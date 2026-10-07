@@ -65,7 +65,9 @@ export function gateableChannels(
   return channels
     .filter(
       (c): c is GuildBasedChannel =>
-        !!c && !c.isThread() && (c.isTextBased() || c.isVoiceBased()),
+        !!c &&
+        !c.isThread() &&
+        (c.isTextBased() || c.isVoiceBased() || c.isThreadOnly()),
     )
     .map((c) => ({ id: c.id, name: c.name }))
     .sort((a, b) => a.name.localeCompare(b.name));

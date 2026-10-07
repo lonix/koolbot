@@ -101,6 +101,7 @@ const GATEABLE_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.GuildVoice,
   ChannelType.GuildStageVoice,
   ChannelType.GuildForum,
+  ChannelType.GuildMedia,
 ]);
 
 /** Pure: the overwrite bits that gate (or ungate) ViewChannel for a target. */

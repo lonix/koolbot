@@ -159,7 +159,8 @@ function fakeGuild(
           ["22222", channel("22222")],
           ["33333", channel("33333")],
           ["44444", channel("44444", 4)],
-          ["55555", channel("55555", 16)],
+          ["55555", channel("55555", 14)],
+          ["66666", channel("66666", 16)],
         ]),
     },
     members: {
@@ -525,6 +526,21 @@ describe("planRulesGate", () => {
     );
   });
 
+  it("accepts a media channel as a gate target", async () => {
+    const guild = fakeGuild({ admin: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["66666"],
+    });
+    expect(
+      p.extraErrors.filter((e) => e.code === "gate-unsupported-channel"),
+    ).toHaveLength(0);
+    expect(
+      p.plan.operations.filter((o) => o.type === "overwrite.set").length,
+    ).toBeGreaterThan(0);
+  });
+
   it("still gates normal text channels", async () => {
     const guild = fakeGuild({ admin: [] });
     const p = await planRulesGate(guild as never, "admin", {
@@ -624,21 +640,31 @@ describe("countLockedOut", () => {
 
 describe("gateableChannels", () => {
   it("drops threads and non-text/voice channels", () => {
-    const ch = (id: string, thread: boolean, text: boolean) =>
+    const ch = (
+      id: string,
+      thread: boolean,
+      text: boolean,
+      threadOnly = false,
+    ) =>
       ({
         id,
         name: id,
         isThread: () => thread,
         isTextBased: () => text,
         isVoiceBased: () => false,
+        isThreadOnly: () => threadOnly,
       }) as never;
     expect(
       gateableChannels([
         ch("b", false, true),
         ch("t", true, true),
         ch("cat", false, false),
+        ch("media", false, false, true),
         null,
       ]),
-    ).toEqual([{ id: "b", name: "b" }]);
+    ).toEqual([
+      { id: "b", name: "b" },
+      { id: "media", name: "media" },
+    ]);
   });
 });

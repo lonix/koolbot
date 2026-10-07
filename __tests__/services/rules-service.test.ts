@@ -368,6 +368,24 @@ describe("recordExistingHolders", () => {
   };
   const ok: TestRole = { id: "r1", managed: false, position: 1 };
 
+  it("reports an unreadable member list as its own problem", async () => {
+    const guild = makeGuild(ok) as unknown as {
+      members: { fetch: jest.Mock };
+    };
+    guild.members.fetch.mockRejectedValue(new Error("Missing intent"));
+    expect(await service().recordExistingHolders(guild as never)).toEqual({
+      problem: "members-unavailable",
+    });
+    expect(bulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("lets a database failure propagate rather than blaming the intent", async () => {
+    bulkWrite.mockRejectedValue(new Error("mongo down"));
+    await expect(
+      service().recordExistingHolders(makeGuild(ok)),
+    ).rejects.toThrow("mongo down");
+  });
+
   it("records holders of a valid role", async () => {
     expect(await service().recordExistingHolders(makeGuild(ok))).toEqual({
       recorded: 2,
@@ -524,6 +542,7 @@ describe("buildMessage and postOrUpdateMessage", () => {
     send.mockRejectedValue(new Error("Missing Access"));
     const r = await service().postOrUpdateMessage(guild());
     expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/^Discord refused the message/);
     expect(mockSet).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
   });
@@ -532,6 +551,8 @@ describe("buildMessage and postOrUpdateMessage", () => {
     mockSet.mockRejectedValue(new Error("mongo down"));
     const r = await service().postOrUpdateMessage(guild());
     expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/couldn't be saved/);
+    expect(r.error).not.toMatch(/Discord refused/);
     expect(del).toHaveBeenCalledTimes(1);
   });
 

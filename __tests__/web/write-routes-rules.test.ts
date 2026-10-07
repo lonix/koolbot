@@ -50,7 +50,10 @@ jest.unstable_mockModule("../../src/services/rules-service.js", () => ({
       recordExistingHolders: mockRecordHolders,
     }),
   },
-  ROLE_PROBLEM_TEXT: { "role-privileged": "Role is privileged." },
+  ROLE_PROBLEM_TEXT: {
+    "role-privileged": "Role is privileged.",
+    "members-unavailable": "Is the Server Members intent on?",
+  },
 }));
 
 const mockPlan = jest.fn<(...a: any[]) => any>();
@@ -193,12 +196,27 @@ describe("POST /rules/sync", () => {
     await mount();
     const res = await harness.post("/rules/sync");
     expect(flashOf(res).type).toBe("err");
+    expect(JSON.stringify(flashOf(res))).not.toMatch(/intent/i);
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: "rules.record-holders",
         result: "failure",
         errorMessage: "bulk write failed",
+      }),
+    );
+  });
+
+  it("keeps the intent hint when the member list can't be read", async () => {
+    mockRecordHolders.mockResolvedValue({ problem: "members-unavailable" });
+    await mount();
+    const res = await harness.post("/rules/sync");
+    expect(JSON.stringify(flashOf(res))).toMatch(/Server Members intent/);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "rules.record-holders",
+        result: "failure",
       }),
     );
   });

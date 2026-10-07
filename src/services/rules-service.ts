@@ -33,7 +33,8 @@ export type RulesProblem =
   | "role-everyone"
   | "role-too-high"
   | "role-privileged"
-  | "no-manage-roles";
+  | "no-manage-roles"
+  | "members-unavailable";
 
 /**
  * Permissions nobody may self-grant by pressing a public button. The Accept
@@ -117,6 +118,8 @@ export const ROLE_PROBLEM_TEXT: Record<RulesProblem, string> = {
   "role-privileged":
     "The acceptance role carries administrative or moderation permissions (such as Administrator, Manage Server or Ban Members). Everyone can press Accept, so use a role without them.",
   "no-manage-roles": "The bot lacks the Manage Roles permission.",
+  "members-unavailable":
+    "The member list couldn't be read. Is the Server Members intent on?",
 };
 
 export interface RulesPostResult {
@@ -223,7 +226,14 @@ export class RulesService {
             `Couldn't remove the unlinked rules message ${sent.id}: ${sanitizeForLog(getErrorMessage(deleteError))}`,
           );
         });
-        throw error;
+        logger.error(
+          `Failed to save the rules message ID: ${sanitizeForLog(getErrorMessage(error))}`,
+        );
+        return {
+          ok: false,
+          error:
+            "The message was posted but couldn't be saved, so it was taken down again. Check the database and try again.",
+        };
       }
       return { ok: true, action: "posted", messageId: sent.id };
     } catch (error) {
@@ -382,7 +392,15 @@ export class RulesService {
       me.permissions.has(PermissionFlagsBits.ManageRoles),
     );
     if (problem) return { problem };
-    const members = await guild.members.fetch();
+    let members;
+    try {
+      members = await guild.members.fetch();
+    } catch (error) {
+      logger.warn(
+        `Couldn't read the member list: ${sanitizeForLog(getErrorMessage(error))}`,
+      );
+      return { problem: "members-unavailable" };
+    }
     const holders = members.filter(
       (m) => !m.user.bot && m.roles.cache.has(roleId),
     );

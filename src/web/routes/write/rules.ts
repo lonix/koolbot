@@ -138,7 +138,7 @@ export function createRulesRouter(client: Client): Router {
         });
         flashRedirect(res, PAGE, {
           type: "err",
-          text: "The member list couldn't be read. Is the Server Members intent on?",
+          text: "Recording the holders failed, possibly only part of them. Check the database and try again.",
         });
       }
     }),
