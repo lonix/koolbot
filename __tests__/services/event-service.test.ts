@@ -844,6 +844,8 @@ describe("recurring event lifecycle", () => {
       seriesCancelled: false,
     }));
     EventMock.exists = jest.fn(async () => null);
+    EventMock.find = jest.fn(async () => []);
+    EventMock.deleteOne = jest.fn(async () => ({}));
     EventMock.findOneAndUpdate = jest.fn(async () => ({}));
     EventMock.findOne = jest.fn(async () => null);
     EventMock.updateOne = jest.fn(async () => ({}));
@@ -1183,6 +1185,33 @@ describe("recurring event lifecycle", () => {
     ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
     expect(cancelOne).toHaveBeenCalledWith(open);
     expect(created).toHaveLength(0);
+  });
+
+  it("removes a higher-indexed duplicate that inserted before this lower row existed", async () => {
+    const { service, postAnnouncement } = buildService();
+    const duplicate = { _id: "occ-2", occurrenceIndex: 2 };
+    // This caller picked index 1 (it started before occurrence 1's start); a
+    // concurrent caller picked index 2 and already inserted and finished its
+    // own (empty) lower-sibling check.
+    EventMock.find = jest.fn(async () => [duplicate]);
+    EventMock.findById = jest
+      .fn()
+      .mockResolvedValueOnce({ nextSpawned: false, seriesCancelled: false })
+      .mockResolvedValue({ announcementMessageId: null });
+    const next = await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      NOW,
+    );
+    expect(next).toBe(created[0]);
+    expect(created[0].occurrenceIndex).toBe(1);
+    expect(EventMock.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurrenceIndex: { $gt: 1 },
+        state: "scheduled",
+      }),
+    );
+    expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "occ-2" });
+    expect(postAnnouncement).toHaveBeenCalledWith(created[0]);
   });
 
   it("removes its own successor when a lower-indexed sibling already exists", async () => {

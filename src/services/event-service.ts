@@ -622,23 +622,26 @@ export class EventService extends ScheduledService {
           occurrenceIndex: { $gt: previous.occurrenceIndex, $lt: index },
         });
         if (sibling) {
-          // The scan's announcement retry may already have posted for this
-          // row; take that post down with it rather than orphan it.
-          const mine = await Event.findById(next._id).catch(() => null);
-          if (mine?.announcementChannelId && mine.announcementMessageId) {
-            await this.deleteAnnouncementPost(
-              mine.guildId,
-              mine.announcementChannelId,
-              mine.announcementMessageId,
-            );
-          }
-          await Event.deleteOne({ _id: next._id });
+          await this.discardDuplicate(next);
           await Event.updateOne(
             { _id: previous._id },
             { $set: { nextSpawned: true } },
           );
           previous.nextSpawned = true;
           return sibling;
+        }
+        // The reverse insert order: a higher-indexed duplicate may have gone
+        // in (and passed its own check) before this lower row existed. This
+        // row is the lower one, so it wins and sweeps those up; between the
+        // two checks the lowest index always survives.
+        const higher = await Event.find({
+          guildId: previous.guildId,
+          seriesId,
+          occurrenceIndex: { $gt: index },
+          state: "scheduled",
+        });
+        for (const duplicate of higher) {
+          await this.discardDuplicate(duplicate);
         }
         await this.postAnnouncement(next).catch((error) =>
           logger.error("Failed to post event announcement:", error),
@@ -1077,6 +1080,20 @@ export class EventService extends ScheduledService {
     );
 
     return { embeds: [embed], components: [row] };
+  }
+
+  /** Delete a duplicate successor row, taking down any RSVP post the scan's
+   * announcement retry already attached to it so nothing is orphaned. */
+  private async discardDuplicate(event: IEvent): Promise<void> {
+    const mine = await Event.findById(event._id).catch(() => null);
+    if (mine?.announcementChannelId && mine.announcementMessageId) {
+      await this.deleteAnnouncementPost(
+        mine.guildId,
+        mine.announcementChannelId,
+        mine.announcementMessageId,
+      );
+    }
+    await Event.deleteOne({ _id: event._id });
   }
 
   /** Best-effort removal of an announcement post whose row is going away. */
