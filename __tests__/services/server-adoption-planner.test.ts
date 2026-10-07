@@ -397,7 +397,10 @@ describe("planAdoption: destructive operations", () => {
           name: "old",
           overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
         }),
-        channel({ id: "chat" }),
+        channel({
+          id: "chat",
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        }),
       ],
     });
 
@@ -407,7 +410,7 @@ describe("planAdoption: destructive operations", () => {
         { kind: "channel", id: "old" },
         { kind: "role", id: "member" },
       ],
-      overwriteRemovals: [{ channelId: "old", targetId: "member" }],
+      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
     });
     expect(codes(plan)).toEqual([
       "approval-required",
@@ -443,11 +446,11 @@ describe("planAdoption: destructive operations", () => {
         { kind: "channel", id: "old" },
         { kind: "role", id: "member" },
       ],
-      overwriteRemovals: [{ channelId: "old", targetId: "member" }],
+      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
       approvals: [
         approval("channel.delete", "old"),
         approval("role.delete", "member"),
-        approval("overwrite.remove", "old:member"),
+        approval("overwrite.remove", "chat:member"),
       ],
     });
     expect(plan.errors).toEqual([]);
@@ -475,8 +478,13 @@ describe("planAdoption: destructive operations", () => {
         approval("role.delete", "member"),
       ],
     });
-    expect(plan.baseline.channels.map((c) => c.id)).toEqual(["old"]);
-    expect(plan.baseline.channels[0].overwrites).toHaveLength(1);
+    expect(plan.baseline.channels.map((c) => c.id).sort()).toEqual([
+      "chat",
+      "old",
+    ]);
+    expect(
+      plan.baseline.channels.find((c) => c.id === "old")!.overwrites,
+    ).toHaveLength(1);
     expect(plan.baseline.roles.map((r) => r.id)).toEqual(["member"]);
   });
 
@@ -666,5 +674,93 @@ describe("planAdoption: bot management permissions", () => {
     expect(
       codes(planAdoption(limited(F.ManageChannels | F.ViewChannel), del)),
     ).toEqual([]);
+  });
+});
+
+describe("planAdoption: input validation and conflicts", () => {
+  it("rejects malformed permission bitfields instead of coercing them", () => {
+    const plan = planAdoption(scan(), {
+      roles: [
+        { name: "Bad", permissions: "not-a-number" },
+        { id: "member", name: "Member", permissions: "-5" },
+      ],
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { id: "member" },
+          allow: "12abc",
+          deny: "0",
+        },
+        {
+          channelId: "chat",
+          target: { id: "staff" },
+          allow: "0",
+          deny: "99999999999999999999999",
+        },
+      ],
+    });
+    expect(codes(plan)).toEqual([
+      "invalid-permissions",
+      "invalid-permissions",
+      "invalid-permissions",
+      "invalid-permissions",
+    ]);
+    expect(plan.operations).toEqual([]);
+  });
+
+  it("validates config values against the setting's type and constraints", () => {
+    const plan = planAdoption(scan(), {
+      config: {
+        "adoption.snapshot.retention_days": -3,
+        "voicechannels.enabled": "yes" as never,
+        "core.web_audit.retention_days": Number.NaN,
+      },
+    });
+    expect(codes(plan)).toEqual([
+      "invalid-config-value",
+      "invalid-config-value",
+      "invalid-config-value",
+    ]);
+    expect(
+      planAdoption(scan(), {
+        config: { "adoption.snapshot.retention_days": 0 },
+      }).errors,
+    ).toEqual([]);
+  });
+
+  it("treats an overwrite removal on a channel being deleted as redundant", () => {
+    const state = scan({
+      channels: [
+        channel({
+          id: "old",
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      deletions: [{ kind: "channel", id: "old" }],
+      overwriteRemovals: [{ channelId: "old", targetId: "member" }],
+      approvals: [approval("channel.delete", "old")],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations.map((o) => o.type)).toEqual(["channel.delete"]);
+  });
+
+  it("snapshots a deleted category's children", () => {
+    const state = scan({
+      channels: [
+        channel({ id: "cat", kind: "category" }),
+        channel({ id: "kid", parentId: "cat" }),
+        channel({ id: "other" }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      deletions: [{ kind: "channel", id: "cat" }],
+      approvals: [approval("channel.delete", "cat")],
+    });
+    expect(plan.baseline.channels.map((c) => c.id).sort()).toEqual([
+      "cat",
+      "kid",
+    ]);
   });
 });

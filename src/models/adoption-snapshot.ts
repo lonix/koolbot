@@ -10,6 +10,9 @@ import mongoose, { Document, Schema } from "mongoose";
  * stored verbatim (Mixed) because their shape is owned by
  * `server-adoption-planner.ts`.
  */
+/** No heartbeat for this long means an apply/rollback is dead, not slow. */
+export const ADOPTION_STALE_AFTER_MS = 30 * 60 * 1000;
+
 export type AdoptionSnapshotStatus =
   "applying" | "rolling_back" | "applied" | "partial" | "rolled_back";
 

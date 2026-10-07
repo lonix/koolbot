@@ -24,6 +24,7 @@ jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
     deleteMany: mockDeleteMany,
     updateMany: mockUpdateMany,
   },
+  ADOPTION_STALE_AFTER_MS: 30 * 60 * 1000,
 }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {

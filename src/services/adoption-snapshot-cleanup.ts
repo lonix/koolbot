@@ -1,13 +1,13 @@
 import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
-import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
+import {
+  AdoptionSnapshot,
+  ADOPTION_STALE_AFTER_MS,
+} from "../models/adoption-snapshot.js";
 import { ScheduledService } from "./scheduled-service.js";
 
 /** Daily at 04:00 — after the other retention cleanups (03:00–03:45). */
 const CLEANUP_CRON = "0 4 * * *";
-
-/** No heartbeat for this long means the run is dead, not slow. */
-const STALE_AFTER_MS = 30 * 60 * 1000;
 
 export interface AdoptionSnapshotCleanupSummary {
   deleted: number;
@@ -68,7 +68,7 @@ export class AdoptionSnapshotCleanupService extends ScheduledService<AdoptionSna
    */
   public async recoverStale(): Promise<number> {
     try {
-      const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+      const cutoff = new Date(Date.now() - ADOPTION_STALE_AFTER_MS);
       const result = await AdoptionSnapshot.updateMany(
         { active: true, heartbeatAt: { $lt: cutoff } },
         { $set: { status: "partial", active: false } },

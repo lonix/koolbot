@@ -5,6 +5,7 @@ import type { AdoptionPlan } from "../../src/services/server-adoption-planner.js
 const base: AdoptionPlan = {
   id: "abc123",
   guildId: "g1",
+  plannedBy: "admin",
   operations: [],
   warnings: [],
   errors: [],

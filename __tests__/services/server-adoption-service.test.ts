@@ -126,6 +126,8 @@ function harness() {
     channels: new Map<string, unknown>(),
   };
   const alreadyHolds = new Set<string>();
+  const staleIds = new Set<string>();
+  const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
   let configIssues: string[] = [];
   let n = 0;
@@ -162,6 +164,9 @@ function harness() {
         run(`addMember:${m}:${r}`);
         if (failMembers.has(m)) throw new Error("no");
         return !alreadyHolds.has(m);
+      },
+      setChannelParent: async (ch, parent) => {
+        run(`setParent:${ch}:${parent}`);
       },
       findRoleByName: async (name) => {
         calls.push(`findRole:${name}`);
@@ -204,6 +209,21 @@ function harness() {
       get: async (id) => (records.has(id) ? clone(records.get(id)!) : null),
       update: async (id, patch) => {
         Object.assign(records.get(id)!, clone(patch));
+      },
+      recoverStale: async (guildId) => {
+        recoveries.push(guildId);
+        let n = 0;
+        for (const r of records.values()) {
+          if (
+            r.guildId === guildId &&
+            staleIds.has(r.id) &&
+            (r.status === "applying" || r.status === "rolling_back")
+          ) {
+            r.status = "partial";
+            n++;
+          }
+        }
+        return n;
       },
       claim: async (id, from, to) => {
         const rec = records.get(id);
@@ -248,6 +268,8 @@ function harness() {
     failOn,
     failMembers,
     alreadyHolds,
+    staleIds,
+    recoveries,
     existingRoleByName,
     live,
     setConfigIssues: (v: string[]): void => {
@@ -833,5 +855,142 @@ describe("review hardening, round three", () => {
     expect(
       h.records.get(applied.snapshotId)!.memberProgress["op-1"].granted,
     ).toEqual(["a", "b"]);
+  });
+});
+
+describe("review hardening, round four", () => {
+  it("recovers a dead snapshot's lock before taking a new one", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const first = await h.service.apply(p, opts);
+    const dead = h.records.get(first.snapshotId)!;
+    dead.status = "applying";
+    h.staleIds.add(dead.id);
+    const q = planAdoption(scanned(), { roles: [{ name: "Other" }] });
+    const second = await h.service.apply(q, opts);
+    expect(second.status).toBe("applied");
+    expect(dead.status).toBe("partial");
+    expect(h.recoveries).toContain("g1");
+  });
+
+  it("refuses to resume when a pending role has since become managed", async () => {
+    const h = harness();
+    h.failOn.add("editRole:member:color");
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    h.failOn.clear();
+    h.live.roles.set("member", { ...scanned().roles[3], managed: true });
+    await expect(
+      h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId }),
+    ).rejects.toThrow(/now managed/);
+    expect(h.records.get(first.snapshotId)!.status).toBe("partial");
+  });
+
+  it("lets the caller veto a resume with its own live-state check", async () => {
+    const h = harness();
+    h.failOn.add("editRole:member:color");
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    const first = await h.service.apply(p, opts);
+    h.failOn.clear();
+    await expect(
+      h.service.apply(p, {
+        ...opts,
+        resumeSnapshotId: first.snapshotId,
+        revalidate: async (pending) => [
+          `${pending.length} step(s) now feature-bound`,
+        ],
+      }),
+    ).rejects.toThrow(/feature-bound/);
+  });
+
+  it("puts back the config prefix when a later config write fails", async () => {
+    const h = harness();
+    const p = planAdoption(
+      scanned({ config: { "adoption.snapshot.retention_days": 90 } }),
+      {
+        config: {
+          "adoption.snapshot.retention_days": 30,
+          "core.web_audit.retention_days": 10,
+        },
+      },
+    );
+    expect(p.operations).toHaveLength(2);
+    h.failOn.add(
+      `config:${(p.operations[1] as { key: string }).key}=${(p.operations[1] as { value: unknown }).value}`,
+    );
+    const r = await h.service.apply(p, opts);
+    expect(r.status).toBe("partial");
+    // The first write is put back to its prior value (90).
+    expect(h.calls).toContain("config:adoption.snapshot.retention_days=90");
+    expect(h.records.get(r.snapshotId)!.operations[0].status).toBe("pending");
+  });
+
+  it("pages the member revocation and persists progress", async () => {
+    const h = harness();
+    const ids = Array.from({ length: 130 }, (_, i) => `m${i}`);
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ids }],
+    });
+    const applied = await h.service.apply(p, opts);
+    const updates: number[] = [];
+    const update = h.deps.store.update;
+    h.deps.store.update = async (id, patch) => {
+      if (patch.memberProgress) {
+        updates.push(patch.memberProgress["op-1"].granted.length);
+      }
+      return update(id, patch);
+    };
+    await new ServerAdoptionService(h.deps).rollback(applied.snapshotId, {
+      actor,
+    });
+    expect(updates.slice(0, 3)).toEqual([80, 30, 0]);
+  });
+
+  it("runs a rollback as a background job", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    const applied = await h.service.apply(p, opts);
+    const job = h.service.startRollback(applied.snapshotId, { actor });
+    expect(job.status).toBe("running");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.service.getRollbackJob(job.id)!.status).toBe("done");
+    expect(h.service.getRollbackJob(job.id)!.result?.failed).toEqual([]);
+  });
+
+  it("puts surviving children back under a recreated category", async () => {
+    const h = harness();
+    const state = scanned({
+      channels: [
+        scanned().channels[0],
+        { ...scanned().channels[1], parentId: "old-cat" },
+      ],
+    });
+    const p = planAdoption(state, {
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    expect(p.baseline.channels.map((c) => c.id).sort()).toEqual([
+      "chat",
+      "old-cat",
+    ]);
+    h.live.channels.set(
+      "old-cat",
+      p.baseline.channels.find((c) => c.id === "old-cat"),
+    );
+    h.live.channels.set(
+      "chat",
+      p.baseline.channels.find((c) => c.id === "chat"),
+    );
+    const applied = await h.service.apply(p, opts);
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls).toContain("setParent:chat:new-old-cat");
   });
 });

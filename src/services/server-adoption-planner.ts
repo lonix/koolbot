@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { PermissionsBitField } from "discord.js";
-import { defaultConfig } from "./config-schema.js";
+import { defaultConfig, settingsMetadata } from "./config-schema.js";
 
 /**
  * Pure planner for server adoption (#1018).
@@ -290,6 +290,38 @@ export function isApplicable(plan: AdoptionPlan): boolean {
   return plan.errors.length === 0;
 }
 
+/** A Discord permission bitfield: a non-negative decimal integer string. */
+function isValidBitfield(value: unknown): boolean {
+  if (typeof value !== "string" || !/^\d{1,20}$/.test(value)) return false;
+  return BigInt(value) <= PermissionsBitField.All;
+}
+
+/** Why a desired config value may not be written, or null if it may. */
+function configValueProblem(key: string, value: unknown): string | null {
+  const expected = typeof (defaultConfig as unknown as Record<string, unknown>)[
+    key
+  ];
+  if (typeof value !== expected) {
+    return `"${key}" expects a ${expected}, got ${typeof value}.`;
+  }
+  const meta = (
+    settingsMetadata as unknown as Record<
+      string,
+      { options?: Array<{ value: string }>; min?: number }
+    >
+  )[key];
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return `"${key}" must be a finite number.`;
+    if (meta?.min !== undefined && value < meta.min) {
+      return `"${key}" must be at least ${meta.min}.`;
+    }
+  }
+  if (meta?.options && !meta.options.some((o) => o.value === String(value))) {
+    return `"${key}" must be one of: ${meta.options.map((o) => o.value).join(", ")}.`;
+  }
+  return null;
+}
+
 function big(value: string | undefined): bigint {
   try {
     return BigInt(value ?? "0");
@@ -517,6 +549,13 @@ export function planAdoption(
       null;
     if (!existing) {
       const permissions = want.permissions ?? "0";
+      if (!isValidBitfield(permissions)) {
+        err(
+          "invalid-permissions",
+          `Role "${want.name}" has an invalid permissions value.`,
+        );
+        continue;
+      }
       if (
         want.position !== undefined &&
         want.position >= scanned.botHighestRolePosition
@@ -552,6 +591,14 @@ export function planAdoption(
           position: want.position ?? null,
         },
       });
+      continue;
+    }
+    if (want.permissions !== undefined && !isValidBitfield(want.permissions)) {
+      err(
+        "invalid-permissions",
+        `Role "${existing.name}" has an invalid permissions value.`,
+        existing.id,
+      );
       continue;
     }
     const changes: RoleEditOp["changes"] = {};
@@ -632,6 +679,14 @@ export function planAdoption(
       targetType = "role";
     } else {
       targetId = want.target.id;
+    }
+    if (!isValidBitfield(want.allow) || !isValidBitfield(want.deny)) {
+      err(
+        "invalid-permissions",
+        `The overwrite on "${channel.name}" has an invalid allow/deny value.`,
+        channel.id,
+      );
+      continue;
     }
     const existing = channel.overwrites.find((o) => o.id === targetId);
     if (
@@ -714,6 +769,11 @@ export function planAdoption(
       err("unknown-config-key", `"${key}" is not a KoolBot setting.`, key);
       continue;
     }
+    const problem = configValueProblem(key, value);
+    if (problem) {
+      err("invalid-config-value", problem, key);
+      continue;
+    }
     const current = scanned.config[key];
     if (sameConfig(current, value)) continue;
     baselineConfig[key] = current ?? null;
@@ -793,6 +853,13 @@ export function planAdoption(
       );
       if (!gate.ok) continue;
       touchedChannels.add(channel.id);
+      // Discord uncategorises a deleted category's children; snapshot them so
+      // a rollback can put them back under the recreated category.
+      if (channel.kind === "category") {
+        for (const child of scanned.channels) {
+          if (child.parentId === channel.id) touchedChannels.add(child.id);
+        }
+      }
       ops.push({
         id: "",
         type: "channel.delete",
@@ -851,7 +918,12 @@ export function planAdoption(
     }
   }
 
+  // An overwrite on a channel that is being deleted goes with it.
+  const deletingChannels = new Set(
+    ops.flatMap((o) => (o.type === "channel.delete" ? [o.channelId] : [])),
+  );
   for (const rem of desired.overwriteRemovals ?? []) {
+    if (deletingChannels.has(rem.channelId)) continue;
     const channel = channelsById.get(rem.channelId);
     const existing = channel?.overwrites.find((o) => o.id === rem.targetId);
     if (!channel || !existing) continue; // nothing to remove: idempotent

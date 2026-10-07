@@ -15,6 +15,7 @@ import logger from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import {
   AdoptionSnapshot,
+  ADOPTION_STALE_AFTER_MS,
   type AdoptionOperationStatus,
   type AdoptionSnapshotStatus,
   type IAdoptionOperationRecord,
@@ -72,6 +73,8 @@ export interface AdoptionGateway {
   removeMemberRole(memberId: string, roleId: string): Promise<void>;
   /** Live state, read just before the first write. Null when gone. */
   readRole(roleId: string): Promise<RoleState | null>;
+  /** Move a channel under a (possibly recreated) category. */
+  setChannelParent(channelId: string, parentId: string): Promise<void>;
   /** Used to reconcile a role.create whose result was never recorded. */
   findRoleByName(name: string): Promise<string | null>;
   readChannel(channelId: string): Promise<ChannelState | null>;
@@ -112,6 +115,8 @@ export interface AdoptionStore {
     id: string,
     patch: Partial<Omit<AdoptionSnapshotRecord, "id">>,
   ): Promise<void>;
+  /** Release the lock of dead (heartbeat-less) active snapshots on a server. */
+  recoverStale(guildId: string, staleAfterMs: number): Promise<number>;
   /** Atomically move a snapshot between statuses; false if it was not in `from`. */
   claim(
     id: string,
@@ -150,6 +155,12 @@ export interface ApplyOptions {
   /** Members processed per page of a member operation (default 50). */
   memberPageSize?: number;
   onProgress?: (progress: ApplyProgress) => void;
+  /**
+   * Extra live-state safety check run before a resume claims its snapshot.
+   * Receives the operations that are still pending; return reasons to refuse.
+   * The scanner that knows feature bindings supplies this.
+   */
+  revalidate?: (pending: PlanOperation[]) => Promise<string[]>;
 }
 
 export interface ApplyProgress {
@@ -204,9 +215,19 @@ export interface AdoptionJob {
   error: string | null;
 }
 
+export interface RollbackJob {
+  id: string;
+  status: "running" | "done" | "failed";
+  result: RollbackResult | null;
+  error: string | null;
+}
+
+const REVOKE_PAGE_SIZE = 50;
+
 export class ServerAdoptionService {
   private static instance: ServerAdoptionService | undefined;
   private readonly jobs = new Map<string, AdoptionJob>();
+  private readonly rollbackJobs = new Map<string, RollbackJob>();
 
   public constructor(private readonly deps: AdoptionDeps) {}
 
@@ -282,6 +303,35 @@ export class ServerAdoptionService {
     return this.jobs.get(id);
   }
 
+  /** Rollback of a big grant is as long as the apply; it runs as a job too. */
+  public startRollback(
+    snapshotId: string,
+    options: RollbackOptions,
+  ): RollbackJob {
+    const job: RollbackJob = {
+      id: randomUUID(),
+      status: "running",
+      result: null,
+      error: null,
+    };
+    this.rollbackJobs.set(job.id, job);
+    void this.rollback(snapshotId, options)
+      .then((result) => {
+        job.result = result;
+        job.status = "done";
+      })
+      .catch((error) => {
+        job.error = getErrorMessage(error);
+        job.status = "failed";
+        logger.error("Server adoption rollback failed:", error);
+      });
+    return job;
+  }
+
+  public getRollbackJob(id: string): RollbackJob | undefined {
+    return this.rollbackJobs.get(id);
+  }
+
   public async apply(
     plan: AdoptionPlan,
     options: ApplyOptions,
@@ -308,6 +358,8 @@ export class ServerAdoptionService {
         throw new AdoptionPlanError("Snapshot belongs to a different plan.");
       if (existing.guildId !== options.actor.guildId)
         throw new AdoptionPlanError("Snapshot belongs to a different server.");
+      await store.recoverStale(plan.guildId, ADOPTION_STALE_AFTER_MS);
+      await this.assertResumeSafe(plan, existing, options);
       // Claim atomically so a rollback or a second resume cannot race us.
       if (!(await store.claim(existing.id, ["partial"], "applying"))) {
         throw new AdoptionPlanError(
@@ -316,6 +368,7 @@ export class ServerAdoptionService {
       }
       snapshot = existing;
     } else {
+      await store.recoverStale(plan.guildId, ADOPTION_STALE_AFTER_MS);
       await this.assertBaselineCurrent(plan);
       const configBatch = Object.fromEntries(
         plan.operations.flatMap((op) =>
@@ -421,6 +474,11 @@ export class ServerAdoptionService {
             record.at = new Date();
             progress.failed++;
             logger.error(`Adoption operation ${op.id} failed:`, error);
+            if (op.type === "config.set") {
+              // Config writes skip per-key dependency checks, so a half-applied
+              // batch could leave an invalid prefix. Put the prefix back.
+              await this.revertConfigPrefix(plan, records);
+            }
             await this.auditOp(
               options.actor,
               plan,
@@ -508,6 +566,66 @@ export class ServerAdoptionService {
     if (drifted.length > 0) {
       throw new AdoptionPlanError(
         `Changed since the plan was made (${drifted.join(", ")}). Review and plan again.`,
+      );
+    }
+  }
+
+  private async revertConfigPrefix(
+    plan: AdoptionPlan,
+    records: Map<string, IAdoptionOperationRecord>,
+  ): Promise<void> {
+    for (const op of [...plan.operations].reverse()) {
+      const record = records.get(op.id);
+      if (op.type !== "config.set" || record?.status !== "applied") continue;
+      try {
+        const prior = plan.baseline.config[op.key];
+        if (prior === null || prior === undefined) {
+          await this.deps.config.delete(op.key);
+        } else {
+          await this.deps.config.set(op.key, prior);
+        }
+        record.status = "pending";
+        record.error = "Reverted: a later config change failed.";
+      } catch (error) {
+        logger.error(`Could not revert config ${op.key}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Things can change between a partial apply and its resume (a role turns
+   * managed, a channel fills up). Re-check what is still pending against the
+   * live guild before touching anything.
+   */
+  private async assertResumeSafe(
+    plan: AdoptionPlan,
+    existing: AdoptionSnapshotRecord,
+    options: ApplyOptions,
+  ): Promise<void> {
+    const { gateway, callApi } = this.deps;
+    const done = new Set(
+      existing.operations
+        .filter((r) => r.status === "applied")
+        .map((r) => r.opId),
+    );
+    const pending = plan.operations.filter((op) => !done.has(op.id));
+    const problems: string[] = [];
+    for (const op of pending) {
+      if (op.type !== "role.edit" && op.type !== "role.delete") continue;
+      const live = await callApi(
+        () => gateway.readRole(op.roleId),
+        `read role ${op.roleId}`,
+      );
+      if (live?.managed) problems.push(`role "${live.name}" is now managed`);
+      if (!live && op.type === "role.edit") {
+        problems.push(`role ${op.roleId} no longer exists`);
+      }
+    }
+    if (options.revalidate)
+      problems.push(...(await options.revalidate(pending)));
+    if (problems.length > 0) {
+      throw new AdoptionPlanError(
+        `Cannot resume: ${problems.join("; ")}. Plan again.`,
       );
     }
   }
@@ -714,7 +832,9 @@ export class ServerAdoptionService {
       throw new AdoptionPlanError("Snapshot was already rolled back.");
     if (snapshot.guildId !== options.actor.guildId)
       throw new AdoptionPlanError("Snapshot belongs to a different server.");
-    const priorStatus = snapshot.status;
+    await store.recoverStale(snapshot.guildId, ADOPTION_STALE_AFTER_MS);
+    const priorStatus =
+      (await store.get(snapshotId))?.status ?? snapshot.status;
     if (
       !(await store.claim(snapshotId, ["applied", "partial"], "rolling_back"))
     ) {
@@ -854,13 +974,21 @@ export class ServerAdoptionService {
           break;
         }
         case "member.role.add": {
-          const granted = snapshot.memberProgress[op.id]?.granted ?? [];
+          const state = snapshot.memberProgress[op.id];
           const roleId = mapRole(op.roleId);
-          for (const memberId of granted) {
-            await callApi(
-              () => gateway.removeMemberRole(memberId, roleId),
-              `revoke role from ${memberId}`,
-            );
+          // Page through the grants, dropping each page once revoked and
+          // persisting (which also refreshes the heartbeat), so thousands of
+          // members neither block for long nor look dead, and a retry resumes.
+          while (state && state.granted.length > 0) {
+            const page = state.granted.slice(0, REVOKE_PAGE_SIZE);
+            for (const memberId of page) {
+              await callApi(
+                () => gateway.removeMemberRole(memberId, roleId),
+                `revoke role from ${memberId}`,
+              );
+            }
+            state.granted.splice(0, page.length);
+            await persist();
           }
           break;
         }
@@ -882,6 +1010,7 @@ export class ServerAdoptionService {
         rolledBackOps: snapshot.rolledBackOps,
         restoredChannels: snapshot.restoredChannels,
         restoredRoles: snapshot.restoredRoles,
+        memberProgress: snapshot.memberProgress,
       });
     };
 
@@ -946,6 +1075,27 @@ export class ServerAdoptionService {
                 id: restoredRole.newId,
               }),
             `restore overwrite on ${channel.id}`,
+          );
+          done.add(key);
+          await persist();
+        } catch (error) {
+          failed.push({ opId: key, error: getErrorMessage(error) });
+        }
+      }
+    }
+
+    // Deleting a category un-parents the children it did not delete; put them
+    // back under the recreated category.
+    for (const restoredChannel of snapshot.restoredChannels) {
+      for (const child of baseline.channels) {
+        if (child.parentId !== restoredChannel.oldId) continue;
+        if (deletedChannels.has(child.id)) continue;
+        const key = `parent:${child.id}`;
+        if (done.has(key)) continue;
+        try {
+          await callApi(
+            () => gateway.setChannelParent(child.id, restoredChannel.newId),
+            `reparent channel ${child.id}`,
           );
           done.add(key);
           await persist();
@@ -1048,6 +1198,20 @@ export class MongoAdoptionStore implements AdoptionStore {
       memberProgress: doc.memberProgress ?? {},
       rolledBackBy: doc.rolledBackBy ?? null,
     };
+  }
+  public async recoverStale(
+    guildId: string,
+    staleAfterMs: number,
+  ): Promise<number> {
+    const result = await AdoptionSnapshot.updateMany(
+      {
+        guildId,
+        active: true,
+        heartbeatAt: { $lt: new Date(Date.now() - staleAfterMs) },
+      },
+      { $set: { status: "partial", active: false } },
+    );
+    return result.modifiedCount ?? 0;
   }
   public async claim(
     id: string,
@@ -1175,6 +1339,17 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
       position: role.position,
       managed: role.managed,
     };
+  }
+  public async setChannelParent(
+    channelId: string,
+    parentId: string,
+  ): Promise<void> {
+    const channel = await this.guild.channels.fetch(channelId);
+    if (channel && "setParent" in channel) {
+      await channel.setParent(parentId, {
+        reason: "KoolBot server adoption rollback",
+      });
+    }
   }
   public async findRoleByName(name: string): Promise<string | null> {
     const roles = await this.guild.roles.fetch(undefined, { force: true });
