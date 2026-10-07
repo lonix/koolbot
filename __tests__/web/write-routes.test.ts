@@ -872,7 +872,7 @@ describe("createWriteRouter (#850)", () => {
       true,
     );
     // Every domain module mounted exactly once.
-    expect(stack.length - 3).toBe(18);
+    expect(stack.length - 3).toBe(19);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -937,6 +937,11 @@ describe("createWriteRouter (#850)", () => {
         "POST /reaction-roles/group/delete",
         "POST /reaction-roles/remove-mapping",
         "POST /reaction-roles/unarchive",
+        "POST /role-groups/:id/delete",
+        "POST /role-groups/:id/edit",
+        "POST /role-groups/apply",
+        "POST /role-groups/create",
+        "POST /role-groups/reorder",
         "POST /settings/import",
         "POST /settings/import/apply",
         "POST /settings/reload",

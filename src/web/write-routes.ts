@@ -34,6 +34,7 @@ import { createBotStatusRouter } from "./routes/write/bot-status.js";
 import { createTicketsRouter } from "./routes/write/tickets.js";
 import { createModerationRouter } from "./routes/write/moderation.js";
 import { createVersionCheckRouter } from "./routes/write/version-check.js";
+import { createRoleGroupsRouter } from "./routes/write/role-groups.js";
 
 export * from "./routes/write/helpers.js";
 
@@ -67,6 +68,7 @@ export function createWriteRouter(
   router.use(createTicketsRouter(client));
   router.use(createModerationRouter(client));
   router.use(createVersionCheckRouter(client));
+  router.use(createRoleGroupsRouter(client));
 
   return router;
 }
