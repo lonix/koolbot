@@ -41,6 +41,7 @@ Complete configuration reference for all KoolBot settings.
 - [Weekly Digest](#-weekly-digest)
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Birthdays](#-birthdays)
+- [Welcome Messages](#-welcome-messages)
 - [Events](#-events)
 - [LFG (Looking for Group)](#-lfg-looking-for-group)
 - [Reminders](#-reminders)
@@ -690,6 +691,39 @@ page (`/admin/birthdays`), which also edits these settings.
 
 ---
 
+## 👋 Welcome Messages
+
+Greet new members with a message in a configured channel, optionally
+pointing them at the self-assign role picker (see
+[Reaction Roles](#-reaction-roles)) and the rules channel. There is no slash
+command: edit these settings on the Web UI **Settings** page or the Setup
+Wizard. The message is posted in the channel only — the bot never DMs new
+members unprompted.
+
+> **Requires the Server Members Intent.** Discord only delivers member-join
+> events to bots that request the privileged `GuildMembers` intent. Enable
+> **Server Members Intent** in the Discord developer portal, then set
+> `GUILD_MEMBERS_INTENT=true` in `.env`. Without it the bot logs a startup
+> warning when `welcome.enabled` is on and no welcome messages are posted.
+
+| Setting                    | Default                             | Description                                                                                                                                                                                                                         |
+| -------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `welcome.enabled`          | `false`                             | Master switch for welcome messages                                                                                                                                                                                                  |
+| `welcome.channel_id`       | `""`                                | Channel where welcome messages are posted (required)                                                                                                                                                                                |
+| `welcome.message`          | `"👋 Welcome to {server}, {user}!"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{server}` (server name), `{roles}` (self-assign role picker link, blank when unset), `{rules}` (rules channel mention, blank when unset) |
+| `welcome.mention`          | `true`                              | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification                                                                                                                                 |
+| `welcome.roles_message_id` | `""`                                | Optional reaction-role message ID. With `reactionroles.message_channel_id` set, `{roles}` becomes a jump link to that message; with only the channel set it mentions the channel                                                    |
+| `welcome.rules_channel_id` | `""`                                | Optional channel mentioned by `{rules}`                                                                                                                                                                                             |
+
+**Notes:**
+
+- Bots and members of other servers are never greeted, and a member who
+  leaves and rejoins within a few minutes is greeted once.
+- A missing or unreadable channel is logged as a warning and skipped; a
+  join never crashes the bot.
+
+---
+
 ## 📅 Events
 
 Schedule server events backed by a **temporary voice channel** — for
@@ -842,12 +876,12 @@ UI page, which also lists open, claimed and closed tickets and can reopen one.
 Closing archives the channel (renamed `closed-…`, locked) — it is never
 deleted. See [COMMANDS.md](COMMANDS.md#ticket).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `tickets.enabled` | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page |
-| `tickets.staff_role_id` | `""` | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
-| `tickets.category_id` | `""` | Category new ticket channels are created under. Empty creates them at the top level |
-| `tickets.transcript_on_close` | `true` | Post a plain-text message log into the channel when a ticket closes |
+| Setting                       | Default | Description                                                                                                              |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `tickets.enabled`             | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page                                                          |
+| `tickets.staff_role_id`       | `""`    | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
+| `tickets.category_id`         | `""`    | Category new ticket channels are created under. Empty creates them at the top level                                      |
+| `tickets.transcript_on_close` | `true`  | Post a plain-text message log into the channel when a ticket closes                                                      |
 
 **Notes:**
 
@@ -1659,6 +1693,15 @@ leave the graph in a broken state.
 - `birthdays.mention` (bool, default: true)
 - `birthdays.role_id` (string, default: "")
 - `birthdays.role_duration_hours` (number, default: 24)
+
+#### Welcome Messages
+
+- `welcome.enabled` (bool, default: false)
+- `welcome.channel_id` (string, default: "")
+- `welcome.message` (string, default: `"👋 Welcome to {server}, {user}!"`)
+- `welcome.mention` (bool, default: true)
+- `welcome.roles_message_id` (string, default: "")
+- `welcome.rules_channel_id` (string, default: "")
 
 #### Events
 

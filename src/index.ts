@@ -52,6 +52,7 @@ import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
 import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
+import { WelcomeService } from "./services/welcome-service.js";
 import { EventService } from "./services/event-service.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
@@ -804,6 +805,10 @@ async function initializeServices(): Promise<void> {
       }
     }
 
+    // Welcome messages (#767): warn when the feature is on but the
+    // GuildMembers intent is off, since join events then never arrive.
+    await WelcomeService.getInstance().warnIfIntentMissing();
+
     // Start the update check (#1029). An anonymous GET of the latest public
     // release, at startup and every 12h; gates on `core.updatecheck.enabled`
     // at run time and never blocks startup on the network round-trip.
@@ -1255,6 +1260,14 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
     newMember,
     TrackingOptOutService.getInstance().admission(),
   );
+});
+
+// New-member welcome message (#767). Only delivered when the GuildMembers
+// intent is on (GUILD_MEMBERS_INTENT=true); the service gates on
+// welcome.enabled per event and never throws.
+client.on(Events.GuildMemberAdd, async (member) => {
+  recordDiscordEvent("guildMemberAdd");
+  await WelcomeService.getInstance().handleMemberJoin(member);
 });
 
 // Easter egg: Creator detection when joining the server

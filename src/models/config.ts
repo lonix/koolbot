@@ -41,6 +41,7 @@ export const CONFIG_CATEGORIES = [
   "tickets",
   "voicechannels",
   "voicetracking",
+  "welcome",
   "wizard", // Kept for backward compatibility; key removed but legacy rows may exist
 ] as const;
 

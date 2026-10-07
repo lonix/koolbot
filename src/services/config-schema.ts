@@ -101,6 +101,12 @@ export interface ConfigSchema {
   "birthdays.mention": boolean; // Whether the announcement pings the member
   "birthdays.role_id": string; // Optional temporary "birthday" role
   "birthdays.role_duration_hours": number; // How long the temp role is held
+  "welcome.enabled": boolean;
+  "welcome.channel_id": string; // Channel for new-member welcome messages
+  "welcome.message": string; // Template; {user}, {username}, {server}, {roles}, {rules}
+  "welcome.mention": boolean; // Whether {user} pings the new member
+  "welcome.roles_message_id": string; // Optional reaction-role message to deep-link as {roles}
+  "welcome.rules_channel_id": string; // Optional rules channel mentioned as {rules}
 
   // Events — scheduled/temporary voice channels (#708)
   "events.enabled": boolean;
@@ -373,6 +379,14 @@ export const defaultConfig: ConfigSchema = {
   "birthdays.mention": true,
   "birthdays.role_id": "", // Empty → no temporary role granted
   "birthdays.role_duration_hours": 24,
+
+  // Welcome messages (#767)
+  "welcome.enabled": false,
+  "welcome.channel_id": "",
+  "welcome.message": "👋 Welcome to {server}, {user}!",
+  "welcome.mention": true,
+  "welcome.roles_message_id": "",
+  "welcome.rules_channel_id": "",
 
   // Events (#708) — feature gate off by default (rule 1)
   "events.enabled": false,
@@ -968,6 +982,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     description:
       "Celebrate members' birthdays with a daily announcement in their own timezone, optionally granting a temporary birthday role. Members set their date on /me/birthday.",
   },
+  welcome: {
+    title: "Welcome Messages",
+    description:
+      "Greet new members in a configured channel, optionally pointing them at the self-assign role picker and the rules channel. Needs the privileged Server Members Intent (GUILD_MEMBERS_INTENT=true) so Discord delivers member-join events.",
+  },
   events: {
     title: "Events",
     description:
@@ -1549,6 +1568,47 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long the temporary birthday role is held before the daily sweep removes it.",
     category: "birthdays",
     type: "number",
+  },
+  "welcome.enabled": {
+    label: "Welcome messages enabled",
+    description:
+      "Post a welcome message in a configured channel when a new member joins. Requires the Server Members Intent: enable it in the Discord developer portal and set GUILD_MEMBERS_INTENT=true, otherwise Discord never delivers join events (the bot logs a warning at startup).",
+    category: "welcome",
+    type: "boolean",
+  },
+  "welcome.channel_id": {
+    label: "Welcome channel",
+    description: "Channel where welcome messages are posted.",
+    category: "welcome",
+    type: "channel",
+  },
+  "welcome.message": {
+    label: "Welcome message template",
+    description:
+      "Message posted when a member joins. Placeholders: {user} (mention), {username} (display name, no ping), {server} (server name), {roles} (link to the self-assign role picker, blank if none configured), {rules} (rules channel mention, blank if none configured).",
+    category: "welcome",
+    type: "string",
+  },
+  "welcome.mention": {
+    label: "Ping the new member",
+    description:
+      "When on, the {user} placeholder pings the member. When off, their name shows but no notification is sent.",
+    category: "welcome",
+    type: "boolean",
+  },
+  "welcome.roles_message_id": {
+    label: "Self-assign role message ID",
+    description:
+      "Optional ID of the reaction-role message (in the reaction-role message channel) that {roles} links to. Leave empty to link the channel instead.",
+    category: "welcome",
+    type: "string",
+  },
+  "welcome.rules_channel_id": {
+    label: "Rules channel",
+    description:
+      "Optional channel mentioned by the {rules} placeholder in the welcome message.",
+    category: "welcome",
+    type: "channel",
   },
   "events.enabled": {
     label: "Events enabled",
