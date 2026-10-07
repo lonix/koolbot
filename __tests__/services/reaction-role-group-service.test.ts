@@ -43,6 +43,16 @@ jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
 const { ReactionRoleGroupService, parseRoleColour } =
   await import("../../src/services/reaction-role-group-service.js");
 
+// Bot sits at position 10; a role at or above it is not assignable.
+const botMember = () => ({
+  id: "bot",
+  roles: {
+    highest: {
+      comparePositionTo: (r: { position?: number }) => 10 - (r.position ?? 0),
+    },
+  },
+});
+
 function setup(existingRoles: Array<{ id: string; name: string }>) {
   const created: Array<Record<string, unknown>> = [];
   const del = jest.fn(async () => undefined);
@@ -74,9 +84,12 @@ function setup(existingRoles: Array<{ id: string; name: string }>) {
       }),
     },
     channels: { fetch: jest.fn(async () => channel) },
-    members: { me: { id: "bot" }, fetchMe: jest.fn() },
+    members: { me: botMember(), fetchMe: jest.fn() },
   };
-  const client = { guilds: { fetch: jest.fn(async () => guild) } };
+  const client = {
+    user: { id: "bot" },
+    guilds: { fetch: jest.fn(async () => guild) },
+  };
   return {
     client: client as unknown as Client,
     created,
@@ -152,7 +165,7 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
 
   it("fetches the bot member through the API wrapper when it is not cached", async () => {
     const s = setup([{ id: "old1", name: "europe" }]);
-    const me = { id: "bot" };
+    const me = botMember();
     const fetchMe = jest.fn(async () => me);
     (s.guild as unknown as Record<string, unknown>).members = {
       me: null,
@@ -358,9 +371,15 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
   it("restores the embed and removes added reactions when a top-up fails", async () => {
     const s = setup([{ id: "r1", name: "Europe" }]);
     const reactionRemove = jest.fn(async () => undefined);
+    const botReactionRemove = jest.fn(async () => undefined);
     Object.assign(s.message, {
       embeds: [{ data: { title: "Region" } }],
-      reactions: { resolve: jest.fn(() => ({ remove: reactionRemove })) },
+      reactions: {
+        resolve: jest.fn(() => ({
+          remove: reactionRemove,
+          users: { remove: botReactionRemove },
+        })),
+      },
     });
     model.find.mockResolvedValue([liveRow]);
     model.insertMany.mockRejectedValue(new Error("db down"));
@@ -370,11 +389,26 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     // edited once to add the option, then restored to the prior embed
     expect(s.message.edit).toHaveBeenCalledTimes(2);
     expect(s.message.react).toHaveBeenCalledTimes(1);
-    expect(reactionRemove).toHaveBeenCalledTimes(1);
+    // only the bot's own reaction goes; members' reactions are untouched
+    expect(botReactionRemove).toHaveBeenCalledTimes(1);
+    expect(botReactionRemove).toHaveBeenCalledWith("bot");
+    expect(reactionRemove).not.toHaveBeenCalled();
     const labels = mockApi.mock.calls.map((c) => String(c[1]));
     expect(labels).toContain("restore group message m1");
     expect(labels.some((l) => l.startsWith("remove reaction"))).toBe(true);
     expect(s.message.delete).not.toHaveBeenCalled();
+  });
+
+  it("tells the admin to check the picker by hand when a top-up edit times out", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([liveRow]);
+    s.message.edit.mockRejectedValue(
+      new Error("Discord API timeout for edit group message m1"),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/picker message and its reactions by hand/);
   });
 
   it("drops retired rows holding an emoji being re-added on a top-up", async () => {
@@ -484,6 +518,20 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     const r = await svc.provisionGroup("g1", "Region", entries);
     expect(r.success).toBe(true);
     expect(r.reusedRoles).toEqual(["ok1"]);
+  });
+
+  it("reuses the assignable same-name role when another sits above the bot", async () => {
+    const s = setup([]);
+    const roles = new Map<string, unknown>([
+      ["high", { id: "high", name: "Europe", managed: false, position: 20 }],
+      ["low", { id: "low", name: "europe", managed: false, position: 3 }],
+    ]);
+    s.guild.roles.fetch.mockResolvedValue(roles as never);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(r.reusedRoles).toEqual(["low"]);
+    expect(s.created.map((c) => c.name)).toEqual(["Asia"]);
   });
 
   it("passes an explicit null bot member and does not refetch outside the wrapper", async () => {

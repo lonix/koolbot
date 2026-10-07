@@ -216,6 +216,8 @@ export class ReactionRoleGroupService {
     let postedMessage: Message | null = null;
     // Existing-picker top-up state, so a failure can restore the message.
     let editedAnchor: Message | null = null;
+    // True once an edit or reaction is in flight on the existing picker.
+    let touchedExisting = false;
     let previousEmbeds: EmbedBuilder[] = [];
     const addedReactions: string[] = [];
     // Rollback bookkeeping for the persistence step.
@@ -301,11 +303,23 @@ export class ReactionRoleGroupService {
       const keptRows = existingRows;
       const haveRoleIds = new Set(keptRows.map((r) => r.roleId));
       const haveEmojis = new Set(keptRows.map((r) => r.emoji));
+      // Resolve the bot member through the retry/timeout wrapper. An explicit
+      // null (fetch failed) makes the validator report it, not refetch.
+      const botMember =
+        guild.members.me ??
+        (await this.api(
+          () => guild.members.fetchMe(),
+          "fetch bot member",
+        ).catch(() => null));
       // Index every role by name, @everyone and managed ones included, so an
       // unassignable match is reported by the validator instead of creating a
-      // duplicate. An assignable same-name role wins over an unassignable one.
+      // duplicate. An assignable same-name role wins over an unassignable one
+      // (managed, @everyone, or at/above the bot's highest role).
       const unassignable = (r: Role): boolean =>
-        r.id === guild.roles.everyone.id || r.managed;
+        r.id === guild.roles.everyone.id ||
+        r.managed ||
+        (botMember !== null &&
+          botMember.roles.highest.comparePositionTo(r) <= 0);
       const byName = new Map<string, Role>();
       for (const r of allRoles.values()) {
         const k = r.name.toLowerCase();
@@ -344,14 +358,6 @@ export class ReactionRoleGroupService {
 
       // Validate reused roles are assignable before creating anything.
       const toValidate = todo.flatMap((t) => (t.role ? [t.role] : []));
-      // Resolve the bot member through the retry/timeout wrapper. An explicit
-      // null (fetch failed) makes the validator report it, not refetch.
-      const botMember =
-        guild.members.me ??
-        (await this.api(
-          () => guild.members.fetchMe(),
-          "fetch bot member",
-        ).catch(() => null));
       for (const role of toValidate) {
         const ok = await rrService.validateRoleAssignable(
           guild,
@@ -420,6 +426,7 @@ export class ReactionRoleGroupService {
       let target: Message;
       if (anchor) {
         const a = anchor;
+        touchedExisting = true;
         previousEmbeds = (a.embeds ?? []).map((e) => EmbedBuilder.from(e));
         target = await this.api(
           () => a.edit({ embeds: [embed] }),
@@ -518,9 +525,12 @@ export class ReactionRoleGroupService {
         for (const emoji of addedReactions) {
           const id = emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
           const reaction = a.reactions.resolve(id);
-          if (!reaction) continue;
+          const botId = this.client.user?.id;
+          if (!reaction || !botId) continue;
+          // Only the bot's own reaction: reaction.remove() would also wipe
+          // reactions members added before this run.
           await this.api(
-            () => reaction.remove(),
+            () => reaction.users.remove(botId),
             `remove reaction ${emoji}`,
           ).catch((err) => logger.warn("Could not remove reaction:", err));
         }
@@ -538,8 +548,18 @@ export class ReactionRoleGroupService {
           `delete group role ${role.id}`,
         ).catch((err) => logger.warn("Could not delete group role:", err));
       }
+      // A timed-out edit or reaction may still land after rollback; the retry
+      // wrapper cannot cancel it, so ask the admin to check by hand.
+      const timedOut =
+        touchedExisting &&
+        error instanceof Error &&
+        error.message.toLowerCase().includes("timeout");
       return fail(
-        `Failed to generate role group: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to generate role group: ${error instanceof Error ? error.message : "Unknown error"}${
+          timedOut
+            ? " Discord was slow to answer, so the existing picker message may have been edited or reacted to late. Check the picker message and its reactions by hand."
+            : ""
+        }`,
       );
     }
   }
