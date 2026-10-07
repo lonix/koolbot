@@ -11,6 +11,7 @@ import {
   loadCaseHistory,
   loadModerationCaseData,
   CASE_HISTORY_LIMIT,
+  CASE_HISTORY_CONCURRENCY,
   type CaseGroups,
   type CaseView,
 } from "../../src/web/moderation-case-groups.js";
@@ -334,6 +335,33 @@ describe("buildCaseGroups", () => {
       reason: null,
       history: [],
     });
+  });
+
+  it("bounds how many history reads are in flight at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const getHistory = jest.fn(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return [];
+    });
+    const many = Array.from(
+      { length: CASE_HISTORY_CONCURRENCY * 3 + 4 },
+      (_, i) => doc({ _id: `c${i}`, originEntryId: `e${i}` }),
+    );
+
+    const result = await loadCaseHistory(
+      { getHistory } as never,
+      "g1",
+      many,
+      new Map(),
+    );
+
+    expect(getHistory).toHaveBeenCalledTimes(many.length);
+    expect(peak).toBeLessThanOrEqual(CASE_HISTORY_CONCURRENCY);
+    expect(result.size).toBe(many.length);
   });
 
   it("reads history per case, cut off at that case's origin entry, and survives a failed read", async () => {

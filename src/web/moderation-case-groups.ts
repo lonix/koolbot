@@ -27,6 +27,13 @@ import type { ModerationService } from "../services/moderation-service.js";
 /** How many of a member's newest log entries a case card shows. */
 export const CASE_HISTORY_LIMIT = 10;
 
+/**
+ * History reads in flight at once. The queue can hold hundreds of cases and
+ * one read per case, launched together, would spike the connection pool on
+ * every page load.
+ */
+export const CASE_HISTORY_CONCURRENCY = 10;
+
 export interface CaseHistoryItem {
   createdAt: string;
   action: ModerationAction;
@@ -75,7 +82,7 @@ const iso = (d: Date | null | undefined): string | null =>
  * before the case's origin entry, so the origin itself and anything that
  * happened after it are not shown as "prior" history, and a member's older
  * and newer cases each get their own list. Keyed by case id; one read per
- * case, and a failed read just shows none. A case whose origin entry is gone
+ * case in bounded batches, and a failed read just shows none. A case whose origin entry is gone
  * has no cutoff to apply and shows the member's newest entries.
  */
 export async function loadCaseHistory(
@@ -85,19 +92,21 @@ export async function loadCaseHistory(
   originEntries: ReadonlyMap<string, IModerationLog>,
 ): Promise<Map<string, IModerationLog[]>> {
   const byCase = new Map<string, IModerationLog[]>();
-  await Promise.all(
-    cases.map(async (c) => {
-      const origin = originEntries.get(String(c.originEntryId));
-      const rows = await moderation
-        .getHistory(guildId, c.userId, {
-          limit: CASE_HISTORY_LIMIT,
-          skip: 0,
-          before: origin?.createdAt,
-        })
-        .catch(() => []);
-      byCase.set(String(c._id), rows);
-    }),
-  );
+  for (let i = 0; i < cases.length; i += CASE_HISTORY_CONCURRENCY) {
+    await Promise.all(
+      cases.slice(i, i + CASE_HISTORY_CONCURRENCY).map(async (c) => {
+        const origin = originEntries.get(String(c.originEntryId));
+        const rows = await moderation
+          .getHistory(guildId, c.userId, {
+            limit: CASE_HISTORY_LIMIT,
+            skip: 0,
+            before: origin?.createdAt,
+          })
+          .catch(() => []);
+        byCase.set(String(c._id), rows);
+      }),
+    );
+  }
   return byCase;
 }
 

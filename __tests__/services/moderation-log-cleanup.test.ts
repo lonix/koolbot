@@ -269,6 +269,7 @@ describe("ModerationLogCleanupService", () => {
       config({
         "moderation.retention_days": 365,
         "moderation.cases.retention_days": 90,
+        "moderation.cases.history_grace_days": 30,
       });
       mockCaseDeleteMany.mockResolvedValue({ deletedCount: 2 });
       const result =
@@ -284,6 +285,41 @@ describe("ModerationLogCleanupService", () => {
       expect(filter.status).toEqual({ $in: ["upheld", "lifted", "expired"] });
       expect(filter.updatedAt.$lt).toBeInstanceOf(Date);
       expect(filter.openedAt).toBeUndefined();
+    });
+
+    it("never deletes a resolved case before the history grace window has passed", async () => {
+      // 30-day case retention against a 365-day grace: the case is what
+      // protects its member's history, so it must outlive the window.
+      config({
+        "moderation.retention_days": 365,
+        "moderation.cases.retention_days": 30,
+        "moderation.cases.history_grace_days": 365,
+      });
+      mockDeleteMany.mockResolvedValue({ deletedCount: 0 });
+      const before = Date.now();
+      await ModerationLogCleanupService.getInstance().runCleanup();
+
+      const cutoff = (
+        mockCaseDeleteMany.mock.calls[0]?.[0] as Record<string, any>
+      ).updatedAt.$lt.getTime();
+      expect(cutoff).toBeLessThanOrEqual(Date.now() - 365 * DAY);
+      expect(cutoff).toBeGreaterThanOrEqual(before - 365 * DAY - 1000);
+    });
+
+    it("uses the case retention itself when it is longer than the grace window", async () => {
+      config({
+        "moderation.retention_days": 365,
+        "moderation.cases.retention_days": 730,
+        "moderation.cases.history_grace_days": 365,
+      });
+      mockDeleteMany.mockResolvedValue({ deletedCount: 0 });
+      const before = Date.now();
+      await ModerationLogCleanupService.getInstance().runCleanup();
+      const cutoff = (
+        mockCaseDeleteMany.mock.calls[0]?.[0] as Record<string, any>
+      ).updatedAt.$lt.getTime();
+      expect(cutoff).toBeLessThanOrEqual(Date.now() - 730 * DAY);
+      expect(cutoff).toBeGreaterThanOrEqual(before - 730 * DAY - 1000);
     });
 
     it("prunes cases on their own rule even when the log is kept forever", async () => {

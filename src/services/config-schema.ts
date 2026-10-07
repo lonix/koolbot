@@ -2091,7 +2091,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.cases.retention_days": {
     label: "Resolved case retention (days)",
     description:
-      "Days to keep a resolved case, counted from its last decision rather than from when it was opened. Set to 0 to keep resolved cases forever. Open cases are never pruned.",
+      "Days to keep a resolved case, counted from its last decision rather than from when it was opened. Set to 0 to keep resolved cases forever. Open cases are never pruned. A resolved case is never removed sooner than the history protection window below, since it is what carries that protection.",
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,

@@ -183,18 +183,18 @@ declares them with `configKey: null`, so there is nothing to toggle.
 `/me` also has no key: it is registered whenever the Web UI is enabled
 and at least one `/me/*` surface is on (derived in `src/web/me-surfaces.ts`).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `ping.enabled` | `false` | Enable/disable the `/ping` command |
-| `quotes.enabled` | `false` | Enable/disable the quote system and the `/quote` command |
-| `voicetracking.enabled` | `false` | Enables `/voicestats` (its `top` and `user` subcommands also need `voicetracking.stats.top.enabled` / `voicetracking.stats.user.enabled`) |
-| `voicetracking.seen.enabled` | `false` | Enable/disable the `/seen` command |
-| `aka.enabled` | `false` | Enable/disable the `/aka` command |
-| `achievements.enabled` | `false` | Enable/disable the achievements system and the `/achievements` command |
-| `events.enabled` | `false` | Enable/disable the `/event` command |
-| `lfg.enabled` | `false` | Enable/disable the `/lfg` command |
-| `reminders.enabled` | `false` | Enable/disable the `/remind` command |
-| `moderation.enabled` | `false` | Enables `/warn`, `/timeout`, `/ban` and `/modlog` together |
+| Setting                      | Default | Description                                                                                                                               |
+| ---------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `ping.enabled`               | `false` | Enable/disable the `/ping` command                                                                                                        |
+| `quotes.enabled`             | `false` | Enable/disable the quote system and the `/quote` command                                                                                  |
+| `voicetracking.enabled`      | `false` | Enables `/voicestats` (its `top` and `user` subcommands also need `voicetracking.stats.top.enabled` / `voicetracking.stats.user.enabled`) |
+| `voicetracking.seen.enabled` | `false` | Enable/disable the `/seen` command                                                                                                        |
+| `aka.enabled`                | `false` | Enable/disable the `/aka` command                                                                                                         |
+| `achievements.enabled`       | `false` | Enable/disable the achievements system and the `/achievements` command                                                                    |
+| `events.enabled`             | `false` | Enable/disable the `/event` command                                                                                                       |
+| `lfg.enabled`                | `false` | Enable/disable the `/lfg` command                                                                                                         |
+| `reminders.enabled`          | `false` | Enable/disable the `/remind` command                                                                                                      |
+| `moderation.enabled`         | `false` | Enables `/warn`, `/timeout`, `/ban` and `/modlog` together                                                                                |
 
 After changing any `*.enabled` value, click **Reload commands to
 Discord** on the Settings page so Discord picks up the change.
@@ -217,18 +217,18 @@ from the admin nav — no config key gates it. The wizard:
 
 Configure the quote management system.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `quotes.enabled` | `false` | Enable/disable the quote system |
-| `quotes.channel_id` | `""` | Channel ID for quote messages (empty = use command channel) |
-| `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
-| `quotes.max_length` | `1000` | Maximum character length for quotes |
-| `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
-| `quotes.header_enabled` | `true` | Show informational header post in quote channel |
-| `quotes.header_pin_enabled` | `true` | Pin the header post for easy access |
-| `quotes.header_message_id` | `""` | Stores header message ID (managed automatically) |
-| `quotes.clear_on_sync` | `false` | Wipe and re-post the entire channel on each quote sync |
-| `quotes.vote_history_days` | `30` | Days of timestamped 👍 vote history kept for "quote of the week" ranking |
+| Setting                     | Default | Description                                                              |
+| --------------------------- | ------- | ------------------------------------------------------------------------ |
+| `quotes.enabled`            | `false` | Enable/disable the quote system                                          |
+| `quotes.channel_id`         | `""`    | Channel ID for quote messages (empty = use command channel)              |
+| `quotes.cooldown`           | `60`    | Seconds between quote additions (per user)                               |
+| `quotes.max_length`         | `1000`  | Maximum character length for quotes                                      |
+| `quotes.delete_roles`       | `""`    | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
+| `quotes.header_enabled`     | `true`  | Show informational header post in quote channel                          |
+| `quotes.header_pin_enabled` | `true`  | Pin the header post for easy access                                      |
+| `quotes.header_message_id`  | `""`    | Stores header message ID (managed automatically)                         |
+| `quotes.clear_on_sync`      | `false` | Wipe and re-post the entire channel on each quote sync                   |
+| `quotes.vote_history_days`  | `30`    | Days of timestamped 👍 vote history kept for "quote of the week" ranking |
 
 **Notes:**
 
@@ -257,13 +257,13 @@ information. Notice content (titles, bodies, categories, order) is
 managed on the Web UI's **Notices** page; the settings below control
 the channel itself.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `notices.enabled` | `false` | Enable/disable the notices system |
-| `notices.channel_id` | `""` | Channel ID for notice messages |
-| `notices.header_enabled` | `true` | Show informational header post in notices channel |
-| `notices.header_pin_enabled` | `true` | Pin the header post for easy access |
-| `notices.header_message_id` | `""` | Stores header message ID (managed automatically) |
+| Setting                      | Default | Description                                       |
+| ---------------------------- | ------- | ------------------------------------------------- |
+| `notices.enabled`            | `false` | Enable/disable the notices system                 |
+| `notices.channel_id`         | `""`    | Channel ID for notice messages                    |
+| `notices.header_enabled`     | `true`  | Show informational header post in notices channel |
+| `notices.header_pin_enabled` | `true`  | Pin the header post for easy access               |
+| `notices.header_message_id`  | `""`    | Stores header message ID (managed automatically)  |
 
 **Features:**
 
@@ -292,14 +292,14 @@ CRUD operations (add, edit, delete, sync) happen on the Web UI's
 Periodic Discord native polls. Poll questions and schedules are managed
 on the Web UI's **Polls** page; the settings below are global defaults.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `polls.enabled` | `false` | Enable/disable the poll system |
-| `polls.default_duration_hours` | `24` | Default poll duration (1-768, max 32 days) |
-| `polls.cooldown_days` | `7` | Minimum days before reusing the same poll question |
-| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year + per-ISO-week) and per-poll turnout when users vote on any guild poll. Surfaced (#655) on the `/me/` overview "Poll participation" card, the Rewind `Poll votes cast` stat, the poll-participation accolades (Poll Regular / Poll Devotee), and the weekly recap's "N members voted across M polls this week" line (#816) |
-| `polls.participation.weekly_retention_weeks` | `12` | Weeks of per-member weekly vote counters to keep. Lifetime and per-year totals are never pruned; `0` keeps every week forever |
-| `polls.turnout.retention_days` | `90` | Days to keep the per-poll turnout rows (which polls ran, and who voted on them) behind the recap's "across M polls" line; `0` keeps them forever |
+| Setting                                      | Default | Description                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `polls.enabled`                              | `false` | Enable/disable the poll system                                                                                                                                                                                                                                                                                                                                                |
+| `polls.default_duration_hours`               | `24`    | Default poll duration (1-768, max 32 days)                                                                                                                                                                                                                                                                                                                                    |
+| `polls.cooldown_days`                        | `7`     | Minimum days before reusing the same poll question                                                                                                                                                                                                                                                                                                                            |
+| `polls.participation.enabled`                | `false` | Capture per-user "votes cast" (lifetime + per-year + per-ISO-week) and per-poll turnout when users vote on any guild poll. Surfaced (#655) on the `/me/` overview "Poll participation" card, the Rewind `Poll votes cast` stat, the poll-participation accolades (Poll Regular / Poll Devotee), and the weekly recap's "N members voted across M polls this week" line (#816) |
+| `polls.participation.weekly_retention_weeks` | `12`    | Weeks of per-member weekly vote counters to keep. Lifetime and per-year totals are never pruned; `0` keeps every week forever                                                                                                                                                                                                                                                 |
+| `polls.turnout.retention_days`               | `90`    | Days to keep the per-poll turnout rows (which polls ran, and who voted on them) behind the recap's "across M polls" line; `0` keeps them forever                                                                                                                                                                                                                              |
 
 **Features:**
 
@@ -356,17 +356,17 @@ Schedule CRUD and question CRUD live on the Polls page.
 
 Dynamic voice channel creation and management.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicechannels.enabled` | `false` | Enable dynamic voice channel management |
-| `voicechannels.category_id` | `""` | Discord category ID for managed channels (pick from the dropdown in /admin/settings) |
-| `voicechannels.lobby.name` | `"Lobby"` | Lobby channel name when bot is online |
-| `voicechannels.lobby.offlinename` | `"Offline Lobby"` | Lobby channel name when bot is offline |
-| `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
-| `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
-| `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
-| `voicechannels.presets.enabled` | `false` | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page |
-| `voicechannels.presets.max_per_user` | `3` | Maximum number of presets a single user can save |
+| Setting                              | Default           | Description                                                                                                                                                                                        |
+| ------------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voicechannels.enabled`              | `false`           | Enable dynamic voice channel management                                                                                                                                                            |
+| `voicechannels.category_id`          | `""`              | Discord category ID for managed channels (pick from the dropdown in /admin/settings)                                                                                                               |
+| `voicechannels.lobby.name`           | `"Lobby"`         | Lobby channel name when bot is online                                                                                                                                                              |
+| `voicechannels.lobby.offlinename`    | `"Offline Lobby"` | Lobby channel name when bot is offline                                                                                                                                                             |
+| `voicechannels.channel.prefix`       | `"🎮"`            | Prefix for user-created channels                                                                                                                                                                   |
+| `voicechannels.channel.suffix`       | `""`              | Suffix for user-created channels                                                                                                                                                                   |
+| `voicechannels.controlpanel.enabled` | `true`            | Show interactive control panel in channel text chat                                                                                                                                                |
+| `voicechannels.presets.enabled`      | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page |
+| `voicechannels.presets.max_per_user` | `3`               | Maximum number of presets a single user can save                                                                                                                                                   |
 
 ### Manual cleanup
 
@@ -379,15 +379,15 @@ page (replaces the old `/vc reload` and `/vc force-reload`).
 
 Track user voice channel activity and generate statistics.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.enabled` | `false` | Enable voice channel activity tracking |
-| `voicetracking.stats.top.enabled` | `false` | Enable `/voicestats top` subcommand |
-| `voicetracking.stats.user.enabled` | `false` | Enable `/voicestats user` subcommand |
-| `voicetracking.stats.leaderboard_max_results` | `50` | Server-side cap on how many ranked users `/voicestats top` returns (bounds the aggregation so one request can never materialise the whole collection) |
-| `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
-| `voicetracking.companions.enabled` | `false` | Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats (#570) |
-| `voicetracking.excluded_channels` | `""` | Voice channel IDs to exclude from tracking (comma-separated; the Web UI picker lists voice + stage channels) |
+| Setting                                       | Default | Description                                                                                                                                                                                   |
+| --------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voicetracking.enabled`                       | `false` | Enable voice channel activity tracking                                                                                                                                                        |
+| `voicetracking.stats.top.enabled`             | `false` | Enable `/voicestats top` subcommand                                                                                                                                                           |
+| `voicetracking.stats.user.enabled`            | `false` | Enable `/voicestats user` subcommand                                                                                                                                                          |
+| `voicetracking.stats.leaderboard_max_results` | `50`    | Server-side cap on how many ranked users `/voicestats top` returns (bounds the aggregation so one request can never materialise the whole collection)                                         |
+| `voicetracking.seen.enabled`                  | `false` | Enable `/seen` command for last-seen tracking                                                                                                                                                 |
+| `voicetracking.companions.enabled`            | `false` | Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats (#570) |
+| `voicetracking.excluded_channels`             | `""`    | Voice channel IDs to exclude from tracking (comma-separated; the Web UI picker lists voice + stage channels)                                                                                  |
 
 ### Managing excluded channels
 
@@ -421,15 +421,15 @@ section; when their own features are enabled, the recap also includes accolades
 earned, the quote of the week, and poll turnout. Each section can be toggled
 independently.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.announcements.enabled` | `false` | Enable the weekly recap |
-| `voicetracking.announcements.channel_id` | `""` | Discord channel ID where the weekly recap is posted (pick from the dropdown in /admin/settings) |
-| `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
-| `voicetracking.announcements.include_voice_stats` | `true` | Include the top voice-time leaderboard |
-| `voicetracking.announcements.include_accolades` | `true` | Include accolades earned this week (needs achievements + achievement announcements enabled) |
-| `voicetracking.announcements.include_quote_of_week` | `true` | Include the quote that gained the most likes this week (needs quotes enabled) |
-| `voicetracking.announcements.include_poll_turnout` | `true` | Include how many members voted across how many polls this week, plus the best-attended poll when several ran (needs poll participation tracking enabled) |
+| Setting                                             | Default        | Description                                                                                                                                              |
+| --------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voicetracking.announcements.enabled`               | `false`        | Enable the weekly recap                                                                                                                                  |
+| `voicetracking.announcements.channel_id`            | `""`           | Discord channel ID where the weekly recap is posted (pick from the dropdown in /admin/settings)                                                          |
+| `voicetracking.announcements.schedule`              | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM)                                                                                                                    |
+| `voicetracking.announcements.include_voice_stats`   | `true`         | Include the top voice-time leaderboard                                                                                                                   |
+| `voicetracking.announcements.include_accolades`     | `true`         | Include accolades earned this week (needs achievements + achievement announcements enabled)                                                              |
+| `voicetracking.announcements.include_quote_of_week` | `true`         | Include the quote that gained the most likes this week (needs quotes enabled)                                                                            |
+| `voicetracking.announcements.include_poll_turnout`  | `true`         | Include how many members voted across how many polls this week, plus the best-attended poll when several ran (needs poll participation tracking enabled) |
 
 To trigger one out of schedule, use the **Post weekly stats now** button
 on the Web UI's Announcements page (replaces the old
@@ -440,8 +440,8 @@ on the Web UI's Announcements page (replaces the old
 Custom scheduled announcements (managed on the Web UI's **Announcements**
 page).
 
-| Setting | Default | Description |
-| --- | --- | --- |
+| Setting                 | Default | Description                           |
+| ----------------------- | ------- | ------------------------------------- |
 | `announcements.enabled` | `false` | Enable scheduled announcements system |
 
 **Features:**
@@ -466,11 +466,11 @@ CRUD operations happen on the Announcements page.
 
 Persistent accolade system to encourage voice channel participation.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `achievements.enabled` | `false` | Enable/disable achievements system |
-| `achievements.announcements.enabled` | `true` | Include new accolades in weekly announcements |
-| `achievements.dm_notifications.enabled` | `true` | Server-wide switch for accolade DMs. Even when on, each user must opt in per-user on `/me/notifications` (off by default) — Koolbot never DMs a member who has not opted in |
+| Setting                                 | Default | Description                                                                                                                                                                 |
+| --------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `achievements.enabled`                  | `false` | Enable/disable achievements system                                                                                                                                          |
+| `achievements.announcements.enabled`    | `true`  | Include new accolades in weekly announcements                                                                                                                               |
+| `achievements.dm_notifications.enabled` | `true`  | Server-wide switch for accolade DMs. Even when on, each user must opt in per-user on `/me/notifications` (off by default) — Koolbot never DMs a member who has not opted in |
 
 **Features:**
 
@@ -518,10 +518,10 @@ who have opted in on `/me/notifications`) and weekly round-up; this adds
 a single extra announcement in a dedicated channel for just the headline
 milestones.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `celebrations.enabled` | `false` | Master switch — posts a celebration when a marquee accolade is first earned. Requires `achievements.enabled` |
-| `celebrations.channel_id` | `""` | Channel where milestone celebrations are posted. Leave empty to disable the post (the accolade is still awarded) |
+| Setting                   | Default | Description                                                                                                      |
+| ------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `celebrations.enabled`    | `false` | Master switch — posts a celebration when a marquee accolade is first earned. Requires `achievements.enabled`     |
+| `celebrations.channel_id` | `""`    | Channel where milestone celebrations are posted. Leave empty to disable the post (the accolade is still awarded) |
 
 **Which accolades are "marquee":**
 
@@ -556,13 +556,13 @@ streak, and achievements earned in the last 7 days. The digest DM is
 on their **/me/notifications** page (no slash command). Koolbot never
 DMs a member who has not opted in.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `digest.enabled` | `false` | Master switch — enables the cron job and DM delivery |
-| `digest.cron` | `"0 9 * * 1"` | Cron schedule (default: Mondays at 09:00 host timezone) |
-| `digest.min_active_minutes` | `30` | Minimum weekly voice minutes a user needs to receive a digest |
-| `digest.streak_min_minutes` | `30` | Minutes of weekly activity that count toward the consecutive-weeks streak |
-| `digest.include_achievements` | `true` | Include accolades and achievements earned in the past week |
+| Setting                       | Default       | Description                                                               |
+| ----------------------------- | ------------- | ------------------------------------------------------------------------- |
+| `digest.enabled`              | `false`       | Master switch — enables the cron job and DM delivery                      |
+| `digest.cron`                 | `"0 9 * * 1"` | Cron schedule (default: Mondays at 09:00 host timezone)                   |
+| `digest.min_active_minutes`   | `30`          | Minimum weekly voice minutes a user needs to receive a digest             |
+| `digest.streak_min_minutes`   | `30`          | Minutes of weekly activity that count toward the consecutive-weeks streak |
+| `digest.include_achievements` | `true`        | Include accolades and achievements earned in the past week                |
 
 **Notes:**
 
@@ -600,12 +600,12 @@ rest. It is never blocked or rejected because a source is off (this is the
 inverse of a hard dependency — `rewind.enabled` is intentionally **not** in
 any `dependsOn`). Per-section gates:
 
-| Rewind section | Source feature | When the source is off |
-| --- | --- | --- |
-| Voice (total time, companions, peak day, longest session, streak, annual rank, weekly journey) | `voicetracking.enabled` | Voice stats read as empty / zero |
-| Badges (accolades + achievements earned) | `achievements.enabled` | Badge section hidden |
-| Text activity | `messagetracking.enabled` | Text card hidden |
-| Reaction activity (given / received) | `reactiontracking.enabled` | Reaction card hidden |
+| Rewind section                                                                                 | Source feature             | When the source is off           |
+| ---------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------- |
+| Voice (total time, companions, peak day, longest session, streak, annual rank, weekly journey) | `voicetracking.enabled`    | Voice stats read as empty / zero |
+| Badges (accolades + achievements earned)                                                       | `achievements.enabled`     | Badge section hidden             |
+| Text activity                                                                                  | `messagetracking.enabled`  | Text card hidden                 |
+| Reaction activity (given / received)                                                           | `reactiontracking.enabled` | Reaction card hidden             |
 
 Each section additionally requires the user to have data for the chosen
 year; with the source on but no data, the usual empty-state placeholder is
@@ -618,12 +618,12 @@ gates the December DM independently. Following the repo's opt-in
 convention, both default to `false` — set `rewind.enabled = true` to
 expose the page.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `rewind.enabled` | `false` | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page shows a consistent "off" banner (HTTP 200) in place of the recap and its nav link is greyed with an "off" badge (#709) |
-| `rewind.nudge.enabled` | `false` | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled` |
-| `rewind.cron` | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone) |
-| `rewind.min_minutes` | `60` | Minimum annual voice minutes a user needs to receive the nudge |
+| Setting                | Default          | Description                                                                                                                                                                                                                                    |
+| ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page shows a consistent "off" banner (HTTP 200) in place of the recap and its nav link is greyed with an "off" badge (#709) |
+| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled`                                                                                                                                 |
+| `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                                                           |
+| `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                                                                 |
 
 **Notes:**
 
@@ -663,15 +663,15 @@ optional for privacy); there is no slash command. Admins manage the stored
 birthdays, preview the message and run the check on the Web UI **Birthdays**
 page (`/admin/birthdays`), which also edits these settings.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `birthdays.enabled` | `false` | Master switch — enables the recurring check and announcements |
-| `birthdays.cron` | `"0 * * * *"` | Cron schedule for the check. Hourly by default so the post lands on each member's local day across timezones; a once-daily schedule can miss members far ahead of or behind the host |
-| `birthdays.channel_id` | `""` | Channel where birthday messages are posted (required) |
-| `birthdays.message` | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file) |
-| `birthdays.mention` | `true` | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification |
-| `birthdays.role_id` | `""` | Optional role granted on the birthday and auto-removed later. Leave empty to skip the role |
-| `birthdays.role_duration_hours` | `24` | How long the temporary birthday role is held before the sweep removes it |
+| Setting                         | Default                           | Description                                                                                                                                                                          |
+| ------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `birthdays.enabled`             | `false`                           | Master switch — enables the recurring check and announcements                                                                                                                        |
+| `birthdays.cron`                | `"0 * * * *"`                     | Cron schedule for the check. Hourly by default so the post lands on each member's local day across timezones; a once-daily schedule can miss members far ahead of or behind the host |
+| `birthdays.channel_id`          | `""`                              | Channel where birthday messages are posted (required)                                                                                                                                |
+| `birthdays.message`             | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file)                                              |
+| `birthdays.mention`             | `true`                            | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification                                                                                  |
+| `birthdays.role_id`             | `""`                              | Optional role granted on the birthday and auto-removed later. Leave empty to skip the role                                                                                           |
+| `birthdays.role_duration_hours` | `24`                              | How long the temporary birthday role is held before the sweep removes it                                                                                                             |
 
 **Notes:**
 
@@ -702,17 +702,17 @@ and deletes the channel once the event ends and empties.
 Manage events from the **`/admin/events`** page or the **`/event`** slash
 command (see [COMMANDS.md](COMMANDS.md#event)).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `events.enabled` | `false` | Master switch — enables the feature, the `/event` command, and the `/admin/events` page |
-| `events.category_id` | `""` | Category the temporary event voice channels are created under (**required** for channels to spin up) |
-| `events.announcement_channel_id` | `""` | Text channel where the RSVP message and the pre-start reminder are posted |
-| `events.timezone` | `""` | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
-| `events.channel_prefix` | `"📅"` | Prefix prepended to the event title when naming the voice channel |
-| `events.reminder_minutes` | `30` | How long before start the reminder is posted. Set to `0` to disable reminders |
-| `events.create_lead_minutes` | `15` | How long before start the temporary voice channel is created |
-| `events.default_duration_minutes` | `120` | Duration applied to an event when the organiser doesn't specify one |
-| `events.channel_grace_minutes` | `15` | How long after an event ends the bot waits before deleting its (now empty) channel |
+| Setting                           | Default | Description                                                                                                                       |
+| --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `events.enabled`                  | `false` | Master switch — enables the feature, the `/event` command, and the `/admin/events` page                                           |
+| `events.category_id`              | `""`    | Category the temporary event voice channels are created under (**required** for channels to spin up)                              |
+| `events.announcement_channel_id`  | `""`    | Text channel where the RSVP message and the pre-start reminder are posted                                                         |
+| `events.timezone`                 | `""`    | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
+| `events.channel_prefix`           | `"📅"`  | Prefix prepended to the event title when naming the voice channel                                                                 |
+| `events.reminder_minutes`         | `30`    | How long before start the reminder is posted. Set to `0` to disable reminders                                                     |
+| `events.create_lead_minutes`      | `15`    | How long before start the temporary voice channel is created                                                                      |
+| `events.default_duration_minutes` | `120`   | Duration applied to an event when the organiser doesn't specify one                                                               |
+| `events.channel_grace_minutes`    | `15`    | How long after an event ends the bot waits before deleting its (now empty) channel                                                |
 
 **Notes:**
 
@@ -740,14 +740,14 @@ the party fills, the host closes it, or its timer runs out. Member
 self-service, so there is no admin page — just the settings below (see
 [COMMANDS.md](COMMANDS.md#lfg)).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `lfg.enabled` | `false` | Master switch — enables the feature and the `/lfg` command |
-| `lfg.channel_id` | `""` | Channel LFG posts are sent to. Empty posts in whichever channel `/lfg` was run in |
-| `lfg.expiry_minutes` | `60` | How long a post stays open before it closes itself |
-| `lfg.default_size` | `4` | Party size (host included) used when the member doesn't pass `size:` |
-| `lfg.max_active_per_user` | `1` | How many posts one member may have open at a time (`0` = no cap) |
-| `lfg.voice_channel.enabled` | `true` | Attach a voice channel to each post and link it from the embed |
+| Setting                     | Default | Description                                                                       |
+| --------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `lfg.enabled`               | `false` | Master switch — enables the feature and the `/lfg` command                        |
+| `lfg.channel_id`            | `""`    | Channel LFG posts are sent to. Empty posts in whichever channel `/lfg` was run in |
+| `lfg.expiry_minutes`        | `60`    | How long a post stays open before it closes itself                                |
+| `lfg.default_size`          | `4`     | Party size (host included) used when the member doesn't pass `size:`              |
+| `lfg.max_active_per_user`   | `1`     | How many posts one member may have open at a time (`0` = no cap)                  |
+| `lfg.voice_channel.enabled` | `true`  | Attach a voice channel to each post and link it from the embed                    |
 
 **Notes:**
 
@@ -788,10 +788,10 @@ Personal, one-off reminders members set for themselves with
 self-service, not admin configuration — there is nothing to wire up
 beyond the on/off switch and the per-member cap.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `reminders.enabled` | `false` | Master switch — enables the feature and the `/remind` command |
-| `reminders.max_pending` | `10` | How many undelivered reminders one member may hold at a time |
+| Setting                 | Default | Description                                                   |
+| ----------------------- | ------- | ------------------------------------------------------------- |
+| `reminders.enabled`     | `false` | Master switch — enables the feature and the `/remind` command |
+| `reminders.max_pending` | `10`    | How many undelivered reminders one member may hold at a time  |
 
 **Notes:**
 
@@ -868,12 +868,12 @@ shows what KoolBot stores about the signed-in member and offers it as a
 single JSON file — and, behind its own gate, a **"Reset my data"** action.
 Web UI only — there is no slash command for either.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `privacy.enabled` | `false` | Master switch — enables the `/me/privacy` page and its download |
-| `privacy.export.max_items` | `5000` | Ceiling on rows (and append-only array entries) per collection in one export |
-| `privacy.delete.enabled` | `false` | Enables the self-service "Reset my data" action (also needs `privacy.enabled`) |
-| `privacy.delete.cooldown_hours` | `168` | Per-member wait after a reset starts before another is allowed (`0` = off) |
+| Setting                            | Default | Description                                                                       |
+| ---------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `privacy.enabled`                  | `false` | Master switch — enables the `/me/privacy` page and its download                   |
+| `privacy.export.max_items`         | `5000`  | Ceiling on rows (and append-only array entries) per collection in one export      |
+| `privacy.delete.enabled`           | `false` | Enables the self-service "Reset my data" action (also needs `privacy.enabled`)    |
+| `privacy.delete.cooldown_hours`    | `168`   | Per-member wait after a reset starts before another is allowed (`0` = off)        |
 | `privacy.tracking_opt_out.enabled` | `false` | Offers members a tracking opt-out on `/me/privacy` (also needs `privacy.enabled`) |
 
 **Notes:**
@@ -975,19 +975,19 @@ admitted the interaction — reaching a role without those permissions needs a
 command override in **Server Settings → Integrations → KoolBot**. See
 [COMMANDS.md](COMMANDS.md#-moderation-commands).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `moderation.enabled` | `false` | Master switch — enables the `/warn`, `/timeout`, `/ban` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
-| `moderation.retention_days` | `365` | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever |
-| `core.moderation.enabled` | `false` | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached |
-| `core.moderation.channel_id` | `""` | Text channel that receives those embeds. Nothing is posted while this is empty |
-| `moderation.cases.enabled` | `false` | Case lifecycle: lets staff open a case against a kick or ban with an optional review date and record the outcome. Requires `moderation.enabled` |
-| `moderation.cases.review_cron` | `0 9 * * *` | When the job runs that moves cases whose review date has passed into the review queue |
-| `moderation.cases.default_review_days` | `90` | Review date pre-filled (days from now) when staff open a case |
-| `moderation.cases.retention_days` | `0` | Days to keep a resolved case, counted from its last decision. `0` keeps resolved cases forever. Open cases are never pruned |
-| `moderation.cases.history_grace_days` | `365` | How long after a case resolves its member's log history stays exempt from pruning. `0` protects it for as long as the case exists |
-| `core.moderation_review.enabled` | `false` | Post one summary to a channel when cases come due for review. Requires `moderation.cases.enabled` |
-| `core.moderation_review.channel_id` | `""` | Text channel that receives that summary. Nothing is posted while this is empty |
+| Setting                                | Default     | Description                                                                                                                                                                                                        |
+| -------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `moderation.enabled`                   | `false`     | Master switch — enables the `/warn`, `/timeout`, `/ban` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page                            |
+| `moderation.retention_days`            | `365`       | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever                                                                                                          |
+| `core.moderation.enabled`              | `false`     | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached                                                                                              |
+| `core.moderation.channel_id`           | `""`        | Text channel that receives those embeds. Nothing is posted while this is empty                                                                                                                                     |
+| `moderation.cases.enabled`             | `false`     | Case lifecycle: lets staff open a case against a kick or ban with an optional review date and record the outcome. Requires `moderation.enabled`                                                                    |
+| `moderation.cases.review_cron`         | `0 9 * * *` | When the job runs that moves cases whose review date has passed into the review queue                                                                                                                              |
+| `moderation.cases.default_review_days` | `90`        | Review date pre-filled (days from now) when staff open a case                                                                                                                                                      |
+| `moderation.cases.retention_days`      | `0`         | Days to keep a resolved case, counted from its last decision. `0` keeps resolved cases forever. Open cases are never pruned, and a resolved case is kept at least as long as `moderation.cases.history_grace_days` |
+| `moderation.cases.history_grace_days`  | `365`       | How long after a case resolves its member's log history stays exempt from pruning. `0` protects it for as long as the case exists                                                                                  |
+| `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases come due for review. Requires `moderation.cases.enabled`                                                                                                                  |
+| `core.moderation_review.channel_id`    | `""`        | Text channel that receives that summary. Nothing is posted while this is empty                                                                                                                                     |
 
 **Notes:**
 
@@ -1057,11 +1057,11 @@ Self-assignable roles via message reactions. Users react to a message
 to get a role and access to a dedicated category. Role CRUD happens on
 the Web UI's **Reaction Roles** page.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `reactionroles.enabled` | `false` | Enable reaction role system |
-| `reactionroles.message_channel_id` | `""` | Channel ID where reaction-role messages are posted |
-| `reactionroles.style` | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu) |
+| Setting                            | Default    | Description                                                                                   |
+| ---------------------------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `reactionroles.enabled`            | `false`    | Enable reaction role system                                                                   |
+| `reactionroles.message_channel_id` | `""`       | Channel ID where reaction-role messages are posted                                            |
+| `reactionroles.style`              | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu) |
 
 ### How it works
 
@@ -1110,13 +1110,13 @@ Auto-assign Discord roles based on each user's position on the
 voice-channel leaderboard. A cron job recalculates assignments on a
 schedule; users who fall out of a tier lose the role automatically.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `leaderboard_roles.enabled` | `false` | Enable/disable auto-assignment |
-| `leaderboard_roles.period` | `alltime` | Leaderboard period: `week`, `month`, or `alltime` |
-| `leaderboard_roles.update_cron` | `0 0 * * 1` | Cron schedule for recalculation (default: Mondays 00:00) |
-| `leaderboard_roles.tiers` | `""` | Comma-separated `topN:roleId` pairs (e.g. `1:111,3:222,10:333`) |
-| `leaderboard_roles.announcement_channel_id` | `""` | Optional channel ID for role-change announcements (empty disables) |
+| Setting                                     | Default     | Description                                                        |
+| ------------------------------------------- | ----------- | ------------------------------------------------------------------ |
+| `leaderboard_roles.enabled`                 | `false`     | Enable/disable auto-assignment                                     |
+| `leaderboard_roles.period`                  | `alltime`   | Leaderboard period: `week`, `month`, or `alltime`                  |
+| `leaderboard_roles.update_cron`             | `0 0 * * 1` | Cron schedule for recalculation (default: Mondays 00:00)           |
+| `leaderboard_roles.tiers`                   | `""`        | Comma-separated `topN:roleId` pairs (e.g. `1:111,3:222,10:333`)    |
+| `leaderboard_roles.announcement_channel_id` | `""`        | Optional channel ID for role-change announcements (empty disables) |
 
 ### Tier configuration
 
@@ -1152,13 +1152,13 @@ configuration from applying.
 
 Automatic cleanup of old tracking data with data aggregation.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.cleanup.enabled` | `false` | Enable automatic data cleanup |
-| `voicetracking.cleanup.schedule` | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
-| `voicetracking.cleanup.retention.detailed_sessions_days` | `400` | Days to keep detailed session data (full Rewind year + buffer). `0` keeps every session forever |
-| `voicetracking.cleanup.retention.monthly_summaries_months` | `6` | Months to keep monthly summaries. `0` keeps them forever |
-| `voicetracking.cleanup.retention.yearly_summaries_years` | `1` | Years to keep yearly summaries. `0` keeps them forever |
+| Setting                                                    | Default       | Description                                                                                     |
+| ---------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `voicetracking.cleanup.enabled`                            | `false`       | Enable automatic data cleanup                                                                   |
+| `voicetracking.cleanup.schedule`                           | `"0 0 * * *"` | Cron schedule (default: daily at midnight)                                                      |
+| `voicetracking.cleanup.retention.detailed_sessions_days`   | `400`         | Days to keep detailed session data (full Rewind year + buffer). `0` keeps every session forever |
+| `voicetracking.cleanup.retention.monthly_summaries_months` | `6`           | Months to keep monthly summaries. `0` keeps them forever                                        |
+| `voicetracking.cleanup.retention.yearly_summaries_years`   | `1`           | Years to keep yearly summaries. `0` keeps them forever                                          |
 
 **How it works:**
 
@@ -1202,13 +1202,13 @@ This is the **data-capture foundation only** — nothing is surfaced on
 Rewind or the Web UI yet (that lives in a follow-up). No slash command is
 introduced.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `messagetracking.enabled` | `false` | Master switch — turning this off stops the listener entirely |
-| `messagetracking.excluded_channels` | `""` | Channel IDs to skip (comma-separated; mirrors `voicetracking.excluded_channels`) |
-| `messagetracking.cleanup.enabled` | `false` | Master switch for the per-message detail cleanup job |
-| `messagetracking.cleanup.schedule` | `"0 3 * * *"` | Cron schedule (default: daily at 03:00) |
-| `messagetracking.cleanup.retention.detailed_days` | `400` | Drop per-message detail older than N days (allows a full Rewind year + buffer). `0` keeps every message forever |
+| Setting                                           | Default       | Description                                                                                                     |
+| ------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------- |
+| `messagetracking.enabled`                         | `false`       | Master switch — turning this off stops the listener entirely                                                    |
+| `messagetracking.excluded_channels`               | `""`          | Channel IDs to skip (comma-separated; mirrors `voicetracking.excluded_channels`)                                |
+| `messagetracking.cleanup.enabled`                 | `false`       | Master switch for the per-message detail cleanup job                                                            |
+| `messagetracking.cleanup.schedule`                | `"0 3 * * *"` | Cron schedule (default: daily at 03:00)                                                                         |
+| `messagetracking.cleanup.retention.detailed_days` | `400`         | Drop per-message detail older than N days (allows a full Rewind year + buffer). `0` keeps every message forever |
 
 **What's tracked:**
 
@@ -1235,11 +1235,11 @@ Remember the usernames, global display names and server nicknames members have
 used, so `/aka @user` can answer "what did they used to go by?". History only
 starts from when `namehistory.enabled` was turned on — nothing is back-filled.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `aka.enabled` | `false` | Enable the `/aka` command |
-| `namehistory.enabled` | `false` | Record names as the bot sees them. Works even while `/aka` is off, so history can build up first |
-| `namehistory.retention_days` | `365` | Days to keep a name that has not been seen again before the daily cleanup prunes it. Set to `0` to keep names forever |
+| Setting                      | Default | Description                                                                                                           |
+| ---------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `aka.enabled`                | `false` | Enable the `/aka` command                                                                                             |
+| `namehistory.enabled`        | `false` | Record names as the bot sees them. Works even while `/aka` is off, so history can build up first                      |
+| `namehistory.retention_days` | `365`   | Days to keep a name that has not been seen again before the daily cleanup prunes it. Set to `0` to keep names forever |
 
 **How names are captured:**
 
@@ -1267,10 +1267,10 @@ messages) and **receives** (others add to theirs) via a
 **data-capture foundation only** — nothing is surfaced on Rewind or the
 Web UI yet (that lives in a follow-up). No slash command is introduced.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `reactiontracking.enabled` | `false` | Master switch — turning this off stops the listener entirely |
-| `reactiontracking.excluded_channels` | `""` | Channel IDs to skip (comma-separated; mirrors `messagetracking.excluded_channels`) |
+| Setting                              | Default | Description                                                                        |
+| ------------------------------------ | ------- | ---------------------------------------------------------------------------------- |
+| `reactiontracking.enabled`           | `false` | Master switch — turning this off stops the listener entirely                       |
+| `reactiontracking.excluded_channels` | `""`    | Channel IDs to skip (comma-separated; mirrors `messagetracking.excluded_channels`) |
 
 **What's tracked:**
 
@@ -1290,12 +1290,12 @@ Web UI yet (that lives in a follow-up). No slash command is introduced.
 
 Protect your bot from command spam with global rate limiting.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `ratelimit.enabled` | `false` | Enable global rate limiting for all commands |
-| `ratelimit.max_commands` | `5` | Maximum number of commands allowed per time window |
-| `ratelimit.window_seconds` | `10` | Time window in seconds for rate limit tracking |
-| `ratelimit.bypass_admin` | `true` | Allow administrators to bypass rate limits |
+| Setting                    | Default | Description                                        |
+| -------------------------- | ------- | -------------------------------------------------- |
+| `ratelimit.enabled`        | `false` | Enable global rate limiting for all commands       |
+| `ratelimit.max_commands`   | `5`     | Maximum number of commands allowed per time window |
+| `ratelimit.window_seconds` | `10`    | Time window in seconds for rate limit tracking     |
+| `ratelimit.bypass_admin`   | `true`  | Allow administrators to bypass rate limits         |
 
 Rate limiting uses a sliding window. When a user exceeds the limit, they
 receive an ephemeral message like:
@@ -1403,23 +1403,23 @@ migrator copies each one into its matching key when that key has no stored
 value yet (`npm run migrate-config` does the same on demand); after
 that, edit the setting in the Web UI:
 
-| Legacy variable | Setting |
-| --- | --- |
-| `ENABLE_VC_MANAGEMENT` | `voicechannels.enabled` |
-| `LOBBY_CHANNEL_NAME` | `voicechannels.lobby.name` |
-| `LOBBY_CHANNEL_NAME_OFFLINE` | `voicechannels.lobby.offlinename` |
-| `VC_CHANNEL_PREFIX` | `voicechannels.channel.prefix` |
-| `VC_SUFFIX` | `voicechannels.channel.suffix` |
-| `ENABLE_VC_TRACKING` | `voicetracking.enabled` |
-| `ENABLE_SEEN` | `voicetracking.seen.enabled` |
-| `EXCLUDED_VC_CHANNELS` | `voicetracking.excluded_channels` |
-| `ENABLE_VC_WEEKLY_ANNOUNCEMENT` | `voicetracking.announcements.enabled` |
-| `VC_ANNOUNCEMENT_SCHEDULE` | `voicetracking.announcements.schedule` |
-| `ENABLE_PING` | `ping.enabled` |
-| `ENABLE_QUOTES` | `quotes.enabled` |
-| `QUOTE_DELETE_ROLES` | `quotes.delete_roles` |
-| `QUOTE_MAX_LENGTH` | `quotes.max_length` |
-| `QUOTE_COOLDOWN` | `quotes.cooldown` |
+| Legacy variable                 | Setting                                |
+| ------------------------------- | -------------------------------------- |
+| `ENABLE_VC_MANAGEMENT`          | `voicechannels.enabled`                |
+| `LOBBY_CHANNEL_NAME`            | `voicechannels.lobby.name`             |
+| `LOBBY_CHANNEL_NAME_OFFLINE`    | `voicechannels.lobby.offlinename`      |
+| `VC_CHANNEL_PREFIX`             | `voicechannels.channel.prefix`         |
+| `VC_SUFFIX`                     | `voicechannels.channel.suffix`         |
+| `ENABLE_VC_TRACKING`            | `voicetracking.enabled`                |
+| `ENABLE_SEEN`                   | `voicetracking.seen.enabled`           |
+| `EXCLUDED_VC_CHANNELS`          | `voicetracking.excluded_channels`      |
+| `ENABLE_VC_WEEKLY_ANNOUNCEMENT` | `voicetracking.announcements.enabled`  |
+| `VC_ANNOUNCEMENT_SCHEDULE`      | `voicetracking.announcements.schedule` |
+| `ENABLE_PING`                   | `ping.enabled`                         |
+| `ENABLE_QUOTES`                 | `quotes.enabled`                       |
+| `QUOTE_DELETE_ROLES`            | `quotes.delete_roles`                  |
+| `QUOTE_MAX_LENGTH`              | `quotes.max_length`                    |
+| `QUOTE_COOLDOWN`                | `quotes.cooldown`                      |
 
 Renamed keys keep a one-way fallback so existing stored values survive an
 upgrade: the old `gamification` keys are migrated to `achievements.*`, the
@@ -1514,15 +1514,15 @@ tracked, are intentionally **not** listed and are never blocked on enable.
 
 Current hard dependencies:
 
-| Setting | Requires |
-| --- | --- |
-| `leaderboard_roles.enabled` | `voicetracking.enabled` |
-| `digest.enabled` | `voicetracking.enabled` |
-| `digest.include_achievements` | `achievements.enabled` |
-| `achievements.enabled` | `voicetracking.enabled` |
-| `celebrations.enabled` | `achievements.enabled` |
-| `voicetracking.announcements.enabled` | `voicetracking.enabled` |
-| `core.updates.enabled` | `core.updatecheck.enabled` |
+| Setting                               | Requires                   |
+| ------------------------------------- | -------------------------- |
+| `leaderboard_roles.enabled`           | `voicetracking.enabled`    |
+| `digest.enabled`                      | `voicetracking.enabled`    |
+| `digest.include_achievements`         | `achievements.enabled`     |
+| `achievements.enabled`                | `voicetracking.enabled`    |
+| `celebrations.enabled`                | `achievements.enabled`     |
+| `voicetracking.announcements.enabled` | `voicetracking.enabled`    |
+| `core.updates.enabled`                | `core.updatecheck.enabled` |
 
 **Write-time enforcement.** Every config write surface — `ConfigService.set`,
 the Settings single-key save and section save, the YAML import, and the setup
@@ -1786,16 +1786,16 @@ to. Both live under the **core** category on the Settings page. Nothing is
 posted while a category is disabled or its channel id is empty. Saved changes
 apply to the next log message — no restart is needed.
 
-| Key | Type | Default | Events |
-| --- | --- | --- | --- |
-| `core.startup.enabled` / `core.startup.channel_id` | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord registration, service init |
-| `core.errors.enabled` / `core.errors.channel_id` | bool / channel | `false` / `""` | Unhandled command failures, service crashes |
-| `core.cleanup.enabled` / `core.cleanup.channel_id` | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated) |
-| `core.config.enabled` / `core.config.channel_id` | bool / channel | `false` / `""` | Configuration reloads and their outcome |
-| `core.cron.enabled` / `core.cron.channel_id` | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks) |
-| `core.moderation.enabled` / `core.moderation.channel_id` | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`) |
-| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that came due for review (needs `moderation.cases.enabled`) |
-| `core.updates.enabled` / `core.updates.channel_id` | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
+| Key                                                                    | Type           | Default        | Events                                                                                                    |
+| ---------------------------------------------------------------------- | -------------- | -------------- | --------------------------------------------------------------------------------------------------------- |
+| `core.startup.enabled` / `core.startup.channel_id`                     | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord registration, service init                                      |
+| `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Unhandled command failures, service crashes                                                               |
+| `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
+| `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Configuration reloads and their outcome                                                                   |
+| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks)                                         |
+| `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`)                  |
+| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that came due for review (needs `moderation.cases.enabled`)             |
+| `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).

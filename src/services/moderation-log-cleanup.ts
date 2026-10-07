@@ -29,7 +29,9 @@ import { ConfigService } from "./config-service.js";
  * Both sets are bounded by the number of cases (a handful a year), not by the
  * size of the log, so `$nin` is safe here. Resolved cases are pruned on their
  * own rule, `moderation.cases.retention_days`, measured from the last
- * decision; live cases are never pruned — they are the queue.
+ * decision (never sooner than the history grace window, since the resolved
+ * case is what carries that protection); live cases are never pruned — they
+ * are the queue.
  */
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -87,6 +89,9 @@ export class ModerationLogCleanupService {
     const caseRetentionDays = await this.configService
       .getNumber("moderation.cases.retention_days", 0)
       .catch(() => 0);
+    const graceDays = await this.configService
+      .getNumber("moderation.cases.history_grace_days", 365)
+      .catch(() => 365);
     const logPrunes = Number.isFinite(retentionDays) && retentionDays > 0;
     const casePrunes =
       Number.isFinite(caseRetentionDays) && caseRetentionDays > 0;
@@ -96,9 +101,15 @@ export class ModerationLogCleanupService {
       // Cases first, so the protection sets below reflect what survives.
       let casesDeleted = 0;
       if (casePrunes) {
-        const caseCutoff = new Date(
-          Date.now() - caseRetentionDays * MS_PER_DAY,
+        // A resolved case is what protects its member's history through the
+        // grace window, so it must outlive that window: deleting it sooner
+        // would end the protection early. A grace of 0 ("while the case
+        // exists") has no window to outlive.
+        const keepDays = Math.max(
+          caseRetentionDays,
+          Number.isFinite(graceDays) && graceDays > 0 ? graceDays : 0,
         );
+        const caseCutoff = new Date(Date.now() - keepDays * MS_PER_DAY);
         const result = await ModerationCase.deleteMany({
           status: { $in: TERMINAL_CASE_STATUSES },
           updatedAt: { $lt: caseCutoff },
@@ -106,7 +117,7 @@ export class ModerationLogCleanupService {
         casesDeleted = result.deletedCount ?? 0;
         if (casesDeleted > 0) {
           logger.info(
-            `Moderation cleanup removed ${casesDeleted} resolved cases older than ${caseRetentionDays}d`,
+            `Moderation cleanup removed ${casesDeleted} resolved cases older than ${keepDays}d`,
           );
         }
       }
@@ -115,7 +126,7 @@ export class ModerationLogCleanupService {
       if (logPrunes) {
         const cutoff = new Date(Date.now() - retentionDays * MS_PER_DAY);
         const filter: Record<string, unknown> = { createdAt: { $lt: cutoff } };
-        const protection = await this.collectProtection();
+        const protection = await this.collectProtection(graceDays);
         if (protection.entryIds.length > 0) {
           filter._id = { $nin: protection.entryIds };
         }
@@ -142,13 +153,10 @@ export class ModerationLogCleanupService {
    * case points at are always kept; a member's whole history is kept while
    * their case is live or inside the grace window after it resolved.
    */
-  private async collectProtection(): Promise<{
+  private async collectProtection(graceDays: number): Promise<{
     entryIds: unknown[];
     userKeys: Array<{ guildId: string; userId: string }>;
   }> {
-    const graceDays = await this.configService
-      .getNumber("moderation.cases.history_grace_days", 365)
-      .catch(() => 365);
     const graceCutoff =
       Number.isFinite(graceDays) && graceDays > 0
         ? new Date(Date.now() - graceDays * MS_PER_DAY)
