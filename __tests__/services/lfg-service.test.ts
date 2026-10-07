@@ -276,7 +276,7 @@ describe("joinPost", () => {
       memberIds: { $ne: "user-2" },
       $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
     });
-    expect(options).toEqual({ new: true });
+    expect(options).toEqual({ returnDocument: "after", updatePipeline: true });
     // Stage 1 appends; stage 2 reads the *post-append* roster to decide
     // whether the party is now full.
     expect(pipeline).toEqual([

@@ -671,7 +671,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
           },
         },
       ],
-      { new: true },
+      // Mongoose 9 rejects an array update unless `updatePipeline` is set (#1103).
+      { returnDocument: "after", updatePipeline: true },
     );
 
     if (!joined) {

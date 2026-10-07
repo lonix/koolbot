@@ -280,7 +280,7 @@ describe("setRsvp", () => {
           },
         },
       ],
-      { new: true },
+      { returnDocument: "after", updatePipeline: true },
     );
   });
 
@@ -350,7 +350,7 @@ describe("removeRsvp", () => {
     expect(EventMock.findByIdAndUpdate).toHaveBeenCalledWith(
       "e1",
       { $pull: { rsvps: { userId: "user-1" } } },
-      { new: true },
+      { returnDocument: "after" },
     );
     expect(render).toHaveBeenCalledTimes(1);
   });
