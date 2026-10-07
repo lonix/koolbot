@@ -74,6 +74,15 @@ export async function resolveManagedCategory(
   return ch as CategoryChannel;
 }
 
+/**
+ * Remove one matching pair of surrounding quotes (e.g. a value supplied as
+ * `LOBBY_CHANNEL_NAME="Lobby"`). Quotes inside the name are never touched.
+ */
+export function stripSurroundingQuotes(value: string): string {
+  const match = /^(["'])(.*)\1$/s.exec(value.trim());
+  return match ? match[2] : value;
+}
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
@@ -656,11 +665,11 @@ export class VoiceChannelManager {
    * different code paths agree on what counts as the lobby.
    */
   private async getLobbyChannelName(): Promise<string> {
-    return (
+    const raw =
       (await configService.getString("voicechannels.lobby.name")) ||
       (await configService.getString("voice_channel.lobby_channel_name")) ||
-      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
-    );
+      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+    return stripSurroundingQuotes(raw);
   }
 
   /**
@@ -2736,12 +2745,7 @@ export class VoiceChannelManager {
       // Check for offline lobby. A lobby configured by ID that is still
       // carrying a non-online name is the one to restore.
       const lobbyById = await this.getLobbyChannelById(guild);
-      // A lobby selected by ID keeps its configured display name exactly (a
-      // name like "Bob's Lobby" must not be rewritten); the legacy name-based
-      // lookup keeps its long-standing quote stripping.
-      const lobbyChannelName = lobbyById
-        ? configuredLobbyName
-        : configuredLobbyName.replace(/["']/g, "");
+      const lobbyChannelName = configuredLobbyName;
       // Once the ID resolves the name fallback is off (see renameLobbyToOnline).
       const offlineLobby = lobbyById
         ? lobbyById.name !== lobbyChannelName
