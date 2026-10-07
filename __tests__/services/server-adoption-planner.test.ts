@@ -638,16 +638,33 @@ describe("planAdoption: bot management permissions", () => {
     ).toEqual([]);
   });
 
-  it("requires Manage Channels for overwrite and channel operations", () => {
+  it("requires Manage Roles (not Manage Channels) for overwrites, Manage Channels for deletes", () => {
     const desired: DesiredState = {
       overwrites: [
         { channelId: "chat", target: { id: "member" }, allow: VIEW, deny: "0" },
       ],
     };
-    const plan = planAdoption(limited(F.ManageRoles | F.ViewChannel), desired);
-    expect(plan.errors.map((e) => e.message).join()).toMatch(/Manage Channels/);
+    const noRoles = planAdoption(
+      limited(F.ManageChannels | F.ViewChannel),
+      desired,
+    );
+    expect(noRoles.errors.map((e) => e.message).join()).toMatch(/Manage Roles/);
     expect(
-      codes(planAdoption(limited(F.ManageChannels | F.ViewChannel), desired)),
+      codes(planAdoption(limited(F.ManageRoles | F.ViewChannel), desired)),
+    ).toEqual([]);
+    const del: DesiredState = {
+      deletions: [{ kind: "channel", id: "chat" }],
+      approvals: [approval("channel.delete", "chat")],
+    };
+    const noChannels = planAdoption(
+      limited(F.ManageRoles | F.ViewChannel),
+      del,
+    );
+    expect(noChannels.errors.map((e) => e.message).join()).toMatch(
+      /Manage Channels/,
+    );
+    expect(
+      codes(planAdoption(limited(F.ManageChannels | F.ViewChannel), del)),
     ).toEqual([]);
   });
 });

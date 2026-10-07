@@ -7,6 +7,8 @@ import {
   type GuildChannelCreateOptions,
   type PermissionOverwriteManager,
   type OverwriteType,
+  DiscordAPIError,
+  RESTJSONErrorCodes,
   Routes,
 } from "discord.js";
 import logger from "../utils/logger.js";
@@ -70,6 +72,8 @@ export interface AdoptionGateway {
   removeMemberRole(memberId: string, roleId: string): Promise<void>;
   /** Live state, read just before the first write. Null when gone. */
   readRole(roleId: string): Promise<RoleState | null>;
+  /** Used to reconcile a role.create whose result was never recorded. */
+  findRoleByName(name: string): Promise<string | null>;
   readChannel(channelId: string): Promise<ChannelState | null>;
 }
 
@@ -89,7 +93,12 @@ export interface AdoptionSnapshotRecord {
   rolledBackOps: string[];
   memberProgress: Record<
     string,
-    { done: number; failed: string[]; granted: string[] }
+    {
+      done: number;
+      failed: string[];
+      granted: string[];
+      inflight?: string[];
+    }
   >;
   rolledBackBy: string | null;
 }
@@ -281,6 +290,11 @@ export class ServerAdoptionService {
     if (plan.guildId !== options.actor.guildId) {
       throw new AdoptionPlanError("Plan belongs to a different server.");
     }
+    if (plan.plannedBy !== options.actor.discordUserId) {
+      throw new AdoptionPlanError(
+        "Only the admin the plan was made for can apply it. Plan again as yourself.",
+      );
+    }
     const { store } = this.deps;
     const batchSize = Math.max(1, options.batchSize ?? 5);
     const batchDelayMs = options.batchDelayMs ?? 1000;
@@ -382,11 +396,18 @@ export class ServerAdoptionService {
             continue;
           }
           try {
+            const started = !!record.startedAt;
+            if (op.type === "role.create" && !started) {
+              // Durable intent, written before the non-idempotent write.
+              record.startedAt = new Date();
+              await persist();
+            }
             record.resultId = await this.execute(
               op,
               snapshot,
               options,
               persist,
+              started,
             );
             record.status = "applied";
             record.error = null;
@@ -515,20 +536,31 @@ export class ServerAdoptionService {
     snapshot: AdoptionSnapshotRecord,
     options: ApplyOptions,
     persist: () => Promise<void>,
+    started: boolean,
   ): Promise<string | null> {
     const { gateway, callApi, config } = this.deps;
     switch (op.type) {
       case "role.create": {
-        const roleId = await callApi(
-          () =>
-            gateway.createRole({
-              name: op.name,
-              color: op.color,
-              permissions: op.permissions,
-              position: op.position,
-            }),
-          `create role ${op.name}`,
-        );
+        // A previous run that began this create but never recorded its result
+        // may have created the role; adopt it instead of making a duplicate.
+        const earlier = started
+          ? await callApi(
+              () => gateway.findRoleByName(op.name),
+              `look up role ${op.name}`,
+            )
+          : null;
+        const roleId =
+          earlier ??
+          (await callApi(
+            () =>
+              gateway.createRole({
+                name: op.name,
+                color: op.color,
+                permissions: op.permissions,
+                position: op.position,
+              }),
+            `create role ${op.name}`,
+          ));
         snapshot.createdRoles.push({ ref: op.ref, roleId, name: op.name });
         return roleId;
       }
@@ -599,6 +631,9 @@ export class ServerAdoptionService {
       failed: [],
       granted: [],
     });
+    // Members whose page was in flight when a previous run died: they may
+    // already hold the role because of us, so a no-op add still counts.
+    const maybeOurs = new Set(state.inflight ?? []);
     const grant = async (memberId: string): Promise<void> => {
       try {
         const changed = await callApi(
@@ -607,7 +642,12 @@ export class ServerAdoptionService {
         );
         // Only record grants that actually changed something, so a rollback
         // never removes a role the member already held.
-        if (changed) state.granted.push(memberId);
+        if (
+          (changed || maybeOurs.has(memberId)) &&
+          !state.granted.includes(memberId)
+        ) {
+          state.granted.push(memberId);
+        }
       } catch {
         state.failed.push(memberId);
       }
@@ -617,8 +657,11 @@ export class ServerAdoptionService {
     await persist();
     while (state.done < op.memberIds.length) {
       const page = op.memberIds.slice(state.done, state.done + pageSize);
+      state.inflight = page;
+      await persist();
       for (const memberId of page) await grant(memberId);
       state.done += page.length;
+      state.inflight = [];
       await persist();
     }
     if (state.failed.length > 0) {
@@ -961,14 +1004,30 @@ class ConfigServiceWriter implements AdoptionConfigWriter {
   }
 }
 
+export const BUSY_MESSAGE =
+  "Another apply or rollback is already running for this server.";
+
+/** Statuses during which a snapshot holds the per-server lock. */
+export const isActiveStatus = (status: AdoptionSnapshotStatus): boolean =>
+  status === "applying" || status === "rolling_back";
+
 export class MongoAdoptionStore implements AdoptionStore {
   public async create(
     record: Omit<AdoptionSnapshotRecord, "id" | "rolledBackBy">,
   ): Promise<AdoptionSnapshotRecord> {
-    const doc = await AdoptionSnapshot.create(
-      record as unknown as Record<string, unknown>,
-    );
-    return { ...record, id: String(doc._id), rolledBackBy: null };
+    try {
+      const doc = await AdoptionSnapshot.create({
+        ...(record as unknown as Record<string, unknown>),
+        active: isActiveStatus(record.status),
+        heartbeatAt: new Date(),
+      });
+      return { ...record, id: String(doc._id), rolledBackBy: null };
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        throw new AdoptionPlanError(BUSY_MESSAGE);
+      }
+      throw error;
+    }
   }
   public async get(id: string): Promise<AdoptionSnapshotRecord | null> {
     const doc = await AdoptionSnapshot.findById(id).lean();
@@ -995,21 +1054,42 @@ export class MongoAdoptionStore implements AdoptionStore {
     from: AdoptionSnapshotStatus[],
     to: AdoptionSnapshotStatus,
   ): Promise<boolean> {
-    const result = await AdoptionSnapshot.updateOne(
-      { _id: id, status: { $in: from } },
-      { $set: { status: to } },
-    );
-    return result.modifiedCount === 1;
+    try {
+      const result = await AdoptionSnapshot.updateOne(
+        { _id: id, status: { $in: from } },
+        {
+          $set: {
+            status: to,
+            active: isActiveStatus(to),
+            heartbeatAt: new Date(),
+          },
+        },
+      );
+      return result.modifiedCount === 1;
+    } catch (error) {
+      // The unique "one active snapshot per server" index refused the claim.
+      if ((error as { code?: number }).code === 11000) return false;
+      throw error;
+    }
   }
   public async update(
     id: string,
     patch: Partial<Omit<AdoptionSnapshotRecord, "id">>,
   ): Promise<void> {
-    const set: Record<string, unknown> = { ...patch };
+    const set: Record<string, unknown> = { ...patch, heartbeatAt: new Date() };
+    if (patch.status) set.active = isActiveStatus(patch.status);
     if (patch.status === "rolled_back") set.rolledBackAt = new Date();
     await AdoptionSnapshot.updateOne({ _id: id }, { $set: set });
   }
 }
+
+/** Swallow only Discord's "Unknown X" answer; every other error must surface. */
+const ignoreUnknown =
+  (code: number) =>
+  (error: unknown): null => {
+    if (error instanceof DiscordAPIError && error.code === code) return null;
+    throw error;
+  };
 
 const CHANNEL_TYPE: Record<ChannelState["kind"], ChannelType | null> = {
   category: ChannelType.GuildCategory,
@@ -1083,7 +1163,9 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     );
   }
   public async readRole(roleId: string): Promise<RoleState | null> {
-    const role = await this.guild.roles.fetch(roleId, { force: true });
+    const role = await this.guild.roles
+      .fetch(roleId, { force: true })
+      .catch(ignoreUnknown(RESTJSONErrorCodes.UnknownRole));
     if (!role) return null;
     return {
       id: role.id,
@@ -1094,10 +1176,14 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
       managed: role.managed,
     };
   }
+  public async findRoleByName(name: string): Promise<string | null> {
+    const roles = await this.guild.roles.fetch(undefined, { force: true });
+    return roles.find((r) => r.name === name)?.id ?? null;
+  }
   public async readChannel(channelId: string): Promise<ChannelState | null> {
     const channel = await this.guild.channels
       .fetch(channelId, { force: true })
-      .catch(() => null);
+      .catch(ignoreUnknown(RESTJSONErrorCodes.UnknownChannel));
     if (!channel || !("permissionOverwrites" in channel)) return null;
     return {
       id: channel.id,

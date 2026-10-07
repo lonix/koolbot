@@ -12,8 +12,18 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 }));
 const mockDeleteMany =
   jest.fn<(f: Record<string, unknown>) => Promise<{ deletedCount: number }>>();
+const mockUpdateMany =
+  jest.fn<
+    (
+      f: Record<string, unknown>,
+      u: Record<string, unknown>,
+    ) => Promise<{ modifiedCount: number }>
+  >();
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
-  AdoptionSnapshot: { deleteMany: mockDeleteMany },
+  AdoptionSnapshot: {
+    deleteMany: mockDeleteMany,
+    updateMany: mockUpdateMany,
+  },
 }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -49,6 +59,8 @@ describe("AdoptionSnapshotCleanupService", () => {
     AdoptionSnapshotCleanupService.reset();
     mockGetNumber.mockReset();
     mockDeleteMany.mockReset();
+    mockUpdateMany.mockReset();
+    mockUpdateMany.mockResolvedValue({ modifiedCount: 0 });
     cronExpressions.length = 0;
   });
 
@@ -82,5 +94,16 @@ describe("AdoptionSnapshotCleanupService", () => {
     mockGetNumber.mockResolvedValue(30);
     mockDeleteMany.mockRejectedValue(new Error("db"));
     expect(await svc().runCleanup()).toBeNull();
+  });
+
+  it("hands a dead apply or rollback back as partial, even when retention is off", async () => {
+    mockGetNumber.mockResolvedValue(0);
+    mockUpdateMany.mockResolvedValue({ modifiedCount: 2 });
+    await svc().runCleanup();
+    const [filter, update] = mockUpdateMany.mock.calls[0];
+    expect(filter).toMatchObject({ active: true });
+    const cutoff = (filter as { heartbeatAt: { $lt: Date } }).heartbeatAt.$lt;
+    expect(Math.round((Date.now() - cutoff.getTime()) / 60000)).toBe(30);
+    expect(update).toEqual({ $set: { status: "partial", active: false } });
   });
 });

@@ -254,6 +254,8 @@ export interface AdoptionPlan {
   /** Content hash: the same inputs always yield the same id. */
   id: string;
   guildId: string;
+  /** The admin the plan was simulated for; only they may apply it. */
+  plannedBy: string;
   operations: PlanOperation[];
   warnings: PlanIssue[];
   errors: PlanIssue[];
@@ -901,14 +903,12 @@ export function planAdoption(
       o.type === "role.create" ||
       o.type === "role.edit" ||
       o.type === "role.delete" ||
-      o.type === "member.role.add",
-  );
-  const needsManageChannels = ordered.some(
-    (o) =>
+      o.type === "member.role.add" ||
+      // Editing channel permissions is a Manage Roles action in Discord.
       o.type === "overwrite.set" ||
-      o.type === "overwrite.remove" ||
-      o.type === "channel.delete",
+      o.type === "overwrite.remove",
   );
+  const needsManageChannels = ordered.some((o) => o.type === "channel.delete");
   if (needsManageRoles && (botBase & ManageRoles) !== ManageRoles) {
     err(
       "bot-lacks-permission",
@@ -1037,13 +1037,21 @@ export function planAdoption(
   };
 
   const id = createHash("sha256")
-    .update(canonical({ g: scanned.guildId, ops: ordered, baseline }))
+    .update(
+      canonical({
+        g: scanned.guildId,
+        by: scanned.adminUserId,
+        ops: ordered,
+        baseline,
+      }),
+    )
     .digest("hex")
     .slice(0, 24);
 
   return {
     id,
     guildId: scanned.guildId,
+    plannedBy: scanned.adminUserId,
     operations: ordered,
     warnings,
     errors,

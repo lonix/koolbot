@@ -21,6 +21,8 @@ export interface IAdoptionOperationRecord {
   status: AdoptionOperationStatus;
   error?: string | null;
   at?: Date | null;
+  /** Set before a non-idempotent write; lets a resume reconcile a crash. */
+  startedAt?: Date | null;
   /** Id the operation produced (e.g. the new role's id). */
   resultId?: string | null;
 }
@@ -45,10 +47,19 @@ export interface IAdoptionSnapshot extends Document {
   rolledBackOps: string[];
   memberProgress: Record<
     string,
-    { done: number; failed: string[]; granted: string[] }
+    {
+      done: number;
+      failed: string[];
+      granted: string[];
+      inflight?: string[];
+    }
   >;
   rolledBackBy: string | null;
   rolledBackAt: Date | null;
+  /** True while applying or rolling back: at most one per server. */
+  active: boolean;
+  /** Refreshed on every write; a stale active snapshot is recoverable. */
+  heartbeatAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -72,6 +83,8 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     restoredRoles: { type: Schema.Types.Mixed, default: [] },
     rolledBackOps: { type: Schema.Types.Mixed, default: [] },
     memberProgress: { type: Schema.Types.Mixed, default: {} },
+    active: { type: Boolean, default: false },
+    heartbeatAt: { type: Date, default: Date.now },
     rolledBackBy: { type: String, default: null },
     rolledBackAt: { type: Date, default: null },
   },
@@ -79,6 +92,11 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
 );
 
 AdoptionSnapshotSchema.index({ createdAt: 1 });
+// One apply or rollback at a time per server, enforced by the database.
+AdoptionSnapshotSchema.index(
+  { guildId: 1 },
+  { unique: true, partialFilterExpression: { active: true } },
+);
 
 export const AdoptionSnapshot = mongoose.model<IAdoptionSnapshot>(
   "AdoptionSnapshot",

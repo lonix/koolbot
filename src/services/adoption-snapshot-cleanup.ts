@@ -6,6 +6,9 @@ import { ScheduledService } from "./scheduled-service.js";
 /** Daily at 04:00 — after the other retention cleanups (03:00–03:45). */
 const CLEANUP_CRON = "0 4 * * *";
 
+/** No heartbeat for this long means the run is dead, not slow. */
+const STALE_AFTER_MS = 30 * 60 * 1000;
+
 export interface AdoptionSnapshotCleanupSummary {
   deleted: number;
 }
@@ -58,12 +61,38 @@ export class AdoptionSnapshotCleanupService extends ScheduledService<AdoptionSna
     return CLEANUP_CRON;
   }
 
+  /**
+   * An apply or rollback that died with the process (deploy, crash) leaves its
+   * snapshot active forever. One whose heartbeat has stopped is handed back as
+   * "partial", which can be resumed or rolled back, and releases the lock.
+   */
+  public async recoverStale(): Promise<number> {
+    try {
+      const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+      const result = await AdoptionSnapshot.updateMany(
+        { active: true, heartbeatAt: { $lt: cutoff } },
+        { $set: { status: "partial", active: false } },
+      );
+      const recovered = result.modifiedCount ?? 0;
+      if (recovered > 0) {
+        logger.warn(
+          `Recovered ${recovered} stale adoption snapshot(s) to partial`,
+        );
+      }
+      return recovered;
+    } catch (err) {
+      logger.error("Adoption snapshot recovery failed:", err);
+      return 0;
+    }
+  }
+
   /** Run one prune now (same as `runNow`; kept for callers and tests). */
   public runCleanup(): Promise<AdoptionSnapshotCleanupSummary | null> {
     return this.runNow();
   }
 
   protected async runOnce(): Promise<AdoptionSnapshotCleanupSummary | null> {
+    await this.recoverStale();
     const retentionDays = await this.configService
       .getNumber("adoption.snapshot.retention_days", 90)
       .catch(() => 90);

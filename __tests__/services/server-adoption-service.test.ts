@@ -126,6 +126,7 @@ function harness() {
     channels: new Map<string, unknown>(),
   };
   const alreadyHolds = new Set<string>();
+  const existingRoleByName = new Map<string, string>();
   let configIssues: string[] = [];
   let n = 0;
   const run = (label: string) => {
@@ -162,6 +163,10 @@ function harness() {
         if (failMembers.has(m)) throw new Error("no");
         return !alreadyHolds.has(m);
       },
+      findRoleByName: async (name) => {
+        calls.push(`findRole:${name}`);
+        return existingRoleByName.get(name) ?? null;
+      },
       readRole: async (id) =>
         (live.roles.get(id) ??
           scanned().roles.find((r) => r.id === id) ??
@@ -176,6 +181,17 @@ function harness() {
     },
     store: {
       create: async (rec) => {
+        if (
+          [...records.values()].some(
+            (r) =>
+              r.guildId === rec.guildId &&
+              (r.status === "applying" || r.status === "rolling_back"),
+          )
+        ) {
+          throw new AdoptionPlanError(
+            "Another apply or rollback is already running",
+          );
+        }
         calls.push("snapshot.create");
         const full = {
           ...rec,
@@ -192,6 +208,17 @@ function harness() {
       claim: async (id, from, to) => {
         const rec = records.get(id);
         if (!rec || !from.includes(rec.status)) return false;
+        if (
+          (to === "applying" || to === "rolling_back") &&
+          [...records.values()].some(
+            (r) =>
+              r !== rec &&
+              r.guildId === rec.guildId &&
+              (r.status === "applying" || r.status === "rolling_back"),
+          )
+        ) {
+          return false;
+        }
         rec.status = to;
         return true;
       },
@@ -221,6 +248,7 @@ function harness() {
     failOn,
     failMembers,
     alreadyHolds,
+    existingRoleByName,
     live,
     setConfigIssues: (v: string[]): void => {
       configIssues = v;
@@ -727,5 +755,83 @@ describe("review hardening, round two", () => {
     expect(h.calls.filter((c) => c.startsWith("removeMember"))).toEqual([
       "removeMember:a:member",
     ]);
+  });
+});
+
+describe("review hardening, round three", () => {
+  it("only the admin the plan was made for can apply it", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    expect(p.plannedBy).toBe("admin");
+    const someoneElse = { ...actor, discordUserId: "other-admin" } as never;
+    await expect(
+      h.service.apply(p, { ...opts, actor: someoneElse }),
+    ).rejects.toThrow(/Only the admin the plan was made for/);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("refuses a second apply or rollback while one is running for the server", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const q = planAdoption(scanned(), { roles: [{ name: "Other" }] });
+    let nested: Promise<unknown> | null = null;
+    const create = h.deps.gateway.createRole;
+    h.deps.gateway.createRole = async (input) => {
+      nested = h.service.apply(q, opts);
+      await expect(nested).rejects.toThrow(/already running/);
+      return create(input);
+    };
+    const r = await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(r.status).toBe("applied");
+    expect(nested).not.toBeNull();
+  });
+
+  it("adopts a role created by a run that died before recording it", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    h.failOn.add("createRole:New");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    expect(
+      h.records.get(first.snapshotId)!.operations[0].startedAt,
+    ).toBeTruthy();
+    // The create actually reached Discord before the process died.
+    h.failOn.clear();
+    h.existingRoleByName.set("New", "role-from-crash");
+    h.calls.length = 0;
+    const second = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+    expect(h.calls.some((c) => c.startsWith("createRole"))).toBe(false);
+    expect(h.records.get(first.snapshotId)!.createdRoles[0].roleId).toBe(
+      "role-from-crash",
+    );
+  });
+
+  it("counts members from an interrupted page as ours, so rollback revokes them", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a", "b"] }],
+    });
+    h.failOn.add("persist-crash");
+    const applied = await h.service.apply(p, opts);
+    // Simulate a crash mid-page: both were granted on Discord, nothing recorded.
+    const rec = h.records.get(applied.snapshotId)!;
+    rec.status = "partial";
+    rec.operations[0].status = "pending";
+    rec.memberProgress["op-1"] = {
+      done: 0,
+      failed: [],
+      granted: [],
+      inflight: ["a", "b"],
+    };
+    h.alreadyHolds.add("a");
+    h.alreadyHolds.add("b");
+    await h.service.apply(p, { ...opts, resumeSnapshotId: applied.snapshotId });
+    expect(
+      h.records.get(applied.snapshotId)!.memberProgress["op-1"].granted,
+    ).toEqual(["a", "b"]);
   });
 });
