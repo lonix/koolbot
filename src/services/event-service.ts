@@ -622,6 +622,16 @@ export class EventService extends ScheduledService {
           occurrenceIndex: { $gt: previous.occurrenceIndex, $lt: index },
         });
         if (sibling) {
+          // The scan's announcement retry may already have posted for this
+          // row; take that post down with it rather than orphan it.
+          const mine = await Event.findById(next._id).catch(() => null);
+          if (mine?.announcementChannelId && mine.announcementMessageId) {
+            await this.deleteAnnouncementPost(
+              mine.guildId,
+              mine.announcementChannelId,
+              mine.announcementMessageId,
+            );
+          }
           await Event.deleteOne({ _id: next._id });
           await Event.updateOne(
             { _id: previous._id },
@@ -1067,6 +1077,24 @@ export class EventService extends ScheduledService {
     );
 
     return { embeds: [embed], components: [row] };
+  }
+
+  /** Best-effort removal of an announcement post whose row is going away. */
+  private async deleteAnnouncementPost(
+    guildId: string,
+    channelId: string,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      const channel = await this.fetchTextChannel(guildId, channelId);
+      const message = await channel?.messages.fetch(messageId);
+      await message?.delete();
+    } catch (error) {
+      logger.warn(
+        `Could not remove orphaned event announcement ${sanitizeForLog(messageId)}:`,
+        error,
+      );
+    }
   }
 
   private async isSeriesCancelled(event: IEvent): Promise<boolean> {

@@ -1209,6 +1209,36 @@ describe("recurring event lifecycle", () => {
     );
   });
 
+  it("removes an already-posted announcement when the sibling check deletes the row", async () => {
+    const { service } = buildService();
+    const sibling = { _id: "occ-1", occurrenceIndex: 1 };
+    EventMock.findOne = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(sibling);
+    EventMock.deleteOne = jest.fn(async () => ({}));
+    EventMock.findById = jest
+      .fn()
+      .mockResolvedValueOnce({ nextSpawned: false, seriesCancelled: false })
+      .mockResolvedValue({
+        guildId: "guild-1",
+        announcementChannelId: "chan-1",
+        announcementMessageId: "msg-orphan",
+      });
+    const del = jest.fn(async () => undefined);
+    (service as unknown as { fetchTextChannel: jest.Mock }).fetchTextChannel =
+      jest.fn(async () => ({
+        messages: { fetch: jest.fn(async () => ({ delete: del })) },
+      }));
+    await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      new Date("2026-07-12T12:00:00Z"),
+    );
+    expect(del).toHaveBeenCalled();
+    expect(EventMock.deleteOne).toHaveBeenCalled();
+  });
+
   it("retries a missing RSVP announcement on a recurring occurrence", async () => {
     const { service, postAnnouncement } = buildService();
     (service as unknown as { configService: unknown }).configService = {
