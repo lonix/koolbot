@@ -144,7 +144,11 @@ function relinkForm(
   options: RoleGroupRoleOption[],
 ): string {
   const choices = options
-    .filter((r) => r.lock === null && !r.taken)
+    // A gate-only group links an integration-managed role; any other group
+    // an editable one (the same rule the POST handler enforces).
+    .filter(
+      (r) => (g.gateOnly ? r.lock === "managed" : r.lock === null) && !r.taken,
+    )
     .map(
       (r) =>
         `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`,

@@ -1139,8 +1139,10 @@ every feature keeps its current behaviour.
     permission) or fails, that group drops back to flag-only and stays there, so nothing retries
     in a loop.
   - Sync pauses while an adoption apply or rollback is running, so the engine's own edits are
-    never mistaken for drift. Turn the periodic job off or change its schedule with
-    `adoption.role_groups.reconcile_enabled` / `reconcile_cron`.
+    never mistaken for drift. `adoption.role_groups.reconcile_enabled` / `reconcile_cron` control only
+    the periodic and startup runs; role edits and deletes in Discord are always checked. Every
+    automatic change (unlink, adopt, recreate, fallback to flag-only) is written to the audit log
+    under the bot as a system actor.
 - **A deleted role unlinks its group.** The group keeps its definition, is marked *unlinked*, and an
   alert is logged. It is never silently recreated: on the page you choose **Create a new role** (the
   next plan creates it) or **Link another role**. Only the *enforce* policy recreates it on its own,

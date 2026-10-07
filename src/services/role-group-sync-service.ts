@@ -31,6 +31,7 @@ import {
   ServerAdoptionService,
 } from "./server-adoption-service.js";
 import type { WebSessionContext } from "../web/session.js";
+import { recordAudit } from "../web/audit.js";
 
 /**
  * Keeps role groups and their Discord roles in sync (#1021).
@@ -179,7 +180,8 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
   }
 
   private async noteRoleEvent(role: Role): Promise<void> {
-    if (!(await this.isEnabled())) return;
+    // Not gated by `reconcile_enabled`: that key only controls the scheduled
+    // and startup runs, so live Discord changes are never missed.
     const guildId = role.guild.id;
     try {
       const groups = await RoleGroupService.getInstance().list(guildId);
@@ -238,6 +240,32 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
     });
   }
 
+  /** The identity automatic changes are audited under (the bot itself). */
+  private systemActor(guildId: string, botId: string): WebSessionContext {
+    return {
+      sessionId: "system:role-group-sync",
+      discordUserId: botId,
+      guildId,
+      role: "admin",
+      scopes: [],
+      lastActivityAt: Date.now(),
+      expiresAt: new Date(Date.now() + JOB_MAX_WAIT_MS),
+    };
+  }
+
+  /** Every automatic write to the groups is audited, like a web write. */
+  private audit(
+    guildId: string,
+    action: string,
+    targetId: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    return recordAudit(
+      this.systemActor(guildId, this.client.user?.id ?? "system"),
+      { action, targetId, details, result: "success" },
+    );
+  }
+
   private async adoptionIsActive(guildId: string): Promise<boolean> {
     try {
       // A dead apply stays `active` until the daily recovery; ignore one
@@ -289,12 +317,19 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
       const done = await service.markUnlinked(guild.id, group.id, group.roleId);
       if (!done) continue;
       summary.unlinked += 1;
+      await this.audit(guild.id, "role-groups.sync.unlink", group.id, {
+        name: group.name,
+        lostRoleId: group.roleId,
+      });
       actions.push(
         `**${group.name}**: its Discord role was deleted; the group is now unlinked.`,
       );
       if (!group.gateOnly && resolvePolicy(group, globalPolicy) === "enforce") {
         if (await service.requestRecreate(guild.id, group.id)) {
           recreate.add(group.id);
+          await this.audit(guild.id, "role-groups.sync.recreate", group.id, {
+            name: group.name,
+          });
         }
       }
     }
@@ -319,6 +354,11 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
       try {
         await service.applyAdopted(guild.id, updates);
         summary.adopted = updates.length;
+        for (const u of updates) {
+          await this.audit(guild.id, "role-groups.sync.adopt", u.groupId, {
+            set: u.set,
+          });
+        }
         for (const i of adoptItems) {
           actions.push(`**${i.groupName}**: adopted from Discord. ${i.detail}`);
         }
@@ -341,6 +381,9 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
       if (result.fellBack.length > 0) {
         for (const id of result.fellBack) {
           await service.setSyncPolicy(guild.id, id, "flag");
+          await this.audit(guild.id, "role-groups.sync.fallback", id, {
+            policy: "flag",
+          });
         }
       } else {
         items = items.filter((i) => !enforceIds.has(i.groupId));
@@ -431,15 +474,7 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
         this.client,
         guild,
       );
-      const actor: WebSessionContext = {
-        sessionId: "system:role-group-sync",
-        discordUserId: botId,
-        guildId: guild.id,
-        role: "admin",
-        scopes: [],
-        lastActivityAt: Date.now(),
-        expiresAt: new Date(Date.now() + JOB_MAX_WAIT_MS),
-      };
+      const actor = this.systemActor(guild.id, botId);
       const job = engine.startApply(plan, { actor });
       const deadline = Date.now() + JOB_MAX_WAIT_MS;
       while (job.status === "running" && Date.now() < deadline) {

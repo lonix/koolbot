@@ -143,7 +143,7 @@ describe("detectDrift", () => {
     expect(detectDrift(groups, ok, "g")).toEqual([]);
   });
 
-  it("does not double-report when the definition itself covers Administrator", () => {
+  it("reports a missing Administrator once, as its own flag, not as permission drift", () => {
     const groups = [
       group({
         id: "a",
@@ -153,7 +153,33 @@ describe("detectDrift", () => {
       }),
     ];
     const kinds = detectDrift(groups, roles, "g").map((d) => d.kind);
-    expect(kinds).toEqual(["permissions"]);
+    expect(kinds).toEqual(["admin-permission"]);
+  });
+
+  it("leaves an accepted Administrator grant alone when the definition omits it", () => {
+    const groups = [
+      group({
+        id: "a",
+        roleId: "r1",
+        capabilities: ["admin"],
+        permissions: "1024",
+      }),
+    ];
+    const granted = [
+      role("g", 0),
+      role("r1", 2, { permissions: "1032" }),
+      roles[2],
+    ];
+    expect(detectDrift(groups, granted, "g")).toEqual([]);
+    // Other permission changes still count.
+    const changed = [
+      role("g", 0),
+      role("r1", 2, { permissions: "2056" }),
+      roles[2],
+    ];
+    expect(detectDrift(groups, changed, "g").map((d) => d.kind)).toEqual([
+      "permissions",
+    ]);
   });
 });
 

@@ -276,6 +276,41 @@ describe("sync with Discord (#1021)", () => {
     expect(html).toContain('value="link"');
   });
 
+  it("offers a gate-only group only managed roles, and others only editable ones", () => {
+    const options = [
+      {
+        id: "rm",
+        name: "Booster",
+        memberCount: 1,
+        lock: "managed" as const,
+        taken: false,
+      },
+      { id: "re", name: "Plain", memberCount: 1, lock: null, taken: false },
+    ];
+    const relinkOptions = (html: string): string =>
+      /name="roleId" required>(.*?)<\/select>/s.exec(html)?.[1] ?? "";
+    const gate = renderRoleGroupsPage(
+      props({
+        groups: [row({ roleId: null, unlinked: true, gateOnly: true })],
+        roleOptions: options,
+      }),
+    );
+    expect(relinkOptions(gate)).toContain(
+      '<option value="rm">@Booster</option>',
+    );
+    expect(relinkOptions(gate)).not.toContain('<option value="re">');
+    const plain = renderRoleGroupsPage(
+      props({
+        groups: [row({ roleId: null, unlinked: true })],
+        roleOptions: options,
+      }),
+    );
+    expect(relinkOptions(plain)).toContain(
+      '<option value="re">@Plain</option>',
+    );
+    expect(relinkOptions(plain)).not.toContain('<option value="rm">');
+  });
+
   it("lets a group pick its sync policy, defaulting to the global one", () => {
     const html = renderRoleGroupsPage(
       props({

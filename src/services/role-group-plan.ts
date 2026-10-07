@@ -89,6 +89,27 @@ export const PERMISSION_PRESETS: ReadonlyArray<{
   },
 ];
 
+/**
+ * The permission set a group wants on its (live) role. For an `admin` group
+ * the Administrator bit is managed on its own (#1021): it is only changed by
+ * the explicit, previewed grant, so an accepted grant is never undone by
+ * ordinary permission syncing, and a definition that omits it never strips it.
+ */
+export function effectivePermissions(
+  group: Pick<GroupSpec, "permissions" | "capabilities">,
+  live: string | undefined,
+): string | null {
+  if (group.permissions === null) return null;
+  if (live === undefined || !group.capabilities.includes("admin")) {
+    return group.permissions;
+  }
+  const admin = PermissionsBitField.Flags.Administrator;
+  return (
+    (BigInt(group.permissions) & ~admin) |
+    (BigInt(live) & admin)
+  ).toString();
+}
+
 export const MAX_GROUPS_PER_GUILD = 50;
 export const MAX_NAME_LENGTH = 100;
 
@@ -247,8 +268,9 @@ export function buildDesiredState(
     const desired: DesiredRole = existing
       ? { id: existing.id, name: g.roleName ?? existing.name }
       : { name: g.name };
-    if (g.permissions !== null && g.permissions !== existing?.permissions) {
-      desired.permissions = g.permissions;
+    const wanted = effectivePermissions(g, existing?.permissions);
+    if (wanted !== null && wanted !== existing?.permissions) {
+      desired.permissions = wanted;
     }
     if (g.colour !== null && g.colour !== existing?.color) {
       desired.color = g.colour;

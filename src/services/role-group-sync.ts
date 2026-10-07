@@ -4,7 +4,7 @@ import {
   ROLE_GROUP_SYNC_POLICIES,
   type RoleGroupSyncPolicy,
 } from "../models/role-group.js";
-import type { GroupSpec } from "./role-group-plan.js";
+import { effectivePermissions, type GroupSpec } from "./role-group-plan.js";
 import type {
   DesiredState,
   PlanIssue,
@@ -124,8 +124,9 @@ export function detectDrift(
       continue;
     }
     if (g.gateOnly || role.managed || role.id === guildId) continue;
+    const wanted = effectivePermissions(g, role.permissions);
     const permissionsDrift =
-      g.permissions !== null && big(g.permissions) !== big(role.permissions);
+      wanted !== null && big(wanted) !== big(role.permissions);
     if (permissionsDrift) {
       add(
         g,
@@ -142,8 +143,7 @@ export function detectDrift(
     }
     if (
       g.capabilities.includes("admin") &&
-      !hasAdministrator(role.permissions) &&
-      !(permissionsDrift && hasAdministrator(g.permissions))
+      !hasAdministrator(role.permissions)
     ) {
       add(g, "admin-permission", "The admin group's role lacks Administrator.");
     }

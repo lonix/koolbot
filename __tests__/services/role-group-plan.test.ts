@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { PermissionsBitField } from "discord.js";
 import {
   buildDesiredState,
+  effectivePermissions,
   formatColour,
   isValidPermissions,
   parseColour,
@@ -249,6 +250,26 @@ describe("buildDesiredState", () => {
       scan({ roles: [role("g", 0), role("r1", 3, { name: "Renamed" })] }),
     );
     expect(desired.roles).toEqual([]);
+  });
+
+  it("keeps an accepted Administrator grant when the definition omits it (#1021)", () => {
+    const state = scan({
+      roles: [role("g", 0), role("r1", 3, { permissions: "1032" })],
+    });
+    const admin = group({
+      id: "a",
+      roleId: "r1",
+      capabilities: ["admin"],
+      permissions: "1024",
+    });
+    expect(buildDesiredState([admin], state).desired.roles).toEqual([]);
+    expect(effectivePermissions(admin, "1032")).toBe("1032");
+    expect(effectivePermissions(admin, "0")).toBe("1024");
+    expect(effectivePermissions(admin, undefined)).toBe("1024");
+    // A non-admin group is still taken literally.
+    const mod = group({ id: "m", roleId: "r1", permissions: "1024" });
+    expect(effectivePermissions(mod, "1032")).toBe("1024");
+    expect(effectivePermissions(group({ id: "n" }), "8")).toBeNull();
   });
 
   it("never adds Administrator to an admin group's role on its own (#1021)", () => {

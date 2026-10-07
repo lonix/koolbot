@@ -67,6 +67,10 @@ jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
     );
   },
 }));
+const mockAudit = jest.fn<(...a: any[]) => Promise<void>>();
+jest.unstable_mockModule("../../src/web/audit.js", () => ({
+  recordAudit: mockAudit,
+}));
 const mockActive = jest.fn<(...a: any[]) => Promise<unknown>>();
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
   AdoptionSnapshot: { exists: mockActive },
@@ -297,6 +301,18 @@ describe("reconcileGuild", () => {
     expect(mockAdopted).toHaveBeenCalledWith("g", [
       { groupId: "g1", set: { permissions: "0" } },
     ]);
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "system:role-group-sync",
+        discordUserId: "kool",
+        guildId: "g",
+      }),
+      expect.objectContaining({
+        action: "role-groups.sync.adopt",
+        targetId: "g1",
+        result: "success",
+      }),
+    );
     expect(mockStartApply).not.toHaveBeenCalled();
     expect(mockLog).toHaveBeenCalledTimes(1);
   });
@@ -384,6 +400,13 @@ describe("reconcileGuild", () => {
     await svc.reconcileGuild(guild());
     expect(mockStartApply).not.toHaveBeenCalled();
     expect(mockSetPolicy).toHaveBeenCalledWith("g", "g1", "flag");
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "role-groups.sync.fallback",
+        targetId: "g1",
+      }),
+    );
     expect(mockLog).toHaveBeenCalledTimes(1);
   });
 
@@ -418,6 +441,13 @@ describe("reconcileGuild", () => {
     it("marks the group unlinked and alerts, and does not recreate it (flag)", async () => {
       const s = await svc.reconcileGuild(guild());
       expect(mockMarkUnlinked).toHaveBeenCalledWith("g", "g1", "r1");
+      expect(mockAudit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: "role-groups.sync.unlink",
+          details: { name: "Mods", lostRoleId: "r1" },
+        }),
+      );
       expect(s.unlinked).toBe(1);
       expect(mockRecreate).not.toHaveBeenCalled();
       expect(mockStartApply).not.toHaveBeenCalled();
@@ -451,6 +481,10 @@ describe("reconcileGuild", () => {
       });
       await svc.reconcileGuild(guild());
       expect(mockRecreate).toHaveBeenCalledWith("g", "g1");
+      expect(mockAudit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: "role-groups.sync.recreate" }),
+      );
       const [plan] = mockStartApply.mock.calls[0];
       expect(plan.operations).toEqual([
         expect.objectContaining({ type: "role.create", name: "Mods" }),
@@ -539,11 +573,11 @@ describe("Discord events", () => {
     expect(mockActive).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing while the sync is switched off", async () => {
+  it("still reconciles live changes while the periodic job is switched off", async () => {
     settings["adoption.role_groups.reconcile_enabled"] = false;
     await svc.handleRoleDelete(role("r1"));
-    await jest.advanceTimersByTimeAsync(10_000);
-    expect(mockActive).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(6_000);
+    expect(mockActive).toHaveBeenCalledTimes(1);
   });
 
   it("retries later when an adoption was running, then gives up", async () => {
