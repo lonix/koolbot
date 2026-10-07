@@ -261,7 +261,10 @@ export async function planRulesGate(
       managed: r.managed,
     })),
     channels,
-    config: {},
+    // The effective value ("" when unset), so the baseline matches what the
+    // engine reads at apply time and a rollback restores it exactly; whether
+    // an override row exists is recorded by the engine in the snapshot.
+    config: { "rules.role_id": roleId ?? "" },
     boundChannelIds: [],
     koolbotCreatedIds: [],
     memberRoles,

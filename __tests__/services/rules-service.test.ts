@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import type { ButtonInteraction } from "discord.js";
+import { Collection, type ButtonInteraction } from "discord.js";
 
 const mockGetBoolean =
   jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
@@ -171,5 +171,98 @@ describe("handleAcceptButton", () => {
     await expect(service().handleAcceptButton(i)).resolves.toBeUndefined();
     expect(i.editReply).toHaveBeenCalled();
     expect(mockUpdateOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordExistingHolders", () => {
+  const bulkWrite = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+  let roleCfg = "r1";
+
+  type TestRole = { id: string; managed: boolean; position: number };
+  const makeGuild = (role: TestRole | undefined, canManage = true): never =>
+    ({
+      id: "g1",
+      roles: {
+        fetch: jest.fn(async () => new Map(role ? [[role.id, role]] : [])),
+      },
+      members: {
+        me: {
+          roles: { highest: { position: 5 } },
+          permissions: { has: () => canManage },
+        },
+        fetch: jest.fn(async () => {
+          const m = new Collection<string, unknown>();
+          for (const id of ["u1", "u2"]) {
+            m.set(id, {
+              user: { bot: false },
+              roles: { cache: { has: () => true } },
+            });
+          }
+          return m;
+        }),
+      },
+    }) as never;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    roleCfg = "r1";
+    mockGetString.mockImplementation(async (k) =>
+      k === "rules.role_id" ? roleCfg : "",
+    );
+    const { RulesAcceptance } =
+      await import("../../src/models/rules-acceptance.js");
+    (RulesAcceptance as unknown as Record<string, unknown>).bulkWrite =
+      bulkWrite;
+    (RulesAcceptance as unknown as Record<string, unknown>).find = jest.fn(
+      () => ({ select: () => ({ lean: async () => [] }) }),
+    );
+    bulkWrite.mockResolvedValue({});
+  });
+
+  const service = (): InstanceType<typeof RulesService> => {
+    RulesService.reset();
+    return RulesService.getInstance({} as never);
+  };
+  const ok: TestRole = { id: "r1", managed: false, position: 1 };
+
+  it("records holders of a valid role", async () => {
+    expect(await service().recordExistingHolders(makeGuild(ok))).toEqual({
+      recorded: 2,
+    });
+    expect(bulkWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "@everyone",
+      "g1",
+      { id: "g1", managed: false, position: 0 },
+      "role-everyone",
+    ],
+    ["a managed role", "r1", { ...ok, managed: true }, "role-managed"],
+    ["a role above the bot", "r1", { ...ok, position: 5 }, "role-too-high"],
+    ["a deleted role", "r1", undefined, "role-missing"],
+  ])("refuses %s and records nothing", async (_n, cfgId, role, problem) => {
+    roleCfg = cfgId;
+    expect(
+      await service().recordExistingHolders(
+        makeGuild(role as TestRole | undefined),
+      ),
+    ).toEqual({ problem });
+    expect(bulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the bot lacks Manage Roles", async () => {
+    expect(await service().recordExistingHolders(makeGuild(ok, false))).toEqual(
+      { problem: "no-manage-roles" },
+    );
+    expect(bulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("records nothing when no role is configured", async () => {
+    roleCfg = "";
+    expect(await service().recordExistingHolders(makeGuild(ok))).toEqual({
+      recorded: 0,
+    });
   });
 });

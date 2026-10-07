@@ -10,7 +10,10 @@
 import { Router } from "express";
 import { Client, type Guild } from "discord.js";
 import logger from "../../../utils/logger.js";
-import { RulesService } from "../../../services/rules-service.js";
+import {
+  RulesService,
+  ROLE_PROBLEM_TEXT,
+} from "../../../services/rules-service.js";
 import {
   planRulesGate,
   rulesPlanIsApplicable,
@@ -100,8 +103,21 @@ export function createRulesRouter(client: Client): Router {
         return;
       }
       try {
-        const recorded =
+        const result =
           await RulesService.getInstance(client).recordExistingHolders(guild);
+        if ("problem" in result) {
+          await recordAudit(session, {
+            action: "rules.record-holders",
+            details: { problem: result.problem },
+            result: "failure",
+          });
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Nothing was recorded. ${ROLE_PROBLEM_TEXT[result.problem]}`,
+          });
+          return;
+        }
+        const recorded = result.recorded;
         await recordAudit(session, {
           action: "rules.record-holders",
           details: { recorded },

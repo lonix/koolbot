@@ -263,18 +263,32 @@ export class RulesService {
   /**
    * Record current holders of the acceptance role as accepted ("adopted"),
    * skipping members who already have a record. Needs the member list, so it
-   * requires the GuildMembers intent. Returns how many were recorded.
+   * requires the GuildMembers intent. The role is validated first, with the
+   * same rules as the Accept handler, so a role that can never be granted
+   * (e.g. @everyone set outside the picker) isn't recorded as adopted.
+   * Returns how many were recorded, or the role problem.
    */
-  public async recordExistingHolders(guild: Guild): Promise<number> {
+  public async recordExistingHolders(
+    guild: Guild,
+  ): Promise<{ recorded: number } | { problem: RulesProblem }> {
     const roleId = (
       await ConfigService.getInstance().getString("rules.role_id", "")
     ).trim();
-    if (!roleId) return 0;
+    if (!roleId) return { recorded: 0 };
+    const roles = await guild.roles.fetch();
+    const me = guild.members.me ?? (await guild.members.fetchMe());
+    const problem = roleProblem(
+      roles.get(roleId),
+      guild.id,
+      me.roles.highest.position,
+      me.permissions.has(PermissionFlagsBits.ManageRoles),
+    );
+    if (problem) return { problem };
     const members = await guild.members.fetch();
     const holders = members.filter(
       (m) => !m.user.bot && m.roles.cache.has(roleId),
     );
-    if (holders.size === 0) return 0;
+    if (holders.size === 0) return { recorded: 0 };
     const known = new Set(
       (
         await RulesAcceptance.find({ guildId: guild.id })
@@ -283,7 +297,7 @@ export class RulesService {
       ).map((r) => r.userId),
     );
     const fresh = [...holders.keys()].filter((id) => !known.has(id));
-    if (fresh.length === 0) return 0;
+    if (fresh.length === 0) return { recorded: 0 };
     const now = new Date();
     await RulesAcceptance.bulkWrite(
       fresh.map((userId) => ({
@@ -297,7 +311,7 @@ export class RulesService {
       })),
       { ordered: false },
     );
-    return fresh.length;
+    return { recorded: fresh.length };
   }
 
   /**

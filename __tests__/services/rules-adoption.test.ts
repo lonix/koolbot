@@ -273,6 +273,18 @@ describe("planRulesGate", () => {
     ]);
   });
 
+  it("baselines rules.role_id with its effective value so rollback restores it", async () => {
+    const guild = fakeGuild({ admin: [], a: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["22222"],
+    });
+    expect(p.plan.baseline.config["rules.role_id"]).toBe("");
+    const cfg = p.plan.operations.find((o) => o.type === "config.set");
+    expect(cfg).toMatchObject({ previous: "" });
+  });
+
   it("links the created role through a config step before any gate", async () => {
     const guild = fakeGuild({ admin: [], a: [] });
     const p = await planRulesGate(guild as never, "admin", {
