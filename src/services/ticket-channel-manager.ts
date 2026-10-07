@@ -316,22 +316,13 @@ export class TicketChannelManager {
       return { ok: false, reason: "already-closed" };
     const settings = await this.getSettings();
     const channel = await this.fetchChannel(ticket);
+    const manager = CommandManager.getInstance(this.client);
 
+    // Locking is mandatory: a "closed" ticket the member can still write in
+    // would be reported as locked. Refuse to close when it fails. A channel
+    // that is already gone has nothing to lock, so the record still closes.
     if (channel) {
       try {
-        if (settings.transcriptOnClose) {
-          // Best-effort: a failed transcript must not leave a "closed" ticket
-          // unlocked, so it is isolated from the lock and rename below.
-          try {
-            const sent = await this.postTranscript(channel, ticket);
-            if (sent) ticket.transcriptMessageId = sent.id;
-          } catch (error) {
-            logger.warn(
-              `Ticket ${String(ticket._id)} transcript failed: ${sanitizeForLog(getErrorMessage(error))}`,
-            );
-          }
-        }
-        const manager = CommandManager.getInstance(this.client);
         await manager.makeDiscordApiCall(
           () =>
             channel.permissionOverwrites.edit(
@@ -341,6 +332,43 @@ export class TicketChannelManager {
             ),
           "lock closed ticket channel",
         );
+      } catch (error) {
+        logger.error(
+          `Failed to lock ticket ${String(ticket._id)}: ${sanitizeForLog(getErrorMessage(error))}`,
+        );
+        return { ok: false, reason: "discord-error" };
+      }
+    }
+
+    // Reserve the transition so concurrent closes can't both run the side
+    // effects below or overwrite who closed it; only the winner archives.
+    const closedAt = new Date();
+    const reserved = await Ticket.findOneAndUpdate(
+      { _id: ticket._id, status: { $ne: "closed" } },
+      { $set: { status: "closed", closedBy: closerId, closedAt } },
+      { new: true },
+    ).exec();
+    if (!reserved) return { ok: false, reason: "already-closed" };
+    ticket.status = "closed";
+    ticket.closedBy = closerId;
+    ticket.closedAt = closedAt;
+
+    // Everything from here is best-effort archiving of an already-closed row.
+    if (channel) {
+      try {
+        if (settings.transcriptOnClose) {
+          try {
+            const sent = await this.postTranscript(channel, ticket);
+            if (sent) {
+              ticket.transcriptMessageId = sent.id;
+              await ticket.save();
+            }
+          } catch (error) {
+            logger.warn(
+              `Ticket ${String(ticket._id)} transcript failed: ${sanitizeForLog(getErrorMessage(error))}`,
+            );
+          }
+        }
         await manager.makeDiscordApiCall(
           () => channel.setName(closedChannelName(channel.name)),
           "rename closed ticket channel",
@@ -350,18 +378,11 @@ export class TicketChannelManager {
           allowedMentions: { parse: [] },
         });
       } catch (error) {
-        // The record must still close: a ticket stuck "open" because Discord
-        // hiccuped on the archive would be un-closable from the Web UI.
         logger.warn(
           `Ticket ${String(ticket._id)} archive step failed: ${sanitizeForLog(getErrorMessage(error))}`,
         );
       }
     }
-
-    ticket.status = "closed";
-    ticket.closedBy = closerId;
-    ticket.closedAt = new Date();
-    await ticket.save();
     return { ok: true, ticket };
   }
 
@@ -379,7 +400,7 @@ export class TicketChannelManager {
         () =>
           channel.permissionOverwrites.edit(
             ticket.authorId,
-            { SendMessages: true, SendMessagesInThreads: true },
+            { SendMessages: true, SendMessagesInThreads: null },
             { reason: `Ticket reopened by ${staffId}` },
           ),
         "unlock reopened ticket channel",

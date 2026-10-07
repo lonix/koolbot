@@ -249,6 +249,12 @@ describe("TicketChannelManager transitions", () => {
     config();
   });
 
+  beforeEach(() => {
+    // Default: the conditional close update wins.
+    mockFindOneAndUpdate.mockReset();
+    mockFindOneAndUpdate.mockReturnValue({ exec: async () => ({}) });
+  });
+
   function ticket(status: string): Record<string, unknown> {
     return {
       _id: "t1",
@@ -354,6 +360,33 @@ describe("TicketChannelManager transitions", () => {
     });
   });
 
+  it("refuses to close, leaving the row open, when the lock fails", async () => {
+    const { client, channel } = clientWithChannel();
+    (
+      channel.permissionOverwrites as unknown as { edit: jest.Mock }
+    ).edit.mockRejectedValue(new Error("Missing Permissions"));
+    const t = ticket("open");
+    const result = await TicketChannelManager.getInstance(client).closeTicket(
+      t as never,
+      "staff-1",
+    );
+    expect(result).toEqual({ ok: false, reason: "discord-error" });
+    expect(t.status).toBe("open");
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets only the winner of a concurrent close archive the ticket", async () => {
+    const { client, channel } = clientWithChannel();
+    mockFindOneAndUpdate.mockReturnValue({ exec: async () => null });
+    const result = await TicketChannelManager.getInstance(client).closeTicket(
+      ticket("open") as never,
+      "staff-2",
+    );
+    expect(result).toEqual({ ok: false, reason: "already-closed" });
+    expect(channel.setName).not.toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
   it("still closes the record when the channel is already gone", async () => {
     const client = {
       user: { id: "bot" },
@@ -382,6 +415,13 @@ describe("TicketChannelManager transitions", () => {
 
     expect(result.ok).toBe(true);
     expect(channel.setName).toHaveBeenCalledWith("ticket-ola-ab12");
+    expect(
+      (channel.permissionOverwrites as unknown as { edit: jest.Mock }).edit,
+    ).toHaveBeenCalledWith(
+      "u1",
+      { SendMessages: true, SendMessagesInThreads: null },
+      expect.anything(),
+    );
     expect(t.status).toBe("claimed");
     expect(t.closedBy).toBeNull();
     expect(
