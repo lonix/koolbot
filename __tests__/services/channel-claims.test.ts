@@ -355,11 +355,14 @@ describe("read-only", () => {
     expect(d).toBe(F.RequestToSpeak);
   });
 
-  it("a category claim reaches synced text children, not unsynced or voice ones", () => {
+  it("a category claim reaches the channels synced to it, identically, and never an unsynced one", () => {
     const r = plan([{ channelId: C_CAT, action: "read-only" }]);
-    expect(setFor(r.plan, C_TEXT, GUILD)).toBeDefined();
-    expect(setFor(r.plan, C_FORUM, GUILD)).toBeDefined();
-    expect(setFor(r.plan, C_VOICE, GUILD)).toBeUndefined();
+    const own = setFor(r.plan, C_CAT, GUILD)!;
+    for (const id of [C_TEXT, C_FORUM, C_VOICE]) {
+      const child = setFor(r.plan, id, GUILD)!;
+      // Mirrors the category exactly, so the child still reads as synced.
+      expect([child.allow, child.deny]).toEqual([own.allow, own.deny]);
+    }
     expect(setFor(r.plan, C_UNSYNCED, GUILD)).toBeUndefined();
   });
 
@@ -377,6 +380,22 @@ describe("read-only", () => {
     const r = plan(parsed.claims);
     expect(r.errors).toEqual([]);
     expect(setFor(r.plan, C_UNSYNCED, GUILD)).toBeDefined();
+  });
+
+  it("bulk never carries a sync approval to the channels it reaches", () => {
+    const parsed = claimsFromForm(
+      {
+        [`bulk_${C_CAT}`]: "sync",
+        [`replace_${C_CAT}`]: "1",
+      },
+      fixture().channels.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        parentId: c.parentId,
+      })),
+    );
+    expect(parsed.claims.length).toBeGreaterThan(0);
+    for (const c of parsed.claims) expect(c.approveReplace).toBeFalsy();
   });
 
   it("is idempotent: planning again after applying gives an empty plan", () => {
@@ -735,6 +754,40 @@ describe("voice category claims (#1032)", () => {
     expect(plan([voiceCat()], s).errors).toEqual([]);
   });
 
+  it("blocks managed-only adoption when another bot's channels follow the voice naming", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_TEMP)!.name = "🔊 |  Red team";
+    const risky = plan(
+      [voiceCat({ voiceManagedOnly: true, usePrefix: true })],
+      s,
+    );
+    expect(risky.errors).toContain("voice-adoption-risk");
+    const issue = buildClaimsDesiredState(
+      [voiceCat({ voiceManagedOnly: true, usePrefix: true })],
+      ctxFor(s),
+    ).issues.find((i) => i.code === "voice-adoption-risk")!;
+    expect(issue.message).toContain("Red team");
+    // Without changing the naming the same channel is not a lookalike.
+    expect(plan([voiceCat({ voiceManagedOnly: true })], s).errors).toEqual([]);
+    // Once the first managed-only cleanup has run, nothing is re-adopted.
+    expect(
+      plan([voiceCat({ voiceManagedOnly: true, usePrefix: true })], s, {
+        voiceMigrationDone: true,
+      }).errors,
+    ).toEqual([]);
+  });
+
+  it("checks the stored prefix too when managed-only is already on", () => {
+    const s = fixture({
+      config: {
+        "voicechannels.cleanup.managed_only": true,
+        "voicechannels.channel.prefix": "🎮",
+      },
+    });
+    s.channels.find((c) => c.id === C_TEMP)!.name = "🎮 Someone's room";
+    expect(plan([voiceCat()], s).errors).toContain("voice-adoption-risk");
+  });
+
   it("binds an existing lobby by id and the naming prefix when asked", () => {
     const r = plan([
       voiceCat({ voiceManagedOnly: true, usePrefix: true }),
@@ -751,7 +804,7 @@ describe("voice category claims (#1032)", () => {
       ),
     );
     expect(values["voicechannels.lobby.channel_id"]).toBe(C_LOBBY);
-    expect(values["voicechannels.channel.prefix"]).toBe("🔊 | ");
+    expect(values["voicechannels.channel.prefix"]).toBe("🔊 |");
   });
 });
 

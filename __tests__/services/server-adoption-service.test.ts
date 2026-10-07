@@ -1817,4 +1817,70 @@ describe("grants before gating overwrites", () => {
       h.calls.indexOf("audit:adoption.rollback.role.create:success"),
     );
   });
+
+describe("a channel-claims sync plan through the real engine (#1022)", () => {
+  const sync = async () => {
+    const { buildClaimsDesiredState } =
+      await import("../../src/services/channel-claims.js");
+    const chat = {
+      ...scanned().channels[1],
+      parentId: "old-cat",
+      overwrites: [
+        { id: "staff", type: "role" as const, allow: VIEW, deny: "0" },
+      ],
+    };
+    const state = scanned({
+      channels: [scanned().channels[0], chat],
+    });
+    const built = buildClaimsDesiredState(
+      [{ channelId: "chat", action: "sync", approveReplace: true }],
+      {
+        scanned: state,
+        groups: [],
+        integrationRoleIds: new Set(),
+        syncedToParent: new Map([["chat", false]]),
+        membersIntent: true,
+        suggestedPrefix: null,
+        // Stamped at preview time, well before the apply.
+        approvedAt: "2026-10-01T10:00:00Z",
+      },
+    );
+    const p = planAdoption(state, built.desired, { approverId: "admin" });
+    return { p, state, chat };
+  };
+
+  it("applies the category's overwrite first and removes the channel's own one last", async () => {
+    const h = harness();
+    const { p, chat } = await sync();
+    expect(p.errors).toEqual([]);
+    h.live.channels.set("chat", chat);
+    const r = await h.service.apply(p, opts);
+    expect(r.status).toBe("applied");
+    const writes = h.calls.filter((c) => /^(set|remove)Overwrite/.test(c));
+    expect(writes).toEqual([
+      "setOverwrite:chat:member",
+      "removeOverwrite:chat:staff",
+    ]);
+  });
+
+  it("is refused without the live-state check the destructive step needs", async () => {
+    const h = harness();
+    const { p } = await sync();
+    expect(() => h.service.startApply(p, { actor, batchDelayMs: 0 })).toThrow(
+      /live-state check/,
+    );
+  });
+
+  it("is refused when the live check finds the channel changed", async () => {
+    const h = harness();
+    const { p, chat } = await sync();
+    h.live.channels.set("chat", chat);
+    await expect(
+      h.service.apply(p, {
+        ...opts,
+        revalidate: async () => ["the channel's permissions changed"],
+      }),
+    ).rejects.toThrow(/Live check failed/);
+    expect(h.calls.some((c) => c.startsWith("removeOverwrite"))).toBe(false);
+  });
 });

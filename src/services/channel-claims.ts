@@ -15,6 +15,8 @@ import {
   type ChannelFamily,
   type PermissionSet,
 } from "../utils/channel-permissions.js";
+import { matchesVoiceNamingPattern } from "../utils/voice-naming.js";
+import { defaultConfig } from "./config-schema.js";
 import type { GroupSpec } from "./role-group-plan.js";
 import type {
   ChannelState,
@@ -173,6 +175,7 @@ const VOICE_MANAGED_ONLY = "voicechannels.cleanup.managed_only";
 const VOICE_CATEGORY = "voicechannels.category_id";
 const VOICE_LOBBY = "voicechannels.lobby.channel_id";
 const VOICE_PREFIX = "voicechannels.channel.prefix";
+const VOICE_SUFFIX = "voicechannels.channel.suffix";
 
 // ---------------------------------------------------------------------------
 // Context and result
@@ -189,6 +192,8 @@ export interface ClaimContext {
   membersIntent: boolean;
   /** The detected channel naming prefix, e.g. `🔊 | `. */
   suggestedPrefix: string | null;
+  /** The first managed-only cleanup already ran for this server. */
+  voiceMigrationDone?: boolean;
   /** Stamp for approvals; fixed by the caller so plan ids are reproducible. */
   approvedAt: string;
 }
@@ -457,12 +462,22 @@ export function buildClaimsDesiredState(
     return feature;
   };
 
+  /** The prefix KoolBot will name voice channels with once the plan is applied. */
+  const voicePrefixAfter = (claim: ChannelClaim): string => {
+    if (claim.usePrefix && ctx.suggestedPrefix) {
+      return ctx.suggestedPrefix.trim();
+    }
+    return String(
+      scanned.config[VOICE_PREFIX] ??
+        defaultConfig["voicechannels.channel.prefix"],
+    );
+  };
+
   const voiceBindChecks = (
     claim: ChannelClaim,
     channel: ChannelState,
   ): void => {
-    const current = scanned.config[VOICE_CATEGORY];
-    if (current === channel.id) return;
+    const alreadyBound = scanned.config[VOICE_CATEGORY] === channel.id;
     const managedOnly = isTrue(scanned.config[VOICE_MANAGED_ONLY]);
     const lobbyId =
       valid.find((v) => v.claim.bindKey === VOICE_LOBBY)?.channel.id ??
@@ -474,24 +489,23 @@ export function buildClaimsDesiredState(
         scanned.config["voicechannels.lobby.offlinename"] ?? "Offline Lobby",
       ),
     ]);
-    if (!managedOnly && !claim.voiceManagedOnly) {
+    const voiceChildren = scanned.channels.filter(
+      (c) =>
+        c.parentId === channel.id &&
+        c.kind === "voice" &&
+        c.id !== lobbyId &&
+        !lobbyNames.has(c.name),
+    );
+    const names = (list: ChannelState[]): string =>
+      list.map((c) => `"${c.name}"`).join(", ");
+
+    if (!alreadyBound && !managedOnly && !claim.voiceManagedOnly) {
       // Legacy cleanup deletes every empty voice channel in this category.
-      const atRisk = scanned.channels.filter(
-        (c) =>
-          c.parentId === channel.id &&
-          c.kind === "voice" &&
-          c.voiceMemberCount === 0 &&
-          c.id !== lobbyId &&
-          !lobbyNames.has(c.name),
-      );
+      const atRisk = voiceChildren.filter((c) => c.voiceMemberCount === 0);
       if (atRisk.length > 0) {
         err(
           "voice-cleanup-risk",
-          `Binding "${channel.name}" as the voice category would let KoolBot's cleanup delete these empty voice channels: ${atRisk
-            .map((c) => `"${c.name}"`)
-            .join(
-              ", ",
-            )}. Use a dedicated category, or also turn on managed-only cleanup so only channels KoolBot created are removed.`,
+          `Binding "${channel.name}" as the voice category would let KoolBot's cleanup delete these empty voice channels: ${names(atRisk)}. Use a dedicated category, or also turn on managed-only cleanup so only channels KoolBot created are removed.`,
           channel.id,
         );
       }
@@ -502,9 +516,26 @@ export function buildClaimsDesiredState(
       config[VOICE_MANAGED_ONLY] = true;
     }
     if (managedOnly || claim.voiceManagedOnly) {
+      // The first managed-only cleanup records every voice channel here that
+      // follows the naming pattern as KoolBot's own, and later deletes it once
+      // empty (#1032). A pattern another bot's channels also follow is unsafe.
+      if (!ctx.voiceMigrationDone) {
+        const prefix = voicePrefixAfter(claim);
+        const suffix = String(scanned.config[VOICE_SUFFIX] ?? "");
+        const lookalikes = voiceChildren.filter((c) =>
+          matchesVoiceNamingPattern(c.name, prefix, suffix),
+        );
+        if (lookalikes.length > 0) {
+          err(
+            "voice-adoption-risk",
+            `With the voice naming ${prefix ? `prefix "${prefix}"` : "suffix"}, KoolBot's first managed-only cleanup would treat these channels in "${channel.name}" as its own and delete them once empty: ${names(lookalikes)}. Use a dedicated category, or keep a prefix or suffix those channels don't follow.`,
+            channel.id,
+          );
+        }
+      }
       issues.push({
         code: "voice-managed-only",
-        message: `With managed-only cleanup, voice channels in "${channel.name}" whose names follow your voice prefix/suffix are treated as KoolBot's on the first cleanup run. Others are never deleted.`,
+        message: `With managed-only cleanup, only channels KoolBot created (or recognised by its naming pattern on the first cleanup run) are ever deleted from "${channel.name}".`,
         targetId: channel.id,
       });
     }
@@ -538,7 +569,8 @@ export function buildClaimsDesiredState(
         permissions: bitsOf(feature.botPermissions.allow),
       });
       if (feature.key === VOICE_CATEGORY && claim.usePrefix) {
-        if (ctx.suggestedPrefix) config[VOICE_PREFIX] = ctx.suggestedPrefix;
+        if (ctx.suggestedPrefix)
+          config[VOICE_PREFIX] = ctx.suggestedPrefix.trim();
         else
           issues.push({
             code: "no-naming-prefix",
@@ -562,19 +594,17 @@ export function buildClaimsDesiredState(
           );
           break;
         }
-        gate(channel, family, targets, botSetFor(family, feature, false));
+        const gateBot = botSetFor(family, feature, false);
+        gate(channel, family, targets, gateBot);
+        // Discord does not push a category's overwrites to its channels, so
+        // the ones synced to it get the identical set. Mirroring it exactly
+        // (rather than a per-type variant) keeps them reading as synced.
         if (family === "category") {
           for (const child of scanned.channels) {
             if (child.parentId !== channel.id || claimed.has(child.id))
               continue;
             if (ctx.syncedToParent.get(child.id) !== true) continue;
-            const childFamily = channelFamily(child.rawType, child.kind);
-            gate(
-              child,
-              childFamily,
-              targets,
-              botSetFor(childFamily, undefined, false),
-            );
+            gate(child, "category", targets, gateBot);
           }
         }
         break;
@@ -582,21 +612,17 @@ export function buildClaimsDesiredState(
       case "read-only": {
         const posters = resolveTargets(claim, channel);
         if (!posters) break;
-        readOnly(
-          channel,
-          family,
-          claim,
-          posters,
-          botSetFor(family, feature, true),
-        );
+        // A category carries the text rules itself so the channels synced to
+        // it can mirror it exactly and keep reading as synced.
+        const roFamily = family === "category" ? "text" : family;
+        const roBot = botSetFor(family, feature, true);
+        readOnly(channel, roFamily, claim, posters, roBot);
         if (family === "category") {
           for (const child of scanned.channels) {
             if (child.parentId !== channel.id || claimed.has(child.id))
               continue;
             if (ctx.syncedToParent.get(child.id) !== true) continue;
-            const childFamily = channelFamily(child.rawType, child.kind);
-            if (childFamily === "voice" || childFamily === "stage") continue;
-            readOnly(child, childFamily, claim, posters, BOT_POSTS);
+            readOnly(child, "text", claim, posters, roBot);
           }
         }
         break;

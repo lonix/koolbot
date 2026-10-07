@@ -96,6 +96,8 @@ export function claimsFromForm(
   }
 
   // Bulk: a category's bulk action reaches children the admin left alone.
+  // Approval to replace permissions is never inherited: each channel needs its
+  // own tick, so "apply all" can't approve a destructive step implicitly.
   for (const category of channels.filter((c) => c.kind === "category")) {
     const bulk = asString(body[`bulk_${category.id}`]);
     if (!bulk) continue;
@@ -115,7 +117,6 @@ export function claimsFromForm(
           : {}),
         allowReactions: asFlag(body[`react_${category.id}`]),
         lockReplies: asFlag(body[`lock_${category.id}`]),
-        approveReplace: asFlag(body[`replace_${category.id}`]),
       });
     }
   }

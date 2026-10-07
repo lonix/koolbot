@@ -150,7 +150,7 @@ function claimRow(
 ${groupSelect}
 <label class="check"><input type="checkbox" name="react_${id}" value="1"${checked(claim?.allowReactions)}> Read-only: members may still react</label>
 ${forumLock}
-<label class="check"><input type="checkbox" name="replace_${id}" value="1"${checked(claim?.approveReplace)}> Sync: I approve replacing the permission overwrites this channel has of its own${c.kind === "category" ? " (and every channel the bulk action reaches)" : ""}. The previous ones are saved in the snapshot.</label>
+<label class="check"><input type="checkbox" name="replace_${id}" value="1"${checked(claim?.approveReplace)}> Sync: I approve replacing the permission overwrites this channel has of its own. The previous ones are saved in the snapshot.</label>
 ${voiceBind}
 </div></details>`;
   return `<tr>

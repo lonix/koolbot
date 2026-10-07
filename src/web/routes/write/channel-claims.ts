@@ -16,6 +16,7 @@ import logger from "../../../utils/logger.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
   claimsPlanIsApplicable,
+  claimsRevalidator,
   planChannelClaims,
 } from "../../../services/channel-claims-adoption.js";
 import {
@@ -230,7 +231,17 @@ export function createChannelClaimsRouter(client: Client): Router {
       }
       const engine = await ServerAdoptionService.getInstance(client, guild);
       try {
-        const job = engine.startApply(built.plan, { actor: session });
+        const job = engine.startApply(built.plan, {
+          actor: session,
+          // Required for the destructive "replace permissions" steps: the
+          // engine re-checks the live server before running them.
+          revalidate: claimsRevalidator(
+            guild,
+            session.discordUserId,
+            parsed.claims,
+            new Date(stamp).toISOString(),
+          ),
+        });
         await recordAudit(session, {
           action: "adopt.claims.apply",
           targetId: built.plan.id,

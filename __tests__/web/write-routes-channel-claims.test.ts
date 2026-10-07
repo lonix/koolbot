@@ -44,6 +44,7 @@ jest.unstable_mockModule(
   "../../src/services/channel-claims-adoption.js",
   () => ({
     planChannelClaims: mockPlan,
+    claimsRevalidator: () => async () => [],
     claimsPlanIsApplicable: (p: {
       plan: { errors: unknown[]; operations: unknown[] };
       errors: unknown[];

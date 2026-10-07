@@ -1328,12 +1328,16 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   does not create a second lobby or category afterwards, and existing messages, pins and webhooks are never
   touched.
 - **Bulk select**: a category row has a "for every channel here left alone" choice that applies one action to
-  all of its channels (each row's own choice wins).
+  all of its channels (each row's own choice wins). A sync approval is never carried over by a bulk choice: each
+  channel needs its own tick.
 
 Binding `voicechannels.category_id` to a category that holds other voice channels is **blocked** while legacy
 cleanup could delete them. The error lists the empty channels it would remove. Either use a dedicated category,
 or tick "also turn on managed-only cleanup", which sets `voicechannels.cleanup.managed_only` before the category
-is bound so only channels KoolBot created are ever deleted. A warning reminds you to disable another
+is bound so only channels KoolBot created are ever deleted. Managed-only cleanup first records the voice channels
+whose names follow the voice prefix or suffix as KoolBot's own, so the plan is also **blocked** (listing the
+channels) when another bot's channels in that category already follow the naming it would use, including a prefix
+adopted from this server. A warning reminds you to disable another
 join-to-create bot before enabling `voicechannels.enabled`. "Use this server's naming prefix" pre-fills
 `voicechannels.channel.prefix` from the scan.
 
