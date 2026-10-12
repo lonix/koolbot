@@ -816,7 +816,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 | `events.category_id`              | `""`      | Category the temporary event voice channels are created under (**required** for channels to spin up)                              |
 | `events.announcement_channel_id`  | `""`      | Text channel where the RSVP message and the pre-start reminder are posted                                                         |
 | `events.timezone`                 | `""`      | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
-| `events.channel_prefix`           | `"📅"`     | Prefix prepended to the event title when naming the voice channel                                                                 |
+| `events.channel_prefix`           | `"📅"`    | Prefix prepended to the event title when naming the voice channel                                                                 |
 | `events.reminder_minutes`         | `30`      | How long before start the reminder is posted. Set to `0` to disable reminders                                                     |
 | `events.create_lead_minutes`      | `15`      | How long before start the temporary voice channel is created                                                                      |
 | `events.default_duration_minutes` | `120`     | Duration applied to an event when the organiser doesn't specify one                                                               |
