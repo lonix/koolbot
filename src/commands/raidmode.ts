@@ -113,21 +113,18 @@ export async function execute(
 
     // `on` makes the bot apply the configured action to every later join, so
     // the moderator must hold the permission that action stands for, the same
-    // way `/ban` needs Ban Members. `off` and `status` never escalate.
-    if (mode === "on") {
-      const needed = await service.getLockdownRequirement();
-      if (!interaction.memberPermissions?.has(needed.flag)) {
-        await interaction.editReply({
-          content: `Lockdown is set to **${needed.action}** members who join, which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
-        });
-        return;
-      }
-    }
-
+    // way `/ban` needs Ban Members. The check runs inside `setLockdown`, on
+    // the settings snapshot the lockdown starts with, so the action cannot
+    // change between the check and the start. `off` and `status` never
+    // escalate.
     const result = await service.setLockdown(
       interaction.guild,
       mode === "on",
       interaction.user.id,
+      (needed) =>
+        interaction.memberPermissions?.has(needed.flag)
+          ? null
+          : `Lockdown is set to **${needed.action}** members who join, which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
     );
     await interaction.editReply({ content: result.message });
   } catch (error) {

@@ -504,6 +504,75 @@ describe("RaidProtectionService", () => {
     });
   });
 
+  describe("transitions and authorisation", () => {
+    it("authorises /raidmode on against the settings snapshot it starts with", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      const seen: string[] = [];
+      const refused = await service.setLockdown(guild, true, "mod-1", (r) => {
+        seen.push(r.action);
+        return "nope";
+      });
+      expect(refused).toEqual({ changed: false, message: "nope" });
+      expect(rowsWith("raid_lockdown")).toHaveLength(0);
+
+      liveConfig({ "moderation.raid.lockdown_action": "kick" });
+      const allowed = await service.setLockdown(guild, true, "mod-1", (r) => {
+        seen.push(r.action);
+        return null;
+      });
+      expect(allowed.changed).toBe(true);
+      expect(seen).toEqual(["timeout", "kick"]);
+    });
+
+    it("does not authorise (or require anything for) off", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      const authorize = jest.fn(() => "nope");
+      expect(
+        (await service.setLockdown(guild, false, "mod-1", authorize)).changed,
+      ).toBe(true);
+      expect(authorize).not.toHaveBeenCalled();
+    });
+
+    it("stops recording joins once locked down, so a flood costs no growing window", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await joinMany(4);
+      await joinMany(40);
+      expect((await service.getStatus(guild)).joinsInWindow).toBe(0);
+    });
+
+    it("sends no stale 'started' alert after a concurrent off", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      let release: () => void = () => undefined;
+      mockCreate.mockImplementationOnce(
+        () => new Promise((resolve) => (release = () => resolve({}))),
+      );
+      const starting = service.setLockdown(guild, true, "mod-1");
+      await Promise.resolve();
+      const ending = service.setLockdown(guild, false, "mod-2");
+      await ending;
+      release();
+      const started = await starting;
+      const texts = send.mock.calls.map((c) =>
+        String((c[0] as { content: string }).content),
+      );
+      expect(texts.some((t) => t.includes("lockdown started"))).toBe(false);
+      expect(texts.some((t) => t.includes("lockdown ended"))).toBe(true);
+      expect(started.message).toMatch(/ended by another action/);
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("reports both live and dry-run activity when dry run is switched on mid-lockdown", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await joinMany(4);
+      liveConfig({ "moderation.raid.dry_run": true });
+      await service.handleMemberJoin(makeMember().member);
+      await service.setLockdown(guild, false, "mod-1");
+      const reason = String(rowsWith("raid_clear")[0].reason);
+      expect(reason).toMatch(/1 acted on, 1 would have been \(dry run\)/);
+    });
+  });
+
   describe("log row durability", () => {
     it("retries a failed write and records the row", async () => {
       mockCreate.mockRejectedValueOnce(new Error("blip")).mockResolvedValue({});

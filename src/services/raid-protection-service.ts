@@ -176,6 +176,12 @@ export interface RaidState {
   /** Counters for the independent new-account gate, since the process started. */
   gateCounts: ActionCounts;
   failureAlerted: boolean;
+  /**
+   * Bumped by every lockdown start and end. A transition's alert is sent only
+   * if no other transition happened while it awaited the log write, so a
+   * stale "started" can never follow "ended".
+   */
+  generation: number;
 }
 
 function freshState(): RaidState {
@@ -189,6 +195,7 @@ function freshState(): RaidState {
     lockdownCounts: freshCounts(),
     gateCounts: freshCounts(),
     failureAlerted: false,
+    generation: 0,
   };
 }
 
@@ -211,6 +218,18 @@ export interface RaidStatus {
   gateCounts: ActionCounts;
   /** Log rows still waiting to be written after a database failure. */
   unrecorded: number;
+}
+
+export interface LockdownRequirement {
+  action: RaidAction;
+  label: string;
+  flag: bigint;
+}
+
+/** The permission `/raidmode on` needs under a given settings snapshot. */
+export function requirementFor(settings: RaidSettings): LockdownRequirement {
+  const { flag, label } = RAID_ACTION_PERMISSIONS[settings.lockdownAction];
+  return { action: settings.lockdownAction, label, flag };
 }
 
 export interface SetLockdownResult {
@@ -486,20 +505,6 @@ export class RaidProtectionService {
   }
 
   /**
-   * The permission a moderator needs for `/raidmode on` under the current
-   * settings: the one matching the configured lockdown action.
-   */
-  public async getLockdownRequirement(): Promise<{
-    action: RaidAction;
-    label: string;
-    flag: bigint;
-  }> {
-    const { lockdownAction } = await this.loadSettings();
-    const { flag, label } = RAID_ACTION_PERMISSIONS[lockdownAction];
-    return { action: lockdownAction, label, flag };
-  }
-
-  /**
    * Re-check the open lockdown whenever settings are saved, so switching the
    * feature (or `moderation.enabled`) off ends the lockdown at once instead of
    * leaving it to resume if the feature is switched back on.
@@ -607,18 +612,22 @@ export class RaidProtectionService {
       // From the push to the `beginLockdown` call nothing awaits, and
       // `beginLockdown` sets `state.lockdown` before its own first await, so
       // concurrent joins cannot both start a lockdown.
-      state.joins.push(now);
-      const count = countJoinsInWindow(
-        state.joins,
-        now,
-        settings.windowSeconds * 1000,
-      );
-
-      if (!state.lockdown && count > settings.joinThreshold) {
-        await this.beginLockdown(guild, state, settings, now, {
-          moderatorId: null,
-          reason: `Automatic: ${count} members joined within ${settings.windowSeconds}s (threshold ${settings.joinThreshold}).`,
-        });
+      // Detection only runs while no lockdown is open: once locked the count
+      // cannot trigger anything, and recording a flood of joins would make
+      // the work grow with the burst.
+      if (!state.lockdown) {
+        state.joins.push(now);
+        const count = countJoinsInWindow(
+          state.joins,
+          now,
+          settings.windowSeconds * 1000,
+        );
+        if (count > settings.joinThreshold) {
+          await this.beginLockdown(guild, state, settings, now, {
+            moderatorId: null,
+            reason: `Automatic: ${count} members joined within ${settings.windowSeconds}s (threshold ${settings.joinThreshold}).`,
+          });
+        }
       }
 
       let decision: Decision | null = null;
@@ -654,6 +663,7 @@ export class RaidProtectionService {
     guild: Guild,
     on: boolean,
     moderatorId: string,
+    authorize?: (requirement: LockdownRequirement) => string | null,
   ): Promise<SetLockdownResult> {
     try {
       const settings = await this.loadSettings();
@@ -665,10 +675,20 @@ export class RaidProtectionService {
         if (state.lockdown) {
           return { changed: false, message: "Lockdown is already on." };
         }
+        // Authorised against the very settings snapshot the lockdown starts
+        // with, so a setting changed in between cannot widen the action.
+        const refusal = authorize?.(requirementFor(settings)) ?? null;
+        if (refusal) return { changed: false, message: refusal };
         await this.beginLockdown(guild, state, settings, now, {
           moderatorId,
           reason: "Manual: started with /raidmode on",
         });
+        if (!state.lockdown) {
+          return {
+            changed: true,
+            message: "Lockdown was started, then ended by another action.",
+          };
+        }
         return {
           changed: true,
           message: settings.dryRun
@@ -768,7 +788,10 @@ export class RaidProtectionService {
   ): Promise<void> {
     // State first, so any join that interleaves with the awaits below already
     // sees the lockdown.
+    const generation = ++state.generation;
     state.lockdown = true;
+    // The joins that triggered it are spent; the window restarts when it ends.
+    state.joins.length = 0;
     state.dryRun = settings.dryRun;
     state.since = now;
     state.startedBy = info.moderatorId;
@@ -786,6 +809,9 @@ export class RaidProtectionService {
     logger.warn(
       `Anti-raid: lockdown started in guild ${sanitizeForLog(guild.id)}${suffix}: ${info.reason}`,
     );
+    // Another transition ran while the row was being written: the alert for
+    // this one would now be stale.
+    if (state.generation !== generation) return;
     const how = settings.dryRun
       ? "Dry run is on, so nobody is being acted on."
       : `New joins get the **${settings.lockdownAction}** action.`;
@@ -802,9 +828,11 @@ export class RaidProtectionService {
     settings: RaidSettings,
     info: { moderatorId: string | null; reason: string },
   ): Promise<void> {
-    const summary = state.dryRun
-      ? `${state.lockdownCounts.wouldAction} would have been acted on`
-      : `${state.lockdownCounts.actioned} acted on, ${state.lockdownCounts.skipped} skipped, ${state.lockdownCounts.failed} failed`;
+    // Both live and dry-run counts, since dry run can be switched on during a
+    // live lockdown.
+    const c = state.lockdownCounts;
+    const summary = `${c.actioned} acted on, ${c.wouldAction} would have been (dry run), ${c.skipped} skipped, ${c.failed} failed`;
+    const generation = ++state.generation;
     state.lockdown = false;
     state.dryRun = false;
     state.since = null;
@@ -823,6 +851,7 @@ export class RaidProtectionService {
     logger.info(
       `Anti-raid: lockdown ended in guild ${sanitizeForLog(guild.id)}: ${info.reason} (${summary})`,
     );
+    if (state.generation !== generation) return;
     await this.sendAlert(
       guild,
       settings,

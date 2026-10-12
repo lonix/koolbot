@@ -6,10 +6,21 @@ import { RAID_ACTION_PERMISSIONS } from "../../src/utils/raid-actions.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
 
 const mockGetStatus = jest.fn<() => Promise<unknown>>();
-const mockRequirement =
-  jest.fn<() => Promise<{ action: string; label: string; flag: bigint }>>();
+type Requirement = { action: string; label: string; flag: bigint };
+let requirement: Requirement = {
+  action: "timeout",
+  label: "Moderate Members",
+  flag: PermissionFlagsBits.ModerateMembers,
+};
 const mockSetLockdown =
-  jest.fn<(g: unknown, on: boolean, id: string) => Promise<unknown>>();
+  jest.fn<
+    (
+      g: unknown,
+      on: boolean,
+      id: string,
+      authorize?: (r: Requirement) => string | null,
+    ) => Promise<unknown>
+  >();
 
 jest.unstable_mockModule(
   "../../src/services/raid-protection-service.js",
@@ -18,7 +29,6 @@ jest.unstable_mockModule(
       getInstance: jest.fn(() => ({
         getStatus: mockGetStatus,
         setLockdown: mockSetLockdown,
-        getLockdownRequirement: mockRequirement,
       })),
     },
   }),
@@ -78,10 +88,18 @@ const status = {
 describe("/raidmode", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockRequirement.mockResolvedValue({
+    requirement = {
       action: "timeout",
       label: "Moderate Members",
       flag: PermissionFlagsBits.ModerateMembers,
+    };
+    // Behaves like the service: authorises against the settings snapshot it
+    // holds (`requirement`) before starting, but never for `off`.
+    mockSetLockdown.mockImplementation(async (_g, on, _id, authorize) => {
+      const refusal = on ? (authorize?.(requirement) ?? null) : null;
+      return refusal
+        ? { changed: false, message: refusal }
+        : { changed: true, message: "done" };
     });
   });
 
@@ -120,7 +138,6 @@ describe("/raidmode", () => {
     ["on", true],
     ["off", false],
   ])("passes %s to the service with the moderator id", async (mode, on) => {
-    mockSetLockdown.mockResolvedValue({ changed: true, message: "done" });
     const i = interaction(mode);
     await execute(i as never);
     expect(i.deferReply).toHaveBeenCalled();
@@ -128,6 +145,7 @@ describe("/raidmode", () => {
       { id: "guild-1" },
       on,
       "mod-1",
+      expect.any(Function),
     );
     expect(i.editReply).toHaveBeenCalledWith({ content: "done" });
   });
@@ -170,16 +188,13 @@ describe("/raidmode", () => {
     )(
       "%s: refused without %s, allowed with it",
       async (action, flag, label) => {
-        mockRequirement.mockResolvedValue({ action, label, flag });
-        mockSetLockdown.mockResolvedValue({ changed: true, message: "done" });
+        requirement = { action, label, flag };
 
         const without = interaction("on", { perms: [MOD] });
         await execute(without as never);
         if (flag === MOD) {
-          expect(mockSetLockdown).toHaveBeenCalledTimes(1);
-          mockSetLockdown.mockClear();
+          expect(without.editReply).toHaveBeenCalledWith({ content: "done" });
         } else {
-          expect(mockSetLockdown).not.toHaveBeenCalled();
           expect(without.editReply).toHaveBeenCalledWith({
             content: expect.stringContaining(label),
           });
@@ -187,25 +202,43 @@ describe("/raidmode", () => {
 
         const withIt = interaction("on", { perms: [MOD, flag] });
         await execute(withIt as never);
-        expect(mockSetLockdown).toHaveBeenCalledTimes(1);
+        expect(withIt.editReply).toHaveBeenCalledWith({ content: "done" });
       },
     );
+
+    it("checks the snapshot the service started with, not a separate earlier read", async () => {
+      // The permission check is passed into setLockdown, so a settings change
+      // between "check" and "start" cannot widen the action.
+      requirement = {
+        action: "kick",
+        label: "Kick Members",
+        flag: PermissionFlagsBits.KickMembers,
+      };
+      const i = interaction("on", {
+        perms: [PermissionFlagsBits.ModerateMembers],
+      });
+      await execute(i as never);
+      expect(i.editReply).toHaveBeenCalledWith({
+        content: expect.stringContaining("Kick Members"),
+      });
+    });
 
     it.each(["off", "status"])(
       "%s stays with Moderate Members",
       async (mode) => {
-        mockRequirement.mockResolvedValue({
+        requirement = {
           action: "kick",
           label: "Kick Members",
           flag: PermissionFlagsBits.KickMembers,
-        });
-        mockSetLockdown.mockResolvedValue({ changed: true, message: "done" });
+        };
         mockGetStatus.mockResolvedValue(status);
-        await execute(interaction(mode) as never);
-        expect(mockRequirement).not.toHaveBeenCalled();
-        expect(
-          mode === "off" ? mockSetLockdown : mockGetStatus,
-        ).toHaveBeenCalled();
+        const i = interaction(mode);
+        await execute(i as never);
+        if (mode === "off") {
+          expect(i.editReply).toHaveBeenCalledWith({ content: "done" });
+        } else {
+          expect(mockGetStatus).toHaveBeenCalled();
+        }
       },
     );
 
