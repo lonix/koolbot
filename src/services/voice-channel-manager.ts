@@ -793,13 +793,39 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Whether the bot effectively holds Set Voice Channel Status in `scope` (the
+   * managed category before a room exists, the room itself during transfers),
+   * so a category or room that denies it to the bot is respected. Discord
+   * rejects (50013) an overwrite that grants or changes a permission the bot
+   * lacks, which would break room creation and ownership transfers.
+   */
+  private botHoldsStatusPermission(
+    guild: Guild,
+    scope?: {
+      permissionsFor?: (
+        m: GuildMember,
+      ) => Readonly<{ has: (p: bigint) => boolean }> | null;
+    },
+  ): boolean {
+    const me = guild?.members?.me;
+    if (!me) return false;
+    const perms =
+      typeof scope?.permissionsFor === "function"
+        ? scope.permissionsFor(me)
+        : me.permissions;
+    return !!perms?.has(PermissionFlagsBits.SetVoiceChannelStatus);
+  }
+
+  /**
    * The native Set Voice Channel Status grant for a room owner (empty when
    * off). Only given when `voicechannels.owner.grant_status` is on AND the bot
-   * holds the permission guild-wide: Discord rejects (50013) an overwrite that
-   * grants a permission the grantor lacks, which would break room creation and
-   * ownership transfers. The readiness check warns when the bot lacks it.
+   * effectively holds the permission in `scope`. The readiness check warns when
+   * the bot lacks it.
    */
-  private async ownerStatusGrant(guild: Guild): Promise<PermissionSet> {
+  private async ownerStatusGrant(
+    guild: Guild,
+    scope?: Parameters<VoiceChannelManager["botHoldsStatusPermission"]>[1],
+  ): Promise<PermissionSet> {
     const none: PermissionSet = { allow: [], deny: [] };
     try {
       if (
@@ -810,14 +836,37 @@ export class VoiceChannelManager {
       ) {
         return none;
       }
-      const me = guild?.members?.me;
-      if (!me?.permissions.has(PermissionFlagsBits.SetVoiceChannelStatus)) {
-        return none;
-      }
-      return VOICE_ROOM_OWNER_STATUS;
+      return this.botHoldsStatusPermission(guild, scope)
+        ? VOICE_ROOM_OWNER_STATUS
+        : none;
     } catch {
       return none;
     }
+  }
+
+  /**
+   * Overwrite fields that take the status permission away from a previous
+   * owner, independent of the current grant setting: only when their overwrite
+   * currently allows it (so a server-wide role grant is left alone) and the bot
+   * can change it. Resets to neutral rather than denying.
+   */
+  private previousOwnerStatusRevoke(
+    channel: VoiceChannel,
+    previousOwnerId: string,
+  ): Partial<Record<"SetVoiceChannelStatus", null>> {
+    try {
+      const existing =
+        channel.permissionOverwrites?.cache?.get(previousOwnerId);
+      if (
+        existing?.allow?.has(PermissionFlagsBits.SetVoiceChannelStatus) &&
+        this.botHoldsStatusPermission(channel.guild, channel)
+      ) {
+        return { SetVoiceChannelStatus: null };
+      }
+    } catch {
+      // fall through: leave their overwrite as is
+    }
+    return {};
   }
 
   /**
@@ -1347,7 +1396,11 @@ export class VoiceChannelManager {
       logger.info(
         `[Manual Transfer] Granting ManageChannels permission to new owner ${newOwnerId}`,
       );
-      const statusGrant = await this.ownerStatusGrant(channel.guild);
+      const statusGrant = await this.ownerStatusGrant(channel.guild, channel);
+      const statusRevoke = this.previousOwnerStatusRevoke(
+        channel,
+        currentOwnerId,
+      );
       await channel.permissionOverwrites.create(newOwnerId, {
         ...toOverwriteOptions(VOICE_ROOM_OWNER),
         ...toOverwriteOptions(statusGrant),
@@ -1362,9 +1415,7 @@ export class VoiceChannelManager {
         Connect: true,
         Speak: true,
         ViewChannel: true,
-        ...(statusGrant.allow.length > 0
-          ? { SetVoiceChannelStatus: false }
-          : {}),
+        ...statusRevoke,
       });
 
       // Only rename if channel doesn't have a custom name
@@ -1660,12 +1711,34 @@ export class VoiceChannelManager {
       );
       const channelName = `${prefix} ${member.displayName}${suffix}`;
 
+      // The lobby-join path has never set owner overwrites (the room inherits
+      // the category's), so only the opt-in status grant is added here; with it
+      // off or unavailable the room is created exactly as before.
+      const ownerStatusGrant = await this.ownerStatusGrant(guild, category);
+
       // Create channel with default settings
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
         parent: category,
         userLimit: 0, // 0 = unlimited by default
+        ...(ownerStatusGrant.allow.length > 0
+          ? {
+              // Explicit overwrites stop Discord syncing the room with its
+              // category, so carry the category's overwrites over.
+              permissionOverwrites: [
+                ...[...(category.permissionOverwrites?.cache?.values() ?? [])]
+                  .filter((o) => o.id !== member.id)
+                  .map((o) => ({
+                    id: o.id,
+                    type: o.type,
+                    allow: o.allow,
+                    deny: o.deny,
+                  })),
+                { id: member.id, allow: [...ownerStatusGrant.allow] },
+              ],
+            }
+          : {}),
       });
 
       // Record the channel as KoolBot's own the moment it exists, before
@@ -2162,7 +2235,7 @@ export class VoiceChannelManager {
           : `${channelPrefix} ${userId}`;
       }
 
-      const ownerStatusGrant = await this.ownerStatusGrant(guild);
+      const ownerStatusGrant = await this.ownerStatusGrant(guild, category);
 
       // Create the dynamic channel with default settings
       const newChannel = await guild.channels.create({
@@ -3054,7 +3127,10 @@ export class VoiceChannelManager {
       logger.info(
         `[Ownership Transfer] Granting ManageChannels permission to new owner ${newOwner.id}`,
       );
-      const statusGrant = await this.ownerStatusGrant(channel.guild);
+      const statusGrant = await this.ownerStatusGrant(channel.guild, channel);
+      const statusRevoke = currentOwnerId
+        ? this.previousOwnerStatusRevoke(channel, currentOwnerId)
+        : {};
       await channel.permissionOverwrites.create(newOwner.id, {
         ...toOverwriteOptions(VOICE_ROOM_OWNER),
         ...toOverwriteOptions(statusGrant),
@@ -3070,9 +3146,7 @@ export class VoiceChannelManager {
           Connect: true,
           Speak: true,
           ViewChannel: true,
-          ...(statusGrant.allow.length > 0
-            ? { SetVoiceChannelStatus: false }
-            : {}),
+          ...statusRevoke,
         });
       }
 
