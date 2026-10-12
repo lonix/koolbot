@@ -64,6 +64,13 @@ jest.unstable_mockModule("../../src/services/reaction-role-service.js", () => ({
   },
 }));
 
+jest.unstable_mockModule(
+  "../../src/services/reaction-role-group-service.js",
+  () => ({
+    ReactionRoleGroupService: { getInstance: (): unknown => ({}) },
+  }),
+);
+
 const { createReactionRolesRouter } =
   await import("../../src/web/routes/write/reaction-roles.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -309,17 +316,41 @@ describe("POST /reaction-roles/group/create", () => {
     expect(mockCreateReactionRoleGroup).not.toHaveBeenCalled();
   });
 
-  it("requires at least two complete role/emoji rows", async () => {
+  it("requires at least two role/emoji rows", async () => {
     const res = await harness.post("/reaction-roles/group/create", {
       groupName: "Pronouns",
-      roleName: ["A", "B"],
-      // The second row's emoji is blank, so only one usable pair remains.
-      emoji: ["🅰️", ""],
+      roleName: ["A", "", " "],
+      // Only one row has any content; the blank rows are ignored.
+      emoji: ["🅰️", "", ""],
     });
     expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
       "A role group needs at least two role/emoji options.",
     );
     expect(mockCreateReactionRoleGroup).not.toHaveBeenCalled();
+  });
+
+  it("passes a half-filled row to the service so its validation error is shown", async () => {
+    mockCreateReactionRoleGroup.mockResolvedValue({
+      success: false,
+      message: "Every role option needs an emoji.",
+    });
+    const res = await harness.post("/reaction-roles/group/create", {
+      groupName: "Pronouns",
+      roleName: ["A", "B"],
+      emoji: ["🅰️", ""],
+    });
+    expect(mockCreateReactionRoleGroup).toHaveBeenCalledWith(
+      expect.anything(),
+      "Pronouns",
+      [
+        { roleName: "A", emoji: "🅰️" },
+        { roleName: "B", emoji: "" },
+      ],
+      "unique",
+    );
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Every role option needs an emoji.",
+    );
   });
 
   it("pairs the parallel arrays positionally and defaults to unique mode", async () => {
@@ -377,5 +408,20 @@ describe("POST /reaction-roles/group/create", () => {
       action: "reactionrole.group.delete",
       result: "success",
     });
+  });
+
+  it("flashes the deleted and kept role outcome of a group delete", async () => {
+    const text =
+      "Deleted the role group: removed 1 role, kept 2 that were reused or still used elsewhere.";
+    mockDeleteReactionRoleGroup.mockResolvedValue({
+      success: true,
+      message: text,
+      rolesDeleted: 1,
+      rolesKept: 2,
+    });
+    const res = await harness.post("/reaction-roles/group/delete", {
+      groupId: "group-1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(text);
   });
 });

@@ -1,4 +1,11 @@
-import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from "@jest/globals";
 import { CommandManager } from "../../src/services/command-manager.js";
 import { PermissionsService } from "../../src/services/permissions-service.js";
 
@@ -69,6 +76,36 @@ describe("CommandManager", () => {
       const commands = (service as any).commands;
       expect(commands).toBeDefined();
       expect(commands.size).toBe(0);
+    });
+  });
+
+  describe("makeDiscordApiCall timeout retries", () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("retries a timed-out call by default", async () => {
+      jest.useFakeTimers();
+      const call = jest
+        .fn<() => Promise<string>>()
+        .mockImplementationOnce(() => new Promise(() => undefined))
+        .mockResolvedValueOnce("ok");
+      const p = service.makeDiscordApiCall(call, "op", 10, 2);
+      await jest.advanceTimersByTimeAsync(5000);
+      await expect(p).resolves.toBe("ok");
+      expect(call).toHaveBeenCalledTimes(2);
+    });
+
+    it("runs once and fails clearly when retryOnTimeout is false", async () => {
+      jest.useFakeTimers();
+      const call = jest
+        .fn<() => Promise<string>>()
+        .mockImplementation(() => new Promise(() => undefined));
+      const p = service.makeDiscordApiCall(call, "op", 10, 3, false);
+      const assertion = expect(p).rejects.toThrow(/not retried/);
+      await jest.advanceTimersByTimeAsync(5000);
+      await assertion;
+      expect(call).toHaveBeenCalledTimes(1);
     });
   });
 });
