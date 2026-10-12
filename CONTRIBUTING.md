@@ -531,16 +531,21 @@ git fetch origin main
 npm run check:lockfile -- --base-ref origin/main
 ```
 
-If it fails, restore the lockfile from `main` and re-apply only your intended change:
+If it fails, do not simply rerun `npm install`: an affected npm (for example npm 10.9.4, where even a
+no-op `npm install --package-lock-only` drops all 16 entries) reproduces the problem. Instead copy the
+dropped `libc` fields back from `main` and keep the rest of your lockfile changes:
 
 ```bash
-git checkout origin/main -- package-lock.json
-npm install <your intended change>
+npm run check:lockfile -- --base-ref origin/main --fix
 npm run check:lockfile -- --base-ref origin/main
+git diff package-lock.json   # should contain only your intended changes
 ```
 
+The fix works with any npm version. We have not verified which npm versions keep the field, so no npm
+version is recommended here.
+
 Adding or removing a native dependency together with its `libc` entries is fine. If a Dependabot PR
-trips the check, rebuild its lockfile the same way.
+trips the check, run the same `--fix` on its branch.
 
 ### Pull Request Template
 

@@ -12,14 +12,17 @@
  * Packages that were removed or added (a legitimate dependency change) never fail.
  *
  * Usage:
- *   node scripts/check-lockfile-libc.mjs [--base-ref origin/main] [--base <file>] [--head <file>]
+ *   node scripts/check-lockfile-libc.mjs [--base-ref origin/main] [--base <file>] [--head <file>] [--fix]
+ *
+ * `--fix` copies the dropped `libc` fields back from the base lockfile into the head
+ * lockfile (exit 0) instead of failing, so the lockfile can be regenerated with any npm.
  *
  * Defaults: head is ./package-lock.json, base is read with `git show <ref>:package-lock.json`
  * (ref defaults to origin/main).
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -52,6 +55,29 @@ export function findDroppedLibc(base, head) {
   return dropped.sort();
 }
 
+/**
+ * Copies `libc` back from `base` onto the packages in `head` that lost it,
+ * keeping the base entry's key order so the lockfile diff stays minimal.
+ * Mutates and returns `head`.
+ */
+export function restoreLibc(base, head) {
+  for (const name of findDroppedLibc(base, head)) {
+    const baseEntry = base.packages[name];
+    const headEntry = head.packages[name];
+    const merged = {};
+    for (const key of Object.keys(baseEntry)) {
+      if (key === "libc" || key in headEntry) {
+        merged[key] = key === "libc" ? baseEntry.libc : headEntry[key];
+      }
+    }
+    for (const key of Object.keys(headEntry)) {
+      if (!(key in merged)) merged[key] = headEntry[key];
+    }
+    head.packages[name] = merged;
+  }
+  return head;
+}
+
 export function formatFailure(dropped) {
   const list = dropped.map((name) => `  - ${name}`).join("\n");
   return [
@@ -59,14 +85,20 @@ export function formatFailure(dropped) {
     list,
     "",
     "Some npm versions drop these fields when regenerating the lockfile. The Alpine (musl)",
-    "image needs them to choose the right native binary. To fix: restore package-lock.json",
-    "from the base branch (git checkout origin/main -- package-lock.json) and re-apply only",
-    "your intended dependency changes. See CONTRIBUTING.md (Dependency changes).",
+    "image needs them to choose the right native binary. To fix, copy them back from the",
+    "base branch with:",
+    "  npm run check:lockfile -- --base-ref origin/main --fix",
+    "then review git diff package-lock.json. See CONTRIBUTING.md (Dependency changes).",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  const args = { baseRef: "origin/main", base: undefined, head: undefined };
+  const args = {
+    baseRef: "origin/main",
+    base: undefined,
+    head: undefined,
+    fix: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => {
@@ -79,6 +111,7 @@ function parseArgs(argv) {
     if (arg === "--base-ref") args.baseRef = next();
     else if (arg === "--base") args.base = next();
     else if (arg === "--head") args.head = next();
+    else if (arg === "--fix") args.fix = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -97,23 +130,36 @@ function loadBase(args) {
 }
 
 export function main(argv = process.argv.slice(2)) {
+  let args;
   let base;
   let head;
+  let headPath;
   try {
-    const args = parseArgs(argv);
+    args = parseArgs(argv);
     base = loadBase(args);
-    head = JSON.parse(
-      readFileSync(
-        resolve(args.head ?? `${repoRoot}/package-lock.json`),
-        "utf8",
-      ),
-    );
+    headPath = resolve(args.head ?? `${repoRoot}/package-lock.json`);
+    head = JSON.parse(readFileSync(headPath, "utf8"));
   } catch (error) {
     console.error(`check-lockfile-libc: ${error.message}`);
     return 2;
   }
 
   const dropped = findDroppedLibc(base, head);
+  if (dropped.length > 0 && args.fix) {
+    try {
+      writeFileSync(
+        headPath,
+        `${JSON.stringify(restoreLibc(base, head), null, 2)}\n`,
+      );
+    } catch (error) {
+      console.error(`check-lockfile-libc: ${error.message}`);
+      return 2;
+    }
+    console.log(
+      `Restored "libc" on ${dropped.length} package(s) in ${headPath}. Review the diff.`,
+    );
+    return 0;
+  }
   if (dropped.length > 0) {
     console.error(formatFailure(dropped));
     return 1;

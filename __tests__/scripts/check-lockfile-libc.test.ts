@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, jest } from "@jest/globals";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-expect-error -- plain Node ESM tooling script, no type declarations
@@ -72,6 +72,20 @@ describe("check-lockfile-libc", () => {
     });
   });
 
+  describe("restoreLibc", () => {
+    it("copies libc back from base, keeping key order and other changes", () => {
+      const head = stripLibc(goodLock());
+      head.packages["node_modules/express"].version = "5.3.0";
+      const fixed = guard.restoreLibc(goodLock(), head) as Lock;
+      const entry =
+        fixed.packages["node_modules/@parcel/watcher-linux-x64-musl"];
+      expect(Object.keys(entry)).toEqual(["version", "optional", "libc"]);
+      expect(entry.libc).toEqual(["musl"]);
+      expect(fixed.packages["node_modules/express"].version).toBe("5.3.0");
+      expect(guard.findDroppedLibc(goodLock(), fixed)).toEqual([]);
+    });
+  });
+
   describe("formatFailure", () => {
     it("lists packages and explains the fix", () => {
       const message = guard.formatFailure(["node_modules/a"]);
@@ -88,7 +102,7 @@ describe("check-lockfile-libc", () => {
       dir = undefined;
     });
 
-    const run = (base: Lock, head: Lock): number => {
+    const run = (base: Lock, head: Lock, extra: string[] = []): number => {
       dir = mkdtempSync(join(tmpdir(), "libc-guard-"));
       writeFileSync(join(dir, "base.json"), JSON.stringify(base));
       writeFileSync(join(dir, "head.json"), JSON.stringify(head));
@@ -99,6 +113,7 @@ describe("check-lockfile-libc", () => {
         join(dir, "base.json"),
         "--head",
         join(dir, "head.json"),
+        ...extra,
       ]);
     };
 
@@ -108,6 +123,12 @@ describe("check-lockfile-libc", () => {
 
     it("exits 1 for a lockfile that dropped the constraints", () => {
       expect(run(goodLock(), stripLibc(goodLock()))).toBe(1);
+    });
+
+    it("--fix rewrites the head lockfile so the check then passes", () => {
+      expect(run(goodLock(), stripLibc(goodLock()), ["--fix"])).toBe(0);
+      const fixed = JSON.parse(readFileSync(join(dir!, "head.json"), "utf8"));
+      expect(run(goodLock(), fixed)).toBe(0);
     });
 
     it("exits 2 on unreadable input or bad arguments", () => {
