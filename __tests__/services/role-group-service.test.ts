@@ -305,6 +305,33 @@ describe("writes", () => {
   });
 });
 
+describe("groupBackedRoles (#1023)", () => {
+  it("names the group behind each role that backs one", async () => {
+    await seed();
+    expect(
+      await svc.groupBackedRoles(G, ["rMod", "rFree", "rVip", ""]),
+    ).toEqual([
+      { roleId: "rMod", groupName: "Mod" },
+      { roleId: "rVip", groupName: "VIP" },
+    ]);
+  });
+
+  it("is empty for free roles, no groups, or no roles", async () => {
+    expect(await svc.groupBackedRoles(G, ["rMod"])).toEqual([]);
+    await seed();
+    expect(await svc.groupBackedRoles(G, ["rFree"])).toEqual([]);
+    expect(await svc.groupBackedRoles(G, [])).toEqual([]);
+  });
+
+  it("sees a group created after an earlier read", async () => {
+    await svc.groupBackedRoles(G, ["rNew"]);
+    await svc.create(G, { name: "New", roleId: "rNew", rank: 1 });
+    expect(await svc.groupBackedRoles(G, ["rNew"])).toEqual([
+      { roleId: "rNew", groupName: "New" },
+    ]);
+  });
+});
+
 describe("sync with Discord (#1021)", () => {
   it("marks a group unlinked when its role is gone, once", async () => {
     const g = await svc.create(G, {

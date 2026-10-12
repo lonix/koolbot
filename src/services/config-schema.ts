@@ -1414,7 +1414,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "quotes.delete_roles": {
     label: "Roles allowed to delete quotes",
     description:
-      "Comma-separated role IDs allowed to delete quotes. Empty means only admins.",
+      "Comma-separated roles or role groups allowed to delete quotes. Empty means the staff and admin role groups once one exists.",
     category: "quotes",
     type: "role_list",
   },

@@ -16,6 +16,7 @@ jest.mock("../../src/models/reaction-role-config.js");
 import { reactionRoleGuildLock } from "../../src/services/reaction-role-guild-lock.js";
 import { ReactionRoleService } from "../../src/services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../../src/models/reaction-role-config.js";
+import { RoleGroupService } from "../../src/services/role-group-service.js";
 
 const model = ReactionRoleConfig as unknown as {
   findOne: jest.Mock;
@@ -433,6 +434,61 @@ describe("ReactionRoleService.validateRoleAssignable bot member resolution", () 
   const makeGuild = (me: unknown, fetchMe: jest.Mock) => ({
     members: { me, fetchMe },
     roles: { everyone: { id: "everyone" } },
+  });
+
+  describe("role group roles (#1023)", () => {
+    const bot = {
+      permissions: { has: () => true },
+      roles: { highest: { comparePositionTo: () => 1 } },
+    };
+    const guild = {
+      id: "g1",
+      members: { me: bot, fetchMe: jest.fn() },
+      roles: { everyone: { id: "everyone" } },
+    };
+
+    it("refuses a role that backs a group and names the group", async () => {
+      const { service } = createService({});
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+        .mockResolvedValue([{ roleId: "r1", groupName: "Moderators" }]);
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        role as never,
+      );
+      expect(spy).toHaveBeenCalledWith("g1", ["r1"]);
+      expect(res).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("Moderators"),
+      });
+      spy.mockRestore();
+    });
+
+    it("allows a role no group backs", async () => {
+      const { service } = createService({});
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+        .mockResolvedValue([]);
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        role as never,
+      );
+      expect(res).toEqual({ ok: true });
+      spy.mockRestore();
+    });
+
+    it("allows the role when the groups can't be read (a guard, not an access check)", async () => {
+      const { service } = createService({});
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+        .mockRejectedValue(new Error("database offline"));
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        role as never,
+      );
+      expect(res).toEqual({ ok: true });
+      spy.mockRestore();
+    });
   });
 
   it("omitted argument keeps the cache/fetchMe fallback", async () => {

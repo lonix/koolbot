@@ -5,6 +5,12 @@ import {
 } from "../models/command-permissions.js";
 import { ConfigService } from "./config-service.js";
 import { RoleGroupService } from "./role-group-service.js";
+import {
+  hasStaffGroup,
+  resolveGroupRefs,
+  staffRoleIds,
+} from "./role-group-access.js";
+import { STAFF_DEFAULT_COMMANDS } from "./command-registry.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -50,6 +56,8 @@ export class PermissionsService {
   private client: Client;
   private configService: ConfigService;
   private permissionsCache: Map<string, string[]> = new Map();
+  /** Role group references per `guild:command` (#1023). */
+  private groupRefsCache: Map<string, string[]> = new Map();
   private adminCheckCache = new Map<
     string,
     { value: boolean; expiresAt: number }
@@ -106,10 +114,12 @@ export class PermissionsService {
 
         const permissions = await CommandPermission.find({ guildId });
         this.permissionsCache.clear();
+        this.groupRefsCache.clear();
 
         for (const perm of permissions) {
           const cacheKey = `${perm.guildId}:${perm.commandName}`;
           this.permissionsCache.set(cacheKey, perm.roleIds);
+          this.groupRefsCache.set(cacheKey, perm.groupRefs ?? []);
         }
 
         this.cacheInitialized = true;
@@ -203,20 +213,36 @@ export class PermissionsService {
 
       // Check if there are any permissions set for this command
       const cacheKey = `${guildId}:${commandName}`;
-      const allowedRoleIds = this.permissionsCache.get(cacheKey);
+      const allowedRoleIds = this.permissionsCache.get(cacheKey) ?? [];
+      const groupRefs = this.groupRefsCache.get(cacheKey) ?? [];
 
-      // If no permissions set, allow access (default open)
-      if (!allowedRoleIds || allowedRoleIds.length === 0) {
-        return true;
+      // Nothing set: default open, except that moderation commands default
+      // to the staff capability once the guild has a staff or admin group
+      // (#1023). Reading the groups happens inside this try, so a failure
+      // follows the same deny / `PermissionCheckError` contract as the
+      // permissions cache instead of silently opening the command.
+      if (allowedRoleIds.length === 0 && groupRefs.length === 0) {
+        if (!STAFF_DEFAULT_COMMANDS.has(commandName)) return true;
+        const groups = await RoleGroupService.getInstance().list(guildId);
+        if (!hasStaffGroup(groups)) return true;
+        const staffIds = staffRoleIds(groups);
+        return member.roles.cache.some((role) => staffIds.includes(role.id));
       }
-
-      // Check if user has ANY of the allowed roles (OR logic)
       const userRoleIds = member.roles.cache.map((role) => role.id);
-      const hasPermission = allowedRoleIds.some((roleId) =>
+
+      // Check if user has ANY of the allowed roles, or a role of any
+      // allowed group (OR logic). Groups are only read when the command
+      // actually names one, so role-only commands are untouched.
+      const groupRoleIds =
+        groupRefs.length > 0
+          ? resolveGroupRefs(
+              await RoleGroupService.getInstance().list(guildId),
+              groupRefs,
+            )
+          : [];
+      return [...allowedRoleIds, ...groupRoleIds].some((roleId) =>
         userRoleIds.includes(roleId),
       );
-
-      return hasPermission;
     } catch (error) {
       if (error instanceof PermissionCheckError) {
         throw error;
@@ -291,17 +317,20 @@ export class PermissionsService {
     guildId: string,
     commandName: string,
     roleIds: string[],
+    groupRefs?: string[],
   ): Promise<void> {
     try {
+      // `groupRefs` left out keeps whatever groups the command already names.
       await CommandPermission.findOneAndUpdate(
         { guildId, commandName },
-        { roleIds },
+        groupRefs === undefined ? { roleIds } : { roleIds, groupRefs },
         { upsert: true, new: true },
       );
 
       // Update cache
       const cacheKey = `${guildId}:${commandName}`;
       this.permissionsCache.set(cacheKey, roleIds);
+      if (groupRefs !== undefined) this.groupRefsCache.set(cacheKey, groupRefs);
 
       logger.info(
         `Set permissions for command ${sanitizeForLog(commandName)}: ${roleIds.length} role(s)`,
@@ -364,10 +393,11 @@ export class PermissionsService {
         (roleId) => !roleIds.includes(roleId),
       );
 
-      if (newRoleIds.length === 0) {
-        // If no roles left, delete the permission entry
+      if (newRoleIds.length === 0 && (existing.groupRefs ?? []).length === 0) {
+        // If no roles or groups left, delete the permission entry
         await CommandPermission.deleteOne({ guildId, commandName });
         this.permissionsCache.delete(`${guildId}:${commandName}`);
+        this.groupRefsCache.delete(`${guildId}:${commandName}`);
         logger.info(
           `Removed all permissions for command ${commandName} (entry deleted)`,
         );
@@ -415,6 +445,7 @@ export class PermissionsService {
     try {
       await CommandPermission.deleteOne({ guildId, commandName });
       this.permissionsCache.delete(`${guildId}:${commandName}`);
+      this.groupRefsCache.delete(`${guildId}:${commandName}`);
       logger.info(
         `Cleared all permissions for command ${sanitizeForLog(commandName)}`,
       );
@@ -442,13 +473,14 @@ export class PermissionsService {
         if (perm.roleIds.includes(roleId)) {
           const newRoleIds = perm.roleIds.filter((id) => id !== roleId);
 
-          if (newRoleIds.length === 0) {
-            // If no roles left, delete the permission entry
+          if (newRoleIds.length === 0 && (perm.groupRefs ?? []).length === 0) {
+            // If no roles or groups left, delete the permission entry
             await CommandPermission.deleteOne({
               guildId,
               commandName: perm.commandName,
             });
             this.permissionsCache.delete(`${guildId}:${perm.commandName}`);
+            this.groupRefsCache.delete(`${guildId}:${perm.commandName}`);
           } else {
             // Update with remaining roles
             await this.setCommandPermissions(
@@ -491,13 +523,14 @@ export class PermissionsService {
         if (hasAnyRole) {
           const newRoleIds = perm.roleIds.filter((id) => !roleIds.includes(id));
 
-          if (newRoleIds.length === 0) {
-            // If no roles left, delete the permission entry
+          if (newRoleIds.length === 0 && (perm.groupRefs ?? []).length === 0) {
+            // If no roles or groups left, delete the permission entry
             await CommandPermission.deleteOne({
               guildId,
               commandName: perm.commandName,
             });
             this.permissionsCache.delete(`${guildId}:${perm.commandName}`);
+            this.groupRefsCache.delete(`${guildId}:${perm.commandName}`);
           } else {
             // Update with remaining roles
             await this.setCommandPermissions(
@@ -562,6 +595,7 @@ export class PermissionsService {
 
       const userRoleIds = member.roles.cache.map((role) => role.id);
       const allPermissions = await this.listAllPermissions(guildId);
+      const groups = await RoleGroupService.getInstance().list(guildId);
       const accessibleCommands: string[] = [];
 
       // Get all registered commands
@@ -573,10 +607,22 @@ export class PermissionsService {
         );
 
         // If no permission set or user has one of the required roles
-        if (
+        // (directly, or through a role group, #1023)
+        const groupRefs = permission?.groupRefs ?? [];
+        const allowed = permission
+          ? [...permission.roleIds, ...resolveGroupRefs(groups, groupRefs)]
+          : [];
+        const open =
           !permission ||
-          permission.roleIds.length === 0 ||
-          permission.roleIds.some((roleId) => userRoleIds.includes(roleId))
+          (permission.roleIds.length === 0 && groupRefs.length === 0);
+        const staffDefault =
+          open &&
+          STAFF_DEFAULT_COMMANDS.has(commandName) &&
+          hasStaffGroup(groups);
+        if (
+          staffDefault
+            ? staffRoleIds(groups).some((id) => userRoleIds.includes(id))
+            : open || allowed.some((roleId) => userRoleIds.includes(roleId))
         ) {
           accessibleCommands.push(commandName);
         }
@@ -601,6 +647,7 @@ export class PermissionsService {
   ): Promise<string[]> {
     try {
       const allPermissions = await this.listAllPermissions(guildId);
+      const groups = await RoleGroupService.getInstance().list(guildId);
       const accessibleCommands: string[] = [];
 
       // Get all registered commands
@@ -611,11 +658,22 @@ export class PermissionsService {
           (p) => p.commandName === commandName,
         );
 
-        // If no permission set or role is in the allowed list
-        if (
+        // If no permission set or role is in the allowed list (directly, or
+        // through a role group, #1023)
+        const groupRefs = permission?.groupRefs ?? [];
+        const open =
           !permission ||
-          permission.roleIds.length === 0 ||
-          permission.roleIds.includes(roleId)
+          (permission.roleIds.length === 0 && groupRefs.length === 0);
+        const staffDefault =
+          open &&
+          STAFF_DEFAULT_COMMANDS.has(commandName) &&
+          hasStaffGroup(groups);
+        if (
+          staffDefault
+            ? staffRoleIds(groups).includes(roleId)
+            : open ||
+              permission.roleIds.includes(roleId) ||
+              resolveGroupRefs(groups, groupRefs).includes(roleId)
         ) {
           accessibleCommands.push(commandName);
         }

@@ -22,6 +22,7 @@ import {
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
 import { ConfigService } from "../../src/services/config-service.js";
+import { RoleGroupService } from "../../src/services/role-group-service.js";
 import {
   defaultConfig,
   getDependencies,
@@ -442,6 +443,50 @@ describe("loadFeatureSettings (#971)", () => {
     const data = await loadFeatureSettings(client, "guild-1", [roleKey!], []);
     expect(calls.roles).toBe(1);
     expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
+  });
+
+  describe("role groups in the quote delete picker (#1023)", () => {
+    it("offers each group alone and 'and above' ahead of the roles", async () => {
+      const { client } = countingClient();
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "list")
+        .mockResolvedValue([{ id: "g1", name: "Mods" }] as never);
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["quotes.delete_roles"],
+        [],
+      );
+      expect(data.pickers.roles).toEqual([
+        { id: "group:g1", name: "Mods (group)" },
+        { id: "group:g1+", name: "Mods and above (group)" },
+        { id: "r1", name: "Mods" },
+      ]);
+      spy.mockRestore();
+    });
+
+    it("keeps the plain role list when the groups can't be read", async () => {
+      const { client } = countingClient();
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "list")
+        .mockRejectedValue(new Error("database offline"));
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["quotes.delete_roles"],
+        [],
+      );
+      expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
+      spy.mockRestore();
+    });
+
+    it("does not read groups for other role pickers", async () => {
+      const { client } = countingClient();
+      const spy = jest.spyOn(RoleGroupService.getInstance(), "list");
+      await loadFeatureSettings(client, "guild-1", ["birthdays.role_id"], []);
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
   });
 
   it("falls back to an env-supplied value before the schema default", async () => {

@@ -500,7 +500,8 @@ export class WizardService {
         "Discord channel ID for voice channel announcements",
       "quotes.enabled": "Enable/disable quote system",
       "quotes.channel_id": "Channel ID for quote messages",
-      "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
+      "quotes.delete_roles":
+        "Comma-separated roles or role groups that can delete quotes",
       "achievements.enabled": "Enable/disable achievements system",
     };
 

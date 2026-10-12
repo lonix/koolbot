@@ -533,6 +533,25 @@ export class RoleGroupService {
     }
   }
 
+  /**
+   * Which of these roles already back a group? Feature pickers (leaderboard
+   * tiers, reaction roles, birthday role) refuse a new choice of one, so a
+   * group's role is never handed out or taken back by another feature (#1023).
+   * Throws when the groups can't be read; callers decide how to degrade.
+   */
+  public async groupBackedRoles(
+    guildId: string,
+    roleIds: readonly string[],
+  ): Promise<Array<{ roleId: string; groupName: string }>> {
+    const wanted = new Set(roleIds.filter(Boolean));
+    if (wanted.size === 0) return [];
+    return (await this.list(guildId)).flatMap((g) =>
+      g.roleId && wanted.has(g.roleId)
+        ? [{ roleId: g.roleId, groupName: g.name }]
+        : [],
+    );
+  }
+
   // ---- adoption support -------------------------------------------------
 
   /**

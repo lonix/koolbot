@@ -29,6 +29,20 @@ const mockGetAll = jest.fn<() => Promise<unknown[]>>();
 const mockSet = jest.fn<() => Promise<void>>();
 const mockRunNow = jest.fn<() => Promise<unknown>>();
 
+const mockGroupBackedRoles =
+  jest.fn<
+    (
+      guildId: string,
+      roleIds: string[],
+    ) => Promise<Array<{ roleId: string; groupName: string }>>
+  >();
+
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: (): unknown => ({ groupBackedRoles: mockGroupBackedRoles }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
 }));
@@ -127,6 +141,7 @@ function soleAudit(): Record<string, unknown> {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetString.mockResolvedValue("");
+  mockGroupBackedRoles.mockResolvedValue([]);
   mockGetAll.mockResolvedValue([]);
   mockSet.mockResolvedValue(undefined);
 });
@@ -163,6 +178,41 @@ describe("POST /leaderboard-roles/tiers", () => {
       details: { before: "", after: "1:111,3:222" },
       result: "success",
     });
+  });
+
+  it("refuses a role that backs a role group (#1023)", async () => {
+    mockGroupBackedRoles.mockResolvedValue([
+      { roleId: "111", groupName: "Moderators" },
+    ]);
+    harness = await mount(
+      makeClient({ roles: { "222": { position: 2 }, "111": { position: 3 } } }),
+    );
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: ["3", "1", ""],
+      roleId: ["222", "111", ""],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Moderators");
+    expect(mockSet).not.toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      action: "leaderboard-roles.tiers",
+      result: "failure",
+    });
+  });
+
+  it("only checks roles the tiers didn't already hold, and never clears stored ones (#1023)", async () => {
+    mockGetString.mockResolvedValue("1:111");
+    harness = await mount(
+      makeClient({ roles: { "222": { position: 2 }, "111": { position: 3 } } }),
+    );
+    await harness.post("/leaderboard-roles/tiers", {
+      topN: ["1", "3", ""],
+      roleId: ["111", "222", ""],
+    });
+    // 111 is already a tier (even if a group now backs it), so only 222 is new.
+    expect(mockGroupBackedRoles).toHaveBeenCalledWith("guild-1", ["222"]);
+    expect(mockSet).toHaveBeenCalled();
   });
 
   it("leaves an existing config untouched when saved unchanged", async () => {

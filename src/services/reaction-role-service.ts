@@ -36,6 +36,7 @@ import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { CommandManager } from "./command-manager.js";
 import logger from "../utils/logger.js";
+import { RoleGroupService } from "./role-group-service.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
@@ -1092,6 +1093,22 @@ export class ReactionRoleService {
       return {
         ok: false,
         message: `**${role.name}** is managed by an integration or bot and can't be assigned manually.`,
+      };
+    }
+
+    // A role that backs a role group belongs to that group (#1023): a reaction
+    // role would hand it out to anyone. If the groups can't be read this
+    // allows the role (the guard protects a choice, it is not an access check).
+    const backing = await RoleGroupService.getInstance()
+      .groupBackedRoles(guild.id, [role.id])
+      .catch((error: unknown) => {
+        logger.warn("reaction roles: role group check failed", error);
+        return [];
+      });
+    if (backing.length > 0) {
+      return {
+        ok: false,
+        message: `**${role.name}** backs the role group **${backing[0].groupName}**, so it can't be used as a reaction role. Pick another role, or manage this one through the group.`,
       };
     }
 

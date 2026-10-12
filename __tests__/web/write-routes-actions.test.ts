@@ -31,6 +31,8 @@ const mockGetCommandPermissions = jest.fn<() => Promise<unknown>>();
 const mockSetCommandPermissions = jest.fn<() => Promise<unknown>>();
 const mockClearCommandPermissions = jest.fn<() => Promise<unknown>>();
 
+const mockGroupList = jest.fn<() => Promise<unknown>>();
+
 const mockRunCleanup = jest.fn<() => Promise<unknown>>();
 const mockRunNow = jest.fn<() => Promise<unknown>>();
 
@@ -59,6 +61,12 @@ jest.unstable_mockModule("../../src/services/permissions-service.js", () => ({
       setCommandPermissions: mockSetCommandPermissions,
       clearCommandPermissions: mockClearCommandPermissions,
     }),
+  },
+}));
+
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: (): unknown => ({ list: mockGroupList }),
   },
 }));
 
@@ -143,6 +151,7 @@ describe("POST /permissions/set", () => {
     mockGetCommandPermissions.mockResolvedValue({ allowedRoles: ["old"] });
     mockSetCommandPermissions.mockResolvedValue(undefined);
     mockClearCommandPermissions.mockResolvedValue(undefined);
+    mockGroupList.mockResolvedValue([{ id: "g1", name: "Mods", rank: 2 }]);
     harness = await mount(createPermissionsRouter);
   });
 
@@ -180,10 +189,12 @@ describe("POST /permissions/set", () => {
       roleIds: ["role-a", "role-b"],
     });
     expect(res.status).toBe(303);
-    expect(mockSetCommandPermissions).toHaveBeenCalledWith("guild-1", "ping", [
-      "role-a",
-      "role-b",
-    ]);
+    expect(mockSetCommandPermissions).toHaveBeenCalledWith(
+      "guild-1",
+      "ping",
+      ["role-a", "role-b"],
+      [],
+    );
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("ok");
     expect(flash.msg).toContain("2 role(s)");
@@ -194,10 +205,73 @@ describe("POST /permissions/set", () => {
       command: "ping",
       roleIds: "role-a, role-b ,",
     });
-    expect(mockSetCommandPermissions).toHaveBeenCalledWith("guild-1", "ping", [
-      "role-a",
-      "role-b",
-    ]);
+    expect(mockSetCommandPermissions).toHaveBeenCalledWith(
+      "guild-1",
+      "ping",
+      ["role-a", "role-b"],
+      [],
+    );
+  });
+
+  it("splits role groups out of the picker's values (#1023)", async () => {
+    const res = await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["role-a", "group:g1+"],
+    });
+    expect(mockSetCommandPermissions).toHaveBeenCalledWith(
+      "guild-1",
+      "warn",
+      ["role-a"],
+      ["group:g1+"],
+    );
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toContain("1 group(s)");
+  });
+
+  it("accepts a group-only restriction without clearing it (#1023)", async () => {
+    await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["group:g1"],
+    });
+    expect(mockClearCommandPermissions).not.toHaveBeenCalled();
+    expect(mockSetCommandPermissions).toHaveBeenCalledWith(
+      "guild-1",
+      "warn",
+      [],
+      ["group:g1"],
+    );
+  });
+
+  it("refuses a group that no longer exists and saves nothing (#1023)", async () => {
+    const res = await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["group:gone"],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("no longer exists");
+    expect(mockSetCommandPermissions).not.toHaveBeenCalled();
+  });
+
+  it("refuses to save groups it can't verify (#1023)", async () => {
+    mockGroupList.mockRejectedValue(new Error("database offline"));
+    const res = await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["group:g1"],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Could not read the role groups");
+    expect(mockSetCommandPermissions).not.toHaveBeenCalled();
+  });
+
+  it("does not read groups when none were selected", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: ["role-a"],
+    });
+    expect(mockGroupList).not.toHaveBeenCalled();
   });
 
   it("clears the restriction when nothing was selected", async () => {
@@ -217,7 +291,11 @@ describe("POST /permissions/set", () => {
       action: "permissions.set",
       targetId: "ping",
       result: "success",
-      details: { before: { allowedRoles: ["old"] }, after: ["role-a"] },
+      details: {
+        before: { allowedRoles: ["old"] },
+        after: ["role-a"],
+        groupRefs: [],
+      },
     });
   });
 

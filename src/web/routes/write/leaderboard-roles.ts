@@ -26,6 +26,7 @@ import {
   flashRedirect,
   requireSessionContext,
   asyncHandler,
+  findGroupRoleReuse,
 } from "./helpers.js";
 
 const PAGE = "/admin/leaderboard-roles";
@@ -177,6 +178,25 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           errorMessage: problem,
         });
         flashRedirect(res, PAGE, { type: "err", text: problem });
+        return;
+      }
+
+      // A role that backs a role group can't become a reward role (#1023).
+      // Roles the tiers already held are left alone.
+      const reuse = await findGroupRoleReuse(
+        session.guildId,
+        rows.tiers.map((t) => t.roleId),
+        parseTierConfig(before).tiers.map((t) => t.roleId),
+      );
+      if (reuse) {
+        await recordAudit(session, {
+          action: "leaderboard-roles.tiers",
+          targetId: TIERS_KEY,
+          details: { before, attempted: after },
+          result: "failure",
+          errorMessage: reuse,
+        });
+        flashRedirect(res, PAGE, { type: "err", text: reuse });
         return;
       }
 

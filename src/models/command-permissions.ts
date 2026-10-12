@@ -3,6 +3,8 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ICommandPermission extends Document {
   commandName: string;
   roleIds: string[];
+  /** Role group references (`group:<id>` / `group:<id>+`), see role-group-access.ts (#1023). */
+  groupRefs?: string[];
   guildId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -18,6 +20,10 @@ const CommandPermissionSchema = new Schema<ICommandPermission>(
     roleIds: {
       type: [String],
       required: true,
+      default: [],
+    },
+    groupRefs: {
+      type: [String],
       default: [],
     },
     guildId: {

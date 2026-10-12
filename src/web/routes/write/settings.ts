@@ -40,7 +40,9 @@ import {
   coerceConfigValue,
   findSectionMasterKey,
   resetConfigToDefaults,
+  findGroupRoleReuseForSetting,
 } from "./helpers.js";
+import { TIERS_KEY } from "../../leaderboard-tiers.js";
 import {
   rearmScheduledServices,
   rearmFailureNote,
@@ -94,6 +96,25 @@ export function createSettingsRouter(client: Client): Router {
         before = defaultConfig[key as keyof typeof defaultConfig];
       }
       const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+      // A role that backs a role group can't be picked for another feature
+      // (#1023).
+      const reuse = await findGroupRoleReuseForSetting(
+        session.guildId,
+        key,
+        coerced.value,
+        before,
+      );
+      if (reuse) {
+        await recordAudit(session, {
+          action: "setting.set",
+          targetId: key,
+          details: { before, attempted: coerced.value },
+          result: "failure",
+          errorMessage: reuse,
+        });
+        flashRedirect(res, redirectTo, { type: "err", text: reuse }, [key]);
+        return;
+      }
       try {
         await config.set(
           key,
@@ -450,6 +471,23 @@ export function createSettingsRouter(client: Client): Router {
           }
           coerced = coerced.filter((c) => !flagged.has(c.key));
         }
+      }
+
+      // Role-group roles can't be reused by other features (#1023). Only a
+      // changed value is checked, so an existing collision doesn't block
+      // unrelated saves of the same section.
+      for (const c of coerced) {
+        if (!(c.key === "birthdays.role_id" || c.key === TIERS_KEY)) continue;
+        const before = await ConfigService.getInstance()
+          .get(c.key)
+          .catch(() => undefined);
+        const reuse = await findGroupRoleReuseForSetting(
+          session.guildId,
+          c.key,
+          c.value,
+          before,
+        );
+        if (reuse) rejected.push({ key: c.key, reason: reuse });
       }
 
       if (rejected.length > 0) {

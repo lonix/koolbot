@@ -26,7 +26,12 @@ import { ChannelType, Client, type Guild } from "discord.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
-import { ADMIN_ONLY_COMMAND } from "../services/command-registry.js";
+import {
+  ADMIN_ONLY_COMMAND,
+  STAFF_DEFAULT_COMMANDS,
+} from "../services/command-registry.js";
+import { RoleGroupService } from "../services/role-group-service.js";
+import { hasStaffGroup, makeGroupRef } from "../services/role-group-access.js";
 import {
   defaultConfig,
   getDependencies,
@@ -466,6 +471,9 @@ type StoredConfigRow = {
   category?: string;
 };
 
+/** Role-list settings whose picker also offers role groups (#1023). */
+const GROUP_PICKER_KEY = "quotes.delete_roles";
+
 /**
  * One-liner for a feature page's in-place settings card (#971): builds the
  * rows for `keys` via {@link buildSettingRows}, fetches only the guild picker
@@ -525,6 +533,24 @@ export async function loadFeatureSettings(
     pickers.categoryChannels = channelData.categoryChannels;
   }
   if (roleData) pickers.roles = roleData.roles;
+  // `quotes.delete_roles` also takes role groups (#1023): offer each group
+  // alone and "and above" ahead of the raw roles. Optional, so a read failure
+  // just leaves the plain role list.
+  if (roleData && settingRows.some((r) => r.key === GROUP_PICKER_KEY)) {
+    const groups = await RoleGroupService.getInstance()
+      .list(guildId)
+      .catch((err: unknown) => {
+        logger.warn("feature settings: role groups unavailable", err);
+        return [];
+      });
+    pickers.roles = [
+      ...groups.flatMap((g) => [
+        { id: makeGroupRef(g.id, false), name: `${g.name} (group)` },
+        { id: makeGroupRef(g.id, true), name: `${g.name} and above (group)` },
+      ]),
+      ...roleData.roles,
+    ];
+  }
 
   // Dependencies that live outside the card, resolved in the same order
   // `ConfigService.get` uses at runtime: stored row, then an env var named
@@ -1136,11 +1162,20 @@ export function createReadOnlyRouter(
       );
 
       const perCommand = new Map<string, string[]>();
+      const groupRefsPerCommand = new Map<string, string[]>();
       const restrictedRoleIds = new Set<string>();
       for (const entry of all) {
         perCommand.set(entry.commandName, entry.roleIds);
+        groupRefsPerCommand.set(entry.commandName, entry.groupRefs ?? []);
         for (const r of entry.roleIds) restrictedRoleIds.add(r);
       }
+      // Role groups are optional; a read failure just hides the group picker.
+      const groups = await RoleGroupService.getInstance()
+        .list(common.guildId)
+        .catch((err: unknown) => {
+          logger.warn("permissions page: role groups unavailable", err);
+          return [];
+        });
       const roleIds = Array.from(restrictedRoleIds).sort((a, b) =>
         (roleNames.get(a) ?? a).localeCompare(roleNames.get(b) ?? b),
       );
@@ -1154,6 +1189,10 @@ export function createReadOnlyRouter(
           allRoleIds,
           roleNames,
           perCommand,
+          groups: groups.map((g) => ({ id: g.id, name: g.name })),
+          groupRefsPerCommand,
+          staffDefaultCommands: STAFF_DEFAULT_COMMANDS,
+          staffDefaultActive: hasStaffGroup(groups),
           flash: readFlash(req),
         }),
       );

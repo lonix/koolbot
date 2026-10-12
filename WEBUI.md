@@ -1194,6 +1194,27 @@ every feature keeps its current behaviour.
 Every write is audited. There is no slash command for this page: role groups are admin
 configuration and live in the Web UI only.
 
+**Other features use the groups too (#1023).** Each of these keeps its current behaviour when no
+groups are defined:
+
+- **Permissions** page: the role picker for each command offers every group, and *group and above*
+  (that group plus every group ranked higher), under a *Role groups* heading above the roles. A
+  group entry resolves to the group's role at check time, so re-ranking or re-linking a group takes
+  effect without editing the command. A group with no role (unlinked) grants nothing, and the
+  command stays restricted. While at least one `staff` or `admin` group exists, the moderation
+  commands (`/warn`, `/timeout`, `/ban`, `/modlog`) default to staff unless you set a restriction
+  for them on this page; the page marks them *staff only (default)*. Members with the Administrator
+  permission still bypass every check. If the groups can't be read, the check is refused (the user
+  is told permissions can't be verified) rather than opening the command.
+- **Quotes**: the *Roles allowed to delete quotes* picker (`quotes.delete_roles`) offers the same
+  group entries. Left empty, it means the `staff` and `admin` groups once one exists. With no such
+  group the setting works as before.
+- **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
+  chosen for another feature (a leaderboard tier would take it back from members, a birthday role
+  would hand it out). The save is refused with a message naming the group. Choices made earlier are
+  never cleared; the Role Groups page lists them under the feature that uses them. If the groups
+  can't be read, the pick is allowed, since this guards a choice rather than access.
+
 The **Rules** page (`/admin/rules`, #1024, part of the server-adoption epic #1017) manages the
 optional rules / terms acceptance gate. It is off by default (`rules.enabled`) and is the one
 case where KoolBot gives a role to everyone: a role that means "has accepted the rules". The
