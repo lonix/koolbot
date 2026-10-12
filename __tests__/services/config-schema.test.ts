@@ -492,6 +492,7 @@ describe("Config Schema", () => {
       // Moderation cases (#908) — the lifecycle is its own opt-in on top of
       // the log, so an upgrade changes nothing until an operator turns it on.
       "moderation.cases.enabled": false,
+      "moderation.raid.enabled": false,
       // Name history (#1038) — both gates ship off.
       "aka.enabled": false,
       "namehistory.enabled": false,

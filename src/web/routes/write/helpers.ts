@@ -361,6 +361,11 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "moderation.cases.enabled",
     "moderation.cases.default_review_days",
     "moderation.cases.review_cron",
+    "moderation.raid.enabled",
+    "moderation.raid.dry_run",
+    "moderation.raid.join_threshold",
+    "moderation.raid.window_seconds",
+    "moderation.raid.alert_channel_id",
   ],
   events: [
     "events.enabled",
@@ -429,7 +434,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
  */
 export const WIZARD_FEATURE_EXTRA_GATES: Record<string, string[]> = {
   namehistory: ["aka.enabled"],
-  moderation: ["moderation.cases.enabled"],
+  moderation: ["moderation.cases.enabled", "moderation.raid.enabled"],
 };
 
 export const WIZARD_FEATURE_ORDER = [

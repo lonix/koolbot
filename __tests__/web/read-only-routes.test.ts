@@ -382,7 +382,9 @@ describe("loadFeatureSettings (#971)", () => {
     expect(byKey.get("core.moderation.channel_id")?.type).toBe("channel");
     expect(byKey.get("core.moderation.channel_id")?.current).toBe("t1");
     expect(byKey.get("core.moderation.enabled")?.category).toBe("core");
-    expect(calls).toEqual({ channels: 1, roles: 0 });
+    // The anti-raid quarantine role (#1045) needs the role picker.
+    expect(byKey.get("moderation.raid.quarantine_role_id")?.type).toBe("role");
+    expect(calls).toEqual({ channels: 1, roles: 1 });
     expect(data.pickers.textChannels).toEqual([{ id: "t1", name: "general" }]);
   });
 

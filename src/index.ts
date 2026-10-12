@@ -63,6 +63,7 @@ import { EventService } from "./services/event-service.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
+import { RaidProtectionService } from "./services/raid-protection-service.js";
 import { ModerationCaseReviewService } from "./services/moderation-case-review-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
@@ -783,6 +784,13 @@ async function initializeServices(): Promise<void> {
     // below both gate on `moderation.enabled` at call time.
     await moderationService.initialize();
 
+    // Anti-raid (#1045): restore a lockdown that was on before the restart and
+    // warn when the feature is on but a prerequisite (moderation log, Server
+    // Members Intent) is missing. Event-driven, so there are no timers.
+    const raidProtection = RaidProtectionService.getInstance(client);
+    await raidProtection.initialize();
+    await raidProtection.warnIfInactive();
+
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();
 
@@ -1312,6 +1320,10 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
 // welcome.enabled per event and never throws.
 client.on(Events.GuildMemberAdd, async (member) => {
   recordDiscordEvent("guildMemberAdd");
+  // Anti-raid first (#1045): a member it just acted on is not greeted.
+  const actedOn =
+    await RaidProtectionService.getInstance(client).handleMemberJoin(member);
+  if (actedOn) return;
   await WelcomeService.getInstance().handleMemberJoin(member);
 });
 

@@ -6,16 +6,14 @@ import {
   ACTION_SUMMARY_ORDER,
   type ModerationHistorySummary,
 } from "../../src/utils/moderation-format.js";
-import type { ModerationAction } from "../../src/models/moderation-log.js";
+import {
+  MODERATION_ACTIONS,
+  type ModerationAction,
+} from "../../src/models/moderation-log.js";
 
-const ALL_ACTIONS: ModerationAction[] = [
-  "warn",
-  "kick",
-  "ban",
-  "unban",
-  "timeout",
-  "untimeout",
-];
+// Derived from the model's own list, so a new action cannot be added without
+// the label, colour and summary tables covering it.
+const ALL_ACTIONS: readonly ModerationAction[] = MODERATION_ACTIONS;
 
 describe("actionLabel", () => {
   it("renders a label for every action", () => {

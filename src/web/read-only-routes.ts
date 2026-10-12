@@ -95,7 +95,10 @@ import {
   buildCaseGroups,
   loadModerationCaseData,
 } from "./moderation-case-groups.js";
-import type { ModerationAction } from "../models/moderation-log.js";
+import {
+  MODERATION_ACTIONS,
+  type ModerationAction,
+} from "../models/moderation-log.js";
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
@@ -303,6 +306,17 @@ export const MODERATION_SETTING_KEYS = [
   "moderation.cases.default_review_days",
   "moderation.cases.retention_days",
   "moderation.cases.history_grace_days",
+  "moderation.raid.enabled",
+  "moderation.raid.dry_run",
+  "moderation.raid.join_threshold",
+  "moderation.raid.window_seconds",
+  "moderation.raid.lockdown_action",
+  "moderation.raid.min_account_age_hours",
+  "moderation.raid.new_account_action",
+  "moderation.raid.timeout_minutes",
+  "moderation.raid.quarantine_role_id",
+  "moderation.raid.lockdown_max_minutes",
+  "moderation.raid.alert_channel_id",
   "core.moderation_review.enabled",
   "core.moderation_review.channel_id",
 ] as const;
@@ -2555,15 +2569,6 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Moderation log (#728) ----------
-  const MODERATION_ACTIONS: ModerationAction[] = [
-    "warn",
-    "kick",
-    "ban",
-    "unban",
-    "timeout",
-    "untimeout",
-  ];
-
   router.get(
     "/moderation",
     asyncHandler(async (req, res) => {
@@ -2576,7 +2581,9 @@ export function createReadOnlyRouter(
       const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
 
       const actionRaw = String(req.query.action ?? "").trim();
-      const actionFilter = (MODERATION_ACTIONS as string[]).includes(actionRaw)
+      const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
+        actionRaw,
+      )
         ? (actionRaw as ModerationAction)
         : undefined;
       const userFilter = String(req.query.user ?? "").trim() || undefined;

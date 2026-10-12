@@ -172,6 +172,7 @@ commands always registered, and `/me` follows the Web UI):
 - `/timeout` — Time a member out for any duration up to 28 days (`moderation.enabled`)
 - `/ban` — Ban a member and record it (`moderation.enabled`)
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
+- `/raidmode` — Start, end or check the anti-raid lockdown (`moderation.raid.enabled`)
 - `/me` — DMs you a single-use link to your personal settings (registered whenever the Web UI is enabled)
 
 `/warn`, `/timeout`, `/ban` and `/modlog` are moderation commands: Discord shows them only to members with the matching permission.

@@ -43,6 +43,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/timeout](#timeout)
   - [/ban](#ban)
   - [/modlog](#modlog)
+  - [/raidmode](#raidmode)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
   - [/me](#me)
@@ -910,6 +911,34 @@ line with its state, for example `Case #14 — under review, due 12 Mar 2026` or
 `Case #9 — readmitted 4 Feb 2026 by @staff`. Cases are opened and decided on the Web UI moderation page,
 not from Discord.
 
+### `/raidmode`
+
+Manually start, end or inspect the anti-raid **lockdown** (#1045). While a
+lockdown is on, each member who joins gets the configured action (timeout,
+quarantine role or kick) until you clear it. Gated by
+`moderation.raid.enabled`, and you need the **Moderate Members** permission
+(checked again when the command runs, since Discord's own visibility gate can
+be overridden per role). The reply is ephemeral.
+
+```text
+/raidmode mode:on
+/raidmode mode:off
+/raidmode mode:status
+```
+
+**Options:**
+
+- `mode` (required) — `on` starts a lockdown, `off` ends it, `status` shows
+  whether it is on, whether it is a dry run, the joins counted in the current
+  window and what has been done so far
+
+Lockdown also starts by itself when more joins than the threshold arrive in
+the window. It only acts on members who join afterwards, never on existing
+members. Each action is a row in the moderation log (`/modlog`, source `raid`),
+so you can review it and undo it: remove the quarantine role or lift the
+timeout in Discord, or let a kicked member back in. Thresholds, actions and the
+dry run switch are Web UI settings on the Moderation page, not commands.
+
 ---
 
 ## 🔧 Web UI launcher
@@ -1204,6 +1233,7 @@ surfaces share the same validation.
 | `/timeout`                     | Moderate Members | Moderation log enabled        |
 | `/ban`                         | Ban Members      | Moderation log enabled        |
 | `/modlog`                      | Moderate Members | Moderation log enabled        |
+| `/raidmode`                    | Moderate Members | Anti-raid enabled             |
 
 \* `/warn`, `/timeout` and `/modlog` are shown to members with the **Moderate
 Members** permission and `/ban` to **Ban Members** (administrators have both).

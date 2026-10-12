@@ -1112,6 +1112,22 @@ command override in **Server Settings → Integrations → KoolBot**. See
 | `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases come due for review. Requires `moderation.cases.enabled`                                                                                                                  |
 | `core.moderation_review.channel_id`    | `""`        | Text channel that receives that summary. Nothing is posted while this is empty                                                                                                                                     |
 
+Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
+
+| Setting                                 | Default   | Description                                                                                                                                             |
+| --------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moderation.raid.enabled`               | `false`   | Anti-raid protection (join-rate lockdown and new-account gate) and the `/raidmode` command. Requires `moderation.enabled` and the Server Members Intent |
+| `moderation.raid.dry_run`               | `true`    | Detect, enter lockdown and alert, but never act on a member; counts what it would have done. Switch off once the thresholds look right                  |
+| `moderation.raid.join_threshold`        | `10`      | Lockdown starts when more than this many members join within the window (minimum 2)                                                                     |
+| `moderation.raid.window_seconds`        | `30`      | The sliding window the threshold is counted over (clamped to 5 to 3600)                                                                                 |
+| `moderation.raid.lockdown_action`       | `timeout` | `timeout`, `quarantine` or `kick`, applied to each member who joins during lockdown                                                                     |
+| `moderation.raid.min_account_age_hours` | `0`       | New-account gate, independent of lockdown: accounts younger than this get the new-account action. `0` turns the gate off                                |
+| `moderation.raid.new_account_action`    | `timeout` | `timeout`, `quarantine` or `kick`, applied to a too-young account                                                                                       |
+| `moderation.raid.timeout_minutes`       | `60`      | Length of the timeout action (clamped to 1 minute to 28 days)                                                                                           |
+| `moderation.raid.quarantine_role_id`    | `""`      | Role the quarantine action assigns. It should have no channel access and sit below the bot's role                                                       |
+| `moderation.raid.lockdown_max_minutes`  | `0`       | End a lockdown automatically after this long. `0` keeps it on until a moderator runs `/raidmode off`                                                    |
+| `moderation.raid.alert_channel_id`      | `""`      | Text channel that gets a message when lockdown starts or ends. Nothing is posted while this is empty                                                    |
+
 **Notes:**
 
 - Warnings are KoolBot's own record — Discord has no native warning action,
@@ -1142,6 +1158,20 @@ command override in **Server Settings → Integrations → KoolBot**. See
 - Mirroring native actions requires the bot to have the **View Audit Log**
   permission and the `GuildModeration` gateway intent (enabled by default in
   the bot). `/warn` works without View Audit Log.
+- **Anti-raid** (`moderation.raid.*`, #1045) is off by default and starts as a
+  **dry run**: it detects floods and posts its alert, but acts on nobody until
+  you set `moderation.raid.dry_run` to off. It only ever acts on members who
+  join while it is active (never existing members, never bots), and only when
+  the bot is allowed to: the server owner, members at or above the bot's
+  highest role, and missing permissions are skipped and counted, never forced.
+  Lockdown starts on the join that pushes the count above the threshold, so the
+  joins before it are not acted on. Every kick, timeout and quarantine, and
+  every lockdown on and off, is a row in the log (source `raid`). The feature
+  stays inactive, and says why in the startup log and in `/raidmode status`,
+  when `moderation.enabled` or the Server Members Intent
+  (`GUILD_MEMBERS_INTENT=true`) is off. A lockdown survives a restart because
+  it is restored from the newest row in the log, so with a short
+  `moderation.retention_days` a very long lockdown could be forgotten.
 - The log is an append-only history: rows are never edited. There are no
   appeals, expiring warnings, or auto-moderation thresholds — escalation stays
   a human decision. Lifecycle state lives beside the log, in cases (below).
