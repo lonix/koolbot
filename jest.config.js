@@ -51,5 +51,8 @@ export default {
   testTimeout: 10000,
   verbose: true,
   roots: ['<rootDir>/src', '<rootDir>/__tests__'],
+  // Real-MongoDB suites (#1106) run under jest.integration.config.js, not here: this
+  // project mocks mongoose globally and must stay fast and database-free.
+  testPathIgnorePatterns: ['/node_modules/', '\\.integration\\.test\\.ts$'],
   setupFilesAfterEnv: ['<rootDir>/__tests__/setup.ts'],
 };
