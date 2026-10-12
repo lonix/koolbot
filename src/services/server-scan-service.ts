@@ -151,7 +151,12 @@ export interface ScanBot {
   roleIds: string[];
   /** Channels where the bot (or its role) has an overwrite. */
   overwriteChannelIds: string[];
-  /** Webhook-fed channels attributed to it, when known. */
+  /**
+   * Whether Discord lists the bot as a verified app. `null` when the member
+   * (and so its public flags) is not cached, e.g. the GuildMembers intent is
+   * off and the bot was found through its integration role only.
+   */
+  verified: boolean | null;
   isKoolBot: boolean;
 }
 
@@ -344,6 +349,14 @@ function kindOf(type: ChannelType): ChannelKind {
     default:
       return "other";
   }
+}
+
+/** `VerifiedBot` public flag of a cached user; `null` when flags are unknown. */
+export function botVerified(
+  user: { flags: { has(flag: "VerifiedBot"): boolean } | null } | undefined,
+): boolean | null {
+  if (!user?.flags) return null;
+  return user.flags.has("VerifiedBot");
 }
 
 /**
@@ -846,6 +859,7 @@ export class ServerScanService {
           tag: guild.members.cache.get(userId)?.user.tag ?? null,
           roleIds: [],
           overwriteChannelIds: [],
+          verified: botVerified(guild.members.cache.get(userId)?.user),
           isKoolBot: userId === koolBotId,
         };
         byBot.set(userId, bot);

@@ -2,6 +2,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { ChannelType, PermissionsBitField } from "discord.js";
 import {
   ServerScanService,
+  botVerified,
   buildReadiness,
   detectNamingConvention,
   mapFeatureBindings,
@@ -234,6 +235,16 @@ describe("ServerScanService (#1019)", () => {
     expect(scan.bots.map((b) => b.userId).sort()).toEqual(["bot-1", "dyno"]);
     const dyno = scan.bots.find((b) => b.userId === "dyno")!;
     expect(dyno.overwriteChannelIds).toEqual(["ch-quotes"]);
+    expect(typeof dyno.verified === "boolean" || dyno.verified === null).toBe(
+      true,
+    );
+  });
+
+  it("botVerified reads the VerifiedBot flag and is null without flags", () => {
+    expect(botVerified(undefined)).toBeNull();
+    expect(botVerified({ flags: null })).toBeNull();
+    expect(botVerified({ flags: { has: () => true } })).toBe(true);
+    expect(botVerified({ flags: { has: () => false } })).toBe(false);
   });
 
   it("produces the planner's ScannedState", async () => {

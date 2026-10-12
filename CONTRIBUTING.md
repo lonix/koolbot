@@ -258,6 +258,29 @@ Follow the established architecture:
    - Well-documented and tested
    - Reusable across the codebase
 
+### Adding a known-bot entry
+
+The bot replacement report (`/admin/adopt`, #1026) reads a static catalogue in `src/content/known-bots.ts`. It ships in the
+repo and is never fetched from anywhere. To add or update a bot:
+
+1. Find the bot's Discord **user id** (usually the same as its application id). Detection matches ids only, never names.
+   Every id needs a **source URL**, recorded in the entry's `verifiedAgainst` together with the date. Accepted sources:
+   the bot's own invite link or documentation, Discord's app directory, or a directory listing keyed by the id (for example
+   `top.gg/bot/<id>` or `discordbotlist.com/bots/<id>`) whose page shows the right bot name. Say which kind it is: a
+   directory listing is good evidence, not primary-source proof. Never guess an id, and never take one from memory. An
+   entry with no confirmed id is stored with `ids: []` and is not detected until one is added. An id without a source
+   stays marked `// UNVERIFIED` and the report shows an "unverified entry" note for it.
+2. Add a `KNOWN_BOTS` entry with a name, a short description and its capabilities. Give capabilities a stable `id` so the
+   combined view can group bots that provide the same thing.
+3. Pick a coverage level per capability and be honest about it: `full`, `partial` (say what is missing), `planned` (link the
+   KoolBot issue), `none`, or `keep` (say why KoolBot will not replace it). Never claim coverage KoolBot does not have.
+   `full` and `partial` point at a feature in `KOOLBOT_FEATURES`, which owns the enabling config key, the Web UI page and the
+   switch-over steps.
+4. Check the bot's current features against its own docs before you commit, and say in the PR which source you used.
+   `verifiedAgainst` covers the id only; capability lists stay unverified until a maintainer has checked them.
+5. Run `npm test`: `__tests__/content/known-bots.test.ts` validates the shape and that every referenced config key exists in
+   `defaultConfig`.
+
 ### Adding New Commands
 
 Register a new command in **one** place: the `COMMAND_CONFIGS` list in `src/services/command-registry.ts`.
