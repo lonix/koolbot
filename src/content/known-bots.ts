@@ -166,6 +166,14 @@ export interface KnownBot {
   description: string;
   /** Bot user ids (usually the application ids). May be empty until confirmed. */
   ids: readonly string[];
+  /**
+   * Where the **ids** were checked, and when: a source URL (the bot's own
+   * invite link or docs, Discord's app directory, or a directory listing
+   * keyed by the id) plus the date. It covers ids only, never the capability
+   * list. Absent while the ids are unconfirmed; the report then shows an
+   * "unverified entry" note on the card.
+   */
+  verifiedAgainst?: string;
   capabilities: readonly KnownBotCapability[];
 }
 
@@ -217,11 +225,16 @@ const SCHEDULED: KnownBotCapability = {
 };
 
 /*
- * UNVERIFIED: every id and every capability list below was written without
- * access to a primary source (the bots' current docs or the Discord app
- * directory). A maintainer must confirm each one before relying on it; see
- * `CONTRIBUTING.md`. Entries with an empty `ids` list are never detected
- * until an id is confirmed.
+ * Ids: an entry with `verifiedAgainst` had its id confirmed on 2026-10-12
+ * against a third-party directory listing keyed by that id (top.gg or
+ * discordbotlist.com). That is good evidence but not primary-source proof: a
+ * listing can in principle be wrong or point at a renamed bot. An id with an
+ * `// UNVERIFIED` comment has no confirmation at all. Entries with an empty
+ * `ids` list are never detected until an id is confirmed.
+ *
+ * Capability lists: UNVERIFIED for every entry. They were written without
+ * checking each bot's current features, and `verifiedAgainst` does not cover
+ * them. A maintainer must confirm them; see `CONTRIBUTING.md`.
  */
 export const KNOWN_BOTS: readonly KnownBot[] = [
   {
@@ -229,6 +242,8 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     name: "Dyno",
     description: "Moderation, logging, announcements and welcome messages.",
     ids: ["155149108183695360"],
+    verifiedAgainst:
+      "id only: https://top.gg/bot/155149108183695360 (third-party directory listing), 2026-10-12",
     capabilities: [MODERATION_PARTIAL, EVENT_LOG, AUTOMOD, WELCOME, SCHEDULED],
   },
   {
@@ -236,6 +251,8 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     name: "Carl-bot",
     description: "Reaction roles, moderation, logging and custom tags.",
     ids: ["235148962103951360"],
+    verifiedAgainst:
+      "id only: https://discordbotlist.com/bots/235148962103951360 (third-party directory listing), 2026-10-12",
     capabilities: [
       REACTION_ROLES,
       MODERATION_PARTIAL,
@@ -255,6 +272,8 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     description:
       "Moderation, welcome messages, announcements and message XP levelling.",
     ids: ["159985870458322944"],
+    verifiedAgainst:
+      "id only: https://discordbotlist.com/bots/159985870458322944 (third-party directory listing), 2026-10-12",
     capabilities: [
       MODERATION_PARTIAL,
       WELCOME,
@@ -272,7 +291,7 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     name: "YAGPDB",
     description:
       "Moderation, logging, reaction roles, custom commands, feeds and auto-moderation.",
-    ids: ["204255221017214977"],
+    ids: ["204255221017214977"], // UNVERIFIED
     capabilities: [
       MODERATION_PARTIAL,
       EVENT_LOG,
@@ -294,7 +313,9 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     key: "zira",
     name: "Zira",
     description: "Reaction roles.",
-    ids: ["292953664492929025"],
+    ids: ["275813801792634880"],
+    verifiedAgainst:
+      "id only: https://discordbotlist.com/bots/275813801792634880 (third-party directory listing), 2026-10-12",
     capabilities: [REACTION_ROLES],
   },
   {
@@ -338,6 +359,8 @@ export const KNOWN_BOTS: readonly KnownBot[] = [
     name: "Jockie Music",
     description: "Music playback.",
     ids: ["411916947773587456"],
+    verifiedAgainst:
+      "id only: https://top.gg/bot/411916947773587456 (third-party directory listing), 2026-10-12",
     capabilities: [
       {
         id: "music",

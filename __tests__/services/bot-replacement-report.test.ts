@@ -152,6 +152,81 @@ describe("summariseCapabilities", () => {
         .kind,
     ).toBe("keep");
   });
+
+  it("does not treat a mixed keep+full bot as fully replaceable", () => {
+    expect(
+      summariseCapabilities([
+        { coverage: { level: "full" } },
+        { coverage: { level: "keep", reason: "r" } },
+      ]),
+    ).toEqual({ kind: "partial", text: "Can replace 1 of 2 features" });
+    expect(
+      summariseCapabilities([
+        { coverage: { level: "none" } },
+        { coverage: { level: "keep", reason: "r" } },
+      ]).kind,
+    ).toBe("none");
+  });
+
+  it("still calls an all-full bot fully replaceable when nothing is kept", () => {
+    expect(
+      summariseCapabilities([
+        { coverage: { level: "full" } },
+        { coverage: { level: "full" } },
+      ]).kind,
+    ).toBe("full");
+  });
+});
+
+describe("mixed keep bots in the report (#1026)", () => {
+  const mixed: KnownBot[] = [
+    {
+      key: "mix",
+      name: "Mix",
+      description: "d",
+      ids: ["100000000000000009"],
+      verifiedAgainst: "Discord app directory, 2026-10-12",
+      capabilities: [
+        {
+          id: "reaction-roles",
+          label: "Roles",
+          feature: "reactionroles",
+          coverage: { level: "full" },
+        },
+        {
+          id: "music",
+          label: "Music",
+          coverage: { level: "keep", reason: "policy" },
+        },
+      ],
+    },
+  ];
+  it("never lists it as removable after the switch", () => {
+    const report = buildBotReplacementReport(
+      makeScan([{ userId: "100000000000000009" }]),
+      {},
+      mixed,
+    );
+    expect(report.cards[0]!.summaryKind).toBe("partial");
+    expect(report.combined.removableAfterSwitch).toEqual([]);
+    expect(report.combined.headline).toContain("None can be removed outright");
+  });
+  it("carries verifiedAgainst, and null when the entry has none", () => {
+    const verified = buildBotReplacementReport(
+      makeScan([{ userId: "100000000000000009" }]),
+      {},
+      mixed,
+    );
+    expect(verified.cards[0]!.verifiedAgainst).toBe(
+      "Discord app directory, 2026-10-12",
+    );
+    const unverified = buildBotReplacementReport(
+      makeScan([{ userId: "100000000000000001" }]),
+      {},
+      catalog,
+    );
+    expect(unverified.cards[0]!.verifiedAgainst).toBeNull();
+  });
 });
 
 describe("buildBotReplacementReport (#1026)", () => {
@@ -235,7 +310,9 @@ describe("buildBotReplacementReport (#1026)", () => {
     );
     const c = report.combined;
     expect(c.removableAfterSwitch).toEqual(["Roler"]);
-    expect(c.headline).toContain("After the switch you could remove: Roler");
+    expect(c.headline).toContain(
+      "After the switch you could consider removing: Roler",
+    );
     const dup = c.duplicated.find((d) => d.id === "moderation")!;
     expect(dup.bots).toEqual(["Modder", "Modder Two"]);
     expect(c.covered.map((x) => x.id).sort()).toEqual([

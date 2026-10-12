@@ -1353,11 +1353,13 @@ currently enabled, and numbered switch-over steps with a link to the right page.
 the bot's locked integration role, channels it mostly writes to (needs channel ownership hints), channels with a
 member-specific overwrite for the bot, and KoolBot features already bound to its channels. A combined view groups
 capabilities KoolBot covers, capabilities several bots provide (so one of them may already be free to remove) and
-capabilities nothing covers, and lists which bots you could remove after the switch. A bot that is not in the catalogue is
+capabilities nothing covers, and lists which bots you could consider removing after the switch. A bot that is not in the catalogue is
 shown as **custom** when Discord does not list it as a verified app (KoolBot does not try to replace it) and as **unknown**
 otherwise, with a link to suggest a catalogue entry. If the GuildMembers intent is off, the report warns that a bot without
 an integration role may be missing. The report is read-only: removing a bot stays manual in Discord, KoolBot never kicks
-it, and data from other bots cannot be imported. An after-removal cleanup plan is not part of it yet.
+it, and data from other bots cannot be imported. Every catalogued card says the match is by id and the capability list may be out of date, and carries an *unverified
+entry* note until the entry records what it was checked against (`verifiedAgainst`). An after-removal cleanup plan is not part
+of it yet.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:

@@ -169,6 +169,14 @@ describe("renderAdoptPage (#1019)", () => {
             isKoolBot: false,
           },
           {
+            userId: "204255221017214977",
+            tag: "YAGPDB#1",
+            roleIds: [],
+            overwriteChannelIds: [],
+            verified: true,
+            isKoolBot: false,
+          },
+          {
             userId: "300000000000000001",
             tag: "<img src=x>#1",
             roleIds: [],
@@ -184,6 +192,11 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("Missing:");
     expect(html).toContain("moderation.enabled");
     expect(html).toContain("Community-built bot");
+    expect(html).toContain("unverified entry");
+    expect(html).toContain(
+      "Id checked against: id only: https://top.gg/bot/155149108183695360",
+    );
+    expect(html).toContain("may be out of date");
     expect(html).toContain("&lt;img src=x&gt;#1");
     expect(html).not.toContain("<img src=x>");
     expect(html).toContain("GuildMembers intent is off");

@@ -114,6 +114,49 @@ describe("known-bots catalogue (#1026)", () => {
     );
   });
 
+  it("never lists 292953664492929025 (UnbelievaBoat, once mistaken for Zira)", () => {
+    for (const bot of KNOWN_BOTS) {
+      expect(bot.ids).not.toContain("292953664492929025");
+    }
+    expect(KNOWN_BOTS.find((b) => b.key === "zira")!.ids).toEqual([
+      "275813801792634880",
+    ]);
+  });
+
+  it("pins the id of every confirmed bot", () => {
+    const pinned: Record<string, string> = {
+      dyno: "155149108183695360",
+      carlbot: "235148962103951360",
+      mee6: "159985870458322944",
+      zira: "275813801792634880",
+      "jockie-music": "411916947773587456",
+    };
+    for (const [key, id] of Object.entries(pinned)) {
+      const bot = KNOWN_BOTS.find((b) => b.key === key);
+      expect(bot?.ids).toEqual([id]);
+      expect(findKnownBot(id)?.key).toBe(key);
+    }
+  });
+
+  it("records a source URL and date for every verified entry, and UNVERIFIED for the rest", () => {
+    const lines = readFileSync("src/content/known-bots.ts", "utf8").split("\n");
+    for (const bot of KNOWN_BOTS) {
+      for (const id of bot.ids) {
+        if (bot.verifiedAgainst !== undefined) {
+          expect(bot.verifiedAgainst).toMatch(/https:\/\/\S+/);
+          expect(bot.verifiedAgainst).toContain(id);
+          expect(bot.verifiedAgainst).toMatch(/\d{4}-\d{2}-\d{2}/);
+        } else {
+          const line = lines.find((l) => l.includes(`"${id}"`)) ?? "";
+          expect(line).toContain("// UNVERIFIED");
+        }
+      }
+      if (bot.ids.length === 0) expect(bot.verifiedAgainst).toBeUndefined();
+    }
+    const yagpdb = KNOWN_BOTS.find((b) => b.key === "yagpdb")!;
+    expect(yagpdb.verifiedAgainst).toBeUndefined();
+  });
+
   it("finds a bot by id and not by name", () => {
     const dyno = KNOWN_BOTS.find((b) => b.key === "dyno")!;
     expect(findKnownBot(dyno.ids[0]!)?.key).toBe("dyno");

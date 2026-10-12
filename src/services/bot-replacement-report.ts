@@ -49,6 +49,8 @@ export interface BotCard {
   kind: BotKind;
   name: string;
   description: string | null;
+  /** Source and date the catalogue entry was checked against; null when unverified. */
+  verifiedAgainst: string | null;
   summaryKind: SummaryKind;
   summary: string;
   capabilities: ReportCapability[];
@@ -122,19 +124,24 @@ function toCapability(
 export function summariseCapabilities(
   capabilities: ReadonlyArray<{ coverage: CapabilityCoverage }>,
 ): { kind: SummaryKind; text: string } {
-  const counted = capabilities.filter((c) => c.coverage.level !== "keep");
-  if (counted.length === 0) {
+  // Only a bot whose every capability is `keep` is classified as keep. A
+  // `keep` capability inside a mixed bot counts against full replacement:
+  // removing the bot would lose the part KoolBot will not replace.
+  const total = capabilities.length;
+  if (total > 0 && capabilities.every((c) => c.coverage.level === "keep")) {
     return { kind: "keep", text: "Keep: KoolBot does not replace this bot" };
   }
-  const full = counted.filter((c) => c.coverage.level === "full").length;
-  const partial = counted.filter((c) => c.coverage.level === "partial").length;
-  if (full === counted.length) {
+  const full = capabilities.filter((c) => c.coverage.level === "full").length;
+  const partial = capabilities.filter(
+    (c) => c.coverage.level === "partial",
+  ).length;
+  if (full === total) {
     return { kind: "full", text: "Can fully replace" };
   }
   if (full + partial === 0) {
     return { kind: "none", text: "No overlap" };
   }
-  const base = `Can replace ${full + partial} of ${counted.length} features`;
+  const base = `Can replace ${full + partial} of ${total} features`;
   return {
     kind: "partial",
     text: partial > 0 ? `${base} (${partial} only partly)` : base,
@@ -194,6 +201,7 @@ export function buildBotReplacementReport(
         kind: "catalogued",
         name: entry.name,
         description: entry.description,
+        verifiedAgainst: entry.verifiedAgainst ?? null,
         summaryKind: s.kind,
         summary: s.text,
         capabilities,
@@ -210,6 +218,7 @@ export function buildBotReplacementReport(
       kind: custom ? "custom" : "unknown",
       name: display,
       description: null,
+      verifiedAgainst: null,
       summaryKind: custom ? "custom" : "unknown",
       summary: custom
         ? "Community-built bot; KoolBot doesn't try to replace it"
@@ -263,7 +272,7 @@ export function buildBotReplacementReport(
         ? `No overlapping bots found. KoolBot adds: ${koolbotAdds.join(", ")}.`
         : "No overlapping bots found. Every KoolBot feature on this list is already on.";
   } else if (removableAfterSwitch.length > 0) {
-    headline = `After the switch you could remove: ${removableAfterSwitch.join(", ")}.`;
+    headline = `After the switch you could consider removing: ${removableAfterSwitch.join(", ")}.`;
   } else {
     headline = `KoolBot covers part of what ${overlapping.map((c) => c.name).join(", ")} do. None can be removed outright yet.`;
   }

@@ -270,6 +270,8 @@ function renderBotCard(card: BotCard): string {
   const body =
     card.kind === "catalogued"
       ? `<p class="muted">${escapeHtml(card.description ?? "")}</p>
+  <p class="muted">Matched by Discord id. The capability list is maintained in this repository and may be out of date: check it against the bot before you rely on it.${card.verifiedAgainst ? ` Id checked against: ${escapeHtml(card.verifiedAgainst)}.` : ""}</p>
+  ${card.verifiedAgainst ? "" : `<p><span class="tag tag-warn">unverified entry</span> <span class="muted">Nobody has confirmed this id or capability list against a primary source yet.</span></p>`}
   <table><caption class="visually-hidden">What KoolBot can replace for ${escapeHtml(card.name)}</caption><thead><tr><th scope="col">Capability</th><th scope="col">Coverage</th><th scope="col">KoolBot feature</th><th scope="col">State</th><th scope="col">Switch-over steps</th></tr></thead><tbody>${card.capabilities.map(renderCapabilityRow).join("")}</tbody></table>`
       : card.kind === "unknown"
         ? `<p class="muted">Suggest a catalogue entry: see <a href="${CATALOG_DOCS}">CONTRIBUTING.md</a>.</p>`
