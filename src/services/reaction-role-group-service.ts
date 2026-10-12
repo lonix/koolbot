@@ -238,22 +238,6 @@ export class ReactionRoleGroupService {
         () => this.client.guilds.fetch(guildId),
         "fetch guild",
       );
-      // Only a confirmed Unknown Channel (10003) means "not found"; transient
-      // failures propagate instead of being reported as a config error.
-      const channel = (await this.api(
-        () =>
-          guild.channels.fetch(channelId).catch((err: unknown) => {
-            if (this.hasDiscordCode(err, 10003)) return null;
-            throw err;
-          }),
-        "fetch group channel",
-      )) as TextChannel | null;
-      if (!channel || !channel.isTextBased()) {
-        return fail(
-          `Message channel ${channelId} not found or is not a text channel.`,
-        );
-      }
-
       // Live rows make this a top-up of the existing picker; none means a
       // fresh group (archived rows of earlier pickers are ignored).
       const existingRows = await ReactionRoleConfig.find({
@@ -261,8 +245,34 @@ export class ReactionRoleGroupService {
         groupKey,
         isArchived: false,
       });
-      let anchor: Message | null = null;
       const anchorId = existingRows[0]?.messageId;
+      // The picker lives where it was posted, not necessarily in the channel
+      // configured now (the setting is editable). Legacy rows without a
+      // stored channel fall back to the configured one.
+      const pickerChannelId =
+        (anchorId
+          ? existingRows.find((r) => r.messageChannelId)?.messageChannelId
+          : undefined) ?? channelId;
+      const pickerDeleted = `The picker message for **${name}** was deleted. Nothing was changed. Remove the group on the Reaction Roles page and generate it again.`;
+      // Only a confirmed Unknown Channel (10003) means "not found"; transient
+      // failures propagate instead of being reported as a config error.
+      const channel = (await this.api(
+        () =>
+          guild.channels.fetch(pickerChannelId).catch((err: unknown) => {
+            if (this.hasDiscordCode(err, 10003)) return null;
+            throw err;
+          }),
+        "fetch group channel",
+      )) as TextChannel | null;
+      if (!channel || !channel.isTextBased()) {
+        // For a top-up the missing channel took the picker with it.
+        if (anchorId) return fail(pickerDeleted);
+        return fail(
+          `Message channel ${channelId} not found or is not a text channel.`,
+        );
+      }
+
+      let anchor: Message | null = null;
       if (anchorId) {
         // The picker must still exist. Only a confirmed Unknown Message
         // (10008) means it is gone; stop either way and change nothing.
@@ -282,9 +292,7 @@ export class ReactionRoleGroupService {
           );
         }
         if (!anchor) {
-          return fail(
-            `The picker message for **${name}** was deleted. Nothing was changed. Remove the group on the Reaction Roles page and generate it again.`,
-          );
+          return fail(pickerDeleted);
         }
       }
 
@@ -365,9 +373,23 @@ export class ReactionRoleGroupService {
           skippedEntries: skipped,
         };
       }
-      if (keptRows.length + todo.length > MAX_GROUP_ENTRIES) {
+      // Discord caps distinct reactions per message. Archived mappings keep
+      // their reaction on the picker, so count the reactions actually on it
+      // (plus the live rows, in case the cache is incomplete), not just rows.
+      const reactionKey = (emoji: string): string =>
+        emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
+      const onPicker = new Set<string>(
+        keptRows.map((r) => reactionKey(r.emoji)),
+      );
+      for (const reaction of anchor?.reactions?.cache?.values() ?? []) {
+        onPicker.add(reaction.emoji.id ?? reaction.emoji.name ?? "");
+      }
+      const newDistinct = new Set(
+        todo.map((t) => reactionKey(t.emoji)).filter((k) => !onPicker.has(k)),
+      );
+      if (onPicker.size + newDistinct.size > MAX_GROUP_ENTRIES) {
         return fail(
-          `Adding ${todo.length} option(s) would exceed the ${MAX_GROUP_ENTRIES}-reaction limit for this group.`,
+          `The picker for **${name}** already carries ${onPicker.size} distinct reaction(s) (including those of removed options), so adding ${newDistinct.size} more would exceed Discord's ${MAX_GROUP_ENTRIES}-reaction limit. Nothing was changed. Remove the group on the Reaction Roles page and generate it again.`,
         );
       }
 
@@ -469,6 +491,7 @@ export class ReactionRoleGroupService {
         ...todo.map((t) => ({
           guildId,
           messageId: target.id,
+          messageChannelId: channel.id,
           roleId: t.role!.id,
           emoji: t.emoji,
           roleName: t.role!.name,
