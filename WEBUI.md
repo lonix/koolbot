@@ -918,7 +918,10 @@ permissions and aren't mentionable (colour from `reactionroles.group_role_colour
 Discord's default), and running a group again only adds the missing options by
 editing the existing picker message. It never removes roles, mappings or
 reactions. If the picker message was deleted in Discord, the run stops and changes
-nothing: remove the group on this page and generate it again. The mode defaults to
+nothing: remove the group on this page and generate it again. Changing the
+reaction-role channel after generating groups is not supported (this is the same for
+every reaction role, since startup reconciliation looks in the configured channel);
+regenerate the group instead. The mode defaults to
 **unique** (pick exactly one, e.g. one region);
 choose sticky or toggle if members may hold several. Deleting a generated group
 removes only roles the bot created, so reused roles survive.

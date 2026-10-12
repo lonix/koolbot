@@ -29,7 +29,8 @@ import { MAX_GROUP_ENTRIES } from "../content/reaction-role-groups.js";
  * - Re-running a group (same name) that still has live mappings only adds
  *   entries that are missing; it edits the existing picker message instead of
  *   posting a second one and never removes roles, mappings or reactions. If
- *   that picker message was deleted in Discord the run stops and changes
+ *   that picker message is not found in the configured reaction-role channel
+ *   (deleted, or the channel setting was changed) the run stops and changes
  *   nothing: remove the group on the Reaction Roles page and generate it again.
  * - A group with no live mappings is generated fresh. Reused roles stay
  *   `autoCreated: false`, so deleting a group never deletes them.
@@ -246,27 +247,23 @@ export class ReactionRoleGroupService {
         isArchived: false,
       });
       const anchorId = existingRows[0]?.messageId;
-      // The picker lives where it was posted, not necessarily in the channel
-      // configured now (the setting is editable). Legacy rows without a
-      // stored channel fall back to the configured one.
-      const pickerChannelId =
-        (anchorId
-          ? existingRows.find((r) => r.messageChannelId)?.messageChannelId
-          : undefined) ?? channelId;
-      const pickerDeleted = `The picker message for **${name}** was deleted. Nothing was changed. Remove the group on the Reaction Roles page and generate it again.`;
+      // Unknown Message (10008) or Unknown Channel (10003) on a top-up most
+      // likely means the reaction-role channel setting was changed after the
+      // group was generated (the picker is looked up in the configured
+      // channel, as startup reconciliation does), or the picker was deleted.
+      const pickerNotFound = `The picker message for **${name}** wasn't found in the configured reaction-role channel. If you changed the reaction-role channel setting since creating this group, change it back, or delete the group on the Reaction Roles page and generate it again; the same applies if the picker was deleted. Nothing was changed.`;
       // Only a confirmed Unknown Channel (10003) means "not found"; transient
       // failures propagate instead of being reported as a config error.
       const channel = (await this.api(
         () =>
-          guild.channels.fetch(pickerChannelId).catch((err: unknown) => {
+          guild.channels.fetch(channelId).catch((err: unknown) => {
             if (this.hasDiscordCode(err, 10003)) return null;
             throw err;
           }),
         "fetch group channel",
       )) as TextChannel | null;
       if (!channel || !channel.isTextBased()) {
-        // For a top-up the missing channel took the picker with it.
-        if (anchorId) return fail(pickerDeleted);
+        if (anchorId) return fail(pickerNotFound);
         return fail(
           `Message channel ${channelId} not found or is not a text channel.`,
         );
@@ -292,7 +289,7 @@ export class ReactionRoleGroupService {
           );
         }
         if (!anchor) {
-          return fail(pickerDeleted);
+          return fail(pickerNotFound);
         }
       }
 
@@ -491,7 +488,6 @@ export class ReactionRoleGroupService {
         ...todo.map((t) => ({
           guildId,
           messageId: target.id,
-          messageChannelId: channel.id,
           roleId: t.role!.id,
           emoji: t.emoji,
           roleName: t.role!.name,

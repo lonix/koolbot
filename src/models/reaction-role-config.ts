@@ -36,13 +36,6 @@ export interface IReactionRoleConfig extends Document {
   guildId: string;
   messageId: string;
   /**
-   * The channel the picker message lives in. Optional: rows created before
-   * this field existed lack it, and callers then fall back to the configured
-   * reaction-role message channel. Needed because that setting is editable
-   * after a picker was posted (#1064).
-   */
-  messageChannelId?: string;
-  /**
    * The private text channel created for an auto-created reaction role.
    * Optional: mappings that bind to an existing role (or opt out of the
    * private category/channel) have no owned channel.
@@ -92,10 +85,6 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       type: String,
       required: true,
       index: true,
-    },
-    messageChannelId: {
-      type: String,
-      required: false,
     },
     channelId: {
       type: String,

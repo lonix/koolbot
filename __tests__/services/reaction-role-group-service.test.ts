@@ -63,7 +63,6 @@ function setup(existingRoles: Array<{ id: string; name: string }>) {
     delete: jest.fn(async () => undefined),
   };
   const channel = {
-    id: "chan",
     isTextBased: () => true,
     send: jest.fn(async () => message),
     messages: { fetch: jest.fn(async () => message) },
@@ -411,7 +410,10 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
     expect(r.success).toBe(false);
-    expect(r.message).toMatch(/deleted/);
+    expect(r.message).toMatch(
+      /wasn't found in the configured reaction-role channel/,
+    );
+    expect(r.message).toMatch(/Nothing was changed/);
     expect(r.message).toMatch(/Reaction Roles page/);
     expect(model.updateMany).not.toHaveBeenCalled();
     expect(model.insertMany).not.toHaveBeenCalled();
@@ -421,42 +423,19 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(s.guild.roles.fetch).not.toHaveBeenCalled();
   });
 
-  it("finds the picker in the channel stored with the mapping, not the configured one", async () => {
-    const s = setup([{ id: "r1", name: "Europe" }]);
-    model.find.mockResolvedValue([{ ...liveRow, messageChannelId: "oldchan" }]);
-    const svc = ReactionRoleGroupService.getInstance(s.client);
-    const r = await svc.provisionGroup("g1", "Region", entries);
-    expect(r.success).toBe(true);
-    expect(s.guild.channels.fetch).toHaveBeenCalledWith("oldchan");
-    expect(s.guild.channels.fetch).not.toHaveBeenCalledWith("chan");
-    expect(s.channel.send).not.toHaveBeenCalled();
-    const docs = (
-      model.insertMany.mock.calls[0] as unknown as [
-        Array<Record<string, unknown>>,
-      ]
-    )[0];
-    expect(docs.every((d) => d.messageChannelId === "chan")).toBe(true);
-  });
-
-  it("falls back to the configured channel for a legacy row without one", async () => {
-    const s = setup([{ id: "r1", name: "Europe" }]);
-    model.find.mockResolvedValue([liveRow]);
-    const svc = ReactionRoleGroupService.getInstance(s.client);
-    const r = await svc.provisionGroup("g1", "Region", entries);
-    expect(r.success).toBe(true);
-    expect(s.guild.channels.fetch).toHaveBeenCalledWith("chan");
-  });
-
-  it("reports a deleted picker channel (10003) like a deleted picker", async () => {
+  it("reports an unknown configured channel (10003) on a top-up honestly", async () => {
     const s = setup([]);
-    model.find.mockResolvedValue([{ ...liveRow, messageChannelId: "oldchan" }]);
+    model.find.mockResolvedValue([liveRow]);
     s.guild.channels.fetch.mockRejectedValue(
       Object.assign(new Error("Unknown Channel"), { code: 10003 }),
     );
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
     expect(r.success).toBe(false);
-    expect(r.message).toMatch(/was deleted/);
+    expect(r.message).toMatch(
+      /wasn't found in the configured reaction-role channel/,
+    );
+    expect(r.message).toMatch(/change it back/);
     expect(r.message).toMatch(/Reaction Roles page/);
     expect(model.insertMany).not.toHaveBeenCalled();
     expect(s.guild.roles.create).not.toHaveBeenCalled();
