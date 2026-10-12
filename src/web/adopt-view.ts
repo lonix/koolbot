@@ -9,6 +9,11 @@ import type {
   ScanSeverity,
   ServerScan,
 } from "../services/server-scan-service.js";
+import {
+  buildBotReplacementReport,
+  type BotCard,
+  type ReportCapability,
+} from "../services/bot-replacement-report.js";
 
 /**
  * Read-only "Server scan" page (#1019). Renders a `ServerScan` — roles,
@@ -193,6 +198,124 @@ function renderBots(scan: ServerScan): string {
 </div>`;
 }
 
+const CATALOG_DOCS =
+  "https://github.com/lonix/koolbot/blob/main/CONTRIBUTING.md#adding-a-known-bot-entry";
+const ISSUES = "https://github.com/lonix/koolbot/issues";
+
+function renderCoverage(c: ReportCapability): string {
+  const cov = c.coverage;
+  switch (cov.level) {
+    case "full":
+      return `<span class="tag tag-on">Full</span>${cov.note ? `<div class="muted">${escapeHtml(cov.note)}</div>` : ""}`;
+    case "partial":
+      return `<span class="tag tag-warn">Partial</span><div class="muted">Missing: ${escapeHtml(cov.missing)}</div>`;
+    case "planned":
+      return `<span class="tag tag-info">Planned</span> <a href="${ISSUES}/${cov.issue}">#${cov.issue}</a>`;
+    case "keep":
+      return `<span class="tag tag-info">Keep</span><div class="muted">${escapeHtml(cov.reason)}</div>`;
+    default:
+      return `<span class="tag tag-off">Not covered</span><div class="muted">KoolBot does not replace this.</div>`;
+  }
+}
+
+function renderCapabilityRow(c: ReportCapability): string {
+  const feature = c.featureLabel
+    ? `${c.webPath ? `<a href="${escapeHtml(c.webPath)}">${escapeHtml(c.featureLabel)}</a>` : escapeHtml(c.featureLabel)}${c.enabledKey ? ` <code>${escapeHtml(c.enabledKey)}</code>` : ""}`
+    : `<span class="muted">—</span>`;
+  const state =
+    c.enabled === null
+      ? `<span class="muted">—</span>`
+      : c.enabled
+        ? `<span class="tag tag-on">Enabled</span>`
+        : `<span class="tag tag-off">Off</span>`;
+  const steps = c.steps.length
+    ? `<ol>${c.steps.map((st) => `<li>${escapeHtml(st)}</li>`).join("")}</ol>`
+    : `<span class="muted">—</span>`;
+  return `<tr><td>${escapeHtml(c.label)}</td><td>${renderCoverage(c)}</td><td>${feature}</td><td>${state}</td><td>${steps}</td></tr>`;
+}
+
+function renderLeftovers(card: BotCard): string {
+  const l = card.leftovers;
+  const items: string[] = [];
+  if (card.roleNames.length) {
+    items.push(
+      `Integration role ${card.roleNames.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(", ")} <span class="tag tag-warn">locked</span>: Discord removes it with the bot.`,
+    );
+  }
+  for (const c of l.ownedChannels) {
+    items.push(
+      `<strong>${escapeHtml(c.name)}</strong> is mostly written by this bot.${c.usedBy.length ? ` ${escapeHtml(c.usedBy.join(", "))} already use it; bind it before removing the bot.` : ""}`,
+    );
+  }
+  for (const c of l.memberOverwriteChannels) {
+    items.push(
+      `<strong>${escapeHtml(c.name)}</strong> keeps a permission overwrite for the bot's member. Discord does not remove it.`,
+    );
+  }
+  for (const b of l.boundFeatures) {
+    items.push(
+      `<strong>${escapeHtml(b.channel)}</strong> is bound to ${escapeHtml(b.features.join(", "))}.`,
+    );
+  }
+  return items.length
+    ? `<h4>Left over when it is removed</h4><ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul>`
+    : `<h4>Left over when it is removed</h4><p class="muted">Nothing found. This report never touches channels or overwrites.</p>`;
+}
+
+function renderBotCard(card: BotCard): string {
+  const kindTag =
+    card.kind === "catalogued"
+      ? ""
+      : ` <span class="tag tag-warn">${card.kind === "custom" ? "custom" : "unknown"}</span>`;
+  const body =
+    card.kind === "catalogued"
+      ? `<p class="muted">${escapeHtml(card.description ?? "")}</p>
+  <table><caption class="visually-hidden">What KoolBot can replace for ${escapeHtml(card.name)}</caption><thead><tr><th scope="col">Capability</th><th scope="col">Coverage</th><th scope="col">KoolBot feature</th><th scope="col">State</th><th scope="col">Switch-over steps</th></tr></thead><tbody>${card.capabilities.map(renderCapabilityRow).join("")}</tbody></table>`
+      : card.kind === "unknown"
+        ? `<p class="muted">Suggest a catalogue entry: see <a href="${CATALOG_DOCS}">CONTRIBUTING.md</a>.</p>`
+        : "";
+  return `
+  <h3>${escapeHtml(card.name)}${kindTag}</h3>
+  <p><strong>${escapeHtml(card.summary)}</strong></p>
+  ${body}
+  ${renderLeftovers(card)}`;
+}
+
+function shareList(
+  items: Array<{ label: string; bots: string[] }>,
+  empty: string,
+): string {
+  return items.length
+    ? `<ul>${items.map((i) => `<li>${escapeHtml(i.label)} <span class="muted">(${escapeHtml(i.bots.join(", "))})</span></li>`).join("")}</ul>`
+    : `<p class="muted">${empty}</p>`;
+}
+
+function renderBotReport(scan: ServerScan): string {
+  const report = buildBotReplacementReport(scan, scan.scanned?.config ?? {});
+  const warnings = report.warnings
+    .map((w) => `<div class="notice warn">${escapeHtml(w)}</div>`)
+    .join("");
+  const c = report.combined;
+  const summary = `
+  <h3>Combined view</h3>
+  <p>${escapeHtml(c.headline)}</p>
+  ${
+    report.cards.some((b) => b.kind === "catalogued")
+      ? `<h4>KoolBot can cover</h4>${shareList(c.covered, "Nothing yet.")}
+  <h4>Provided by more than one bot</h4>${shareList(c.duplicated, "No overlap between bots.")}
+  <h4>Not covered by KoolBot</h4>${shareList(c.uncovered, "Nothing.")}`
+      : ""
+  }`;
+  return `
+<div class="card">
+  <h2>Bot replacement report (${report.cards.length})</h2>
+  <p class="muted">Read-only. Removing a bot stays manual in Discord, and nothing here changes your server. Data from other bots cannot be imported.</p>
+  ${warnings}
+  ${summary}
+  ${report.cards.map(renderBotCard).join("")}
+</div>`;
+}
+
 function renderCommunity(scan: ServerScan): string {
   const c = scan.community;
   const nameOf = (id: string | null): string =>
@@ -257,6 +380,7 @@ ${suggestions ? `<div class="card"><h2>Suggestions</h2><ul>${suggestions}</ul></
 ${renderRoles(scan)}
 ${renderChannels(scan)}
 ${renderBots(scan)}
+${renderBotReport(scan)}
 ${renderCommunity(scan)}`;
   }
   const body = `

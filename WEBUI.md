@@ -1344,6 +1344,21 @@ hints** (`?sample=1`) additionally samples recent message authors to spot channe
 REST call per channel, so it is off by default. The same data is available to code as
 `ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
 
+**Bot replacement report** (a section of `/admin/adopt`, #1026) compares the bots found in the guild with a static catalogue
+shipped in the repo (`src/content/known-bots.ts`). Bots are matched by their Discord id, never by name, and nothing is
+sent to any outside service. Each catalogued bot gets a summary (*Can fully replace*, *Can replace N of M features*, *No
+overlap* or *Keep*), a table of its capabilities with KoolBot's coverage (**Full**, **Partial** with what is missing,
+**Planned** with the issue link, **Not covered**, or **Keep** with the reason), whether the matching KoolBot feature is
+currently enabled, and numbered switch-over steps with a link to the right page. A *Left over when it is removed* list shows
+the bot's locked integration role, channels it mostly writes to (needs channel ownership hints), channels with a
+member-specific overwrite for the bot, and KoolBot features already bound to its channels. A combined view groups
+capabilities KoolBot covers, capabilities several bots provide (so one of them may already be free to remove) and
+capabilities nothing covers, and lists which bots you could remove after the switch. A bot that is not in the catalogue is
+shown as **custom** when Discord does not list it as a verified app (KoolBot does not try to replace it) and as **unknown**
+otherwise, with a link to suggest a catalogue entry. If the GuildMembers intent is off, the report warns that a bot without
+an integration role may be missing. The report is read-only: removing a bot stays manual in Discord, KoolBot never kicks
+it, and data from other bots cannot be imported. An after-removal cleanup plan is not part of it yet.
+
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:
 

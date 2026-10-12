@@ -67,6 +67,7 @@ const scan: ServerScan = {
       tag: "Dyno#1",
       roleIds: [],
       overwriteChannelIds: ["c1"],
+      verified: true,
       isKoolBot: false,
     },
   ],
@@ -150,6 +151,42 @@ describe("renderAdoptPage (#1019)", () => {
     expect(main).toContain("Server scan");
     expect(main).not.toMatch(/<form/i);
     expect(main).not.toMatch(/<button/i);
+  });
+  it("renders the bot replacement report, escaped, with the catalogue link for unknown bots", () => {
+    const html = renderAdoptPage({
+      ...common,
+      scan: {
+        ...scan,
+        scanned: { config: { "moderation.enabled": true } } as any,
+        bots: [
+          ...scan.bots,
+          {
+            userId: "155149108183695360",
+            tag: "Dyno#1",
+            roleIds: [],
+            overwriteChannelIds: [],
+            verified: true,
+            isKoolBot: false,
+          },
+          {
+            userId: "300000000000000001",
+            tag: "<img src=x>#1",
+            roleIds: [],
+            overwriteChannelIds: [],
+            verified: false,
+            isKoolBot: false,
+          },
+        ],
+      },
+    });
+    expect(html).toContain("Bot replacement report");
+    expect(html).toContain("Can replace");
+    expect(html).toContain("Missing:");
+    expect(html).toContain("moderation.enabled");
+    expect(html).toContain("Community-built bot");
+    expect(html).toContain("&lt;img src=x&gt;#1");
+    expect(html).not.toContain("<img src=x>");
+    expect(html).toContain("GuildMembers intent is off");
   });
   it("renders a failure notice when the scan failed", () => {
     const html = renderAdoptPage({ ...common, scan: null, error: "boom <x>" });

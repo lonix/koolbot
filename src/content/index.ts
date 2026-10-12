@@ -4,3 +4,4 @@ export * from "./accolades.js";
 export * from "./achievements.js";
 export * from "./bot-features.js";
 export * from "./reaction-role-groups.js";
+export * from "./known-bots.js";
