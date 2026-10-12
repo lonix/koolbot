@@ -22,6 +22,7 @@ import {
   type IEvent,
   type RsvpStatus,
 } from "../models/event.js";
+import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -307,6 +308,8 @@ function accentColor(state: IEvent["state"]): number {
 
 export class EventService extends ScheduledService {
   private static instance: EventService;
+  /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
+  private readonly nativeSync: NativeEventSync;
 
   private constructor(client: Client) {
     super(client, {
@@ -315,6 +318,7 @@ export class EventService extends ScheduledService {
       cronContext: "events",
       runLabel: "Event scan",
     });
+    this.nativeSync = new NativeEventSync(client);
   }
 
   protected async isEnabled(): Promise<boolean> {
@@ -368,6 +372,12 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // Finished or cancelled events whose native scheduled event still
+        // needs closing (#1034); the link is released once that succeeds.
+        {
+          state: { $in: ["ended", "cancelled"] },
+          nativeEventId: { $ne: null },
+        },
         // Ended — or individually cancelled — recurring occurrences whose
         // successor has not been created yet (e.g. a crash between ending
         // and spawning, #744). A whole-series cancel is excluded.
@@ -390,12 +400,17 @@ export class EventService extends ScheduledService {
       (await this.configService.getNumber("events.channel_grace_minutes", 15)) *
       MS_PER_MINUTE;
 
+    // One listing of the guild's native events per scan, not one per event.
+    const native =
+      events.length > 0 ? await this.nativeSync.loadCache(guild) : null;
+
     for (const event of events) {
       try {
         await this.processEvent(event, guild, new Date(), {
           reminderMs,
           leadMs,
           graceMs,
+          native,
         });
       } catch (error) {
         logger.error(
@@ -410,7 +425,12 @@ export class EventService extends ScheduledService {
     event: IEvent,
     guild: Guild,
     now: Date,
-    windows: { reminderMs: number; leadMs: number; graceMs: number },
+    windows: {
+      reminderMs: number;
+      leadMs: number;
+      graceMs: number;
+      native?: NativeCache | null;
+    },
   ): Promise<void> {
     let changed = false;
 
@@ -425,7 +445,7 @@ export class EventService extends ScheduledService {
       // (its spawner died before re-checking); a cancelled sibling anywhere
       // in the series settles it, and the flag is carried onto this row.
       event.seriesCancelled = true;
-      await this.cancelOne(event);
+      await this.cancelOne(event, windows.native);
       return;
     }
 
@@ -477,6 +497,10 @@ export class EventService extends ScheduledService {
       await event.save();
       await this.logLifecycle(event);
     }
+
+    // Keep the native scheduled event in line (#1034): creates it for events
+    // that predate the toggle, pushes edits, and closes it on end/cancel.
+    await this.nativeSync.syncEvent(event, guild, windows.native);
 
     // 5. A finished (or individually cancelled) occurrence hands over to the
     // next one in its series.
@@ -724,6 +748,7 @@ export class EventService extends ScheduledService {
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
     );
+    await this.nativeSync.syncEvent(event);
     logger.info(`Created event ${sanitizeForLog(String(event._id))}`);
     return event;
   }
@@ -804,7 +829,10 @@ export class EventService extends ScheduledService {
     return { event: fresh, cancelled };
   }
 
-  private async cancelOne(event: IEvent): Promise<void> {
+  private async cancelOne(
+    event: IEvent,
+    nativeCache?: NativeCache | null,
+  ): Promise<void> {
     if (event.channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
@@ -824,6 +852,7 @@ export class EventService extends ScheduledService {
       event.announcementMessageId = fresh.announcementMessageId;
     }
     await this.updateAnnouncement(event);
+    await this.nativeSync.syncEvent(event, null, nativeCache);
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
   }
 

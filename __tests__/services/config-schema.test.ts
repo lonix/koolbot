@@ -483,6 +483,8 @@ describe("Config Schema", () => {
       "welcome.enabled": false,
       "rules.enabled": false,
       "events.enabled": false,
+      // Mirror of events to Discord scheduled events (#1034): opt-in.
+      "events.native.enabled": false,
       "lfg.enabled": false,
       "reactionroles.enabled": false,
       "notices.enabled": false,

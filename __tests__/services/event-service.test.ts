@@ -1047,7 +1047,7 @@ describe("recurring event lifecycle", () => {
       seriesCancelled: true,
     });
     expect(late.seriesCancelled).toBe(true);
-    expect(cancelOne).toHaveBeenCalledWith(late);
+    expect(cancelOne).toHaveBeenCalledWith(late, undefined);
     expect(created).toHaveLength(0);
   });
 
@@ -1188,7 +1188,7 @@ describe("recurring event lifecycle", () => {
         processEvent: (...a: unknown[]) => Promise<void>;
       }
     ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
-    expect(cancelOne).toHaveBeenCalledWith(open);
+    expect(cancelOne).toHaveBeenCalledWith(open, undefined);
     expect(created).toHaveLength(0);
   });
 

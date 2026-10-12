@@ -97,6 +97,15 @@ export interface IEvent extends Document {
   /** The whole series was cancelled; no occurrence may spawn a successor.
    * Set on every row of the series before its open rows are cancelled. */
   seriesCancelled: boolean;
+  /**
+   * Id of the mirrored Discord native scheduled event (#1034); null when none
+   * exists (mirroring off, not yet created, or finished and released). It is
+   * the restart-safe link: the sync reads it back instead of creating again.
+   */
+  nativeEventId: string | null;
+  /** The native event was deleted in Discord by someone else; the mirror
+   * respects that and does not recreate it. */
+  nativeDetached: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -149,6 +158,8 @@ const EventSchema = new Schema<IEvent>(
     spawnedFrom: { type: String, default: null },
     nextSpawned: { type: Boolean, default: false },
     seriesCancelled: { type: Boolean, default: false },
+    nativeEventId: { type: String, default: null },
+    nativeDetached: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },
   {

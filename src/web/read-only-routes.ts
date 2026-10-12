@@ -238,6 +238,8 @@ export const EVENTS_SETTING_KEYS = [
   "events.channel_grace_minutes",
   "events.reminder_minutes",
   "events.recurrence_enabled",
+  "events.native.enabled",
+  "events.native.location",
 ] as const;
 
 /**
