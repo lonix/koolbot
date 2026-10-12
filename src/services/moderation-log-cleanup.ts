@@ -26,6 +26,10 @@ import { ConfigService } from "./config-service.js";
  *   - every row belonging to a member with a live case, or whose case
  *     resolved within `moderation.cases.history_grace_days` (0 = while the
  *     case exists).
+ * It also skips the newest anti-raid lockdown/clear row of each guild (#1045):
+ * that row is the only record of whether a lockdown is still open, and the raid
+ * service restores its state from it after a restart, so pruning it would
+ * silently turn a long lockdown off. One row per guild, so `$nin` stays small.
  * Both sets are bounded by the number of cases (a handful a year), not by the
  * size of the log, so `$nin` is safe here. Resolved cases are pruned on their
  * own rule, `moderation.cases.retention_days`, measured from the last
@@ -162,25 +166,33 @@ export class ModerationLogCleanupService {
         ? new Date(Date.now() - graceDays * MS_PER_DAY)
         : null;
 
-    const [origins, resolutions, protectedCases] = await Promise.all([
-      ModerationCase.distinct("originEntryId", {}),
-      ModerationCase.distinct("resolutionEntryId", {
-        resolutionEntryId: { $ne: null },
-      }),
-      ModerationCase.find(
-        graceCutoff
-          ? {
-              $or: [
-                { status: { $in: LIVE_CASE_STATUSES } },
-                { updatedAt: { $gte: graceCutoff } },
-              ],
-            }
-          : {},
-      )
-        .select({ guildId: 1, userId: 1 })
-        .lean<Array<{ guildId: string; userId: string }>>()
-        .exec(),
-    ]);
+    const [origins, resolutions, protectedCases, raidState] = await Promise.all(
+      [
+        ModerationCase.distinct("originEntryId", {}),
+        ModerationCase.distinct("resolutionEntryId", {
+          resolutionEntryId: { $ne: null },
+        }),
+        ModerationCase.find(
+          graceCutoff
+            ? {
+                $or: [
+                  { status: { $in: LIVE_CASE_STATUSES } },
+                  { updatedAt: { $gte: graceCutoff } },
+                ],
+              }
+            : {},
+        )
+          .select({ guildId: 1, userId: 1 })
+          .lean<Array<{ guildId: string; userId: string }>>()
+          .exec(),
+        // Newest raid_lockdown / raid_clear row per guild: the lockdown state.
+        ModerationLog.aggregate<{ id: unknown }>([
+          { $match: { action: { $in: ["raid_lockdown", "raid_clear"] } } },
+          { $sort: { createdAt: -1 } },
+          { $group: { _id: "$guildId", id: { $first: "$_id" } } },
+        ]).exec(),
+      ],
+    );
 
     const seen = new Set<string>();
     const userKeys: Array<{ guildId: string; userId: string }> = [];
@@ -190,6 +202,9 @@ export class ModerationLogCleanupService {
       seen.add(key);
       userKeys.push({ guildId: c.guildId, userId: c.userId });
     }
-    return { entryIds: [...origins, ...resolutions], userKeys };
+    return {
+      entryIds: [...origins, ...resolutions, ...raidState.map((r) => r.id)],
+      userKeys,
+    };
   }
 }

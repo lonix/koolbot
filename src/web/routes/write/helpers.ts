@@ -8,6 +8,7 @@
  * routers behind `requireSession`, the admin-role check and `requireCsrf`.
  */
 
+import { RAID_CONFIG_KEYS } from "../../../services/raid-protection-service.js";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import {
   isValidCronExpression,
@@ -361,11 +362,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "moderation.cases.enabled",
     "moderation.cases.default_review_days",
     "moderation.cases.review_cron",
-    "moderation.raid.enabled",
-    "moderation.raid.dry_run",
-    "moderation.raid.join_threshold",
-    "moderation.raid.window_seconds",
-    "moderation.raid.alert_channel_id",
+    // Every anti-raid key (#1045), derived so the wizard cannot fall behind.
+    ...RAID_CONFIG_KEYS,
   ],
   events: [
     "events.enabled",

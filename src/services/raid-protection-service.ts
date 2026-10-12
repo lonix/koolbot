@@ -137,6 +137,12 @@ export interface RaidState {
   /** The moderator who started it, or null when it was automatic. */
   startedBy: string | null;
   joins: number[];
+  /**
+   * The settings the join window was counted under. When they change (dry run
+   * on/off, threshold, window) the window is emptied, so a count gathered
+   * under other rules can never start a lockdown under the new ones.
+   */
+  windowKey: string | null;
   actioned: number;
   wouldAction: number;
   skipped: number;
@@ -151,6 +157,7 @@ function freshState(): RaidState {
     since: null,
     startedBy: null,
     joins: [],
+    windowKey: null,
     actioned: 0,
     wouldAction: 0,
     skipped: 0,
@@ -202,6 +209,7 @@ export class RaidProtectionService {
   private readonly states = new Map<string, RaidState>();
   /** Quarantine-role problems already warned about, so a raid does not spam the log. */
   private readonly warned = new Set<string>();
+  private reloadRegistered = false;
 
   private constructor(client: Client) {
     this.client = client;
@@ -352,11 +360,12 @@ export class RaidProtectionService {
    *
    * Two cases are deliberately not restored, so an old row cannot resurrect a
    * lockdown nobody is expecting: a rehearsal (dry run) lockdown, and any
-   * lockdown found while the feature is off. The latter is closed with a
+   * lockdown found while the feature is inactive. The latter is closed with a
    * `raid_clear` row so it cannot come back when the feature is re-enabled.
    */
   public async initialize(): Promise<void> {
     if (!env.guildId) return;
+    this.registerReload();
     try {
       const last = await ModerationLog.findOne({
         guildId: env.guildId,
@@ -372,13 +381,13 @@ export class RaidProtectionService {
         .exec();
       if (last?.action === "raid_lockdown") {
         const settings = await this.loadSettings();
-        if (!settings.enabled) {
+        if (await this.getInactiveReason(settings)) {
           await this.writeRow(
             env.guildId,
             env.guildId,
             null,
             "raid_clear",
-            "Automatic: anti-raid was switched off while a lockdown was open",
+            "Automatic: anti-raid was inactive while a lockdown was open",
           );
           return;
         }
@@ -397,6 +406,66 @@ export class RaidProtectionService {
     } catch (error) {
       logger.error("Anti-raid: could not restore lockdown state:", error);
     }
+  }
+
+  /**
+   * Re-check the open lockdown whenever settings are saved, so switching the
+   * feature (or `moderation.enabled`) off ends the lockdown at once instead of
+   * leaving it to resume if the feature is switched back on.
+   */
+  private registerReload(): void {
+    if (this.reloadRegistered) return;
+    this.reloadRegistered = true;
+    this.configService.registerReloadCallback(async () => {
+      try {
+        const guildId = env.guildId;
+        const guild = guildId ? this.client.guilds.cache.get(guildId) : null;
+        if (!guild) return;
+        await this.reconcile(guild, await this.loadSettings(), Date.now());
+      } catch (error) {
+        logger.error("Anti-raid: error re-checking after a reload:", error);
+      }
+    });
+  }
+
+  /**
+   * Bring the guild's state in line with the current settings before anything
+   * acts on them. Every path that can act on a member or report state goes
+   * through here first. Returns why the feature is inactive, or null.
+   *
+   *   - Inactive (switched off, moderation log off, no intent): an open
+   *     lockdown is closed with a `raid_clear` row and the join window is
+   *     emptied, so re-enabling later starts clean.
+   *   - Dry run, threshold or window changed: the join window is emptied.
+   *   - A rehearsal lockdown outliving dry run, or one past its auto-expiry,
+   *     is ended.
+   */
+  private async reconcile(
+    guild: Guild,
+    settings: RaidSettings,
+    now: number,
+  ): Promise<string | null> {
+    const state = this.getState(guild.id);
+    const inactive = await this.getInactiveReason(settings);
+    if (inactive) {
+      state.joins.length = 0;
+      state.windowKey = null;
+      if (state.lockdown) {
+        await this.endLockdown(guild, state, settings, {
+          moderatorId: null,
+          reason: "Automatic: anti-raid became inactive during the lockdown",
+        });
+      }
+      return inactive;
+    }
+    const windowKey = `${settings.dryRun}|${settings.joinThreshold}|${settings.windowSeconds}`;
+    if (state.windowKey !== windowKey) {
+      state.joins.length = 0;
+      state.windowKey = windowKey;
+    }
+    await this.expireLockdownIfDue(guild, state, settings, now);
+    await this.endDryRunLockdownIfLive(guild, state, settings);
+    return null;
   }
 
   private getState(guildId: string): RaidState {
@@ -421,13 +490,9 @@ export class RaidProtectionService {
       const now = Date.now();
 
       const settings = await this.loadSettings();
-      if (await this.getInactiveReason(settings)) return false;
-
       const guild = member.guild;
+      if (await this.reconcile(guild, settings, now)) return false;
       const state = this.getState(guild.id);
-
-      await this.expireLockdownIfDue(guild, state, settings, now);
-      await this.endDryRunLockdownIfLive(guild, state, settings);
 
       // From the push to the `beginLockdown` call nothing awaits, and
       // `beginLockdown` sets `state.lockdown` before its own first await, so
@@ -482,10 +547,10 @@ export class RaidProtectionService {
   ): Promise<SetLockdownResult> {
     try {
       const settings = await this.loadSettings();
-      const inactive = await this.getInactiveReason(settings);
+      const now = Date.now();
+      const inactive = await this.reconcile(guild, settings, now);
       if (inactive) return { changed: false, message: inactive };
       const state = this.getState(guild.id);
-      const now = Date.now();
       if (on) {
         if (state.lockdown) {
           return { changed: false, message: "Lockdown is already on." };
@@ -523,10 +588,9 @@ export class RaidProtectionService {
     const settings = await this.loadSettings();
     const state = this.getState(guild.id);
     const now = Date.now();
-    await this.expireLockdownIfDue(guild, state, settings, now);
-    await this.endDryRunLockdownIfLive(guild, state, settings);
+    const inactiveReason = await this.reconcile(guild, settings, now);
     return {
-      inactiveReason: await this.getInactiveReason(settings),
+      inactiveReason,
       lockdown: state.lockdown,
       since: state.since,
       startedBy: state.startedBy,

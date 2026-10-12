@@ -9,6 +9,7 @@ import {
 import type { Client, Guild, GuildMember } from "discord.js";
 
 const config = new Map<string, unknown>();
+const reloadCallbacks: Array<() => Promise<void>> = [];
 const mockEnv = { guildId: "guild-1", guildMembersIntent: true };
 const mockLogger = {
   warn: jest.fn(),
@@ -23,6 +24,9 @@ const mockFindOne = jest.fn();
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
+      registerReloadCallback: (cb: () => Promise<void>) => {
+        reloadCallbacks.push(cb);
+      },
       getBoolean: async (key: string, def: boolean) =>
         (config.get(key) as boolean | undefined) ?? def,
       getNumber: async (key: string, def: number) =>
@@ -101,7 +105,10 @@ function makeMember(
   return { member, kick, timeout, rolesAdd };
 }
 
-const client = { user: { id: "bot-1" } } as unknown as Client;
+const client = {
+  user: { id: "bot-1" },
+  guilds: { cache: { get: (id: string) => (id === "guild-1" ? guild : null) } },
+} as unknown as Client;
 
 function liveConfig(extra: Record<string, unknown> = {}): void {
   config.clear();
@@ -163,6 +170,7 @@ describe("RaidProtectionService", () => {
   beforeEach(() => {
     RaidProtectionService.reset();
     jest.clearAllMocks();
+    reloadCallbacks.length = 0;
     roles.clear();
     mockEnv.guildId = "guild-1";
     mockEnv.guildMembersIntent = true;
@@ -349,6 +357,85 @@ describe("RaidProtectionService", () => {
         await RaidProtectionService.getInstance(client).getStatus(guild);
       expect(status.lockdown).toBe(true);
       expect(rowsWith("raid_clear")).toHaveLength(0);
+    });
+  });
+
+  describe("state across settings changes", () => {
+    it("does not act on the join that follows a dry-run to live switch", async () => {
+      liveConfig({ "moderation.raid.dry_run": true });
+      await joinMany(6);
+      liveConfig({ "moderation.raid.dry_run": false });
+      const next = makeMember();
+      const acted = await RaidProtectionService.getInstance(
+        client,
+      ).handleMemberJoin(next.member);
+      expect(acted).toBe(false);
+      expect(next.timeout).not.toHaveBeenCalled();
+      expect(rowsWith("raid_lockdown")).toHaveLength(1);
+      expect(
+        (await RaidProtectionService.getInstance(client).getStatus(guild))
+          .lockdown,
+      ).toBe(false);
+    });
+
+    it("starts counting afresh when the threshold is lowered", async () => {
+      liveConfig({ "moderation.raid.join_threshold": 50 });
+      await joinMany(8);
+      liveConfig({ "moderation.raid.join_threshold": 3 });
+      const next = makeMember();
+      expect(
+        await RaidProtectionService.getInstance(client).handleMemberJoin(
+          next.member,
+        ),
+      ).toBe(false);
+      expect(rowsWith("raid_lockdown")).toHaveLength(0);
+    });
+
+    it("starts counting afresh when the window changes", async () => {
+      await joinMany(3);
+      liveConfig({ "moderation.raid.window_seconds": 60 });
+      const next = makeMember();
+      expect(
+        await RaidProtectionService.getInstance(client).handleMemberJoin(
+          next.member,
+        ),
+      ).toBe(false);
+    });
+
+    it.each([
+      ["the feature", { "moderation.raid.enabled": false }],
+      ["the moderation log", { "moderation.enabled": false }],
+    ])("closes the lockdown when %s is switched off", async (_l, off) => {
+      const service = RaidProtectionService.getInstance(client);
+      await joinMany(4);
+      expect((await service.getStatus(guild)).lockdown).toBe(true);
+
+      liveConfig(off);
+      const during = makeMember();
+      expect(await service.handleMemberJoin(during.member)).toBe(false);
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+
+      // Re-enabled without a restart: no lockdown resumes, and the old window
+      // is gone, so the next join is not acted on.
+      liveConfig();
+      const after = makeMember();
+      expect(await service.handleMemberJoin(after.member)).toBe(false);
+      expect(after.timeout).not.toHaveBeenCalled();
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("closes the lockdown on a settings reload, before any join", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(reloadCallbacks).toHaveLength(1);
+      await service.initialize();
+      expect(reloadCallbacks).toHaveLength(1);
+      await service.setLockdown(guild, true, "mod-1");
+      liveConfig({ "moderation.raid.enabled": false });
+      await reloadCallbacks[0]();
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      liveConfig();
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
     });
   });
 

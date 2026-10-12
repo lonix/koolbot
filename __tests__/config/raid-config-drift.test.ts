@@ -7,7 +7,10 @@ import { RAID_CONFIG_KEYS } from "../../src/services/raid-protection-service.js"
 import { MODERATION_SETTING_KEYS } from "../../src/web/read-only-routes.js";
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
 import { CONFIG_CATEGORIES } from "../../src/models/config.js";
-import { WIZARD_FEATURE_SETTINGS } from "../../src/web/routes/write/helpers.js";
+import {
+  WIZARD_FEATURE_EXTRA_GATES,
+  WIZARD_FEATURE_SETTINGS,
+} from "../../src/web/routes/write/helpers.js";
 
 /**
  * Guards the anti-raid key set (#1045) so the service, the schema, the
@@ -51,12 +54,13 @@ describe("moderation.raid.* keys", () => {
     }
   });
 
-  it("have every wizard key in the schema, with the feature gate listed", () => {
-    const wizardKeys = WIZARD_FEATURE_SETTINGS.moderation.filter((k) =>
-      k.startsWith("moderation.raid."),
+  it("are all reachable in the wizard, with the master gate still first", () => {
+    const wizardKeys = WIZARD_FEATURE_SETTINGS.moderation;
+    expect(wizardKeys[0]).toBe("moderation.enabled");
+    for (const key of RAID_CONFIG_KEYS) expect(wizardKeys).toContain(key);
+    expect(WIZARD_FEATURE_EXTRA_GATES.moderation).toContain(
+      "moderation.raid.enabled",
     );
-    expect(wizardKeys).toContain("moderation.raid.enabled");
-    for (const key of wizardKeys) expect(schemaKeys).toContain(key);
   });
 
   it("gate /raidmode on the raid switch, not the moderation log alone", () => {

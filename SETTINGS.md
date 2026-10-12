@@ -1172,8 +1172,12 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   stays inactive, and says why in the startup log and in `/raidmode status`,
   when `moderation.enabled` or the Server Members Intent
   (`GUILD_MEMBERS_INTENT=true`) is off. A lockdown survives a restart because
-  it is restored from the newest row in the log, so with a short
-  `moderation.retention_days` a very long lockdown could be forgotten.
+  it is restored from the newest lockdown/clear row in the log; the retention
+  cleanup always keeps that one row per server, however old, so a long lockdown
+  is never forgotten. Switching anti-raid off (or `moderation.enabled`) ends an
+  open lockdown straight away with a log row, and changing dry run, the
+  threshold or the window starts the join count afresh, so nothing carries over
+  from one configuration to the next.
 - The log is an append-only history: rows are never edited. There are no
   appeals, expiring warnings, or auto-moderation thresholds — escalation stays
   a human decision. Lifecycle state lives beside the log, in cases (below).
