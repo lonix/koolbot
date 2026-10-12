@@ -30,7 +30,7 @@ import mongoose, { Document, Schema } from "mongoose";
  * `quarantine`, `raid_lockdown` and `raid_clear` are written only by the
  * anti-raid service (#1045). The two `raid_*` rows are guild-level state
  * changes rather than actions against a member, so their `userId` is the
- * guild id (see `RAID_GUILD_ROW_USER`): they appear in the server-wide
+ * guild id: they appear in the server-wide
  * listing and never in any member's `/modlog` history.
  */
 export const MODERATION_ACTIONS = [

@@ -70,10 +70,9 @@ const status = {
   lockdownAction: "timeout",
   minAccountAgeHours: 24,
   newAccountAction: "kick",
-  actioned: 2,
-  wouldAction: 0,
-  skipped: 1,
-  failed: 0,
+  counts: { actioned: 2, wouldAction: 0, skipped: 1, failed: 0 },
+  gateCounts: { actioned: 7, wouldAction: 0, skipped: 0, failed: 0 },
+  unrecorded: 0,
 };
 
 describe("/raidmode", () => {
@@ -225,5 +224,20 @@ describe("/raidmode", () => {
         expect(setting).toContain(`${action}: ${label}`);
       }
     });
+  });
+
+  it("labels lockdown and gate counters separately and flags unwritten rows", () => {
+    const text = JSON.stringify(
+      buildStatusEmbed({
+        ...status,
+        lockdown: false,
+        unrecorded: 2,
+      } as never).toJSON(),
+    );
+    expect(text).toContain("This lockdown so far:** 2 acted on");
+    expect(text).toContain(
+      "New-account gate since the bot started:** 7 acted on",
+    );
+    expect(text).toContain("2 log row(s) could not be written");
   });
 });

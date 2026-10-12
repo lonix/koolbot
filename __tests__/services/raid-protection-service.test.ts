@@ -320,8 +320,8 @@ describe("RaidProtectionService", () => {
       const status =
         await RaidProtectionService.getInstance(client).getStatus(guild);
       expect(status.lockdown).toBe(true);
-      expect(status.wouldAction).toBe(3);
-      expect(status.actioned).toBe(0);
+      expect(status.counts.wouldAction).toBe(3);
+      expect(status.counts.actioned).toBe(0);
     });
   });
 
@@ -446,6 +446,68 @@ describe("RaidProtectionService", () => {
     });
   });
 
+  describe("detection reset and counters", () => {
+    it("does not restart a cleared lockdown from the joins that caused it", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await joinMany(4);
+      expect(rowsWith("raid_lockdown")).toHaveLength(1);
+      await service.setLockdown(guild, false, "mod-1");
+      const next = makeMember();
+      expect(await service.handleMemberJoin(next.member)).toBe(false);
+      expect(rowsWith("raid_lockdown")).toHaveLength(1);
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("keeps the new-account gate out of the lockdown counters", async () => {
+      liveConfig({
+        "moderation.raid.min_account_age_hours": 24,
+        "moderation.raid.dry_run": true,
+      });
+      const service = RaidProtectionService.getInstance(client);
+      await service.handleMemberJoin(makeMember({ ageMs: HOUR }).member);
+      const status = await service.getStatus(guild);
+      expect(status.lockdown).toBe(false);
+      expect(status.counts.wouldAction).toBe(0);
+      expect(status.gateCounts.wouldAction).toBe(1);
+    });
+
+    it("counts lockdown actions against the lockdown only", async () => {
+      await joinMany(4);
+      const status =
+        await RaidProtectionService.getInstance(client).getStatus(guild);
+      expect(status.counts.actioned).toBe(1);
+      expect(status.gateCounts.actioned).toBe(0);
+    });
+  });
+
+  describe("log row durability", () => {
+    it("retries a failed write and records the row", async () => {
+      mockCreate.mockRejectedValueOnce(new Error("blip")).mockResolvedValue({});
+      await joinMany(4);
+      expect(rowsWith("raid_lockdown")).toHaveLength(2);
+      const status =
+        await RaidProtectionService.getInstance(client).getStatus(guild);
+      expect(status.unrecorded).toBe(0);
+    });
+
+    it("queues rows during an outage and writes them in order afterwards", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      mockCreate.mockRejectedValue(new Error("db down"));
+      await service.setLockdown(guild, true, "mod-1");
+      await service.setLockdown(guild, false, "mod-1");
+      expect((await service.getStatus(guild)).unrecorded).toBe(2);
+      mockCreate.mockClear();
+
+      mockCreate.mockResolvedValue({});
+      const status = await service.getStatus(guild);
+      expect(status.unrecorded).toBe(0);
+      expect(mockCreate.mock.calls.map((c) => c[0].action)).toEqual([
+        "raid_lockdown",
+        "raid_clear",
+      ]);
+    });
+  });
+
   describe("actions and safety", () => {
     it("kicks when configured", async () => {
       liveConfig({ "moderation.raid.lockdown_action": "kick" });
@@ -494,7 +556,7 @@ describe("RaidProtectionService", () => {
         expect(rowsWith("quarantine")).toHaveLength(0);
         const status =
           await RaidProtectionService.getInstance(client).getStatus(guild);
-        expect(status.skipped).toBe(2);
+        expect(status.counts.skipped).toBe(2);
       },
     );
 
@@ -534,7 +596,7 @@ describe("RaidProtectionService", () => {
       await service.handleMemberJoin(failing[1].member);
       expect(rowsWith("timeout")).toHaveLength(0);
       const status = await service.getStatus(guild);
-      expect(status.failed).toBe(2);
+      expect(status.counts.failed).toBe(2);
       // One lockdown alert plus a single failure alert.
       expect(send).toHaveBeenCalledTimes(2);
     });

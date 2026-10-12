@@ -1178,6 +1178,11 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   open lockdown straight away with a log row, and changing dry run, the
   threshold or the window starts the join count afresh, so nothing carries over
   from one configuration to the next.
+  A log row the database refuses is retried and, if it still fails, queued in
+  memory and written in order when the database is back; `/raidmode status`
+  shows how many are waiting. That queue is lost if the bot stops first, and a
+  lost lockdown-cleared row makes the next start restore the lockdown (the safe
+  direction; `/raidmode off` clears it).
 - The log is an append-only history: rows are never edited. There are no
   appeals, expiring warnings, or auto-moderation thresholds — escalation stays
   a human decision. Lifecycle state lives beside the log, in cases (below).

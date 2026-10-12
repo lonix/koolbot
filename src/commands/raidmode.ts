@@ -7,6 +7,7 @@ import {
 } from "discord.js";
 import {
   RaidProtectionService,
+  type ActionCounts,
   type RaidStatus,
 } from "../services/raid-protection-service.js";
 import logger from "../utils/logger.js";
@@ -35,6 +36,10 @@ export const data = new SlashCommandBuilder()
       ),
   );
 
+function countsLine(c: ActionCounts): string {
+  return `${c.actioned} acted on, ${c.wouldAction} would have been (dry run), ${c.skipped} skipped, ${c.failed} failed`;
+}
+
 /** Render the status snapshot. Pure, for direct testing. */
 export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
   const lines: string[] = [];
@@ -57,8 +62,14 @@ export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
         ? `under ${status.minAccountAgeHours}h old gets ${status.newAccountAction}`
         : "off"
     }`,
-    `**This lockdown so far:** ${status.actioned} acted on, ${status.wouldAction} would have been (dry run), ${status.skipped} skipped, ${status.failed} failed`,
+    `**This lockdown so far:** ${countsLine(status.counts)}`,
+    `**New-account gate since the bot started:** ${countsLine(status.gateCounts)}`,
   );
+  if (status.unrecorded > 0) {
+    lines.push(
+      `**Warning:** ${status.unrecorded} log row(s) could not be written to the database yet and are being retried.`,
+    );
+  }
   return new EmbedBuilder()
     .setColor(status.lockdown ? 0xdc2626 : 0x22c55e)
     .setTitle("🛡️ Anti-raid status")

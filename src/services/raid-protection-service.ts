@@ -50,6 +50,10 @@ export { RAID_ACTIONS, type RaidAction };
  */
 export const INIT_WAIT_MS = 10_000;
 
+/** Waits between attempts to write a log row, then it is queued for later. */
+export const ROW_RETRY_DELAYS_MS = [100, 300];
+const MAX_PENDING_ROWS = 500;
+
 export const MIN_JOIN_THRESHOLD = 2;
 export const MIN_WINDOW_SECONDS = 5;
 export const MAX_WINDOW_SECONDS = 3600;
@@ -135,6 +139,18 @@ export function isNewAccount(
   return now - createdTimestamp < minAgeHours * MS_PER_HOUR;
 }
 
+/** What happened to members, counted per source of the decision. */
+export interface ActionCounts {
+  actioned: number;
+  wouldAction: number;
+  skipped: number;
+  failed: number;
+}
+
+function freshCounts(): ActionCounts {
+  return { actioned: 0, wouldAction: 0, skipped: 0, failed: 0 };
+}
+
 /** Per-guild runtime state. */
 export interface RaidState {
   lockdown: boolean;
@@ -155,10 +171,10 @@ export interface RaidState {
    * under other rules can never start a lockdown under the new ones.
    */
   windowKey: string | null;
-  actioned: number;
-  wouldAction: number;
-  skipped: number;
-  failed: number;
+  /** Counters for the current/most recent lockdown. */
+  lockdownCounts: ActionCounts;
+  /** Counters for the independent new-account gate, since the process started. */
+  gateCounts: ActionCounts;
   failureAlerted: boolean;
 }
 
@@ -170,10 +186,8 @@ function freshState(): RaidState {
     startedBy: null,
     joins: [],
     windowKey: null,
-    actioned: 0,
-    wouldAction: 0,
-    skipped: 0,
-    failed: 0,
+    lockdownCounts: freshCounts(),
+    gateCounts: freshCounts(),
     failureAlerted: false,
   };
 }
@@ -191,10 +205,12 @@ export interface RaidStatus {
   lockdownAction: RaidAction;
   minAccountAgeHours: number;
   newAccountAction: RaidAction;
-  actioned: number;
-  wouldAction: number;
-  skipped: number;
-  failed: number;
+  /** Counts for the current/most recent lockdown. */
+  counts: ActionCounts;
+  /** Counts for the independent new-account gate since the bot started. */
+  gateCounts: ActionCounts;
+  /** Log rows still waiting to be written after a database failure. */
+  unrecorded: number;
 }
 
 export interface SetLockdownResult {
@@ -222,6 +238,9 @@ export class RaidProtectionService {
   /** Quarantine-role problems already warned about, so a raid does not spam the log. */
   private readonly warned = new Set<string>();
   private reloadRegistered = false;
+  /** Log rows not yet written because the database failed, oldest first. */
+  private pendingRows: Array<Record<string, unknown>> = [];
+  private draining = false;
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
@@ -516,6 +535,8 @@ export class RaidProtectionService {
     now: number,
   ): Promise<string | null> {
     await this.awaitReady();
+    // Retry rows a database outage left unwritten (single attempt, in order).
+    if (this.pendingRows.length > 0) await this.drainPendingRows(false);
     const state = this.getState(guild.id);
     const inactive = await this.getInactiveReason(settings);
     if (inactive) {
@@ -678,10 +699,9 @@ export class RaidProtectionService {
       lockdownAction: settings.lockdownAction,
       minAccountAgeHours: settings.minAccountAgeHours,
       newAccountAction: settings.newAccountAction,
-      actioned: state.actioned,
-      wouldAction: state.wouldAction,
-      skipped: state.skipped,
-      failed: state.failed,
+      counts: { ...state.lockdownCounts },
+      gateCounts: { ...state.gateCounts },
+      unrecorded: this.pendingRows.length,
     };
   }
 
@@ -736,10 +756,7 @@ export class RaidProtectionService {
     state.dryRun = settings.dryRun;
     state.since = now;
     state.startedBy = info.moderatorId;
-    state.actioned = 0;
-    state.wouldAction = 0;
-    state.skipped = 0;
-    state.failed = 0;
+    state.lockdownCounts = freshCounts();
     state.failureAlerted = false;
 
     const suffix = settings.dryRun ? DRY_RUN_SUFFIX : "";
@@ -770,12 +787,15 @@ export class RaidProtectionService {
     info: { moderatorId: string | null; reason: string },
   ): Promise<void> {
     const summary = state.dryRun
-      ? `${state.wouldAction} would have been acted on`
-      : `${state.actioned} acted on, ${state.skipped} skipped, ${state.failed} failed`;
+      ? `${state.lockdownCounts.wouldAction} would have been acted on`
+      : `${state.lockdownCounts.actioned} acted on, ${state.lockdownCounts.skipped} skipped, ${state.lockdownCounts.failed} failed`;
     state.lockdown = false;
     state.dryRun = false;
     state.since = null;
     state.startedBy = null;
+    // Ending a lockdown resets detection too: the joins that triggered it must
+    // not count again, or the very next join would restart it.
+    state.joins.length = 0;
 
     await this.writeRow(
       guild.id,
@@ -801,8 +821,11 @@ export class RaidProtectionService {
     state: RaidState,
   ): Promise<boolean> {
     const guildId = member.guild.id;
+    // A decision made during a lockdown counts against it; the independent
+    // new-account gate has its own counters.
+    const counts = state.lockdown ? state.lockdownCounts : state.gateCounts;
     if (settings.dryRun) {
-      state.wouldAction++;
+      counts.wouldAction++;
       logger.info(
         `Anti-raid (dry run): would ${decision.action} user ${sanitizeForLog(member.id)} in guild ${sanitizeForLog(guildId)}: ${decision.reason}`,
       );
@@ -813,7 +836,7 @@ export class RaidProtectionService {
     if (decision.action === "quarantine") {
       role = await this.resolveQuarantineRole(member.guild, settings);
       if (!role) {
-        state.skipped++;
+        counts.skipped++;
         return false;
       }
     }
@@ -828,7 +851,7 @@ export class RaidProtectionService {
           ? member.moderatable
           : member.manageable;
     if (!allowed) {
-      state.skipped++;
+      counts.skipped++;
       logger.warn(
         `Anti-raid: skipped ${decision.action} on user ${sanitizeForLog(member.id)}: the bot is not allowed to act on this member (role position or permission)`,
       );
@@ -848,7 +871,7 @@ export class RaidProtectionService {
         await member.roles.add(role, auditReason);
       }
     } catch (error) {
-      state.failed++;
+      counts.failed++;
       logger.error(
         `Anti-raid: ${decision.action} failed for user ${sanitizeForLog(member.id)}:`,
         error,
@@ -864,7 +887,7 @@ export class RaidProtectionService {
       return false;
     }
 
-    state.actioned++;
+    counts.actioned++;
     await this.writeRow(
       guildId,
       member.id,
@@ -905,6 +928,18 @@ export class RaidProtectionService {
     return role;
   }
 
+  /**
+   * Queue a log row and write it. The audit mirror deliberately ignores
+   * actions the bot executed itself, so a lost row would be lost for good;
+   * therefore a failed write is retried with a short backoff and, if it still
+   * fails, kept in memory and retried on the next write, join, status read or
+   * settings reload, in order, so a `raid_clear` can never land before the
+   * `raid_lockdown` it closes. Failures are logged at error level and shown as
+   * "unrecorded" in `/raidmode status`. The queue is in memory only: rows still
+   * pending when the process dies are lost, and a lost `raid_clear` makes the
+   * next start restore the lockdown, the safe direction (`/raidmode off`
+   * clears it). Bounded so a long outage cannot grow memory.
+   */
   private async writeRow(
     guildId: string,
     userId: string,
@@ -912,18 +947,54 @@ export class RaidProtectionService {
     action: ModerationAction,
     reason: string,
   ): Promise<void> {
+    this.pendingRows.push({
+      guildId,
+      userId,
+      moderatorId,
+      action,
+      reason: truncateText(reason, MAX_REASON_LENGTH),
+      source: "raid",
+      createdAt: new Date(),
+    });
+    if (this.pendingRows.length > MAX_PENDING_ROWS) {
+      this.pendingRows.shift();
+      logger.error(
+        "Anti-raid: too many unwritten log rows, dropped the oldest one",
+      );
+    }
+    await this.drainPendingRows(true);
+  }
+
+  private async drainPendingRows(withRetries: boolean): Promise<void> {
+    if (this.draining) return;
+    this.draining = true;
     try {
-      await ModerationLog.create({
-        guildId,
-        userId,
-        moderatorId,
-        action,
-        reason: truncateText(reason, MAX_REASON_LENGTH),
-        source: "raid",
-      });
-    } catch (error) {
-      // The action already happened; losing the row is logged, not thrown.
-      logger.error("Anti-raid: failed to write moderation log row:", error);
+      while (this.pendingRows.length > 0) {
+        const row = this.pendingRows[0];
+        let written = false;
+        const attempts = withRetries ? ROW_RETRY_DELAYS_MS.length + 1 : 1;
+        for (let i = 0; i < attempts && !written; i++) {
+          try {
+            await ModerationLog.create(row);
+            written = true;
+          } catch (error) {
+            logger.error(
+              `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.pendingRows.length} pending):`,
+              error,
+            );
+            if (i < attempts - 1) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, ROW_RETRY_DELAYS_MS[i]),
+              );
+            }
+          }
+        }
+        if (!written) return;
+        // The head may have been dropped by the cap while we were writing.
+        if (this.pendingRows[0] === row) this.pendingRows.shift();
+      }
+    } finally {
+      this.draining = false;
     }
   }
 
