@@ -42,6 +42,17 @@ jobs:
       - name: Prettier
         run: npm run format:check
 
+      # Some npm versions silently drop the glibc/musl "libc" fields from
+      # package-lock.json, which the Alpine image needs (#1087). Compare against
+      # the base branch; only meaningful on pull requests.
+      - name: Fetch base branch lockfile
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin main
+
+      - name: Check lockfile libc constraints
+        if: github.event_name == 'pull_request'
+        run: npm run check:lockfile -- --base-ref FETCH_HEAD
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest

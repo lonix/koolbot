@@ -515,6 +515,33 @@ not. The `PR Title Lint` workflow enforces this on every PR.
 
 5. **Update Dockerfiles** if dependencies changed
 
+6. **Check `package-lock.json` after dependency changes** (see below)
+
+### Dependency changes and `package-lock.json`
+
+Some npm versions silently drop the `"libc"` fields (glibc/musl) from the platform-specific optional
+dependencies in `package-lock.json` when they regenerate it. The production image is Alpine (musl) and
+needs those fields to pick the right native binary, and the loss is easy to miss in a diff review.
+
+CI fails a pull request that removes `libc` from a package that had it on `main`, and names the packages.
+Run the same check locally before pushing:
+
+```bash
+git fetch origin main
+npm run check:lockfile -- --base-ref origin/main
+```
+
+If it fails, restore the lockfile from `main` and re-apply only your intended change:
+
+```bash
+git checkout origin/main -- package-lock.json
+npm install <your intended change>
+npm run check:lockfile -- --base-ref origin/main
+```
+
+Adding or removing a native dependency together with its `libc` entries is fine. If a Dependabot PR
+trips the check, rebuild its lockfile the same way.
+
 ### Pull Request Template
 
 When you open a PR, the template will guide you through the required information:
