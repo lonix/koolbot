@@ -861,7 +861,10 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   mirrored and one warning is logged. The link is stored on the event, so a
   restart never duplicates it. Turning the toggle on also mirrors existing
   future events; turning it off stops syncing and leaves existing native
-  events as they are. A native event deleted by hand is not recreated.
+  events as they are. A native event deleted by hand is not recreated, and one
+  switched to a voice or stage event by hand is put back to an external event.
+  A create that times out is not repeated for five minutes; the bot looks for
+  the late event first and adopts it.
   Not yet covered: native "Interested" to RSVP bridge, adopting existing native
   events, cover images, and mapping recurrence to a native recurrence rule.
 

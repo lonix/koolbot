@@ -103,6 +103,13 @@ export interface IEvent extends Document {
    * the restart-safe link: the sync reads it back instead of creating again.
    */
   nativeEventId: string | null;
+  /**
+   * When a native-event create was started and its id not yet stored (#1034).
+   * A create that times out may still complete in Discord, so a later scan
+   * must not create again straight away: it first looks for the late event
+   * (adoption) and only retries after a grace period. Cleared on claim.
+   */
+  nativeCreateStartedAt: Date | null;
   /** The native event was deleted in Discord by someone else; the mirror
    * respects that and does not recreate it. */
   nativeDetached: boolean;
@@ -159,6 +166,7 @@ const EventSchema = new Schema<IEvent>(
     nextSpawned: { type: Boolean, default: false },
     seriesCancelled: { type: Boolean, default: false },
     nativeEventId: { type: String, default: null },
+    nativeCreateStartedAt: { type: Date, default: null },
     nativeDetached: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },

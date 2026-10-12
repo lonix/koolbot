@@ -47,6 +47,9 @@ const NAME_MAX = 100;
 const DESCRIPTION_MAX = 1000;
 const LOCATION_MAX = 100;
 const DISCORD_UNKNOWN_SCHEDULED_EVENT = 10070;
+/** How long a started-but-unclaimed create is given to show up in Discord
+ * (a timed-out request may still complete) before it is retried. */
+export const CREATE_GRACE_MS = 5 * MS_PER_MINUTE;
 
 export const DEFAULT_NATIVE_LOCATION =
   "Voice channel in this server (see the event announcement)";
@@ -91,6 +94,7 @@ export function diffNativeFields(
     scheduledEndTimestamp: number | null;
     entityType: GuildScheduledEventEntityType;
     entityMetadata: { location: string | null } | null;
+    channelId?: string | null;
   },
   want: NativeEventFields,
 ): Partial<{
@@ -100,6 +104,8 @@ export function diffNativeFields(
   scheduledStartTime: Date;
   scheduledEndTime: Date;
   entityMetadata: { location: string };
+  entityType: GuildScheduledEventEntityType;
+  channel: null;
 }> {
   const diff: ReturnType<typeof diffNativeFields> = {};
   if (native.name !== want.name) diff.name = want.name;
@@ -109,14 +115,22 @@ export function diffNativeFields(
   if (native.scheduledStartTimestamp !== want.start.getTime()) {
     diff.scheduledStartTime = want.start;
   }
-  if (native.scheduledEndTimestamp !== want.end.getTime()) {
-    diff.scheduledEndTime = want.end;
-  }
-  if (
-    native.entityType === GuildScheduledEventEntityType.External &&
-    (native.entityMetadata?.location ?? "") !== want.location
-  ) {
+  if (native.entityType !== GuildScheduledEventEntityType.External) {
+    // An admin switched the mirror to a voice/stage event. Put it back: the
+    // typings allow `entityType: External` with `channel: null` plus a
+    // location and an end time (all three sent together). Not verified
+    // against Discord itself.
+    diff.entityType = GuildScheduledEventEntityType.External;
+    diff.channel = null;
     diff.entityMetadata = { location: want.location };
+    diff.scheduledEndTime = want.end;
+  } else {
+    if (native.scheduledEndTimestamp !== want.end.getTime()) {
+      diff.scheduledEndTime = want.end;
+    }
+    if ((native.entityMetadata?.location ?? "") !== want.location) {
+      diff.entityMetadata = { location: want.location };
+    }
   }
   return diff;
 }
@@ -274,31 +288,76 @@ export class NativeEventSync {
       return;
     }
 
-    const created = await this.callApi(
-      () =>
-        guild.scheduledEvents.create({
-          name: want.name,
-          description: want.description || undefined,
-          scheduledStartTime: want.start,
-          scheduledEndTime: want.end,
-          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-          entityType: GuildScheduledEventEntityType.External,
-          entityMetadata: { location: want.location },
-          reason: "KoolBot event mirror",
-        }),
-      "create guild scheduled event",
-      // Non-idempotent: never replay a create that merely timed out.
-    );
+    // A create that was started but never claimed (timeout, crash) may still
+    // land in Discord. Adoption above already looked for it; do not create
+    // again until the grace period has passed with nothing found.
+    if (!(await this.markCreateStarted(event))) return;
+
+    let created: GuildScheduledEvent;
+    try {
+      created = await this.callApi(
+        () =>
+          guild.scheduledEvents.create({
+            name: want.name,
+            description: want.description || undefined,
+            scheduledStartTime: want.start,
+            scheduledEndTime: want.end,
+            privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+            entityType: GuildScheduledEventEntityType.External,
+            entityMetadata: { location: want.location },
+            reason: "KoolBot event mirror",
+          }),
+        "create guild scheduled event",
+        // Non-idempotent: never replay a create that merely timed out.
+      );
+    } catch (error) {
+      // Discord answered with an error, so nothing was created: allow an
+      // immediate retry. Anything else (timeout) may have created it; the
+      // marker stays so the next scans adopt rather than duplicate.
+      if (error instanceof DiscordAPIError) {
+        await Event.updateOne(
+          { _id: event._id },
+          { $set: { nativeCreateStartedAt: null } },
+        );
+      }
+      throw error;
+    }
     cache?.set(created.id, created);
 
     if (!(await this.claim(event, created.id))) {
-      // Lost the race (or the row is gone): do not leave a duplicate behind.
-      await this.callApi(
-        () => guild.scheduledEvents.delete(created.id),
-        "delete duplicate guild scheduled event",
-      ).catch(() => undefined);
-      cache?.delete(created.id);
+      // Lost the claim. Only an unreferenced event is a duplicate: another
+      // row may have adopted it meanwhile, and deleting that would take its
+      // mirror away.
+      const owned = await Event.exists({ nativeEventId: created.id });
+      if (!owned) {
+        await this.callApi(
+          () => guild.scheduledEvents.delete(created.id),
+          "delete duplicate guild scheduled event",
+        ).catch(() => undefined);
+        cache?.delete(created.id);
+      }
     }
+  }
+
+  /**
+   * Atomically record that a create is starting. False when one was started
+   * recently (within `CREATE_GRACE_MS`) and may still be in flight.
+   */
+  private async markCreateStarted(event: IEvent): Promise<boolean> {
+    const staleBefore = new Date(Date.now() - CREATE_GRACE_MS);
+    const marked = await Event.findOneAndUpdate(
+      {
+        _id: event._id,
+        nativeEventId: null,
+        state: { $in: ["scheduled", "active"] },
+        $or: [
+          { nativeCreateStartedAt: null },
+          { nativeCreateStartedAt: { $lt: staleBefore } },
+        ],
+      },
+      { $set: { nativeCreateStartedAt: new Date() } },
+    );
+    return !!marked;
   }
 
   /** A bot-created native event matching this row that no row references. */
@@ -336,7 +395,7 @@ export class NativeEventSync {
           nativeEventId: null,
           state: { $in: ["scheduled", "active"] },
         },
-        { $set: { nativeEventId: nativeId } },
+        { $set: { nativeEventId: nativeId, nativeCreateStartedAt: null } },
       );
     } catch (error) {
       // The unique index on `nativeEventId`: another row (or replica) already

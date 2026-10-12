@@ -114,6 +114,17 @@ function makeGuild(opts: { perms?: bigint[]; natives?: unknown[] } = {}) {
 const client = { user: { id: BOT_ID }, guilds: { fetch: jest.fn() } } as never;
 const passthrough = async <T>(call: () => Promise<T>): Promise<T> => call();
 
+/** Marker writes always succeed; the id claim (which resets the marker to
+ * null) gets `claim`: a document, null (lost), or an Error to throw. */
+function mockClaim(claim: unknown): void {
+  EventMock.findOneAndUpdate.mockImplementation(async (...args: unknown[]) => {
+    const set = (args[1] as { $set: Record<string, unknown> }).$set;
+    if (set.nativeCreateStartedAt instanceof Date) return { _id: "ev1" };
+    if (claim instanceof Error) throw claim;
+    return claim;
+  });
+}
+
 function makeSync() {
   return new NativeEventSync(client, passthrough as never);
 }
@@ -191,7 +202,7 @@ describe("NativeEventSync.syncEvent", () => {
     expect(arg.scheduledEndTime).toBeInstanceOf(Date);
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ _id: "ev1", nativeEventId: null }),
-      { $set: { nativeEventId: "created1" } },
+      { $set: { nativeEventId: "created1", nativeCreateStartedAt: null } },
     );
     expect((event as { nativeEventId: string }).nativeEventId).toBe("created1");
   });
@@ -229,7 +240,7 @@ describe("NativeEventSync.syncEvent", () => {
     await makeSync().syncEvent(makeEvent(), guild);
     expect(scheduledEvents.create).not.toHaveBeenCalled();
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(expect.anything(), {
-      $set: { nativeEventId: "orphan1" },
+      $set: { nativeEventId: "orphan1", nativeCreateStartedAt: null },
     });
   });
 
@@ -251,7 +262,7 @@ describe("NativeEventSync.syncEvent", () => {
   });
 
   it("deletes the event it just created when it loses the claim race", async () => {
-    EventMock.findOneAndUpdate.mockResolvedValue(null);
+    mockClaim(null);
     const { guild, scheduledEvents } = makeGuild();
     await makeSync().syncEvent(makeEvent(), guild);
     expect(scheduledEvents.delete).toHaveBeenCalledWith("created1");
@@ -360,7 +371,7 @@ describe("NativeEventSync.syncEvent", () => {
   });
 
   it("treats a unique-index conflict on the claim as a lost race", async () => {
-    EventMock.findOneAndUpdate.mockRejectedValue(
+    mockClaim(
       Object.assign(new Error("E11000 duplicate key"), { code: 11000 }),
     );
     const orphan = makeNative({ id: "orphan1" });
@@ -373,7 +384,7 @@ describe("NativeEventSync.syncEvent", () => {
   });
 
   it("removes the event it created when the claim hits the unique index", async () => {
-    EventMock.findOneAndUpdate.mockRejectedValue(
+    mockClaim(
       Object.assign(new Error("E11000 duplicate key"), { code: 11000 }),
     );
     const { guild, scheduledEvents } = makeGuild();
@@ -402,5 +413,112 @@ describe("NativeEventSync.syncEvent", () => {
       scheduledEvents.create.mock.calls[0] as unknown[]
     )[0] as Record<string, unknown>;
     expect(arg.description).toBeUndefined();
+  });
+
+  it("does not delete a created event another row has since claimed", async () => {
+    mockClaim(null);
+    EventMock.exists.mockResolvedValue({ _id: "other" });
+    const { guild, scheduledEvents } = makeGuild();
+    await makeSync().syncEvent(makeEvent(), guild);
+    expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
+    expect(scheduledEvents.delete).not.toHaveBeenCalled();
+  });
+
+  it("restores the external type when an admin switched the mirror to a voice event", async () => {
+    const { guild, scheduledEvents } = makeGuild({
+      natives: [
+        makeNative({
+          entityType: GuildScheduledEventEntityType.Voice,
+          entityMetadata: null,
+          channelId: "vc1",
+        }),
+      ],
+    });
+    await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({
+        entityType: GuildScheduledEventEntityType.External,
+        channel: null,
+        entityMetadata: { location: "Somewhere" },
+        scheduledEndTime: expect.any(Date),
+      }),
+    );
+  });
+
+  describe("create markers (timed-out creates)", () => {
+    // Emulates the marker compare-and-set against one row's stored value.
+    function markerDb(initial: Date | null) {
+      let startedAt = initial;
+      EventMock.findOneAndUpdate.mockImplementation(
+        async (...args: unknown[]) => {
+          const filter = args[0] as {
+            $or?: Array<{ nativeCreateStartedAt: null | { $lt: Date } }>;
+          };
+          const set = (args[1] as { $set: Record<string, unknown> }).$set;
+          if (set.nativeCreateStartedAt instanceof Date) {
+            const ok = filter.$or!.some((c) =>
+              c.nativeCreateStartedAt === null
+                ? startedAt === null
+                : startedAt !== null &&
+                  startedAt.getTime() < c.nativeCreateStartedAt.$lt.getTime(),
+            );
+            if (!ok) return null;
+            startedAt = set.nativeCreateStartedAt;
+            return { _id: "ev1" };
+          }
+          startedAt = null; // the id claim resets the marker
+          return { _id: "ev1" };
+        },
+      );
+      return () => startedAt;
+    }
+
+    it("adopts a late-appearing event on a later scan instead of creating again", async () => {
+      const marker = markerDb(null);
+      const first = makeGuild();
+      first.scheduledEvents.create.mockRejectedValueOnce(new Error("timeout"));
+      const sync = makeSync();
+      await sync.syncEvent(makeEvent(), first.guild);
+      expect(marker()).not.toBeNull(); // marker kept for the later scan
+
+      // The timed-out request completed in Discord after all.
+      const second = makeGuild({ natives: [makeNative({ id: "late1" })] });
+      await sync.syncEvent(makeEvent(), second.guild);
+      expect(second.scheduledEvents.create).not.toHaveBeenCalled();
+      expect(EventMock.findOneAndUpdate).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { $set: { nativeEventId: "late1", nativeCreateStartedAt: null } },
+      );
+    });
+
+    it("does not retry within the grace period, then retries after it", async () => {
+      const { CREATE_GRACE_MS } =
+        await import("../../src/services/event-native-sync.js");
+      markerDb(new Date(Date.now() - 60 * 1000));
+      const within = makeGuild();
+      await makeSync().syncEvent(makeEvent(), within.guild);
+      expect(within.scheduledEvents.create).not.toHaveBeenCalled();
+
+      markerDb(new Date(Date.now() - CREATE_GRACE_MS - 1000));
+      const after = makeGuild();
+      await makeSync().syncEvent(makeEvent(), after.guild);
+      expect(after.scheduledEvents.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears the marker when Discord rejects the create outright", async () => {
+      markerDb(null);
+      const { guild, scheduledEvents } = makeGuild();
+      scheduledEvents.create.mockRejectedValueOnce(
+        Object.assign(Object.create(DiscordAPIError.prototype), {
+          code: 50013,
+        }),
+      );
+      await makeSync().syncEvent(makeEvent(), guild);
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "ev1" },
+        { $set: { nativeCreateStartedAt: null } },
+      );
+    });
   });
 });
