@@ -672,9 +672,11 @@ async function initializeServices(): Promise<void> {
 
     // Anti-raid (#1045), as early as config is readable so joins that arrive
     // during the rest of startup are evaluated against the restored state
-    // (they also wait, bounded, for this). Restore a lockdown that was on before the restart and
-    // warn when the feature is on but a prerequisite (moderation log, Server
-    // Members Intent) is missing. Event-driven, so there are no timers.
+    // (they also wait, bounded, for this). Restore a lockdown that was on
+    // before the restart and warn when the feature is on but a prerequisite
+    // (moderation log, Server Members Intent) is missing. Detection is
+    // event-driven; the only timers are the per-guild lockdown auto-expiry
+    // timers, cleared by `destroy()` on shutdown.
     const raidProtection = RaidProtectionService.getInstance(client);
     await raidProtection.initialize();
     await raidProtection.warnIfInactive();

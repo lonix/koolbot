@@ -31,6 +31,14 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       addChangeListener: (cb: (key: string) => void) => {
         changeListeners.push(cb);
       },
+      removeReloadCallback: (cb: () => Promise<void>) => {
+        const i = reloadCallbacks.indexOf(cb);
+        if (i !== -1) reloadCallbacks.splice(i, 1);
+      },
+      removeChangeListener: (cb: (key: string) => void) => {
+        const i = changeListeners.indexOf(cb);
+        if (i !== -1) changeListeners.splice(i, 1);
+      },
       getBoolean: async (key: string, def: boolean) =>
         (config.get(key) as boolean | undefined) ?? def,
       getNumber: async (key: string, def: number) =>
@@ -55,6 +63,8 @@ const {
   countJoinsInWindow,
   isNewAccount,
   INIT_WAIT_MS,
+  MAX_PENDING_ROWS,
+  ROW_RETRY_DELAYS_MS,
 } = await import("../../src/services/raid-protection-service.js");
 
 const HOUR = 60 * 60 * 1000;
@@ -681,6 +691,43 @@ describe("RaidProtectionService", () => {
     });
   });
 
+  describe("lifecycle and queue limits", () => {
+    it("destroy() unregisters the config callbacks and a recreated service registers once", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(reloadCallbacks).toHaveLength(1);
+      expect(changeListeners).toHaveLength(1);
+      service.destroy();
+      expect(reloadCallbacks).toHaveLength(0);
+      expect(changeListeners).toHaveLength(0);
+      // A destroyed instance no longer reacts to saves.
+      await service.initialize();
+      expect(reloadCallbacks).toHaveLength(1);
+      service.destroy();
+    });
+
+    it("never sheds a lockdown or clear row when the unwritten-row queue overflows", async () => {
+      const delays = ROW_RETRY_DELAYS_MS.splice(0);
+      try {
+        const service = RaidProtectionService.getInstance(client);
+        mockCreate.mockRejectedValue(new Error("db down"));
+        await service.setLockdown(guild, true, "mod-1");
+        for (let i = 0; i < MAX_PENDING_ROWS + 20; i++) {
+          await service.handleMemberJoin(makeMember().member);
+        }
+        mockCreate.mockClear();
+        mockCreate.mockResolvedValue({});
+        const status = await service.getStatus(guild);
+        expect(status.unrecorded).toBe(0);
+        const actions = mockCreate.mock.calls.map((c) => c[0].action);
+        expect(actions).toHaveLength(MAX_PENDING_ROWS);
+        expect(actions[0]).toBe("raid_lockdown");
+      } finally {
+        ROW_RETRY_DELAYS_MS.push(...delays);
+      }
+    });
+  });
+
   describe("log row durability", () => {
     it("retries a failed write and records the row", async () => {
       mockCreate.mockRejectedValueOnce(new Error("blip")).mockResolvedValue({});
@@ -1014,6 +1061,39 @@ describe("RaidProtectionService", () => {
       mockLogger.warn.mockClear();
       await service.handleMemberJoin(makeMember().member);
       expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it("warns once, with one shared timer, for a burst of joins during a slow restore", async () => {
+      jest.useFakeTimers();
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      const pending = Array.from({ length: 6 }, () =>
+        service.handleMemberJoin(makeMember().member),
+      );
+      await Promise.resolve();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(INIT_WAIT_MS + 1);
+      await Promise.all(pending);
+      const timeoutWarnings = mockLogger.warn.mock.calls.filter((c) =>
+        String(c[0]).includes("did not finish"),
+      );
+      expect(timeoutWarnings).toHaveLength(1);
+    });
+
+    it("clears the shared wait timer when restoration finishes first", async () => {
+      jest.useFakeTimers();
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      const pending = service.handleMemberJoin(makeMember().member);
+      await Promise.resolve();
+      await service.initialize();
+      await pending;
+      expect(jest.getTimerCount()).toBe(0);
+      expect(
+        mockLogger.warn.mock.calls.some((c) =>
+          String(c[0]).includes("did not finish"),
+        ),
+      ).toBe(false);
     });
 
     it("releases waiting joins even when restoration fails", async () => {

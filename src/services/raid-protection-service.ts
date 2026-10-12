@@ -22,8 +22,11 @@ import {
 
 /**
  * Anti-raid protection (#1045): join-rate detection with a lockdown mode, and
- * an account-age gate. Event-driven only (no timers): a lockdown that has an
- * auto-expiry is ended lazily on the next join or status read.
+ * an account-age gate. Detection is event-driven (join events). The only
+ * timers are the per-guild auto-expiry timers armed by `scheduleExpiry()` for
+ * a lockdown with a time limit, so a quiet lockdown ends on time; the checks
+ * on each join, status read and settings reconciliation are the backstop.
+ * `destroy()` clears the timers and unregisters the config callbacks.
  *
  * Safety properties, each covered by tests:
  *   - Default off, and a first enablement is a *dry run* (`dry_run` defaults
@@ -52,7 +55,7 @@ export const INIT_WAIT_MS = 10_000;
 
 /** Waits between attempts to write a log row, then it is queued for later. */
 export const ROW_RETRY_DELAYS_MS = [100, 300];
-const MAX_PENDING_ROWS = 500;
+export const MAX_PENDING_ROWS = 500;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 export const MIN_JOIN_THRESHOLD = 2;
@@ -267,6 +270,9 @@ export class RaidProtectionService {
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
+  private readyGate: Promise<void> | null = null;
+  private gateTimer: ReturnType<typeof setTimeout> | null = null;
+  private unregisterConfig: (() => void) | null = null;
   private markReady: () => void = () => undefined;
   private readonly ready: Promise<void> = new Promise<void>((resolve) => {
     this.markReady = (): void => {
@@ -296,12 +302,20 @@ export class RaidProtectionService {
     RaidProtectionService.instance = undefined;
   }
 
-  /** Stop the auto-expiry timers. Called on shutdown. */
+  /**
+   * Stop the timers and unregister the config callbacks, so a destroyed
+   * instance (shutdown, tests) neither keeps acting nor stays referenced.
+   */
   public destroy(): void {
     for (const state of this.states.values()) {
       if (state.expiryTimer) clearTimeout(state.expiryTimer);
       state.expiryTimer = null;
     }
+    if (this.gateTimer) clearTimeout(this.gateTimer);
+    this.gateTimer = null;
+    this.unregisterConfig?.();
+    this.unregisterConfig = null;
+    this.reloadRegistered = false;
   }
 
   /** Resolve and clamp every setting, once per decision. */
@@ -511,21 +525,26 @@ export class RaidProtectionService {
   /** Wait (bounded) for startup restoration; see {@link INIT_WAIT_MS}. */
   private async awaitReady(): Promise<void> {
     if (this.initDone || this.waitedOut) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        this.waitedOut = true;
-        logger.warn(
-          `Anti-raid: startup restoration did not finish within ${INIT_WAIT_MS}ms; evaluating joins without the persisted lockdown state`,
-        );
-        resolve();
-      }, INIT_WAIT_MS);
-    });
-    try {
-      await Promise.race([this.ready, timeout]);
-    } finally {
-      clearTimeout(timer);
+    // One shared bounded wait for every caller, so a burst of joins during a
+    // slow restore makes a single timer and a single warning.
+    if (!this.readyGate) {
+      this.readyGate = new Promise<void>((resolve) => {
+        this.gateTimer = setTimeout(() => {
+          this.waitedOut = true;
+          logger.warn(
+            `Anti-raid: startup restoration did not finish within ${INIT_WAIT_MS}ms; evaluating joins without the persisted lockdown state`,
+          );
+          resolve();
+        }, INIT_WAIT_MS);
+        this.gateTimer.unref?.();
+        void this.ready.then(() => {
+          if (this.gateTimer) clearTimeout(this.gateTimer);
+          this.gateTimer = null;
+          resolve();
+        });
+      });
     }
+    await this.readyGate;
   }
 
   /**
@@ -554,12 +573,17 @@ export class RaidProtectionService {
     // which only notifies change listeners. So subscribe to both: reload for
     // those paths, and a change listener (the pattern the update check uses,
     // #1029) for ordinary saves of the keys this feature depends on.
-    this.configService.registerReloadCallback(recheck);
-    this.configService.addChangeListener((key) => {
+    const onChange = (key: string): void => {
       if (key === "moderation.enabled" || key.startsWith("moderation.raid.")) {
         void recheck();
       }
-    });
+    };
+    this.configService.registerReloadCallback(recheck);
+    this.configService.addChangeListener(onChange);
+    this.unregisterConfig = (): void => {
+      this.configService.removeReloadCallback(recheck);
+      this.configService.removeChangeListener(onChange);
+    };
   }
 
   /**
@@ -1074,9 +1098,15 @@ export class RaidProtectionService {
       createdAt: new Date(),
     });
     if (this.pendingRows.length > MAX_PENDING_ROWS) {
-      this.pendingRows.shift();
+      // Shed the oldest member action first: the lockdown/clear rows are the
+      // persisted lockdown state, there are only a few of them, and losing one
+      // would make a restart restore the wrong state.
+      const i = this.pendingRows.findIndex(
+        (r) => r.action !== "raid_lockdown" && r.action !== "raid_clear",
+      );
+      this.pendingRows.splice(i === -1 ? 0 : i, 1);
       logger.error(
-        "Anti-raid: too many unwritten log rows, dropped the oldest one",
+        "Anti-raid: too many unwritten log rows, dropped the oldest member action row",
       );
     }
     await this.drainPendingRows(true);
