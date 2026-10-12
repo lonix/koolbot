@@ -443,6 +443,20 @@ describe("buildReadiness", () => {
     expect(r.ready).toBe(true);
     expect(r.issues).toEqual([]);
   });
+  it("warns (does not block) when Set Voice Channel Status is missing", () => {
+    const r = buildReadiness({
+      ...base,
+      permissionBits:
+        PermissionsBitField.All &
+        ~PermissionsBitField.Flags.SetVoiceChannelStatus,
+      administrator: false,
+    });
+    const issue = r.issues.find(
+      (i) => i.code === "missing-SetVoiceChannelStatus",
+    );
+    expect(issue?.severity).toBe("warning");
+    expect(r.ready).toBe(true);
+  });
   it("errors when a feature's role sits above the bot", () => {
     const r = buildReadiness({
       ...base,
