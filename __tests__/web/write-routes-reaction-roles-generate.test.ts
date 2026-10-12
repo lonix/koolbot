@@ -105,13 +105,13 @@ describe("POST /reaction-roles/group/generate", () => {
     expect(mockProvision).not.toHaveBeenCalled();
   });
 
-  it("pairs custom rows, drops blanks and honours the mode", async () => {
+  it("pairs custom rows, ignores fully blank rows and honours the mode", async () => {
     await harness.post("/reaction-roles/group/generate", {
       preset: "custom",
       groupName: "Platform",
       mode: "toggle",
-      roleName: ["PC", "", "Console"],
-      emoji: ["🖥️", "x", "🎮"],
+      roleName: ["PC", "  ", "Console"],
+      emoji: ["🖥️", "", "🎮"],
     });
     expect(mockProvision).toHaveBeenCalledWith(
       session.guildId,
@@ -122,6 +122,37 @@ describe("POST /reaction-roles/group/generate", () => {
       ],
       "toggle",
     );
+  });
+
+  it("passes half-filled rows through so the service validation error is shown", async () => {
+    mockProvision.mockResolvedValue({
+      success: false,
+      message: "Every option needs both a role name and an emoji.",
+      createdRoles: [],
+      reusedRoles: [],
+      addedEntries: 0,
+      skippedEntries: 0,
+    });
+    const res = await harness.post("/reaction-roles/group/generate", {
+      preset: "custom",
+      groupName: "Platform",
+      roleName: ["PC", "Console", "Mobile"],
+      emoji: ["🖥️", "🎮", ""],
+    });
+    expect(mockProvision).toHaveBeenCalledWith(
+      session.guildId,
+      "Platform",
+      [
+        { roleName: "PC", emoji: "🖥️" },
+        { roleName: "Console", emoji: "🎮" },
+        { roleName: "Mobile", emoji: "" },
+      ],
+      "unique",
+    );
+    expect(parseFlashRedirect(res.headers.get("location"))).toMatchObject({
+      type: "err",
+      msg: "Every option needs both a role name and an emoji.",
+    });
   });
 
   it("requires a name for a custom group", async () => {

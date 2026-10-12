@@ -214,6 +214,77 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(model.insertMany).not.toHaveBeenCalled();
   });
 
+  it("fails on an emoji collision with another role, before changing anything", async () => {
+    const s = setup([
+      { id: "r1", name: "Europe" },
+      { id: "r9", name: "Other" },
+    ]);
+    model.find.mockResolvedValue([
+      {
+        roleId: "r1",
+        emoji: "🇪🇺",
+        roleName: "Europe",
+        messageId: "m1",
+        groupId: "m1",
+        mode: "unique",
+      },
+    ]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "EU", emoji: "🇪🇺" },
+      { roleName: "Asia", emoji: "🌏" },
+    ]);
+    expect(r.success).toBe(false);
+    expect(r.message).toContain('"EU"');
+    expect(r.message).toContain('"Europe"');
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+    expect(s.message.edit).not.toHaveBeenCalled();
+    expect(s.message.react).not.toHaveBeenCalled();
+    expect(model.insertMany).not.toHaveBeenCalled();
+  });
+
+  it("fails on a role collision with another emoji, before changing anything", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([
+      {
+        roleId: "r1",
+        emoji: "🇪🇺",
+        roleName: "Europe",
+        messageId: "m1",
+        groupId: "m1",
+        mode: "unique",
+      },
+    ]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Europe", emoji: "🌍" },
+      { roleName: "Asia", emoji: "🌏" },
+    ]);
+    expect(r.success).toBe(false);
+    expect(r.message).toContain('"Europe"');
+    expect(r.message).toContain("🇪🇺");
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+    expect(s.message.edit).not.toHaveBeenCalled();
+    expect(model.insertMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a half-filled option before touching Discord", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Europe", emoji: "🇪🇺" },
+      { roleName: "Asia", emoji: "" },
+    ]);
+    expect(r).toMatchObject({
+      success: false,
+      message: "Every option needs both a role name and an emoji.",
+    });
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+  });
+
   it("adds only missing options by editing the existing message", async () => {
     const s = setup([{ id: "r1", name: "Europe" }]);
     model.find.mockResolvedValue([

@@ -301,8 +301,6 @@ export class ReactionRoleGroupService {
         "fetch guild roles",
       );
       const keptRows = existingRows;
-      const haveRoleIds = new Set(keptRows.map((r) => r.roleId));
-      const haveEmojis = new Set(keptRows.map((r) => r.emoji));
       // Resolve the bot member through the retry/timeout wrapper. An explicit
       // null (fetch failed) makes the validator report it, not refetch.
       const botMember =
@@ -331,9 +329,26 @@ export class ReactionRoleGroupService {
       let skipped = 0;
       for (const e of clean) {
         const role = byName.get(e.roleName.toLowerCase());
-        if ((role && haveRoleIds.has(role.id)) || haveEmojis.has(e.emoji)) {
+        const roleRow = role
+          ? keptRows.find((r) => r.roleId === role.id)
+          : undefined;
+        const emojiRow = keptRows.find((r) => r.emoji === e.emoji);
+        // Skip only an exact existing pair. A role or emoji that is already
+        // mapped to something else is a conflict the admin must correct; fail
+        // before any role is created or the picker is touched.
+        if (roleRow && emojiRow && roleRow === emojiRow) {
           skipped++;
           continue;
+        }
+        if (roleRow) {
+          return fail(
+            `Option "${e.roleName}" ${e.emoji}: the role is already in this group with ${roleRow.emoji}. Use that emoji or remove the option.`,
+          );
+        }
+        if (emojiRow) {
+          return fail(
+            `Option "${e.roleName}" ${e.emoji}: the emoji is already used for "${emojiRow.roleName}" in this group. Pick another emoji or remove the option.`,
+          );
         }
         todo.push({ ...e, role });
       }

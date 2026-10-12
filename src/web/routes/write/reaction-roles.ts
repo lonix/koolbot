@@ -386,12 +386,13 @@ export function createReactionRolesRouter(client: Client): Router {
       const roleNames = toArray(body["roleName"]);
       const emojis = toArray(body["emoji"]);
 
-      // Pair positionally and drop rows where either half is blank.
+      // Pair positionally. Drop only fully blank rows; half-filled rows pass
+      // through so the service reports the missing name or emoji.
       const entries: Array<{ roleName: string; emoji: string }> = [];
       for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
         const roleName = (roleNames[i] ?? "").trim();
         const emoji = (emojis[i] ?? "").trim();
-        if (roleName && emoji) {
+        if (roleName || emoji) {
           entries.push({ roleName, emoji });
         }
       }
@@ -494,7 +495,9 @@ export function createReactionRolesRouter(client: Client): Router {
         for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
           const roleName = (roleNames[i] ?? "").trim();
           const emoji = (emojis[i] ?? "").trim();
-          if (roleName && emoji) entries.push({ roleName, emoji });
+          // Only fully blank rows are ignored; half-filled rows reach the
+          // service, which reports the missing name or emoji.
+          if (roleName || emoji) entries.push({ roleName, emoji });
         }
       }
       const modeRaw = getString(req, "mode");
