@@ -152,7 +152,7 @@ describe("renderAdoptPage (#1019)", () => {
     expect(main).not.toMatch(/<form/i);
     expect(main).not.toMatch(/<button/i);
   });
-  it("renders the bot replacement report, escaped, with the catalogue link for unknown bots", () => {
+  it("renders the bot replacement report with escaped values and verification notes", () => {
     const html = renderAdoptPage({
       ...common,
       scan: {
@@ -200,6 +200,52 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("&lt;img src=x&gt;#1");
     expect(html).not.toContain("<img src=x>");
     expect(html).toContain("GuildMembers intent is off");
+  });
+  const botBase = {
+    roleIds: [],
+    overwriteChannelIds: [],
+    isKoolBot: false,
+  };
+  const CATALOG_LINK = "CONTRIBUTING.md#adding-a-known-bot-entry";
+  const onlyBots = (bots: any[]): string =>
+    renderAdoptPage({ ...common, scan: { ...scan, bots } });
+
+  it("links the catalogue docs on an unknown (verified, unlisted) bot card", () => {
+    const html = onlyBots([
+      {
+        ...botBase,
+        userId: "300000000000000002",
+        tag: "Mystery#1",
+        verified: true,
+      },
+    ]);
+    expect(html).toContain("Not in the catalogue; no claims made");
+    expect(html).toContain(CATALOG_LINK);
+    expect(html).not.toContain("Community-built bot");
+  });
+  it("treats a bot whose verified flag is unknown as unknown, not custom", () => {
+    const html = onlyBots([
+      {
+        ...botBase,
+        userId: "300000000000000003",
+        tag: "Maybe#1",
+        verified: null,
+      },
+    ]);
+    expect(html).toContain("Not in the catalogue; no claims made");
+    expect(html).toContain(CATALOG_LINK);
+  });
+  it("shows a custom bot card without the catalogue link", () => {
+    const html = onlyBots([
+      {
+        ...botBase,
+        userId: "300000000000000004",
+        tag: "Homemade#1",
+        verified: false,
+      },
+    ]);
+    expect(html).toContain("Community-built bot");
+    expect(html).not.toContain(CATALOG_LINK);
   });
   it("renders a failure notice when the scan failed", () => {
     const html = renderAdoptPage({ ...common, scan: null, error: "boom <x>" });

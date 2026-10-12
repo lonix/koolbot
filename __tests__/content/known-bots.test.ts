@@ -4,6 +4,7 @@ import {
   KNOWN_BOTS,
   KOOLBOT_FEATURES,
   findKnownBot,
+  type KnownBotCapability,
 } from "../../src/content/known-bots.js";
 import { defaultConfig } from "../../src/services/config-schema.js";
 
@@ -121,6 +122,22 @@ describe("known-bots catalogue (#1026)", () => {
     expect(KNOWN_BOTS.find((b) => b.key === "zira")!.ids).toEqual([
       "275813801792634880",
     ]);
+  });
+
+  it("rejects a full or partial capability without a feature at compile time", () => {
+    // @ts-expect-error `full` must name the KoolBot feature that covers it
+    const noFeature: KnownBotCapability = {
+      id: "x",
+      label: "X",
+      coverage: { level: "full" },
+    };
+    const keep: KnownBotCapability = {
+      id: "y",
+      label: "Y",
+      coverage: { level: "keep", reason: "r" },
+    };
+    expect(noFeature.feature).toBeUndefined();
+    expect(keep.feature).toBeUndefined();
   });
 
   it("pins the id of every confirmed bot", () => {

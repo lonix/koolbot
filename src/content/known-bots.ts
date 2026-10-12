@@ -150,14 +150,32 @@ export type CapabilityCoverage =
 
 export type CoverageLevel = CapabilityCoverage["level"];
 
-export interface KnownBotCapability {
+interface CapabilityBase {
   /** Stable id shared across bots, so the combined view can group them. */
   id: string;
   label: string;
-  /** The KoolBot feature that covers it. Required for `full` and `partial`. */
-  feature?: KoolBotFeatureId;
-  coverage: CapabilityCoverage;
 }
+
+/**
+ * One capability of a bot. A discriminated union on the coverage level, so
+ * an invalid entry fails to compile: `full` and `partial` must name the
+ * KoolBot `feature` that covers them (it owns the enabling key, the Web UI
+ * page and the switch-over steps); `planned`, `none` and `keep` must not.
+ */
+export type KnownBotCapability = CapabilityBase &
+  (
+    | {
+        feature: KoolBotFeatureId;
+        coverage: Extract<CapabilityCoverage, { level: "full" | "partial" }>;
+      }
+    | {
+        feature?: undefined;
+        coverage: Extract<
+          CapabilityCoverage,
+          { level: "planned" | "none" | "keep" }
+        >;
+      }
+  );
 
 export interface KnownBot {
   /** Stable catalogue key. */
