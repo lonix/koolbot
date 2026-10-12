@@ -6,9 +6,11 @@ import {
   type AdoptionPlan,
   type DesiredState,
   type PlanIssue,
+  type PlanOperation,
   type RoleState,
 } from "./server-adoption-planner.js";
 import { buildDesiredState } from "./role-group-plan.js";
+import { staleDestructiveSteps } from "./channel-claims.js";
 import {
   buildAdminFixDesired,
   detectDrift,
@@ -221,7 +223,14 @@ export async function planRoleDeletion(
 ): Promise<{ plan: AdoptionPlan; extraErrors: PlanIssue[] }> {
   const extraErrors: PlanIssue[] = [];
   const roleId = group.roleId;
-  const groups = await RoleGroupService.getInstance().list(guild.id);
+  const saved = await RoleGroupService.getInstance().list(guild.id);
+  // The delete route removes the group right after starting the job, and the
+  // engine's live check runs later. Plan with the group the caller captured, so
+  // a KoolBot-created role keeps its no-approval exemption (it comes from the
+  // group's `createdByKoolbot`) instead of vanishing with the saved row.
+  const groups = saved.some((g) => g.id === group.id)
+    ? saved
+    : [...saved, group];
   const scan = await scanGuildRoles(guild, adminUserId, groups, false);
   if (!roleId) {
     extraErrors.push({
@@ -260,6 +269,30 @@ export async function planRoleDeletion(
     { approverId: adminUserId },
   );
   return { plan, extraErrors };
+}
+
+/**
+ * The live-state check the engine requires before it runs the destructive
+ * role delete (#1097). It re-plans the same deletion from a fresh scan and
+ * refuses if the fresh plan has blocking problems (the role is now managed,
+ * above the bot, or in use by a feature) or no longer contains the pending
+ * delete. The engine runs it before applying and again before the destructive
+ * phase.
+ */
+export function roleDeletionRevalidator(
+  guild: Guild,
+  adminUserId: string,
+  group: RoleGroupView,
+  approved: boolean,
+): (pending: PlanOperation[]) => Promise<string[]> {
+  return async (pending) => {
+    const fresh = await planRoleDeletion(guild, adminUserId, group, approved);
+    const problems = [...fresh.plan.errors, ...fresh.extraErrors].map(
+      (e) => e.message,
+    );
+    problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
+    return problems;
+  };
 }
 
 /**
