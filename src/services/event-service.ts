@@ -378,6 +378,13 @@ export class EventService extends ScheduledService {
           state: { $in: ["ended", "cancelled"] },
           nativeEventId: { $ne: null },
         },
+        // ...and ones whose native create timed out before its id was stored
+        // (the event may still appear in Discord, #1034).
+        {
+          state: { $in: ["ended", "cancelled"] },
+          nativeEventId: null,
+          nativeCreateStartedAt: { $ne: null },
+        },
         // Ended — or individually cancelled — recurring occurrences whose
         // successor has not been created yet (e.g. a crash between ending
         // and spawning, #744). A whole-series cancel is excluded.
@@ -401,8 +408,11 @@ export class EventService extends ScheduledService {
       MS_PER_MINUTE;
 
     // One listing of the guild's native events per scan, not one per event.
-    const native =
+    const loaded =
       events.length > 0 ? await this.nativeSync.loadCache(guild) : null;
+    // A failed listing skips native sync this tick (no per-event fallback).
+    const native = loaded === "failed" ? null : loaded;
+    const skipNative = loaded === "failed";
 
     for (const event of events) {
       try {
@@ -411,6 +421,7 @@ export class EventService extends ScheduledService {
           leadMs,
           graceMs,
           native,
+          skipNative,
         });
       } catch (error) {
         logger.error(
@@ -430,6 +441,7 @@ export class EventService extends ScheduledService {
       leadMs: number;
       graceMs: number;
       native?: NativeCache | null;
+      skipNative?: boolean;
     },
   ): Promise<void> {
     let changed = false;
@@ -500,7 +512,9 @@ export class EventService extends ScheduledService {
 
     // Keep the native scheduled event in line (#1034): creates it for events
     // that predate the toggle, pushes edits, and closes it on end/cancel.
-    await this.nativeSync.syncEvent(event, guild, windows.native);
+    if (!windows.skipNative) {
+      await this.nativeSync.syncEvent(event, guild, windows.native);
+    }
 
     // 5. A finished (or individually cancelled) occurrence hands over to the
     // next one in its series.

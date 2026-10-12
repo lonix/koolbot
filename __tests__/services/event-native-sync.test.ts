@@ -521,4 +521,139 @@ describe("NativeEventSync.syncEvent", () => {
       );
     });
   });
+
+  describe("past-start and conversion patches", () => {
+    const voiceNative = (overrides: Record<string, unknown> = {}) =>
+      makeNative({
+        entityType: GuildScheduledEventEntityType.Voice,
+        entityMetadata: null,
+        channelId: "vc1",
+        ...overrides,
+      });
+    const PAST = new Date(Date.now() - 60 * 1000);
+
+    it("sends only safe fields (no bare location) for a started voice-type native event", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [
+          voiceNative({
+            name: "Old name",
+            scheduledStartTimestamp: PAST.getTime(),
+          }),
+        ],
+      });
+      await makeSync().syncEvent(
+        makeEvent({ nativeEventId: "n1", startTime: PAST }),
+        guild,
+      );
+      expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+      const patch = (
+        scheduledEvents.edit.mock.calls[0] as unknown[]
+      )[1] as Record<string, unknown>;
+      expect(patch.name).toBe("Game night");
+      expect(patch).not.toHaveProperty("entityMetadata");
+      expect(patch).not.toHaveProperty("entityType");
+    });
+
+    it("still sends the location for a started event that is already external", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [
+          makeNative({
+            entityMetadata: { location: "Elsewhere" },
+            scheduledStartTimestamp: PAST.getTime(),
+          }),
+        ],
+      });
+      await makeSync().syncEvent(
+        makeEvent({ nativeEventId: "n1", startTime: PAST }),
+        guild,
+      );
+      expect(scheduledEvents.edit).toHaveBeenCalledWith(
+        "n1",
+        expect.objectContaining({ entityMetadata: { location: "Somewhere" } }),
+      );
+    });
+
+    it("a rejected conversion does not block the name update", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [voiceNative({ name: "Old name" })],
+      });
+      scheduledEvents.edit
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error("rejected"));
+      await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
+      const first = (
+        scheduledEvents.edit.mock.calls[0] as unknown[]
+      )[1] as Record<string, unknown>;
+      expect(first.name).toBe("Game night");
+      expect(first).not.toHaveProperty("entityType");
+      expect(scheduledEvents.edit).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("timed-out creates on finished rows", () => {
+    const pending = (state: string, ageMs: number) =>
+      makeEvent({
+        state,
+        nativeEventId: null,
+        nativeCreateStartedAt: new Date(Date.now() - ageMs),
+      });
+
+    it("cancels a late-created native event of a cancelled row and clears the marker", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [makeNative({ id: "late1" })],
+      });
+      await makeSync().syncEvent(pending("cancelled", 1000), guild);
+      expect(scheduledEvents.edit).toHaveBeenCalledWith(
+        "late1",
+        expect.objectContaining({ status: GuildScheduledEventStatus.Canceled }),
+      );
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "ev1" },
+        { $set: { nativeCreateStartedAt: null } },
+      );
+    });
+
+    it("deletes a late-created native event of an ended row", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [makeNative({ id: "late1" })],
+      });
+      await makeSync().syncEvent(pending("ended", 1000), guild);
+      expect(scheduledEvents.delete).toHaveBeenCalledWith("late1");
+    });
+
+    it("keeps waiting inside the grace period, then clears the marker", async () => {
+      const { CREATE_GRACE_MS } =
+        await import("../../src/services/event-native-sync.js");
+      const { guild } = makeGuild();
+      await makeSync().syncEvent(pending("cancelled", 1000), guild);
+      expect(EventMock.updateOne).not.toHaveBeenCalled();
+      await makeSync().syncEvent(
+        pending("cancelled", CREATE_GRACE_MS + 1000),
+        guild,
+      );
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "ev1" },
+        { $set: { nativeCreateStartedAt: null } },
+      );
+    });
+
+    it("ignores a finished row with no marker and no id", async () => {
+      const { guild, scheduledEvents } = makeGuild();
+      await makeSync().syncEvent(
+        makeEvent({ state: "cancelled", nativeEventId: null }),
+        guild,
+      );
+      expect(scheduledEvents.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("loadCache", () => {
+    it('reports "failed" (not null) when the listing fails, null when off', async () => {
+      const { guild, scheduledEvents } = makeGuild();
+      scheduledEvents.fetch.mockRejectedValueOnce(new Error("503"));
+      expect(await makeSync().loadCache(guild)).toBe("failed");
+      config.getBoolean.mockResolvedValue(false);
+      expect(await makeSync().loadCache(guild)).toBeNull();
+    });
+  });
 });

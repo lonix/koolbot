@@ -1192,6 +1192,29 @@ describe("recurring event lifecycle", () => {
     expect(created).toHaveLength(0);
   });
 
+  it("skips native sync for the tick when the shared native listing failed", async () => {
+    const { service } = buildService();
+    const syncEvent = jest.fn(async () => undefined);
+    (
+      service as unknown as { nativeSync: { syncEvent: jest.Mock } }
+    ).nativeSync = { syncEvent };
+    const run = (skipNative: boolean) =>
+      (
+        service as unknown as {
+          processEvent: (...a: unknown[]) => Promise<void>;
+        }
+      ).processEvent(
+        ended({ state: "ended", recurrence: "none", channelId: null }),
+        {},
+        NOW,
+        { reminderMs: 0, leadMs: 0, graceMs: 0, skipNative },
+      );
+    await run(true);
+    expect(syncEvent).not.toHaveBeenCalled();
+    await run(false);
+    expect(syncEvent).toHaveBeenCalledTimes(1);
+  });
+
   it("removes a higher-indexed duplicate that inserted before this lower row existed", async () => {
     const { service, postAnnouncement } = buildService();
     const duplicate = { _id: "occ-2", occurrenceIndex: 2 };

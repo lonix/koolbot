@@ -165,10 +165,12 @@ export class NativeEventSync {
 
   /**
    * Load the guild's native events once, for a whole scan. Returns null when
-   * mirroring is off or the fetch failed (callers then fall back to per-event
-   * fetches).
+   * mirroring is off, and `"failed"` when the listing failed: the caller then
+   * skips native sync for this tick instead of falling back to one fetch per
+   * event, which would multiply a transient Discord failure by the number of
+   * events.
    */
-  public async loadCache(guild: Guild): Promise<NativeCache | null> {
+  public async loadCache(guild: Guild): Promise<NativeCache | null | "failed"> {
     if (!(await this.isEnabled())) return null;
     try {
       return await this.callApi(
@@ -176,8 +178,11 @@ export class NativeEventSync {
         "fetch guild scheduled events",
       );
     } catch (error) {
-      logger.warn("Native events: could not list scheduled events:", error);
-      return null;
+      logger.warn(
+        "Native events: could not list scheduled events; skipping native sync for this scan:",
+        error,
+      );
+      return "failed";
     }
   }
 
@@ -193,7 +198,10 @@ export class NativeEventSync {
     try {
       if (!(await this.isEnabled())) return;
       const terminal = event.state === "ended" || event.state === "cancelled";
-      if (terminal && !event.nativeEventId) return;
+      const pendingCreate = terminal && !event.nativeEventId;
+      // A terminal row with no id is only interesting while a create it
+      // started may still land in Discord (see `reconcilePendingCreate`).
+      if (pendingCreate && !event.nativeCreateStartedAt) return;
       if (!terminal && event.nativeDetached) return;
 
       const g =
@@ -203,7 +211,9 @@ export class NativeEventSync {
 
       if (!(await this.hasPermission(g))) return;
 
-      if (terminal) {
+      if (pendingCreate) {
+        await this.reconcilePendingCreate(event, g, cache);
+      } else if (terminal) {
         await this.closeNative(event, g, cache);
       } else if (event.nativeEventId) {
         await this.updateNative(event, g, cache);
@@ -452,37 +462,62 @@ export class NativeEventSync {
     if (native.status !== GuildScheduledEventStatus.Scheduled) return;
 
     const want = await this.wantedFields(event);
-    if (want.start.getTime() <= Date.now()) {
-      // A past start cannot be pushed; only the safe fields.
-      const { name, description, entityMetadata } = diffNativeFields(
-        native,
-        want,
-      );
-      if (name === undefined && description === undefined && !entityMetadata) {
-        return;
+    const diff = diffNativeFields(native, want);
+    if (Object.keys(diff).length === 0) return;
+
+    // The conversion back to an external event is its own patch, so a Discord
+    // rejection of it can never block the name/description/time updates.
+    const converting = diff.entityType !== undefined;
+    const startPast = want.start.getTime() <= Date.now();
+
+    // Safe patch. A start in the past cannot be moved, and location metadata
+    // is only valid on a native event that is already external.
+    const safe: Record<string, unknown> = {};
+    if (diff.name !== undefined) safe.name = diff.name;
+    if (diff.description !== undefined) safe.description = diff.description;
+    if (!startPast) {
+      if (diff.scheduledStartTime)
+        safe.scheduledStartTime = diff.scheduledStartTime;
+      if (diff.scheduledEndTime && !converting) {
+        safe.scheduledEndTime = diff.scheduledEndTime;
       }
+    }
+    if (!converting && diff.entityMetadata) {
+      safe.entityMetadata = diff.entityMetadata;
+    }
+    if (Object.keys(safe).length > 0) {
       await this.callApi(
         () =>
           guild.scheduledEvents.edit(native.id, {
-            ...(name !== undefined ? { name } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(entityMetadata ? { entityMetadata } : {}),
+            ...safe,
             reason: "KoolBot event mirror",
           } as unknown as EditOptions),
         "edit guild scheduled event",
       );
-      return;
     }
-    const diff = diffNativeFields(native, want);
-    if (Object.keys(diff).length === 0) return;
-    await this.callApi(
-      () =>
-        guild.scheduledEvents.edit(native.id, {
-          ...diff,
-          reason: "KoolBot event mirror",
-        } as unknown as EditOptions),
-      "edit guild scheduled event",
-    );
+
+    if (converting && !startPast) {
+      // The complete conversion goes in one patch: type, no channel, location
+      // and end time. Failure is logged and retried next scan, nothing more.
+      try {
+        await this.callApi(
+          () =>
+            guild.scheduledEvents.edit(native.id, {
+              entityType: diff.entityType,
+              channel: null,
+              entityMetadata: diff.entityMetadata,
+              scheduledEndTime: want.end,
+              reason: "KoolBot event mirror",
+            } as unknown as EditOptions),
+          "restore external guild scheduled event",
+        );
+      } catch (error) {
+        logger.warn(
+          `Native events: could not restore the external type of ${sanitizeForLog(native.id)}:`,
+          error,
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------
@@ -504,39 +539,81 @@ export class NativeEventSync {
   ): Promise<void> {
     const nativeId = event.nativeEventId as string;
     const native = await this.fetchNative(guild, nativeId, cache);
-    if (native) {
-      if (native.status === GuildScheduledEventStatus.Scheduled) {
-        if (event.state === "cancelled") {
-          await this.callApi(
-            () =>
-              guild.scheduledEvents.edit(native.id, {
-                status: GuildScheduledEventStatus.Canceled,
-                reason: "KoolBot event cancelled",
-              }),
-            "cancel guild scheduled event",
-          );
-        } else {
-          await this.callApi(
-            () => guild.scheduledEvents.delete(native.id),
-            "delete unstarted guild scheduled event",
-          );
-        }
-      } else if (native.status === GuildScheduledEventStatus.Active) {
-        await this.callApi(
-          () =>
-            guild.scheduledEvents.edit(native.id, {
-              status: GuildScheduledEventStatus.Completed,
-              reason: "KoolBot event finished",
-            }),
-          "complete guild scheduled event",
-        );
-      }
-    }
+    if (native) await this.finishNative(event, guild, native);
     await Event.updateOne(
       { _id: event._id, nativeEventId: nativeId },
       { $set: { nativeEventId: null } },
     );
     event.nativeEventId = null;
+  }
+
+  private async finishNative(
+    event: IEvent,
+    guild: Guild,
+    native: GuildScheduledEvent,
+  ): Promise<void> {
+    if (native.status === GuildScheduledEventStatus.Scheduled) {
+      if (event.state === "cancelled") {
+        await this.callApi(
+          () =>
+            guild.scheduledEvents.edit(native.id, {
+              status: GuildScheduledEventStatus.Canceled,
+              reason: "KoolBot event cancelled",
+            }),
+          "cancel guild scheduled event",
+        );
+      } else {
+        await this.callApi(
+          () => guild.scheduledEvents.delete(native.id),
+          "delete unstarted guild scheduled event",
+        );
+      }
+    } else if (native.status === GuildScheduledEventStatus.Active) {
+      await this.callApi(
+        () =>
+          guild.scheduledEvents.edit(native.id, {
+            status: GuildScheduledEventStatus.Completed,
+            reason: "KoolBot event finished",
+          }),
+        "complete guild scheduled event",
+      );
+    }
+  }
+
+  /**
+   * A create that timed out may land in Discord after its row was cancelled or
+   * ended, so the id was never stored. Look for the late event (same creator,
+   * name and start) and close it by the normal terminal rules; give up and
+   * clear the marker once the grace period has passed with nothing found.
+   */
+  private async reconcilePendingCreate(
+    event: IEvent,
+    guild: Guild,
+    cache?: NativeCache | null,
+  ): Promise<void> {
+    const want = await this.wantedFields(event);
+    const existing =
+      cache ??
+      (await this.callApi(
+        () => guild.scheduledEvents.fetch(),
+        "fetch guild scheduled events",
+      ));
+    const found = await this.findAdoptable(event, existing, want);
+    if (found) {
+      await this.finishNative(event, guild, found);
+      cache?.delete(found.id);
+      logger.info(
+        `Native events: closed late-created ${sanitizeForLog(found.id)} for finished event ${sanitizeForLog(String(event._id))}`,
+      );
+    } else {
+      const startedAt = event.nativeCreateStartedAt?.getTime() ?? 0;
+      if (Date.now() - startedAt < CREATE_GRACE_MS) return;
+    }
+    await Event.updateOne(
+      { _id: event._id },
+      { $set: { nativeCreateStartedAt: null } },
+    );
+    event.nativeCreateStartedAt = null;
   }
 }
 
