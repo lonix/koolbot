@@ -474,13 +474,23 @@ export class ReactionRoleGroupService {
         );
         target = postedMessage;
       }
+      // react() is idempotent when the bot already owns the reaction (a
+      // retired mapping's emoji can still be on the picker). Only reactions
+      // this run actually added may be removed again on rollback.
+      const ownedBefore = new Set<string>();
+      for (const reaction of anchor?.reactions?.cache?.values() ?? []) {
+        if (reaction.me) {
+          ownedBefore.add(reaction.emoji.id ?? reaction.emoji.name ?? "");
+        }
+      }
       const reactEmojis = [...todo.map((t) => t.emoji)];
       for (const emoji of reactEmojis) {
         await this.api(
           () => target.react(emoji),
           `react ${emoji} on group message`,
         );
-        addedReactions.push(emoji);
+        const key = emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
+        if (!ownedBefore.has(key)) addedReactions.push(emoji);
       }
 
       const groupId = existingRows[0]?.groupId ?? target.id;

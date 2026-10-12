@@ -509,6 +509,41 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(r.message).not.toMatch(/not found/i);
   });
 
+  it("does not remove a reaction the bot already owned when a top-up rolls back", async () => {
+    const s = setup([
+      { id: "r1", name: "Europe" },
+      { id: "r2", name: "Asia" },
+    ]);
+    const removed: string[] = [];
+    Object.assign(s.message, {
+      embeds: [{ data: { title: "Region" } }],
+      reactions: {
+        // the retired Asia reaction is still on the picker and owned by the bot
+        cache: new Map([
+          ["\u{1F30F}", { me: true, emoji: { id: null, name: "\u{1F30F}" } }],
+        ]),
+        resolve: jest.fn((key: string) => ({
+          users: {
+            remove: jest.fn(async () => {
+              removed.push(key);
+            }),
+          },
+        })),
+      },
+    });
+    model.find.mockResolvedValue([liveRow]);
+    model.insertMany.mockRejectedValue(new Error("db down"));
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Asia", emoji: "\u{1F30F}" },
+      { roleName: "Africa", emoji: "\u{1F30D}" },
+    ]);
+    expect(r.success).toBe(false);
+    expect(s.message.react).toHaveBeenCalledTimes(2);
+    // only the reaction this run added is removed again
+    expect(removed).toEqual(["\u{1F30D}"]);
+  });
+
   it("restores the embed and removes added reactions when a top-up fails", async () => {
     const s = setup([{ id: "r1", name: "Europe" }]);
     const reactionRemove = jest.fn(async () => undefined);
