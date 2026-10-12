@@ -1,4 +1,5 @@
 import { Client, Guild, GuildMember, type Role } from "discord.js";
+import { Types } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
@@ -965,14 +966,9 @@ export class RaidProtectionService {
     // A decision made during a lockdown counts against it; the independent
     // new-account gate has its own counters.
     const counts = state.lockdown ? state.lockdownCounts : state.gateCounts;
-    if (settings.dryRun) {
-      counts.wouldAction++;
-      logger.info(
-        `Anti-raid (dry run): would ${decision.action} user ${sanitizeForLog(member.id)} in guild ${sanitizeForLog(guildId)}: ${decision.reason}`,
-      );
-      return false;
-    }
-
+    // The non-mutating checks (quarantine role, hierarchy and permissions) run
+    // in dry run too, so a rehearsal counts a member the bot could not act on
+    // as skipped, exactly as live mode would, and validates the role setup.
     let role: Role | null = null;
     if (decision.action === "quarantine") {
       role = await this.resolveQuarantineRole(member.guild, settings);
@@ -995,6 +991,14 @@ export class RaidProtectionService {
       counts.skipped++;
       logger.warn(
         `Anti-raid: skipped ${decision.action} on user ${sanitizeForLog(member.id)}: the bot is not allowed to act on this member (role position or permission)`,
+      );
+      return false;
+    }
+
+    if (settings.dryRun) {
+      counts.wouldAction++;
+      logger.info(
+        `Anti-raid (dry run): would ${decision.action} user ${sanitizeForLog(member.id)} in guild ${sanitizeForLog(guildId)}: ${decision.reason}`,
       );
       return false;
     }
@@ -1089,6 +1093,11 @@ export class RaidProtectionService {
     reason: string,
   ): Promise<void> {
     this.pendingRows.push({
+      // Fixed when the row is queued, in queue order: a retry of an attempt
+      // whose outcome was unknown (inserted, but the reply was lost) writes
+      // the same `_id` and cannot create a second row, and `_id` order stays
+      // the write order that restoration and retention rely on.
+      _id: new Types.ObjectId(),
       guildId,
       userId,
       moderatorId,
@@ -1125,6 +1134,12 @@ export class RaidProtectionService {
             await ModerationLog.create(row);
             written = true;
           } catch (error) {
+            // A duplicate key on our own fixed `_id` means an earlier,
+            // ambiguous attempt did commit: the row is written.
+            if ((error as { code?: number }).code === 11000) {
+              written = true;
+              break;
+            }
             logger.error(
               `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.pendingRows.length} pending):`,
               error,

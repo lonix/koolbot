@@ -49,6 +49,18 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 jest.unstable_mockModule("../../src/config/env.js", () => ({ env: mockEnv }));
+// ObjectIds that increase with creation order, like the real ones in one process.
+let objectIdCounter = 0;
+jest.unstable_mockModule("mongoose", () => ({
+  Types: {
+    ObjectId: class {
+      private readonly value = String(++objectIdCounter).padStart(8, "0");
+      toString(): string {
+        return this.value;
+      }
+    },
+  },
+}));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: mockLogger,
 }));
@@ -725,6 +737,140 @@ describe("RaidProtectionService", () => {
       } finally {
         ROW_RETRY_DELAYS_MS.push(...delays);
       }
+    });
+  });
+
+  describe("idempotent log rows", () => {
+    it("gives each queued row one stable _id, increasing in queue order", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      mockCreate
+        .mockRejectedValueOnce(new Error("blip"))
+        .mockRejectedValueOnce(new Error("blip"))
+        .mockResolvedValue({});
+      await service.setLockdown(guild, true, "mod-1");
+      await service.setLockdown(guild, false, "mod-1");
+      const calls = mockCreate.mock.calls.map((c) => c[0]);
+      // First row: three attempts, all with the same _id.
+      expect(calls[0]._id).toBe(calls[1]._id);
+      expect(calls[1]._id).toBe(calls[2]._id);
+      const first = String(calls[0]._id);
+      const second = String(calls[3]._id);
+      expect(second > first).toBe(true);
+      expect(calls[0].createdAt).toBe(calls[2].createdAt);
+    });
+
+    it("writes exactly one row when an attempt committed but its reply was lost", async () => {
+      const store = new Map<string, Record<string, unknown>>();
+      let first = true;
+      mockCreate.mockImplementation(async (row) => {
+        const id = String(row._id);
+        if (store.has(id)) {
+          throw Object.assign(new Error("E11000 duplicate key"), {
+            code: 11000,
+          });
+        }
+        store.set(id, row);
+        if (first) {
+          first = false;
+          throw new Error("write concern timeout (but it was committed)");
+        }
+        return {};
+      });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      expect(store.size).toBe(1);
+      expect((await service.getStatus(guild)).unrecorded).toBe(0);
+    });
+
+    it("treats a duplicate-key error on the fixed _id as written", async () => {
+      mockCreate.mockRejectedValue(
+        Object.assign(new Error("E11000"), { code: 11000 }),
+      );
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      expect((await service.getStatus(guild)).unrecorded).toBe(0);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("dry run counts like live mode", () => {
+    type Case = [string, () => FakeMember, Record<string, unknown>];
+    const cases: Case[] = [
+      [
+        "a member the bot cannot moderate",
+        () => makeMember({ moderatable: false }),
+        { "moderation.raid.lockdown_action": "timeout" },
+      ],
+      [
+        "a member the bot cannot kick",
+        () => makeMember({ kickable: false }),
+        { "moderation.raid.lockdown_action": "kick" },
+      ],
+      [
+        "a member the bot cannot manage",
+        () => makeMember({ manageable: false }),
+        {
+          "moderation.raid.lockdown_action": "quarantine",
+          "moderation.raid.quarantine_role_id": "q-ok",
+        },
+      ],
+      [
+        "a missing quarantine role",
+        () => makeMember(),
+        {
+          "moderation.raid.lockdown_action": "quarantine",
+          "moderation.raid.quarantine_role_id": "nope",
+        },
+      ],
+      [
+        "a quarantine role above the bot",
+        () => makeMember(),
+        {
+          "moderation.raid.lockdown_action": "quarantine",
+          "moderation.raid.quarantine_role_id": "q-high",
+        },
+      ],
+    ];
+
+    it.each(cases)(
+      "%s is skipped, not counted as would-act, in both modes",
+      async (_label, build, extra) => {
+        roles.set("q-ok", { id: "q-ok", managed: false, editable: true });
+        roles.set("q-high", { id: "q-high", managed: false, editable: false });
+        const results: Array<{ skipped: number; wouldAction: number }> = [];
+        for (const dryRun of [true, false]) {
+          RaidProtectionService.reset();
+          liveConfig({ ...extra, "moderation.raid.dry_run": dryRun });
+          mockFindOne.mockReturnValue({
+            sort: () => ({ lean: () => ({ exec: async () => null }) }),
+          });
+          const service = RaidProtectionService.getInstance(client);
+          await service.initialize();
+          await service.setLockdown(guild, true, "mod-1");
+          await service.handleMemberJoin(build().member);
+          const { counts } = await service.getStatus(guild);
+          results.push({
+            skipped: counts.skipped,
+            wouldAction: counts.wouldAction,
+          });
+        }
+        expect(results[0]).toEqual({ skipped: 1, wouldAction: 0 });
+        expect(results[1]).toEqual(results[0]);
+      },
+    );
+
+    it("still counts an allowed member as would-act in dry run", async () => {
+      roles.set("q-ok", { id: "q-ok", managed: false, editable: true });
+      liveConfig({
+        "moderation.raid.dry_run": true,
+        "moderation.raid.lockdown_action": "quarantine",
+        "moderation.raid.quarantine_role_id": "q-ok",
+      });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      await service.handleMemberJoin(makeMember().member);
+      const { counts } = await service.getStatus(guild);
+      expect(counts).toMatchObject({ wouldAction: 1, skipped: 0 });
     });
   });
 
