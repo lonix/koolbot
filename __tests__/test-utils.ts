@@ -229,3 +229,38 @@ export function stubTrackingOptOuts(
     "optedOut"
   ] = new Set(optedOut.map(([userId, guildId]) => `${guildId}:${userId}`));
 }
+
+type ModelStub = Record<string, jest.Mock>;
+
+/**
+ * Give every mongoose model its own stub for the current test file (#1089).
+ *
+ * The global mongoose mock (`__tests__/setup.ts`) normally hands every model
+ * the SAME stub object, which forces a test that needs two collections to
+ * behave differently to route on the shape of each call. After this call,
+ * `Model.find`, `Model.updateOne` and friends are per model, so each
+ * collection can be stubbed on its own with `mockModel("Name")`, or directly
+ * on the imported model.
+ *
+ * Call it once at the top of the test file. It applies to the whole file
+ * (the sandbox global is per test file) and does not affect other suites.
+ * Do not use it in a suite that sets a method up through one model import
+ * and reads it back through another.
+ */
+export function usePerModelStubs(): void {
+  (globalThis as { __perModelStubs?: boolean }).__perModelStubs = true;
+}
+
+/**
+ * The stub behind `mongoose.model(name)` once `usePerModelStubs()` is on:
+ * `mockModel("ManagedVoiceChannel").find.mockResolvedValue(rows)`. `name` is
+ * the first argument the model was registered with, not the variable name.
+ */
+export function mockModel(name: string): ModelStub {
+  const stubFor = (globalThis as { __modelStubFor?: (n: string) => ModelStub })
+    .__modelStubFor;
+  if (!stubFor) {
+    throw new Error("mockModel: the global mongoose mock is not installed");
+  }
+  return stubFor(name);
+}

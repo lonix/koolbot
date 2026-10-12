@@ -89,6 +89,20 @@ mocks (issue #849).
   and `parseFlashRedirect()` unpacks a handler's 303 `Location` into its
   flash parts. See `__tests__/web/write-routes-*.test.ts` for the shape.
 
+- Per-model mongoose stubs (#1089). The global mongoose mock in
+  `__tests__/setup.ts` hands every `mongoose.model(...)` the **same** stub, so by
+  default `ModelA.find` and `ModelB.find` are one function. When a test needs
+  two or more collections to behave differently, call `usePerModelStubs()` from
+  `test-utils.ts` once at the top of the file: every model then gets its own
+  stub (including models imported before the call), and `mockModel("Name")`
+  returns the stub for one model (the name it is registered with), so you set
+  up `find` / `updateOne` / `findOne` per collection instead of one
+  implementation that guesses the collection from the shape of the call. Do not
+  use it in a suite that sets a method up through one model import and reads it
+  back through another, and leave existing shared-stub suites alone until you
+  are touching them. See
+  `__tests__/services/voice-channel-manager-managed-only.test.ts`.
+
 The harness deliberately imports nothing from `src/`: suites register their
 service mocks with `jest.unstable_mockModule` and then `await import()` the
 routers, so a static import in the harness would load them too early and

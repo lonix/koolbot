@@ -25,11 +25,14 @@ import {
   stripSurroundingQuotes,
 } from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
-import { VoiceChannelOwnership } from "../../src/models/voice-channel-ownership.js";
 import {
   ManagedVoiceChannel,
   ManagedVoiceMigration,
 } from "../../src/models/managed-voice-channel.js";
+import { mockModel, usePerModelStubs } from "../test-utils.js";
+
+// Three collections behave differently here: give each model its own stub.
+usePerModelStubs();
 
 const mockConfigService =
   ConfigService.getInstance() as jest.Mocked<ConfigService>;
@@ -170,56 +173,65 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     managedStore = new Map();
     ownershipStore = new Map();
     migrationStore = new Map();
-    // The global mongoose mock (__tests__/setup.ts) hands every model the SAME
-    // stub object, so one set of methods serves all three collections. Route
-    // each call to the right in-memory store by its shape:
-    //  - find(): a projection with `ownerId` is the ownership lookup used by
-    //    the managed-set loader; a projection without it is the managed set;
-    //    no projection is restoreOwnership's ownership read.
-    //  - updateOne(): `$setOnInsert.kind` = managed row, `.adoptedCount` =
-    //    migration marker, `$set` = ownership custom-name update (ignored).
-    //  - findOne() is only used for the migration marker.
-    //  - deleteOne() runs against both stores (the code calls it per model).
-    const stub = ManagedVoiceChannel as unknown as Record<string, jest.Mock>;
-    expect(VoiceChannelOwnership as unknown).toBe(ManagedVoiceChannel);
-    expect(ManagedVoiceMigration as unknown).toBe(ManagedVoiceChannel);
-    stub.find = jest
+    // Each model has its own stub (usePerModelStubs, #1089), so every
+    // collection gets its own in-memory fake with no call-shape routing.
+    const managedModel = mockModel("ManagedVoiceChannel");
+    const migrationModel = mockModel("ManagedVoiceMigration");
+    const ownershipModel = mockModel("VoiceChannelOwnership");
+
+    managedModel.find = jest
       .fn<any>()
-      .mockImplementation(async (filter: any, projection?: any) => {
-        const store =
-          projection && !projection.ownerId ? managedStore : ownershipStore;
-        return [...store.values()].filter((r) => r.guildId === filter.guildId);
-      });
-    stub.updateOne = jest
+      .mockImplementation(async (filter: any) =>
+        [...managedStore.values()].filter((r) => r.guildId === filter.guildId),
+      );
+    managedModel.updateOne = jest
       .fn<any>()
       .mockImplementation(async (filter: any, update: any) => {
         const insert = update.$setOnInsert;
-        if (insert?.adoptedCount !== undefined) {
-          if (!migrationStore.has(filter.guildId)) {
-            migrationStore.set(filter.guildId, { ...insert });
-          }
-        } else if (insert?.kind !== undefined) {
-          if (!managedStore.has(filter.channelId)) {
-            managedStore.set(filter.channelId, { ...insert });
-          }
+        if (insert?.kind !== undefined && !managedStore.has(filter.channelId)) {
+          managedStore.set(filter.channelId, { ...insert });
         }
       });
-    stub.findOne = jest
+    managedModel.deleteOne = jest
+      .fn<any>()
+      .mockImplementation(async (filter: any) => {
+        managedStore.delete(filter.channelId);
+      });
+
+    migrationModel.findOne = jest
       .fn<any>()
       .mockImplementation(
         async (filter: any) => migrationStore.get(filter.guildId) ?? null,
       );
-    stub.findOneAndUpdate = jest
+    migrationModel.updateOne = jest
+      .fn<any>()
+      .mockImplementation(async (filter: any, update: any) => {
+        if (!migrationStore.has(filter.guildId)) {
+          migrationStore.set(filter.guildId, { ...update.$setOnInsert });
+        }
+      });
+
+    ownershipModel.find = jest
+      .fn<any>()
+      .mockImplementation(async (filter: any) =>
+        [...ownershipStore.values()].filter(
+          (r) => r.guildId === filter.guildId,
+        ),
+      );
+    ownershipModel.findOneAndUpdate = jest
       .fn<any>()
       .mockImplementation(async (filter: any, update: any) => {
         ownershipStore.set(filter.channelId, {
           ...update.$setOnInsert,
         } as Row);
       });
-    stub.deleteOne = jest.fn<any>().mockImplementation(async (filter: any) => {
-      managedStore.delete(filter.channelId);
-      ownershipStore.delete(filter.channelId);
-    });
+    // Custom-name `$set` updates are not asserted on, so nothing to store.
+    ownershipModel.updateOne = jest.fn<any>().mockResolvedValue(undefined);
+    ownershipModel.deleteOne = jest
+      .fn<any>()
+      .mockImplementation(async (filter: any) => {
+        ownershipStore.delete(filter.channelId);
+      });
 
     guildChannels = new Collection();
     category = { id: CATEGORY_ID, children: { cache: new Collection() } };
