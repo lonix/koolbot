@@ -90,7 +90,7 @@ backward-compat fallback (see `voice-channel-manager.ts`). A key whose `category
 added to `CONFIG_CATEGORIES` in `models/config.ts`, or the startup cleanup sweep deletes its rows as
 "unknown" on every restart (#609, #834). Only the Setup Wizard (`wizard-service.ts`) and the server-adoption
 scan call `ConfigService.triggerReload()` (clears cache + fires registered reload
-callbacks). An ordinary Web UI settings save (`/admin/settings/save-section`, `/settings/set`) only calls
+callbacks). An ordinary Web UI settings save (`/admin/settings/save-section`, `/admin/settings/set`) only calls
 `ConfigService.set()`, which updates the cache and calls `addChangeListener` listeners but does **not** run
 reload callbacks. A service that caches a flag or runs a schedule must therefore subscribe with
 `addChangeListener` (see `version-check-service.ts`) as well as, where needed, `registerReloadCallback`. Do not reintroduce
