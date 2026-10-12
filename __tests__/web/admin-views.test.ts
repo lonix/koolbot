@@ -2421,6 +2421,9 @@ describe("renderReactionRolesPage", () => {
       archived: [],
     });
     expect(html).toContain("/admin/reaction-roles/group/delete");
+    // reused roles are kept, so the confirmation must not promise otherwise
+    expect(html).toContain("reused roles, and roles still used by another");
+    expect(html).not.toContain("removes every role in the group");
     expect(html).toContain('name="groupId" value="grp1"');
     // Grouped rows must not expose the per-role archive control.
     expect(html).not.toContain("/admin/reaction-roles/archive");

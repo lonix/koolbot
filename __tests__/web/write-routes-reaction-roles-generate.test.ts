@@ -95,6 +95,31 @@ describe("POST /reaction-roles/group/generate", () => {
     );
   });
 
+  it("audits the effective mode of a top-up, not the submitted one", async () => {
+    mockProvision.mockResolvedValue({
+      success: true,
+      message: "Done.",
+      groupId: "g1",
+      mode: "unique",
+      createdRoles: [],
+      reusedRoles: [],
+      addedEntries: 1,
+      skippedEntries: 0,
+    });
+    await harness.post("/reaction-roles/group/generate", {
+      preset: "regions",
+      mode: "toggle",
+    });
+    const call = mockProvision.mock.calls[0] as unknown as unknown[];
+    expect(call[3]).toBe("toggle");
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        details: expect.objectContaining({ mode: "unique" }),
+      }),
+    );
+  });
+
   it("rejects an unknown preset", async () => {
     const res = await harness.post("/reaction-roles/group/generate", {
       preset: "nope",

@@ -38,6 +38,7 @@ import { CommandManager } from "./command-manager.js";
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
   ReactionRoleConfig,
   IReactionRoleConfig,
@@ -1974,7 +1975,28 @@ export class ReactionRoleService {
   public async deleteReactionRoleGroup(
     guildId: string,
     groupId: string,
-  ): Promise<{ success: boolean; message: string }> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    rolesDeleted?: number;
+    rolesKept?: number;
+  }> {
+    // Shared with ReactionRoleGroupService.provisionGroup so a delete and a
+    // top-up of the same guild never interleave (no re-entrant calls).
+    return reactionRoleGuildLock.run(guildId, () =>
+      this.deleteReactionRoleGroupLocked(guildId, groupId),
+    );
+  }
+
+  private async deleteReactionRoleGroupLocked(
+    guildId: string,
+    groupId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    rolesDeleted?: number;
+    rolesKept?: number;
+  }> {
     try {
       const configs = await ReactionRoleConfig.find({ guildId, groupId });
       if (configs.length === 0) {
@@ -2029,8 +2051,13 @@ export class ReactionRoleService {
 
       // Delete every role in the group, except roles the bot did not create
       // (the grouped-role generator reuses existing roles, #1064).
+      let rolesDeleted = 0;
+      let rolesKept = 0;
       for (const config of configs) {
-        if (config.autoCreated === false) continue;
+        if (config.autoCreated === false) {
+          rolesKept++;
+          continue;
+        }
         try {
           // Same guard as deleteReactionRole: a role reused by a mapping
           // outside this group must survive, or that picker would dangle.
@@ -2039,10 +2066,14 @@ export class ReactionRoleService {
             roleId: config.roleId,
             groupId: { $ne: groupId },
           });
-          if (stillUsed > 0) continue;
+          if (stillUsed > 0) {
+            rolesKept++;
+            continue;
+          }
           const role = await guild.roles.fetch(config.roleId);
           if (role) {
             await role.delete();
+            rolesDeleted++;
           }
         } catch (error) {
           logger.warn(`Could not delete role ${config.roleId}:`, error);
@@ -2052,12 +2083,17 @@ export class ReactionRoleService {
       await ReactionRoleConfig.deleteMany({ guildId, groupId });
 
       logger.info(
-        `Fully deleted reaction role group ${groupId} (${configs.length} roles)`,
+        `Fully deleted reaction role group ${groupId} (${rolesDeleted} roles removed, ${rolesKept} kept)`,
       );
 
       return {
         success: true,
-        message: `Successfully deleted role group and its ${configs.length} roles.`,
+        message:
+          rolesKept > 0
+            ? `Deleted the role group: removed ${rolesDeleted} role${rolesDeleted === 1 ? "" : "s"}, kept ${rolesKept} that ${rolesKept === 1 ? "was" : "were"} reused or still used elsewhere.`
+            : `Successfully deleted role group and its ${rolesDeleted} role${rolesDeleted === 1 ? "" : "s"}.`,
+        rolesDeleted,
+        rolesKept,
       };
     } catch (error) {
       logger.error("Error deleting reaction role group:", error);

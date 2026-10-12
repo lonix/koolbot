@@ -40,6 +40,8 @@ jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
   REACTION_ROLE_MODES: ["toggle", "sticky", "unique"],
 }));
 
+const { reactionRoleGuildLock } =
+  await import("../../src/services/reaction-role-guild-lock.js");
 const { ReactionRoleGroupService, parseRoleColour } =
   await import("../../src/services/reaction-role-group-service.js");
 
@@ -323,6 +325,57 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(
       labels.filter((l) => l.startsWith("delete group role")),
     ).toHaveLength(2);
+  });
+
+  it("keeps control characters out of the Discord operation labels", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Evil\r\nINFO forged", emoji: "x\ny" },
+    ]);
+    expect(r.success).toBe(true);
+    const labels = mockApi.mock.calls.map((c) => String(c[1]));
+    const op = labels.filter(
+      (l) => l.startsWith("create role") || l.startsWith("react "),
+    );
+    expect(op).toHaveLength(2);
+    for (const l of op) expect(l).not.toMatch(/[\r\n]/);
+  });
+
+  it("serialises with other holders of the shared guild lock and survives their failure", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    let fail!: (e: Error) => void;
+    const held = reactionRoleGuildLock.run(
+      "g1",
+      () => new Promise<void>((_, reject) => (fail = reject)),
+    );
+    const run = svc.provisionGroup("g1", "Region", entries);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(model.find).not.toHaveBeenCalled();
+    fail(new Error("delete failed"));
+    await expect(held).rejects.toThrow("delete failed");
+    const r = await run;
+    expect(r.success).toBe(true);
+    expect(model.find).toHaveBeenCalled();
+  });
+
+  it("reports the picker's own mode on a top-up, not the submitted one", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([
+      {
+        roleId: "r1",
+        emoji: "🇪🇺",
+        roleName: "Europe",
+        messageId: "m1",
+        groupId: "m1",
+        mode: "unique",
+      },
+    ]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries, "toggle");
+    expect(r.success).toBe(true);
+    expect(r.mode).toBe("unique");
   });
 
   it("ignores archived rows of earlier pickers and generates a fresh group", async () => {

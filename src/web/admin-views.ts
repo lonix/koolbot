@@ -2633,7 +2633,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     // Grouped mappings share a message/category/channel, so they can only be
     // torn down as a unit — offer a single group-delete instead of the
     // per-mapping archive/delete controls.
-    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" onsubmit="return confirm('Permanently delete the whole role group ${jsName} belongs to? This removes every role in the group and its shared category/channel.');">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" onsubmit="return confirm('Permanently delete the whole role group ${jsName} belongs to? This removes the roles the bot created for it (reused roles, and roles still used by another mapping, are kept) and its shared category/channel.');">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
   } else if (!managed) {
     // Bound mappings point at a pre-existing role and may share a picker
     // message, so they are removed per-mapping (message + emoji) and never

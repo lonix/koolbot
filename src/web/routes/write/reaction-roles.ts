@@ -528,7 +528,8 @@ export function createReactionRolesRouter(client: Client): Router {
           details: {
             groupName,
             preset: presetKey || "custom",
-            mode,
+            // the effective mode: a top-up keeps the picker's own
+            mode: result.mode ?? mode,
             created: result.createdRoles,
             reused: result.reusedRoles,
             added: result.addedEntries,

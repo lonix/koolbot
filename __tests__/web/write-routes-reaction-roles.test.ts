@@ -409,4 +409,19 @@ describe("POST /reaction-roles/group/create", () => {
       result: "success",
     });
   });
+
+  it("flashes the deleted and kept role outcome of a group delete", async () => {
+    const text =
+      "Deleted the role group: removed 1 role, kept 2 that were reused or still used elsewhere.";
+    mockDeleteReactionRoleGroup.mockResolvedValue({
+      success: true,
+      message: text,
+      rolesDeleted: 1,
+      rolesKept: 2,
+    });
+    const res = await harness.post("/reaction-roles/group/delete", {
+      groupId: "group-1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(text);
+  });
 });

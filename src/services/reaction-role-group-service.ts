@@ -11,6 +11,7 @@ import { CommandManager } from "./command-manager.js";
 import { ReactionRoleService } from "./reaction-role-service.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
   ReactionRoleConfig,
   ReactionRoleMode,
@@ -52,6 +53,8 @@ export interface GroupProvisionResult {
   message: string;
   groupId?: string;
   messageId?: string;
+  /** The mode the group actually uses (a top-up keeps the picker's own). */
+  mode?: ReactionRoleMode;
   createdRoles: string[];
   reusedRoles: string[];
   addedEntries: number;
@@ -76,8 +79,6 @@ export function parseRoleColour(raw: string): number | undefined {
 export class ReactionRoleGroupService {
   private static instance: ReactionRoleGroupService;
   private client: Client;
-  /** Tail of the in-process provisioning queue, per guild. */
-  private locks = new Map<string, Promise<void>>();
 
   private constructor(client: Client) {
     this.client = client;
@@ -95,32 +96,6 @@ export class ReactionRoleGroupService {
       call,
       label,
     );
-  }
-
-  /**
-   * Run `fn` after every earlier provisioning for the same guild finished.
-   * Serialised per guild (not per group) because roles are reused by name
-   * across groups, so two groups can race on the same role too. The bot is a
-   * single instance, so an in-process queue is sufficient.
-   */
-  private async withGuildLock<T>(
-    guildId: string,
-    fn: () => Promise<T>,
-  ): Promise<T> {
-    const prev = this.locks.get(guildId) ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = prev.then(() => gate);
-    this.locks.set(guildId, tail);
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (this.locks.get(guildId) === tail) this.locks.delete(guildId);
-    }
   }
 
   /**
@@ -200,7 +175,7 @@ export class ReactionRoleGroupService {
       return fail("Emojis within a group must be unique.");
     }
 
-    return this.withGuildLock(guildId, () =>
+    return reactionRoleGuildLock.run(guildId, () =>
       this.provisionLocked(guildId, name, clean, mode),
     );
   }
@@ -364,6 +339,7 @@ export class ReactionRoleGroupService {
           message: `Group **${name}** is already up to date (${skipped} option${skipped === 1 ? "" : "s"} already present). Nothing changed.`,
           groupId: existingRows[0]?.groupId,
           messageId: anchor?.id,
+          mode: effectiveMode,
           createdRoles: [],
           reusedRoles: [],
           addedEntries: 0,
@@ -428,7 +404,7 @@ export class ReactionRoleGroupService {
               mentionable: false,
               reason: `Reaction role group generated: ${name}`,
             }),
-          `create role ${t.roleName}`,
+          `create role ${sanitizeForLog(t.roleName)}`,
         );
         createdRoles.push(role);
         t.role = role;
@@ -487,7 +463,7 @@ export class ReactionRoleGroupService {
       for (const emoji of reactEmojis) {
         await this.api(
           () => target.react(emoji),
-          `react ${emoji} on group message`,
+          `react ${sanitizeForLog(emoji)} on group message`,
         );
         const key = emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
         if (!ownedBefore.has(key)) addedReactions.push(emoji);
@@ -536,6 +512,7 @@ export class ReactionRoleGroupService {
         message: `Group **${name}**: added ${todo.length} option${todo.length === 1 ? "" : "s"} (${created.length} new role${created.length === 1 ? "" : "s"}, ${reused.length} existing reused, ${skipped} already present).`,
         groupId,
         messageId: target.id,
+        mode: effectiveMode,
         createdRoles: created,
         reusedRoles: reused,
         addedEntries: todo.length,

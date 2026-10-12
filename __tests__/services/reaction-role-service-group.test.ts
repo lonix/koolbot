@@ -13,6 +13,7 @@ jest.mock("../../src/utils/logger.js", () => ({
 
 jest.mock("../../src/models/reaction-role-config.js");
 
+import { reactionRoleGuildLock } from "../../src/services/reaction-role-guild-lock.js";
 import { ReactionRoleService } from "../../src/services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../../src/models/reaction-role-config.js";
 
@@ -259,6 +260,11 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
     const result = await service.deleteReactionRoleGroup("g1", "grp1");
 
     expect(result.success).toBe(true);
+    expect(result.rolesDeleted).toBe(2);
+    expect(result.rolesKept).toBe(0);
+    expect(result.message).toBe(
+      "Successfully deleted role group and its 2 roles.",
+    );
     expect(message.delete).toHaveBeenCalledTimes(1);
     expect(category.delete).toHaveBeenCalledTimes(1);
     expect(roleDelete).toHaveBeenCalledTimes(2);
@@ -307,8 +313,11 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
       (q as { roleId: string }).roleId === "shared" ? 1 : 0,
     );
 
-    await service.deleteReactionRoleGroup("g1", "grp1");
+    const result = await service.deleteReactionRoleGroup("g1", "grp1");
 
+    expect(result.rolesDeleted).toBe(1);
+    expect(result.rolesKept).toBe(1);
+    expect(result.message).toMatch(/removed 1 role, kept 1 that was reused/);
     expect(model.countDocuments).toHaveBeenCalledWith({
       guildId: "g1",
       roleId: "shared",
@@ -343,8 +352,10 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
     model.deleteMany.mockResolvedValue({ deletedCount: 2 });
     model.countDocuments.mockResolvedValue(0);
 
-    await service.deleteReactionRoleGroup("g1", "grp1");
+    const result = await service.deleteReactionRoleGroup("g1", "grp1");
 
+    expect(result.rolesDeleted).toBe(1);
+    expect(result.rolesKept).toBe(1);
     expect(fetchRole.mock.calls.map((c) => c[0])).toEqual(["mine"]);
     expect(roleDelete).toHaveBeenCalledTimes(1);
   });
@@ -448,5 +459,34 @@ describe("ReactionRoleService.validateRoleAssignable bot member resolution", () 
       ok: false,
       message: expect.stringContaining("own membership"),
     });
+  });
+
+  it("waits for the shared guild lock and releases it after a failure", async () => {
+    const client = {
+      guilds: { fetch: jest.fn<() => Promise<unknown>>() },
+    };
+    const { service } = createService(client);
+    model.find.mockResolvedValue([]);
+    let release!: () => void;
+    const held = reactionRoleGuildLock.run(
+      "g1",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const deleting = service.deleteReactionRoleGroup("g1", "nope");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    // blocked behind the in-flight provisioning/delete for the same guild
+    expect(model.find).not.toHaveBeenCalled();
+    release();
+    await held;
+    expect((await deleting).success).toBe(false);
+    expect(model.find).toHaveBeenCalledTimes(1);
+
+    // a failing holder does not block the next caller
+    const failing = reactionRoleGuildLock.run("g1", async () => {
+      throw new Error("boom");
+    });
+    await expect(failing).rejects.toThrow("boom");
+    await service.deleteReactionRoleGroup("g1", "nope");
+    expect(model.find).toHaveBeenCalledTimes(2);
   });
 });
