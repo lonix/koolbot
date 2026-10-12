@@ -1,0 +1,146 @@
+import { describe, it, expect, afterEach, jest } from "@jest/globals";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+// @ts-expect-error -- plain Node ESM tooling script, no type declarations
+import * as guard from "../../scripts/check-lockfile-libc.mjs";
+
+type Lock = { packages: Record<string, Record<string, unknown>> };
+
+const goodLock = (): Lock => ({
+  packages: {
+    "": { name: "koolbot" },
+    "node_modules/@parcel/watcher-linux-x64-glibc": {
+      version: "2.5.0",
+      optional: true,
+      libc: ["glibc"],
+    },
+    "node_modules/@parcel/watcher-linux-x64-musl": {
+      version: "2.5.0",
+      optional: true,
+      libc: ["musl"],
+    },
+    "node_modules/express": { version: "5.2.1" },
+  },
+});
+
+const stripLibc = (lock: Lock): Lock => {
+  const copy = JSON.parse(JSON.stringify(lock)) as Lock;
+  for (const entry of Object.values(copy.packages)) delete entry.libc;
+  return copy;
+};
+
+describe("check-lockfile-libc", () => {
+  describe("findDroppedLibc", () => {
+    it("passes an unchanged lockfile", () => {
+      expect(guard.findDroppedLibc(goodLock(), goodLock())).toEqual([]);
+    });
+
+    it("fails and names packages when libc was dropped", () => {
+      expect(guard.findDroppedLibc(goodLock(), stripLibc(goodLock()))).toEqual([
+        "node_modules/@parcel/watcher-linux-x64-glibc",
+        "node_modules/@parcel/watcher-linux-x64-musl",
+      ]);
+    });
+
+    it("flags a partial drop only for the affected package", () => {
+      const head = goodLock();
+      delete head.packages["node_modules/@parcel/watcher-linux-x64-musl"].libc;
+      expect(guard.findDroppedLibc(goodLock(), head)).toEqual([
+        "node_modules/@parcel/watcher-linux-x64-musl",
+      ]);
+    });
+
+    it("allows a native dependency (and its libc) to be removed", () => {
+      const head = goodLock();
+      delete head.packages["node_modules/@parcel/watcher-linux-x64-glibc"];
+      delete head.packages["node_modules/@parcel/watcher-linux-x64-musl"];
+      expect(guard.findDroppedLibc(goodLock(), head)).toEqual([]);
+    });
+
+    it("allows a new native dependency to be added", () => {
+      const head = goodLock();
+      head.packages["node_modules/@unrs/resolver-binding-linux-x64-musl"] = {
+        version: "1.0.0",
+        libc: ["musl"],
+      };
+      expect(guard.findDroppedLibc(goodLock(), head)).toEqual([]);
+    });
+
+    it("tolerates lockfiles without a packages map", () => {
+      expect(guard.findDroppedLibc({}, {})).toEqual([]);
+    });
+  });
+
+  describe("restoreLibc", () => {
+    it("copies libc back from base, keeping key order and other changes", () => {
+      const head = stripLibc(goodLock());
+      head.packages["node_modules/express"].version = "5.3.0";
+      const fixed = guard.restoreLibc(goodLock(), head) as Lock;
+      const entry =
+        fixed.packages["node_modules/@parcel/watcher-linux-x64-musl"];
+      expect(Object.keys(entry)).toEqual(["version", "optional", "libc"]);
+      expect(entry.libc).toEqual(["musl"]);
+      expect(fixed.packages["node_modules/express"].version).toBe("5.3.0");
+      expect(guard.findDroppedLibc(goodLock(), fixed)).toEqual([]);
+    });
+  });
+
+  describe("formatFailure", () => {
+    it("lists packages and explains the fix", () => {
+      const message = guard.formatFailure(["node_modules/a"]);
+      expect(message).toContain("node_modules/a");
+      expect(message).toContain("CONTRIBUTING.md");
+    });
+  });
+
+  describe("main", () => {
+    // Every temp dir run() creates, so a test that calls it twice leaks nothing.
+    const dirs: string[] = [];
+    const lastDir = (): string => dirs[dirs.length - 1];
+    afterEach(() => {
+      jest.restoreAllMocks();
+      for (const d of dirs.splice(0)) {
+        rmSync(d, { recursive: true, force: true });
+      }
+    });
+
+    const run = (base: Lock, head: Lock, extra: string[] = []): number => {
+      const dir = mkdtempSync(join(tmpdir(), "libc-guard-"));
+      dirs.push(dir);
+      writeFileSync(join(dir, "base.json"), JSON.stringify(base));
+      writeFileSync(join(dir, "head.json"), JSON.stringify(head));
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      jest.spyOn(console, "error").mockImplementation(() => undefined);
+      return guard.main([
+        "--base",
+        join(dir, "base.json"),
+        "--head",
+        join(dir, "head.json"),
+        ...extra,
+      ]);
+    };
+
+    it("exits 0 for a good lockfile", () => {
+      expect(run(goodLock(), goodLock())).toBe(0);
+    });
+
+    it("exits 1 for a lockfile that dropped the constraints", () => {
+      expect(run(goodLock(), stripLibc(goodLock()))).toBe(1);
+    });
+
+    it("--fix rewrites the head lockfile so the check then passes", () => {
+      expect(run(goodLock(), stripLibc(goodLock()), ["--fix"])).toBe(0);
+      const fixed = JSON.parse(
+        readFileSync(join(lastDir(), "head.json"), "utf8"),
+      );
+      expect(run(goodLock(), fixed)).toBe(0);
+    });
+
+    it("exits 2 on unreadable input or bad arguments", () => {
+      jest.spyOn(console, "error").mockImplementation(() => undefined);
+      expect(guard.main(["--base", "/nonexistent/base.json"])).toBe(2);
+      expect(guard.main(["--bogus"])).toBe(2);
+    });
+  });
+});

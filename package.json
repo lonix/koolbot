@@ -23,6 +23,7 @@
     "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --ci --coverage --maxWorkers=2",
     "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.integration.config.js --ci --runInBand",
     "coverage:drift": "node scripts/check-coverage-drift.mjs",
+    "check:lockfile": "node scripts/check-lockfile-libc.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\"",
