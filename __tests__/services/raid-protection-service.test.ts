@@ -573,6 +573,114 @@ describe("RaidProtectionService", () => {
     });
   });
 
+  describe("auto-expiry timer", () => {
+    it("ends a quiet lockdown on time with no join, status read or settings save", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      send.mockClear();
+
+      await jest.advanceTimersByTimeAsync(9 * 60 * 1000);
+      expect(rowsWith("raid_clear")).toHaveLength(0);
+      await jest.advanceTimersByTimeAsync(2 * 60 * 1000);
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      expect(rowsWith("raid_clear")[0]).toMatchObject({ moderatorId: null });
+      expect(send).toHaveBeenCalledTimes(1);
+      service.destroy();
+    });
+
+    it("is cancelled by a manual clear and by destroy()", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      await service.setLockdown(guild, false, "mod-1");
+      expect(jest.getTimerCount()).toBe(0);
+      await service.setLockdown(guild, true, "mod-1");
+      expect(jest.getTimerCount()).toBe(1);
+      service.destroy();
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("re-arms when the limit changes, and is off at 0", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      await service.setLockdown(guild, true, "mod-1");
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 0 });
+      await reloadCallbacks[0]();
+      expect(jest.getTimerCount()).toBe(0);
+
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 5 });
+      await reloadCallbacks[0]();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(6 * 60 * 1000);
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      service.destroy();
+    });
+
+    it("arms a timer for a restored lockdown", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      mockFindOne.mockReturnValue({
+        sort: () => ({
+          lean: () => ({
+            exec: async () => ({
+              action: "raid_lockdown",
+              createdAt: new Date(),
+              moderatorId: "mod-1",
+              reason: "Manual",
+            }),
+          }),
+        }),
+      });
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(11 * 60 * 1000);
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      service.destroy();
+    });
+  });
+
+  describe("late startup restoration", () => {
+    it("is ignored once the bounded wait has failed open", async () => {
+      jest.useFakeTimers();
+      RaidProtectionService.reset();
+      let resolveFind: (row: unknown) => void = () => undefined;
+      mockFindOne.mockReturnValue({
+        sort: () => ({
+          lean: () => ({
+            exec: () => new Promise((resolve) => (resolveFind = resolve)),
+          }),
+        }),
+      });
+      const service = RaidProtectionService.getInstance(client);
+      const init = service.initialize();
+      const pending = service.handleMemberJoin(makeMember().member);
+      await jest.advanceTimersByTimeAsync(INIT_WAIT_MS + 1);
+      expect(await pending).toBe(false);
+
+      // The restore finally answers with an old, open lockdown.
+      resolveFind({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: "mod-1",
+        reason: "Manual",
+      });
+      await init;
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("ignoring a lockdown restored after"),
+      );
+      const next = makeMember();
+      expect(await service.handleMemberJoin(next.member)).toBe(false);
+    });
+  });
+
   describe("log row durability", () => {
     it("retries a failed write and records the row", async () => {
       mockCreate.mockRejectedValueOnce(new Error("blip")).mockResolvedValue({});

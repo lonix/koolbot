@@ -521,6 +521,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         CommandAuditCleanupService.getInstance().destroy();
         WebAuditLogCleanupService.getInstance().destroy();
         VersionCheckService.getInstance().destroy();
+        RaidProtectionService.getInstance(client).destroy();
         ModerationLogCleanupService.getInstance().destroy();
         moderationCaseReviewService.destroy();
         nameHistoryCleanup?.destroy();

@@ -53,6 +53,7 @@ export const INIT_WAIT_MS = 10_000;
 /** Waits between attempts to write a log row, then it is queued for later. */
 export const ROW_RETRY_DELAYS_MS = [100, 300];
 const MAX_PENDING_ROWS = 500;
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 export const MIN_JOIN_THRESHOLD = 2;
 export const MIN_WINDOW_SECONDS = 5;
@@ -182,6 +183,8 @@ export interface RaidState {
    * stale "started" can never follow "ended".
    */
   generation: number;
+  /** Fires the auto-expiry of the open lockdown, if it has a time limit. */
+  expiryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 function freshState(): RaidState {
@@ -196,6 +199,7 @@ function freshState(): RaidState {
     gateCounts: freshCounts(),
     failureAlerted: false,
     generation: 0,
+    expiryTimer: null,
   };
 }
 
@@ -288,7 +292,16 @@ export class RaidProtectionService {
   }
 
   public static reset(): void {
+    RaidProtectionService.instance?.destroy();
     RaidProtectionService.instance = undefined;
+  }
+
+  /** Stop the auto-expiry timers. Called on shutdown. */
+  public destroy(): void {
+    for (const state of this.states.values()) {
+      if (state.expiryTimer) clearTimeout(state.expiryTimer);
+      state.expiryTimer = null;
+    }
   }
 
   /** Resolve and clamp every setting, once per decision. */
@@ -469,6 +482,16 @@ export class RaidProtectionService {
         );
         return;
       }
+      // The bounded startup wait already gave up (fail open): joins were
+      // evaluated, and `/raidmode` answered, without this state. Applying it
+      // now would reverse that decision behind everyone's back, so ignore it;
+      // `/raidmode on` re-applies a lockdown deliberately.
+      if (this.waitedOut) {
+        logger.warn(
+          "Anti-raid: ignoring a lockdown restored after the startup wait timed out; use /raidmode on to apply one",
+        );
+        return;
+      }
       const state = this.getState(guildId);
       state.lockdown = true;
       state.since = new Date(last.createdAt).getTime();
@@ -476,6 +499,7 @@ export class RaidProtectionService {
         last.moderatorId && last.moderatorId !== this.client.user?.id
           ? last.moderatorId
           : null;
+      this.scheduleExpiry(guildId, state, settings);
       logger.warn(
         "Anti-raid: restored an active lockdown from before the restart; clear it with /raidmode off",
       );
@@ -578,7 +602,52 @@ export class RaidProtectionService {
     }
     await this.expireLockdownIfDue(guild, state, settings, now);
     await this.endDryRunLockdownIfLive(guild, state, settings);
+    // (Re)arm the expiry for the current settings: they may have changed.
+    this.scheduleExpiry(guild.id, state, settings);
     return null;
+  }
+
+  /**
+   * Arm (or cancel) the timer that ends a lockdown at its time limit, so a
+   * quiet server's lockdown ends on time without waiting for a join, a status
+   * read or a settings save. The check in `expireLockdownIfDue` stays as the
+   * backstop. One timer per guild, its handle kept on the state, never
+   * keeping the process alive, and any error is logged, never thrown.
+   */
+  private scheduleExpiry(
+    guildId: string,
+    state: RaidState,
+    settings: RaidSettings,
+  ): void {
+    if (state.expiryTimer) clearTimeout(state.expiryTimer);
+    state.expiryTimer = null;
+    if (!state.lockdown || state.since === null) return;
+    if (settings.lockdownMaxMinutes <= 0) return;
+    const dueIn = Math.max(
+      0,
+      state.since + settings.lockdownMaxMinutes * MS_PER_MINUTE - Date.now(),
+    );
+    state.expiryTimer = setTimeout(
+      () => {
+        state.expiryTimer = null;
+        void this.runExpiry(guildId);
+      },
+      // setTimeout cannot take more than a signed 32-bit delay.
+      Math.min(dueIn, MAX_TIMER_MS),
+    );
+    state.expiryTimer.unref?.();
+  }
+
+  private async runExpiry(guildId: string): Promise<void> {
+    try {
+      const guild = this.client.guilds.cache.get(guildId);
+      if (!guild) return;
+      // reconcile ends the lockdown if it is due, or re-arms the timer (a long
+      // limit, or a changed setting).
+      await this.reconcile(guild, await this.loadSettings(), Date.now());
+    } catch (error) {
+      logger.error("Anti-raid: error ending an expired lockdown:", error);
+    }
   }
 
   private getState(guildId: string): RaidState {
@@ -795,6 +864,7 @@ export class RaidProtectionService {
     state.dryRun = settings.dryRun;
     state.since = now;
     state.startedBy = info.moderatorId;
+    this.scheduleExpiry(guild.id, state, settings);
     state.lockdownCounts = freshCounts();
     state.failureAlerted = false;
 
@@ -834,6 +904,8 @@ export class RaidProtectionService {
     const summary = `${c.actioned} acted on, ${c.wouldAction} would have been (dry run), ${c.skipped} skipped, ${c.failed} failed`;
     const generation = ++state.generation;
     state.lockdown = false;
+    if (state.expiryTimer) clearTimeout(state.expiryTimer);
+    state.expiryTimer = null;
     state.dryRun = false;
     state.since = null;
     state.startedBy = null;
