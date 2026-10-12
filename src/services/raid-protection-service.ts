@@ -421,7 +421,9 @@ export class RaidProtectionService {
         guildId,
         action: { $in: ["raid_lockdown", "raid_clear"] },
       })
-        .sort({ createdAt: -1 })
+        // `_id` breaks a millisecond tie: rows are written one at a time in
+        // order, and ObjectIds from one process increase in creation order.
+        .sort({ createdAt: -1, _id: -1 })
         .lean<{
           action: ModerationAction;
           createdAt: Date;
@@ -505,14 +507,28 @@ export class RaidProtectionService {
   private registerReload(): void {
     if (this.reloadRegistered) return;
     this.reloadRegistered = true;
-    this.configService.registerReloadCallback(async () => {
+    const recheck = async (): Promise<void> => {
       try {
         const guildId = env.guildId;
         const guild = guildId ? this.client.guilds.cache.get(guildId) : null;
         if (!guild) return;
         await this.reconcile(guild, await this.loadSettings(), Date.now());
       } catch (error) {
-        logger.error("Anti-raid: error re-checking after a reload:", error);
+        logger.error(
+          "Anti-raid: error re-checking after a config change:",
+          error,
+        );
+      }
+    };
+    // `triggerReload()` is only called by the wizard and the server scan; the
+    // Settings and Moderation-card saves go through `ConfigService.set()`,
+    // which only notifies change listeners. So subscribe to both: reload for
+    // those paths, and a change listener (the pattern the update check uses,
+    // #1029) for ordinary saves of the keys this feature depends on.
+    this.configService.registerReloadCallback(recheck);
+    this.configService.addChangeListener((key) => {
+      if (key === "moderation.enabled" || key.startsWith("moderation.raid.")) {
+        void recheck();
       }
     });
   }

@@ -188,7 +188,7 @@ export class ModerationLogCleanupService {
         // Newest raid_lockdown / raid_clear row per guild: the lockdown state.
         ModerationLog.aggregate<{ id: unknown }>([
           { $match: { action: { $in: ["raid_lockdown", "raid_clear"] } } },
-          { $sort: { createdAt: -1 } },
+          { $sort: { createdAt: -1, _id: -1 } },
           { $group: { _id: "$guildId", id: { $first: "$_id" } } },
         ]).exec(),
       ],

@@ -219,6 +219,9 @@ describe("ModerationLogCleanupService", () => {
       const pipeline = mockAggregate.mock.calls[0]?.[0] as Array<
         Record<string, any>
       >;
+      // A millisecond tie must resolve to the row written last (`_id` order),
+      // or the retention exemption could keep the lockdown and delete its clear.
+      expect(pipeline[1].$sort).toEqual({ createdAt: -1, _id: -1 });
       expect(pipeline[0].$match.action.$in).toEqual([
         "raid_lockdown",
         "raid_clear",

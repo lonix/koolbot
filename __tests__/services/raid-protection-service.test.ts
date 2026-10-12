@@ -10,6 +10,7 @@ import type { Client, Guild, GuildMember } from "discord.js";
 
 const config = new Map<string, unknown>();
 const reloadCallbacks: Array<() => Promise<void>> = [];
+const changeListeners: Array<(key: string) => void> = [];
 const mockEnv = { guildId: "guild-1", guildMembersIntent: true };
 const mockLogger = {
   warn: jest.fn(),
@@ -26,6 +27,9 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
     getInstance: jest.fn(() => ({
       registerReloadCallback: (cb: () => Promise<void>) => {
         reloadCallbacks.push(cb);
+      },
+      addChangeListener: (cb: (key: string) => void) => {
+        changeListeners.push(cb);
       },
       getBoolean: async (key: string, def: boolean) =>
         (config.get(key) as boolean | undefined) ?? def,
@@ -172,6 +176,7 @@ describe("RaidProtectionService", () => {
     RaidProtectionService.reset();
     jest.clearAllMocks();
     reloadCallbacks.length = 0;
+    changeListeners.length = 0;
     roles.clear();
     mockEnv.guildId = "guild-1";
     mockEnv.guildMembersIntent = true;
@@ -428,6 +433,25 @@ describe("RaidProtectionService", () => {
       const after = makeMember();
       expect(await service.handleMemberJoin(after.member)).toBe(false);
       expect(after.timeout).not.toHaveBeenCalled();
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("closes the lockdown on an ordinary settings save, which only notifies change listeners", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(changeListeners).toHaveLength(1);
+      await service.setLockdown(guild, true, "mod-1");
+
+      // Unrelated keys are ignored.
+      changeListeners[0]("quotes.enabled");
+      await new Promise((r) => setTimeout(r, 0));
+      expect(rowsWith("raid_clear")).toHaveLength(0);
+
+      liveConfig({ "moderation.enabled": false });
+      changeListeners[0]("moderation.enabled");
+      await new Promise((r) => setTimeout(r, 0));
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      liveConfig();
       expect((await service.getStatus(guild)).lockdown).toBe(false);
     });
 
@@ -714,6 +738,43 @@ describe("RaidProtectionService", () => {
         }),
       });
     }
+
+    it("breaks a createdAt tie by _id, so a clear written after its lockdown wins", async () => {
+      const at = new Date();
+      const rows = [
+        {
+          _id: 1,
+          action: "raid_lockdown",
+          createdAt: at,
+          moderatorId: "mod-1",
+          reason: "Manual",
+        },
+        {
+          _id: 2,
+          action: "raid_clear",
+          createdAt: at,
+          moderatorId: "mod-1",
+          reason: "Manual",
+        },
+      ];
+      const sortSpy = jest.fn((spec: Record<string, 1 | -1>) => {
+        const sorted = [...rows].sort((x, y) => {
+          for (const [k, dir] of Object.entries(spec)) {
+            const a = (x as Record<string, any>)[k];
+            const b = (y as Record<string, any>)[k];
+            const cmp = a instanceof Date ? a.getTime() - b.getTime() : a - b;
+            if (cmp !== 0) return cmp * dir;
+          }
+          return 0;
+        });
+        return { lean: () => ({ exec: async () => sorted[0] }) };
+      });
+      mockFindOne.mockReturnValue({ sort: sortSpy });
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
 
     it("restores a lockdown that was on before a restart", async () => {
       lastRow({
