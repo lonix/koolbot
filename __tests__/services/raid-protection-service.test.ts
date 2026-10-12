@@ -9,6 +9,8 @@ import {
 import type { Client, Guild, GuildMember } from "discord.js";
 
 const config = new Map<string, unknown>();
+// When set, config reads wait on it, to hold a join inside its settings load.
+let configGate: Promise<void> | null = null;
 const reloadCallbacks: Array<() => Promise<void>> = [];
 const changeListeners: Array<(key: string) => void> = [];
 const mockEnv = { guildId: "guild-1", guildMembersIntent: true };
@@ -39,8 +41,10 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
         const i = changeListeners.indexOf(cb);
         if (i !== -1) changeListeners.splice(i, 1);
       },
-      getBoolean: async (key: string, def: boolean) =>
-        (config.get(key) as boolean | undefined) ?? def,
+      getBoolean: async (key: string, def: boolean) => {
+        if (configGate) await configGate;
+        return (config.get(key) as boolean | undefined) ?? def;
+      },
       getNumber: async (key: string, def: number) =>
         (config.get(key) as number | undefined) ?? def,
       getString: async (key: string, def: string) =>
@@ -70,6 +74,7 @@ jest.unstable_mockModule("../../src/models/moderation-log.js", () => ({
 
 const {
   RaidProtectionService,
+  requirementFor,
   clampInt,
   parseRaidAction,
   countJoinsInWindow,
@@ -200,6 +205,7 @@ describe("RaidProtectionService", () => {
     jest.clearAllMocks();
     reloadCallbacks.length = 0;
     changeListeners.length = 0;
+    configGate = null;
     roles.clear();
     mockEnv.guildId = "guild-1";
     mockEnv.guildMembersIntent = true;
@@ -1087,6 +1093,147 @@ describe("RaidProtectionService", () => {
         expect(old.timeout).toHaveBeenCalled();
         expect(old.kick).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("authorisation covers the strongest action that can run", () => {
+    const base = {
+      enabled: true,
+      dryRun: false,
+      joinThreshold: 3,
+      windowSeconds: 30,
+      timeoutMinutes: 60,
+      quarantineRoleId: "",
+      lockdownMaxMinutes: 0,
+      alertChannelId: "",
+    };
+    const settings = (
+      lockdownAction: "timeout" | "quarantine" | "kick",
+      newAccountAction: "timeout" | "quarantine" | "kick",
+      minAccountAgeHours: number,
+    ) => ({
+      ...base,
+      lockdownAction,
+      newAccountAction,
+      minAccountAgeHours,
+    });
+
+    it("timeout lockdown + kick account gate requires Kick Members", () => {
+      expect(requirementFor(settings("timeout", "kick", 24))).toMatchObject({
+        action: "kick",
+        label: "Kick Members",
+      });
+    });
+
+    it("a disabled gate (age 0) does not raise the requirement", () => {
+      expect(requirementFor(settings("timeout", "kick", 0))).toMatchObject({
+        action: "timeout",
+        label: "Moderate Members",
+      });
+    });
+
+    it.each([
+      ["kick", "timeout", "kick"],
+      ["quarantine", "timeout", "quarantine"],
+      ["timeout", "quarantine", "quarantine"],
+      ["kick", "kick", "kick"],
+    ] as const)(
+      "lockdown %s + gate %s requires %s",
+      (lockdown, gate, expected) => {
+        expect(requirementFor(settings(lockdown, gate, 24)).action).toBe(
+          expected,
+        );
+      },
+    );
+
+    it("passes the strongest requirement to the authorize callback, and administrators (who hold it) pass", async () => {
+      liveConfig({
+        "moderation.raid.lockdown_action": "timeout",
+        "moderation.raid.new_account_action": "kick",
+        "moderation.raid.min_account_age_hours": 24,
+      });
+      const service = RaidProtectionService.getInstance(client);
+      const seen: string[] = [];
+      const refused = await service.setLockdown(guild, true, "mod-1", (r) => {
+        seen.push(r.action);
+        return "needs Kick Members";
+      });
+      expect(refused.changed).toBe(false);
+      const allowed = await service.setLockdown(guild, true, "admin-1", (r) => {
+        seen.push(r.action);
+        return null;
+      });
+      expect(allowed.changed).toBe(true);
+      expect(seen).toEqual(["kick", "kick"]);
+    });
+  });
+
+  describe("late restore versus a newer lockdown, and shutdown mid-flight", () => {
+    it("does not write a clear for a stale dry-run row after a new live lockdown started", async () => {
+      jest.useFakeTimers();
+      RaidProtectionService.reset();
+      let resolveFind: (row: unknown) => void = () => undefined;
+      mockFindOne.mockReturnValue({
+        sort: () => ({
+          lean: () => ({
+            exec: () => new Promise((resolve) => (resolveFind = resolve)),
+          }),
+        }),
+      });
+      const service = RaidProtectionService.getInstance(client);
+      const init = service.initialize();
+      const pending = service.handleMemberJoin(makeMember().member);
+      await jest.advanceTimersByTimeAsync(INIT_WAIT_MS + 1);
+      await pending;
+      // After the wait gave up, a moderator starts a live lockdown.
+      await service.setLockdown(guild, true, "mod-1");
+      mockCreate.mockClear();
+
+      resolveFind({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: null,
+        reason: "Automatic: 5 members joined (dry run)",
+      });
+      await init;
+      expect(rowsWith("raid_clear")).toHaveLength(0);
+      expect((await service.getStatus(guild)).lockdown).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining("skipped closing a stale lockdown row"),
+      );
+      service.destroy();
+    });
+
+    it("stops a join before any member action when destroyed during its settings load", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      let open: () => void = () => undefined;
+      configGate = new Promise<void>((resolve) => (open = resolve));
+      const member = makeMember();
+      const joining = service.handleMemberJoin(member.member);
+      await new Promise((r) => setTimeout(r, 0));
+      service.destroy();
+      open();
+      expect(await joining).toBe(false);
+      expect(member.timeout).not.toHaveBeenCalled();
+      expect(member.kick).not.toHaveBeenCalled();
+      expect(member.rolesAdd).not.toHaveBeenCalled();
+    });
+
+    it("arms no timer and queues no row after destroy", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      service.destroy();
+      expect(jest.getTimerCount()).toBe(0);
+      mockCreate.mockClear();
+      // Every entry point is inert now.
+      await service.getStatus(guild);
+      const result = await service.setLockdown(guild, false, "mod-1");
+      expect(result.changed).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+      expect(mockCreate).not.toHaveBeenCalled();
     });
   });
 

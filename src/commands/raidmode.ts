@@ -124,7 +124,7 @@ export async function execute(
       (needed) =>
         interaction.memberPermissions?.has(needed.flag)
           ? null
-          : `Lockdown is set to **${needed.action}** members who join, which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
+          : `Under the current settings a lockdown can **${needed.action}** members who join (the lockdown action, or the stronger new-account action), which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
     );
     await interaction.editReply({ content: result.message });
   } catch (error) {

@@ -249,6 +249,9 @@ describe("/raidmode", () => {
       );
       const setting =
         settingsMetadata["moderation.raid.lockdown_action"].description;
+      // The requirement covers the stronger new-account action too (#1045).
+      expect(docs).toMatch(/new-account\s+action/);
+      expect(setting).toContain("new-account action");
       for (const [action, { label }] of Object.entries(
         RAID_ACTION_PERMISSIONS,
       )) {

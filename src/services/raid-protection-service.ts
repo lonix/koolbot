@@ -251,10 +251,23 @@ export interface LockdownRequirement {
   flag: bigint;
 }
 
-/** The permission `/raidmode on` needs under a given settings snapshot. */
+/**
+ * The permission `/raidmode on` needs under a given settings snapshot: that of
+ * the strongest action that can run during the lockdown. That is the lockdown
+ * action, or the new-account action when the account gate is enabled and is
+ * stronger, since a young account joining during the lockdown gets the stronger
+ * of the two (timeout < quarantine < kick).
+ */
 export function requirementFor(settings: RaidSettings): LockdownRequirement {
-  const { flag, label } = RAID_ACTION_PERMISSIONS[settings.lockdownAction];
-  return { action: settings.lockdownAction, label, flag };
+  let action = settings.lockdownAction;
+  if (
+    settings.minAccountAgeHours > 0 &&
+    isStronger(settings.newAccountAction, action)
+  ) {
+    action = settings.newAccountAction;
+  }
+  const { flag, label } = RAID_ACTION_PERMISSIONS[action];
+  return { action, label, flag };
 }
 
 export interface SetLockdownResult {
@@ -288,6 +301,7 @@ export class RaidProtectionService {
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
+  private generationAtWaitOut = 0;
   private destroyed = false;
   private readonly transitionLock = createKeyedLock();
   private readyGate: Promise<void> | null = null;
@@ -510,6 +524,20 @@ export class RaidProtectionService {
       // only a rehearsal, so the persisted state agrees with the in-memory one
       // and the retention exemption does not keep a stale open row alive.
       if (inactive || last.reason?.endsWith(DRY_RUN_SUFFIX)) {
+        // A lockdown started, or any transition happened, since the wait gave
+        // up: this stale row is no longer the newest truth, and a clear
+        // written now would become the newest persisted transition and hide
+        // the live lockdown from a restart.
+        const current = this.getState(guildId);
+        if (
+          current.lockdown ||
+          (this.waitedOut && current.generation !== this.generationAtWaitOut)
+        ) {
+          logger.info(
+            "Anti-raid: skipped closing a stale lockdown row, the lockdown state changed while restoration was pending",
+          );
+          return;
+        }
         await this.writeRow(
           guildId,
           guildId,
@@ -556,6 +584,11 @@ export class RaidProtectionService {
       this.readyGate = new Promise<void>((resolve) => {
         this.gateTimer = setTimeout(() => {
           this.waitedOut = true;
+          // Remember which transitions had happened when we gave up, so a
+          // late restore can tell whether anything changed since.
+          this.generationAtWaitOut = env.guildId
+            ? this.getState(env.guildId).generation
+            : 0;
           logger.warn(
             `Anti-raid: startup restoration did not finish within ${INIT_WAIT_MS}ms; evaluating joins without the persisted lockdown state`,
           );
@@ -582,6 +615,7 @@ export class RaidProtectionService {
     this.reloadRegistered = true;
     const recheck = async (): Promise<void> => {
       try {
+        if (this.destroyed) return;
         const guildId = env.guildId;
         const guild = guildId ? this.client.guilds.cache.get(guildId) : null;
         if (!guild) return;
@@ -599,6 +633,7 @@ export class RaidProtectionService {
     // those paths, and a change listener (the pattern the update check uses,
     // #1029) for ordinary saves of the keys this feature depends on.
     const onChange = (key: string): void => {
+      if (this.destroyed) return;
       if (key === "moderation.enabled" || key.startsWith("moderation.raid.")) {
         void recheck();
       }
@@ -633,6 +668,7 @@ export class RaidProtectionService {
     if (this.pendingRows.length > 0) await this.drainPendingRows(false);
     const state = this.getState(guild.id);
     const inactive = await this.getInactiveReason(settings);
+    if (this.destroyed) return "Anti-raid protection has been shut down.";
     if (inactive) {
       state.joins.length = 0;
       state.windowKey = null;
@@ -670,6 +706,7 @@ export class RaidProtectionService {
   ): void {
     if (state.expiryTimer) clearTimeout(state.expiryTimer);
     state.expiryTimer = null;
+    if (this.destroyed) return;
     if (!state.lockdown || state.since === null) return;
     if (settings.lockdownMaxMinutes <= 0) return;
     const dueIn = Math.max(
@@ -720,11 +757,14 @@ export class RaidProtectionService {
       // Join evaluation waits for startup restoration first (bounded), then
       // takes its timestamp, so the wait cannot skew the window.
       await this.awaitReady();
+      if (this.destroyed) return false;
       const now = Date.now();
 
       const settings = await this.loadSettings();
+      if (this.destroyed) return false;
       const guild = member.guild;
       if (await this.reconcile(guild, settings, now)) return false;
+      if (this.destroyed) return false;
       const state = this.getState(guild.id);
 
       // From the push to the `beginLockdown` call nothing awaits, and
@@ -1027,6 +1067,7 @@ export class RaidProtectionService {
     let role: Role | null = null;
     if (decision.action === "quarantine") {
       role = await this.resolveQuarantineRole(member.guild, settings);
+      if (this.destroyed) return false;
       if (!role) {
         counts.skipped++;
         return false;
@@ -1058,6 +1099,8 @@ export class RaidProtectionService {
       return false;
     }
 
+    // Nothing is done to a member once the service is shut down.
+    if (this.destroyed) return false;
     const auditReason = truncateText(decision.reason, MAX_REASON_LENGTH);
     try {
       if (decision.action === "kick") {
@@ -1157,6 +1200,7 @@ export class RaidProtectionService {
     action: ModerationAction,
     reason: string,
   ): Promise<void> {
+    if (this.destroyed) return;
     if (
       (action === "raid_lockdown" || action === "raid_clear") &&
       this.pendingTransitionCount() >= MAX_PENDING_TRANSITIONS

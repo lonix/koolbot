@@ -920,16 +920,19 @@ quarantine role or kick) until you clear it. Gated by
 to use it (checked again when the command runs, since Discord's own visibility
 gate can be overridden per role). The reply is ephemeral.
 
-`mode:on` makes the bot apply the configured lockdown action to every later
+`mode:on` makes the bot apply the strongest configured action to every later
 join, so it also needs the permission that action stands for, the same way
-`/ban` needs Ban Members. `mode:off` and `mode:status` need only Moderate
+`/ban` needs Ban Members. That is the lockdown action, or the new-account
+action when the account gate is on (minimum age above 0) and that action is
+stronger (kick over quarantine over timeout), because a young account joining
+during a lockdown gets the stronger of the two. `mode:off` and `mode:status` need only Moderate
 Members. Administrators always have every permission.
 
-| Lockdown action | Extra permission needed for `mode:on` |
-| --------------- | ------------------------------------- |
-| `timeout`       | Moderate Members                      |
-| `quarantine`    | Manage Roles                          |
-| `kick`          | Kick Members                          |
+| Strongest action | Extra permission needed for `mode:on` |
+| ---------------- | ------------------------------------- |
+| `timeout`        | Moderate Members                      |
+| `quarantine`     | Manage Roles                          |
+| `kick`           | Kick Members                          |
 
 ```text
 /raidmode mode:on
