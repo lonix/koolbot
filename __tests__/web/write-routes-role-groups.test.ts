@@ -54,7 +54,9 @@ jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
 const mockPlanRoles = jest.fn<(...a: any[]) => any>();
 const mockPlanDelete = jest.fn<(...a: any[]) => any>();
 const mockPlanAdminFix = jest.fn<(...a: any[]) => any>();
+const mockRevalidator = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
+  roleDeletionRevalidator: mockRevalidator,
   planRoleGroups: mockPlanRoles,
   planRoleDeletion: mockPlanDelete,
   planAdminFix: mockPlanAdminFix,
@@ -64,11 +66,25 @@ jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
   }) => p.plan.errors.length === 0 && p.extraErrors.length === 0,
 }));
 const mockStartApply = jest.fn<(...a: any[]) => any>();
+// Same refusal as the real engine (assertApplicable): a plan with a destructive
+// step is not accepted unless the caller supplies a live-state check (#1097).
+const mockEngineStart = (plan: any, options: any): any => {
+  if (
+    options &&
+    !options.revalidate &&
+    plan.operations?.some((op: any) => op.class === "destructive")
+  ) {
+    throw new Error(
+      "Plans with destructive steps need a live-state check (revalidate) from a fresh scan.",
+    );
+  }
+  return mockStartApply(plan, options);
+};
 jest.unstable_mockModule(
   "../../src/services/server-adoption-service.js",
   () => ({
     ServerAdoptionService: {
-      getInstance: async () => ({ startApply: mockStartApply }),
+      getInstance: async () => ({ startApply: mockEngineStart }),
     },
   }),
 );
@@ -132,6 +148,7 @@ const group = (over = {}) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockRevalidator.mockReturnValue(async () => []);
   svc.create.mockResolvedValue({ ok: true, group: group() });
   svc.update.mockResolvedValue({ ok: true, group: group() });
   svc.reorder.mockResolvedValue({ ok: true });
@@ -401,11 +418,65 @@ describe("POST /role-groups/:id/delete", () => {
       expect.objectContaining({ id: "g1" }),
       true,
     );
-    expect(mockStartApply).toHaveBeenCalledWith(plan, { actor: session });
+    expect(mockStartApply).toHaveBeenCalledWith(plan, {
+      actor: session,
+      revalidate: expect.any(Function),
+    });
     expect(svc.remove).toHaveBeenCalled();
     expect(res.headers.get("location")).toBe(
       "/admin/role-groups?job=11111111-1111-1111-1111-111111111111",
     );
+  });
+
+  it("passes a live-state check so the destructive role delete is accepted (#1097)", async () => {
+    const plan = {
+      id: "p",
+      errors: [],
+      operations: [{ type: "role.delete", class: "destructive" }],
+    };
+    const check = jest.fn(async () => []);
+    mockPlanDelete.mockResolvedValue({ plan, extraErrors: [] });
+    mockRevalidator.mockReturnValue(check);
+    mockStartApply.mockReturnValue({
+      id: "11111111-1111-1111-1111-111111111111",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/g1/delete", {
+      roleAction: "delete",
+      approveRoleDelete: "1",
+    });
+    expect(mockRevalidator).toHaveBeenCalledWith(
+      expect.anything(),
+      session.discordUserId,
+      expect.objectContaining({ id: "g1" }),
+      true,
+    );
+    expect(mockStartApply).toHaveBeenCalledWith(plan, {
+      actor: session,
+      revalidate: check,
+    });
+    expect(svc.remove).toHaveBeenCalled();
+    expect(res.headers.get("location")).toContain("?job=");
+  });
+
+  it("keeps the group and says why when the engine refuses to start", async () => {
+    mockPlanDelete.mockResolvedValue({
+      plan: {
+        id: "p",
+        errors: [],
+        operations: [{ type: "role.delete", class: "destructive" }],
+      },
+      extraErrors: [],
+    });
+    mockRevalidator.mockReturnValue(undefined);
+    await mount();
+    const res = await harness.post("/role-groups/g1/delete", {
+      roleAction: "delete",
+      approveRoleDelete: "1",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(flashOf(res).msg).toContain("live-state check");
+    expect(svc.remove).not.toHaveBeenCalled();
   });
 
   it("lets a role KoolBot created go without approval", async () => {
