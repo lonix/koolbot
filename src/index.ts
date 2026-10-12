@@ -669,6 +669,15 @@ async function initializeServices(): Promise<void> {
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.checkForOutdatedSettings();
 
+    // Anti-raid (#1045), as early as config is readable so joins that arrive
+    // during the rest of startup are evaluated against the restored state
+    // (they also wait, bounded, for this). Restore a lockdown that was on before the restart and
+    // warn when the feature is on but a prerequisite (moderation log, Server
+    // Members Intent) is missing. Event-driven, so there are no timers.
+    const raidProtection = RaidProtectionService.getInstance(client);
+    await raidProtection.initialize();
+    await raidProtection.warnIfInactive();
+
     // Initialize Discord logger AFTER database connection is established
     discordLogger = DiscordLogger.getInstance(client);
     await discordLogger.initialize();
@@ -783,13 +792,6 @@ async function initializeServices(): Promise<void> {
     // its enabled state; the /warn write path and the audit-log mirroring
     // below both gate on `moderation.enabled` at call time.
     await moderationService.initialize();
-
-    // Anti-raid (#1045): restore a lockdown that was on before the restart and
-    // warn when the feature is on but a prerequisite (moderation log, Server
-    // Members Intent) is missing. Event-driven, so there are no timers.
-    const raidProtection = RaidProtectionService.getInstance(client);
-    await raidProtection.initialize();
-    await raidProtection.warnIfInactive();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();

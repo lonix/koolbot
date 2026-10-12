@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { PermissionFlagsBits } from "discord.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { RAID_ACTION_PERMISSIONS } from "../../src/utils/raid-actions.js";
+import { settingsMetadata } from "../../src/services/config-schema.js";
 
 const mockGetStatus = jest.fn<() => Promise<unknown>>();
+const mockRequirement =
+  jest.fn<() => Promise<{ action: string; label: string; flag: bigint }>>();
 const mockSetLockdown =
   jest.fn<(g: unknown, on: boolean, id: string) => Promise<unknown>>();
 
@@ -12,6 +18,7 @@ jest.unstable_mockModule(
       getInstance: jest.fn(() => ({
         getStatus: mockGetStatus,
         setLockdown: mockSetLockdown,
+        getLockdownRequirement: mockRequirement,
       })),
     },
   }),
@@ -30,7 +37,7 @@ const { data, execute, buildStatusEmbed } =
 
 function interaction(
   mode: string,
-  opts: { perms?: boolean; guild?: boolean } = {},
+  opts: { perms?: boolean | bigint[]; guild?: boolean } = {},
 ) {
   return {
     guildId: opts.guild === false ? null : "guild-1",
@@ -38,8 +45,11 @@ function interaction(
     client: {},
     user: { id: "mod-1" },
     memberPermissions: {
-      has: (flag: bigint) =>
-        (opts.perms ?? true) && flag === PermissionFlagsBits.ModerateMembers,
+      has: (flag: bigint) => {
+        const perms = opts.perms ?? true;
+        if (Array.isArray(perms)) return perms.includes(flag);
+        return perms && flag === PermissionFlagsBits.ModerateMembers;
+      },
     },
     options: { getString: () => mode },
     deferReply: jest.fn(async () => undefined),
@@ -69,6 +79,11 @@ const status = {
 describe("/raidmode", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRequirement.mockResolvedValue({
+      action: "timeout",
+      label: "Moderate Members",
+      flag: PermissionFlagsBits.ModerateMembers,
+    });
   });
 
   it("is hidden from members without Moderate Members", () => {
@@ -145,5 +160,70 @@ describe("/raidmode", () => {
       buildStatusEmbed({ ...status, dryRun: true } as never).toJSON(),
     );
     expect(text).toContain("dry run");
+  });
+
+  describe("starting a lockdown needs the permission of the configured action", () => {
+    const MOD = PermissionFlagsBits.ModerateMembers;
+    it.each(
+      Object.entries(RAID_ACTION_PERMISSIONS).map(
+        ([action, { flag, label }]) => [action, flag, label] as const,
+      ),
+    )(
+      "%s: refused without %s, allowed with it",
+      async (action, flag, label) => {
+        mockRequirement.mockResolvedValue({ action, label, flag });
+        mockSetLockdown.mockResolvedValue({ changed: true, message: "done" });
+
+        const without = interaction("on", { perms: [MOD] });
+        await execute(without as never);
+        if (flag === MOD) {
+          expect(mockSetLockdown).toHaveBeenCalledTimes(1);
+          mockSetLockdown.mockClear();
+        } else {
+          expect(mockSetLockdown).not.toHaveBeenCalled();
+          expect(without.editReply).toHaveBeenCalledWith({
+            content: expect.stringContaining(label),
+          });
+        }
+
+        const withIt = interaction("on", { perms: [MOD, flag] });
+        await execute(withIt as never);
+        expect(mockSetLockdown).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(["off", "status"])(
+      "%s stays with Moderate Members",
+      async (mode) => {
+        mockRequirement.mockResolvedValue({
+          action: "kick",
+          label: "Kick Members",
+          flag: PermissionFlagsBits.KickMembers,
+        });
+        mockSetLockdown.mockResolvedValue({ changed: true, message: "done" });
+        mockGetStatus.mockResolvedValue(status);
+        await execute(interaction(mode) as never);
+        expect(mockRequirement).not.toHaveBeenCalled();
+        expect(
+          mode === "off" ? mockSetLockdown : mockGetStatus,
+        ).toHaveBeenCalled();
+      },
+    );
+
+    it("lists every action's permission in COMMANDS.md and the setting text", () => {
+      const docs = readFileSync(
+        fileURLToPath(new URL("../../COMMANDS.md", import.meta.url)),
+        "utf8",
+      );
+      const setting =
+        settingsMetadata["moderation.raid.lockdown_action"].description;
+      for (const [action, { label }] of Object.entries(
+        RAID_ACTION_PERMISSIONS,
+      )) {
+        expect(docs).toContain(`\`${action}\``);
+        expect(docs).toContain(label);
+        expect(setting).toContain(`${action}: ${label}`);
+      }
+    });
   });
 });

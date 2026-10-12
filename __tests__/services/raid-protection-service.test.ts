@@ -50,6 +50,7 @@ const {
   parseRaidAction,
   countJoinsInWindow,
   isNewAccount,
+  INIT_WAIT_MS,
 } = await import("../../src/services/raid-protection-service.js");
 
 const HOUR = 60 * 60 * 1000;
@@ -167,7 +168,7 @@ describe("RaidProtectionService helpers", () => {
 });
 
 describe("RaidProtectionService", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     RaidProtectionService.reset();
     jest.clearAllMocks();
     reloadCallbacks.length = 0;
@@ -177,6 +178,12 @@ describe("RaidProtectionService", () => {
     mockCreate.mockResolvedValue({});
     send.mockResolvedValue({});
     liveConfig();
+    // Joins wait for startup restoration, so every test starts initialised
+    // against an empty log unless it says otherwise.
+    mockFindOne.mockReturnValue({
+      sort: () => ({ lean: () => ({ exec: async () => null }) }),
+    });
+    await RaidProtectionService.getInstance(client).initialize();
   });
 
   afterEach(() => {
@@ -669,6 +676,55 @@ describe("RaidProtectionService", () => {
       const service = RaidProtectionService.getInstance(client);
       await service.initialize();
       expect((await service.getStatus(guild)).lockdown).toBe(false);
+      // The persisted state now agrees: the stale open row is closed.
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      expect(rowsWith("raid_clear")[0].reason).toMatch(/dry-run/);
+    });
+
+    it("holds a join until restoration finishes, then applies the restored lockdown", async () => {
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      const m = makeMember();
+      const pending = service.handleMemberJoin(m.member);
+      await Promise.resolve();
+      expect(m.timeout).not.toHaveBeenCalled();
+      lastRow({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: "mod-1",
+        reason: "Manual",
+      });
+      await service.initialize();
+      expect(await pending).toBe(true);
+      expect(m.timeout).toHaveBeenCalled();
+    });
+
+    it("stops waiting after the bounded time when restoration never finishes, and says so", async () => {
+      jest.useFakeTimers();
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      const first = makeMember();
+      const pending = service.handleMemberJoin(first.member);
+      await jest.advanceTimersByTimeAsync(INIT_WAIT_MS + 1);
+      expect(await pending).toBe(false);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("did not finish"),
+      );
+      // Later joins do not wait again.
+      mockLogger.warn.mockClear();
+      await service.handleMemberJoin(makeMember().member);
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it("releases waiting joins even when restoration fails", async () => {
+      RaidProtectionService.reset();
+      mockFindOne.mockImplementation(() => {
+        throw new Error("db down");
+      });
+      const service = RaidProtectionService.getInstance(client);
+      const pending = service.handleMemberJoin(makeMember().member);
+      await service.initialize();
+      expect(await pending).toBe(false);
     });
 
     it("closes, rather than restores, a lockdown found while the feature is off", async () => {

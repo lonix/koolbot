@@ -14,14 +14,19 @@ import { safeReply } from "../utils/safe-reply.js";
 
 export const data = new SlashCommandBuilder()
   .setName("raidmode")
-  .setDescription("Turn anti-raid lockdown on or off, or check its status")
+  .setDescription("Start or end anti-raid lockdown, or show its status")
   // Primary gate (a guild admin can override it in Integrations), so execute()
   // re-checks the permission itself: this command can lock out new members.
+  // Moderate Members is enough to see the command, to end a lockdown and to
+  // read the status; starting one also needs the permission of the configured
+  // action (see RAID_ACTION_PERMISSIONS), checked below.
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
   .addStringOption((option) =>
     option
       .setName("mode")
-      .setDescription("on: start lockdown, off: end it, status: show it")
+      .setDescription(
+        "on needs the configured action's permission; off and status need Moderate Members",
+      )
       .setRequired(true)
       .addChoices(
         { name: "on", value: "on" },
@@ -93,6 +98,19 @@ export async function execute(
       const status = await service.getStatus(interaction.guild);
       await interaction.editReply({ embeds: [buildStatusEmbed(status)] });
       return;
+    }
+
+    // `on` makes the bot apply the configured action to every later join, so
+    // the moderator must hold the permission that action stands for, the same
+    // way `/ban` needs Ban Members. `off` and `status` never escalate.
+    if (mode === "on") {
+      const needed = await service.getLockdownRequirement();
+      if (!interaction.memberPermissions?.has(needed.flag)) {
+        await interaction.editReply({
+          content: `Lockdown is set to **${needed.action}** members who join, which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
+        });
+        return;
+      }
     }
 
     const result = await service.setLockdown(

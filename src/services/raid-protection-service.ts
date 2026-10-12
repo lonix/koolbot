@@ -11,6 +11,11 @@ import {
 } from "../utils/moderation-guards.js";
 import { defaultConfig } from "./config-schema.js";
 import {
+  RAID_ACTIONS,
+  RAID_ACTION_PERMISSIONS,
+  type RaidAction,
+} from "../utils/raid-actions.js";
+import {
   ModerationLog,
   type ModerationAction,
 } from "../models/moderation-log.js";
@@ -35,8 +40,15 @@ import {
  *     `source: "raid"`; nothing leaves the instance.
  */
 
-export const RAID_ACTIONS = ["timeout", "quarantine", "kick"] as const;
-export type RaidAction = (typeof RAID_ACTIONS)[number];
+export { RAID_ACTIONS, type RaidAction };
+
+/**
+ * How long a join waits for startup restoration before being evaluated anyway.
+ * Fail open on purpose: after this the guild is treated as not in lockdown
+ * (with a warning), because blocking joins, or acting on members, while the
+ * state is unknown is the worse failure.
+ */
+export const INIT_WAIT_MS = 10_000;
 
 export const MIN_JOIN_THRESHOLD = 2;
 export const MIN_WINDOW_SECONDS = 5;
@@ -210,6 +222,16 @@ export class RaidProtectionService {
   /** Quarantine-role problems already warned about, so a raid does not spam the log. */
   private readonly warned = new Set<string>();
   private reloadRegistered = false;
+  /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
+  private initDone = false;
+  private waitedOut = false;
+  private markReady: () => void = () => undefined;
+  private readonly ready: Promise<void> = new Promise<void>((resolve) => {
+    this.markReady = (): void => {
+      this.initDone = true;
+      resolve();
+    };
+  });
 
   private constructor(client: Client) {
     this.client = client;
@@ -364,11 +386,20 @@ export class RaidProtectionService {
    * `raid_clear` row so it cannot come back when the feature is re-enabled.
    */
   public async initialize(): Promise<void> {
-    if (!env.guildId) return;
-    this.registerReload();
+    try {
+      if (!env.guildId) return;
+      this.registerReload();
+      await this.restoreLockdown(env.guildId);
+    } finally {
+      // Always release waiting joins, even when restoration failed.
+      this.markReady();
+    }
+  }
+
+  private async restoreLockdown(guildId: string): Promise<void> {
     try {
       const last = await ModerationLog.findOne({
-        guildId: env.guildId,
+        guildId,
         action: { $in: ["raid_lockdown", "raid_clear"] },
       })
         .sort({ createdAt: -1 })
@@ -379,33 +410,72 @@ export class RaidProtectionService {
           reason: string | null;
         } | null>()
         .exec();
-      if (last?.action === "raid_lockdown") {
-        const settings = await this.loadSettings();
-        if (await this.getInactiveReason(settings)) {
-          await this.writeRow(
-            env.guildId,
-            env.guildId,
-            null,
-            "raid_clear",
-            "Automatic: anti-raid was inactive while a lockdown was open",
-          );
-          return;
-        }
-        if (last.reason?.endsWith(DRY_RUN_SUFFIX)) return;
-        const state = this.getState(env.guildId);
-        state.lockdown = true;
-        state.since = new Date(last.createdAt).getTime();
-        state.startedBy =
-          last.moderatorId && last.moderatorId !== this.client.user?.id
-            ? last.moderatorId
-            : null;
-        logger.warn(
-          "Anti-raid: restored an active lockdown from before the restart; clear it with /raidmode off",
+      if (last?.action !== "raid_lockdown") return;
+
+      const settings = await this.loadSettings();
+      const inactive = await this.getInactiveReason(settings);
+      // Close, rather than restore, a lockdown that cannot be enforced or was
+      // only a rehearsal, so the persisted state agrees with the in-memory one
+      // and the retention exemption does not keep a stale open row alive.
+      if (inactive || last.reason?.endsWith(DRY_RUN_SUFFIX)) {
+        await this.writeRow(
+          guildId,
+          guildId,
+          null,
+          "raid_clear",
+          inactive
+            ? "Automatic: anti-raid was inactive while a lockdown was open"
+            : "Automatic: a dry-run lockdown is not restored after a restart",
         );
+        return;
       }
+      const state = this.getState(guildId);
+      state.lockdown = true;
+      state.since = new Date(last.createdAt).getTime();
+      state.startedBy =
+        last.moderatorId && last.moderatorId !== this.client.user?.id
+          ? last.moderatorId
+          : null;
+      logger.warn(
+        "Anti-raid: restored an active lockdown from before the restart; clear it with /raidmode off",
+      );
     } catch (error) {
       logger.error("Anti-raid: could not restore lockdown state:", error);
     }
+  }
+
+  /** Wait (bounded) for startup restoration; see {@link INIT_WAIT_MS}. */
+  private async awaitReady(): Promise<void> {
+    if (this.initDone || this.waitedOut) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        this.waitedOut = true;
+        logger.warn(
+          `Anti-raid: startup restoration did not finish within ${INIT_WAIT_MS}ms; evaluating joins without the persisted lockdown state`,
+        );
+        resolve();
+      }, INIT_WAIT_MS);
+    });
+    try {
+      await Promise.race([this.ready, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The permission a moderator needs for `/raidmode on` under the current
+   * settings: the one matching the configured lockdown action.
+   */
+  public async getLockdownRequirement(): Promise<{
+    action: RaidAction;
+    label: string;
+    flag: bigint;
+  }> {
+    const { lockdownAction } = await this.loadSettings();
+    const { flag, label } = RAID_ACTION_PERMISSIONS[lockdownAction];
+    return { action: lockdownAction, label, flag };
   }
 
   /**
@@ -445,6 +515,7 @@ export class RaidProtectionService {
     settings: RaidSettings,
     now: number,
   ): Promise<string | null> {
+    await this.awaitReady();
     const state = this.getState(guild.id);
     const inactive = await this.getInactiveReason(settings);
     if (inactive) {
@@ -486,7 +557,9 @@ export class RaidProtectionService {
     try {
       if (member.user.bot) return false;
       if (!env.guildId || member.guild.id !== env.guildId) return false;
-      // Captured before any await so a slow config read cannot skew the window.
+      // Join evaluation waits for startup restoration first (bounded), then
+      // takes its timestamp, so the wait cannot skew the window.
+      await this.awaitReady();
       const now = Date.now();
 
       const settings = await this.loadSettings();

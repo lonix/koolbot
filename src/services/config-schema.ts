@@ -2385,7 +2385,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.raid.lockdown_action": {
     label: "Lockdown action",
     description:
-      "What happens to each member who joins while the server is in lockdown.",
+      "What happens to each member who joins while the server is in lockdown. A moderator needs the matching permission to start a lockdown with /raidmode on (timeout: Moderate Members; quarantine: Manage Roles; kick: Kick Members); administrators always have it.",
     category: "moderation",
     type: "string",
     options: [
