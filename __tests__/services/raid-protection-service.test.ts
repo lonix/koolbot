@@ -310,6 +310,48 @@ describe("RaidProtectionService", () => {
     });
   });
 
+  describe("dry run switched off mid-lockdown", () => {
+    it("ends the rehearsal lockdown instead of letting it go live", async () => {
+      liveConfig({ "moderation.raid.dry_run": true });
+      // A manual rehearsal, so the join counter is not still hot afterwards.
+      await RaidProtectionService.getInstance(client).setLockdown(
+        guild,
+        true,
+        "mod-1",
+      );
+      expect(rowsWith("raid_lockdown")).toHaveLength(1);
+
+      liveConfig({ "moderation.raid.dry_run": false });
+      const next = makeMember();
+      const acted = await RaidProtectionService.getInstance(
+        client,
+      ).handleMemberJoin(next.member);
+      expect(acted).toBe(false);
+      expect(next.timeout).not.toHaveBeenCalled();
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      expect(rowsWith("raid_clear")[0].reason).toMatch(
+        /dry run was switched off/,
+      );
+      expect(rowsWith("timeout")).toHaveLength(0);
+    });
+
+    it("also ends it when only the status is read", async () => {
+      liveConfig({ "moderation.raid.dry_run": true });
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      liveConfig({ "moderation.raid.dry_run": false });
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("keeps a live lockdown live", async () => {
+      await joinMany(4);
+      const status =
+        await RaidProtectionService.getInstance(client).getStatus(guild);
+      expect(status.lockdown).toBe(true);
+      expect(rowsWith("raid_clear")).toHaveLength(0);
+    });
+  });
+
   describe("actions and safety", () => {
     it("kicks when configured", async () => {
       liveConfig({ "moderation.raid.lockdown_action": "kick" });
@@ -528,6 +570,33 @@ describe("RaidProtectionService", () => {
       const status = await service.getStatus(guild);
       expect(status.lockdown).toBe(true);
       expect(status.startedBy).toBe("mod-1");
+    });
+
+    it("does not restore a rehearsal (dry run) lockdown", async () => {
+      lastRow({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: null,
+        reason: "Automatic: 5 members joined (dry run)",
+      });
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+    });
+
+    it("closes, rather than restores, a lockdown found while the feature is off", async () => {
+      liveConfig({ "moderation.raid.enabled": false });
+      lastRow({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: "mod-1",
+        reason: "Manual",
+      });
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+      liveConfig();
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
     });
 
     it("stays out of lockdown when the newest row is a clear, or none", async () => {

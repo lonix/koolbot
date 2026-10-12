@@ -244,6 +244,8 @@ describe("Config Schema", () => {
       "achievements.enabled": ["voicetracking.enabled"],
       "celebrations.enabled": ["achievements.enabled"],
       "voicetracking.announcements.enabled": ["voicetracking.enabled"],
+      // Every anti-raid action must land in the moderation log (#1045).
+      "moderation.raid.enabled": ["moderation.enabled"],
       // The update-available note (#1029) has nothing to announce without
       // the update check that finds the newer release.
       "core.updates.enabled": ["core.updatecheck.enabled"],

@@ -89,6 +89,7 @@ import {
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
+import { RAID_CONFIG_KEYS } from "../services/raid-protection-service.js";
 import { ModerationCaseService } from "../services/moderation-case-service.js";
 import { SYSTEM_ACTOR } from "../models/moderation-case.js";
 import {
@@ -306,17 +307,7 @@ export const MODERATION_SETTING_KEYS = [
   "moderation.cases.default_review_days",
   "moderation.cases.retention_days",
   "moderation.cases.history_grace_days",
-  "moderation.raid.enabled",
-  "moderation.raid.dry_run",
-  "moderation.raid.join_threshold",
-  "moderation.raid.window_seconds",
-  "moderation.raid.lockdown_action",
-  "moderation.raid.min_account_age_hours",
-  "moderation.raid.new_account_action",
-  "moderation.raid.timeout_minutes",
-  "moderation.raid.quarantine_role_id",
-  "moderation.raid.lockdown_max_minutes",
-  "moderation.raid.alert_channel_id",
+  ...RAID_CONFIG_KEYS,
   "core.moderation_review.enabled",
   "core.moderation_review.channel_id",
 ] as const;
@@ -2633,7 +2624,9 @@ export function createReadOnlyRouter(
       // back to the raw snowflake at render time.
       const idsOnPage = new Set<string>();
       for (const d of docs) {
-        idsOnPage.add(d.userId);
+        // Anti-raid lockdown rows concern the server, so their user is the
+        // guild id (#1045): not a member, and not worth a lookup.
+        if (d.userId !== common.guildId) idsOnPage.add(d.userId);
         if (d.moderatorId) idsOnPage.add(d.moderatorId);
       }
       for (const c of queueCases) {
@@ -2646,7 +2639,9 @@ export function createReadOnlyRouter(
           if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
         }
       }
-      const labels = new Map<string, string>();
+      const labels = new Map<string, string>([
+        [common.guildId, "Server (anti-raid)"],
+      ]);
       if (idsOnPage.size > 0) {
         try {
           const guild = await client.guilds.fetch(common.guildId);

@@ -2357,6 +2357,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Detect join floods and optionally act on new accounts. Needs moderation.enabled (every action is written to the moderation log) and the Server Members Intent (GUILD_MEMBERS_INTENT=true) so join events arrive. Also enables the /raidmode command. Only ever acts on members who join while it is active, never on existing members.",
     category: "moderation",
     type: "boolean",
+    dependsOn: ["moderation.enabled"],
   },
   "moderation.raid.dry_run": {
     label: "Anti-raid dry run",

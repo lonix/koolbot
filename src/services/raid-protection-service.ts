@@ -5,7 +5,11 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { truncateText } from "../utils/discord-limits.js";
-import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
+import {
+  MAX_REASON_LENGTH,
+  MAX_TIMEOUT_MINUTES,
+} from "../utils/moderation-guards.js";
+import { defaultConfig } from "./config-schema.js";
 import {
   ModerationLog,
   type ModerationAction,
@@ -38,8 +42,8 @@ export const MIN_JOIN_THRESHOLD = 2;
 export const MIN_WINDOW_SECONDS = 5;
 export const MAX_WINDOW_SECONDS = 3600;
 export const MIN_TIMEOUT_MINUTES = 1;
-/** Discord's hard cap on a communication timeout (28 days). */
-export const MAX_TIMEOUT_MINUTES = 28 * 24 * 60;
+/** Appended to the log reason of a lockdown that began as a dry run. */
+export const DRY_RUN_SUFFIX = " (dry run)";
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_MINUTE = 60 * 1000;
@@ -122,6 +126,12 @@ export function isNewAccount(
 /** Per-guild runtime state. */
 export interface RaidState {
   lockdown: boolean;
+  /**
+   * The lockdown began while `dry_run` was on. Such a lockdown never acts, and
+   * is ended when dry run is switched off, so a rehearsal cannot turn into a
+   * live lockdown nobody asked for.
+   */
+  dryRun: boolean;
   /** When the current lockdown began (ms), or null. */
   since: number | null;
   /** The moderator who started it, or null when it was automatic. */
@@ -137,6 +147,7 @@ export interface RaidState {
 function freshState(): RaidState {
   return {
     lockdown: false,
+    dryRun: false,
     since: null,
     startedBy: null,
     joins: [],
@@ -228,27 +239,65 @@ export class RaidProtectionService {
       lockdownMaxMinutes,
       alertChannelId,
     ] = await Promise.all([
-      c.getBoolean("moderation.raid.enabled", false),
-      c.getBoolean("moderation.raid.dry_run", true),
-      c.getNumber("moderation.raid.join_threshold", 10),
-      c.getNumber("moderation.raid.window_seconds", 30),
-      c.getString("moderation.raid.lockdown_action", "timeout"),
-      c.getNumber("moderation.raid.min_account_age_hours", 0),
-      c.getString("moderation.raid.new_account_action", "timeout"),
-      c.getNumber("moderation.raid.timeout_minutes", 60),
-      c.getString("moderation.raid.quarantine_role_id", ""),
-      c.getNumber("moderation.raid.lockdown_max_minutes", 0),
-      c.getString("moderation.raid.alert_channel_id", ""),
+      c.getBoolean(
+        "moderation.raid.enabled",
+        defaultConfig["moderation.raid.enabled"],
+      ),
+      c.getBoolean(
+        "moderation.raid.dry_run",
+        defaultConfig["moderation.raid.dry_run"],
+      ),
+      c.getNumber(
+        "moderation.raid.join_threshold",
+        defaultConfig["moderation.raid.join_threshold"],
+      ),
+      c.getNumber(
+        "moderation.raid.window_seconds",
+        defaultConfig["moderation.raid.window_seconds"],
+      ),
+      c.getString(
+        "moderation.raid.lockdown_action",
+        defaultConfig["moderation.raid.lockdown_action"],
+      ),
+      c.getNumber(
+        "moderation.raid.min_account_age_hours",
+        defaultConfig["moderation.raid.min_account_age_hours"],
+      ),
+      c.getString(
+        "moderation.raid.new_account_action",
+        defaultConfig["moderation.raid.new_account_action"],
+      ),
+      c.getNumber(
+        "moderation.raid.timeout_minutes",
+        defaultConfig["moderation.raid.timeout_minutes"],
+      ),
+      c.getString(
+        "moderation.raid.quarantine_role_id",
+        defaultConfig["moderation.raid.quarantine_role_id"],
+      ),
+      c.getNumber(
+        "moderation.raid.lockdown_max_minutes",
+        defaultConfig["moderation.raid.lockdown_max_minutes"],
+      ),
+      c.getString(
+        "moderation.raid.alert_channel_id",
+        defaultConfig["moderation.raid.alert_channel_id"],
+      ),
     ]);
     return {
       enabled,
       dryRun,
-      joinThreshold: clampInt(joinThreshold, MIN_JOIN_THRESHOLD, 10000, 10),
+      joinThreshold: clampInt(
+        joinThreshold,
+        MIN_JOIN_THRESHOLD,
+        10000,
+        defaultConfig["moderation.raid.join_threshold"],
+      ),
       windowSeconds: clampInt(
         windowSeconds,
         MIN_WINDOW_SECONDS,
         MAX_WINDOW_SECONDS,
-        30,
+        defaultConfig["moderation.raid.window_seconds"],
       ),
       lockdownAction: parseRaidAction(lockdownAction),
       minAccountAgeHours: Math.max(0, Number(minAccountAgeHours) || 0),
@@ -257,7 +306,7 @@ export class RaidProtectionService {
         timeoutMinutes,
         MIN_TIMEOUT_MINUTES,
         MAX_TIMEOUT_MINUTES,
-        60,
+        defaultConfig["moderation.raid.timeout_minutes"],
       ),
       quarantineRoleId: quarantineRoleId.trim(),
       lockdownMaxMinutes: Math.max(0, Number(lockdownMaxMinutes) || 0),
@@ -300,6 +349,11 @@ export class RaidProtectionService {
    * Restore a lockdown that was on when the process last stopped, from the
    * newest `raid_lockdown` / `raid_clear` row. Best effort: a failed read
    * leaves the guild out of lockdown, which is the safe direction.
+   *
+   * Two cases are deliberately not restored, so an old row cannot resurrect a
+   * lockdown nobody is expecting: a rehearsal (dry run) lockdown, and any
+   * lockdown found while the feature is off. The latter is closed with a
+   * `raid_clear` row so it cannot come back when the feature is re-enabled.
    */
   public async initialize(): Promise<void> {
     if (!env.guildId) return;
@@ -313,9 +367,22 @@ export class RaidProtectionService {
           action: ModerationAction;
           createdAt: Date;
           moderatorId: string | null;
+          reason: string | null;
         } | null>()
         .exec();
       if (last?.action === "raid_lockdown") {
+        const settings = await this.loadSettings();
+        if (!settings.enabled) {
+          await this.writeRow(
+            env.guildId,
+            env.guildId,
+            null,
+            "raid_clear",
+            "Automatic: anti-raid was switched off while a lockdown was open",
+          );
+          return;
+        }
+        if (last.reason?.endsWith(DRY_RUN_SUFFIX)) return;
         const state = this.getState(env.guildId);
         state.lockdown = true;
         state.since = new Date(last.createdAt).getTime();
@@ -360,6 +427,7 @@ export class RaidProtectionService {
       const state = this.getState(guild.id);
 
       await this.expireLockdownIfDue(guild, state, settings, now);
+      await this.endDryRunLockdownIfLive(guild, state, settings);
 
       // From the push to the `beginLockdown` call nothing awaits, and
       // `beginLockdown` sets `state.lockdown` before its own first await, so
@@ -456,6 +524,7 @@ export class RaidProtectionService {
     const state = this.getState(guild.id);
     const now = Date.now();
     await this.expireLockdownIfDue(guild, state, settings, now);
+    await this.endDryRunLockdownIfLive(guild, state, settings);
     return {
       inactiveReason: await this.getInactiveReason(settings),
       lockdown: state.lockdown,
@@ -499,6 +568,24 @@ export class RaidProtectionService {
     });
   }
 
+  /**
+   * A lockdown that began as a rehearsal is ended the moment dry run is
+   * switched off, with an audit row and an alert saying so. Otherwise the
+   * switch would make a lockdown nobody had confirmed start acting on joins.
+   */
+  private async endDryRunLockdownIfLive(
+    guild: Guild,
+    state: RaidState,
+    settings: RaidSettings,
+  ): Promise<void> {
+    if (!state.lockdown || !state.dryRun || settings.dryRun) return;
+    await this.endLockdown(guild, state, settings, {
+      moderatorId: null,
+      reason:
+        "Automatic: dry run was switched off, so the rehearsal lockdown was ended",
+    });
+  }
+
   private async beginLockdown(
     guild: Guild,
     state: RaidState,
@@ -509,6 +596,7 @@ export class RaidProtectionService {
     // State first, so any join that interleaves with the awaits below already
     // sees the lockdown.
     state.lockdown = true;
+    state.dryRun = settings.dryRun;
     state.since = now;
     state.startedBy = info.moderatorId;
     state.actioned = 0;
@@ -517,7 +605,7 @@ export class RaidProtectionService {
     state.failed = 0;
     state.failureAlerted = false;
 
-    const suffix = settings.dryRun ? " (dry run)" : "";
+    const suffix = settings.dryRun ? DRY_RUN_SUFFIX : "";
     await this.writeRow(
       guild.id,
       guild.id,
@@ -544,10 +632,11 @@ export class RaidProtectionService {
     settings: RaidSettings,
     info: { moderatorId: string | null; reason: string },
   ): Promise<void> {
-    const summary = settings.dryRun
+    const summary = state.dryRun
       ? `${state.wouldAction} would have been acted on`
       : `${state.actioned} acted on, ${state.skipped} skipped, ${state.failed} failed`;
     state.lockdown = false;
+    state.dryRun = false;
     state.since = null;
     state.startedBy = null;
 

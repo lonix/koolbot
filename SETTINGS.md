@@ -1160,7 +1160,9 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   the bot). `/warn` works without View Audit Log.
 - **Anti-raid** (`moderation.raid.*`, #1045) is off by default and starts as a
   **dry run**: it detects floods and posts its alert, but acts on nobody until
-  you set `moderation.raid.dry_run` to off. It only ever acts on members who
+  you set `moderation.raid.dry_run` to off (a lockdown that began as a dry run
+  is ended when you do, never carried over into live mode, and is not restored
+  after a restart). It only ever acts on members who
   join while it is active (never existing members, never bots), and only when
   the bot is allowed to: the server owner, members at or above the bot's
   highest role, and missing permissions are skipped and counted, never forced.
