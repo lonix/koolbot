@@ -326,6 +326,17 @@ export const VOICE_ROOM_EVERYONE: PermissionSet = {
   deny: [],
 };
 
+/**
+ * Discord's native Set Voice Channel Status permission, granted to the owner of
+ * a dynamic voice room so they can set the status in the Discord client. Added
+ * only when `voicechannels.owner.grant_status` is on and the bot holds the
+ * permission itself (see `VoiceChannelManager.ownerStatusGrant`).
+ */
+export const VOICE_ROOM_OWNER_STATUS: PermissionSet = {
+  allow: ["SetVoiceChannelStatus"],
+  deny: [],
+};
+
 /** The owner of a dynamic voice room. */
 export const VOICE_ROOM_OWNER: PermissionSet = {
   allow: ["ManageChannels", "Connect", "Speak", "ViewChannel"],

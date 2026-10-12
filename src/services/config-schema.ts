@@ -9,6 +9,7 @@ export interface ConfigSchema {
   "voicechannels.channel.suffix": string;
   "voicechannels.cleanup.managed_only": boolean;
   "voicechannels.controlpanel.enabled": boolean;
+  "voicechannels.owner.grant_status": boolean;
   "voicechannels.presets.enabled": boolean;
   "voicechannels.presets.max_per_user": number;
 
@@ -281,6 +282,7 @@ export const defaultConfig: ConfigSchema = {
   "voicechannels.channel.suffix": "",
   "voicechannels.cleanup.managed_only": false,
   "voicechannels.controlpanel.enabled": true,
+  "voicechannels.owner.grant_status": true,
   "voicechannels.presets.enabled": false,
   "voicechannels.presets.max_per_user": 3,
 
@@ -1173,6 +1175,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "In-channel control panel enabled",
     description:
       "Show the in-channel control panel (rename / privacy / live / transfer).",
+    category: "voicechannels",
+    type: "boolean",
+  },
+  "voicechannels.owner.grant_status": {
+    label: "Let room owners set the channel status",
+    description:
+      "Grant the owner of a temporary voice room Discord's native Set Voice Channel Status permission, so they can set the channel status (the topic line under its name) in the Discord client. KoolBot only grants it when it holds the permission itself; otherwise the grant is skipped.",
     category: "voicechannels",
     type: "boolean",
   },

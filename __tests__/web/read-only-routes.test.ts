@@ -273,6 +273,7 @@ describe("buildSettingRows (#705)", () => {
       "voicechannels.channel.prefix",
       "voicechannels.channel.suffix",
       "voicechannels.controlpanel.enabled",
+      "voicechannels.owner.grant_status",
       "voicechannels.presets.enabled",
       "voicechannels.presets.max_per_user",
     ]);

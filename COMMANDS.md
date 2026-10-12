@@ -1100,6 +1100,9 @@ chat. Only you (the channel owner) can use it.
 - Discord server must support text channels associated with voice channels
 - `voicechannels.controlpanel.enabled` must be `true`
 - The **🎛️ Presets** button additionally needs `voicechannels.presets.enabled`
+- Room owners can also set the voice channel status in the Discord client: KoolBot
+  grants them the native **Set Voice Channel Status** permission when
+  `voicechannels.owner.grant_status` is `true` and the bot holds it itself
 
 **Example panel:**
 

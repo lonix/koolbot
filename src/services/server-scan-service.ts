@@ -277,6 +277,13 @@ const READINESS_PERMISSIONS: Array<{
     required: false,
   },
   {
+    flag: PermissionsBitField.Flags.SetVoiceChannelStatus,
+    name: "SetVoiceChannelStatus",
+    purpose:
+      "Let temporary voice room owners set their channel status (KoolBot can only grant it when it holds it)",
+    required: false,
+  },
+  {
     flag: PermissionsBitField.Flags.MoveMembers,
     name: "MoveMembers",
     purpose: "Move members into temporary voice channels",

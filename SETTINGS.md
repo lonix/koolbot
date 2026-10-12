@@ -372,6 +372,16 @@ Dynamic voice channel creation and management.
 | `voicechannels.presets.enabled`      | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page                  |
 | `voicechannels.presets.max_per_user` | `3`               | Maximum number of presets a single user can save                                                                                                                                                                    |
 
+### Owner channel status
+
+`voicechannels.owner.grant_status` (default `true`) adds Discord's native **Set
+Voice Channel Status** permission to the owner's overwrite in each temporary
+room (and moves it to the new owner on a transfer), so the owner can set the
+channel status, the topic line under the name, in the Discord client. KoolBot
+can only grant a permission it holds: give the KoolBot role **Set Voice Channel
+Status**, otherwise the grant is skipped (the adoption readiness check warns).
+Nothing is cleared on a transfer.
+
 ### Cleaning up only channels KoolBot created
 
 By default KoolBot treats `voicechannels.category_id` as its own: on startup and
@@ -1715,6 +1725,7 @@ leave the graph in a broken state.
 - `voicechannels.channel.prefix` (string, default: "🎮")
 - `voicechannels.channel.suffix` (string, default: "")
 - `voicechannels.controlpanel.enabled` (bool, default: true)
+- `voicechannels.owner.grant_status` (bool, default: true)
 - `voicechannels.presets.enabled` (bool, default: false)
 - `voicechannels.presets.max_per_user` (number, default: 3)
 
