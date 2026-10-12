@@ -126,7 +126,7 @@ they never affect `npm test`, `npm run test:ci` or the coverage floors. Without 
 skip themselves, so nothing here needs Docker unless you want to run them:
 
 ```bash
-docker run --rm -d --name koolbot-it-mongo -p 27017:27017 mongo:8.0
+docker run --rm -d --name koolbot-it-mongo -p 127.0.0.1:27017:27017 mongo:8.0
 MONGODB_URI=mongodb://localhost:27017 npm run test:integration
 docker stop koolbot-it-mongo
 ```
