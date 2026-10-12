@@ -261,7 +261,7 @@ ${renderCommunity(scan)}`;
   }
   const body = `
 <h1>Server scan</h1>
-<p class="subtitle">A read-only inventory of ${escapeHtml(scan?.guildName ?? "this server")}. Nothing here changes Discord or KoolBot settings.</p>
+<p class="subtitle">A read-only inventory of ${escapeHtml(scan?.guildName ?? "this server")}. Nothing here changes Discord or KoolBot settings. To act on what you find, use <a href="/admin/role-groups">Role Groups</a> or <a href="/admin/adopt/claims">Channel Claims</a>.</p>
 <p>${
     props.sampled
       ? `Channel ownership hints are on. <a href="/admin/adopt">Turn off</a>.`
