@@ -800,6 +800,11 @@ settings — the Web UI's **Permissions** page narrows who may run a command the
 bot already received, it cannot widen Discord's own gate. Server-wide history
 is also viewable on the `/admin/moderation` page.
 
+Once the server has a `staff` or `admin` role group (Web UI, **Role Groups**), `/warn`,
+`/timeout`, `/ban` and `/modlog` also require a role from a staff or admin group, unless you
+set an explicit restriction for the command on the **Permissions** page (administrators always
+pass). With no such group, access is unchanged.
+
 `/timeout` and `/ban` act through the bot, so two things follow. The bot's own
 role must sit **above** the target's and hold the matching permission — if it
 doesn't, the command says so and does nothing. And because Discord records

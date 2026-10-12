@@ -39,6 +39,7 @@ import {
   WIZARD_FEATURE_EXTRA_GATES,
   wizardApplyFailureMessage,
   coerceConfigValue,
+  findGroupRoleReuseForSetting,
   truncateFlash,
 } from "./helpers.js";
 
@@ -327,7 +328,21 @@ export function createWizardRouter(client: Client): Router {
         if (masterOff && k !== masterKey) continue;
         const raw = body?.[settingValueFieldName(k)];
         const coerced = coerceConfigValue(k, raw);
-        if (coerced.ok) {
+        // A role that backs a role group can't be picked for another
+        // feature (#1023); the same guard as the Settings page.
+        const reuse = coerced.ok
+          ? await findGroupRoleReuseForSetting(
+              session.guildId,
+              k,
+              coerced.value,
+              await ConfigService.getInstance()
+                .get(k)
+                .catch(() => undefined),
+            )
+          : null;
+        if (reuse) {
+          dropped.push({ key: k, reason: reuse });
+        } else if (coerced.ok) {
           wizard.addConfiguration(
             session.discordUserId,
             session.guildId,

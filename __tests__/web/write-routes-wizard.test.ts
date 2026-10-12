@@ -78,6 +78,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const { RoleGroupService } =
+  await import("../../src/services/role-group-service.js");
 const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -100,6 +102,13 @@ function wizardState(
 beforeEach(async () => {
   jest.clearAllMocks();
   mockGetSession.mockReturnValue(null);
+  jest
+    .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+    .mockImplementation(async (_g, ids) =>
+      ids.includes("777777777777777777")
+        ? [{ roleId: "777777777777777777", groupName: "Moderators" }]
+        : [],
+    );
   mockConfigGetAll.mockImplementation(async () => []);
   harness = await startAdminHarness([
     stubRequireSession(session),
@@ -278,6 +287,32 @@ describe("POST /wizard/step/:n", () => {
     expect(mockAddConfiguration).toHaveBeenCalledTimes(1);
     expect(mockAddConfiguration.mock.calls[0][2]).toBe("quotes.enabled");
     expect(mockAddConfiguration.mock.calls[0][3]).toBe(false);
+  });
+
+  it("drops a birthday role that backs a role group and says why (#1023)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["birthdays"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": "777777777777777777",
+    });
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("step=0");
+    expect(parseFlashRedirect(location).msg).toContain("Moderators");
+    const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
+    expect(recorded).not.toContain("birthdays.role_id");
+    expect(recorded).toContain("birthdays.enabled");
+  });
+
+  it("records a birthday role no group backs (#1023)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["birthdays"]));
+    await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": "888888888888888888",
+    });
+    const recorded = Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+    );
+    expect(recorded["birthdays.role_id"]).toBe("888888888888888888");
   });
 
   it("keeps the operator on the step and names the dropped fields", async () => {

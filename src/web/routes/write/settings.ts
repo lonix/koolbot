@@ -899,6 +899,24 @@ export function createSettingsRouter(client: Client): Router {
         }
       }
 
+      // Role-group roles can't be reused by other features (#1023); an
+      // import that names one is refused for that key only.
+      const afterGroupCheck: typeof toWrite = [];
+      for (const item of toWrite) {
+        const reuse =
+          item.key === "birthdays.role_id" || item.key === TIERS_KEY
+            ? await findGroupRoleReuseForSetting(
+                session.guildId,
+                item.key,
+                item.value,
+                await config.get(item.key).catch(() => undefined),
+              )
+            : null;
+        if (reuse) failed.push({ key: item.key, reason: reuse });
+        else afterGroupCheck.push(item);
+      }
+      toWrite = afterGroupCheck;
+
       // Phase 2: apply the validated set. Skip the per-key check — the batch
       // was already validated, and per-key ordering would falsely reject an
       // intra-snapshot dependency pair.

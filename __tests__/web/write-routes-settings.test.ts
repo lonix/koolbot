@@ -427,6 +427,16 @@ describe("role group roles can't be reused by other features (#1023)", () => {
     expect(mockConfigSet).toHaveBeenCalled();
   });
 
+  it("allows the pick when the groups can't be read (a guard, not an access check)", async () => {
+    mockGroupBackedRoles.mockRejectedValue(new Error("database offline"));
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: GROUP_ROLE,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
   it("does not check settings that hold no role", async () => {
     await harness.post("/settings/set", {
       key: "quotes.max_length",
@@ -1627,6 +1637,32 @@ describe("POST /settings/import (preview)", () => {
     expect(html).toContain("type mismatch");
     // Previewing must not write anything.
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /settings/import/apply with role groups (#1023)", () => {
+  it("refuses a group's role for that key only and applies the rest", async () => {
+    const res = await harness.post("/settings/import/apply", {
+      yaml: [
+        "quotes.max_length: 500",
+        'birthdays.role_id: "777777777777777777"',
+      ].join("\n"),
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("birthdays.role_id");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
+    expect(lastAudit()).toMatchObject({
+      action: "settings.import",
+      details: { applied: 1, failed: 1 },
+    });
+  });
+
+  it("applies a role no group backs", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: 'birthdays.role_id: "888888888888888888"',
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
   });
 });
 

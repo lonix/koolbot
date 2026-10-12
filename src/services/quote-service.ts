@@ -407,7 +407,7 @@ export class QuoteService {
       }
     }
     const hasPermission =
-      open || // Empty means only admins
+      open || // Empty and no staff group: unchanged (anyone, see #1023 notes)
       userRoles.some((role) => allowedRoles.includes(role)) ||
       quote.addedById === userId; // Allow users to delete their own quotes
 
