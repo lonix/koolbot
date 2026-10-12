@@ -54,8 +54,8 @@ describe("QuoteService", () => {
       expect(quoteService.searchQuotes.length).toBe(1);
     });
 
-    it("deleteQuote should accept quote ID, user ID, and roles", () => {
-      expect(quoteService.deleteQuote.length).toBe(3);
+    it("deleteQuote should accept quote ID, user ID, roles and an optional guild ID", () => {
+      expect(quoteService.deleteQuote.length).toBe(4);
     });
 
     it("likeQuote should accept quote ID", () => {

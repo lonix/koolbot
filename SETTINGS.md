@@ -225,7 +225,7 @@ Configure the quote management system.
 | `quotes.channel_id`         | `""`    | Channel ID for quote messages (empty = use command channel)              |
 | `quotes.cooldown`           | `60`    | Seconds between quote additions (per user)                               |
 | `quotes.max_length`         | `1000`  | Maximum character length for quotes                                      |
-| `quotes.delete_roles`       | `""`    | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
+| `quotes.delete_roles`       | `""`    | Roles or role groups allowed to delete quotes (see note below)           |
 | `quotes.header_enabled`     | `true`  | Show informational header post in quote channel                          |
 | `quotes.header_pin_enabled` | `true`  | Pin the header post for easy access                                      |
 | `quotes.header_message_id`  | `""`    | Stores header message ID (managed automatically)                         |
@@ -236,6 +236,11 @@ Configure the quote management system.
 
 - `quotes.channel_id` — If set, all quotes are posted to this channel.
   If empty, quotes post in the channel where the command was used.
+- `quotes.delete_roles` — Takes role IDs and role group references (`group:<id>`, or
+  `group:<id>+` for that group and every group ranked above it). Pick them from the Quotes page;
+  the picker lists groups ahead of the roles. When empty and the server has a `staff` or `admin`
+  role group, deletion is limited to those groups. With no such group the behaviour is unchanged.
+  A member can always delete a quote they saved themselves.
 - `quotes.header_enabled` — Displays a pinned informational header.
   Auto-recreated if deleted.
 - `quotes.header_pin_enabled` — Controls whether the header is pinned.
@@ -1694,7 +1699,7 @@ leave the graph in a broken state.
 - `quotes.channel_id` (string, default: "")
 - `quotes.cooldown` (number, default: 60)
 - `quotes.max_length` (number, default: 1000)
-- `quotes.delete_roles` (string, default: "")
+- `quotes.delete_roles` (string, default: "") — role IDs and/or role group references (`group:<id>`, `group:<id>+`)
 - `quotes.header_enabled` (bool, default: true)
 - `quotes.header_pin_enabled` (bool, default: true)
 - `quotes.clear_on_sync` (bool, default: false)

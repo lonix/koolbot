@@ -39,6 +39,7 @@ import {
   WIZARD_FEATURE_EXTRA_GATES,
   wizardApplyFailureMessage,
   coerceConfigValue,
+  findGroupRoleReuseForSetting,
   truncateFlash,
 } from "./helpers.js";
 
@@ -327,7 +328,21 @@ export function createWizardRouter(client: Client): Router {
         if (masterOff && k !== masterKey) continue;
         const raw = body?.[settingValueFieldName(k)];
         const coerced = coerceConfigValue(k, raw);
-        if (coerced.ok) {
+        // A role that backs a role group can't be picked for another
+        // feature (#1023); the same guard as the Settings page.
+        const reuse = coerced.ok
+          ? await findGroupRoleReuseForSetting(
+              session.guildId,
+              k,
+              coerced.value,
+              await ConfigService.getInstance()
+                .get(k)
+                .catch(() => undefined),
+            )
+          : null;
+        if (reuse) {
+          dropped.push({ key: k, reason: reuse });
+        } else if (coerced.ok) {
           wizard.addConfiguration(
             session.discordUserId,
             session.guildId,
@@ -393,6 +408,35 @@ export function createWizardRouter(client: Client): Router {
           text: "Wizard session expired. Please start again.",
         });
         return;
+      }
+
+      // A step is checked when it is saved, but the wizard can stay open
+      // while another admin links one of the chosen roles to a role group
+      // (#1023). Check again right before anything is written, and apply
+      // nothing if a role has become group-backed.
+      for (const key of ["birthdays.role_id", "leaderboard_roles.tiers"]) {
+        if (!(key in state.configuration)) continue;
+        const reuse = await findGroupRoleReuseForSetting(
+          session.guildId,
+          key,
+          state.configuration[key],
+          await ConfigService.getInstance()
+            .get(key)
+            .catch(() => undefined),
+        );
+        if (reuse) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: { blockedKey: key },
+            result: "failure",
+            errorMessage: `${key}: ${reuse}`,
+          });
+          flashRedirect(res, "/admin/wizard", {
+            type: "err",
+            text: `Nothing was applied. ${key}: ${reuse} Go back to that step and choose another role.`,
+          });
+          return;
+        }
       }
 
       // The wizard treats each run as a complete declaration of which

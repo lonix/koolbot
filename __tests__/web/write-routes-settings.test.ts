@@ -58,6 +58,20 @@ const mockEventReload = jest.fn<() => Promise<void>>();
 const mockReminderReload = jest.fn<() => Promise<void>>();
 const mockLfgReload = jest.fn<() => Promise<void>>();
 
+const mockGroupBackedRoles =
+  jest.fn<
+    (
+      guildId: string,
+      roleIds: string[],
+    ) => Promise<Array<{ roleId: string; groupName: string }>>
+  >();
+
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: (): unknown => ({ groupBackedRoles: mockGroupBackedRoles }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
 }));
@@ -165,6 +179,11 @@ let harness: AdminHarness;
 beforeEach(async () => {
   jest.clearAllMocks();
   mockConfigGet.mockResolvedValue(null);
+  mockGroupBackedRoles.mockImplementation(async (_g, ids) =>
+    ids.includes("777777777777777777")
+      ? [{ roleId: "777777777777777777", groupName: "Moderators" }]
+      : [],
+  );
   mockConfigSet.mockResolvedValue(undefined);
   mockConfigDelete.mockResolvedValue(undefined);
   mockConfigGetAll.mockResolvedValue([]);
@@ -366,6 +385,85 @@ describe("POST /settings/set", () => {
     expect(flash.type).toBe("warn");
     expect(flash.msg).toContain("The LFG schedule could not be re-armed");
     expect(mockConfigSet).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("role group roles can't be reused by other features (#1023)", () => {
+  const GROUP_ROLE = "777777777777777777";
+  const FREE_ROLE = "888888888888888888";
+
+  it("refuses a group's role as the birthday role", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: GROUP_ROLE,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Moderators");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "setting.set",
+      targetId: "birthdays.role_id",
+      result: "failure",
+    });
+  });
+
+  it("allows a role no group backs", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: FREE_ROLE,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
+  it("leaves a role the setting already held alone (never clears stored config)", async () => {
+    mockConfigGet.mockResolvedValue(GROUP_ROLE);
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: GROUP_ROLE,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
+  it("allows the pick when the groups can't be read (a guard, not an access check)", async () => {
+    mockGroupBackedRoles.mockRejectedValue(new Error("database offline"));
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: GROUP_ROLE,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
+  it("does not check settings that hold no role", async () => {
+    await harness.post("/settings/set", {
+      key: "quotes.max_length",
+      value: "500",
+    });
+    expect(mockGroupBackedRoles).not.toHaveBeenCalled();
+  });
+
+  it("refuses a group's role in a leaderboard tier saved from Settings", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "leaderboard_roles.tiers",
+      value: `1:${FREE_ROLE},3:${GROUP_ROLE}`,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("blocks a section save that picks a group's role, saving nothing", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "birthdays",
+      keys: ["birthdays.role_id"],
+      "value_birthdays.role_id": GROUP_ROLE,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("birthdays.role_id");
+    expect(mockConfigSet).not.toHaveBeenCalled();
   });
 });
 
@@ -1539,6 +1637,32 @@ describe("POST /settings/import (preview)", () => {
     expect(html).toContain("type mismatch");
     // Previewing must not write anything.
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /settings/import/apply with role groups (#1023)", () => {
+  it("refuses a group's role for that key only and applies the rest", async () => {
+    const res = await harness.post("/settings/import/apply", {
+      yaml: [
+        "quotes.max_length: 500",
+        'birthdays.role_id: "777777777777777777"',
+      ].join("\n"),
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("birthdays.role_id");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
+    expect(lastAudit()).toMatchObject({
+      action: "settings.import",
+      details: { applied: 1, failed: 1 },
+    });
+  });
+
+  it("applies a role no group backs", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: 'birthdays.role_id: "888888888888888888"',
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
   });
 });
 

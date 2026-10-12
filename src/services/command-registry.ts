@@ -44,6 +44,18 @@ export async function isCommandEnabled(
  */
 export const ADMIN_ONLY_COMMAND = "config";
 
+/**
+ * Commands that default to the `staff` role-group capability once the guild
+ * has a staff or admin group and the command has no explicit permission row
+ * (#1023). With no groups they stay default-open, as before.
+ */
+export const STAFF_DEFAULT_COMMANDS: ReadonlySet<string> = new Set([
+  "warn",
+  "timeout",
+  "ban",
+  "modlog",
+]);
+
 export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   { name: "ping", configKey: "ping.enabled", file: "ping" },
   { name: "help", configKey: null, file: "help" }, // Always enabled - core feature

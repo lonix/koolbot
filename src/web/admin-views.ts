@@ -1342,11 +1342,61 @@ export interface PermissionsProps extends CommonProps {
   allRoleIds: string[];
   roleNames: Map<string, string>;
   perCommand: Map<string, string[]>;
+  /** Role groups the pickers offer next to raw roles (#1023). */
+  groups?: ReadonlyArray<{ id: string; name: string }>;
+  /** Group references (`group:<id>[+]`) per command. */
+  groupRefsPerCommand?: Map<string, string[]>;
+  /** Commands that default to the staff capability, shown while groups exist. */
+  staffDefaultCommands?: ReadonlySet<string>;
+  /** Whether any staff or admin group exists (the staff default is active). */
+  staffDefaultActive?: boolean;
+  /**
+   * The role groups couldn't be read, so whether the staff default applies is
+   * unknown. Runtime checks refuse the moderation commands in that state, so
+   * the page must not call them open.
+   */
+  groupsUnavailable?: boolean;
   flash?: FlashMessage | null;
+}
+
+/** Label for a `group:<id>[+]` reference (the picker uses the same text). */
+function groupRefLabel(
+  ref: string,
+  groups: ReadonlyArray<{ id: string; name: string }>,
+): string {
+  const andAbove = ref.endsWith("+");
+  const id = ref.slice("group:".length).replace(/[+]$/, "");
+  const name = groups.find((g) => g.id === id)?.name ?? `${id} (missing)`;
+  return `${name}${andAbove ? " and above" : ""}`;
 }
 
 export function renderPermissionsPage(props: PermissionsProps): string {
   const csrf = escapeHtml(props.csrfToken);
+  const groups = props.groups ?? [];
+  const groupRefsPerCommand = props.groupRefsPerCommand ?? new Map();
+  const usedGroupRefs = Array.from(
+    new Set(Array.from(groupRefsPerCommand.values()).flat()),
+  ).sort((a, b) =>
+    groupRefLabel(a, groups).localeCompare(groupRefLabel(b, groups)),
+  );
+  /** Status of a command with no explicit restriction. */
+  const unrestrictedStatus = (cmd: string): string => {
+    if (props.staffDefaultCommands?.has(cmd) !== true) {
+      return `<span class="tag tag-info">open</span>`;
+    }
+    if (props.groupsUnavailable === true) {
+      return `<span class="tag tag-warn">unknown (role groups unavailable)</span>`;
+    }
+    return props.staffDefaultActive === true
+      ? `<span class="tag tag-warn">staff only (default)</span>`
+      : `<span class="tag tag-info">open</span>`;
+  };
+  const groupHeaders = usedGroupRefs
+    .map(
+      (ref) =>
+        `<th scope="col">${escapeHtml(groupRefLabel(ref, groups))} <span class="muted">(group)</span></th>`,
+    )
+    .join("");
 
   const headerRoles = props.roleIds
     .map(
@@ -1357,8 +1407,11 @@ export function renderPermissionsPage(props: PermissionsProps): string {
 
   const matrixRows = props.commands
     .map((cmd) => {
-      const allowed = new Set(props.perCommand.get(cmd) ?? []);
-      const cells = props.roleIds
+      const allowed = new Set([
+        ...(props.perCommand.get(cmd) ?? []),
+        ...(groupRefsPerCommand.get(cmd) ?? []),
+      ]);
+      const cells = [...props.roleIds, ...usedGroupRefs]
         .map(
           (rid) =>
             // Each cell's whole content was "✓" or "—" (#855): the glyph stays
@@ -1372,7 +1425,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
         .join("");
       const status =
         allowed.size === 0
-          ? `<span class="tag tag-info">open</span>`
+          ? unrestrictedStatus(cmd)
           : `<span class="tag tag-warn">restricted</span>`;
       // The command name is the row header of a true 2D grid (#855), so a
       // screen reader can recover "which command, which role" from any cell.
@@ -1381,18 +1434,27 @@ export function renderPermissionsPage(props: PermissionsProps): string {
     .join("");
 
   const matrixHtml =
-    props.roleIds.length === 0
-      ? `<div class="empty">No restricted commands. All registered commands are open by default.</div>`
-      : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}</tr></thead><tbody>${matrixRows}</tbody></table>`;
+    props.roleIds.length === 0 && usedGroupRefs.length === 0
+      ? `<div class="empty">No restricted commands. ${
+          props.groupsUnavailable === true
+            ? "The role groups couldn't be read, so the moderation commands are refused until they can be."
+            : props.staffDefaultActive === true
+              ? "Commands are open by default, except the moderation commands, which are staff only while a staff or admin role group exists."
+              : "All registered commands are open by default."
+        }</div>`
+      : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}${groupHeaders}</tr></thead><tbody>${matrixRows}</tbody></table>`;
 
   const editRows = props.commands
     .map((cmd) => {
-      const current = new Set(props.perCommand.get(cmd) ?? []);
+      const current = new Set([
+        ...(props.perCommand.get(cmd) ?? []),
+        ...(groupRefsPerCommand.get(cmd) ?? []),
+      ]);
       const status =
         current.size === 0
-          ? `<span class="tag tag-info">open</span>`
+          ? unrestrictedStatus(cmd)
           : `<span class="tag tag-warn">restricted</span>`;
-      const options =
+      const roleOptions =
         props.allRoleIds.length === 0
           ? `<option disabled>No roles available in this guild</option>`
           : props.allRoleIds
@@ -1402,6 +1464,26 @@ export function renderPermissionsPage(props: PermissionsProps): string {
                 return `<option value="${escapeHtml(rid)}"${sel}>${escapeHtml(name)}</option>`;
               })
               .join("");
+      // Role groups (#1023): each group alone, or "and above" (that group
+      // plus every group ranked higher). A reference to a group that has
+      // since been deleted stays visible so saving doesn't drop it silently.
+      const knownRefs = new Set(
+        groups.flatMap((g) => [`group:${g.id}`, `group:${g.id}+`]),
+      );
+      const groupOptionHtml = (ref: string, label: string): string =>
+        `<option value="${escapeHtml(ref)}"${current.has(ref) ? " selected" : ""}>${escapeHtml(label)}</option>`;
+      const groupOptions = [
+        ...groups.flatMap((g) => [
+          groupOptionHtml(`group:${g.id}`, `${g.name} (group)`),
+          groupOptionHtml(`group:${g.id}+`, `${g.name} and above (group)`),
+        ]),
+        ...Array.from(current)
+          .filter((v) => v.startsWith("group:") && !knownRefs.has(v))
+          .map((v) => groupOptionHtml(v, groupRefLabel(v, groups))),
+      ].join("");
+      const options = groupOptions
+        ? `<optgroup label="Role groups">${groupOptions}</optgroup><optgroup label="Roles">${roleOptions}</optgroup>`
+        : roleOptions;
       // The role picker sits in a column headed "Allowed roles", which a
       // screen reader does not announce as the control's name. Give it a
       // visually-hidden `<label for>` naming the command it governs, and link
@@ -1430,7 +1512,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
 
   const body = `
 <h1>Permissions</h1>
-<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles to restrict a command; deselect all and save to make it open.</p>
+<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one staff or admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to staff unless you set a restriction here; with no groups they stay open.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Edit</h2>

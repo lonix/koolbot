@@ -1228,6 +1228,118 @@ describe("renderSettingsPage", () => {
   });
 });
 
+describe("renderPermissionsPage with role groups (#1023)", () => {
+  const base = {
+    ...COMMON,
+    commands: ["warn", "quote"],
+    roleIds: [],
+    allRoleIds: ["r1"],
+    roleNames: new Map([["r1", "Admins"]]),
+    perCommand: new Map<string, string[]>(),
+    groups: [{ id: "g1", name: "Mods" }],
+  };
+
+  it("offers each group and 'and above' next to the roles", () => {
+    const html = renderPermissionsPage(base);
+    expect(html).toContain('<optgroup label="Role groups">');
+    expect(html).toContain('<option value="group:g1">Mods (group)</option>');
+    expect(html).toContain(
+      '<option value="group:g1+">Mods and above (group)</option>',
+    );
+    expect(html).toContain('<optgroup label="Roles">');
+  });
+
+  it("keeps the plain role picker when there are no groups", () => {
+    const html = renderPermissionsPage({ ...base, groups: [] });
+    expect(html).not.toContain("optgroup");
+    expect(html).toContain(">Admins</option>");
+  });
+
+  it("selects and shows the groups a command names in the matrix", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      groupRefsPerCommand: new Map([["quote", ["group:g1+"]]]),
+    });
+    expect(html).toContain(
+      '<option value="group:g1+" selected>Mods and above (group)</option>',
+    );
+    expect(html).toContain("Mods and above");
+    expect(html).toContain('class="tag tag-warn">restricted');
+    expect(html).not.toContain("No restricted commands");
+  });
+
+  it("keeps a reference to a deleted group visible and selected", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      groupRefsPerCommand: new Map([["quote", ["group:gone"]]]),
+    });
+    expect(html).toContain(
+      '<option value="group:gone" selected>gone (missing)</option>',
+    );
+  });
+
+  it("shows the moderation commands as staff only in the matrix too, not open", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      roleIds: ["r1"],
+      perCommand: new Map([["quote", ["r1"]]]),
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    const matrix = html.slice(html.indexOf("<caption"));
+    expect(matrix).toContain("staff only (default)");
+    // ...and the restricted command keeps its own status, nothing says open.
+    expect(matrix).toContain('class="tag tag-warn">restricted');
+    expect(matrix).not.toContain('class="tag tag-info">open');
+  });
+
+  it("explains the staff default in the empty matrix text", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(html).toContain("except the moderation commands");
+    expect(html).not.toContain("All registered commands are open by default");
+  });
+
+  it("shows unknown, not open, when the groups couldn't be read", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      groupsUnavailable: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(html).toContain("unknown (role groups unavailable)");
+    expect(html).toContain("refused until they can be");
+    expect(html).not.toContain("staff only (default)");
+  });
+
+  it("flags the staff default on moderation commands only while it applies", () => {
+    const on = renderPermissionsPage({
+      ...base,
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(on).toContain("staff only (default)");
+    const off = renderPermissionsPage({
+      ...base,
+      staffDefaultActive: false,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(off).not.toContain("staff only (default)");
+  });
+
+  it("a command with its own restriction is not flagged as the default", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      perCommand: new Map([["warn", ["r1"]]]),
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(html).not.toContain("staff only (default)");
+  });
+});
+
 describe("renderPermissionsPage", () => {
   it("falls back to an empty state when no roles are configured", () => {
     const html = renderPermissionsPage({

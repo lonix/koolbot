@@ -78,6 +78,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const { RoleGroupService } =
+  await import("../../src/services/role-group-service.js");
 const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -100,6 +102,13 @@ function wizardState(
 beforeEach(async () => {
   jest.clearAllMocks();
   mockGetSession.mockReturnValue(null);
+  jest
+    .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+    .mockImplementation(async (_g, ids) =>
+      ids.includes("777777777777777777")
+        ? [{ roleId: "777777777777777777", groupName: "Moderators" }]
+        : [],
+    );
   mockConfigGetAll.mockImplementation(async () => []);
   harness = await startAdminHarness([
     stubRequireSession(session),
@@ -280,6 +289,32 @@ describe("POST /wizard/step/:n", () => {
     expect(mockAddConfiguration.mock.calls[0][3]).toBe(false);
   });
 
+  it("drops a birthday role that backs a role group and says why (#1023)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["birthdays"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": "777777777777777777",
+    });
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("step=0");
+    expect(parseFlashRedirect(location).msg).toContain("Moderators");
+    const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
+    expect(recorded).not.toContain("birthdays.role_id");
+    expect(recorded).toContain("birthdays.enabled");
+  });
+
+  it("records a birthday role no group backs (#1023)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["birthdays"]));
+    await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": "888888888888888888",
+    });
+    const recorded = Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+    );
+    expect(recorded["birthdays.role_id"]).toBe("888888888888888888");
+  });
+
   it("keeps the operator on the step and names the dropped fields", async () => {
     mockGetSession.mockReturnValue(wizardState(["quotes"]));
     const res = await harness.post("/wizard/step/0", {
@@ -311,6 +346,45 @@ describe("POST /wizard/apply", () => {
     const res = await harness.post("/wizard/apply");
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("applies nothing when a saved role has since become group-backed (#1023)", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["birthdays"], {
+        "birthdays.enabled": true,
+        "birthdays.role_id": "777777777777777777",
+      }),
+    );
+    const res = await harness.post("/wizard/apply");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.path).toBe("/admin/wizard");
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).toContain("Moderators");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockAddConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "wizard.apply",
+      result: "failure",
+    });
+  });
+
+  it("applies a saved role no group backs (#1023)", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["birthdays"], {
+        "birthdays.enabled": true,
+        "birthdays.role_id": "888888888888888888",
+      }),
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+    await harness.post("/wizard/apply");
+    expect(mockApplyConfiguration).toHaveBeenCalled();
   });
 
   it("explicitly disables every feature the admin did not tick", async () => {

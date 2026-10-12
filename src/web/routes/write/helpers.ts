@@ -15,6 +15,8 @@ import {
 } from "../../../utils/cron.js";
 import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
+import { RoleGroupService } from "../../../services/role-group-service.js";
+import { parseTierConfig, TIERS_KEY } from "../../leaderboard-tiers.js";
 import type { WizardApplyResult } from "../../../services/wizard-service.js";
 import {
   defaultConfig,
@@ -691,4 +693,66 @@ export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
 export function navStatusForPage(): ReturnType<typeof resolveNavFeatureStatus> {
   const config = ConfigService.getInstance();
   return resolveNavFeatureStatus((key) => config.getBoolean(key, false));
+}
+
+/**
+ * A role that already backs a role group can't be chosen for another feature
+ * (#1023): a leaderboard tier would take it back from members on the next
+ * run, and a birthday role would hand it out. Returns an operator-facing
+ * message naming the group, or null when every role in `roleIds` is fine.
+ *
+ * Roles in `keep` are the feature's current choices; they are never reported,
+ * so an existing collision is not blocked on every unrelated save (it keeps
+ * working, and the group page lists it as feature-used). Stored config is
+ * never cleared. If the groups can't be read this logs and allows the write:
+ * the guard protects a choice, it is not an access check.
+ */
+export async function findGroupRoleReuse(
+  guildId: string,
+  roleIds: readonly string[],
+  keep: readonly string[] = [],
+): Promise<string | null> {
+  const fresh = roleIds.filter((id) => id !== "" && !keep.includes(id));
+  if (fresh.length === 0) return null;
+  try {
+    const hits = await RoleGroupService.getInstance().groupBackedRoles(
+      guildId,
+      fresh,
+    );
+    if (hits.length === 0) return null;
+    const names = [...new Set(hits.map((h) => `"${h.groupName}"`))].join(", ");
+    return `That role backs the role group ${names}, so another feature can't use it. Pick a different role, or manage the role through the group.`;
+  } catch (err) {
+    logger.warn("group role reuse check: role groups unreadable", err);
+    return null;
+  }
+}
+
+/** Settings whose value is a role a group may already back (#1023). */
+const GROUP_GUARDED_ROLE_KEYS = new Set(["birthdays.role_id", TIERS_KEY]);
+
+/** Role ids a guarded setting value names (empty for any other key). */
+function guardedRoleIds(key: string, value: unknown): string[] {
+  if (!GROUP_GUARDED_ROLE_KEYS.has(key) || typeof value !== "string") {
+    return [];
+  }
+  return key === TIERS_KEY
+    ? parseTierConfig(value).tiers.map((t) => t.roleId)
+    : [value.trim()].filter(Boolean);
+}
+
+/**
+ * {@link findGroupRoleReuse} for a settings write: for the birthday role and
+ * the leaderboard tiers, refuse a role that backs a group unless the setting
+ * already held it. `before` is the stored value (or default).
+ */
+export async function findGroupRoleReuseForSetting(
+  guildId: string,
+  key: string,
+  value: unknown,
+  before: unknown,
+): Promise<string | null> {
+  const roleIds = guardedRoleIds(key, value);
+  if (roleIds.length === 0) return null;
+  return findGroupRoleReuse(guildId, roleIds, guardedRoleIds(key, before));
 }

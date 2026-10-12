@@ -10,6 +10,13 @@ function isValidObjectId(id: string): boolean {
 }
 import { quoteSchema } from "../database/schema.js";
 import { ConfigService } from "./config-service.js";
+import { RoleGroupService } from "./role-group-service.js";
+import {
+  hasStaffGroup,
+  resolveGroupRefs,
+  splitRoleSetting,
+  staffRoleIds,
+} from "./role-group-access.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { CooldownManager } from "./cooldown-manager.js";
 import { normalizeUserId, userIdMatchForms } from "../utils/user-id.js";
@@ -354,10 +361,17 @@ export class QuoteService {
       .limit(10);
   }
 
+  /**
+   * `guildId` switches on role group support (#1023): `quotes.delete_roles`
+   * may then name groups (`group:<id>`, `group:<id>+`), and an empty setting
+   * means the staff and admin groups once the guild has one. Without it, or
+   * with no groups defined, the behaviour is the original role-id check.
+   */
   async deleteQuote(
     quoteId: string,
     userId: string,
     userRoles: string[],
+    guildId?: string,
   ): Promise<void> {
     const quote = await this.model.findById(quoteId);
     if (!quote) {
@@ -369,10 +383,32 @@ export class QuoteService {
       "quotes.delete_roles",
       "",
     );
-    const deleteRoles = deleteRolesStr.split(",").filter(Boolean);
+    const { roleIds: deleteRoles, groupRefs } =
+      splitRoleSetting(deleteRolesStr);
+    let allowedRoles = deleteRoles;
+    let open = deleteRoles.length === 0 && groupRefs.length === 0;
+    if (guildId) {
+      // A read failure here denies (unless the user owns the quote) rather
+      // than opening deletion to everyone.
+      const groups = await RoleGroupService.getInstance()
+        .list(guildId)
+        .catch((error: unknown) => {
+          logger.warn("quote delete: could not read role groups", error);
+          return null;
+        });
+      if (groups === null) {
+        open = false;
+        allowedRoles = [];
+      } else if (open && hasStaffGroup(groups)) {
+        open = false;
+        allowedRoles = staffRoleIds(groups);
+      } else {
+        allowedRoles = [...deleteRoles, ...resolveGroupRefs(groups, groupRefs)];
+      }
+    }
     const hasPermission =
-      deleteRoles.length === 0 || // Empty means only admins
-      userRoles.some((role) => deleteRoles.includes(role)) ||
+      open || // Empty and no staff group: unchanged (anyone, see #1023 notes)
+      userRoles.some((role) => allowedRoles.includes(role)) ||
       quote.addedById === userId; // Allow users to delete their own quotes
 
     if (!hasPermission) {
