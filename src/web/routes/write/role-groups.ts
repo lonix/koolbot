@@ -18,6 +18,7 @@ import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
   planAdminFix,
   planRoleDeletion,
+  roleDeletionRevalidator,
   planRoleGroups,
   planIsApplicable,
 } from "../../../services/role-group-adoption.js";
@@ -420,7 +421,27 @@ export function createRoleGroupsRouter(client: Client): Router {
           return;
         }
         const engine = await ServerAdoptionService.getInstance(client, guild);
-        jobId = engine.startApply(plan, { actor: session }).id;
+        try {
+          jobId = engine.startApply(plan, {
+            actor: session,
+            // Required for the destructive role delete: the engine re-checks
+            // the live server before running it (#1097).
+            revalidate: roleDeletionRevalidator(
+              guild,
+              session.discordUserId,
+              group,
+              approved,
+            ),
+          }).id;
+        } catch (error) {
+          const text = error instanceof Error ? error.message : "Unknown error";
+          logger.error("role groups: role delete failed to start", error);
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `The role can't be deleted: ${text} The group was kept.`,
+          });
+          return;
+        }
       }
       await groups().remove(session.guildId, id);
       await recordAudit(session, {

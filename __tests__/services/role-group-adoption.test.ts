@@ -35,6 +35,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 const {
   planRoleGroups,
   planRoleDeletion,
+  roleDeletionRevalidator,
   linkCreatedRoles,
   planIsApplicable,
   planAdminFix,
@@ -237,6 +238,70 @@ describe("planRoleDeletion", () => {
       true,
     );
     expect(extraErrors[0]).toMatchObject({ code: "no-role" });
+  });
+});
+
+describe("roleDeletionRevalidator (#1097)", () => {
+  const fresh = (over = {}) =>
+    mockScan.mockResolvedValue({
+      scanned: scanned(over),
+      memberCounts: new Map(),
+      botIds: null,
+    });
+  beforeEach(() => {
+    mockList.mockResolvedValue([grp()]);
+    mockUses.mockResolvedValue([]);
+    fresh();
+  });
+  const pendingDelete = async () =>
+    (await planRoleDeletion(guild, "admin", grp(), true)).plan.operations;
+
+  it("accepts the pending delete while the role is unchanged", async () => {
+    const pending = await pendingDelete();
+    const check = roleDeletionRevalidator(guild, "admin", grp(), true);
+    expect(await check(pending)).toEqual([]);
+  });
+
+  it("refuses when a feature started using the role since the preview", async () => {
+    const pending = await pendingDelete();
+    mockUses.mockResolvedValue(["Leaderboard Roles"]);
+    const problems = await roleDeletionRevalidator(
+      guild,
+      "admin",
+      grp(),
+      true,
+    )(pending);
+    expect(problems.join(" ")).toContain("Leaderboard Roles");
+  });
+
+  it("refuses when the role became managed or rose above the bot", async () => {
+    const pending = await pendingDelete();
+    fresh({
+      roles: [
+        role("g", 0),
+        role("r1", 30, { managed: true }),
+        role("botrole", 20, { permissions: "268435456" }),
+      ],
+    });
+    const problems = await roleDeletionRevalidator(
+      guild,
+      "admin",
+      grp(),
+      true,
+    )(pending);
+    expect(problems.length).toBeGreaterThan(0);
+  });
+
+  it("refuses when the role is gone and the delete no longer matches", async () => {
+    const pending = await pendingDelete();
+    fresh({ roles: [role("g", 0), role("botrole", 20)] });
+    const problems = await roleDeletionRevalidator(
+      guild,
+      "admin",
+      grp(),
+      true,
+    )(pending);
+    expect(problems.join(" ")).toContain("no longer matches the live server");
   });
 });
 

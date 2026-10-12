@@ -6,9 +6,11 @@ import {
   type AdoptionPlan,
   type DesiredState,
   type PlanIssue,
+  type PlanOperation,
   type RoleState,
 } from "./server-adoption-planner.js";
 import { buildDesiredState } from "./role-group-plan.js";
+import { staleDestructiveSteps } from "./channel-claims.js";
 import {
   buildAdminFixDesired,
   detectDrift,
@@ -260,6 +262,30 @@ export async function planRoleDeletion(
     { approverId: adminUserId },
   );
   return { plan, extraErrors };
+}
+
+/**
+ * The live-state check the engine requires before it runs the destructive
+ * role delete (#1097). It re-plans the same deletion from a fresh scan and
+ * refuses if the fresh plan has blocking problems (the role is now managed,
+ * above the bot, or in use by a feature) or no longer contains the pending
+ * delete. The engine runs it before applying and again before the destructive
+ * phase.
+ */
+export function roleDeletionRevalidator(
+  guild: Guild,
+  adminUserId: string,
+  group: RoleGroupView,
+  approved: boolean,
+): (pending: PlanOperation[]) => Promise<string[]> {
+  return async (pending) => {
+    const fresh = await planRoleDeletion(guild, adminUserId, group, approved);
+    const problems = [...fresh.plan.errors, ...fresh.extraErrors].map(
+      (e) => e.message,
+    );
+    problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
+    return problems;
+  };
 }
 
 /**
