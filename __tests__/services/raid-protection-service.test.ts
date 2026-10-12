@@ -76,6 +76,7 @@ const {
   isNewAccount,
   INIT_WAIT_MS,
   MAX_PENDING_ROWS,
+  MAX_PENDING_TRANSITIONS,
   ROW_RETRY_DELAYS_MS,
 } = await import("../../src/services/raid-protection-service.js");
 
@@ -563,25 +564,31 @@ describe("RaidProtectionService", () => {
       expect((await service.getStatus(guild)).joinsInWindow).toBe(0);
     });
 
-    it("sends no stale 'started' alert after a concurrent off", async () => {
+    it("alerts a lockdown start before its end when an automatic lockdown is ended while its row is being written", async () => {
       const service = RaidProtectionService.getInstance(client);
+      await joinMany(3);
       let release: () => void = () => undefined;
       mockCreate.mockImplementationOnce(
         () => new Promise((resolve) => (release = () => resolve({}))),
       );
-      const starting = service.setLockdown(guild, true, "mod-1");
-      await Promise.resolve();
+      // The 4th join starts a lockdown automatically (not under the manual
+      // lock) and waits on its log row.
+      const crossing = service.handleMemberJoin(makeMember().member);
+      await new Promise((r) => setTimeout(r, 0));
       const ending = service.setLockdown(guild, false, "mod-2");
       await new Promise((r) => setTimeout(r, 0));
       release();
       await ending;
-      const started = await starting;
+      await crossing;
       const texts = send.mock.calls.map((c) =>
         String((c[0] as { content: string }).content),
       );
-      expect(texts.some((t) => t.includes("lockdown started"))).toBe(false);
-      expect(texts.some((t) => t.includes("lockdown ended"))).toBe(true);
-      expect(started.message).toMatch(/ended by another action/);
+      // Alerts come out in transition order: started, then ended, never the
+      // reverse, and the final state is off.
+      const started = texts.findIndex((t) => t.includes("lockdown started"));
+      const ended = texts.findIndex((t) => t.includes("lockdown ended"));
+      expect(started).toBeGreaterThanOrEqual(0);
+      expect(ended).toBeGreaterThan(started);
       expect((await service.getStatus(guild)).lockdown).toBe(false);
     });
 
@@ -944,6 +951,142 @@ describe("RaidProtectionService", () => {
       ]);
       expect(results.every((r) => typeof r.message === "string")).toBe(true);
       expect((await service.getStatus(guild)).unrecorded).toBeGreaterThan(0);
+    });
+  });
+
+  describe("shutdown, ordering, transition cap and precedence", () => {
+    it("destroy() releases joins waiting on a pending restore, and a late restore is a no-op", async () => {
+      jest.useFakeTimers({ now: Date.now() });
+      liveConfig({ "moderation.raid.lockdown_max_minutes": 10 });
+      RaidProtectionService.reset();
+      let resolveFind: (row: unknown) => void = () => undefined;
+      mockFindOne.mockReturnValue({
+        sort: () => ({
+          lean: () => ({
+            exec: () => new Promise((resolve) => (resolveFind = resolve)),
+          }),
+        }),
+      });
+      const service = RaidProtectionService.getInstance(client);
+      const init = service.initialize();
+      const waiting = service.handleMemberJoin(makeMember().member);
+      await Promise.resolve();
+      service.destroy();
+      // The waiter is released without the 10s timeout.
+      expect(await waiting).toBe(false);
+
+      resolveFind({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: "mod-1",
+        reason: "Manual",
+      });
+      await init;
+      expect(jest.getTimerCount()).toBe(0);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(
+        mockLogger.warn.mock.calls.some((c) =>
+          String(c[0]).includes("restored an active lockdown"),
+        ),
+      ).toBe(false);
+    });
+
+    it("decides concurrent on and off in call order, never losing the clear", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      const [on, off] = await Promise.all([
+        service.setLockdown(guild, true, "mod-1"),
+        service.setLockdown(guild, false, "mod-2"),
+      ]);
+      expect(on.changed).toBe(true);
+      expect(off).toMatchObject({ changed: true, message: "Lockdown is off." });
+      expect((await service.getStatus(guild)).lockdown).toBe(false);
+      expect(rowsWith("raid_clear")).toHaveLength(1);
+    });
+
+    it("decides concurrent off then on consistently too", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      const [off, on] = await Promise.all([
+        service.setLockdown(guild, false, "mod-2"),
+        service.setLockdown(guild, true, "mod-1"),
+      ]);
+      expect(off).toMatchObject({
+        changed: false,
+        message: "Lockdown is not on.",
+      });
+      expect(on.changed).toBe(true);
+      expect((await service.getStatus(guild)).lockdown).toBe(true);
+    });
+
+    it("refuses a new transition past the hard cap and keeps earlier rows in order", async () => {
+      const delays = ROW_RETRY_DELAYS_MS.splice(0);
+      try {
+        const service = RaidProtectionService.getInstance(client);
+        mockCreate.mockRejectedValue(new Error("db down"));
+        for (let i = 0; i < MAX_PENDING_TRANSITIONS / 2; i++) {
+          await service.setLockdown(guild, true, "mod-1");
+          await service.setLockdown(guild, false, "mod-1");
+        }
+        const refused = await service.setLockdown(guild, true, "mod-1");
+        expect(refused.changed).toBe(false);
+        expect(refused.message).toMatch(/Cannot change lockdown/);
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          expect.stringContaining("refused a lockdown change"),
+        );
+        mockCreate.mockClear();
+        mockCreate.mockResolvedValue({});
+        await service.getStatus(guild);
+        const actions = mockCreate.mock.calls.map((c) => c[0].action);
+        expect(actions).toHaveLength(MAX_PENDING_TRANSITIONS);
+        expect(
+          actions.every(
+            (a, i) => a === (i % 2 ? "raid_clear" : "raid_lockdown"),
+          ),
+        ).toBe(true);
+      } finally {
+        ROW_RETRY_DELAYS_MS.push(...delays);
+      }
+    });
+
+    describe("a young account during lockdown", () => {
+      it.each([
+        ["timeout", "kick", "kick"],
+        ["kick", "timeout", "kick"],
+        ["timeout", "timeout", "timeout"],
+      ] as const)(
+        "lockdown %s + new-account %s applies %s",
+        async (lockdownAction, gateAction, expected) => {
+          liveConfig({
+            "moderation.raid.lockdown_action": lockdownAction,
+            "moderation.raid.new_account_action": gateAction,
+            "moderation.raid.min_account_age_hours": 24,
+          });
+          const service = RaidProtectionService.getInstance(client);
+          await service.setLockdown(guild, true, "mod-1");
+          const young = makeMember({ ageMs: HOUR });
+          expect(await service.handleMemberJoin(young.member)).toBe(true);
+          const called = {
+            kick: young.kick.mock.calls.length,
+            timeout: young.timeout.mock.calls.length,
+          };
+          expect(called.kick + called.timeout).toBe(1);
+          expect(called[expected]).toBe(1);
+          expect(rowsWith(expected).at(-1)?.reason).toMatch(/lockdown/);
+        },
+      );
+
+      it("an old account during lockdown gets the lockdown action only", async () => {
+        liveConfig({
+          "moderation.raid.lockdown_action": "timeout",
+          "moderation.raid.new_account_action": "kick",
+          "moderation.raid.min_account_age_hours": 24,
+        });
+        const service = RaidProtectionService.getInstance(client);
+        await service.setLockdown(guild, true, "mod-1");
+        const old = makeMember({ ageMs: 48 * HOUR });
+        await service.handleMemberJoin(old.member);
+        expect(old.timeout).toHaveBeenCalled();
+        expect(old.kick).not.toHaveBeenCalled();
+      });
     });
   });
 

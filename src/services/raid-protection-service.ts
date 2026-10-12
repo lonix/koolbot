@@ -1,5 +1,6 @@
 import { Client, Guild, GuildMember, type Role } from "discord.js";
 import { Types } from "mongoose";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 import { ConfigService } from "./config-service.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
@@ -57,6 +58,13 @@ export const INIT_WAIT_MS = 10_000;
 /** Waits between attempts to write a log row, then it is queued for later. */
 export const ROW_RETRY_DELAYS_MS = [100, 300];
 export const MAX_PENDING_ROWS = 500;
+/**
+ * Hard bound on queued lockdown/clear rows. They are never shed, but they are
+ * not unbounded: past this, a manual transition is refused with an error (and an
+ * automatic one is logged and its row dropped) rather than growing memory
+ * while the database is down.
+ */
+export const MAX_PENDING_TRANSITIONS = 2000;
 
 function isTransitionRow(row: Record<string, unknown>): boolean {
   return row.action === "raid_lockdown" || row.action === "raid_clear";
@@ -101,6 +109,11 @@ export interface RaidSettings {
   quarantineRoleId: string;
   lockdownMaxMinutes: number;
   alertChannelId: string;
+}
+
+/** True when `a` is a stronger action than `b` (RAID_ACTIONS is ordered by strength). */
+export function isStronger(a: RaidAction, b: RaidAction): boolean {
+  return RAID_ACTIONS.indexOf(a) > RAID_ACTIONS.indexOf(b);
 }
 
 export function clampInt(
@@ -275,6 +288,8 @@ export class RaidProtectionService {
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
+  private destroyed = false;
+  private readonly transitionLock = createKeyedLock();
   private readyGate: Promise<void> | null = null;
   private gateTimer: ReturnType<typeof setTimeout> | null = null;
   private unregisterConfig: (() => void) | null = null;
@@ -321,6 +336,10 @@ export class RaidProtectionService {
     this.unregisterConfig?.();
     this.unregisterConfig = null;
     this.reloadRegistered = false;
+    // Release anyone waiting on startup restoration, and make a restore that
+    // finishes later a no-op, so shutdown never strands a join or arms a timer.
+    this.destroyed = true;
+    this.markReady();
   }
 
   /** Resolve and clamp every setting, once per decision. */
@@ -482,10 +501,11 @@ export class RaidProtectionService {
           reason: string | null;
         } | null>()
         .exec();
-      if (last?.action !== "raid_lockdown") return;
+      if (this.destroyed || last?.action !== "raid_lockdown") return;
 
       const settings = await this.loadSettings();
       const inactive = await this.getInactiveReason(settings);
+      if (this.destroyed) return;
       // Close, rather than restore, a lockdown that cannot be enforced or was
       // only a rehearsal, so the persisted state agrees with the in-memory one
       // and the retention exemption does not keep a stale open row alive.
@@ -695,7 +715,7 @@ export class RaidProtectionService {
    */
   public async handleMemberJoin(member: GuildMember): Promise<boolean> {
     try {
-      if (member.user.bot) return false;
+      if (this.destroyed || member.user.bot) return false;
       if (!env.guildId || member.guild.id !== env.guildId) return false;
       // Join evaluation waits for startup restoration first (bounded), then
       // takes its timestamp, so the wait cannot skew the window.
@@ -728,23 +748,37 @@ export class RaidProtectionService {
         }
       }
 
+      // The two triggers are independent. One member gets one action, so when
+      // both apply (a young account joining during lockdown) the stronger of
+      // the two configured actions wins: the account gate is never weaker
+      // during a lockdown than outside it.
       let decision: Decision | null = null;
       if (state.lockdown) {
         decision = {
           action: settings.lockdownAction,
           reason: "Anti-raid: joined during lockdown",
         };
-      } else if (
+      }
+      if (
         isNewAccount(
           member.user.createdTimestamp,
           now,
           settings.minAccountAgeHours,
         )
       ) {
-        decision = {
+        const young: Decision = {
           action: settings.newAccountAction,
           reason: `Anti-raid: account younger than ${settings.minAccountAgeHours}h`,
         };
+        decision =
+          decision === null || isStronger(young.action, decision.action)
+            ? {
+                ...young,
+                reason: decision
+                  ? `${young.reason}, joined during lockdown`
+                  : young.reason,
+              }
+            : decision;
       }
       if (decision) {
         return await this.applyDecision(member, decision, settings, state);
@@ -757,7 +791,20 @@ export class RaidProtectionService {
   }
 
   /** `/raidmode on|off`. Never throws; the message is shown to the moderator. */
-  public async setLockdown(
+  public setLockdown(
+    guild: Guild,
+    on: boolean,
+    moderatorId: string,
+    authorize?: (requirement: LockdownRequirement) => string | null,
+  ): Promise<SetLockdownResult> {
+    // One manual transition per guild at a time, so an `off` racing an `on`
+    // is decided in a single order and acknowledged accordingly.
+    return this.transitionLock.run(guild.id, () =>
+      this.setLockdownNow(guild, on, moderatorId, authorize),
+    );
+  }
+
+  private async setLockdownNow(
     guild: Guild,
     on: boolean,
     moderatorId: string,
@@ -777,6 +824,8 @@ export class RaidProtectionService {
         // with, so a setting changed in between cannot widen the action.
         const refusal = authorize?.(requirementFor(settings)) ?? null;
         if (refusal) return { changed: false, message: refusal };
+        const full = this.refuseIfTransitionQueueFull();
+        if (full) return full;
         await this.beginLockdown(guild, state, settings, now, {
           moderatorId,
           reason: "Manual: started with /raidmode on",
@@ -797,6 +846,8 @@ export class RaidProtectionService {
       if (!state.lockdown) {
         return { changed: false, message: "Lockdown is not on." };
       }
+      const full = this.refuseIfTransitionQueueFull();
+      if (full) return full;
       await this.endLockdown(guild, state, settings, {
         moderatorId,
         reason: "Manual: cleared with /raidmode off",
@@ -1106,6 +1157,15 @@ export class RaidProtectionService {
     action: ModerationAction,
     reason: string,
   ): Promise<void> {
+    if (
+      (action === "raid_lockdown" || action === "raid_clear") &&
+      this.pendingTransitionCount() >= MAX_PENDING_TRANSITIONS
+    ) {
+      logger.error(
+        `Anti-raid: ${MAX_PENDING_TRANSITIONS} lockdown log rows are waiting for the database; dropped the new ${action} row`,
+      );
+      return;
+    }
     this.pendingRows.push({
       // Fixed when the row is queued, in queue order: a retry of an attempt
       // whose outcome was unknown (inserted, but the reply was lost) writes
@@ -1139,6 +1199,23 @@ export class RaidProtectionService {
         logger.error("Anti-raid: error writing log rows:", error);
       });
     }
+  }
+
+  /** Refuse a manual transition while too many are waiting for the database. */
+  private refuseIfTransitionQueueFull(): SetLockdownResult | null {
+    if (this.pendingTransitionCount() < MAX_PENDING_TRANSITIONS) return null;
+    logger.error(
+      `Anti-raid: refused a lockdown change, ${MAX_PENDING_TRANSITIONS} lockdown log rows are waiting for the database`,
+    );
+    return {
+      changed: false,
+      message:
+        "Cannot change lockdown: the database has been failing and too many lockdown log rows are waiting to be written. Fix the database first.",
+    };
+  }
+
+  private pendingTransitionCount(): number {
+    return this.pendingRows.filter(isTransitionRow).length;
   }
 
   /**

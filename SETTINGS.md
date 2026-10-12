@@ -1166,7 +1166,9 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   join while it is active (never existing members, never bots), and only when
   the bot is allowed to: the server owner, members at or above the bot's
   highest role, and missing permissions are skipped and counted, never forced.
-  Lockdown starts on the join that pushes the count above the threshold, so the
+  A young account that joins during a lockdown gets the stronger of the lockdown
+  action and the new-account action (kick over quarantine over timeout), so the
+  account gate is never weaker during a lockdown. Lockdown starts on the join that pushes the count above the threshold, so the
   joins before it are not acted on. Every kick, timeout and quarantine, and
   every lockdown on and off, is a row in the log (source `raid`). The feature
   stays inactive, and says why in the startup log and in `/raidmode status`,
