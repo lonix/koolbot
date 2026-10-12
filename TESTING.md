@@ -114,6 +114,28 @@ new key, model or wizard feature that skips its bookkeeping fails one of them:
 `__tests__/services/settings-metadata.test.ts` checks that every category used
 in `settingsMetadata` is listed in `CONFIG_CATEGORIES` (`src/models/config.ts`).
 
+### Real-MongoDB integration tests
+
+Every unit test runs against the global mongoose mock in `__tests__/setup.ts`, so none of them can show
+whether Mongoose or MongoDB actually accepts what the code sends. The suites in `__tests__/integration/`
+(`*.integration.test.ts`) cover the contracts a mock cannot: aggregation-pipeline updates (Mongoose 9
+needs `updatePipeline: true`, #1103), upserts, and index and unique-constraint behaviour (#1102).
+
+They are a separate Jest project (`jest.integration.config.js`) with no mongoose mock and no coverage, so
+they never affect `npm test`, `npm run test:ci` or the coverage floors. Without `MONGODB_URI` the suites
+skip themselves, so nothing here needs Docker unless you want to run them:
+
+```bash
+docker run --rm -d --name koolbot-it-mongo -p 27017:27017 mongo:8.0
+MONGODB_URI=mongodb://localhost:27017 npm run test:integration
+docker stop koolbot-it-mongo
+```
+
+Each run creates its own throwaway database (`koolbot_it_*`) on that server and drops it afterwards. CI
+runs the same script in the `integration` job against a `mongo:8.0` service container on Node 22. The
+supported range matches what the shipped Compose files run (MongoDB 8); a regression on a different
+major is not covered. Keep this suite small: add a test only for behaviour a mock cannot prove.
+
 ### Generating sample data for manual testing
 
 To exercise the data-heavy surfaces (Rewind, leaderboards, digests,
@@ -324,14 +346,15 @@ and `typecheck` jobs:
 - The `test` job runs `npm run test:ci` on a Node 22 and Node 24 matrix (`fail-fast: false`, so both
   legs always report).
 - The `coverage:drift` check and the `coverage-report` artifact upload only run on the Node 22 leg.
-- `ci-success` aggregates `lint`, `typecheck` and `test`, and is the single required status check for
+- The `integration` job runs `npm run test:integration` on Node 22 against a `mongo:8.0` service
+  container (see [Real-MongoDB integration tests](#real-mongodb-integration-tests)).
+- `ci-success` aggregates `lint`, `typecheck`, `test` and `integration`, and is the single required status check for
   branch protection — it fails if any job failed or was cancelled.
 
 ## Future Improvements
 
 - [ ] Add integration tests for Discord interactions
 - [ ] Add end-to-end tests for voice channel management
-- [ ] Replace the global mongoose mock with `mongodb-memory-server` so model
-      validators, indexes, defaults and TTLs are actually exercised
+- [ ] Grow the real-MongoDB integration suite (model validators, defaults and TTLs)
 - [ ] Add snapshot testing for command outputs
 - [ ] Add performance benchmarks
