@@ -88,8 +88,12 @@ use dot notation grouped by feature (`voicechannels.*`, `voicetracking.*`, `quot
 key must be declared with a default in `services/config-schema.ts`; when renaming a key, keep a
 backward-compat fallback (see `voice-channel-manager.ts`). A key whose `category` is new must also be
 added to `CONFIG_CATEGORIES` in `models/config.ts`, or the startup cleanup sweep deletes its rows as
-"unknown" on every restart (#609, #834). Saving settings in the Web UI (and the wizard) calls
-`ConfigService.triggerReload()` (clears cache + fires registered reload callbacks) — do not reintroduce
+"unknown" on every restart (#609, #834). Only the Setup Wizard (`wizard-service.ts`) and the server-adoption
+scan call `ConfigService.triggerReload()` (clears cache + fires registered reload
+callbacks). An ordinary Web UI settings save (`/admin/settings/save-section`, `/admin/settings/set`) only calls
+`ConfigService.set()`, which updates the cache and calls `addChangeListener` listeners but does **not** run
+reload callbacks. A service that caches a flag or runs a schedule must therefore subscribe with
+`addChangeListener` (see `version-check-service.ts`) as well as, where needed, `registerReloadCallback`. Do not reintroduce
 implicit reload logic into `CommandManager`.
 
 **Feature gating:** most features (and their commands) only activate when their `*.enabled` config key is
