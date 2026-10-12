@@ -85,12 +85,13 @@ const mockIsValidObjectId = (id: unknown): boolean =>
 
 // Mock mongoose globally to prevent DB connections
 //
-// `model()` keeps returning one shared stub object: several suites set up a
-// model's methods through one import and read them through another, so giving
-// each model its own stub would break them. The schema each model was built
+// By default every model resolves to one shared stub object: several suites
+// set up a model's methods through one import and read them through another,
+// so giving each model its own stub would break them. A suite that wants
+// independent stubs opts in with `usePerModelStubs()` (see `test-utils.ts`). The schema each model was built
 // with is recorded in `mockSchemas` instead, which is what lets a model test
 // assert its own indexes and defaults without a database.
-const sharedModelStub = {
+const createModelStub = () => ({
   find: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(null),
   findOneAndUpdate: jest.fn().mockResolvedValue(null),
@@ -98,6 +99,64 @@ const sharedModelStub = {
   create: jest.fn().mockResolvedValue({}),
   countDocuments: jest.fn().mockResolvedValue(0),
   aggregate: jest.fn().mockResolvedValue([]),
+});
+
+const sharedModelStub = createModelStub();
+
+/**
+ * Per-model stubs (#1089), keyed by model name and created on first use.
+ *
+ * A test opts in with `usePerModelStubs()` from `test-utils.ts` and then gets
+ * an independent stub per `mongoose.model(name)`, so two collections can be
+ * stubbed differently without routing on the shape of each call. Exposed on
+ * `globalThis` for the same reason as `__mockSchemas` above.
+ */
+const perModelStubs = new Map<string, ReturnType<typeof createModelStub>>();
+const modelStubFor = (name: string): ReturnType<typeof createModelStub> => {
+  let stub = perModelStubs.get(name);
+  if (!stub) {
+    stub = createModelStub();
+    perModelStubs.set(name, stub);
+  }
+  return stub;
+};
+
+const modelStubGlobals = globalThis as {
+  __modelStubFor?: typeof modelStubFor;
+  __perModelStubs?: boolean;
+};
+modelStubGlobals.__modelStubFor = modelStubFor;
+
+/**
+ * What `mongoose.model(name)` returns: a stable proxy per name that forwards
+ * every property read and write to the shared stub (the default, which
+ * existing suites rely on) or, once `__perModelStubs` is switched on, to that
+ * model's own stub. The switch is read on each access rather than at
+ * `model()` time, because model modules are imported (and so call `model()`)
+ * before a test body can opt in.
+ */
+const modelProxies = new Map<string, typeof sharedModelStub>();
+const activeStub = (name: string): typeof sharedModelStub =>
+  modelStubGlobals.__perModelStubs ? modelStubFor(name) : sharedModelStub;
+
+const proxyFor = (name: string): typeof sharedModelStub => {
+  let proxy = modelProxies.get(name);
+  if (!proxy) {
+    proxy = new Proxy(sharedModelStub, {
+      get: (_t, prop) => Reflect.get(activeStub(name), prop),
+      set: (_t, prop, value) => Reflect.set(activeStub(name), prop, value),
+      has: (_t, prop) => Reflect.has(activeStub(name), prop),
+      deleteProperty: (_t, prop) =>
+        Reflect.deleteProperty(activeStub(name), prop),
+      defineProperty: (_t, prop, desc) =>
+        Reflect.defineProperty(activeStub(name), prop, desc),
+      getOwnPropertyDescriptor: (_t, prop) =>
+        Reflect.getOwnPropertyDescriptor(activeStub(name), prop),
+      ownKeys: () => Reflect.ownKeys(activeStub(name)),
+    });
+    modelProxies.set(name, proxy);
+  }
+  return proxy;
 };
 
 const mockModel = (
@@ -105,7 +164,7 @@ const mockModel = (
   schema?: MockSchema,
 ): typeof sharedModelStub => {
   if (schema) mockSchemas.set(name, schema);
-  return sharedModelStub;
+  return proxyFor(name);
 };
 
 const mockConnection = {
