@@ -358,4 +358,49 @@ describe("NativeEventSync.syncEvent", () => {
       makeSync().syncEvent(makeEvent(), guild),
     ).resolves.toBeUndefined();
   });
+
+  it("treats a unique-index conflict on the claim as a lost race", async () => {
+    EventMock.findOneAndUpdate.mockRejectedValue(
+      Object.assign(new Error("E11000 duplicate key"), { code: 11000 }),
+    );
+    const orphan = makeNative({ id: "orphan1" });
+    const { guild, scheduledEvents } = makeGuild({ natives: [orphan] });
+    const event = makeEvent();
+    await expect(makeSync().syncEvent(event, guild)).resolves.toBeUndefined();
+    // Adopting: the native event belongs to the other row, so it is left alone.
+    expect(scheduledEvents.delete).not.toHaveBeenCalled();
+    expect((event as { nativeEventId: unknown }).nativeEventId).toBeNull();
+  });
+
+  it("removes the event it created when the claim hits the unique index", async () => {
+    EventMock.findOneAndUpdate.mockRejectedValue(
+      Object.assign(new Error("E11000 duplicate key"), { code: 11000 }),
+    );
+    const { guild, scheduledEvents } = makeGuild();
+    await makeSync().syncEvent(makeEvent(), guild);
+    expect(scheduledEvents.delete).toHaveBeenCalledWith("created1");
+  });
+
+  it("clears a removed description with null, never an empty string", async () => {
+    const { guild, scheduledEvents } = makeGuild({
+      natives: [makeNative()],
+    });
+    await makeSync().syncEvent(
+      makeEvent({ nativeEventId: "n1", description: "" }),
+      guild,
+    );
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({ description: null }),
+    );
+  });
+
+  it("omits an empty description when creating", async () => {
+    const { guild, scheduledEvents } = makeGuild();
+    await makeSync().syncEvent(makeEvent({ description: "" }), guild);
+    const arg = (
+      scheduledEvents.create.mock.calls[0] as unknown[]
+    )[0] as Record<string, unknown>;
+    expect(arg.description).toBeUndefined();
+  });
 });

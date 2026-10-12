@@ -178,4 +178,16 @@ EventSchema.index(
   { unique: true, partialFilterExpression: { seriesId: { $type: "string" } } },
 );
 
+// A native scheduled event belongs to at most one row (#1034). The claim in
+// `NativeEventSync` is a per-row compare-and-set, so two replicas recovering
+// the same orphan for two same-name, same-start events could both win it;
+// this index makes the second claim fail atomically (E11000 = lost the race).
+EventSchema.index(
+  { nativeEventId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { nativeEventId: { $type: "string" } },
+  },
+);
+
 export const Event = mongoose.model<IEvent>("Event", EventSchema);

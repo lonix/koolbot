@@ -95,7 +95,8 @@ export function diffNativeFields(
   want: NativeEventFields,
 ): Partial<{
   name: string;
-  description: string;
+  // `null` clears it: Discord accepts 1-1000 characters or null, never "".
+  description: string | null;
   scheduledStartTime: Date;
   scheduledEndTime: Date;
   entityMetadata: { location: string };
@@ -103,7 +104,7 @@ export function diffNativeFields(
   const diff: ReturnType<typeof diffNativeFields> = {};
   if (native.name !== want.name) diff.name = want.name;
   if ((native.description ?? "") !== want.description) {
-    diff.description = want.description;
+    diff.description = want.description === "" ? null : want.description;
   }
   if (native.scheduledStartTimestamp !== want.start.getTime()) {
     diff.scheduledStartTime = want.start;
@@ -121,6 +122,11 @@ export function diffNativeFields(
 }
 
 export type NativeCache = Collection<Snowflake, GuildScheduledEvent>;
+
+// discord.js types `description` as `string`, but its manager forwards it
+// verbatim into the REST body, whose typing (RESTPatchAPIGuildScheduledEventJSONBody)
+// allows `null` to clear it. Edits that clear a description are cast through this.
+type EditOptions = Parameters<Guild["scheduledEvents"]["edit"]>[1];
 
 type ApiCaller = <T>(call: () => Promise<T>, name: string) => Promise<T>;
 
@@ -322,14 +328,22 @@ export class NativeEventSync {
 
   /** Atomically store the native id; false when another writer got there. */
   private async claim(event: IEvent, nativeId: string): Promise<boolean> {
-    const claimed = await Event.findOneAndUpdate(
-      {
-        _id: event._id,
-        nativeEventId: null,
-        state: { $in: ["scheduled", "active"] },
-      },
-      { $set: { nativeEventId: nativeId } },
-    );
+    let claimed: unknown;
+    try {
+      claimed = await Event.findOneAndUpdate(
+        {
+          _id: event._id,
+          nativeEventId: null,
+          state: { $in: ["scheduled", "active"] },
+        },
+        { $set: { nativeEventId: nativeId } },
+      );
+    } catch (error) {
+      // The unique index on `nativeEventId`: another row (or replica) already
+      // owns this native event, so this claim lost the race.
+      if ((error as { code?: number }).code === 11000) return false;
+      throw error;
+    }
     if (claimed) event.nativeEventId = nativeId;
     return !!claimed;
   }
@@ -395,7 +409,7 @@ export class NativeEventSync {
             ...(description !== undefined ? { description } : {}),
             ...(entityMetadata ? { entityMetadata } : {}),
             reason: "KoolBot event mirror",
-          }),
+          } as unknown as EditOptions),
         "edit guild scheduled event",
       );
       return;
@@ -407,7 +421,7 @@ export class NativeEventSync {
         guild.scheduledEvents.edit(native.id, {
           ...diff,
           reason: "KoolBot event mirror",
-        }),
+        } as unknown as EditOptions),
       "edit guild scheduled event",
     );
   }
