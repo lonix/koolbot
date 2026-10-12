@@ -261,9 +261,84 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       expect(arg.permissionOverwrites).toEqual(
         expect.arrayContaining([
           { id: "everyone", type: 0, allow: 1n, deny: 2n },
-          { id: "u1", allow: ["SetVoiceChannelStatus"] },
+          {
+            id: "u1",
+            type: 1,
+            allow: PermissionFlagsBits.SetVoiceChannelStatus,
+            deny: 0n,
+          },
         ]),
       );
+    });
+
+    it("merges the status bit into an existing category overwrite for the owner", async () => {
+      const { create, member } = lobbyFixture(true);
+      const cat = member.guild.channels.cache.get("cat") as any;
+      const connect = PermissionFlagsBits.Connect;
+      const status = PermissionFlagsBits.SetVoiceChannelStatus;
+      cat.permissionOverwrites.cache.set("u1", {
+        id: "u1",
+        type: 1,
+        allow: { bitfield: connect },
+        deny: { bitfield: status | PermissionFlagsBits.Speak },
+      });
+
+      await (manager as any).createUserChannelUnlocked(member);
+
+      const arg = (create.mock.calls[0] as unknown[])[0] as {
+        permissionOverwrites: Array<{
+          id: string;
+          allow: bigint;
+          deny: bigint;
+        }>;
+      };
+      const own = arg.permissionOverwrites.filter((o) => o.id === "u1");
+      expect(own).toHaveLength(1);
+      expect(own[0].allow).toBe(connect | status); // Connect kept, status added
+      expect(own[0].deny).toBe(PermissionFlagsBits.Speak); // status un-denied, Speak kept
+    });
+
+    it("createDynamicChannel (LFG/events) includes the grant when eligible", async () => {
+      const { create, member } = lobbyFixture(true);
+      const guild = {
+        ...member.guild,
+        roles: { everyone: { id: "everyone" } },
+        members: {
+          me: { permissions: { has: () => true } },
+          fetch: jest.fn(async () => ({ id: "u1", displayName: "Ann" })),
+        },
+      };
+
+      await (manager as any).createDynamicChannelUnlocked(guild, "u1");
+
+      const arg = (create.mock.calls[0] as unknown[])[0] as {
+        permissionOverwrites: Array<{ id: string; allow: unknown[] }>;
+      };
+      const own = arg.permissionOverwrites.find((o) => o.id === "u1")!;
+      expect(own.allow).toEqual(
+        expect.arrayContaining(["ManageChannels", "SetVoiceChannelStatus"]),
+      );
+    });
+
+    it("createDynamicChannel omits the grant when the bot lacks it", async () => {
+      const { create, member } = lobbyFixture(false);
+      const guild = {
+        ...member.guild,
+        roles: { everyone: { id: "everyone" } },
+        members: {
+          me: { permissions: { has: () => false } },
+          fetch: jest.fn(async () => ({ id: "u1", displayName: "Ann" })),
+        },
+      };
+
+      await (manager as any).createDynamicChannelUnlocked(guild, "u1");
+
+      const arg = (create.mock.calls[0] as unknown[])[0] as {
+        permissionOverwrites: Array<{ id: string; allow: unknown[] }>;
+      };
+      expect(
+        arg.permissionOverwrites.find((o) => o.id === "u1")!.allow,
+      ).not.toContain("SetVoiceChannelStatus");
     });
 
     it("creates the room exactly as before when the bot lacks the permission", async () => {
@@ -282,5 +357,56 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
           ((create.mock.calls[0] as unknown[])[0] as object),
       ).toBe(false);
     });
+  });
+  it("automatic transfer (updateChannelOwnership) grants the new owner and neutralises the old", async () => {
+    const create = jest.fn(async () => undefined);
+    const channel: any = {
+      id: "c",
+      name: "Room",
+      guild: guildHolding(true),
+      permissionOverwrites: {
+        create,
+        cache: new Map([
+          [
+            "old",
+            {
+              allow: {
+                has: (f: bigint) =>
+                  f === PermissionFlagsBits.SetVoiceChannelStatus,
+              },
+            },
+          ],
+        ]),
+      },
+      permissionsFor: () => ({ has: () => true }),
+      setName: jest.fn(async () => undefined),
+      send: jest.fn(async () => undefined),
+    };
+    (manager as any).userChannels.set("old", channel);
+    (manager as any).customChannelNames.set("c", "custom");
+    (manager as any).updateControlPanelOwnership = jest.fn(
+      async () => undefined,
+    );
+    (manager as any).persistOwnership = jest.fn(async () => undefined);
+
+    await (manager as any).updateChannelOwnership(channel, {
+      id: "new",
+      displayName: "New",
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      "new",
+      expect.objectContaining({
+        ManageChannels: true,
+        SetVoiceChannelStatus: true,
+      }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      "old",
+      expect.objectContaining({
+        ManageChannels: false,
+        SetVoiceChannelStatus: null,
+      }),
+    );
   });
 });

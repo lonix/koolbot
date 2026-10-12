@@ -194,6 +194,7 @@ export const VOICE_CHANNELS_SETTING_KEYS = [
   "voicechannels.channel.prefix",
   "voicechannels.channel.suffix",
   "voicechannels.controlpanel.enabled",
+  "voicechannels.owner.grant_status",
   "voicechannels.presets.enabled",
   "voicechannels.presets.max_per_user",
 ] as const;

@@ -845,6 +845,39 @@ export class VoiceChannelManager {
   }
 
   /**
+   * The category's overwrites carried over to a new lobby-join room, with the
+   * status permission added to the owner's own entry. An existing overwrite for
+   * the owner keeps every allow/deny it has (only the status bit is allowed and
+   * un-denied), so e.g. an explicit Connect allow still applies.
+   */
+  private lobbyRoomOverwrites(
+    category: CategoryChannel,
+    ownerId: string,
+  ): Array<{ id: string; type: number; allow: bigint; deny: bigint }> {
+    const bit = PermissionFlagsBits.SetVoiceChannelStatus;
+    const toBits = (v: unknown): bigint =>
+      typeof v === "bigint"
+        ? v
+        : BigInt((v as { bitfield?: bigint } | undefined)?.bitfield ?? 0n);
+    const out = [...(category.permissionOverwrites?.cache?.values() ?? [])].map(
+      (o) => ({
+        id: o.id,
+        type: o.type as number,
+        allow: toBits(o.allow),
+        deny: toBits(o.deny),
+      }),
+    );
+    const own = out.find((o) => o.id === ownerId);
+    if (own) {
+      own.allow |= bit;
+      own.deny &= ~bit;
+    } else {
+      out.push({ id: ownerId, type: 1, allow: bit, deny: 0n }); // 1 = member
+    }
+    return out;
+  }
+
+  /**
    * Overwrite fields that take the status permission away from a previous
    * owner, independent of the current grant setting: only when their overwrite
    * currently allows it (so a server-wide role grant is left alone) and the bot
@@ -1726,17 +1759,10 @@ export class VoiceChannelManager {
           ? {
               // Explicit overwrites stop Discord syncing the room with its
               // category, so carry the category's overwrites over.
-              permissionOverwrites: [
-                ...[...(category.permissionOverwrites?.cache?.values() ?? [])]
-                  .filter((o) => o.id !== member.id)
-                  .map((o) => ({
-                    id: o.id,
-                    type: o.type,
-                    allow: o.allow,
-                    deny: o.deny,
-                  })),
-                { id: member.id, allow: [...ownerStatusGrant.allow] },
-              ],
+              permissionOverwrites: this.lobbyRoomOverwrites(
+                category,
+                member.id,
+              ),
             }
           : {}),
       });
