@@ -262,6 +262,49 @@ describe("roleDeletionRevalidator (#1097)", () => {
     expect(await check(pending)).toEqual([]);
   });
 
+  // Like the real scan: created-by-KoolBot ids come from the groups passed in.
+  const scanFromGroups = () =>
+    mockScan.mockImplementation(async (_g, _a, groups: any[]) => ({
+      scanned: scanned({
+        koolbotCreatedIds: groups
+          .filter((x) => x.createdByKoolbot)
+          .map((x) => x.roleId),
+      }),
+      memberCounts: new Map(),
+      botIds: null,
+    }));
+
+  it("keeps the KoolBot-created exemption after the route removed the group", async () => {
+    const created = grp({ createdByKoolbot: true });
+    scanFromGroups();
+    mockList.mockResolvedValue([created]);
+    const pending = (await planRoleDeletion(guild, "admin", created, false))
+      .plan.operations;
+    expect(pending).toHaveLength(1);
+    // The delete route removes the group right after startApply; the engine's
+    // live check runs later, against a list that no longer has it.
+    mockList.mockResolvedValue([]);
+    const problems = await roleDeletionRevalidator(
+      guild,
+      "admin",
+      created,
+      false,
+    )(pending);
+    expect(problems).toEqual([]);
+  });
+
+  it("still needs approval for a pre-existing role once the group is gone", async () => {
+    scanFromGroups();
+    mockList.mockResolvedValue([]);
+    const problems = await roleDeletionRevalidator(
+      guild,
+      "admin",
+      grp(),
+      false,
+    )([{ type: "role.delete", class: "destructive", roleId: "r1" } as never]);
+    expect(problems.length).toBeGreaterThan(0);
+  });
+
   it("refuses when a feature started using the role since the preview", async () => {
     const pending = await pendingDelete();
     mockUses.mockResolvedValue(["Leaderboard Roles"]);

@@ -223,7 +223,14 @@ export async function planRoleDeletion(
 ): Promise<{ plan: AdoptionPlan; extraErrors: PlanIssue[] }> {
   const extraErrors: PlanIssue[] = [];
   const roleId = group.roleId;
-  const groups = await RoleGroupService.getInstance().list(guild.id);
+  const saved = await RoleGroupService.getInstance().list(guild.id);
+  // The delete route removes the group right after starting the job, and the
+  // engine's live check runs later. Plan with the group the caller captured, so
+  // a KoolBot-created role keeps its no-approval exemption (it comes from the
+  // group's `createdByKoolbot`) instead of vanishing with the saved row.
+  const groups = saved.some((g) => g.id === group.id)
+    ? saved
+    : [...saved, group];
   const scan = await scanGuildRoles(guild, adminUserId, groups, false);
   if (!roleId) {
     extraErrors.push({
