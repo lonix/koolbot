@@ -44,14 +44,19 @@ jobs:
 
       # Some npm versions silently drop the glibc/musl "libc" fields from
       # package-lock.json, which the Alpine image needs (#1087). Compare against
-      # the base branch; only meaningful on pull requests.
-      - name: Fetch base branch lockfile
+      # the PR's immutable base commit (not the moving tip of main); only
+      # meaningful on pull requests.
+      - name: Fetch base commit lockfile
         if: github.event_name == 'pull_request'
-        run: git fetch --no-tags --depth=1 origin main
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
 
       - name: Check lockfile libc constraints
         if: github.event_name == 'pull_request'
-        run: npm run check:lockfile -- --base-ref FETCH_HEAD
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: npm run check:lockfile -- --base-ref "$BASE_SHA"
 
   typecheck:
     name: Typecheck

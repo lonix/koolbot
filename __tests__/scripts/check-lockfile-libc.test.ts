@@ -95,15 +95,19 @@ describe("check-lockfile-libc", () => {
   });
 
   describe("main", () => {
-    let dir: string | undefined;
+    // Every temp dir run() creates, so a test that calls it twice leaks nothing.
+    const dirs: string[] = [];
+    const lastDir = (): string => dirs[dirs.length - 1];
     afterEach(() => {
       jest.restoreAllMocks();
-      if (dir) rmSync(dir, { recursive: true, force: true });
-      dir = undefined;
+      for (const d of dirs.splice(0)) {
+        rmSync(d, { recursive: true, force: true });
+      }
     });
 
     const run = (base: Lock, head: Lock, extra: string[] = []): number => {
-      dir = mkdtempSync(join(tmpdir(), "libc-guard-"));
+      const dir = mkdtempSync(join(tmpdir(), "libc-guard-"));
+      dirs.push(dir);
       writeFileSync(join(dir, "base.json"), JSON.stringify(base));
       writeFileSync(join(dir, "head.json"), JSON.stringify(head));
       jest.spyOn(console, "log").mockImplementation(() => undefined);
@@ -127,7 +131,9 @@ describe("check-lockfile-libc", () => {
 
     it("--fix rewrites the head lockfile so the check then passes", () => {
       expect(run(goodLock(), stripLibc(goodLock()), ["--fix"])).toBe(0);
-      const fixed = JSON.parse(readFileSync(join(dir!, "head.json"), "utf8"));
+      const fixed = JSON.parse(
+        readFileSync(join(lastDir(), "head.json"), "utf8"),
+      );
       expect(run(goodLock(), fixed)).toBe(0);
     });
 
