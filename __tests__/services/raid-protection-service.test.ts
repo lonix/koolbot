@@ -572,8 +572,9 @@ describe("RaidProtectionService", () => {
       const starting = service.setLockdown(guild, true, "mod-1");
       await Promise.resolve();
       const ending = service.setLockdown(guild, false, "mod-2");
-      await ending;
+      await new Promise((r) => setTimeout(r, 0));
       release();
+      await ending;
       const started = await starting;
       const texts = send.mock.calls.map((c) =>
         String((c[0] as { content: string }).content),
@@ -871,6 +872,78 @@ describe("RaidProtectionService", () => {
       await service.handleMemberJoin(makeMember().member);
       const { counts } = await service.getStatus(guild);
       expect(counts).toMatchObject({ wouldAction: 1, skipped: 0 });
+    });
+  });
+
+  describe("transition rows in the write queue", () => {
+    it("keeps every lockdown/clear row, in order, when only transitions overflow the cap", async () => {
+      const delays = ROW_RETRY_DELAYS_MS.splice(0);
+      try {
+        const service = RaidProtectionService.getInstance(client);
+        mockCreate.mockRejectedValue(new Error("db down"));
+        const pairs = Math.ceil(MAX_PENDING_ROWS / 2) + 5;
+        for (let i = 0; i < pairs; i++) {
+          await service.setLockdown(guild, true, "mod-1");
+          await service.setLockdown(guild, false, "mod-1");
+        }
+        mockCreate.mockClear();
+        mockCreate.mockResolvedValue({});
+        await service.getStatus(guild);
+        const actions = mockCreate.mock.calls.map((c) => c[0].action);
+        expect(actions).toHaveLength(pairs * 2);
+        expect(
+          actions.every(
+            (a, i) => a === (i % 2 ? "raid_clear" : "raid_lockdown"),
+          ),
+        ).toBe(true);
+      } finally {
+        ROW_RETRY_DELAYS_MS.push(...delays);
+      }
+    });
+
+    it("resolves a transition write only after its own row was written, even behind a drain in flight", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      const written: string[] = [];
+      let release: () => void = () => undefined;
+      mockCreate.mockImplementationOnce(
+        (row) =>
+          new Promise((resolve) => {
+            release = () => {
+              written.push(String(row.action));
+              resolve({});
+            };
+          }),
+      );
+      mockCreate.mockImplementation(async (row) => {
+        written.push(String(row.action));
+        return {};
+      });
+      const starting = service.setLockdown(guild, true, "mod-1");
+      await new Promise((r) => setTimeout(r, 0));
+      let endedResolved = false;
+      const ending = service
+        .setLockdown(guild, false, "mod-2")
+        .then((result) => {
+          endedResolved = true;
+          return result;
+        });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(endedResolved).toBe(false);
+      release();
+      await ending;
+      expect(written).toEqual(["raid_lockdown", "raid_clear"]);
+      await starting;
+    });
+
+    it("does not hang /raidmode when the database keeps failing", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      mockCreate.mockRejectedValue(new Error("db down"));
+      const results = await Promise.all([
+        service.setLockdown(guild, true, "mod-1"),
+        service.setLockdown(guild, false, "mod-2"),
+      ]);
+      expect(results.every((r) => typeof r.message === "string")).toBe(true);
+      expect((await service.getStatus(guild)).unrecorded).toBeGreaterThan(0);
     });
   });
 

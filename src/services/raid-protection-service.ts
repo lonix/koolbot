@@ -57,6 +57,10 @@ export const INIT_WAIT_MS = 10_000;
 /** Waits between attempts to write a log row, then it is queued for later. */
 export const ROW_RETRY_DELAYS_MS = [100, 300];
 export const MAX_PENDING_ROWS = 500;
+
+function isTransitionRow(row: Record<string, unknown>): boolean {
+  return row.action === "raid_lockdown" || row.action === "raid_clear";
+}
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 export const MIN_JOIN_THRESHOLD = 2;
@@ -267,7 +271,7 @@ export class RaidProtectionService {
   private reloadRegistered = false;
   /** Log rows not yet written because the database failed, oldest first. */
   private pendingRows: Array<Record<string, unknown>> = [];
-  private draining = false;
+  private drainPromise: Promise<void> | null = null;
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
@@ -1083,7 +1087,17 @@ export class RaidProtectionService {
    * "unrecorded" in `/raidmode status`. The queue is in memory only: rows still
    * pending when the process dies are lost, and a lost `raid_clear` makes the
    * next start restore the lockdown, the safe direction (`/raidmode off`
-   * clears it). Bounded so a long outage cannot grow memory.
+   * clears it). Bounded so a long outage cannot grow memory: past the cap the
+   * oldest member-action row is shed, and lockdown/clear rows are never shed,
+   * so the queue can exceed the cap by the number of transitions (one per
+   * lockdown start or end, bounded by people and the service, not by join
+   * volume).
+   *
+   * A lockdown/clear write resolves only after its own row was attempted (it
+   * waits for any drain in progress, then drains again), so a command or alert
+   * never reports a transition as done while its row is only queued. That wait
+   * is bounded by the retry backoff of the head row. Member-action rows are
+   * fire-and-forget: the join path never waits on the database.
    */
   private async writeRow(
     guildId: string,
@@ -1107,56 +1121,70 @@ export class RaidProtectionService {
       createdAt: new Date(),
     });
     if (this.pendingRows.length > MAX_PENDING_ROWS) {
-      // Shed the oldest member action first: the lockdown/clear rows are the
-      // persisted lockdown state, there are only a few of them, and losing one
-      // would make a restart restore the wrong state.
-      const i = this.pendingRows.findIndex(
-        (r) => r.action !== "raid_lockdown" && r.action !== "raid_clear",
-      );
-      this.pendingRows.splice(i === -1 ? 0 : i, 1);
-      logger.error(
-        "Anti-raid: too many unwritten log rows, dropped the oldest member action row",
-      );
+      // Shed the oldest member action only. The lockdown/clear rows are the
+      // persisted lockdown state and the audit history of transitions; losing
+      // one would make a restart restore the wrong state.
+      const i = this.pendingRows.findIndex((r) => !isTransitionRow(r));
+      if (i !== -1) {
+        this.pendingRows.splice(i, 1);
+        logger.error(
+          "Anti-raid: too many unwritten log rows, dropped the oldest member action row",
+        );
+      }
     }
-    await this.drainPendingRows(true);
+    if (action === "raid_lockdown" || action === "raid_clear") {
+      await this.drainPendingRows(true);
+    } else {
+      void this.drainPendingRows(true).catch((error) => {
+        logger.error("Anti-raid: error writing log rows:", error);
+      });
+    }
   }
 
+  /**
+   * Write queued rows in order. Callers share one drain at a time; a caller
+   * that arrives during a drain waits for it and then drains again, so rows
+   * appended meanwhile are attempted before it returns. Each drain stops at the
+   * first row that still fails after its retries, so every wait is finite.
+   */
   private async drainPendingRows(withRetries: boolean): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
-    try {
-      while (this.pendingRows.length > 0) {
-        const row = this.pendingRows[0];
-        let written = false;
-        const attempts = withRetries ? ROW_RETRY_DELAYS_MS.length + 1 : 1;
-        for (let i = 0; i < attempts && !written; i++) {
-          try {
-            await ModerationLog.create(row);
+    while (this.drainPromise) await this.drainPromise;
+    this.drainPromise = this.runDrain(withRetries).finally(() => {
+      this.drainPromise = null;
+    });
+    await this.drainPromise;
+  }
+
+  private async runDrain(withRetries: boolean): Promise<void> {
+    while (this.pendingRows.length > 0) {
+      const row = this.pendingRows[0];
+      let written = false;
+      const attempts = withRetries ? ROW_RETRY_DELAYS_MS.length + 1 : 1;
+      for (let i = 0; i < attempts && !written; i++) {
+        try {
+          await ModerationLog.create(row);
+          written = true;
+        } catch (error) {
+          // A duplicate key on our own fixed `_id` means an earlier,
+          // ambiguous attempt did commit: the row is written.
+          if ((error as { code?: number }).code === 11000) {
             written = true;
-          } catch (error) {
-            // A duplicate key on our own fixed `_id` means an earlier,
-            // ambiguous attempt did commit: the row is written.
-            if ((error as { code?: number }).code === 11000) {
-              written = true;
-              break;
-            }
-            logger.error(
-              `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.pendingRows.length} pending):`,
-              error,
+            break;
+          }
+          logger.error(
+            `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.pendingRows.length} pending):`,
+            error,
+          );
+          if (i < attempts - 1) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, ROW_RETRY_DELAYS_MS[i]),
             );
-            if (i < attempts - 1) {
-              await new Promise((resolve) =>
-                setTimeout(resolve, ROW_RETRY_DELAYS_MS[i]),
-              );
-            }
           }
         }
-        if (!written) return;
-        // The head may have been dropped by the cap while we were writing.
-        if (this.pendingRows[0] === row) this.pendingRows.shift();
       }
-    } finally {
-      this.draining = false;
+      if (!written) return;
+      // The head may have been dropped by the cap while we were writing.
+      if (this.pendingRows[0] === row) this.pendingRows.shift();
     }
   }
 
