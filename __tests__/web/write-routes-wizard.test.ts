@@ -348,6 +348,45 @@ describe("POST /wizard/apply", () => {
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
   });
 
+  it("applies nothing when a saved role has since become group-backed (#1023)", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["birthdays"], {
+        "birthdays.enabled": true,
+        "birthdays.role_id": "777777777777777777",
+      }),
+    );
+    const res = await harness.post("/wizard/apply");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.path).toBe("/admin/wizard");
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).toContain("Moderators");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockAddConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "wizard.apply",
+      result: "failure",
+    });
+  });
+
+  it("applies a saved role no group backs (#1023)", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["birthdays"], {
+        "birthdays.enabled": true,
+        "birthdays.role_id": "888888888888888888",
+      }),
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+    await harness.post("/wizard/apply");
+    expect(mockApplyConfiguration).toHaveBeenCalled();
+  });
+
   it("explicitly disables every feature the admin did not tick", async () => {
     mockGetSession.mockReturnValue(
       wizardState(["quotes"], { "quotes.enabled": true }),

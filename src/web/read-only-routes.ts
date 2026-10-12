@@ -1169,11 +1169,15 @@ export function createReadOnlyRouter(
         groupRefsPerCommand.set(entry.commandName, entry.groupRefs ?? []);
         for (const r of entry.roleIds) restrictedRoleIds.add(r);
       }
-      // Role groups are optional; a read failure just hides the group picker.
+      // Role groups are optional; a read failure hides the group picker and
+      // is shown as "unknown" rather than as a guild with no groups, since the
+      // runtime check refuses the moderation commands in that state.
+      let groupsUnavailable = false;
       const groups = await RoleGroupService.getInstance()
         .list(common.guildId)
         .catch((err: unknown) => {
           logger.warn("permissions page: role groups unavailable", err);
+          groupsUnavailable = true;
           return [];
         });
       const roleIds = Array.from(restrictedRoleIds).sort((a, b) =>
@@ -1193,6 +1197,7 @@ export function createReadOnlyRouter(
           groupRefsPerCommand,
           staffDefaultCommands: STAFF_DEFAULT_COMMANDS,
           staffDefaultActive: hasStaffGroup(groups),
+          groupsUnavailable,
           flash: readFlash(req),
         }),
       );

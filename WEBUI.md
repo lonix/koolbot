@@ -1212,8 +1212,9 @@ groups are defined:
 - **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
   chosen for another feature (a leaderboard tier would take it back from members, a birthday role
   would hand it out). The save is refused with a message naming the group. Choices made earlier are
-  never cleared; the Role Groups page lists them under the feature that uses them. If the groups
-  can't be read, the pick is allowed, since this guards a choice rather than access.
+  never cleared. If the groups can't be read, the pick is allowed, since this guards a choice
+  rather than access. The Role Groups page does not yet list these roles as used by a feature or
+  exclude them from group linking.
 
 The **Rules** page (`/admin/rules`, #1024, part of the server-adoption epic #1017) manages the
 optional rules / terms acceptance gate. It is off by default (`rules.enabled`) and is the one

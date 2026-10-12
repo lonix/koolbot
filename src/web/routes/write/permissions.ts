@@ -92,6 +92,11 @@ export function createPermissionsRouter(client: Client): Router {
       const before = await permissions
         .getCommandPermissions(session.guildId, command)
         .catch(() => null);
+      // Snapshot the groups too, so the audit record shows the whole previous
+      // restriction when a group-based one is replaced or cleared (#1023).
+      const beforeGroupRefs = await permissions
+        .getCommandGroupRefs(session.guildId, command)
+        .catch(() => null);
 
       try {
         if (roleIds.length === 0 && groupRefs.length === 0) {
@@ -107,7 +112,12 @@ export function createPermissionsRouter(client: Client): Router {
         await recordAudit(session, {
           action: "permissions.set",
           targetId: command,
-          details: { before, after: roleIds, groupRefs },
+          details: {
+            before,
+            beforeGroupRefs,
+            after: roleIds,
+            groupRefs,
+          },
           result: "success",
         });
         flashRedirect(res, "/admin/permissions", {
@@ -123,7 +133,12 @@ export function createPermissionsRouter(client: Client): Router {
         await recordAudit(session, {
           action: "permissions.set",
           targetId: command,
-          details: { before, attempted: roleIds, groupRefs },
+          details: {
+            before,
+            beforeGroupRefs,
+            attempted: roleIds,
+            groupRefs,
+          },
           result: "failure",
           errorMessage: text,
         });

@@ -30,6 +30,7 @@ const mockRecordAudit = jest.fn(async () => undefined);
 const mockGetCommandPermissions = jest.fn<() => Promise<unknown>>();
 const mockSetCommandPermissions = jest.fn<() => Promise<unknown>>();
 const mockClearCommandPermissions = jest.fn<() => Promise<unknown>>();
+const mockGetCommandGroupRefs = jest.fn<() => Promise<unknown>>();
 
 const mockGroupList = jest.fn<() => Promise<unknown>>();
 
@@ -60,6 +61,7 @@ jest.unstable_mockModule("../../src/services/permissions-service.js", () => ({
       getCommandPermissions: mockGetCommandPermissions,
       setCommandPermissions: mockSetCommandPermissions,
       clearCommandPermissions: mockClearCommandPermissions,
+      getCommandGroupRefs: mockGetCommandGroupRefs,
     }),
   },
 }));
@@ -151,6 +153,7 @@ describe("POST /permissions/set", () => {
     mockGetCommandPermissions.mockResolvedValue({ allowedRoles: ["old"] });
     mockSetCommandPermissions.mockResolvedValue(undefined);
     mockClearCommandPermissions.mockResolvedValue(undefined);
+    mockGetCommandGroupRefs.mockResolvedValue([]);
     mockGroupList.mockResolvedValue([{ id: "g1", name: "Mods", rank: 2 }]);
     harness = await mount(createPermissionsRouter);
   });
@@ -264,6 +267,54 @@ describe("POST /permissions/set", () => {
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("Could not read the role groups");
     expect(mockSetCommandPermissions).not.toHaveBeenCalled();
+  });
+
+  it("audits the previous groupRefs when a group restriction is replaced (#1023)", async () => {
+    mockGetCommandGroupRefs.mockResolvedValue(["group:g1+"]);
+    await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["role-a"],
+    });
+    expect(soleAudit()).toMatchObject({
+      result: "success",
+      details: { beforeGroupRefs: ["group:g1+"], groupRefs: [] },
+    });
+  });
+
+  it("audits the previous groupRefs when a group restriction is cleared (#1023)", async () => {
+    mockGetCommandGroupRefs.mockResolvedValue(["group:g1"]);
+    await harness.post("/permissions/set", { command: "warn" });
+    expect(mockClearCommandPermissions).toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      result: "success",
+      details: { beforeGroupRefs: ["group:g1"] },
+    });
+  });
+
+  it("keeps the previous groupRefs in the failure audit too (#1023)", async () => {
+    mockGetCommandGroupRefs.mockResolvedValue(["group:g1"]);
+    mockSetCommandPermissions.mockRejectedValue(new Error("mongo is down"));
+    await harness.post("/permissions/set", {
+      command: "warn",
+      roleIds: ["role-a"],
+    });
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      details: { beforeGroupRefs: ["group:g1"] },
+    });
+  });
+
+  it("still saves when the group snapshot can't be read (#1023)", async () => {
+    mockGetCommandGroupRefs.mockRejectedValue(new Error("read failed"));
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: ["role-a"],
+    });
+    expect(mockSetCommandPermissions).toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      result: "success",
+      details: { beforeGroupRefs: null },
+    });
   });
 
   it("does not read groups when none were selected", async () => {

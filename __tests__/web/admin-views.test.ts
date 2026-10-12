@@ -1278,6 +1278,42 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
     );
   });
 
+  it("shows the moderation commands as staff only in the matrix too, not open", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      roleIds: ["r1"],
+      perCommand: new Map([["quote", ["r1"]]]),
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    const matrix = html.slice(html.indexOf("<caption"));
+    expect(matrix).toContain("staff only (default)");
+    // ...and the restricted command keeps its own status, nothing says open.
+    expect(matrix).toContain('class="tag tag-warn">restricted');
+    expect(matrix).not.toContain('class="tag tag-info">open');
+  });
+
+  it("explains the staff default in the empty matrix text", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      staffDefaultActive: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(html).toContain("except the moderation commands");
+    expect(html).not.toContain("All registered commands are open by default");
+  });
+
+  it("shows unknown, not open, when the groups couldn't be read", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      groupsUnavailable: true,
+      staffDefaultCommands: new Set(["warn"]),
+    });
+    expect(html).toContain("unknown (role groups unavailable)");
+    expect(html).toContain("refused until they can be");
+    expect(html).not.toContain("staff only (default)");
+  });
+
   it("flags the staff default on moderation commands only while it applies", () => {
     const on = renderPermissionsPage({
       ...base,

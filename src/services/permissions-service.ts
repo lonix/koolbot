@@ -434,6 +434,23 @@ export class PermissionsService {
   }
 
   /**
+   * Role group references stored for a command (#1023), read from the cache.
+   * Used to snapshot a restriction before it is replaced or cleared.
+   */
+  public async getCommandGroupRefs(
+    guildId: string,
+    commandName: string,
+  ): Promise<string[] | null> {
+    try {
+      await this.initializeCache();
+      return this.groupRefsCache.get(`${guildId}:${commandName}`) ?? null;
+    } catch (error) {
+      logger.error("Error getting command group references:", error);
+      return null;
+    }
+  }
+
+  /**
    * Clear all permissions for a command
    * @param guildId - Discord guild ID
    * @param commandName - Name of the command

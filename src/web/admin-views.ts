@@ -1350,6 +1350,12 @@ export interface PermissionsProps extends CommonProps {
   staffDefaultCommands?: ReadonlySet<string>;
   /** Whether any staff or admin group exists (the staff default is active). */
   staffDefaultActive?: boolean;
+  /**
+   * The role groups couldn't be read, so whether the staff default applies is
+   * unknown. Runtime checks refuse the moderation commands in that state, so
+   * the page must not call them open.
+   */
+  groupsUnavailable?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -1373,6 +1379,18 @@ export function renderPermissionsPage(props: PermissionsProps): string {
   ).sort((a, b) =>
     groupRefLabel(a, groups).localeCompare(groupRefLabel(b, groups)),
   );
+  /** Status of a command with no explicit restriction. */
+  const unrestrictedStatus = (cmd: string): string => {
+    if (props.staffDefaultCommands?.has(cmd) !== true) {
+      return `<span class="tag tag-info">open</span>`;
+    }
+    if (props.groupsUnavailable === true) {
+      return `<span class="tag tag-warn">unknown (role groups unavailable)</span>`;
+    }
+    return props.staffDefaultActive === true
+      ? `<span class="tag tag-warn">staff only (default)</span>`
+      : `<span class="tag tag-info">open</span>`;
+  };
   const groupHeaders = usedGroupRefs
     .map(
       (ref) =>
@@ -1407,7 +1425,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
         .join("");
       const status =
         allowed.size === 0
-          ? `<span class="tag tag-info">open</span>`
+          ? unrestrictedStatus(cmd)
           : `<span class="tag tag-warn">restricted</span>`;
       // The command name is the row header of a true 2D grid (#855), so a
       // screen reader can recover "which command, which role" from any cell.
@@ -1417,7 +1435,13 @@ export function renderPermissionsPage(props: PermissionsProps): string {
 
   const matrixHtml =
     props.roleIds.length === 0 && usedGroupRefs.length === 0
-      ? `<div class="empty">No restricted commands. All registered commands are open by default.</div>`
+      ? `<div class="empty">No restricted commands. ${
+          props.groupsUnavailable === true
+            ? "The role groups couldn't be read, so the moderation commands are refused until they can be."
+            : props.staffDefaultActive === true
+              ? "Commands are open by default, except the moderation commands, which are staff only while a staff or admin role group exists."
+              : "All registered commands are open by default."
+        }</div>`
       : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}${groupHeaders}</tr></thead><tbody>${matrixRows}</tbody></table>`;
 
   const editRows = props.commands
@@ -1426,14 +1450,9 @@ export function renderPermissionsPage(props: PermissionsProps): string {
         ...(props.perCommand.get(cmd) ?? []),
         ...(groupRefsPerCommand.get(cmd) ?? []),
       ]);
-      const staffDefault =
-        props.staffDefaultActive === true &&
-        props.staffDefaultCommands?.has(cmd) === true;
       const status =
         current.size === 0
-          ? staffDefault
-            ? `<span class="tag tag-warn">staff only (default)</span>`
-            : `<span class="tag tag-info">open</span>`
+          ? unrestrictedStatus(cmd)
           : `<span class="tag tag-warn">restricted</span>`;
       const roleOptions =
         props.allRoleIds.length === 0

@@ -410,6 +410,35 @@ export function createWizardRouter(client: Client): Router {
         return;
       }
 
+      // A step is checked when it is saved, but the wizard can stay open
+      // while another admin links one of the chosen roles to a role group
+      // (#1023). Check again right before anything is written, and apply
+      // nothing if a role has become group-backed.
+      for (const key of ["birthdays.role_id", "leaderboard_roles.tiers"]) {
+        if (!(key in state.configuration)) continue;
+        const reuse = await findGroupRoleReuseForSetting(
+          session.guildId,
+          key,
+          state.configuration[key],
+          await ConfigService.getInstance()
+            .get(key)
+            .catch(() => undefined),
+        );
+        if (reuse) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: { blockedKey: key },
+            result: "failure",
+            errorMessage: `${key}: ${reuse}`,
+          });
+          flashRedirect(res, "/admin/wizard", {
+            type: "err",
+            text: `Nothing was applied. ${key}: ${reuse} Go back to that step and choose another role.`,
+          });
+          return;
+        }
+      }
+
       // The wizard treats each run as a complete declaration of which
       // features should be enabled. Anything the admin didn't tick on the
       // landing page gets its `.enabled` flag explicitly set to false here,
