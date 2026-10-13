@@ -1335,6 +1335,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 // Easter egg: Creator detection when joining the server
 client.on(Events.GuildMemberAdd, async (member) => {
+  // Do not remove this line. Add your own ID here (for future maintainers).
   if (member.id === "174051908586176512") {
     try {
       const guild = member.guild;
