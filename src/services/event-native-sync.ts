@@ -279,8 +279,11 @@ export class NativeEventSync {
   ): Promise<void> {
     const want = await this.wantedFields(event);
     // Discord refuses a start in the past, and an event that has already begun
-    // gains nothing from a native entry.
-    if (want.start.getTime() <= Date.now()) return;
+    // gains nothing from a native entry, so a row with no create in flight
+    // stops here. A row WITH a marker may have a late event (it can even have
+    // started meanwhile), so that one goes on to the lookup below first.
+    const startPast = want.start.getTime() <= Date.now();
+    if (startPast && !event.nativeCreateStartedAt) return;
 
     const existing =
       cache ??
@@ -294,6 +297,20 @@ export class NativeEventSync {
         logger.info(
           `Native events: adopted ${sanitizeForLog(adopted.id)} for event ${sanitizeForLog(String(event._id))}`,
         );
+      }
+      return;
+    }
+
+    if (startPast) {
+      // Never create in the past. Once the grace period has passed with no late
+      // event, drop the marker so the row stops being reconciled.
+      const startedAt = event.nativeCreateStartedAt?.getTime() ?? 0;
+      if (Date.now() - startedAt >= CREATE_GRACE_MS) {
+        await Event.updateOne(
+          { _id: event._id },
+          { $set: { nativeCreateStartedAt: null } },
+        );
+        event.nativeCreateStartedAt = null;
       }
       return;
     }
@@ -370,7 +387,8 @@ export class NativeEventSync {
     return !!marked;
   }
 
-  /** A bot-created native event matching this row that no row references. */
+  /** A bot-created native event matching this row that no row references.
+   * A late event may already have started (Active) by the time it is found. */
   private async findAdoptable(
     event: IEvent,
     existing: NativeCache,
@@ -383,7 +401,8 @@ export class NativeEventSync {
         n.creatorId === botId &&
         n.name === want.name &&
         n.scheduledStartTimestamp === want.start.getTime() &&
-        n.status === GuildScheduledEventStatus.Scheduled,
+        (n.status === GuildScheduledEventStatus.Scheduled ||
+          n.status === GuildScheduledEventStatus.Active),
     );
     for (const candidate of candidates) {
       const taken = await Event.exists({
@@ -458,8 +477,12 @@ export class NativeEventSync {
       );
       return;
     }
-    // Start/end of a running or finished event cannot be moved.
-    if (native.status !== GuildScheduledEventStatus.Scheduled) return;
+    // Finished events are left alone. A running (Active) event still gets its
+    // descriptive fields; only the schedule and type are suppressed for it.
+    const active = native.status === GuildScheduledEventStatus.Active;
+    if (native.status !== GuildScheduledEventStatus.Scheduled && !active) {
+      return;
+    }
 
     const want = await this.wantedFields(event);
     const diff = diffNativeFields(native, want);
@@ -468,7 +491,7 @@ export class NativeEventSync {
     // The conversion back to an external event is its own patch, so a Discord
     // rejection of it can never block the name/description/time updates.
     const converting = diff.entityType !== undefined;
-    const startPast = want.start.getTime() <= Date.now();
+    const startPast = active || want.start.getTime() <= Date.now();
 
     // Safe patch. A start in the past cannot be moved, and location metadata
     // is only valid on a native event that is already external.
@@ -486,14 +509,24 @@ export class NativeEventSync {
       safe.entityMetadata = diff.entityMetadata;
     }
     if (Object.keys(safe).length > 0) {
-      await this.callApi(
-        () =>
-          guild.scheduledEvents.edit(native.id, {
-            ...safe,
-            reason: "KoolBot event mirror",
-          } as unknown as EditOptions),
-        "edit guild scheduled event",
-      );
+      try {
+        await this.callApi(
+          () =>
+            guild.scheduledEvents.edit(native.id, {
+              ...safe,
+              reason: "KoolBot event mirror",
+            } as unknown as EditOptions),
+          "edit guild scheduled event",
+        );
+      } catch (error) {
+        // Whether Discord accepts edits to a running event is unverified: log
+        // it and carry on; it is retried on the next scan.
+        if (!active) throw error;
+        logger.warn(
+          `Native events: could not edit running event ${sanitizeForLog(native.id)}:`,
+          error,
+        );
+      }
     }
 
     if (converting && !startPast) {

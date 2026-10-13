@@ -286,14 +286,132 @@ describe("NativeEventSync.syncEvent", () => {
     );
   });
 
-  it("leaves a running native event's schedule alone", async () => {
-    const { guild, scheduledEvents } = makeGuild({
-      natives: [
-        makeNative({ name: "Old", status: GuildScheduledEventStatus.Active }),
-      ],
+  describe("running (Active) native events", () => {
+    const active = (o: Record<string, unknown> = {}) =>
+      makeNative({ status: GuildScheduledEventStatus.Active, ...o });
+
+    it("pushes name, description and location but never start, end or type", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [
+          active({
+            name: "Old",
+            description: "old text",
+            entityMetadata: { location: "Elsewhere" },
+            scheduledStartTimestamp: 1,
+            scheduledEndTimestamp: 2,
+          }),
+        ],
+      });
+      await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
+      expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+      const patch = (
+        scheduledEvents.edit.mock.calls[0] as unknown[]
+      )[1] as Record<string, unknown>;
+      expect(patch).toMatchObject({
+        name: "Game night",
+        description: "Bring snacks",
+        entityMetadata: { location: "Somewhere" },
+      });
+      expect(patch).not.toHaveProperty("scheduledStartTime");
+      expect(patch).not.toHaveProperty("scheduledEndTime");
+      expect(patch).not.toHaveProperty("entityType");
     });
-    await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
-    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+
+    it("logs a rejected edit and does not throw", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [active({ name: "Old" })],
+      });
+      scheduledEvents.edit.mockRejectedValueOnce(new Error("rejected"));
+      await expect(
+        makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it("does nothing for a native event that already finished", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [
+          makeNative({
+            name: "Old",
+            status: GuildScheduledEventStatus.Completed,
+          }),
+        ],
+      });
+      await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
+      expect(scheduledEvents.edit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("timed-out create that crosses the start time", () => {
+    const PAST = new Date(Date.now() - 60 * 1000);
+    const marked = (ageMs: number, extra: Record<string, unknown> = {}) =>
+      makeEvent({
+        startTime: PAST,
+        nativeCreateStartedAt: new Date(Date.now() - ageMs),
+        ...extra,
+      });
+    const lateNative = (status: GuildScheduledEventStatus) =>
+      makeNative({
+        id: "late1",
+        status,
+        scheduledStartTimestamp: PAST.getTime(),
+        scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
+      });
+
+    for (const [label, status] of [
+      ["Scheduled", GuildScheduledEventStatus.Scheduled],
+      ["Active", GuildScheduledEventStatus.Active],
+    ] as const) {
+      it(`adopts a late ${label} event for a still-open row`, async () => {
+        const { guild, scheduledEvents } = makeGuild({
+          natives: [lateNative(status)],
+        });
+        await makeSync().syncEvent(marked(1000), guild);
+        expect(scheduledEvents.create).not.toHaveBeenCalled();
+        expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+          expect.anything(),
+          { $set: { nativeEventId: "late1", nativeCreateStartedAt: null } },
+        );
+      });
+
+      it(`closes a late ${label} event once its row has finished`, async () => {
+        const { guild, scheduledEvents } = makeGuild({
+          natives: [lateNative(status)],
+        });
+        await makeSync().syncEvent(marked(1000, { state: "cancelled" }), guild);
+        const closed =
+          status === GuildScheduledEventStatus.Active
+            ? GuildScheduledEventStatus.Completed
+            : GuildScheduledEventStatus.Canceled;
+        expect(scheduledEvents.edit).toHaveBeenCalledWith(
+          "late1",
+          expect.objectContaining({ status: closed }),
+        );
+      });
+    }
+
+    it("never creates in the past, and drops the marker after the grace period", async () => {
+      const { CREATE_GRACE_MS } =
+        await import("../../src/services/event-native-sync.js");
+      const { guild, scheduledEvents } = makeGuild();
+      await makeSync().syncEvent(marked(1000), guild);
+      expect(scheduledEvents.create).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).not.toHaveBeenCalled();
+      await makeSync().syncEvent(marked(CREATE_GRACE_MS + 1000), guild);
+      expect(scheduledEvents.create).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "ev1" },
+        { $set: { nativeCreateStartedAt: null } },
+      );
+    });
+
+    it("without a marker a past start still does nothing at all", async () => {
+      const { guild, scheduledEvents } = makeGuild();
+      await makeSync().syncEvent(makeEvent({ startTime: PAST }), guild);
+      expect(scheduledEvents.create).not.toHaveBeenCalled();
+      expect(scheduledEvents.fetch).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).not.toHaveBeenCalled();
+    });
   });
 
   it("stops mirroring (no recreate) when the native event was deleted by hand", async () => {
