@@ -193,6 +193,87 @@ describe("VoiceChannelManager - room lock (#1143)", () => {
     });
   });
 
+  describe("waiting room access follows ownership", () => {
+    let waitingRoom: any;
+
+    const withWaitingRoom = (): void => {
+      waitingRoom = {
+        id: "wr",
+        permissionOverwrites: {
+          cache: new Map([["a", { allow: { has: () => false } }]]),
+          create: jest.fn<any>().mockResolvedValue(undefined),
+          delete: jest.fn<any>().mockResolvedValue(undefined),
+        },
+      };
+      (manager as any).client = {
+        user: { id: "bot" },
+        channels: {
+          cache: { get: (id: string) => (id === "wr" ? waitingRoom : room) },
+        },
+      };
+      (manager as any).waitingRooms.set("room", "wr");
+      (manager as any).waitingRoomToMain.set("wr", "room");
+    };
+
+    it("manual transfer revokes the old owner and grants the new owner in the waiting room", async () => {
+      withWaitingRoom();
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      expect(waitingRoom.permissionOverwrites.delete).toHaveBeenCalledWith(
+        "a",
+        expect.any(String),
+      );
+      expect(waitingRoom.permissionOverwrites.create).toHaveBeenCalledWith(
+        "b",
+        { Connect: true, ViewChannel: true, MoveMembers: true },
+      );
+    });
+
+    it("automatic transfer does the same", async () => {
+      withWaitingRoom();
+      releaseCreate();
+
+      await (manager as any).updateChannelOwnership(room, member("b"), "a");
+
+      expect(waitingRoom.permissionOverwrites.delete).toHaveBeenCalledWith(
+        "a",
+        expect.any(String),
+      );
+      expect(waitingRoom.permissionOverwrites.create).toHaveBeenCalledWith(
+        "b",
+        { Connect: true, ViewChannel: true, MoveMembers: true },
+      );
+    });
+
+    it("neutralises (including MoveMembers) when deleting the waiting-room overwrite fails", async () => {
+      withWaitingRoom();
+      waitingRoom.permissionOverwrites.delete.mockRejectedValue(
+        new Error("boom"),
+      );
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      expect(waitingRoom.permissionOverwrites.create).toHaveBeenCalledWith(
+        "a",
+        expect.objectContaining({ MoveMembers: null, ManageChannels: false }),
+      );
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+
+    it("leaves a room without a waiting room unaffected", async () => {
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      // only the main channel's overwrite was removed
+      expect(room.permissionOverwrites.delete).toHaveBeenCalledTimes(1);
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+  });
+
   describe("controlPanels cleanup on normal deletion paths", () => {
     beforeEach(() => {
       (manager as any).controlPanels.set("room", {

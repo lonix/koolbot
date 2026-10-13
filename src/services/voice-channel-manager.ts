@@ -496,7 +496,10 @@ export class VoiceChannelManager {
     fallbackId: string,
   ): Promise<string> {
     if (!(await this.isReservedChannelName(name))) return name;
-    const altered = `${name} (room)`;
+    // Discord caps channel names at 100 characters: trim the base so the
+    // suffix cannot push the name over the limit.
+    const suffix = " (room)";
+    const altered = `${name.slice(0, 100 - suffix.length)}${suffix}`;
     if (!(await this.isReservedChannelName(altered))) return altered;
     return `Room ${fallbackId}`;
   }
@@ -1069,11 +1072,45 @@ export class VoiceChannelManager {
         Connect: null,
         Speak: null,
         ViewChannel: null,
+        MoveMembers: null,
         ...status,
       });
     } catch (error) {
       logger.error(
         `Could not neutralise previous owner ${previousOwnerId}'s overwrite on ${channel.id}:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Move the waiting room's owner-level access (Connect, ViewChannel,
+   * MoveMembers, given to the owner by createWaitingRoom) from the previous
+   * owner to the new one, as part of the same locked ownership transition as
+   * the main channel. Without it a former owner could keep entering the
+   * waiting room and moving members (#1143). No-op when the room has no
+   * waiting room. Never aborts the transfer.
+   */
+  private async reconcileWaitingRoomAccess(
+    mainChannelId: string,
+    previousOwnerId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    const waitingRoomId = this.waitingRooms.get(mainChannelId);
+    if (!waitingRoomId) return;
+    try {
+      const waitingRoom = this.client.channels.cache.get(waitingRoomId) as
+        VoiceChannel | undefined;
+      if (!waitingRoom?.permissionOverwrites) return;
+      await waitingRoom.permissionOverwrites.create(newOwnerId, {
+        Connect: true,
+        ViewChannel: true,
+        MoveMembers: true,
+      });
+      await this.revokePreviousOwnerAccess(waitingRoom, previousOwnerId);
+    } catch (error) {
+      logger.warn(
+        `Could not reconcile waiting room access for ${mainChannelId}:`,
         error,
       );
     }
@@ -1639,6 +1676,11 @@ export class VoiceChannelManager {
         `[Manual Transfer] Removing previous owner ${currentOwnerId}'s permission overwrite`,
       );
       await this.revokePreviousOwnerAccess(channel, currentOwnerId);
+      await this.reconcileWaitingRoomAccess(
+        channelId,
+        currentOwnerId,
+        newOwnerId,
+      );
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channelId)) {
@@ -3380,6 +3422,11 @@ export class VoiceChannelManager {
           `[Ownership Transfer] Removing previous owner ${currentOwnerId}'s permission overwrite`,
         );
         await this.revokePreviousOwnerAccess(channel, currentOwnerId);
+        await this.reconcileWaitingRoomAccess(
+          channel.id,
+          currentOwnerId,
+          newOwner.id,
+        );
       }
 
       // Only rename if channel doesn't have a custom name

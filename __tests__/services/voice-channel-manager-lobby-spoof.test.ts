@@ -331,6 +331,24 @@ describe("VoiceChannelManager - name spoofing and control-panel tracking (#1148,
     });
   });
 
+  describe("safeRoomName length", () => {
+    it("keeps a name derived from a 100-character reserved name within 100 characters", async () => {
+      const long = "L".repeat(100);
+      mockConfigService.getString = jest
+        .fn<any>()
+        .mockImplementation((key: string, def?: string) =>
+          Promise.resolve(
+            key === "voicechannels.lobby.name" ? long : (def ?? ""),
+          ),
+        );
+
+      const name: string = await (manager as any).safeRoomName(long, "u1");
+
+      expect(name.length).toBeLessThanOrEqual(100);
+      expect(await manager.isReservedChannelName(name)).toBe(false);
+    });
+  });
+
   describe("presets", () => {
     it("skips a preset channel name that is reserved but still applies the rest", async () => {
       const room: any = {

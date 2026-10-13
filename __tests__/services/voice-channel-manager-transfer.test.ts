@@ -137,6 +137,7 @@ describe("VoiceChannelManager - Transfer Ownership", () => {
           Connect: null,
           Speak: null,
           ViewChannel: null,
+          MoveMembers: null,
         },
       );
     });
