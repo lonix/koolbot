@@ -167,8 +167,12 @@ ping, scheduled announcements, ticket staff pings) set their own allow-list.
   can read it. Some of it is also shown in Discord by design: `/seen` and `/voicestats` show a member's voice
   activity to whoever runs them (channel names are hidden when the caller cannot view the channel), `/aka` shows
   name history, and `/modlog` shows a member's moderation history to moderators (it is registered for
-  **Moderate Members**). Members who opt out of tracking are not recorded. Restrict who may run these commands in
+  **Moderate Members**). Restrict who may run these commands in
   the Web UI's permissions page, and keep the MongoDB port unpublished.
+  Three things are separate: (a) a member's tracking opt-out (`privacy.tracking_opt_out.enabled`) stops new
+  activity and name-history rows being written; (b) moderation records (warnings and mirrored native actions)
+  are still written for opted-out members, because they are a moderation record, not tracking; (c) rows already
+  tracked stay until the member resets their data.
 - **GDPR compliance**: Members can export or reset their own data from the Web UI (`/me`, when `privacy.enabled`
   is on; the reset also needs `privacy.delete.enabled`). Both are off by default. There is no administrator-run
   export or reset of an arbitrary member's data. Admins can remove individual entries on some Web UI pages (for example birthdays),
