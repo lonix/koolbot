@@ -294,6 +294,17 @@ describe("birthday pure helpers", () => {
         }),
       ).toBe("🎂 <@123> turns 30 today!");
     });
+    it("escapes markdown in the display name (#1146)", () => {
+      expect(
+        renderBirthdayMessage("Happy birthday {username}!", {
+          userId: "123",
+          displayName: "[free nitro](https://evil.example) **x**",
+          age: null,
+        }),
+      ).toBe(
+        "Happy birthday \\[free nitro](https://evil.example) \\*\\*x\\*\\*!",
+      );
+    });
     it("uses the display name for {username} without a ping", () => {
       expect(
         renderBirthdayMessage("Happy birthday {username}!", {

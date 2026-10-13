@@ -1,4 +1,10 @@
-import { Client, Guild, TextChannel, EmbedBuilder } from "discord.js";
+import {
+  Client,
+  Guild,
+  TextChannel,
+  EmbedBuilder,
+  type MessageMentionOptions,
+} from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -26,6 +32,17 @@ export type AnnouncementContent = Pick<
 > & {
   _id?: unknown;
   embedData?: IScheduledAnnouncement["embedData"];
+};
+
+/**
+ * Announcement text is written by the operator in the Web UI, so an
+ * `@everyone`, `@here`, role or user mention in it is deliberate. Say so
+ * explicitly: the client default no longer resolves `@everyone` or roles
+ * (#1146). The placeholders only ever inject server facts and `<@id>`
+ * mentions, never member display names.
+ */
+const OPERATOR_AUTHORED_MENTIONS: MessageMentionOptions = {
+  parse: ["users", "roles", "everyone"],
 };
 
 export class ScheduledAnnouncementService {
@@ -263,9 +280,16 @@ export class ScheduledAnnouncementService {
         embed.setImage(announcement.embedData.image);
       }
 
-      await channel.send({ content: message, embeds: [embed] });
+      await channel.send({
+        content: message,
+        embeds: [embed],
+        allowedMentions: OPERATOR_AUTHORED_MENTIONS,
+      });
     } else {
-      await channel.send(message);
+      await channel.send({
+        content: message,
+        allowedMentions: OPERATOR_AUTHORED_MENTIONS,
+      });
     }
   }
 

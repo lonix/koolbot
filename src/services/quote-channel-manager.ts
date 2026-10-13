@@ -15,6 +15,8 @@ import {
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { env } from "../config/env.js";
+import { shouldIgnoreGuild } from "../utils/guild-scope.js";
 import {
   MissingPostError,
   isMissingPostError,
@@ -931,6 +933,9 @@ export class QuoteChannelManager {
     // Create and store handler for reactions added
     this.reactionAddHandler = async (reaction, user): Promise<void> => {
       if (user.bot) return;
+      // Guild scope (#1144): before any partial fetch, so a foreign guild's
+      // reaction costs no REST call.
+      if (shouldIgnoreGuild(reaction.message.guildId, env.guildId)) return;
 
       try {
         // Fetch partial data if needed
@@ -956,6 +961,7 @@ export class QuoteChannelManager {
     // Create and store handler for reactions removed
     this.reactionRemoveHandler = async (reaction, user): Promise<void> => {
       if (user.bot) return;
+      if (shouldIgnoreGuild(reaction.message.guildId, env.guildId)) return;
 
       try {
         // Fetch partial data if needed

@@ -68,6 +68,8 @@ import { RaidProtectionService } from "./services/raid-protection-service.js";
 import { ModerationCaseReviewService } from "./services/moderation-case-review-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "./utils/guild-members-intent.js";
+import { DEFAULT_ALLOWED_MENTIONS } from "./utils/allowed-mentions.js";
+import { applyGuildScope, shouldIgnoreGuild } from "./utils/guild-scope.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createUserWebRouter,
@@ -154,6 +156,10 @@ const client = new Client({
   // uncached users. Both consumers (ReactionRoleService, ReactionActivityTracker)
   // already resolve partial users via user.fetch().
   partials: [Partials.Message, Partials.Reaction, Partials.User],
+  // Safe default for every send that does not set its own allowedMentions
+  // (#1146): no @everyone / @here / role pings from text the bot echoes, such
+  // as member display names. Intentional role or everyone pings set their own.
+  allowedMentions: DEFAULT_ALLOWED_MENTIONS,
 });
 
 // Add commands collection to client
@@ -289,10 +295,41 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   await initializeServices();
 
+  // Guild scoping (#1144): warn about, and optionally leave, guilds other than
+  // GUILD_ID. Needs ConfigService, so it runs once services are wired up.
+  await enforceGuildScope();
+  ConfigService.getInstance().addChangeListener((key) => {
+    if (key === LEAVE_OTHER_GUILDS_KEY) void enforceGuildScope();
+  });
+
   // Flip the health flag so /health switches from 503 "Starting" to its
   // normal Discord + MongoDB readiness checks (#521). The server itself is
   // already listening — it was started before client.login() below.
   isReady = true;
+});
+
+// Events from a guild other than GUILD_ID are ignored (#1144), so one operator's
+// bot can never merge another guild's activity into its own community. Leaving
+// those guilds is an explicit opt-in that is off by default: an operator may
+// deliberately keep the bot in a second guild.
+const LEAVE_OTHER_GUILDS_KEY = "core.guild_scope.leave_other_guilds";
+
+async function enforceGuildScope(): Promise<void> {
+  try {
+    const leave = await ConfigService.getInstance().getBoolean(
+      LEAVE_OTHER_GUILDS_KEY,
+      false,
+    );
+    await applyGuildScope(client.guilds.cache.values(), env.guildId, leave);
+  } catch (error) {
+    logger.error("Error applying guild scope:", error);
+  }
+}
+
+// A guild the bot is added to after startup, and a flip of the opt-in setting
+// from the Web UI (which only fires change listeners, not reload callbacks).
+client.on(Events.GuildCreate, () => {
+  void enforceGuildScope();
 });
 
 async function cleanupGlobalCommands(): Promise<void> {
@@ -917,6 +954,17 @@ client.on(Events.ShardResume, () => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   recordDiscordEvent("interactionCreate");
+  // Guild scoping (#1144). Commands are only registered for GUILD_ID, but
+  // buttons and menus on messages the bot left behind could still arrive.
+  if (shouldIgnoreGuild(interaction.guildId, env.guildId)) {
+    if (interaction.isRepliable() && !interaction.isAutocomplete()) {
+      await safeReply(interaction, {
+        content: "This bot is not set up for this server.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    return;
+  }
   // Handle autocomplete interactions
   if (interaction.isAutocomplete()) {
     try {
@@ -1069,6 +1117,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   recordDiscordEvent("voiceStateUpdate");
+  if (shouldIgnoreGuild(newState.guild.id, env.guildId)) return;
   try {
     const member = newState.member || oldState.member;
     if (member) {
@@ -1109,6 +1158,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // Gating (enabled, bot/DM, excluded channels) lives in the tracker.
 client.on(Events.MessageCreate, async (message) => {
   recordDiscordEvent("messageCreate");
+  if (shouldIgnoreGuild(message.guildId, env.guildId)) return;
   try {
     // Before the first await (#918): see the voice handler.
     const nameAdmission = TrackingOptOutService.getInstance().admission();
@@ -1132,6 +1182,8 @@ client.on(Events.MessageCreate, async (message) => {
 // gating (enabled, DM, excluded channels) lives in each service.
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   recordDiscordEvent("messageReactionAdd");
+  // Before any partial fetch: a foreign guild's reaction costs no REST call.
+  if (shouldIgnoreGuild(reaction.message.guildId, env.guildId)) return;
   const nameAdmission = TrackingOptOutService.getInstance().admission();
   try {
     // Bots are always ignored; `bot` is populated even on partial users, so
@@ -1165,6 +1217,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 // the service.
 client.on(Events.MessageReactionRemove, async (reaction, user) => {
   recordDiscordEvent("messageReactionRemove");
+  if (shouldIgnoreGuild(reaction.message.guildId, env.guildId)) return;
   try {
     // Bots are always ignored; `bot` is populated even on partial users, so
     // guard first to avoid unnecessary fetches for bot reactions.
@@ -1188,6 +1241,7 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 // config(s) so the DB stops drifting from reality; gating lives in the service.
 client.on(Events.MessageDelete, async (message) => {
   recordDiscordEvent("messageDelete");
+  if (shouldIgnoreGuild(message.guildId, env.guildId)) return;
   try {
     await reactionRoleService.handleMessageDelete(message);
   } catch (error) {
@@ -1197,6 +1251,7 @@ client.on(Events.MessageDelete, async (message) => {
 
 client.on(Events.GuildRoleDelete, async (role) => {
   recordDiscordEvent("roleDelete");
+  if (shouldIgnoreGuild(role.guild.id, env.guildId)) return;
   try {
     await reactionRoleService.handleRoleDelete(role);
   } catch (error) {
@@ -1213,6 +1268,7 @@ client.on(Events.GuildRoleDelete, async (role) => {
 
 client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
   recordDiscordEvent("roleUpdate");
+  if (shouldIgnoreGuild(newRole.guild.id, env.guildId)) return;
   try {
     await RoleGroupSyncService.getInstance(client).handleRoleUpdate(
       oldRole,
@@ -1225,6 +1281,13 @@ client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
 
 client.on(Events.ChannelDelete, async (channel) => {
   recordDiscordEvent("channelDelete");
+  if (
+    shouldIgnoreGuild(
+      "guildId" in channel ? channel.guildId : null,
+      env.guildId,
+    )
+  )
+    return;
   try {
     await reactionRoleService.handleChannelDelete(channel);
   } catch (error) {
@@ -1236,6 +1299,7 @@ client.on(Events.ChannelDelete, async (channel) => {
 // Gating (enabled, DM/bot) lives in the tracker.
 client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {
   recordDiscordEvent("messagePollVoteAdd");
+  if (shouldIgnoreGuild(pollAnswer.poll.message.guildId, env.guildId)) return;
   try {
     await pollParticipationTracker.handlePollVoteAdd(pollAnswer, userId);
   } catch (error) {
@@ -1249,6 +1313,7 @@ client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {
 // Audit Log permission.
 client.on(Events.GuildAuditLogEntryCreate, async (auditLogEntry, guild) => {
   recordDiscordEvent("guildAuditLogEntryCreate");
+  if (shouldIgnoreGuild(guild.id, env.guildId)) return;
   try {
     await moderationService.handleAuditLogEntry(auditLogEntry, guild);
   } catch (error) {
@@ -1258,6 +1323,13 @@ client.on(Events.GuildAuditLogEntryCreate, async (auditLogEntry, guild) => {
 
 // Handle channel updates to detect renames
 client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
+  if (
+    shouldIgnoreGuild(
+      "guildId" in newChannel ? newChannel.guildId : null,
+      env.guildId,
+    )
+  )
+    return;
   try {
     // Only track voice channel updates
     if (newChannel.type !== ChannelType.GuildVoice) {
@@ -1323,6 +1395,7 @@ client.on(Events.UserUpdate, async (_oldUser, newUser) => {
 // (GUILD_MEMBERS_INTENT=true); harmless to register either way.
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   recordDiscordEvent("guildMemberUpdate");
+  if (shouldIgnoreGuild(newMember.guild.id, env.guildId)) return;
   await NameHistoryService.getInstance().recordMember(
     newMember,
     TrackingOptOutService.getInstance().admission(),
@@ -1334,6 +1407,7 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
 // welcome.enabled per event and never throws.
 client.on(Events.GuildMemberAdd, async (member) => {
   recordDiscordEvent("guildMemberAdd");
+  if (shouldIgnoreGuild(member.guild.id, env.guildId)) return;
   // Anti-raid first (#1045): a member it just acted on is not greeted.
   const actedOn =
     await RaidProtectionService.getInstance(client).handleMemberJoin(member);
@@ -1343,6 +1417,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 // Easter egg: Creator detection when joining the server
 client.on(Events.GuildMemberAdd, async (member) => {
+  if (shouldIgnoreGuild(member.guild.id, env.guildId)) return;
   // Do not remove this line. Add your own ID here (for future maintainers).
   if (member.id === "174051908586176512") {
     try {

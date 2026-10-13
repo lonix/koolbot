@@ -187,6 +187,7 @@ export interface ConfigSchema {
   // Each `core.<type>.enabled` toggle pairs with a `core.<type>.channel_id`
   // that names the text channel the embeds are posted to.
   "core.webui.link_delivery": string; // How /me and /config deliver the sign-in link: dm | ephemeral
+  "core.guild_scope.leave_other_guilds": boolean; // Leave any guild other than GUILD_ID (#1144)
   "core.startup.enabled": boolean;
   "core.startup.channel_id": string;
   "core.errors.enabled": boolean;
@@ -530,6 +531,7 @@ export const defaultConfig: ConfigSchema = {
   // bot lifecycle/error/cron embeds into a guild channel is an operator
   // opt-in, and each category needs a channel id before it does anything.
   "core.webui.link_delivery": "dm",
+  "core.guild_scope.leave_other_guilds": false,
   "core.startup.enabled": false,
   "core.startup.channel_id": "",
   "core.errors.enabled": false,
@@ -2152,6 +2154,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       { value: "dm", label: "Direct message (ephemeral fallback)" },
       { value: "ephemeral", label: "Ephemeral reply" },
     ],
+  },
+  "core.guild_scope.leave_other_guilds": {
+    label: "Leave other servers",
+    description:
+      "KoolBot only works for the server named by GUILD_ID and ignores events from any other server it has been added to. Turn this on to make it leave those servers (now, and whenever it is added to one). Off by default so a bot you deliberately keep in a second server is never removed. Turn off Public Bot in the Discord developer portal to stop others adding it.",
+    category: "core",
+    type: "boolean",
   },
   "core.startup.enabled": {
     label: "Startup log to Discord",
