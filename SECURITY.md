@@ -119,8 +119,10 @@ non-administrator commands rather than running them ungated.
 ### Supply Chain
 
 Container images are built on `node:24-alpine`, run as a non-root numeric
-user (`1000:1000`), are scanned with Trivy, and are signed with cosign
-(keyless) when published to GHCR. CodeQL and dependency review run in CI.
+user (`1000:1000`), and are signed with cosign (keyless) when published to
+GHCR. Release images are built and scanned with Trivy (fixable CRITICAL
+findings fail the build) before they are pushed, and the Dockerfile is linted
+with hadolint (errors fail the build). CodeQL and dependency review run in CI.
 
 ### Input Validation
 

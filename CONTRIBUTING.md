@@ -658,7 +658,7 @@ Every new push to the PR rebuilds the image while the label is on. Remove the
 label to stop further builds. When a build finishes, the workflow posts a comment
 on the PR with the commit, the digest and the `docker pull` commands for both
 tags, and updates that same comment on every rebuild. Preview images are `linux/amd64` only and skip the
-release-only steps (Trivy scan, cosign signing, provenance and SBOM). PRs from
+release-only steps (the pre-push Trivy scan, cosign signing, provenance and SBOM). PRs from
 forks never get a preview, because their workflow token cannot push to GHCR.
 
 Pull the preview in place of `latest`, for example in a copy of
