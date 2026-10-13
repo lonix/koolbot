@@ -27,10 +27,13 @@ import type { AdoptionSnapshotRecord } from "./server-adoption-service.js";
  * session user as the admin) against the server after the remaining reversible
  * operations are undone.
  *
+ * Role grants a restore revokes are modelled for the two people who matter for
+ * lockout, the acting admin and the bot (see `revokedRoleIds`).
+ *
  * Not covered, because the planner cannot express them: recreating a deleted
- * channel or role, revoking member role grants, and restoring settings. Those
- * do not take access away from the admin or the bot in the way the checked
- * steps can; the check only ever refuses, it never approves them.
+ * channel or role, and restoring settings. Those do not take access away from
+ * the admin or the bot in the way the checked steps can; the check only ever
+ * refuses, it never approves them.
  */
 
 /** Planner error codes that mean "this restore is unsafe for the admin or the bot". */
@@ -159,6 +162,48 @@ export function buildRestoreDesired(
 }
 
 /**
+ * Roles the restore will revoke from the acting admin or the bot: for every
+ * step still to be reverted that granted a role to members, whether the admin
+ * or the bot is among the members it granted. Only these two matter for
+ * lockout, so only these two are looked for; the member ids are tested for
+ * membership here and never copied anywhere.
+ *
+ * `inflight` ids count too: reconcile may promote them to granted at restore
+ * time, so assuming they are ours is the conservative reading. Returns `null`
+ * when the saved grant data cannot be read, which the caller treats as unsafe.
+ */
+export function revokedRoleIds(
+  snapshot: AdoptionSnapshotRecord,
+  scanned: ScannedState,
+  options: RestoreCheckOptions,
+): { admin: string[]; bot: string[] } | null {
+  const progressAll: unknown = snapshot.memberProgress ?? {};
+  if (typeof progressAll !== "object" || progressAll === null) return null;
+  const mapRole = (id: string): string =>
+    snapshot.restoredRoles.find((r) => r.oldId === id)?.newId ??
+    snapshot.createdRoles.find((r) => r.ref === id)?.roleId ??
+    id;
+  const admin = new Set<string>();
+  const bot = new Set<string>();
+  for (const op of snapshot.plan.operations) {
+    if (op.type !== "member.role.add") continue;
+    // An operation whose revoke already finished is not revisited.
+    if (snapshot.rolledBackOps.includes(op.id)) continue;
+    const progress = (progressAll as Record<string, unknown>)[op.id] as
+      { granted?: unknown; inflight?: unknown } | undefined;
+    if (progress === undefined) continue; // nothing was granted
+    const granted: unknown = progress?.granted ?? [];
+    const inflight: unknown = progress?.inflight ?? [];
+    if (!Array.isArray(granted) || !Array.isArray(inflight)) return null;
+    const ids = new Set<unknown>([...granted, ...inflight]);
+    const roleId = mapRole(op.roleId);
+    if (ids.has(options.actorId)) admin.add(roleId);
+    if (ids.has(scanned.botUserId)) bot.add(roleId);
+  }
+  return { admin: [...admin], bot: [...bot] };
+}
+
+/**
  * Problems that make restoring this snapshot unsafe right now, as readable
  * messages. Empty means the check passed. Pure: pass in a fresh scan.
  */
@@ -167,8 +212,19 @@ export function restoreProblems(
   scanned: ScannedState,
   options: RestoreCheckOptions,
 ): string[] {
+  const revoked = revokedRoleIds(snapshot, scanned, options);
+  if (revoked === null) {
+    // Fail closed: if who was granted what can't be read, safety can't be shown.
+    return [
+      "the saved role grants could not be read, so the restore can't be checked",
+    ];
+  }
   const desired = buildRestoreDesired(snapshot, scanned, options);
-  const plan = planAdoption(scanned, desired, { approverId: options.actorId });
+  const plan = planAdoption(scanned, desired, {
+    approverId: options.actorId,
+    revokedAdminRoleIds: revoked.admin,
+    revokedBotRoleIds: revoked.bot,
+  });
   return [
     ...new Set(
       plan.errors.filter((e) => SAFETY_CODES.has(e.code)).map((e) => e.message),

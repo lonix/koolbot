@@ -583,3 +583,190 @@ describe("restore through the engine", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Role grants the restore will revoke (#1134, review round 1)
+// ---------------------------------------------------------------------------
+
+describe("restore revokes role grants", () => {
+  const grantSnapshot = (
+    progress: unknown,
+    over: Partial<Snapshot> = {},
+  ): Snapshot =>
+    snapshot({
+      plan: {
+        operations: [
+          {
+            id: "op-1",
+            type: "member.role.add",
+            class: "additive",
+            roleId: "grantrole",
+            memberCount: 1,
+            sample: [],
+            memberIds: [],
+          },
+        ],
+      } as never,
+      operations: [{ opId: "op-1", status: "applied" }],
+      memberProgress: { "op-1": progress } as never,
+      ...over,
+    });
+
+  /** c1 is hidden from everyone and shown only to `grantrole`. */
+  const gated = (over: Partial<Scanned> = {}): Scanned =>
+    live({
+      roles: [...live().roles, role("grantrole", "Granted", 4)],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("grantrole", VIEW),
+        ]),
+      ],
+      ...over,
+    });
+
+  it("refuses when the admin is among the members granted a role that is their only access", () => {
+    const scanned = gated({ adminRoleIds: ["admin-role", "grantrole"] });
+    const problems = restoreProblems(
+      grantSnapshot({ done: 2, failed: [], granted: ["other", "admin"] }),
+      scanned,
+      opts,
+    );
+    expect(problems.join(" ")).toMatch(/remove your own access to "c1"/);
+  });
+
+  it("refuses when the bot is among the members granted a role and a feature channel depends on it", () => {
+    const scanned = gated({
+      botRoleIds: ["koolbot", "grantrole"],
+      boundChannelIds: ["c1"],
+    });
+    const problems = restoreProblems(
+      grantSnapshot({ done: 1, failed: [], granted: ["bot"] }),
+      scanned,
+      opts,
+    );
+    expect(problems.join(" ")).toMatch(/lock the bot out of "c1"/);
+  });
+
+  it("passes when the admin and the bot are in no grant list", () => {
+    const scanned = gated({
+      adminRoleIds: ["admin-role", "grantrole"],
+      botRoleIds: ["koolbot", "grantrole"],
+      boundChannelIds: ["c1"],
+    });
+    expect(
+      restoreProblems(
+        grantSnapshot({ done: 2, failed: [], granted: ["m1", "m2"] }),
+        scanned,
+        opts,
+      ),
+    ).toEqual([]);
+  });
+
+  it("passes when the admin holds the role but also has access another way", () => {
+    const scanned = gated({
+      adminRoleIds: ["admin-role", "grantrole", "plain"],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("grantrole", VIEW),
+          ow("plain", VIEW),
+        ]),
+      ],
+    });
+    expect(
+      restoreProblems(
+        grantSnapshot({ done: 1, failed: [], granted: ["admin"] }),
+        scanned,
+        opts,
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses, failing closed, when the saved grants cannot be read", () => {
+    const scanned = gated({ adminRoleIds: ["admin-role", "grantrole"] });
+    for (const broken of [
+      { done: 1, failed: [], granted: "admin" },
+      { done: 1, failed: [], granted: [], inflight: 7 },
+    ]) {
+      expect(restoreProblems(grantSnapshot(broken), scanned, opts)).toEqual([
+        expect.stringMatching(/could not be read/),
+      ]);
+    }
+    expect(
+      restoreProblems(
+        grantSnapshot({}, { memberProgress: "garbage" as never }),
+        scanned,
+        opts,
+      ),
+    ).toEqual([expect.stringMatching(/could not be read/)]);
+  });
+
+  it("treats in-flight grants as possibly ours, the conservative reading", () => {
+    const scanned = gated({ adminRoleIds: ["admin-role", "grantrole"] });
+    expect(
+      restoreProblems(
+        grantSnapshot({
+          done: 0,
+          failed: [],
+          granted: [],
+          inflight: ["admin"],
+        }),
+        scanned,
+        opts,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not revisit a grant whose revoke already finished", () => {
+    const scanned = gated({ adminRoleIds: ["admin-role", "grantrole"] });
+    expect(
+      restoreProblems(
+        grantSnapshot(
+          { done: 1, failed: [], granted: ["admin"] },
+          { status: "rollback_partial", rolledBackOps: ["op-1"] },
+        ),
+        scanned,
+        opts,
+      ),
+    ).toEqual([]);
+  });
+
+  it("maps a role created by the plan to the role that exists now", () => {
+    const scanned = gated({
+      adminRoleIds: ["admin-role", "grantrole"],
+    });
+    const snap = grantSnapshot(
+      { done: 1, failed: [], granted: ["admin"] },
+      {
+        createdRoles: [
+          { ref: "new:granted", roleId: "grantrole", name: "Granted" },
+        ],
+        plan: {
+          operations: [
+            {
+              id: "op-1",
+              type: "member.role.add",
+              class: "additive",
+              roleId: "new:granted",
+              memberCount: 1,
+              sample: [],
+              memberIds: [],
+            },
+          ],
+        } as never,
+      },
+    );
+    expect(restoreProblems(snap, scanned, opts)).toHaveLength(1);
+  });
+
+  it("never puts member ids in a message", () => {
+    const scanned = gated({ adminRoleIds: ["admin-role", "grantrole"] });
+    const text = restoreProblems(
+      grantSnapshot({ done: 1, failed: [], granted: ["admin", "secret-9"] }),
+      scanned,
+      opts,
+    ).join(" ");
+    expect(text).not.toContain("secret-9");
+  });
+});

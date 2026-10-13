@@ -178,6 +178,14 @@ export interface PlanOptions {
    * this opens nothing else: other bots' existing overwrites stay protected.
    */
   gateTargetIds?: string[];
+  /**
+   * Roles the admin / the bot will no longer hold once the operations have run
+   * (a rollback revoking the grants a plan made, #1134). They are removed from
+   * the simulated after-state only, so the access checks see the loss; the
+   * scan itself, and so the "before" side, still has them.
+   */
+  revokedAdminRoleIds?: string[];
+  revokedBotRoleIds?: string[];
 }
 
 interface OpBase {
@@ -1185,7 +1193,10 @@ export function planAdoption(
   }
 
   // ---- admin / bot access (simulated after-state) ----------------------
-  if (ordered.length > 0) {
+  const revokesAccess =
+    (options.revokedAdminRoleIds?.length ?? 0) > 0 ||
+    (options.revokedBotRoleIds?.length ?? 0) > 0;
+  if (ordered.length > 0 || revokesAccess) {
     const before = simulate(scanned, []);
     const after = simulate(scanned, ordered);
     // Grants run before the destructive phase, and a failed grant skips it,
@@ -1199,11 +1210,19 @@ export function planAdoption(
     const adminRoles = [
       ...scanned.adminRoleIds,
       ...grantedTo(scanned.adminUserId),
-    ].filter((id) => !after.removedRoles.has(id));
+    ].filter(
+      (id) =>
+        !after.removedRoles.has(id) &&
+        !(options.revokedAdminRoleIds ?? []).includes(id),
+    );
     const botRoles = [
       ...scanned.botRoleIds,
       ...grantedTo(scanned.botUserId),
-    ].filter((id) => !after.removedRoles.has(id));
+    ].filter(
+      (id) =>
+        !after.removedRoles.has(id) &&
+        !(options.revokedBotRoleIds ?? []).includes(id),
+    );
     // An early role edit must not strip a management permission that a later
     // step in the same plan still needs.
     const botAfter = effectivePermissions({

@@ -1479,13 +1479,17 @@ opens the snapshot history.
    scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same
    safety rules as an apply. It is refused, with a message naming the cause and with nothing changed, when it would:
    remove your own access to a channel or your Administrator permission (you are the admin who clicked Restore, not the one
-   who applied); lock the bot out of a channel a feature uses; leave the bot without the Manage Roles permission it needs to
-   restore anything; or edit a role that is managed by an integration or sits at or above the bot's highest role. Choosing
-   **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. The
+   who applied); lock the bot out of a channel a feature uses; leave the bot without the Manage Roles permission that the role and
+   permission-overwrite changes in the restore need (a restore of settings only does not need it); or edit a role that is
+   managed by an integration or sits at or above the bot's highest role. Roles the plan granted to members are revoked by a
+   restore, so if you or the bot are among the members it granted a role to, the check treats that role as lost; for a plan
+   that granted a role to many members only whether *you* and *the bot* were among them matters, and no member names are shown.
+   Choosing **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. The
    engine runs the same check again after it claims the snapshot and before its first write. If the live server can't be
    read, Restore is refused. For a snapshot that was already partly restored, only the steps still to be reverted are
    checked; what was restored earlier is part of the live state. The check never approves anything the planner can't judge:
-   recreating a deleted channel or role, revoking member role grants and putting settings back are not part of it. There is no
+   recreating a deleted channel or role and putting settings back are not part of it. If the saved list of who was granted
+   a role can't be read, Restore is refused. There is no
    extra warning for old snapshots: the check looks at the live server, so a snapshot's age does not change the result.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are

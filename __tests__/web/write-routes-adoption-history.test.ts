@@ -137,6 +137,11 @@ beforeEach(() => {
   mockStartRollback.mockReturnValue({ id: JOB });
   mockRecoverStale.mockResolvedValue(0);
   mockCheck.mockResolvedValue([]);
+  mockGetRollbackJob.mockReset();
+  mockGetRollbackJob.mockReturnValue({
+    status: "done",
+    result: { restored: [], failed: [] },
+  });
 });
 afterEach(async () => {
   await harness?.close();
@@ -236,6 +241,59 @@ describe("GET /adopt/history/:id/restore", () => {
   });
 });
 
+/** The audit entry is written after the response, when the job has ended. */
+async function waitForAudit(): Promise<void> {
+  for (let i = 0; i < 50 && mockRecordAudit.mock.calls.length === 0; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+describe("restore audit follows the real outcome (#1134)", () => {
+  it("records a failure, and no success, when the engine's second check refuses", async () => {
+    mockGetRollbackJob.mockReturnValue({
+      status: "failed",
+      error: "Cannot roll back: this would remove your own access to c1.",
+      result: null,
+    });
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(res.status).toBe(303); // the first check passed, so the job started
+    await waitForAudit();
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "adopt.rollback",
+        result: "failure",
+        errorMessage: expect.stringContaining("Cannot roll back"),
+      }),
+    );
+  });
+
+  it("records a failure when steps failed, and waits while the job is running", async () => {
+    mockGetRollbackJob
+      .mockReturnValueOnce({ status: "running" })
+      .mockReturnValue({
+        status: "done",
+        result: { restored: ["a"], failed: [{ opId: "b", error: "x" }] },
+      });
+    await mount();
+    await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(mockRecordAudit).not.toHaveBeenCalled(); // still running
+    for (let i = 0; i < 80 && mockRecordAudit.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        result: "failure",
+        errorMessage: "1 step(s) failed.",
+      }),
+    );
+  });
+});
+
 describe("POST /adopt/history/:id/restore live-state check (#1134)", () => {
   it("refuses an unsafe restore before the engine starts, names the cause and audits it", async () => {
     mockCheck.mockResolvedValue([
@@ -297,6 +355,8 @@ describe("POST /adopt/history/:id/restore", () => {
       expect.any(Function),
       { actorId: session.discordUserId, deleteCreatedRoles: false },
     );
+    // Audited when the job ends, not when it starts.
+    await waitForAudit();
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "adopt.rollback", result: "success" }),

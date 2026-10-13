@@ -365,14 +365,18 @@ Error: An invalid token was provided
 7. **Restore was refused ("Restore refused, nothing was changed: ...").** Restore compares the server as it is now with the
    state the restore would produce, and refuses when that would be unsafe. Nothing was written. By cause:
    - *"This change would remove your own access to ..."* or *"...your own Administrator permission"*: someone gave you
-     access since the apply, and the saved state would take it away (or deleting a created role would). Give yourself
+     access since the apply, and the saved state would take it away. Deleting a created role would too, and so would
+     revoking a role the plan granted you (a restore takes back roles the plan gave to members). Give yourself
      access another way (a role you hold), or untick **Also delete the roles this plan created**, then try again. The check
      is for the admin who clicks Restore, so a different admin may get a different result.
    - *"...lock the bot out of ..."*: the saved permissions would hide a channel a KoolBot feature uses from the bot. Give the
      KoolBot role access to that channel first.
-   - *"The bot needs the Manage Roles permission..."*: grant Manage Roles to the KoolBot role; every restore step needs it.
+   - *"The bot needs the Manage Roles permission..."*: grant Manage Roles to the KoolBot role. It is needed for the role and
+     permission-overwrite changes in the restore; a restore that only puts settings back does not need it.
    - A message naming a role (managed by an integration, or at or above the KoolBot role): move the KoolBot role above it in
      Server Settings → Roles, or leave that role as it is. Managed roles are never edited.
+   - *"the saved role grants could not be read, so the restore can't be checked"*: the snapshot's record of who was granted
+     a role is damaged. The restore is refused rather than guessed at; the plan's changes can only be undone by hand.
    - *"the live server state could not be read"*: Discord or the database could not be reached; try again shortly.
 8. **The snapshot is missing.** Snapshots are removed after `adoption.snapshot.retention_days` (default 90).
    Without one, the changes can only be undone by hand in Discord.

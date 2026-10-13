@@ -51,8 +51,51 @@ function readFlash(req: {
   return { type, text: text.slice(0, 500) };
 }
 
+/** How often a running restore is looked at while waiting to audit it. */
+const AUDIT_POLL_MS = 1000;
+
 export function createAdoptionHistoryRouter(client: Client): Router {
   const router = Router();
+
+  /**
+   * Audit a restore once its job has ended, so the trail shows the real
+   * outcome: the engine's second live-state check, or a failed step, can still
+   * end it after the request has been answered. Never throws.
+   */
+  async function auditWhenDone(
+    engine: Awaited<ReturnType<typeof ServerAdoptionService.getInstance>>,
+    jobId: string,
+    session: Parameters<typeof recordAudit>[0],
+    snapshotId: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      for (;;) {
+        const job = engine.getRollbackJob(jobId);
+        if (!job) return; // no longer tracked: nothing to report
+        if (job.status !== "running") {
+          const failedSteps = job.result?.failed.length ?? 0;
+          const failure =
+            job.status === "failed"
+              ? (job.error ?? "The restore failed.")
+              : failedSteps > 0
+                ? `${failedSteps} step(s) failed.`
+                : null;
+          await recordAudit(session, {
+            action: "adopt.rollback",
+            targetId: snapshotId,
+            details,
+            result: failure === null ? "success" : "failure",
+            errorMessage: failure,
+          });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, AUDIT_POLL_MS));
+      }
+    } catch (error) {
+      logger.warn("adoption history: could not audit the restore", error);
+    }
+  }
 
   /**
    * Release the lock of an apply or rollback whose bot died (no heartbeat for
@@ -233,11 +276,11 @@ export function createAdoptionHistoryRouter(client: Client): Router {
           deleteCreatedRoles,
           revalidate,
         });
-        await recordAudit(session, {
-          action: "adopt.rollback",
-          targetId: id,
-          details: { planId: snapshot.planId, deleteCreatedRoles },
-          result: "success",
+        // The engine re-checks and may refuse after this response, so the audit
+        // entry is written when the job ends, with its real outcome.
+        void auditWhenDone(engine, job.id, session, id, {
+          planId: snapshot.planId,
+          deleteCreatedRoles,
         });
         res.redirect(303, `${HISTORY_PATH}?job=${encodeURIComponent(job.id)}`);
       } catch (error) {
