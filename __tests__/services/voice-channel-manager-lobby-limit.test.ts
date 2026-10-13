@@ -22,6 +22,7 @@ jest.mock("../../src/services/config-service.js");
 // Import after mocks
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
+import logger from "../../src/utils/logger.js";
 
 const mockConfigService =
   ConfigService.getInstance() as jest.Mocked<ConfigService>;
@@ -39,6 +40,7 @@ describe("VoiceChannelManager lobby room limit (#1147)", () => {
   let createMock: jest.Mock;
   let setChannelMock: jest.Mock;
   let lobbySend: jest.Mock;
+  let elsewhereSend: jest.Mock;
   let limits: { max: number; windowSeconds: number };
 
   const newRoom = (n: number): Partial<VoiceChannel> =>
@@ -51,7 +53,10 @@ describe("VoiceChannelManager lobby room limit (#1147)", () => {
 
   /** One lobby visit: join (creates a room) then leave (forgets the room). */
   const visit = async (): Promise<void> => {
-    await (manager as any).createUserChannel(mockMember as GuildMember);
+    await (manager as any).createUserChannel(mockMember as GuildMember, {
+      id: "lobby-id",
+      send: lobbySend,
+    });
     (manager as any).userChannels.delete("member-id");
   };
 
@@ -107,13 +112,15 @@ describe("VoiceChannelManager lobby room limit (#1147)", () => {
 
     setChannelMock = jest.fn().mockResolvedValue(undefined);
     lobbySend = jest.fn().mockResolvedValue(undefined);
+    elsewhereSend = jest.fn().mockResolvedValue(undefined);
     mockMember = {
       id: "member-id",
       displayName: "@everyone",
       guild: mockGuild as Guild,
       voice: {
         setChannel: setChannelMock,
-        channel: { id: "lobby-id", send: lobbySend },
+        // Where the member is NOW; the notice must not go here.
+        channel: { id: "elsewhere-id", send: elsewhereSend },
       } as any,
     } as any;
 
@@ -152,6 +159,35 @@ describe("VoiceChannelManager lobby room limit (#1147)", () => {
     expect(payload.content).toContain("Leave and rejoin the lobby");
     expect(payload.content).not.toContain("@everyone");
     expect(payload.allowedMentions).toEqual({ users: ["member-id"] });
+  });
+
+  it("posts in the channel the join was for, not where the member is now", async () => {
+    for (let i = 0; i < 3; i++) await visit();
+    await visit();
+
+    expect(lobbySend).toHaveBeenCalledTimes(1);
+    expect(elsewhereSend).not.toHaveBeenCalled();
+  });
+
+  it("posts no notice when no trigger channel is given", async () => {
+    for (let i = 0; i < 3; i++) await visit();
+    await (manager as any).createUserChannel(mockMember as GuildMember);
+    expect(lobbySend).toHaveBeenCalledTimes(0);
+    expect(elsewhereSend).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("logs the rejected join once per window, not once per attempt", async () => {
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
+    for (let i = 0; i < 3; i++) await visit();
+    for (let i = 0; i < 6; i++) await visit();
+
+    const limitedWarnings = warn.mock.calls.filter(
+      ([message]) =>
+        typeof message === "string" &&
+        message.startsWith("Lobby room creation limited"),
+    );
+    expect(limitedWarnings).toHaveLength(1);
   });
 
   it("still holds the room back when the notice cannot be sent", async () => {

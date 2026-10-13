@@ -102,6 +102,14 @@ export class NotRoomOwnerError extends Error {
   }
 }
 
+/** The channel a lobby join happened in; only its text chat is used. */
+type RoomLimitNoticeChannel = {
+  send?: (options: {
+    content: string;
+    allowedMentions: { users: string[] };
+  }) => Promise<unknown>;
+};
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
@@ -1836,7 +1844,7 @@ export class VoiceChannelManager {
           logger.info(
             `Creating channel for ${member.displayName} who joined the lobby`,
           );
-          await this.createUserChannel(member);
+          await this.createUserChannel(member, newChannel);
         } else if (
           newChannel.name === NEW_CHANNEL_TRIGGER_NAME &&
           !this.isTrackedRoom(newChannel.id)
@@ -1845,7 +1853,7 @@ export class VoiceChannelManager {
           logger.info(
             `Creating personal channel for ${member.displayName} who joined the new channel`,
           );
-          await this.createUserChannel(member);
+          await this.createUserChannel(member, newChannel);
         }
       }
       // User left a channel
@@ -1896,7 +1904,7 @@ export class VoiceChannelManager {
           if (oldChannel.type === ChannelType.GuildVoice) {
             await this.cleanupEmptyChannel(oldChannel);
           }
-          await this.createUserChannel(member);
+          await this.createUserChannel(member, newChannel);
         }
         // If user is moving to the "New Channel", create a personal channel
         else if (
@@ -1918,7 +1926,7 @@ export class VoiceChannelManager {
           if (oldChannel.type === ChannelType.GuildVoice) {
             await this.cleanupEmptyChannel(oldChannel);
           }
-          await this.createUserChannel(member);
+          await this.createUserChannel(member, newChannel);
         }
         // If user is moving from their personal channel to another channel, clean up the old one
         else if (
@@ -1998,15 +2006,21 @@ export class VoiceChannelManager {
     }
   }
 
-  private async createUserChannel(member: GuildMember): Promise<void> {
+  private async createUserChannel(
+    member: GuildMember,
+    triggerChannel?: RoomLimitNoticeChannel,
+  ): Promise<void> {
     // Same turn as `createDynamicChannel`: the check below and the creation
     // that follows it must not interleave with the other path.
     return this.ownerChannelLock.run(member.id, () =>
-      this.createUserChannelUnlocked(member),
+      this.createUserChannelUnlocked(member, triggerChannel),
     );
   }
 
-  private async createUserChannelUnlocked(member: GuildMember): Promise<void> {
+  private async createUserChannelUnlocked(
+    member: GuildMember,
+    triggerChannel?: RoomLimitNoticeChannel,
+  ): Promise<void> {
     try {
       // Check if user already has a channel
       if (this.userChannels.has(member.id)) {
@@ -2029,7 +2043,7 @@ export class VoiceChannelManager {
       // Join/leave churn would otherwise create and delete a room (plus DB
       // writes) on every join. Counted before `create`, because the REST
       // cost is paid even when the move below fails.
-      if (await this.refuseIfRoomCreationLimited(member)) {
+      if (await this.refuseIfRoomCreationLimited(member, triggerChannel)) {
         return;
       }
 
@@ -2130,6 +2144,7 @@ export class VoiceChannelManager {
    */
   private async refuseIfRoomCreationLimited(
     member: GuildMember,
+    triggerChannel?: RoomLimitNoticeChannel,
   ): Promise<boolean> {
     const max = await configService.getNumber(
       "voicechannels.lobby.max_rooms",
@@ -2151,17 +2166,19 @@ export class VoiceChannelManager {
       1,
       limiter.getRateLimitReset(member.id, max, windowSeconds),
     );
-    logger.warn(
-      `Lobby room creation limited for member ${member.id}: more than ${max} rooms in ${windowSeconds}s`,
-    );
-
-    // One notice per window, or the notice becomes the amplifier.
+    // One warning and one notice per window: neither the log nor the lobby
+    // chat may become the new amplifier.
     const noticeKey = "lobby-room-notice";
     if (limiter.isOnCooldown(member.id, noticeKey, windowSeconds)) return true;
     limiter.setCooldown(member.id, noticeKey);
+    logger.warn(
+      `Lobby room creation limited for member ${member.id}: more than ${max} rooms in ${windowSeconds}s`,
+    );
     try {
-      const lobby = member.voice?.channel;
-      if (lobby && "send" in lobby && typeof lobby.send === "function") {
+      // The channel the join event was for, not the member's live voice
+      // state, which may have moved on while this waited for the lock.
+      const lobby = triggerChannel;
+      if (lobby && typeof lobby.send === "function") {
         await lobby.send({
           // Mention by id only; a display name is never echoed here.
           content: `<@${member.id}> You have opened several voice rooms in a short time, so a new one is on hold. Leave and rejoin the lobby in about ${wait} second${wait === 1 ? "" : "s"} to get your room.`,

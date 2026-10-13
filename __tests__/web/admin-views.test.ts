@@ -4817,6 +4817,56 @@ describe("renderCommandAuditPage", () => {
     expect(html).toContain("123ms");
   });
 
+  it("shows component rows and filter options without a leading slash (#1147)", () => {
+    const html = renderCommandAuditPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 30,
+      settingRows: [],
+      commandOptions: ["quote", "component:vc_control"],
+      userOptions: [{ id: "u1", label: "Alice" }],
+      filters: { ...BASE_FILTERS, commandName: "component:vc_control" },
+      rows: [
+        {
+          createdAt: "2026-05-08T12:34:56.000Z",
+          discordUserId: "u1",
+          userLabel: "Alice",
+          commandName: "component:vc_control",
+          subcommand: null,
+          channelId: "c1",
+          channelLabel: "general",
+          result: "success",
+          errorMessage: null,
+          durationMs: 5,
+        },
+        {
+          createdAt: "2026-05-08T12:35:56.000Z",
+          discordUserId: "u1",
+          userLabel: "Alice",
+          commandName: "quote",
+          subcommand: "add",
+          channelId: "c1",
+          channelLabel: "general",
+          result: "success",
+          errorMessage: null,
+          durationMs: 6,
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 50,
+    });
+    // Filter option: component label bare and selected, slash command with "/".
+    expect(html).toContain(
+      '<option value="component:vc_control" selected>component:vc_control</option>',
+    );
+    expect(html).toContain('<option value="quote">/quote</option>');
+    expect(html).not.toContain("/component:");
+    // Table cell: bare label for the component row, slash for the command.
+    expect(html).toContain('<td class="mono">component:vc_control</td>');
+    expect(html).toContain('<td class="mono">/quote add</td>');
+  });
+
   it("preserves filters in pagination links and form state", () => {
     const html = renderCommandAuditPage({
       ...COMMON,
