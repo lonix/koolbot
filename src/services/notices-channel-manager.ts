@@ -23,6 +23,9 @@ const CLEANUP_INTERVAL_MINUTES = 5;
 // Mirrors the `maxlength` on `Notice.content` (models/notice.ts).
 const NOTICE_CONTENT_MAX_LENGTH = 4000;
 
+// Discord API error code for "Unknown Message": the message is already gone.
+const UNKNOWN_MESSAGE_CODE = 10008;
+
 // A top-level feature gate: exactly `<feature>.enabled`. Sub-feature toggles
 // (`voicetracking.seen.enabled`) and the `core.*` logging categories have
 // three or more segments and are deliberately not listed as features.
@@ -105,6 +108,11 @@ export class NoticesChannelManager {
   private initPromise: Promise<void> | null = null;
   private noticeRun: Promise<void> | null = null;
   private noticeRerunPending = false;
+  // Status messages the bot posted or replaced but could not delete (the
+  // delete failed, typically alongside a failed save during an outage). Nothing
+  // else tracks them and the cleanup job skips bot messages, so each sync pass
+  // retries them. In memory only: a restart reposts every notice anyway.
+  private readonly orphanedMessageIds = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onConfigChange = (key: string): void => {
     // Before the manager is running, only enabling it (or pointing it at a
@@ -409,8 +417,22 @@ export class NoticesChannelManager {
     return this.noticeRun;
   }
 
+  private async retryOrphanedMessages(generation: number): Promise<void> {
+    for (const messageId of [...this.orphanedMessageIds]) {
+      if (generation !== this.generation) return;
+      // true also when Discord says the message is already gone, so an id
+      // never loops once it no longer exists.
+      if (await this.deleteNoticeMessage(messageId)) {
+        this.orphanedMessageIds.delete(messageId);
+      }
+    }
+  }
+
   private async syncBotInfoNotice(generation: number): Promise<void> {
     try {
+      await this.retryOrphanedMessages(generation);
+      if (generation !== this.generation) return;
+
       // Check if a bot info notice already exists
       const existingNotice = await Notice.findOne({
         title: "KoolBot Features & Commands",
@@ -456,12 +478,16 @@ export class NoticesChannelManager {
             existingNotice.content = previousContent;
             existingNotice.messageId = previousMessageId;
             existingNotice.updatedAt = previousUpdatedAt;
-            await this.deleteNoticeMessage(messageId);
+            if (!(await this.deleteNoticeMessage(messageId))) {
+              this.orphanedMessageIds.add(messageId);
+            }
             throw error;
           }
           logger.info("Updated bot info notice with current features");
           if (previousMessageId) {
-            await this.deleteNoticeMessage(previousMessageId);
+            if (!(await this.deleteNoticeMessage(previousMessageId))) {
+              this.orphanedMessageIds.add(previousMessageId);
+            }
           }
         }
       } else {
@@ -606,6 +632,7 @@ export class NoticesChannelManager {
 
   public async stop(): Promise<void> {
     this.generation++;
+    this.orphanedMessageIds.clear();
     if (this.reloadCallbackRegistered) {
       this.configService.removeReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = false;
@@ -625,6 +652,8 @@ export class NoticesChannelManager {
     // Let in-flight work notice the new generation and wind down, so nothing
     // is registered or posted once stop() has returned.
     await Promise.allSettled([this.initPromise, this.noticeRun]);
+    // A pass that was winding down may have remembered one more orphan.
+    this.orphanedMessageIds.clear();
   }
 
   private async getNoticesChannel(): Promise<TextChannel | null> {
@@ -684,13 +713,15 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Delete a notice message from the channel
+   * Delete a notice message from the channel. Resolves true when the message
+   * is gone (deleted now, or Discord reports it no longer exists) and false
+   * when it may still be there, so callers can retry.
    */
-  public async deleteNoticeMessage(messageId: string): Promise<void> {
+  public async deleteNoticeMessage(messageId: string): Promise<boolean> {
     try {
       const channel = await this.getNoticesChannel();
       if (!channel) {
-        return;
+        return false;
       }
 
       const message = await channel.messages.fetch(messageId);
@@ -698,8 +729,13 @@ export class NoticesChannelManager {
         await message.delete();
         logger.info(`Deleted notice message ${messageId}`);
       }
+      return true;
     } catch (error) {
+      if ((error as { code?: unknown })?.code === UNKNOWN_MESSAGE_CODE) {
+        return true;
+      }
       logger.error(`Error deleting notice message ${messageId}:`, error);
+      return false;
     }
   }
 

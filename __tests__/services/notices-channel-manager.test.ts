@@ -528,6 +528,8 @@ describe("NoticesChannelManager", () => {
       const messages = new Set<string>(["old-msg"]);
       const events: string[] = [];
       const gates: Record<string, ReturnType<typeof deferred> | undefined> = {};
+      const fetchErrors: Record<string, unknown> = {};
+      const deleteErrors: Record<string, unknown> = {};
       let nextId = 1;
       const channel = {
         send: jest.fn(async (): Promise<{ id: string }> => {
@@ -539,15 +541,19 @@ describe("NoticesChannelManager", () => {
           return { id };
         }),
         messages: {
-          fetch: jest.fn(async (id: string) => ({
-            id,
-            delete: jest.fn(async () => {
-              events.push(`delete:${id}`);
-              await gates.delete?.promise;
-              messages.delete(id);
-              events.push(`deleted:${id}`);
-            }),
-          })),
+          fetch: jest.fn(async (id: string) => {
+            if (fetchErrors[id]) throw fetchErrors[id];
+            return {
+              id,
+              delete: jest.fn(async () => {
+                if (deleteErrors[id]) throw deleteErrors[id];
+                events.push(`delete:${id}`);
+                await gates.delete?.promise;
+                messages.delete(id);
+                events.push(`deleted:${id}`);
+              }),
+            };
+          }),
         },
       };
       const notice: any = {
@@ -575,7 +581,16 @@ describe("NoticesChannelManager", () => {
         removeReloadCallback: jest.fn(),
         removeChangeListener: jest.fn(),
       };
-      return { manager, messages, events, gates, channel, notice };
+      return {
+        manager,
+        messages,
+        events,
+        gates,
+        channel,
+        notice,
+        fetchErrors,
+        deleteErrors,
+      };
     };
 
     it("posts the new message before deleting the old one", async () => {
@@ -626,6 +641,62 @@ describe("NoticesChannelManager", () => {
       expect([...messages]).toEqual(["old-msg"]);
       expect(notice.messageId).toBe("old-msg");
       expect(notice.content).toBe("stale");
+    });
+
+    it("remembers a post it could not take down and removes it on the next refresh", async () => {
+      const { manager, messages, notice, deleteErrors } = setup();
+      notice.save.mockRejectedValueOnce(new Error("mongo down") as never);
+      deleteErrors["new-msg-1"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages].sort()).toEqual(["new-msg-1", "old-msg"]);
+      expect([...manager.orphanedMessageIds]).toEqual(["new-msg-1"]);
+
+      delete deleteErrors["new-msg-1"];
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages]).toEqual(["new-msg-2"]);
+      expect(notice.messageId).toBe("new-msg-2");
+      expect(manager.orphanedMessageIds.size).toBe(0);
+    });
+
+    it("remembers an old message it could not delete after a successful swap", async () => {
+      const { manager, messages, deleteErrors } = setup();
+      deleteErrors["old-msg"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+      expect([...manager.orphanedMessageIds]).toEqual(["old-msg"]);
+
+      delete deleteErrors["old-msg"];
+      await manager.ensureBotInfoNotice();
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(manager.orphanedMessageIds.size).toBe(0);
+    });
+
+    it("forgets an orphan Discord says no longer exists, without looping", async () => {
+      const { manager, channel, fetchErrors } = setup();
+      manager.orphanedMessageIds.add("ghost");
+      fetchErrors["ghost"] = { code: 10008, message: "Unknown Message" };
+
+      await manager.ensureBotInfoNotice();
+      expect(manager.orphanedMessageIds.size).toBe(0);
+      const ghostFetches = () =>
+        channel.messages.fetch.mock.calls.filter(([id]) => id === "ghost")
+          .length;
+      expect(ghostFetches()).toBe(1);
+
+      await manager.ensureBotInfoNotice();
+      expect(ghostFetches()).toBe(1);
+    });
+
+    it("keeps retrying an orphan while the delete keeps failing, and clears the set on stop()", async () => {
+      const { manager, deleteErrors } = setup();
+      manager.orphanedMessageIds.add("stuck");
+      deleteErrors["stuck"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+      expect([...manager.orphanedMessageIds]).toEqual(["stuck"]);
+
+      await manager.stop();
+      expect(manager.orphanedMessageIds.size).toBe(0);
     });
 
     it("stop() while the delete is in flight posts nothing after stop() and leaves one message", async () => {
