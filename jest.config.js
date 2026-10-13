@@ -44,8 +44,8 @@ export default {
     global: {
       branches: 72,
       functions: 77,
-      lines: 72,
-      statements: 72,
+      lines: 79,
+      statements: 78,
     },
   },
   testTimeout: 10000,
