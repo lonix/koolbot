@@ -66,6 +66,7 @@ import { ModerationService } from "./services/moderation-service.js";
 import { RaidProtectionService } from "./services/raid-protection-service.js";
 import { ModerationCaseReviewService } from "./services/moderation-case-review-service.js";
 import { WizardService } from "./services/wizard-service.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "./utils/guild-members-intent.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createUserWebRouter,
@@ -837,7 +838,7 @@ async function initializeServices(): Promise<void> {
     ) {
       if (!env.guildMembersIntent) {
         logger.warn(
-          "namehistory.enabled is on but GUILD_MEMBERS_INTENT is not set: server nickname changes are not recorded (usernames and display names still are). Enable the Server Members Intent in the Discord developer portal and set GUILD_MEMBERS_INTENT=true to record nicknames.",
+          `namehistory.enabled is on but the bot is not requesting the Server Members Intent: server nickname changes are not recorded (usernames and display names still are). ${GUILD_MEMBERS_INTENT_HOWTO}`,
         );
       }
     }

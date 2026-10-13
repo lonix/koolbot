@@ -1,5 +1,6 @@
 import type { Client, GuildBasedChannel } from "discord.js";
 import { env } from "../config/env.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
@@ -142,7 +143,7 @@ function renderNotices(p: RulesPageProps): string {
   }
   if (p.intentMissing) {
     out.push(
-      `<div class="notice warn" role="status">The Server Members intent is off (<code>GUILD_MEMBERS_INTENT</code>), so the member list can't be read. Granting the role to existing members and recording current holders won't work until it is on.</div>`,
+      `<div class="notice warn" role="status">The Server Members intent is off, so the member list can't be read. Granting the role to existing members and recording current holders won't work until it is on. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}</div>`,
     );
   }
   if (p.unavailable) {

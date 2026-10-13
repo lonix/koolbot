@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import {
   DISCORD_MESSAGE_CONTENT_LIMIT,
   truncateText,
@@ -97,7 +98,7 @@ export class WelcomeService {
       .catch(() => false);
     if (!enabled || env.guildMembersIntent) return false;
     logger.warn(
-      "welcome.enabled is on but GUILD_MEMBERS_INTENT is not set: Discord does not deliver member-join events, so no welcome messages will be posted. Enable the Server Members Intent in the Discord developer portal and set GUILD_MEMBERS_INTENT=true.",
+      `welcome.enabled is on but the bot is not requesting the Server Members Intent: Discord does not deliver member-join events, so no welcome messages will be posted. ${GUILD_MEMBERS_INTENT_HOWTO}`,
     );
     return true;
   }
