@@ -100,7 +100,7 @@ export function renderAdoptionHistoryPage(
         : props.snapshots.length === 0
           ? `<p class="muted">Nothing has been applied yet. Snapshots appear here after you apply a plan from Role Groups, Rules or Channel Claims.</p>`
           : `<table class="adoption-diff">
-  <thead><tr><th>When</th><th>Status</th><th>Changes</th><th>Applied by</th><th></th></tr></thead>
+  <thead><tr><th>When</th><th>Status</th><th>Changes</th><th>Applied by</th><th><span class="visually-hidden">Action</span></th></tr></thead>
   <tbody>${props.snapshots.map(row).join("")}</tbody>
 </table>${paging}`;
   const body = `
@@ -145,8 +145,11 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
     .join("");
   // Only roles this restore can still reach: a role.create already rolled back
   // by an earlier restore is not revisited, so it must not be offered.
-  const roles = s.revertibleCreatedRoles
-    ? `<label><input type="checkbox" name="deleteCreatedRoles" value="1"> Also delete the ${s.revertibleCreatedRoles} role(s) this plan created. Unticked, they are left in place (members who hold them keep them).</label>`
+  // An interrupted role creation counts too: if Discord did create the role the
+  // restore promotes the step, and only then can the option delete it.
+  const reachableRoles = s.revertibleCreatedRoles + s.uncertainCreatedRoles;
+  const roles = reachableRoles
+    ? `<label><input type="checkbox" name="deleteCreatedRoles" value="1"> Also delete the ${reachableRoles} role(s) this plan created${s.uncertainCreatedRoles ? ` (${s.uncertainCreatedRoles} of them only if the restore finds the role on the server)` : ""}. Unticked, they are left in place (members who hold them keep them).</label>`
     : "";
   const note = s.destructive
     ? `<div class="notice warn" role="status">${escapeHtml(props.destructiveNote)}</div>`
@@ -168,6 +171,7 @@ ${note}
 <div class="card">
   <h2>What will be reverted</h2>
   ${items ? `<ul>${items}</ul>` : `<p class="muted">Nothing recorded as applied is left to revert in this snapshot.</p>`}
+  ${s.dependentRepairs ? `<p class="notice warn" role="status">${s.dependentRepairs} follow-up repair(s) from an earlier restore are still pending (permissions on recreated roles, channels placed back under recreated categories). Restoring again retries them.</p>` : ""}
   ${s.interrupted ? `<p class="notice warn" role="status">${s.interrupted} more step(s) were interrupted (started but not recorded as finished, or in flight). The restore checks Discord first and also reverts any that did go through.</p>` : ""}
   ${form}
 </div>

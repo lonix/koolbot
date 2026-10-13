@@ -3,7 +3,11 @@ import {
   AdoptionSnapshot,
   type AdoptionSnapshotStatus,
 } from "../models/adoption-snapshot.js";
-import { remainingReversibleIds } from "./adoption-rollback-selection.js";
+import {
+  pendingDependentRepairs,
+  remainingReversibleIds,
+  type BaselineChannelRefs,
+} from "./adoption-rollback-selection.js";
 
 /**
  * Read-only listing of saved adoption snapshots for the Web UI history view
@@ -45,6 +49,13 @@ export interface SnapshotDetail extends SnapshotSummary {
   interrupted: number;
   /** Still-reversible `role.create` steps: what "delete created roles" can reach. */
   revertibleCreatedRoles: number;
+  /**
+   * Interrupted `role.create` steps: if Discord did create the role the restore
+   * promotes the step, and only then can the option delete it.
+   */
+  uncertainCreatedRoles: number;
+  /** Follow-up repairs (overwrites on recreated roles, reparenting) still pending. */
+  dependentRepairs: number;
 }
 
 export interface SnapshotPage {
@@ -73,6 +84,7 @@ interface RawOp {
 interface RawPlanOp {
   id?: string;
   type?: string;
+  channelId?: string | null;
   summary?: string;
   class?: string;
 }
@@ -92,6 +104,13 @@ interface RawSnapshot {
   /** Ids of operations with in-flight member grants (never the member ids). */
   inflightOps?: string[];
   rolledBackOps?: string[];
+  restoredRoles?: { oldId?: string }[];
+  restoredChannels?: { oldId?: string }[];
+  baselineChannels?: {
+    id?: string;
+    parentId?: string | null;
+    roleOverwriteIds?: string[];
+  }[];
 }
 
 function summarise(doc: RawSnapshot): SnapshotSummary {
@@ -186,8 +205,48 @@ export function snapshotPipeline(
             in: {
               id: "$$o.id",
               type: "$$o.type",
+              channelId: "$$o.channelId",
               summary: "$$o.summary",
               class: "$$o.class",
+            },
+          },
+        },
+        // Ids only, no member overwrites: just enough to find the repairs a
+        // rollback still owes for recreated roles and categories.
+        restoredRoles: {
+          $map: {
+            input: orEmpty("$restoredRoles"),
+            as: "r",
+            in: { oldId: "$$r.oldId" },
+          },
+        },
+        restoredChannels: {
+          $map: {
+            input: orEmpty("$restoredChannels"),
+            as: "r",
+            in: { oldId: "$$r.oldId" },
+          },
+        },
+        baselineChannels: {
+          $map: {
+            input: orEmpty("$baseline.channels"),
+            as: "c",
+            in: {
+              id: "$$c.id",
+              parentId: "$$c.parentId",
+              roleOverwriteIds: {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: orEmpty("$$c.overwrites"),
+                      as: "w",
+                      cond: { $eq: ["$$w.type", "role"] },
+                    },
+                  },
+                  as: "w",
+                  in: "$$w.id",
+                },
+              },
             },
           },
         },
@@ -249,12 +308,14 @@ export async function getSnapshotDetail(
   // Uncertain steps: not yet counted as reversible, but the restore may promote
   // them after checking Discord. The page says so instead of under-promising.
   const uncertain = new Set<string>();
+  const uncertainRoleCreates = new Set<string>();
   for (const o of doc.operations ?? []) {
     const id = o.opId ?? "";
     if (remaining.has(id) || rolledBack.has(id) || o.status === "applied")
       continue;
     if (o.startedAt && RECONCILED_TYPES.has(typeOf.get(id) ?? "")) {
       uncertain.add(id);
+      if (typeOf.get(id) === "role.create") uncertainRoleCreates.add(id);
     }
   }
   for (const id of doc.inflightOps ?? []) {
@@ -263,6 +324,24 @@ export async function getSnapshotDetail(
   return {
     ...summarise(doc),
     interrupted: uncertain.size,
+    uncertainCreatedRoles: uncertainRoleCreates.size,
+    dependentRepairs: pendingDependentRepairs({
+      restoredRoleOldIds: (doc.restoredRoles ?? []).map((r) => r.oldId ?? ""),
+      restoredChannelOldIds: (doc.restoredChannels ?? []).map(
+        (r) => r.oldId ?? "",
+      ),
+      baselineChannels: (doc.baselineChannels ?? []).map(
+        (c): BaselineChannelRefs => ({
+          id: c.id ?? "",
+          parentId: c.parentId ?? null,
+          roleOverwriteIds: c.roleOverwriteIds ?? [],
+        }),
+      ),
+      deletedChannelIds: (doc.planOps ?? []).flatMap((o) =>
+        o.type === "channel.delete" && o.channelId ? [o.channelId] : [],
+      ),
+      rolledBackOps: doc.rolledBackOps ?? [],
+    }).length,
     revertibleCreatedRoles: [...remaining].filter(
       (id) => typeOf.get(id) === "role.create",
     ).length,

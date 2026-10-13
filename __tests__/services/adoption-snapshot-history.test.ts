@@ -77,7 +77,9 @@ describe("adoption snapshot history", () => {
   it("never selects member ids, grants or the baseline", () => {
     const text = JSON.stringify(snapshotPipeline({ guildId: "g" }));
     expect(text).not.toContain("memberIds");
-    expect(text).not.toContain("baseline");
+    // Only channel ids, parents and role-overwrite ids are read from the baseline.
+    expect(text.match(/\$baseline[.\w]*/g)).toEqual(["$baseline.channels"]);
+    expect(text).not.toContain('$baseline"');
     const project = (
       snapshotPipeline({ guildId: "g" }).find((s) => "$project" in s) as {
         $project: Record<string, any>;
@@ -85,6 +87,7 @@ describe("adoption snapshot history", () => {
     ).$project;
     // Three fields per planned operation, nothing else.
     expect(Object.keys(project.planOps.$map.in).sort()).toEqual([
+      "channelId",
       "class",
       "id",
       "summary",
@@ -96,10 +99,17 @@ describe("adoption snapshot history", () => {
       "status",
     ]);
     // Grants are reduced to the operation names; the granted ids stay put.
+    // The dependent-repair inputs are ids only: no member overwrites.
+    expect(Object.keys(project.baselineChannels.$map.in).sort()).toEqual([
+      "id",
+      "parentId",
+      "roleOverwriteIds",
+    ]);
     expect(project.grantedOps.$map.in).toBe("$$p.k");
     expect(project.inflightOps.$map.in).toBe("$$p.k");
     expect(project.memberProgress).toBeUndefined();
     expect(project.plan).toBeUndefined();
+    expect(project.baseline).toBeUndefined();
   });
 
   it("lists exactly what a rollback would still revert", async () => {
@@ -173,6 +183,57 @@ describe("adoption snapshot history", () => {
       doc({ planOps, operations, rolledBackOps: ["r1"], createdRoles: 2 }),
     ]);
     expect((await getSnapshotDetail("g1", ID))?.revertibleCreatedRoles).toBe(1);
+  });
+
+  it("counts an interrupted role creation as reachable by the delete-roles option", async () => {
+    mockAggregate.mockResolvedValue([
+      doc({
+        operations: [{ opId: "r1", status: "pending", startedAt: new Date() }],
+        planOps: [
+          { id: "r1", type: "role.create", summary: "R", class: "additive" },
+        ],
+        grantedOps: [],
+        inflightOps: [],
+        rolledBackOps: [],
+      }),
+    ]);
+    const d = await getSnapshotDetail("g1", ID);
+    expect(d?.revertibleCreatedRoles).toBe(0);
+    expect(d?.uncertainCreatedRoles).toBe(1);
+  });
+
+  it("reports follow-up repairs still owed after every plan step succeeded", async () => {
+    mockAggregate.mockResolvedValue([
+      doc({
+        status: "rollback_partial",
+        operations: [{ opId: "x", status: "applied" }],
+        planOps: [
+          { id: "x", type: "role.delete", summary: "X", class: "destructive" },
+          {
+            id: "y",
+            type: "channel.delete",
+            channelId: "gone",
+            summary: "Y",
+            class: "destructive",
+          },
+        ],
+        grantedOps: [],
+        inflightOps: [],
+        rolledBackOps: ["x", "c1:oldrole"],
+        restoredRoles: [{ oldId: "oldrole" }],
+        restoredChannels: [{ oldId: "oldcat" }],
+        baselineChannels: [
+          { id: "c1", parentId: null, roleOverwriteIds: ["oldrole"] },
+          { id: "c2", parentId: "oldcat", roleOverwriteIds: ["oldrole"] },
+          // Deleted by the plan, so never repaired.
+          { id: "gone", parentId: "oldcat", roleOverwriteIds: ["oldrole"] },
+        ],
+      }),
+    ]);
+    const d = await getSnapshotDetail("g1", ID);
+    expect(d?.operations).toEqual([]);
+    // c1's overwrite is done; c2's overwrite and c2's reparenting are pending.
+    expect(d?.dependentRepairs).toBe(2);
   });
 
   it("answers null for a missing snapshot and never queries a malformed id", async () => {

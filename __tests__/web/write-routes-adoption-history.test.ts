@@ -93,6 +93,8 @@ const summary = (over: Record<string, unknown> = {}) => ({
   createdRoles: 1,
   revertibleCreatedRoles: 1,
   interrupted: 0,
+  uncertainCreatedRoles: 0,
+  dependentRepairs: 0,
   operations: [{ summary: "Make #news read-only", destructive: false }],
   ...over,
 });

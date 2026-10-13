@@ -80,6 +80,8 @@ describe("restore confirm page", () => {
     ...snap(),
     operations: [{ summary: "Delete #old", destructive: true }],
     interrupted: 0,
+    uncertainCreatedRoles: 0,
+    dependentRepairs: 0,
     revertibleCreatedRoles: 2,
     ...over,
   });
@@ -125,6 +127,44 @@ describe("restore confirm page", () => {
         destructiveNote: "n",
       }),
     ).not.toContain("interrupted");
+  });
+
+  it("offers deleting an interrupted role creation, worded as conditional on finding the role", () => {
+    const html = renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({
+        createdRoles: 1,
+        revertibleCreatedRoles: 0,
+        uncertainCreatedRoles: 1,
+        interrupted: 1,
+      }),
+      destructiveNote: "n",
+    });
+    expect(html).toContain('name="deleteCreatedRoles"');
+    expect(html).toContain("delete the 1 role(s)");
+    expect(html).toContain("only if the restore finds the role");
+  });
+
+  it("reports pending follow-up repairs even when no plan step remains", () => {
+    const html = renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({
+        operations: [],
+        revertibleCreatedRoles: 0,
+        dependentRepairs: 3,
+        status: "rollback_partial",
+      }),
+      destructiveNote: "n",
+    });
+    expect(html).toContain("3 follow-up repair(s)");
+    expect(html).toContain("Restore this snapshot");
+    expect(
+      renderRestoreConfirmPage({
+        ...base,
+        snapshot: detail(),
+        destructiveNote: "n",
+      }),
+    ).not.toContain("follow-up repair");
   });
 
   it("omits the note and the role option when they don't apply, and blocks a finished snapshot", () => {

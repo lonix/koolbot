@@ -36,3 +36,47 @@ export function remainingReversibleIds(
     (id) => !done.has(id),
   );
 }
+
+export interface BaselineChannelRefs {
+  id: string;
+  parentId: string | null;
+  /** Ids of the role overwrites the channel had before the apply. */
+  roleOverwriteIds: readonly string[];
+}
+
+/**
+ * Follow-up repairs a rollback retries after the plan's own steps, recorded in
+ * `rolledBackOps` under synthetic keys: `${channelId}:${oldRoleId}` (an
+ * overwrite naming a recreated role) and `parent:${childId}` (a child of a
+ * recreated category). Mirrors the two loops at the end of
+ * `ServerAdoptionService.rollback`; they only exist once an earlier rollback
+ * recreated a role or category. Returns the keys still pending.
+ */
+export function pendingDependentRepairs(input: {
+  restoredRoleOldIds: readonly string[];
+  restoredChannelOldIds: readonly string[];
+  baselineChannels: readonly BaselineChannelRefs[];
+  deletedChannelIds: readonly string[];
+  rolledBackOps: readonly string[];
+}): string[] {
+  const done = new Set(input.rolledBackOps);
+  const deleted = new Set(input.deletedChannelIds);
+  const pending: string[] = [];
+  for (const oldId of input.restoredRoleOldIds) {
+    for (const channel of input.baselineChannels) {
+      if (deleted.has(channel.id)) continue;
+      const key = `${channel.id}:${oldId}`;
+      if (channel.roleOverwriteIds.includes(oldId) && !done.has(key)) {
+        pending.push(key);
+      }
+    }
+  }
+  for (const oldId of input.restoredChannelOldIds) {
+    for (const child of input.baselineChannels) {
+      if (child.parentId !== oldId || deleted.has(child.id)) continue;
+      const key = `parent:${child.id}`;
+      if (!done.has(key)) pending.push(key);
+    }
+  }
+  return pending;
+}
