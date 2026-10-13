@@ -30,6 +30,8 @@ describe("VCControlButtonHandler", () => {
     removeWaitingRoom: jest.Mock;
     rebuildControlPanel: jest.Mock;
     getUserChannel: jest.Mock;
+    isRoomOwner: jest.Mock;
+    runAsRoomOwner: jest.Mock;
   };
 
   beforeEach(() => {
@@ -44,6 +46,25 @@ describe("VCControlButtonHandler", () => {
       removeWaitingRoom: jest.fn().mockResolvedValue(undefined),
       rebuildControlPanel: jest.fn().mockResolvedValue(undefined),
       getUserChannel: jest.fn().mockReturnValue({ id: "channel-id" }),
+      // Live ownership, derived from the same registry mock as getUserChannel
+      runAsRoomOwner: jest.fn(
+        async (
+          userId: string,
+          channelId: string,
+          work: () => Promise<void>,
+        ) => {
+          if (!mockManagerInstance.isRoomOwner(userId, channelId)) return false;
+          await work();
+          return true;
+        },
+      ),
+      isRoomOwner: jest.fn(
+        (userId: string, channelId: string) =>
+          (
+            mockManagerInstance.getUserChannel(userId) as
+              { id: string } | undefined
+          )?.id === channelId,
+      ),
     };
 
     (mockVoiceChannelManager.getInstance as unknown as jest.Mock) = jest.fn(
@@ -91,6 +112,9 @@ describe("VCControlButtonHandler", () => {
         displayName: "OwnerUser",
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
+      deferReply: jest.fn().mockResolvedValue(undefined),
+      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      editReply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       message: {
         edit: jest.fn().mockResolvedValue(undefined),
@@ -110,9 +134,134 @@ describe("VCControlButtonHandler", () => {
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: expect.stringContaining("Only the channel owner"),
+          content: expect.stringContaining("Only the current channel owner"),
         }),
       );
+    });
+  });
+
+  describe("Live ownership (#1143)", () => {
+    it("rejects the previous owner whose customId still names them", async () => {
+      // Ownership moved to someone else: the registry no longer maps this user
+      // to the channel, but the (stale) button still carries their id.
+      mockManagerInstance.getUserChannel.mockReturnValue(undefined);
+      mockInteraction.customId = "vc_control_waitingroom_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("Only the current channel owner"),
+        }),
+      );
+      expect(mockManagerInstance.createWaitingRoom).not.toHaveBeenCalled();
+      expect(mockManagerInstance.toggleLive).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stale rename button before opening the modal", async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue({
+        id: "some-other-channel",
+      });
+      mockInteraction.customId = "vc_control_name_channel-id_owner-id";
+      (mockInteraction as any).showModal = jest.fn();
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect((mockInteraction as any).showModal).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stale privacy button without touching permissions", async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue(undefined);
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(
+        (mockChannel.permissionOverwrites as any).create,
+      ).not.toHaveBeenCalled();
+      expect(
+        (mockChannel.permissionOverwrites as any).delete,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Transfer racing a mutation (#1143)", () => {
+    it("refuses privacy when a transfer lands after the preflight but before the locked mutation", async () => {
+      // Preflight sees the clicker as owner; by the time the room lock is
+      // acquired, a transfer has moved the room.
+      mockManagerInstance.isRoomOwner
+        .mockReturnValueOnce(true)
+        .mockReturnValue(false);
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(
+        (mockChannel.permissionOverwrites as any).create,
+      ).not.toHaveBeenCalled();
+      expect(
+        (mockChannel.permissionOverwrites as any).delete,
+      ).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("current channel owner"),
+        }),
+      );
+    });
+
+    it("refuses go-live and waiting room under the same race", async () => {
+      for (const action of ["live", "waitingroom"]) {
+        mockManagerInstance.isRoomOwner
+          .mockReturnValueOnce(true)
+          .mockReturnValue(false);
+        mockInteraction.customId = `vc_control_${action}_channel-id_owner-id`;
+        await handleVCControlButton(mockInteraction as ButtonInteraction);
+      }
+      expect(mockManagerInstance.toggleLive).not.toHaveBeenCalled();
+      expect(mockManagerInstance.createWaitingRoom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Deferral and let-in race (#1143)", () => {
+    it("defers before the room lock is awaited for privacy/live/waitingroom/letin", async () => {
+      const ids = [
+        "vc_control_privacy_channel-id_owner-id",
+        "vc_control_live_channel-id_owner-id",
+        "vc_control_waitingroom_channel-id_owner-id",
+        "vc_control_letin_channel-id_waiting-user-id_owner-id",
+      ];
+      for (const id of ids) {
+        const order: string[] = [];
+        (mockInteraction.deferReply as jest.Mock) = jest
+          .fn()
+          .mockImplementation(async () => {
+            order.push("defer");
+          });
+        mockManagerInstance.runAsRoomOwner.mockImplementationOnce(async () => {
+          order.push("lock");
+          return true;
+        });
+        mockInteraction.customId = id;
+        await handleVCControlButton(mockInteraction as ButtonInteraction);
+        expect(order).toEqual(["defer", "lock"]);
+      }
+    });
+
+    it("moves nobody when a transfer lands after the let-in preflight", async () => {
+      const setChannel = jest.fn();
+      (mockGuild.members!.fetch as jest.Mock).mockResolvedValue({
+        displayName: "WaitingUser",
+        voice: { channelId: "waiting-room-id", setChannel },
+      } as never);
+      mockManagerInstance.getWaitingRoom.mockReturnValue("waiting-room-id");
+      // Ownership is only re-checked inside the lock
+      mockManagerInstance.isRoomOwner.mockReturnValue(false);
+      mockInteraction.customId =
+        "vc_control_letin_channel-id_waiting-user-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(setChannel).not.toHaveBeenCalled();
     });
   });
 
