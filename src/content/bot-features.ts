@@ -6,7 +6,8 @@
  * This table only decorates the list: which features appear is derived from
  * `defaultConfig`, so a feature shipped without an entry here still shows up
  * (with a generic emoji, a label built from its prefix and the key's Settings
- * description). Add an entry to give a new feature nicer copy.
+ * description). Add an entry to give a new feature nicer copy: the test in
+ * `notices-channel-manager.test.ts` fails when a listed feature has none.
  */
 
 export interface BotFeatureInfo {
@@ -126,6 +127,21 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
     emoji: "🚦",
     label: "Rate Limiting",
     description: "Commands are rate-limited to keep things fair",
+  },
+  welcome: {
+    emoji: "👋",
+    label: "Welcome",
+    description: "New members get a welcome message when they join",
+  },
+  rules: {
+    emoji: "📜",
+    label: "Server Rules",
+    description: "Accept the server rules with a button to unlock the rest",
+  },
+  namehistory: {
+    emoji: "🪪",
+    label: "Name History",
+    description: "See what a member used to be called with `/aka @user`",
   },
   ping: {
     emoji: "🏓",

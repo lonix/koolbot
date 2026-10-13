@@ -32,12 +32,27 @@ const FEATURE_ENABLED_KEY = /^([a-z0-9_]+)\.enabled$/;
  * Every top-level `<feature>.enabled` key in the schema, in schema order.
  * Read from `defaultConfig` on each call so the list can never drift from
  * the features that actually exist.
+ *
+ * A key only counts as a feature gate when it lives in the category of its
+ * own prefix (`quotes.enabled` in `quotes`). A toggle that belongs to another
+ * feature's category (`aka.enabled`, the /aka sub-toggle of `namehistory`,
+ * #1119) is not a feature of its own. This is the same rule
+ * `pickCascadeMasterKey` uses to find a category's master switch.
  */
 export function getFeatureEnabledKeys(): string[] {
-  return Object.keys(defaultConfig).filter((key) =>
-    FEATURE_ENABLED_KEY.test(key),
-  );
+  const meta = settingsMetadata as Record<
+    string,
+    { category?: string } | undefined
+  >;
+  return Object.keys(defaultConfig).filter((key) => {
+    const feature = FEATURE_ENABLED_KEY.exec(key)?.[1];
+    return feature !== undefined && meta[key]?.category === feature;
+  });
 }
+
+// Settings saves arrive one key at a time (the Web UI and the wizard write
+// each key separately), so wait for the burst to settle before regenerating.
+const FEATURE_NOTICE_REFRESH_DEBOUNCE_MS = 2000;
 
 /**
  * One notice line for an enabled feature. Uses the copy in `BOT_FEATURES`
@@ -85,6 +100,43 @@ export class NoticesChannelManager {
     await this.ensureBotInfoNotice();
   };
 
+  // Regenerates the features notice when a feature gate is saved from the
+  // Web UI. Those saves call `ConfigService.set()` only and never fire the
+  // reload callbacks, so without this the notice kept listing a feature until
+  // the next `/config reload` or restart (#1120).
+  private changeListenerRegistered = false;
+  private initializing = false;
+  // stop() bumps the generation; work started under an older one bails out
+  // at its next checkpoint instead of registering jobs or posting after
+  // shutdown. The in-flight promises let stop() wait for that to happen.
+  private generation = 0;
+  private initPromise: Promise<void> | null = null;
+  private noticeRun: Promise<void> | null = null;
+  private noticeRerunPending = false;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly onConfigChange = (key: string): void => {
+    // Before the manager is running, only enabling it (or pointing it at a
+    // channel) matters; once running, feature gates change the notice.
+    const relevant = this.isInitialized
+      ? key === "notices.enabled" || getFeatureEnabledKeys().includes(key)
+      : key === "notices.enabled" || key === "notices.channel_id";
+    if (!relevant) return;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      // Not running yet (started with notices off): bring it up now that
+      // the setting may be on. When already running, an off value makes
+      // onConfigReload a no-op, so a disabled notice is never refreshed.
+      const task = this.isInitialized
+        ? this.onConfigReload()
+        : this.initialize();
+      void task.catch((error) => {
+        logger.error("Error refreshing features notice after change:", error);
+      });
+    }, FEATURE_NOTICE_REFRESH_DEBOUNCE_MS);
+    this.refreshTimer.unref?.();
+  };
+
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
@@ -115,15 +167,38 @@ export class NoticesChannelManager {
       return;
     }
 
+    if (this.initializing) return;
+    this.initializing = true;
+    const generation = this.generation;
+    this.initPromise = this.runInitialize(generation);
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+      this.initializing = false;
+    }
+  }
+
+  private async runInitialize(generation: number): Promise<void> {
+    const stopped = (): boolean => generation !== this.generation;
+    // Subscribe before the enabled check so an instance that starts with
+    // notices off still hears `notices.enabled` being turned on in the Web UI.
+    if (!this.changeListenerRegistered) {
+      this.configService.addChangeListener(this.onConfigChange);
+      this.changeListenerRegistered = true;
+    }
+
     logger.info("Initializing notices channel manager...");
 
     try {
       await waitForClientReady(this.client, "NoticesChannelManager");
+      if (stopped()) return;
 
       const enabled = await this.configService.getBoolean(
         "notices.enabled",
         false,
       );
+      if (stopped()) return;
       if (!enabled) {
         logger.info("Notices system is disabled");
         return;
@@ -142,6 +217,7 @@ export class NoticesChannelManager {
 
       // Verify channel exists
       const channel = await this.getNoticesChannel();
+      if (stopped()) return;
       if (!channel) {
         logger.error(`Notices channel with ID ${channelId} not found`);
         return;
@@ -154,15 +230,19 @@ export class NoticesChannelManager {
 
       // Setup strict permissions on the channel
       await this.setupChannelPermissions(channel);
+      if (stopped()) return;
 
       // Ensure header post exists
       await this.ensureHeaderPost(channel);
+      if (stopped()) return;
 
       // Ensure bot info notice exists
       await this.ensureBotInfoNotice();
+      if (stopped()) return;
 
       // Sync all notices to channel
       await this.syncNotices();
+      if (stopped()) return;
 
       // Start cleanup job to remove non-bot messages
       this.startCleanupJob();
@@ -315,6 +395,29 @@ export class NoticesChannelManager {
    * This auto-generates a notice listing bot features with examples
    */
   private async ensureBotInfoNotice(): Promise<void> {
+    // One run at a time: two overlapping runs could both delete and repost
+    // the notice and leave an orphan message. A call that arrives mid-run
+    // asks for exactly one more pass once the current one finishes.
+    if (this.noticeRun) {
+      this.noticeRerunPending = true;
+      return this.noticeRun;
+    }
+    const generation = this.generation;
+    this.noticeRun = (async (): Promise<void> => {
+      try {
+        do {
+          this.noticeRerunPending = false;
+          await this.syncBotInfoNotice(generation);
+        } while (this.noticeRerunPending && generation === this.generation);
+      } finally {
+        this.noticeRun = null;
+        this.noticeRerunPending = false;
+      }
+    })();
+    return this.noticeRun;
+  }
+
+  private async syncBotInfoNotice(generation: number): Promise<void> {
     try {
       // Check if a bot info notice already exists
       const existingNotice = await Notice.findOne({
@@ -324,6 +427,7 @@ export class NoticesChannelManager {
 
       // Generate current bot info content
       const botInfoContent = await this.generateBotInfoContent();
+      if (generation !== this.generation) return;
 
       if (existingNotice) {
         // Update existing notice if content changed
@@ -480,14 +584,26 @@ export class NoticesChannelManager {
   }
 
   public async stop(): Promise<void> {
+    this.generation++;
     if (this.reloadCallbackRegistered) {
       this.configService.removeReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = false;
+    }
+    if (this.changeListenerRegistered) {
+      this.configService.removeChangeListener(this.onConfigChange);
+      this.changeListenerRegistered = false;
+    }
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
     }
     if (this.cleanupJob) {
       this.cleanupJob.stop();
       logger.info("Stopped notices channel cleanup job");
     }
+    // Let in-flight work notice the new generation and wind down, so nothing
+    // is registered or posted once stop() has returned.
+    await Promise.allSettled([this.initPromise, this.noticeRun]);
   }
 
   private async getNoticesChannel(): Promise<TextChannel | null> {
