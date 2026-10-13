@@ -253,9 +253,14 @@ by editing `.env` and restarting the container.
 | `CLIENT_ID`            | yes      | `1234567890123456789`                  |
 | `GUILD_ID`             | yes      | `9876543210987654321`                  |
 | `MONGODB_URI`          | yes      | `mongodb://mongodb:27017/koolbot`      |
-| `NODE_ENV`             | no       | `production` (default) / `development` |
+| `NODE_ENV`             | no       | `development` (unset) / `production`   |
 | `DEBUG`                | no       | `false` (default) / `true`             |
 | `GUILD_MEMBERS_INTENT` | no       | `false` (default) / `true`             |
+
+`NODE_ENV` defaults to `development` when unset (`src/config/env.ts`). The published Docker image
+(`Dockerfile`) sets `NODE_ENV=production`, and `.env.example` ships `NODE_ENV=production`, so containers run as
+production unless you override it; a bare `npm run dev` or `node dist/index.js` does not. Set it to `production`
+for any real deployment.
 
 ### Required when the Web UI is enabled
 
@@ -422,9 +427,9 @@ With this, `WEBUI_BASE_URL=http://your-host:3000`.
 The Web UI decides the session cookie's `Secure` flag from the scheme of
 `WEBUI_BASE_URL` (see `shouldUseSecureCookies()` in `src/web/cookies.ts`):
 `https://` sets it, `http://` does not, so a plain-HTTP `WEBUI_BASE_URL`
-such as `http://your-host:3000` works regardless of `NODE_ENV`. Only when
-`WEBUI_BASE_URL` is missing or malformed does it fall back to
-`NODE_ENV=production`. Keep `WEBUI_BASE_URL` matching the URL you actually
+such as `http://your-host:3000` works regardless of `NODE_ENV`. Startup
+refuses to enable the Web UI when `WEBUI_BASE_URL` does not start with a lower-case `http://` or `https://`
+(`validateWebUIEnvVars`), so a missing or malformed value never silently falls back to `NODE_ENV`. Keep `WEBUI_BASE_URL` matching the URL you actually
 browse to, or the browser will drop the cookie and every page click will
 log you back out.
 
@@ -1933,8 +1938,8 @@ flags its session cookie `Secure` when `WEBUI_BASE_URL` starts with
   `WEBUI_BASE_URL` starts with `http://`.
 
 A mismatch between `WEBUI_BASE_URL` and the URL in your browser is the
-usual cause. `NODE_ENV` only matters when `WEBUI_BASE_URL` is missing or
-malformed.
+usual cause. `NODE_ENV` is not used for the cookie flag once `WEBUI_BASE_URL` is valid,
+and startup rejects an invalid one.
 
 ### Behind a proxy, rate limits trigger on the proxy's IP
 
