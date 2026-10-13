@@ -47,7 +47,6 @@ export async function execute(
         interaction,
         activeSession.channelId,
         activeSession.channelName,
-        "hide",
       );
       await interaction.editReply(
         channelName === HIDDEN_CHANNEL_LABEL

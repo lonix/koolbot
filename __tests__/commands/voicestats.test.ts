@@ -214,8 +214,26 @@ describe("VoiceStats Command", () => {
       startTime: new Date(base + i * day),
       endTime: new Date(base + i * day + 3600 * 1000),
       duration: 3600,
+      channelId: `ch-${i + 1}`,
       channelName: `session-${i + 1}`,
     }));
+
+    // Every session's channel exists and the caller can view it (#1153).
+    const viewableGuild = {
+      channels: {
+        cache: new Map(
+          sessions.map((s) => [
+            s.channelId,
+            { permissionsFor: () => ({ has: () => true }) },
+          ]),
+        ),
+      },
+    };
+    const makeViewerInteraction = (): MockInteraction =>
+      ({
+        ...makeUserInteraction(),
+        guild: viewableGuild,
+      }) as unknown as MockInteraction;
 
     function recentLines(editReply: jest.Mock): string[] {
       const content = editReply.mock.calls[0][0] as string;
@@ -234,7 +252,7 @@ describe("VoiceStats Command", () => {
         sessions,
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
@@ -248,7 +266,7 @@ describe("VoiceStats Command", () => {
     });
 
     // #1153: do not name a channel the caller cannot view.
-    it("hides the name of a recent-session channel the caller cannot view", async () => {
+    it("hides recent-session channel names the caller cannot view or that no longer exist", async () => {
       mockGetUserStats.mockResolvedValue({
         userId: "user-1",
         username: "alice",
@@ -278,8 +296,9 @@ describe("VoiceStats Command", () => {
       expect(content).not.toContain("Staff Room");
       expect(content).toContain("• a voice channel: 1h 0m");
       expect(content).toContain("• General: 1h 0m");
-      // A deleted channel cannot be checked, so its stored name stays.
-      expect(content).toContain("• Old Room: 1h 0m");
+      // A deleted channel cannot be checked, so it fails closed too.
+      expect(content).not.toContain("Old Room");
+      expect(content.match(/• a voice channel: 1h 0m/g)).toHaveLength(2);
     });
 
     it("orders by startTime even when the stored array is not chronological", async () => {
@@ -302,7 +321,7 @@ describe("VoiceStats Command", () => {
         sessions: shuffled,
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([
@@ -325,11 +344,15 @@ describe("VoiceStats Command", () => {
         lastSeen: new Date(base + day),
         sessions: [
           sessions[0],
-          { startTime: new Date(base + day), channelName: "live" },
+          {
+            startTime: new Date(base + day),
+            channelId: "ch-1",
+            channelName: "live",
+          },
         ],
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([

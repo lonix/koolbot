@@ -237,7 +237,8 @@ Then reload commands.
 
 **Private channels:** if the user is in a voice channel you cannot view, the
 reply says "a voice channel" instead of naming it. `/voicestats` applies the
-same rule to its Recent Sessions list.
+same rule to its Recent Sessions list, which also shows "a voice channel" for
+rooms that have since been deleted.
 
 ---
 

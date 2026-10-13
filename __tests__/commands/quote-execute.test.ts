@@ -444,7 +444,12 @@ describe("/quote admin subcommands", () => {
     );
     await expect(execute(it_)).resolves.toBeUndefined();
     const edit = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(edit.content).toContain("Missing Access");
+    expect(edit.content).toContain("Failed to rebuild the quote channel");
+    // #1153: the raw Discord error text stays in the log.
+    expect(edit.content).not.toContain("Missing Access");
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.stringContaining("Missing Access"),
+    );
   });
 });
 

@@ -10,6 +10,7 @@ import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { describeDiscordError } from "../utils/log-sanitize.js";
 import { UserFacingError } from "../utils/user-facing-error.js";
 
 // Hard cap on a restore upload. A quote backup is small text; this stops a
@@ -474,10 +475,16 @@ async function handleReset(
       } re-posted with their saved vote tallies.`,
     });
   } catch (error) {
-    logger.error("Failed to reset quote channel:", error);
+    // Log the detail, reply generically: Discord / driver error text is not
+    // for members (#1153). Only a UserFacingError carries member-safe text.
+    logger.error(
+      `Failed to reset quote channel: ${describeDiscordError(error)}`,
+    );
     await safeReply(interaction, {
       content: `❌ Failed to rebuild the quote channel: ${
-        error instanceof Error ? error.message : "Unknown error"
+        error instanceof UserFacingError
+          ? error.message
+          : "an unexpected error occurred. Check the bot log for details."
       }`,
     });
   }

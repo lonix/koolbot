@@ -1182,7 +1182,10 @@ describe("VoiceChannelTracker", () => {
 
         // The fresh session is untouched: not ended, not persisted.
         expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
-        expect(tracker.getActiveSession("u1")).toEqual({ channelName: "C1" });
+        expect(tracker.getActiveSession("u1")).toEqual({
+          channelId: "c1",
+          channelName: "C1",
+        });
       });
 
       it("does not let a switch end a fresh session when the barrier lands inside endTracking", async () => {

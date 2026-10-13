@@ -215,13 +215,12 @@ async function executeUser(
         const duration = session.duration
           ? formatTime(session.duration)
           : "ongoing";
-        // Hide the name of a channel the caller cannot view (#1153). A channel
-        // that no longer exists cannot be checked, so its stored name stays.
+        // Hide the name of a channel the caller cannot view, or that no longer
+        // exists and so cannot be checked (#1153).
         const channelName = visibleChannelName(
           interaction,
           session.channelId,
           session.channelName,
-          "show",
         );
         return `• ${channelName}: ${duration}`;
       }),
