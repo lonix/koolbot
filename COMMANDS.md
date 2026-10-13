@@ -615,6 +615,11 @@ For a recurring event, step 5 also creates the **next occurrence** (new RSVP
 message, new channel) at the same wall-clock time; future occurrences are
 never pre-created.
 
+With `events.native.enabled` on (the default, while Events are enabled), each event is also mirrored
+to a Discord **scheduled event** that shows in the server's Events list; cancel
+and end are mirrored too. The bot needs the Create Events (or Manage Events)
+permission.
+
 ---
 
 ### `/lfg`

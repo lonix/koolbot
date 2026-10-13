@@ -1047,7 +1047,7 @@ describe("recurring event lifecycle", () => {
       seriesCancelled: true,
     });
     expect(late.seriesCancelled).toBe(true);
-    expect(cancelOne).toHaveBeenCalledWith(late);
+    expect(cancelOne).toHaveBeenCalledWith(late, undefined, undefined);
     expect(created).toHaveLength(0);
   });
 
@@ -1188,8 +1188,31 @@ describe("recurring event lifecycle", () => {
         processEvent: (...a: unknown[]) => Promise<void>;
       }
     ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
-    expect(cancelOne).toHaveBeenCalledWith(open);
+    expect(cancelOne).toHaveBeenCalledWith(open, undefined, undefined);
     expect(created).toHaveLength(0);
+  });
+
+  it("skips native sync for the tick when the shared native listing failed", async () => {
+    const { service } = buildService();
+    const syncEvent = jest.fn(async () => undefined);
+    (
+      service as unknown as { nativeSync: { syncEvent: jest.Mock } }
+    ).nativeSync = { syncEvent };
+    const run = (skipNative: boolean) =>
+      (
+        service as unknown as {
+          processEvent: (...a: unknown[]) => Promise<void>;
+        }
+      ).processEvent(
+        ended({ state: "ended", recurrence: "none", channelId: null }),
+        {},
+        NOW,
+        { reminderMs: 0, leadMs: 0, graceMs: 0, skipNative },
+      );
+    await run(true);
+    expect(syncEvent).not.toHaveBeenCalled();
+    await run(false);
+    expect(syncEvent).toHaveBeenCalledTimes(1);
   });
 
   it("removes a higher-indexed duplicate that inserted before this lower row existed", async () => {
@@ -1221,6 +1244,175 @@ describe("recurring event lifecycle", () => {
     expect(created[0].spawnedFrom).toBe("occ-0");
     expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "occ-2" });
     expect(postAnnouncement).toHaveBeenCalledWith(created[0]);
+  });
+
+  describe("native mirror of discarded duplicates and skipped cancels (#1034)", () => {
+    type Priv = {
+      discardDuplicate: (e: unknown) => Promise<void>;
+      cancelOne: (e: unknown, c?: unknown, skip?: boolean) => Promise<void>;
+      processEvent: (...a: unknown[]) => Promise<void>;
+      nativeSync: { syncEvent: jest.Mock };
+    };
+    function withSync() {
+      const { service } = buildService();
+      const order: string[] = [];
+      const syncEvent = jest.fn(async () => {
+        order.push("sync");
+      });
+      (service as unknown as Priv).nativeSync = { syncEvent };
+      EventMock.deleteOne = jest.fn(async () => {
+        order.push("delete");
+        return {};
+      });
+      return { priv: service as unknown as Priv, syncEvent, order };
+    }
+
+    function dup(overrides: Record<string, unknown> = {}) {
+      return {
+        _id: "dup",
+        state: "scheduled",
+        nativeEventId: null,
+        nativeCreateStartedAt: null,
+        ...overrides,
+      };
+    }
+    /** A sync that "confirms" by releasing the link, as the real close does. */
+    function confirming(syncEvent: jest.Mock, order: string[]) {
+      syncEvent.mockImplementation(async (...args: unknown[]) => {
+        const row = args[0] as Record<string, unknown>;
+        row.nativeEventId = null;
+        row.nativeCreateStartedAt = null;
+        order.push("sync");
+      });
+    }
+
+    it("closes a duplicate's native event before deleting the row", async () => {
+      const { priv, syncEvent, order } = withSync();
+      confirming(syncEvent, order);
+      EventMock.findById = jest.fn(async () => dup({ nativeEventId: "n1" }));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(syncEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ state: "cancelled" }),
+        null,
+      );
+      expect(order).toEqual(["sync", "delete"]);
+    });
+
+    it("keeps a duplicate as a cleanup record when the close is not confirmed", async () => {
+      const { priv } = withSync(); // sync stub leaves the link in place
+      EventMock.findById = jest.fn(async () => dup({ nativeEventId: "n1" }));
+      EventMock.updateOne = jest.fn(async () => ({}));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(EventMock.deleteOne).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "dup" },
+        {
+          $set: {
+            state: "cancelled",
+            nativeCleanupOnly: true,
+            seriesId: null,
+            recurrence: "none",
+            nextSpawned: true,
+          },
+        },
+      );
+    });
+
+    it("keeps a duplicate whose pending create is not reconciled yet, deletes it once it is", async () => {
+      const first = withSync();
+      EventMock.findById = jest.fn(async () =>
+        dup({ nativeCreateStartedAt: new Date() }),
+      );
+      EventMock.updateOne = jest.fn(async () => ({}));
+      await first.priv.discardDuplicate({ _id: "dup" });
+      expect(EventMock.deleteOne).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).toHaveBeenCalled();
+
+      const second = withSync();
+      confirming(second.syncEvent, second.order);
+      await second.priv.discardDuplicate({ _id: "dup" });
+      expect(second.order).toEqual(["sync", "delete"]);
+    });
+
+    it("deletes a cleanup record on the scan once its native event is closed", async () => {
+      const { priv, syncEvent } = withSync();
+      syncEvent.mockImplementation(async (...args: unknown[]) => {
+        (args[0] as Record<string, unknown>).nativeEventId = null;
+      });
+      await priv.processEvent(
+        ended({
+          _id: "dup",
+          state: "cancelled",
+          recurrence: "none",
+          nativeCleanupOnly: true,
+          nativeEventId: "n1",
+          nativeCreateStartedAt: null,
+          channelId: null,
+        }),
+        {},
+        NOW,
+        { reminderMs: 0, leadMs: 0, graceMs: 0 },
+      );
+      expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "dup" });
+    });
+
+    it("keeps a cleanup record on the scan while its native event is still open", async () => {
+      const { priv } = withSync(); // sync stub leaves the link in place
+      await priv.processEvent(
+        ended({
+          _id: "dup",
+          state: "cancelled",
+          recurrence: "none",
+          nativeCleanupOnly: true,
+          nativeEventId: "n1",
+          channelId: null,
+        }),
+        {},
+        NOW,
+        { reminderMs: 0, leadMs: 0, graceMs: 0 },
+      );
+      expect(EventMock.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it("deletes a duplicate with no native mirror as before", async () => {
+      const { priv, syncEvent } = withSync();
+      EventMock.findById = jest.fn(async () => ({
+        _id: "dup",
+        state: "scheduled",
+        nativeEventId: null,
+        nativeCreateStartedAt: null,
+      }));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(syncEvent).not.toHaveBeenCalled();
+      expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "dup" });
+    });
+
+    it("makes no native call for interrupted series cancels while the listing failed", async () => {
+      const { priv, syncEvent } = withSync();
+      EventMock.findById = jest.fn(async () => null);
+      for (let i = 0; i < 3; i++) {
+        await priv.processEvent(
+          ended({
+            _id: `occ-${i}`,
+            state: "scheduled",
+            seriesCancelled: true,
+            channelId: null,
+          }),
+          {},
+          NOW,
+          { reminderMs: 0, leadMs: 0, graceMs: 0, skipNative: true },
+        );
+      }
+      expect(syncEvent).not.toHaveBeenCalled();
+      // The cancelled rows keep their native link / create marker, so the
+      // scan's terminal-row query retries them once the listing works again.
+      await priv.cancelOne(
+        ended({ state: "scheduled", channelId: null }),
+        null,
+        false,
+      );
+      expect(syncEvent).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("removes its own successor when a lower-indexed sibling already exists", async () => {

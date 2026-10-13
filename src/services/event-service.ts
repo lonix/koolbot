@@ -22,6 +22,7 @@ import {
   type IEvent,
   type RsvpStatus,
 } from "../models/event.js";
+import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -307,6 +308,8 @@ function accentColor(state: IEvent["state"]): number {
 
 export class EventService extends ScheduledService {
   private static instance: EventService;
+  /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
+  private readonly nativeSync: NativeEventSync;
 
   private constructor(client: Client) {
     super(client, {
@@ -315,6 +318,7 @@ export class EventService extends ScheduledService {
       cronContext: "events",
       runLabel: "Event scan",
     });
+    this.nativeSync = new NativeEventSync(client);
   }
 
   protected async isEnabled(): Promise<boolean> {
@@ -368,6 +372,19 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // Finished or cancelled events whose native scheduled event still
+        // needs closing (#1034); the link is released once that succeeds.
+        {
+          state: { $in: ["ended", "cancelled"] },
+          nativeEventId: { $ne: null },
+        },
+        // ...and ones whose native create timed out before its id was stored
+        // (the event may still appear in Discord, #1034).
+        {
+          state: { $in: ["ended", "cancelled"] },
+          nativeEventId: null,
+          nativeCreateStartedAt: { $ne: null },
+        },
         // Ended — or individually cancelled — recurring occurrences whose
         // successor has not been created yet (e.g. a crash between ending
         // and spawning, #744). A whole-series cancel is excluded.
@@ -390,12 +407,21 @@ export class EventService extends ScheduledService {
       (await this.configService.getNumber("events.channel_grace_minutes", 15)) *
       MS_PER_MINUTE;
 
+    // One listing of the guild's native events per scan, not one per event.
+    const loaded =
+      events.length > 0 ? await this.nativeSync.loadCache(guild) : null;
+    // A failed listing skips native sync this tick (no per-event fallback).
+    const native = loaded === "failed" ? null : loaded;
+    const skipNative = loaded === "failed";
+
     for (const event of events) {
       try {
         await this.processEvent(event, guild, new Date(), {
           reminderMs,
           leadMs,
           graceMs,
+          native,
+          skipNative,
         });
       } catch (error) {
         logger.error(
@@ -410,7 +436,13 @@ export class EventService extends ScheduledService {
     event: IEvent,
     guild: Guild,
     now: Date,
-    windows: { reminderMs: number; leadMs: number; graceMs: number },
+    windows: {
+      reminderMs: number;
+      leadMs: number;
+      graceMs: number;
+      native?: NativeCache | null;
+      skipNative?: boolean;
+    },
   ): Promise<void> {
     let changed = false;
 
@@ -425,7 +457,7 @@ export class EventService extends ScheduledService {
       // (its spawner died before re-checking); a cancelled sibling anywhere
       // in the series settles it, and the flag is carried onto this row.
       event.seriesCancelled = true;
-      await this.cancelOne(event);
+      await this.cancelOne(event, windows.native, windows.skipNative);
       return;
     }
 
@@ -476,6 +508,22 @@ export class EventService extends ScheduledService {
     if (changed) {
       await event.save();
       await this.logLifecycle(event);
+    }
+
+    // Keep the native scheduled event in line (#1034): creates it for events
+    // that predate the toggle, pushes edits, and closes it on end/cancel.
+    if (!windows.skipNative) {
+      await this.nativeSync.syncEvent(event, guild, windows.native);
+      // A discarded duplicate's cleanup record has done its job once the
+      // native event is closed.
+      if (
+        event.nativeCleanupOnly &&
+        !event.nativeEventId &&
+        !event.nativeCreateStartedAt
+      ) {
+        await Event.deleteOne({ _id: event._id });
+        return;
+      }
     }
 
     // 5. A finished (or individually cancelled) occurrence hands over to the
@@ -724,6 +772,7 @@ export class EventService extends ScheduledService {
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
     );
+    await this.nativeSync.syncEvent(event);
     logger.info(`Created event ${sanitizeForLog(String(event._id))}`);
     return event;
   }
@@ -804,7 +853,11 @@ export class EventService extends ScheduledService {
     return { event: fresh, cancelled };
   }
 
-  private async cancelOne(event: IEvent): Promise<void> {
+  private async cancelOne(
+    event: IEvent,
+    nativeCache?: NativeCache | null,
+    skipNative = false,
+  ): Promise<void> {
     if (event.channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
@@ -824,6 +877,12 @@ export class EventService extends ScheduledService {
       event.announcementMessageId = fresh.announcementMessageId;
     }
     await this.updateAnnouncement(event);
+    // When the scan's shared listing failed, skip (no per-event fetch). The
+    // cancelled row keeps its native id or create marker, so the scan's
+    // terminal-row query picks it up again on a later tick and closes it.
+    if (!skipNative) {
+      await this.nativeSync.syncEvent(event, null, nativeCache);
+    }
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
   }
 
@@ -1099,6 +1158,39 @@ export class EventService extends ScheduledService {
         mine.announcementChannelId,
         mine.announcementMessageId,
       );
+    }
+    // The duplicate may already mirror (or be mid-create of) a native event
+    // (#1034). Close it by the terminal rules first. The sync is best-effort
+    // (it does nothing when mirroring is off or the permission is missing, and
+    // swallows REST failures), so success is read from the row afterwards: the
+    // link and create marker are cleared only once the native event is closed,
+    // already gone (10070), or a late event was dealt with.
+    if (mine && (mine.nativeEventId || mine.nativeCreateStartedAt)) {
+      mine.state = "cancelled"; // in memory only: selects the closing rules
+      await this.nativeSync.syncEvent(mine, null);
+      if (mine.nativeEventId || mine.nativeCreateStartedAt) {
+        // Not confirmed. Do not delete the only record of the native event:
+        // keep it as a cleanup record, taken out of the series so the spawn
+        // path cannot adopt it and its unique occurrence key is freed. The
+        // scan retries the close and deletes the row once it succeeds. While
+        // mirroring is disabled it simply waits for it to be re-enabled.
+        await Event.updateOne(
+          { _id: event._id },
+          {
+            $set: {
+              state: "cancelled",
+              nativeCleanupOnly: true,
+              seriesId: null,
+              recurrence: "none",
+              nextSpawned: true,
+            },
+          },
+        );
+        logger.warn(
+          `Kept discarded duplicate ${sanitizeForLog(String(event._id))} as a cleanup record until its native event is closed`,
+        );
+        return;
+      }
     }
     await Event.deleteOne({ _id: event._id });
   }

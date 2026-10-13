@@ -129,6 +129,8 @@ export interface ConfigSchema {
   "events.default_duration_minutes": number; // Default event length when none is given
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
   "events.recurrence_enabled": boolean; // Allow recurring events (weekly/biweekly/monthly series)
+  "events.native.enabled": boolean; // Mirror events to Discord native scheduled events (#1034)
+  "events.native.location": string; // Location text shown on the mirrored native event
 
   // LFG — ad-hoc "looking for group" posts (#957)
   "lfg.enabled": boolean;
@@ -445,6 +447,9 @@ export const defaultConfig: ConfigSchema = {
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
   "events.recurrence_enabled": true,
+  "events.native.enabled": true, // Inert unless events.enabled is on
+  "events.native.location":
+    "Voice channel in this server (see the event announcement)",
 
   // LFG (#957) — feature gate off by default (rule 1)
   "lfg.enabled": false,
@@ -1838,6 +1843,20 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Allow events to repeat weekly, every two weeks or monthly. When off, new events are one-off only and finished recurring events stop spawning their next occurrence (already-scheduled ones are unaffected).",
     category: "events",
     type: "boolean",
+  },
+  "events.native.enabled": {
+    label: "Mirror to Discord scheduled events",
+    description:
+      "On by default, and only when Events are enabled: also create each event as a Discord native scheduled event (the Events list at the top of the channel list), and keep it in sync when the event is edited, cancelled or finishes. Needs the Create Events (or Manage Events) permission for the bot; without it events are simply not mirrored and one warning is logged. Turn this off to keep events inside KoolBot only.",
+    category: "events",
+    type: "boolean",
+  },
+  "events.native.location": {
+    label: "Native event location text",
+    description:
+      "Location line shown on the mirrored Discord scheduled event (max 100 characters). The temporary voice channel only exists shortly before the start, so the native event is an external one with this text.",
+    category: "events",
+    type: "string",
   },
   "lfg.enabled": {
     label: "LFG enabled",

@@ -97,6 +97,30 @@ export interface IEvent extends Document {
   /** The whole series was cancelled; no occurrence may spawn a successor.
    * Set on every row of the series before its open rows are cancelled. */
   seriesCancelled: boolean;
+  /**
+   * Id of the mirrored Discord native scheduled event (#1034); null when none
+   * exists (mirroring off, not yet created, or finished and released). It is
+   * the restart-safe link: the sync reads it back instead of creating again.
+   */
+  nativeEventId: string | null;
+  /**
+   * When a native-event create was started and its id not yet stored (#1034).
+   * A create that times out may still complete in Discord, so a later scan
+   * must not create again straight away: it first looks for the late event
+   * (adoption) and only retries after a grace period. Cleared on claim.
+   */
+  nativeCreateStartedAt: Date | null;
+  /**
+   * A discarded duplicate occurrence kept only until its native event has been
+   * closed (#1034). It is taken out of its series (no `seriesId`, no
+   * recurrence) so the spawn path and the unique occurrence key never see it,
+   * and the scan deletes it once `nativeEventId` and `nativeCreateStartedAt`
+   * are both clear.
+   */
+  nativeCleanupOnly: boolean;
+  /** The native event was deleted in Discord by someone else; the mirror
+   * respects that and does not recreate it. */
+  nativeDetached: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -149,6 +173,10 @@ const EventSchema = new Schema<IEvent>(
     spawnedFrom: { type: String, default: null },
     nextSpawned: { type: Boolean, default: false },
     seriesCancelled: { type: Boolean, default: false },
+    nativeEventId: { type: String, default: null },
+    nativeCreateStartedAt: { type: Date, default: null },
+    nativeCleanupOnly: { type: Boolean, default: false },
+    nativeDetached: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },
   {
@@ -165,6 +193,18 @@ EventSchema.index({ "rsvps.userId": 1 });
 EventSchema.index(
   { guildId: 1, seriesId: 1, occurrenceIndex: 1 },
   { unique: true, partialFilterExpression: { seriesId: { $type: "string" } } },
+);
+
+// A native scheduled event belongs to at most one row (#1034). The claim in
+// `NativeEventSync` is a per-row compare-and-set, so two replicas recovering
+// the same orphan for two same-name, same-start events could both win it;
+// this index makes the second claim fail atomically (E11000 = lost the race).
+EventSchema.index(
+  { nativeEventId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { nativeEventId: { $type: "string" } },
+  },
 );
 
 export const Event = mongoose.model<IEvent>("Event", EventSchema);
