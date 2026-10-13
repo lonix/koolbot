@@ -115,7 +115,7 @@ steps:
         description: 'Run the actual bot locally to test in a real Discord server'
         commands:
           - description: 'Start MongoDB (if not using Docker)'
-            command: 'docker run -d -p 27017:27017 --name mongodb mongo:latest'
+            command: 'docker run -d -p 127.0.0.1:27017:27017 --name mongodb mongo:8'
           - description: 'Run bot in development mode'
             command: 'npm run dev'
         notes:

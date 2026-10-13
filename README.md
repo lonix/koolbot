@@ -105,7 +105,8 @@ container will:
   register only after you enable them on the Web UI's Settings page and
   click **Reload commands to Discord**)
 - ✅ Mount the Web UI at `/admin` (only when `WEBUI_ENABLED=true`)
-- ✅ Publish port 3000 to the host so the sign-in link is reachable
+- ✅ Publish port 3000 on the host's loopback (`127.0.0.1`) so the sign-in link is
+  reachable from that machine
 - ✅ Start the bot and keep it running
 
 Check the logs:
@@ -431,25 +432,14 @@ docker compose logs -f mongodb
 
 ### Exposing the Web UI
 
-The default `docker-compose.yml` **publishes port 3000 to the host**
-already — that's what makes the quick-start magic link reachable at
-`http://your-host:3000` out of the box. There is no HTTPS. The compose
-file's `bot.ports` block is the spot to change if you want something
-else:
+The default `docker-compose.yml` publishes port 3000 **on the host's
+loopback only** (`127.0.0.1:3000`), so the quick-start magic link is
+reachable at `http://localhost:3000` on the machine running the bot (or
+through an SSH tunnel) and is not exposed to the network. There is no
+HTTPS. The compose file's `bot.ports` block is the spot to change if you
+want something else:
 
-- **Direct port publish (shipped default)** — fine for LAN-only or
-  VPN-only deployments:
-
-  ```yaml
-  services:
-    bot:
-      # ...
-      ports:
-        - "3000:3000"     # /health and /admin
-  ```
-
-- **Bind to localhost only** (then SSH-tunnel or VPN in) — replace the
-  publish above with:
+- **Bind to localhost only (shipped default)** — then SSH-tunnel or VPN in:
 
   ```yaml
   services:
@@ -457,6 +447,17 @@ else:
       # ...
       ports:
         - "127.0.0.1:3000:3000"
+  ```
+
+- **Direct port publish** — fine for LAN-only or VPN-only deployments. Set
+  `WEBUI_BASE_URL=http://your-host:3000` to match:
+
+  ```yaml
+  services:
+    bot:
+      # ...
+      ports:
+        - "3000:3000"     # /health and /admin
   ```
 
 - **Reverse proxy with Caddy** (recommended for any internet-facing

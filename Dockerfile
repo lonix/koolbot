@@ -44,10 +44,13 @@ WORKDIR /app
 ARG NPM_VERSION=12.1.0
 RUN npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && npm cache clean --force
 
-# Copy only runtime artifacts
-COPY --from=builder --chown=1000:1000 /app/package*.json ./
-COPY --from=builder --chown=1000:1000 /app/dist ./dist
-COPY --from=prod-deps --chown=1000:1000 /app/node_modules ./node_modules
+# Copy only runtime artifacts. Deliberately no --chown: the files stay owned by
+# root (world-readable) so the unprivileged runtime user below can run the code
+# but cannot rewrite it. The bot only logs to stdout and never writes to disk, so
+# this costs nothing and pairs with `read_only: true` in docker-compose.yml.
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/dist ./dist
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Set environment variables
 ENV NODE_ENV=production

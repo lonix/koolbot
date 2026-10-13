@@ -88,7 +88,7 @@ For detailed technical guidance on extending KoolBot:
 
    ```bash
    # Using Docker for MongoDB only
-   docker run -d -p 27017:27017 --name mongodb mongo:latest
+   docker run -d -p 127.0.0.1:27017:27017 --name mongodb mongo:8
    
    # Or use your local MongoDB installation
    ```
