@@ -4,6 +4,7 @@
  * without a Discord client or MongoDB.
  */
 
+import { scriptTag } from "./html.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -2659,7 +2660,7 @@ ${renderFeatureSettingsCard({
     <button type="submit" class="btn btn-primary">Import</button>
   </form>
 </div>
-<script>${POLL_IMPORT_UPLOAD_SCRIPT}</script>
+${scriptTag(POLL_IMPORT_UPLOAD_SCRIPT)}
 `;
   return renderAdminPage({
     title: "Polls",
@@ -4451,7 +4452,7 @@ ${renderFeatureSettingsCard({
   </form>`
   }
 </div>
-<script>${LEADERBOARD_TIER_EDITOR_SCRIPT}</script>
+${scriptTag(LEADERBOARD_TIER_EDITOR_SCRIPT)}
 `;
   return renderAdminPage({
     title: "Leaderboard Roles",

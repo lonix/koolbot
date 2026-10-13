@@ -10,7 +10,7 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
-import { CONFIRM_SCRIPT } from "./html.js";
+import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
 import { THEME } from "./theme.js";
 import {
   DAY_NAMES,
@@ -372,9 +372,9 @@ export function renderUserPage(opts: UserPageOptions): string {
       birthdayEnabled: opts.birthdayEnabled,
       privacyEnabled: opts.privacyEnabled,
     })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
-    `<script>${SCRIPT}</script>`,
-    `<script>${CONFIRM_SCRIPT}</script>`,
-    `<script>${FLASH_FOCUS_SCRIPT}</script>`,
+    `${scriptTag(SCRIPT)}`,
+    `${scriptTag(CONFIRM_SCRIPT)}`,
+    `${scriptTag(FLASH_FOCUS_SCRIPT)}`,
     "</body></html>",
   ].join("");
 }
@@ -1116,7 +1116,7 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
     "</div>",
     "</div>",
     "</form>",
-    `<script>${BIRTHDAY_DAY_SCRIPT}</script>`,
+    `${scriptTag(BIRTHDAY_DAY_SCRIPT)}`,
   ].join("");
 }
 
@@ -1198,7 +1198,7 @@ export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
     "</div>",
     "</div>",
     "</form>",
-    `<script>${TZ_PREVIEW_SCRIPT}</script>`,
+    `${scriptTag(TZ_PREVIEW_SCRIPT)}`,
   ].join("");
 }
 

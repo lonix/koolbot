@@ -22,8 +22,12 @@ import { PermissionsService } from "../../src/services/permissions-service.js";
 import { signValue, parseCookies } from "../../src/web/cookies.js";
 import { flashRedirectQuery } from "../../src/web/routes/write/helpers.js";
 import { deriveCsrfToken } from "../../src/web/csrf.js";
-import { CONFIRM_SCRIPT } from "../../src/web/html.js";
-import { addNonce, buildCsp } from "../../src/web/security-headers.js";
+import { CONFIRM_SCRIPT, NONCE_MARKER, scriptTag } from "../../src/web/html.js";
+import {
+  applyNonce,
+  buildCsp,
+  webSecurityHeaders,
+} from "../../src/web/security-headers.js";
 import { signFlash, verifyFlashSignature } from "../../src/web/http-flash.js";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -153,6 +157,7 @@ function expectHardened(res: Response, body: string): void {
   const tags = body.match(/<script\b[^>]*>/gi) ?? [];
   for (const tag of tags) expect(tag).toContain(`nonce="${nonce}"`);
   expect(body).not.toMatch(/\son[a-z]+\s*=\s*["']/i);
+  expect(body).not.toContain(NONCE_MARKER);
 }
 
 describe("Web UI response headers (#1149)", () => {
@@ -257,16 +262,50 @@ describe("Web UI response headers over HTTPS (#1149)", () => {
   });
 });
 
-describe("CSP helpers (#1149)", () => {
-  it("adds the nonce to script tags only", () => {
-    expect(addNonce("<script>a()</script><scripts>x</scripts>", "N")).toBe(
-      '<script nonce="N">a()</script><scripts>x</scripts>',
+describe("nonce only on trusted scripts, over HTTP (#1149)", () => {
+  it("does not give an injected <script> the nonce, but runs trusted ones", async () => {
+    process.env.WEBUI_BASE_URL = "http://127.0.0.1";
+    const app = express();
+    app.use(webSecurityHeaders);
+    app.get("/x", (req, res) => {
+      // Simulates an escaping bug: raw attacker text next to a trusted block.
+      res.type("html").send(`${scriptTag("ok()")}${String(req.query.q ?? "")}`);
+    });
+    const srv = createServer(app);
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as AddressInfo).port;
+    const evil = '<script>pwn()</script><script nonce="guess">pwn()</script>';
+    const get1 = await fetch(
+      `http://127.0.0.1:${port}/x?q=${encodeURIComponent(evil)}`,
     );
+    const get2 = await fetch(`http://127.0.0.1:${port}/x`);
+    const nonce1 = /'nonce-([^']+)'/.exec(
+      get1.headers.get("content-security-policy")!,
+    )![1];
+    const nonce2 = /'nonce-([^']+)'/.exec(
+      get2.headers.get("content-security-policy")!,
+    )![1];
+    const body = await get1.text();
+    await new Promise<void>((r) => srv.close(() => r()));
+    expect(body).toContain(`<script nonce="${nonce1}">ok()</script>`);
+    expect(body).toContain("<script>pwn()</script>");
+    expect(body.split(`nonce="${nonce1}"`).length - 1).toBe(1);
+    expect(body).not.toContain(NONCE_MARKER);
+    expect(nonce1).not.toBe(nonce2);
   });
+});
 
-  it("never adds a nonce to escaped user text", () => {
-    const escaped = "&lt;script&gt;alert(1)&lt;/script&gt;";
-    expect(addNonce(escaped, "N")).toBe(escaped);
+describe("CSP helpers (#1149)", () => {
+  it("swaps only the server marker for the nonce, so injected scripts get none", () => {
+    const trusted = scriptTag("a()");
+    const injected =
+      '<script>alert(1)</script><script nonce="guess">x</script>';
+    const out = applyNonce(`${trusted}${injected}`, "N");
+    expect(out).toContain('<script nonce="N">a()</script>');
+    expect(out).toContain(injected);
+    expect(out).not.toContain(NONCE_MARKER);
+    // The attacker-supplied tags are untouched, so they carry no valid nonce.
+    expect(out.match(/<script nonce="N">/g)).toHaveLength(1);
   });
 
   it("builds a policy with a nonce script-src and no script unsafe-inline", () => {

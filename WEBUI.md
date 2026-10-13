@@ -644,8 +644,10 @@ That said:
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
   `Cache-Control: no-store`, and `X-Powered-By` is off (`src/web/security-headers.ts`).
   The CSP is `default-src 'none'` with `script-src` limited to a per-request
-  nonce (the pages' inline scripts get it automatically; there is no inline
-  event handler, destructive buttons use `data-confirm`), `style-src
+  nonce (trusted templates emit scripts through `scriptTag()`, which the
+  response middleware stamps with the nonce, so a `<script>` injected through
+  unescaped content gets none and does not run; there is no inline event
+  handler, destructive buttons use `data-confirm`), `style-src
   'unsafe-inline'` (the pages use `style=` attributes), same-origin
   `connect-src`/`img-src`/`form-action`, and `frame-ancestors 'none'`.
   `Strict-Transport-Security: max-age=15552000` (180 days, no

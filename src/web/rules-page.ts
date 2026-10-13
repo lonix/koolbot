@@ -1,4 +1,5 @@
 import type { Client, GuildBasedChannel } from "discord.js";
+import { scriptTag } from "./html.js";
 import { env } from "../config/env.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import logger from "../utils/logger.js";
@@ -254,7 +255,7 @@ ${job}
 ${renderNotices(props)}
 ${renderStatus(props, csrf)}
 ${renderRollout(props, csrf)}
-${props.jobId ? `<script>${JOB_SCRIPT(props.jobId)}</script>` : ""}
+${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Rules Acceptance",

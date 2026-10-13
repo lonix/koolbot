@@ -3,6 +3,7 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
+import { scriptTag } from "./html.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import {
@@ -263,7 +264,7 @@ ${renderFlash(props.flash)}
 ${job}
 ${problems}
 ${content}
-${props.jobId ? `<script>${JOB_SCRIPT(props.jobId)}</script>` : ""}
+${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Channel Claims",

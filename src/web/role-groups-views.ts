@@ -1,4 +1,5 @@
 import { PermissionsBitField } from "discord.js";
+import { scriptTag } from "./html.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -487,8 +488,8 @@ ${renderDriftSummary(props)}
   ${renderAddForm(props, csrf)}
 </div>
 <p class="muted">The server owner and members with the Administrator permission always count as <code>admin</code>, with or without a group.</p>
-<script>${PRESET_SCRIPT}</script>
-${props.jobId ? `<script>${JOB_SCRIPT(props.jobId)}</script>` : ""}
+${scriptTag(PRESET_SCRIPT)}
+${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Role Groups",

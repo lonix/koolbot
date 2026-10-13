@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.js";
+import { NONCE_MARKER } from "./html.js";
 
 /**
  * Response hardening for the Web UI (`/admin/*` and `/me/*`, #1149).
@@ -19,14 +20,14 @@ import { env } from "../config/env.js";
  * delegated listener (`CONFIRM_SCRIPT`), so nothing needs
  * `script-src 'unsafe-inline'`:
  *  - `script-src 'nonce-<n>'`: only inline scripts carrying this request's
- *    nonce run. The nonce is added to every `<script>` tag of an HTML
- *    response by wrapping `res.send` (`addNonce`), so no template needs to
- *    know about it. Limit of this design: it blocks inline event handlers,
- *    script-scheme URLs and external script sources, but it does NOT stop a
- *    `<script>` tag that reached the output unescaped, because that tag would
- *    be given the nonce too. Output escaping (`escapeHtml`) remains the
- *    defence against script injection; the CSP is a backstop for everything
- *    else (framing, `<base>`, off-origin forms and fetches, plugins).
+ *    nonce run. Trusted templates emit their script blocks with
+ *    `scriptTag()` (`html.ts`), which writes a server-only random marker where
+ *    the nonce goes; `applyNonce` swaps that marker for the request's nonce.
+ *    Content an attacker controls cannot contain the marker (it is random per
+ *    process and never leaves the server), so a `<script>` that slips through
+ *    escaping gets no valid nonce and does not run. This keeps the CSP a real
+ *    backstop for script injection as well as for inline handlers, script-
+ *    scheme URLs, external sources, framing, `<base>` and off-origin forms.
  *  - `style-src 'unsafe-inline'`: justified exception. Dozens of
  *    `style="..."` attributes and several `<style>` blocks exist; a style
  *    nonce would disable `'unsafe-inline'` for the attributes too. Style
@@ -60,9 +61,9 @@ export function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
-/** Add `nonce="..."` to every `<script>` opening tag. */
-export function addNonce(html: string, nonce: string): string {
-  return html.replace(/<script(?=[\s>])/gi, `<script nonce="${nonce}"`);
+/** Replace the server-only marker from `scriptTag()` with the real nonce. */
+export function applyNonce(html: string, nonce: string): string {
+  return html.split(NONCE_MARKER).join(nonce);
 }
 
 export function webSecurityHeaders(
@@ -83,11 +84,8 @@ export function webSecurityHeaders(
 
   const originalSend = res.send.bind(res) as (body?: unknown) => Response;
   res.send = ((body?: unknown): Response => {
-    if (typeof body === "string" && body.includes("<script")) {
-      const type = String(res.getHeader("Content-Type") ?? "");
-      if (type ? /html/i.test(type) : body.trimStart().startsWith("<")) {
-        return originalSend(addNonce(body, nonce));
-      }
+    if (typeof body === "string" && body.includes(NONCE_MARKER)) {
+      return originalSend(applyNonce(body, nonce));
     }
     return originalSend(body);
   }) as Response["send"];
