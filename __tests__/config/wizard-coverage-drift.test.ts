@@ -26,7 +26,7 @@ const WIZARD_OPT_OUT: Record<string, string> = {
   rewind: "Annual nudge with its own admin handling.",
   celebrations: "Piggybacks on achievements; single channel opt-in.",
   adoption:
-    "Server Adoption has its own Web UI flow (Role Groups); retention and sync tunables live on the Settings page.",
+    "Server Adoption has its own Web UI flow, entered from the card on the wizard landing page (Scan, Role Groups, Rules, Channel Claims, History); it has no first-time settings to collect, and retention and sync tunables live on the Settings page.",
 };
 
 describe("Setup Wizard coverage", () => {

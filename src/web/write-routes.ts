@@ -37,6 +37,7 @@ import { createVersionCheckRouter } from "./routes/write/version-check.js";
 import { createRoleGroupsRouter } from "./routes/write/role-groups.js";
 import { createRulesRouter } from "./routes/write/rules.js";
 import { createChannelClaimsRouter } from "./routes/write/channel-claims.js";
+import { createAdoptionHistoryRouter } from "./routes/write/adoption-history.js";
 
 export * from "./routes/write/helpers.js";
 
@@ -73,6 +74,7 @@ export function createWriteRouter(
   router.use(createRoleGroupsRouter(client));
   router.use(createRulesRouter(client));
   router.use(createChannelClaimsRouter(client));
+  router.use(createAdoptionHistoryRouter(client));
 
   return router;
 }

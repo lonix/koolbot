@@ -328,6 +328,42 @@ Error: An invalid token was provided
    from the cache (shown with a `+`); webhook and Onboarding reads need
    `ManageWebhooks` and the Community feature.
 
+### Adopting a Server: Role Hierarchy, Missing Permissions and Rollback
+
+**Symptoms:**
+
+- The scan, a plan preview or an apply reports a blocker about a role, a channel or a permission
+- A plan says a role is "locked" or "managed", or that the bot would lose access to a channel
+- An adoption apply stopped part-way, or you want to undo one
+
+**Solutions:**
+
+1. **Role hierarchy.** KoolBot can only create, edit or assign roles that sit *below* its own highest role. Roles at or
+   above it are shown as locked and are never changed. In Server Settings → Roles, drag the KoolBot role above the roles
+   you want adopted, then run the scan again. See also
+   [Bot Can't Manage Roles or Channels](#bot-cant-manage-roles-or-channels).
+2. **Managed roles.** Roles created by an integration or another bot, and roles such as Server Booster, are never edited.
+   They can still be used as a gate (who may see a channel), but not as a group KoolBot edits.
+3. **Missing permissions.** Adoption needs **Manage Roles** to edit roles and **Manage Channels** to change a channel's
+   permission overwrites, and it must be able to see the channels it changes. Grant them on the KoolBot role, or on the
+   channel for a single failure, then preview again. The planner refuses (as an error) any step that would remove your
+   own access or lock the bot out of a channel a feature needs; change the claim instead of working around it.
+4. **A step failed or an apply stopped part-way.** The snapshot of the previous state was saved before the first change,
+   so the steps that ran can be undone as below. The exception is a step you explicitly approved as destructive: what
+   it deleted is only recreated as structure (see step 6). Fix the cause, then open the page you applied from
+   (Role Groups, Rules or Channel Claims) and preview again. The preview is planned from the server as it is now, so
+   it lists only the differences that remain, and applying it saves a new snapshot; the web pages do not resume the
+   old snapshot.
+5. **Recovering with rollback.** Open the Web UI → **Adoption** (`/admin/adopt/history`), choose the snapshot and click
+   **Restore…**. Only steps that were applied are reverted. The restore is refused while another apply or rollback is
+   running; wait for it, or if the bot restarted mid-run, wait about 30 minutes for the stale run to be released and try
+   again. A restore that stopped part-way shows *Rollback incomplete* and can be started again.
+6. **What rollback cannot bring back.** If a plan deleted a channel or role (only ever after you approved that step),
+   rollback recreates its structure only. Messages, pins, threads, webhooks, role memberships and the original IDs are
+   gone for good. Roles the plan created are kept unless you tick the option to delete them.
+7. **The snapshot is missing.** Snapshots are removed after `adoption.snapshot.retention_days` (default 90).
+   Without one, the changes can only be undone by hand in Discord.
+
 ### Bot logs in but "Used disallowed intents" / login fails
 
 KoolBot always requests Guilds, GuildMessages, GuildVoiceStates,

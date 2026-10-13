@@ -1641,6 +1641,18 @@ export function renderWizardPage(props: WizardPageProps): string {
 <h1>Setup Wizard</h1>
 <p class="subtitle">Pick the features you want to configure and click <strong>Next</strong>. The wizard walks you through each feature's key settings.</p>
 <div class="notice info">Changes are only applied at the final confirmation step. Cancel any time without affecting the current configuration.</div>
+<div class="card" id="wizard-adoption">
+  <h2>Adopting an existing server?</h2>
+  <p>If this server already has roles, categories and channels, let KoolBot take them over instead of creating new ones. Nothing is changed until you preview a plan and apply it, every apply is saved as a snapshot, and you can restore it later. Steps 2 to 4 are optional.</p>
+  <ol>
+    <li><a href="/admin/adopt">Scan the server</a>: roles, channels, other bots and what to fix first.</li>
+    <li><a href="/admin/role-groups">Role groups</a>: tie your Admin, Mod or VIP roles to groups.</li>
+    <li><a href="/admin/rules">Rules role</a>: an optional rules acceptance gate.</li>
+    <li><a href="/admin/adopt/claims">Channel claims</a>: preview, then apply, read-only and gated channels and feature bindings.</li>
+    <li><a href="/admin/adopt/history">History</a>: review snapshots and restore one.</li>
+  </ol>
+  <p class="muted">Starting from a fresh server? Skip this and pick features below.</p>
+</div>
 <form method="POST" action="/admin/wizard/start">
   <input type="hidden" name="_csrf" value="${csrf}">
   <div class="card">

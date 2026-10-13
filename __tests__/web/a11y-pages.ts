@@ -40,6 +40,10 @@ import {
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import {
+  renderAdoptionHistoryPage,
+  renderRestoreConfirmPage,
+} from "../../src/web/adoption-history-view.js";
+import {
   renderUserBirthdayBody,
   renderUserIndexBody,
   renderUserNotificationsBody,
@@ -63,6 +67,21 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+const ADOPTION_SNAPSHOT = {
+  id: "a".repeat(24),
+  planId: "plan-1",
+  appliedBy: "123456789",
+  status: "applied" as const,
+  createdAt: new Date("2026-10-01T10:00:00Z"),
+  rolledBackBy: null,
+  rolledBackAt: null,
+  applied: 3,
+  failed: 0,
+  skipped: 1,
+  destructive: 1,
+  createdRoles: 2,
+};
 
 const CHANNELS = [
   { id: "c1", name: "general" },
@@ -428,6 +447,88 @@ export function adminPages(): A11yPage[] {
         ]),
         perCommand: new Map([["quote", ["r1"]]]),
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Adoption history",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        flash: FLASH,
+        jobId: "11111111-1111-1111-1111-111111111111",
+        page: 2,
+        hasMore: true,
+        snapshots: [
+          ADOPTION_SNAPSHOT,
+          {
+            ...ADOPTION_SNAPSHOT,
+            id: "b".repeat(24),
+            status: "rolled_back",
+            rolledBackBy: "9",
+            rolledBackAt: new Date("2026-10-02T10:00:00Z"),
+          },
+          {
+            ...ADOPTION_SNAPSHOT,
+            id: "c".repeat(24),
+            status: "partial",
+            failed: 1,
+          },
+          { ...ADOPTION_SNAPSHOT, id: "d".repeat(24), status: "rolling_back" },
+        ],
+      }),
+    },
+    {
+      name: "Adoption history (empty)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: [],
+      }),
+    },
+    {
+      name: "Adoption history (unreadable)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: null,
+      }),
+    },
+    {
+      name: "Restore snapshot",
+      html: renderRestoreConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        destructiveNote: "Messages and pins cannot be restored.",
+        snapshot: {
+          ...ADOPTION_SNAPSHOT,
+          operations: [
+            { summary: "Delete #old", destructive: true },
+            { summary: "Make #news read-only", destructive: false },
+          ],
+          interrupted: 1,
+          revertibleCreatedRoles: 1,
+          uncertainCreatedRoles: 1,
+          dependentRepairs: 2,
+        },
+      }),
+    },
+    {
+      name: "Restore snapshot (nothing left, not restorable)",
+      html: renderRestoreConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        destructiveNote: "n",
+        snapshot: {
+          ...ADOPTION_SNAPSHOT,
+          status: "rolled_back",
+          destructive: 0,
+          createdRoles: 0,
+          operations: [],
+          interrupted: 0,
+          revertibleCreatedRoles: 0,
+          uncertainCreatedRoles: 0,
+          dependentRepairs: 0,
+        },
       }),
     },
     {

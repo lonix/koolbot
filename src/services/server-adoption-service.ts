@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { appliedOperationIds } from "./adoption-rollback-selection.js";
 import {
   ChannelType,
   type Client,
@@ -1231,14 +1232,9 @@ export class ServerAdoptionService {
     const { plan, baseline } = snapshot;
     // A member operation that failed part-way still has persisted grants
     // that must be revoked, so it counts as reversible too.
-    const applied = new Set(
-      snapshot.operations
-        .filter(
-          (r) =>
-            r.status === "applied" ||
-            (snapshot.memberProgress[r.opId]?.granted.length ?? 0) > 0,
-        )
-        .map((r) => r.opId),
+    const applied = appliedOperationIds(
+      snapshot.operations,
+      (opId) => snapshot.memberProgress[opId]?.granted.length ?? 0,
     );
     const done = new Set(snapshot.rolledBackOps);
     const restored: string[] = [];
