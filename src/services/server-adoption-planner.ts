@@ -178,6 +178,31 @@ export interface PlanOptions {
    * this opens nothing else: other bots' existing overwrites stay protected.
    */
   gateTargetIds?: string[];
+  /**
+   * Roles the admin / the bot will no longer hold once the operations have run
+   * (a rollback revoking the grants a plan made, #1134). They are removed from
+   * the simulated after-state only, so the access checks see the loss; the
+   * scan itself, and so the "before" side, still has them.
+   */
+  revokedAdminRoleIds?: string[];
+  revokedBotRoleIds?: string[];
+  /**
+   * Roles a rollback will take back from members it granted them to. Needs the
+   * bot's Manage Roles permission and the same role limits as editing the role
+   * (managed roles, roles at or above the bot), even when the admin and the bot
+   * are not among those members.
+   */
+  revokedGrantRoleIds?: string[];
+  /**
+   * What a rollback will write even where the value already matches the live
+   * server (and so produces no operation): roles it will edit are held to the
+   * same limits as an edit (managed roles, roles at or above the bot), and
+   * `forceManageRoles` makes Manage Roles a requirement. Without these, a
+   * restore whose writes all happen to be no-ops in the plan would skip the
+   * checks for writes the engine still makes.
+   */
+  rollbackEditedRoleIds?: string[];
+  forceManageRoles?: boolean;
 }
 
 interface OpBase {
@@ -1160,16 +1185,32 @@ export function planAdoption(
     });
 
   // ---- the bot must hold the permissions Discord will demand ---------------
-  const needsManageRoles = ordered.some(
-    (o) =>
-      o.type === "role.create" ||
-      o.type === "role.edit" ||
-      o.type === "role.delete" ||
-      o.type === "member.role.add" ||
-      // Editing channel permissions is a Manage Roles action in Discord.
-      o.type === "overwrite.set" ||
-      o.type === "overwrite.remove",
-  );
+  for (const id of options.revokedGrantRoleIds ?? []) {
+    const granted = rolesById.get(id);
+    if (!granted) continue;
+    const problem = roleLimitProblem(granted, "revoke");
+    if (problem) err("role-protected", problem, id);
+  }
+  for (const id of options.rollbackEditedRoleIds ?? []) {
+    const edited = rolesById.get(id);
+    if (!edited) continue;
+    const problem = roleLimitProblem(edited, "edit");
+    if (problem) err("role-protected", problem, id);
+  }
+  const needsManageRoles =
+    !!options.forceManageRoles ||
+    // Only roles that still exist are revoked; a missing one is skipped.
+    (options.revokedGrantRoleIds ?? []).some((id) => rolesById.has(id)) ||
+    ordered.some(
+      (o) =>
+        o.type === "role.create" ||
+        o.type === "role.edit" ||
+        o.type === "role.delete" ||
+        o.type === "member.role.add" ||
+        // Editing channel permissions is a Manage Roles action in Discord.
+        o.type === "overwrite.set" ||
+        o.type === "overwrite.remove",
+    );
   const needsManageChannels = ordered.some((o) => o.type === "channel.delete");
   if (needsManageRoles && (botBase & ManageRoles) !== ManageRoles) {
     err(
@@ -1185,7 +1226,10 @@ export function planAdoption(
   }
 
   // ---- admin / bot access (simulated after-state) ----------------------
-  if (ordered.length > 0) {
+  const revokesAccess =
+    (options.revokedAdminRoleIds?.length ?? 0) > 0 ||
+    (options.revokedBotRoleIds?.length ?? 0) > 0;
+  if (ordered.length > 0 || revokesAccess) {
     const before = simulate(scanned, []);
     const after = simulate(scanned, ordered);
     // Grants run before the destructive phase, and a failed grant skips it,
@@ -1199,11 +1243,19 @@ export function planAdoption(
     const adminRoles = [
       ...scanned.adminRoleIds,
       ...grantedTo(scanned.adminUserId),
-    ].filter((id) => !after.removedRoles.has(id));
+    ].filter(
+      (id) =>
+        !after.removedRoles.has(id) &&
+        !(options.revokedAdminRoleIds ?? []).includes(id),
+    );
     const botRoles = [
       ...scanned.botRoleIds,
       ...grantedTo(scanned.botUserId),
-    ].filter((id) => !after.removedRoles.has(id));
+    ].filter(
+      (id) =>
+        !after.removedRoles.has(id) &&
+        !(options.revokedBotRoleIds ?? []).includes(id),
+    );
     // An early role edit must not strip a management permission that a later
     // step in the same plan still needs.
     const botAfter = effectivePermissions({

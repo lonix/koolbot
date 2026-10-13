@@ -12,6 +12,7 @@
 import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
+import { rollbackRevalidator } from "../../../services/adoption-rollback-check.js";
 import {
   DESTRUCTIVE_RESTORE_NOTE,
   MongoAdoptionStore,
@@ -50,8 +51,51 @@ function readFlash(req: {
   return { type, text: text.slice(0, 500) };
 }
 
+/** How often a running restore is looked at while waiting to audit it. */
+const AUDIT_POLL_MS = 1000;
+
 export function createAdoptionHistoryRouter(client: Client): Router {
   const router = Router();
+
+  /**
+   * Audit a restore once its job has ended, so the trail shows the real
+   * outcome: the engine's second live-state check, or a failed step, can still
+   * end it after the request has been answered. Never throws.
+   */
+  async function auditWhenDone(
+    engine: Awaited<ReturnType<typeof ServerAdoptionService.getInstance>>,
+    jobId: string,
+    session: Parameters<typeof recordAudit>[0],
+    snapshotId: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      for (;;) {
+        const job = engine.getRollbackJob(jobId);
+        if (!job) return; // no longer tracked: nothing to report
+        if (job.status !== "running") {
+          const failedSteps = job.result?.failed.length ?? 0;
+          const failure =
+            job.status === "failed"
+              ? (job.error ?? "The restore failed.")
+              : failedSteps > 0
+                ? `${failedSteps} step(s) failed.`
+                : null;
+          await recordAudit(session, {
+            action: "adopt.rollback",
+            targetId: snapshotId,
+            details,
+            result: failure === null ? "success" : "failure",
+            errorMessage: failure,
+          });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, AUDIT_POLL_MS));
+      }
+    } catch (error) {
+      logger.warn("adoption history: could not audit the restore", error);
+    }
+  }
 
   /**
    * Release the lock of an apply or rollback whose bot died (no heartbeat for
@@ -199,15 +243,51 @@ export function createAdoptionHistoryRouter(client: Client): Router {
       try {
         const guild = await client.guilds.fetch(session.guildId);
         const engine = await ServerAdoptionService.getInstance(client, guild);
-        const job = engine.startRollback(id, {
-          actor: session,
+        // Live-state safety check (#1134). Run here first so a refusal is
+        // shown at once; the engine runs it again after claiming the snapshot,
+        // before its first write.
+        const store = new MongoAdoptionStore();
+        const revalidate = rollbackRevalidator(guild, () => store.get(id), {
+          actorId: session.discordUserId,
           deleteCreatedRoles,
         });
+        let problems: string[];
+        try {
+          problems = await revalidate();
+        } catch (error) {
+          // Fail closed: if the live server can't be read, don't restore.
+          logger.warn("adoption history: restore check failed", error);
+          problems = ["the live server state could not be read"];
+        }
+        if (problems.length > 0) {
+          const text = `Restore refused, nothing was changed: ${problems.join(" ")}`;
+          await recordAudit(session, {
+            action: "adopt.rollback",
+            targetId: id,
+            details: { planId: snapshot.planId, deleteCreatedRoles, problems },
+            result: "failure",
+            errorMessage: text,
+          });
+          flashRedirect(res, HISTORY_PATH, { type: "err", text });
+          return;
+        }
+        // Record that the restore was accepted before it runs, so a restart
+        // can never leave no trace; the outcome entry follows when the job
+        // ends (the engine's second check can still refuse).
         await recordAudit(session, {
-          action: "adopt.rollback",
+          action: "adopt.rollback.start",
           targetId: id,
           details: { planId: snapshot.planId, deleteCreatedRoles },
           result: "success",
+        });
+        const job = engine.startRollback(id, {
+          actor: session,
+          deleteCreatedRoles,
+          revalidate,
+        });
+        void auditWhenDone(engine, job.id, session, id, {
+          planId: snapshot.planId,
+          deleteCreatedRoles,
         });
         res.redirect(303, `${HISTORY_PATH}?job=${encodeURIComponent(job.id)}`);
       } catch (error) {

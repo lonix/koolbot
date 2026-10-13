@@ -51,6 +51,16 @@ jest.unstable_mockModule(
   }),
 );
 const mockRecoverStale = jest.fn<(...a: any[]) => Promise<number>>();
+const mockCheck = jest.fn<(...a: any[]) => Promise<string[]>>();
+const mockRevalidatorFactory = jest.fn<(...a: any[]) => typeof mockCheck>(
+  () => mockCheck,
+);
+jest.unstable_mockModule(
+  "../../src/services/adoption-rollback-check.js",
+  () => ({
+    rollbackRevalidator: mockRevalidatorFactory,
+  }),
+);
 const mockStartRollback = jest.fn<(...a: any[]) => any>();
 const mockGetRollbackJob = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule(
@@ -59,6 +69,7 @@ jest.unstable_mockModule(
     DESTRUCTIVE_RESTORE_NOTE: "Messages can't be restored.",
     MongoAdoptionStore: class {
       recoverStale = mockRecoverStale;
+      get = jest.fn(async () => ({ id: "snap" }));
     },
     ServerAdoptionService: {
       getInstance: async () => ({
@@ -125,6 +136,12 @@ beforeEach(() => {
   mockDetail.mockResolvedValue(summary());
   mockStartRollback.mockReturnValue({ id: JOB });
   mockRecoverStale.mockResolvedValue(0);
+  mockCheck.mockResolvedValue([]);
+  mockGetRollbackJob.mockReset();
+  mockGetRollbackJob.mockReturnValue({
+    status: "done",
+    result: { restored: [], failed: [] },
+  });
 });
 afterEach(async () => {
   await harness?.close();
@@ -224,6 +241,114 @@ describe("GET /adopt/history/:id/restore", () => {
   });
 });
 
+const auditActions = (): string[] =>
+  mockRecordAudit.mock.calls.map(
+    (c) => (c as unknown as [unknown, { action: string }])[1].action,
+  );
+
+/** The outcome entry is written after the response, when the job has ended. */
+async function waitForAudit(): Promise<void> {
+  for (
+    let i = 0;
+    i < 80 && !auditActions().includes("adopt.rollback");
+    i += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+describe("restore audit follows the real outcome (#1134)", () => {
+  it("records a failure, and no success, when the engine's second check refuses", async () => {
+    mockGetRollbackJob.mockReturnValue({
+      status: "failed",
+      error: "Cannot roll back: this would remove your own access to c1.",
+      result: null,
+    });
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(res.status).toBe(303); // the first check passed, so the job started
+    await waitForAudit();
+    // A started entry (the restore was accepted), then the real outcome.
+    expect(auditActions()).toEqual(["adopt.rollback.start", "adopt.rollback"]);
+    expect(mockRecordAudit).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "adopt.rollback",
+        result: "failure",
+        errorMessage: expect.stringContaining("Cannot roll back"),
+      }),
+    );
+  });
+
+  it("records a failure when steps failed, and waits while the job is running", async () => {
+    mockGetRollbackJob
+      .mockReturnValueOnce({ status: "running" })
+      .mockReturnValue({
+        status: "done",
+        result: { restored: ["a"], failed: [{ opId: "b", error: "x" }] },
+      });
+    await mount();
+    await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Still running: only the started entry exists, no outcome yet.
+    expect(auditActions()).toEqual(["adopt.rollback.start"]);
+    await waitForAudit();
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        result: "failure",
+        errorMessage: "1 step(s) failed.",
+      }),
+    );
+  });
+});
+
+describe("POST /adopt/history/:id/restore live-state check (#1134)", () => {
+  it("refuses an unsafe restore before the engine starts, names the cause and audits it", async () => {
+    mockCheck.mockResolvedValue([
+      'This change would remove your own access to "secret".',
+    ]);
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(res.status).toBe(303);
+    const flash = flashOf(res);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("nothing was changed");
+    expect(flash.msg).toContain('remove your own access to "secret"');
+    expect(mockStartRollback).not.toHaveBeenCalled();
+    // Exactly one entry: the refusal. Nothing was started.
+    expect(auditActions()).toEqual(["adopt.rollback"]);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "adopt.rollback",
+        result: "failure",
+        details: expect.objectContaining({ problems: expect.any(Array) }),
+      }),
+    );
+  });
+
+  it("checks with the ticked option, so deleting created roles is judged too", async () => {
+    await mount();
+    await harness.post(`/adopt/history/${SNAP}/restore`, {
+      deleteCreatedRoles: "1",
+    });
+    expect(mockRevalidatorFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      { actorId: session.discordUserId, deleteCreatedRoles: true },
+    );
+  });
+
+  it("fails closed when the live server can't be read", async () => {
+    mockCheck.mockRejectedValue(new Error("discord down"));
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(flashOf(res).msg).toContain("could not be read");
+    expect(mockStartRollback).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /adopt/history/:id/restore", () => {
   it("starts the rollback, audits it, and leaves created roles alone by default", async () => {
     await mount();
@@ -233,7 +358,17 @@ describe("POST /adopt/history/:id/restore", () => {
     expect(mockStartRollback).toHaveBeenCalledWith(SNAP, {
       actor: session,
       deleteCreatedRoles: false,
+      // The engine re-runs the same check after it claims the snapshot.
+      revalidate: mockCheck,
     });
+    expect(mockRevalidatorFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      { actorId: session.discordUserId, deleteCreatedRoles: false },
+    );
+    // A started entry is written before the job runs, the outcome when it ends.
+    await waitForAudit();
+    expect(auditActions()).toEqual(["adopt.rollback.start", "adopt.rollback"]);
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "adopt.rollback", result: "success" }),

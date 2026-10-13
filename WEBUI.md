@@ -1472,8 +1472,33 @@ opens the snapshot history.
    reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
    this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
    IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
-   can be restored again to finish. Each restore is written to the audit log (`adopt.rollback`). Snapshots are kept for
+   can be restored again to finish. Each accepted restore writes a started entry (`adopt.rollback.start`) to the audit log
+   before it runs, and its outcome (`adopt.rollback`) when it ends; if KoolBot restarts in between, only the started entry
+   exists. A refused restore is written as a failed `adopt.rollback`. Snapshots are kept for
    `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
+
+   **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore
+   scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same
+   safety rules as an apply. It is refused, with a message naming the cause and with nothing changed, when it would:
+   remove your own access to a channel or your Administrator permission (you are the admin who clicked Restore, not the one
+   who applied); lock the bot out of a channel a feature uses; leave the bot without the Manage Roles permission that the role and
+   permission-overwrite changes in the restore need, including a role or overwrite that already has the saved value,
+   because the restore still writes it (a restore of settings only does not need it); or edit a role that is
+   managed by an integration or sits at or above the bot's highest role. Roles the plan granted to members are revoked by a
+   restore, so if you or the bot are among the members it granted a role to, the check treats that role as lost; for a plan
+   that granted a role to many members only whether *you* and *the bot* were among them matters, and no member names are shown.
+   Every role the restore takes back from members is also judged like a role change, even when neither of you received it:
+   the bot needs Manage Roles, and a role that is managed by an integration or sits at or above the bot's highest role
+   refuses the restore.
+   Choosing **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. This includes a role whose
+   creation was interrupted: any role on the server with the same name, colour and permissions is judged as if it
+   would be deleted, so a lookalike can refuse the restore. The
+   engine runs the same check again after it claims the snapshot and before its first write. If the live server can't be
+   read, Restore is refused. For a snapshot that was already partly restored, only the steps still to be reverted are
+   checked; what was restored earlier is part of the live state. The check never approves anything the planner can't judge:
+   recreating a deleted channel or role and putting settings back are not part of it. If the saved list of who was granted
+   a role is not in the shape KoolBot expects, Restore is refused. There is no
+   extra warning for old snapshots: the check looks at the live server, so a snapshot's age does not change the result.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
