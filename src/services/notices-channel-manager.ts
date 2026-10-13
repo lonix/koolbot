@@ -10,7 +10,7 @@ import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
-import { BOT_FEATURES } from "../content/bot-features.js";
+import { BOT_FEATURES, BotFeatureInfo } from "../content/bot-features.js";
 import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
 import { getBotVersion } from "../utils/version.js";
 
@@ -55,29 +55,21 @@ export function getFeatureEnabledKeys(): string[] {
 const FEATURE_NOTICE_REFRESH_DEBOUNCE_MS = 2000;
 
 /**
- * One notice line for an enabled feature. Uses the copy in `BOT_FEATURES`
- * when present, otherwise falls back to a label built from the key prefix and
- * the key's Settings description, so an undecorated feature still shows up.
+ * The notice copy for a feature gate, or `undefined` when the feature is not
+ * listed. A feature is listed only when `BOT_FEATURES` has an entry for it
+ * with `listed: true` (#1131), so a feature nobody has classified yet stays
+ * out of the post instead of appearing with a generic fallback.
  */
-export function formatFeatureLine(key: string): string {
-  const feature = FEATURE_ENABLED_KEY.exec(key)?.[1] ?? key;
-  const info = hasOwn(BOT_FEATURES, feature)
-    ? BOT_FEATURES[feature]
-    : undefined;
-  const emoji = info?.emoji ?? "✅";
-  const label =
-    info?.label ??
-    feature
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  const meta = (
-    settingsMetadata as Record<string, { description?: string } | undefined>
-  )[key];
-  const description = info?.description ?? meta?.description;
-  return description
-    ? `**${emoji} ${label}** - ${description}`
-    : `**${emoji} ${label}**`;
+export function getListedFeature(key: string): BotFeatureInfo | undefined {
+  const feature = FEATURE_ENABLED_KEY.exec(key)?.[1];
+  if (feature === undefined || !hasOwn(BOT_FEATURES, feature)) return undefined;
+  const info = BOT_FEATURES[feature];
+  return info.listed ? info : undefined;
+}
+
+/** One notice line for a listed feature (see `getListedFeature`). */
+export function formatFeatureLine(info: BotFeatureInfo): string {
+  return `**${info.emoji} ${info.label}** - ${info.description}`;
 }
 
 export class NoticesChannelManager {
@@ -436,15 +428,23 @@ export class NoticesChannelManager {
           existingNotice.updatedAt = new Date();
           await existingNotice.save();
           logger.info("Updated bot info notice with current features");
+          // Checked right before the post: once stop() has landed, leave the
+          // old message in place. The next start reposts from the saved content.
+          if (generation !== this.generation) return;
 
-          // Delete old message and post new one
-          if (existingNotice.messageId) {
-            await this.deleteNoticeMessage(existingNotice.messageId);
-          }
+          // Post the new message before deleting the old one, so a pass that
+          // fails or is cut short never leaves the channel without a status
+          // message. A post already in flight cannot be recalled: once it has
+          // landed the swap is finished (stop() waits for this pass), which
+          // keeps exactly one message and a stored id that points at it.
+          const previousMessageId = existingNotice.messageId;
           const messageId = await this.postNotice(existingNotice);
           if (messageId) {
             existingNotice.messageId = messageId;
             await existingNotice.save();
+            if (previousMessageId) {
+              await this.deleteNoticeMessage(previousMessageId);
+            }
           }
         }
       } else {
@@ -458,6 +458,7 @@ export class NoticesChannelManager {
         });
         await botInfoNotice.save();
         logger.info("Created bot info notice");
+        if (generation !== this.generation) return;
 
         // Post to channel
         const messageId = await this.postNotice(botInfoNotice);
@@ -472,17 +473,20 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Generate bot info content: the running version plus every enabled
-   * feature. The feature list is derived from the schema's top-level
-   * `<feature>.enabled` keys (#1007) rather than a hand-maintained subset, so
-   * a newly shipped feature appears without touching this method.
+   * Generate bot info content: the running version plus every enabled feature
+   * that is classified as member-facing and worth knowing about (#1131). The
+   * candidates come from the schema's top-level `<feature>.enabled` keys
+   * (#1007); `BOT_FEATURES` decides which of them are listed, and a drift test
+   * forces that decision when a feature ships.
    */
   private async generateBotInfoContent(): Promise<string> {
     const features: string[] = [];
 
     for (const key of getFeatureEnabledKeys()) {
+      const info = getListedFeature(key);
+      if (!info) continue;
       if (await this.configService.getBoolean(key, false)) {
-        features.push(formatFeatureLine(key));
+        features.push(formatFeatureLine(info));
       }
     }
 
