@@ -7,6 +7,7 @@ import {
   jest,
 } from "@jest/globals";
 import type { GuildMember } from "discord.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../../src/utils/guild-members-intent.js";
 
 const mockGetBoolean =
   jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
@@ -279,7 +280,7 @@ describe("WelcomeService", () => {
       mockEnv.guildMembersIntent = false;
       expect(await svc().warnIfIntentMissing()).toBe(true);
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("GUILD_MEMBERS_INTENT"),
+        expect.stringContaining(GUILD_MEMBERS_INTENT_HOWTO),
       );
     });
     it("stays quiet when the intent is on or the feature is off", async () => {

@@ -7,6 +7,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { truncateText } from "../utils/discord-limits.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import {
   MAX_REASON_LENGTH,
   MAX_TIMEOUT_MINUTES,
@@ -497,7 +498,7 @@ export class RaidProtectionService {
       return "The moderation log (`moderation.enabled`) is off, and every anti-raid action must be recorded in it.";
     }
     if (!env.guildMembersIntent) {
-      return "The Server Members Intent is off (`GUILD_MEMBERS_INTENT`), so Discord never sends member-join events.";
+      return `The bot is not requesting the Server Members Intent, so Discord never sends member-join events. ${GUILD_MEMBERS_INTENT_HOWTO}`;
     }
     return null;
   }

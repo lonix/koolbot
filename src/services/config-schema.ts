@@ -1,3 +1,5 @@
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
+
 export interface ConfigSchema {
   // Voice Channel Management
   "voicechannels.enabled": boolean;
@@ -1078,8 +1080,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   },
   welcome: {
     title: "Welcome Messages",
-    description:
-      "Greet new members in a configured channel, optionally pointing them at the self-assign role picker and the rules channel. Needs the privileged Server Members Intent (GUILD_MEMBERS_INTENT=true) so Discord delivers member-join events.",
+    description: `Greet new members in a configured channel, optionally pointing them at the self-assign role picker and the rules channel. Needs the privileged Server Members Intent so Discord delivers member-join events. ${GUILD_MEMBERS_INTENT_HOWTO}`,
   },
   rules: {
     title: "Rules Acceptance",
@@ -1694,8 +1695,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "welcome.enabled": {
     label: "Welcome messages enabled",
-    description:
-      "Post a welcome message in a configured channel when a new member joins. Requires the Server Members Intent: enable it in the Discord developer portal and set GUILD_MEMBERS_INTENT=true, otherwise Discord never delivers join events (the bot logs a warning at startup).",
+    description: `Post a welcome message in a configured channel when a new member joins. Requires the Server Members Intent, otherwise Discord never delivers join events (the bot logs a warning at startup). ${GUILD_MEMBERS_INTENT_HOWTO}`,
     category: "welcome",
     type: "boolean",
   },
@@ -2372,8 +2372,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "moderation.raid.enabled": {
     label: "Anti-raid protection enabled",
-    description:
-      "Detect join floods and optionally act on new accounts. Needs moderation.enabled (every action is written to the moderation log) and the Server Members Intent (GUILD_MEMBERS_INTENT=true) so join events arrive. Also enables the /raidmode command. Only ever acts on members who join while it is active, never on existing members.",
+    description: `Detect join floods and optionally act on new accounts. Needs moderation.enabled (every action is written to the moderation log) and the Server Members Intent so join events arrive. ${GUILD_MEMBERS_INTENT_HOWTO} Also enables the /raidmode command. Only ever acts on members who join while it is active, never on existing members.`,
     category: "moderation",
     type: "boolean",
     dependsOn: ["moderation.enabled"],

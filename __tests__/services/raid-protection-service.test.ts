@@ -7,6 +7,7 @@ import {
   jest,
 } from "@jest/globals";
 import type { Client, Guild, GuildMember } from "discord.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../../src/utils/guild-members-intent.js";
 
 const config = new Map<string, unknown>();
 // When set, config reads wait on it, to hold a join inside its settings load.
@@ -238,7 +239,9 @@ describe("RaidProtectionService", () => {
     it("does nothing without the Server Members Intent and says why", async () => {
       mockEnv.guildMembersIntent = false;
       const service = RaidProtectionService.getInstance(client);
-      expect(await service.getInactiveReason()).toMatch(/Members Intent/);
+      const reason = await service.getInactiveReason();
+      expect(reason).toMatch(/Members Intent/);
+      expect(reason).toContain(GUILD_MEMBERS_INTENT_HOWTO);
       expect(await service.warnIfInactive()).toBe(true);
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining("inactive"),
