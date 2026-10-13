@@ -1122,7 +1122,7 @@ an interactive control panel is automatically sent to the channel's text
 chat. Only you (the channel owner) can use it. Every click is checked
 against who owns the room right now, so after ownership moves to someone
 else the previous owner's old panel, Transfer menu or Presets panel stops
-working and they lose their member overwrite on the room.
+working and their owner-specific access to the room is revoked.
 
 **Enable:** Web UI → Settings → `voicechannels.controlpanel.enabled = true`
 (default: `true`).

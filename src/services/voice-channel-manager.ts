@@ -93,6 +93,14 @@ export function stripSurroundingQuotes(value: string): string {
 /** Legacy trigger channel name; reserved so rooms cannot spoof it (#1148). */
 const NEW_CHANNEL_TRIGGER_NAME = "➕ New Channel";
 
+/** Thrown when a transfer is requested by someone who no longer owns the room (#1143). */
+export class NotRoomOwnerError extends Error {
+  constructor(message = "Not the current owner of this channel") {
+    super(message);
+    this.name = "NotRoomOwnerError";
+  }
+}
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
@@ -122,6 +130,12 @@ export class VoiceChannelManager {
    * this map already assumes actually holds.
    */
   private readonly ownerChannelLock = createKeyedLock();
+  /**
+   * Serialises every owner-only room mutation and every ownership transfer
+   * per room, so a transfer cannot land between an ownership check and the
+   * Discord write it was meant to authorise (#1143).
+   */
+  private readonly roomLock = createKeyedLock();
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
@@ -477,6 +491,26 @@ export class VoiceChannelManager {
    */
   public isRoomOwner(userId: string, channelId: string): boolean {
     return this.userChannels.get(userId)?.id === channelId;
+  }
+
+  /**
+   * Run an owner-only room mutation under the room's lock, re-checking live
+   * ownership inside the lock right before `work`. Transfers take the same
+   * lock, so a transfer that landed after the caller's earlier preflight
+   * check is seen here and the former owner is refused instead of acting on
+   * the new owner's room. Returns false (without running `work`) when the
+   * user does not currently own the room.
+   */
+  public async runAsRoomOwner(
+    userId: string,
+    channelId: string,
+    work: () => Promise<void>,
+  ): Promise<boolean> {
+    return this.roomLock.run(channelId, async () => {
+      if (!this.isRoomOwner(userId, channelId)) return false;
+      await work();
+      return true;
+    });
   }
 
   /**
@@ -1532,6 +1566,22 @@ export class VoiceChannelManager {
     currentOwnerId: string,
     newOwnerId: string,
   ): Promise<void> {
+    return this.roomLock.run(channelId, () =>
+      this.transferOwnershipLocked(channelId, currentOwnerId, newOwnerId),
+    );
+  }
+
+  private async transferOwnershipLocked(
+    channelId: string,
+    currentOwnerId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    // Re-check inside the lock: a concurrent (manual or automatic) transfer
+    // may already have moved the room, and acting on a stale request would
+    // revoke the wrong former owner (#1143).
+    if (!this.isRoomOwner(currentOwnerId, channelId)) {
+      throw new NotRoomOwnerError();
+    }
     try {
       const channel = this.client.channels.cache.get(channelId) as VoiceChannel;
       if (!channel) {
@@ -2099,6 +2149,7 @@ export class VoiceChannelManager {
     // restarts (issue #404).
     this.userChannels.delete(userId);
     this.customChannelNames.delete(channelId);
+    this.controlPanels.delete(channelId);
     this.ownershipQueue.delete(channelId);
     // Cancel any pending ownership-transfer timer so it doesn't fire on the
     // now-deleted channel (issue #540).
@@ -2170,6 +2221,7 @@ export class VoiceChannelManager {
 
       // Clean up live status
       this.liveChannels.delete(channel.id);
+      this.controlPanels.delete(channel.id);
 
       // Cancel any pending ownership-transfer timer so it doesn't fire on the
       // now-deleted channel (issue #540).
@@ -3233,6 +3285,15 @@ export class VoiceChannelManager {
   }
 
   private async updateChannelOwnership(
+    channel: VoiceChannel,
+    newOwner: GuildMember,
+  ): Promise<void> {
+    return this.roomLock.run(channel.id, () =>
+      this.updateChannelOwnershipLocked(channel, newOwner),
+    );
+  }
+
+  private async updateChannelOwnershipLocked(
     channel: VoiceChannel,
     newOwner: GuildMember,
   ): Promise<void> {

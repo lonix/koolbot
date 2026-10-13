@@ -87,13 +87,29 @@ export async function handleVCControlButton(
     return;
   }
 
+  // Room-mutating actions run under the room's lock with ownership re-checked
+  // inside it, so a transfer that lands after the preflight above (during the
+  // channel fetch or any Discord call) cannot let a former owner act (#1143).
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  const asOwner = async (work: () => Promise<void>): Promise<void> => {
+    const ran = await manager.runAsRoomOwner(userId, channelId, work);
+    if (!ran) {
+      await interaction.reply({
+        content: "❌ Only the current channel owner can use these controls.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  };
+
   try {
     switch (action) {
       case "name":
         await handleCustomizeName(interaction, channel as VoiceChannel);
         break;
       case "privacy":
-        await handlePrivacy(interaction, channel as VoiceChannel, ownerId);
+        await asOwner(() =>
+          handlePrivacy(interaction, channel as VoiceChannel, ownerId),
+        );
         break;
       case "invite":
         await handleInvite(interaction);
@@ -102,10 +118,14 @@ export async function handleVCControlButton(
         await handleTransfer(interaction, channel as VoiceChannel);
         break;
       case "live":
-        await handleLive(interaction, channel as VoiceChannel, ownerId);
+        await asOwner(() =>
+          handleLive(interaction, channel as VoiceChannel, ownerId),
+        );
         break;
       case "waitingroom":
-        await handleWaitingRoom(interaction, channel as VoiceChannel, ownerId);
+        await asOwner(() =>
+          handleWaitingRoom(interaction, channel as VoiceChannel, ownerId),
+        );
         break;
       default:
         await interaction.reply({

@@ -43,6 +43,17 @@ describe("VCModalHandler - Custom Name Tracking", () => {
     mockGetInstance = jest.fn(() => ({
       setCustomChannelName: mockSetCustomChannelName,
       isRoomOwner: mockIsRoomOwner,
+      runAsRoomOwner: jest.fn(
+        async (
+          userId: string,
+          channelId: string,
+          work: () => Promise<void>,
+        ) => {
+          if (!mockIsRoomOwner(userId, channelId)) return false;
+          await work();
+          return true;
+        },
+      ),
       isReservedChannelName: mockIsReservedChannelName,
     }));
 
@@ -96,6 +107,16 @@ describe("VCModalHandler - Custom Name Tracking", () => {
           content: expect.stringContaining("current channel owner"),
         }),
       );
+    });
+
+    it("refuses the rename when a transfer lands between the click and the locked rename", async () => {
+      // Ownership is re-checked inside runAsRoomOwner, not just up front
+      mockIsRoomOwner.mockReturnValue(false);
+      mockChannel.setName = jest.fn();
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockChannel.setName).not.toHaveBeenCalled();
     });
 
     it("rejects a rename to a reserved (lobby) name", async () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   ChannelType,
   type ButtonInteraction,
+  type StringSelectMenuInteraction,
   type Guild,
   type VoiceChannel,
 } from "discord.js";
@@ -21,6 +22,7 @@ import { UserVoicePreferences } from "../../src/models/user-voice-preferences.js
 import { UserVoicePrefsService } from "../../src/services/user-voice-prefs-service.js";
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import {
+  handleVCPresetSelect,
   handleVCPresetButton,
   presetNameTag,
 } from "../../src/handlers/vc-preset-handler.js";
@@ -32,6 +34,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
   let mockGuild: Partial<Guild>;
   let mockChannel: Partial<VoiceChannel>;
   let mockIsRoomOwner: jest.Mock;
+  let mockIsReserved: jest.Mock;
   let mockService: {
     setDefault: jest.Mock;
     deletePreset: jest.Mock;
@@ -63,9 +66,20 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       (userId: string, channelId: string) =>
         userId === "user1" && channelId === "chan1",
     );
+    mockIsReserved = jest.fn().mockResolvedValue(false);
     jest.spyOn(VoiceChannelManager, "getInstance").mockReturnValue({
       isRoomOwner: mockIsRoomOwner,
-      isReservedChannelName: jest.fn().mockResolvedValue(false),
+      // Mirrors the real lock: ownership is re-checked right before `work`
+      runAsRoomOwner: async (
+        userId: string,
+        channelId: string,
+        work: () => Promise<void>,
+      ) => {
+        if (!mockIsRoomOwner(userId, channelId)) return false;
+        await work();
+        return true;
+      },
+      isReservedChannelName: mockIsReserved,
     } as unknown as VoiceChannelManager);
 
     mockChannel = {
@@ -92,6 +106,61 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
   const setPresets = (presets: Array<{ name: string; isDefault: boolean }>) =>
     mockFindOne.mockResolvedValue({ presets } as never);
+
+  describe("apply preset", () => {
+    const applyInteraction = (): StringSelectMenuInteraction =>
+      ({
+        ...mockInteraction,
+        customId: "vc_preset_apply_chan1_user1",
+        values: ["0"],
+      }) as unknown as StringSelectMenuInteraction;
+
+    beforeEach(() => {
+      Object.assign(mockChannel, {
+        setName: jest.fn().mockResolvedValue(undefined),
+        setUserLimit: jest.fn().mockResolvedValue(undefined),
+        setBitrate: jest.fn().mockResolvedValue(undefined),
+      });
+    });
+
+    it("does not report a skipped reserved name as applied", async () => {
+      mockFindOne.mockResolvedValue({
+        presets: [{ name: "Sneaky", channelName: "Lobby", userLimit: 4 }],
+      } as never);
+      mockIsReserved.mockResolvedValue(true);
+      const i = applyInteraction();
+
+      await handleVCPresetSelect(i);
+
+      expect((mockChannel as any).setName).not.toHaveBeenCalled();
+      expect((mockChannel as any).setUserLimit).toHaveBeenCalledWith(4);
+      const arg = (i.update as jest.Mock).mock.calls[0][0] as {
+        embeds: Array<{ data: { description: string } }>;
+      };
+      const text = arg.embeds[0].data.description;
+      expect(text).not.toContain('name "Lobby"');
+      expect(text).toContain("reserved");
+    });
+
+    it("refuses a former owner when a transfer lands before the locked apply", async () => {
+      mockFindOne.mockResolvedValue({
+        presets: [{ name: "Mine", channelName: "Cool", userLimit: 4 }],
+      } as never);
+      // Preflight (ensureOwnership) passes, the re-check inside the lock fails
+      mockIsRoomOwner.mockReturnValueOnce(true).mockReturnValue(false);
+      const i = applyInteraction();
+
+      await handleVCPresetSelect(i);
+
+      expect((mockChannel as any).setName).not.toHaveBeenCalled();
+      expect((mockChannel as any).setUserLimit).not.toHaveBeenCalled();
+      expect(i.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("current channel owner"),
+        }),
+      );
+    });
+  });
 
   describe("live ownership (#1143)", () => {
     it("refuses a preset action from a user who no longer owns the room", async () => {

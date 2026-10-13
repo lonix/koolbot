@@ -5,7 +5,10 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
-import { VoiceChannelManager } from "../services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  NotRoomOwnerError,
+} from "../services/voice-channel-manager.js";
 
 export async function handleVCTransferSelect(
   interaction: StringSelectMenuInteraction,
@@ -86,6 +89,15 @@ export async function handleVCTransferSelect(
       components: [],
     });
   } catch (error) {
+    // transferOwnership re-checks ownership under the room lock; a transfer
+    // that landed after our preflight makes this request stale (#1143).
+    if (error instanceof NotRoomOwnerError) {
+      await safeReply(interaction, {
+        content: "❌ Only the current channel owner can transfer ownership.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
     logger.error("Error transferring ownership:", error);
     await safeReply(interaction, {
       content: "❌ Failed to transfer ownership. Please try again.",

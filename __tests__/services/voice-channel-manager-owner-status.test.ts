@@ -119,6 +119,7 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       user: { id: "bot" },
       channels: { cache: { get: () => channel } },
     };
+    (manager as any).userChannels.set("old", channel);
     (manager as any).customChannelNames.set("c", "custom");
     (manager as any).updateControlPanelOwnership = jest.fn(
       async () => undefined,

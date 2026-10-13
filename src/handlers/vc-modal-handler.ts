@@ -63,12 +63,14 @@ export async function handleVCModal(
   try {
     switch (action) {
       case "name":
-        if (!(await requireLiveOwner(interaction, channelId))) return;
-        await handleNameModal(interaction, channelId);
+        await asLiveOwner(interaction, channelId, () =>
+          handleNameModal(interaction, channelId),
+        );
         break;
       case "savepreset":
-        if (!(await requireLiveOwner(interaction, channelId))) return;
-        await handleSavePresetModal(interaction, channelId, userId);
+        await asLiveOwner(interaction, channelId, () =>
+          handleSavePresetModal(interaction, channelId, userId),
+        );
         break;
       case "renamepreset":
         if (presetIndex === null || !Number.isInteger(presetIndex)) {
@@ -105,17 +107,25 @@ export async function handleVCModal(
  * user, not that they still own the room (a transfer can happen while the
  * modal is open). Re-check live ownership before touching the room (#1143).
  */
-async function requireLiveOwner(
+async function asLiveOwner(
   interaction: ModalSubmitInteraction,
   channelId: string,
-): Promise<boolean> {
+  work: () => Promise<void>,
+): Promise<void> {
+  // Authorise and mutate inside one serialised, ownership-checked operation:
+  // a transfer cannot land between the check and the rename (#1143).
   const manager = VoiceChannelManager.getInstance(interaction.client);
-  if (manager.isRoomOwner(interaction.user.id, channelId)) return true;
-  await interaction.reply({
-    content: "❌ Only the current channel owner can do this.",
-    flags: MessageFlags.Ephemeral,
-  });
-  return false;
+  const ran = await manager.runAsRoomOwner(
+    interaction.user.id,
+    channelId,
+    work,
+  );
+  if (!ran) {
+    await interaction.reply({
+      content: "❌ Only the current channel owner can do this.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 }
 
 async function handleNameModal(

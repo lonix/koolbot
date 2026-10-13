@@ -74,6 +74,8 @@ describe("VoiceChannelManager - Transfer Ownership", () => {
 
     // Create manager instance
     manager = VoiceChannelManager.getInstance(mockClient as Client);
+    // old-owner-id is the live owner (transfers verify this under the lock)
+    (manager as any).userChannels.set("old-owner-id", mockChannel);
   });
 
   afterEach(() => {
