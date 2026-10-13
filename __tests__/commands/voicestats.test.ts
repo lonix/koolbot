@@ -224,7 +224,10 @@ describe("VoiceStats Command", () => {
         cache: new Map(
           sessions.map((s) => [
             s.channelId,
-            { permissionsFor: () => ({ has: () => true }) },
+            {
+              name: s.channelName,
+              permissionsFor: () => ({ has: () => true }),
+            },
           ]),
         ),
       },
@@ -282,7 +285,13 @@ describe("VoiceStats Command", () => {
         channels: {
           cache: new Map([
             ["private", { permissionsFor: () => ({ has: () => false }) }],
-            ["public", { permissionsFor: () => ({ has: () => true }) }],
+            [
+              "public",
+              {
+                name: "General Renamed",
+                permissionsFor: () => ({ has: () => true }),
+              },
+            ],
           ]),
         },
       };
@@ -295,7 +304,9 @@ describe("VoiceStats Command", () => {
       const content = interaction.editReply.mock.calls[0][0] as string;
       expect(content).not.toContain("Staff Room");
       expect(content).toContain("• a voice channel: 1h 0m");
-      expect(content).toContain("• General: 1h 0m");
+      // Current channel name, not the one stored with the session.
+      expect(content).toContain("• General Renamed: 1h 0m");
+      expect(content).not.toContain("• General: 1h 0m");
       // A deleted channel cannot be checked, so it fails closed too.
       expect(content).not.toContain("Old Room");
       expect(content.match(/• a voice channel: 1h 0m/g)).toHaveLength(2);
@@ -356,7 +367,8 @@ describe("VoiceStats Command", () => {
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([
-        "• live: ongoing",
+        // ch-1's current name, not the stored "live".
+        "• session-1: ongoing",
         "• session-1: 1h 0m",
       ]);
     });

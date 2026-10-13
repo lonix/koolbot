@@ -31,11 +31,11 @@ type MockInteraction = ChatInputCommandInteraction & {
 };
 
 /** A guild whose only channel, "c1", is (or is not) viewable by the caller. */
-function guildWith(canView: boolean): unknown {
+function guildWith(canView: boolean, name = "General"): unknown {
   return {
     channels: {
       cache: new Map([
-        ["c1", { permissionsFor: () => ({ has: () => canView }) }],
+        ["c1", { name, permissionsFor: () => ({ has: () => canView }) }],
       ]),
     },
   };
@@ -161,6 +161,27 @@ describe("Seen Command", () => {
 
       const reply = interaction.editReply.mock.calls[0][0] as string;
       expect(reply).toBe("bob is currently in a voice channel.");
+      expect(reply).not.toContain("Staff Secret");
+    });
+
+    // The stored session name is from when tracking started; after a rename
+    // only the channel's current name may be shown (#1153).
+    it("names the channel by its current name, not the stored one", async () => {
+      mockGetActiveSession.mockReturnValue({
+        channelId: "c1",
+        channelName: "Staff Secret",
+      });
+      const interaction = makeInteraction(
+        undefined,
+        guildWith(true, "Public Lounge"),
+      );
+
+      await execute(interaction);
+
+      const reply = interaction.editReply.mock.calls[0][0] as string;
+      expect(reply).toBe(
+        'bob is currently in the voice channel "Public Lounge".',
+      );
       expect(reply).not.toContain("Staff Secret");
     });
 

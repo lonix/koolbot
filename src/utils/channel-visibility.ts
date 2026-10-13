@@ -18,7 +18,6 @@ export const HIDDEN_CHANNEL_LABEL = "a voice channel";
 export function visibleChannelName(
   interaction: ChatInputCommandInteraction,
   channelId: string | undefined,
-  channelName: string,
 ): string {
   const channel =
     channelId && interaction.guild
@@ -30,5 +29,7 @@ export function visibleChannelName(
   const canView = channel
     .permissionsFor(interaction.user.id)
     ?.has(PermissionFlagsBits.ViewChannel);
-  return canView ? channelName : HIDDEN_CHANNEL_LABEL;
+  // The channel's current name, not the one stored with the session: a private
+  // room renamed and later made visible must not leak its former name.
+  return canView ? channel.name : HIDDEN_CHANNEL_LABEL;
 }

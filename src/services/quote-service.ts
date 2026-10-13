@@ -735,8 +735,10 @@ export class QuoteService {
         result.imported++;
       } catch (error) {
         logger.error(`Error importing quote ${i + 1}:`, error);
+        // The detail is logged above; the member-facing text must not carry
+        // Mongoose or driver messages (#1153).
         result.errors.push(
-          `Quote ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          `Quote ${i + 1}: could not be saved (see the bot log for details)`,
         );
         result.skipped++;
       }

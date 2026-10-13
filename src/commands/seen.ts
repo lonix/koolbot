@@ -46,7 +46,6 @@ export async function execute(
       const channelName = visibleChannelName(
         interaction,
         activeSession.channelId,
-        activeSession.channelName,
       );
       await interaction.editReply(
         channelName === HIDDEN_CHANNEL_LABEL
