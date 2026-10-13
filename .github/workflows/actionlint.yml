@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
 
       - name: Run actionlint
-        uses: reviewdog/action-actionlint@v1.77.0
+        uses: reviewdog/action-actionlint@v1.79.1
         with:
           reporter: github-check
           fail_level: error
