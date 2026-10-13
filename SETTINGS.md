@@ -865,6 +865,12 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   switched to a voice or stage event by hand is put back to an external event.
   A create that times out is not repeated for five minutes; the bot looks for
   the late event first and adopts it.
+  A discarded duplicate occurrence (a recurrence race) that already has a
+  native event is closed before its row is deleted. If the close cannot be
+  confirmed (mirroring turned off, permission missing, Discord error), the row
+  is kept as a hidden-from-the-series cleanup record and removed once the
+  native event has been closed, which happens on a later scan; while mirroring
+  is off it waits for it to be turned back on.
   Not yet covered: native "Interested" to RSVP bridge, adopting existing native
   events, cover images, and mapping recurrence to a native recurrence rule.
 

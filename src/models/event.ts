@@ -110,6 +110,14 @@ export interface IEvent extends Document {
    * (adoption) and only retries after a grace period. Cleared on claim.
    */
   nativeCreateStartedAt: Date | null;
+  /**
+   * A discarded duplicate occurrence kept only until its native event has been
+   * closed (#1034). It is taken out of its series (no `seriesId`, no
+   * recurrence) so the spawn path and the unique occurrence key never see it,
+   * and the scan deletes it once `nativeEventId` and `nativeCreateStartedAt`
+   * are both clear.
+   */
+  nativeCleanupOnly: boolean;
   /** The native event was deleted in Discord by someone else; the mirror
    * respects that and does not recreate it. */
   nativeDetached: boolean;
@@ -167,6 +175,7 @@ const EventSchema = new Schema<IEvent>(
     seriesCancelled: { type: Boolean, default: false },
     nativeEventId: { type: String, default: null },
     nativeCreateStartedAt: { type: Date, default: null },
+    nativeCleanupOnly: { type: Boolean, default: false },
     nativeDetached: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },

@@ -514,6 +514,16 @@ export class EventService extends ScheduledService {
     // that predate the toggle, pushes edits, and closes it on end/cancel.
     if (!windows.skipNative) {
       await this.nativeSync.syncEvent(event, guild, windows.native);
+      // A discarded duplicate's cleanup record has done its job once the
+      // native event is closed.
+      if (
+        event.nativeCleanupOnly &&
+        !event.nativeEventId &&
+        !event.nativeCreateStartedAt
+      ) {
+        await Event.deleteOne({ _id: event._id });
+        return;
+      }
     }
 
     // 5. A finished (or individually cancelled) occurrence hands over to the
@@ -1142,21 +1152,45 @@ export class EventService extends ScheduledService {
    * announcement retry already attached to it so nothing is orphaned. */
   private async discardDuplicate(event: IEvent): Promise<void> {
     const mine = await Event.findById(event._id).catch(() => null);
-    // The duplicate may already mirror (or be mid-create of) a native event
-    // (#1034). Close it by the terminal rules before the row, and with it the
-    // link to the event, is gone. Marker-only rows get one lookup for a late
-    // event now; a create that lands after that is not tracked (a tombstone
-    // row would collide with the series' unique occurrence key).
-    if (mine && (mine.nativeEventId || mine.nativeCreateStartedAt)) {
-      mine.state = "cancelled"; // in memory only: selects the closing rules
-      await this.nativeSync.syncEvent(mine, null);
-    }
     if (mine?.announcementChannelId && mine.announcementMessageId) {
       await this.deleteAnnouncementPost(
         mine.guildId,
         mine.announcementChannelId,
         mine.announcementMessageId,
       );
+    }
+    // The duplicate may already mirror (or be mid-create of) a native event
+    // (#1034). Close it by the terminal rules first. The sync is best-effort
+    // (it does nothing when mirroring is off or the permission is missing, and
+    // swallows REST failures), so success is read from the row afterwards: the
+    // link and create marker are cleared only once the native event is closed,
+    // already gone (10070), or a late event was dealt with.
+    if (mine && (mine.nativeEventId || mine.nativeCreateStartedAt)) {
+      mine.state = "cancelled"; // in memory only: selects the closing rules
+      await this.nativeSync.syncEvent(mine, null);
+      if (mine.nativeEventId || mine.nativeCreateStartedAt) {
+        // Not confirmed. Do not delete the only record of the native event:
+        // keep it as a cleanup record, taken out of the series so the spawn
+        // path cannot adopt it and its unique occurrence key is freed. The
+        // scan retries the close and deletes the row once it succeeds. While
+        // mirroring is disabled it simply waits for it to be re-enabled.
+        await Event.updateOne(
+          { _id: event._id },
+          {
+            $set: {
+              state: "cancelled",
+              nativeCleanupOnly: true,
+              seriesId: null,
+              recurrence: "none",
+              nextSpawned: true,
+            },
+          },
+        );
+        logger.warn(
+          `Kept discarded duplicate ${sanitizeForLog(String(event._id))} as a cleanup record until its native event is closed`,
+        );
+        return;
+      }
     }
     await Event.deleteOne({ _id: event._id });
   }

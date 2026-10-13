@@ -794,4 +794,35 @@ describe("NativeEventSync.syncEvent", () => {
     );
     expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
   });
+
+  describe("closing a link for a discarded duplicate", () => {
+    it("releases the link when the native event is already gone (10070)", async () => {
+      const { guild, scheduledEvents } = makeGuild({ natives: [] });
+      const event = makeEvent({ state: "cancelled", nativeEventId: "gone1" });
+      await makeSync().syncEvent(event, guild);
+      expect(scheduledEvents.edit).not.toHaveBeenCalled();
+      expect(EventMock.updateOne).toHaveBeenCalledWith(
+        { _id: "ev1", nativeEventId: "gone1" },
+        { $set: { nativeEventId: null } },
+      );
+      expect((event as { nativeEventId: unknown }).nativeEventId).toBeNull();
+    });
+
+    it("leaves the link in place when mirroring is disabled", async () => {
+      config.getBoolean.mockResolvedValue(false);
+      const { guild, scheduledEvents } = makeGuild({ natives: [makeNative()] });
+      const event = makeEvent({ state: "cancelled", nativeEventId: "n1" });
+      await makeSync().syncEvent(event, guild);
+      expect(scheduledEvents.edit).not.toHaveBeenCalled();
+      expect((event as { nativeEventId: unknown }).nativeEventId).toBe("n1");
+    });
+
+    it("leaves the link in place when the close fails", async () => {
+      const { guild, scheduledEvents } = makeGuild({ natives: [makeNative()] });
+      scheduledEvents.edit.mockRejectedValueOnce(new Error("503"));
+      const event = makeEvent({ state: "cancelled", nativeEventId: "n1" });
+      await makeSync().syncEvent(event, guild);
+      expect((event as { nativeEventId: unknown }).nativeEventId).toBe("n1");
+    });
+  });
 });
