@@ -206,9 +206,9 @@ export class UserNotificationPrefsService {
     }
 
     if (!isValidTimezone(timezone)) {
-      throw new Error(
-        `"${timezone}" is not a recognized IANA timezone identifier`,
-      );
+      // Fixed message: the caller's audit row and flash must not echo an
+      // arbitrarily long member-supplied string (#1142).
+      throw new Error("That is not a recognized IANA timezone identifier");
     }
 
     const row = await UserNotificationPrefs.findOneAndUpdate(

@@ -175,6 +175,7 @@ describe("createSessionMiddleware permission re-check failures (#781)", () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(check).toHaveBeenCalledWith("u-1", "g-1", "me", {
       onUnavailable: "throw",
+      fresh: true,
     });
   });
 

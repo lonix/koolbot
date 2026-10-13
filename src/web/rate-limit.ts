@@ -48,7 +48,7 @@ export function createRateLimiter(opts: {
   }
 
   return function rateLimit(req, res, next): void {
-    const ip = (req.ip || req.socket.remoteAddress || "unknown").toString();
+    const ip = (req.ip || req.socket?.remoteAddress || "unknown").toString();
     const key = `${opts.keyName}:${ip}`;
     const now = Date.now();
 
