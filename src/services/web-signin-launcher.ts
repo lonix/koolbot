@@ -5,6 +5,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { describeDiscordError } from "../utils/log-sanitize.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { ConfigService } from "./config-service.js";
 import { WebSessionService } from "./web-session-service.js";
@@ -168,14 +169,17 @@ export async function runWebSignin(
           "✅ I've DMed you a single-use sign-in link. Check your direct messages.",
       });
     } catch (dmError) {
+      // Never pass the raw error: a DiscordAPIError carries the DM body
+      // (the sign-in link) in `requestBody` (#1152).
       logger.warn(
-        `Could not DM web sign-in link to ${userId}; falling back to ephemeral reply`,
-        dmError,
+        `/${commandName}: could not DM web sign-in link to user=${userId} (${describeDiscordError(dmError)}); falling back to ephemeral reply`,
       );
       await safeReply(interaction, { content: dmBody });
     }
   } catch (error) {
-    logger.error(`Error issuing web sign-in link for user=${userId}:`, error);
+    logger.error(
+      `Error issuing web sign-in link for user=${userId}: ${describeDiscordError(error)}`,
+    );
     await safeReply(interaction, {
       content: "An error occurred while issuing your sign-in link.",
     });

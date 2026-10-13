@@ -986,7 +986,9 @@ export class VoiceChannelManager {
   ): Promise<VoiceChannel | null> {
     try {
       if (this.waitingRooms.has(channel.id)) {
-        logger.info(`Waiting room already exists for channel ${channel.name}`);
+        logger.info(
+          `Waiting room already exists for channel ${sanitizeForLog(channel.name)}`,
+        );
         return null;
       }
 
@@ -1240,7 +1242,9 @@ export class VoiceChannelManager {
       )?.[0];
 
       if (!currentOwnerId) {
-        logger.error(`Could not find owner for channel ${channel.name}`);
+        logger.error(
+          `Could not find owner for channel ${sanitizeForLog(channel.name)}`,
+        );
         return;
       }
 
@@ -1518,12 +1522,14 @@ export class VoiceChannelManager {
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;
 
-      logger.info(`Voice state update for ${member.displayName}:`);
       logger.info(
-        `Old channel: ${oldChannel?.name || "none"} (${oldChannel?.id || "none"})`,
+        `Voice state update for ${sanitizeForLog(member.displayName)}:`,
       );
       logger.info(
-        `New channel: ${newChannel?.name || "none"} (${newChannel?.id || "none"})`,
+        `Old channel: ${sanitizeForLog(oldChannel?.name) || "none"} (${oldChannel?.id || "none"})`,
+      );
+      logger.info(
+        `New channel: ${sanitizeForLog(newChannel?.name) || "none"} (${newChannel?.id || "none"})`,
       );
 
       // User joined a channel
@@ -2039,7 +2045,9 @@ export class VoiceChannelManager {
       // Delete the channel
       try {
         await channel.delete();
-        logger.info(`Cleaned up empty voice channel ${channel.name}`);
+        logger.info(
+          `Cleaned up empty voice channel ${sanitizeForLog(channel.name)}`,
+        );
       } catch (error) {
         if (isUnknownChannelError(error)) {
           // Already gone on Discord's side — fall through and reconcile.
@@ -2914,7 +2922,9 @@ export class VoiceChannelManager {
           await channel.delete("Bot cleanup - unmanaged channel");
           // Reconcile any leftover in-memory tracking for this channel
           await this.reconcileDeletedChannelState(channel.id);
-          logger.info(`Deleted unmanaged channel: ${channel.name}`);
+          logger.info(
+            `Deleted unmanaged channel: ${sanitizeForLog(channel.name)}`,
+          );
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
         }
@@ -2939,7 +2949,9 @@ export class VoiceChannelManager {
           await channel.delete("Bot cleanup - empty managed channel");
           // Reconcile all in-memory tracking so no per-channel state is orphaned
           await this.reconcileDeletedChannelState(channel.id);
-          logger.info(`Deleted empty managed channel: ${channel.name}`);
+          logger.info(
+            `Deleted empty managed channel: ${sanitizeForLog(channel.name)}`,
+          );
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
         }

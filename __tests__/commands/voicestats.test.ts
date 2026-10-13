@@ -214,8 +214,29 @@ describe("VoiceStats Command", () => {
       startTime: new Date(base + i * day),
       endTime: new Date(base + i * day + 3600 * 1000),
       duration: 3600,
+      channelId: `ch-${i + 1}`,
       channelName: `session-${i + 1}`,
     }));
+
+    // Every session's channel exists and the caller can view it (#1153).
+    const viewableGuild = {
+      channels: {
+        cache: new Map(
+          sessions.map((s) => [
+            s.channelId,
+            {
+              name: s.channelName,
+              permissionsFor: () => ({ has: () => true }),
+            },
+          ]),
+        ),
+      },
+    };
+    const makeViewerInteraction = (): MockInteraction =>
+      ({
+        ...makeUserInteraction(),
+        guild: viewableGuild,
+      }) as unknown as MockInteraction;
 
     function recentLines(editReply: jest.Mock): string[] {
       const content = editReply.mock.calls[0][0] as string;
@@ -234,7 +255,7 @@ describe("VoiceStats Command", () => {
         sessions,
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
@@ -245,6 +266,50 @@ describe("VoiceStats Command", () => {
         "• session-4: 1h 0m",
         "• session-3: 1h 0m",
       ]);
+    });
+
+    // #1153: do not name a channel the caller cannot view.
+    it("hides recent-session channel names the caller cannot view or that no longer exist", async () => {
+      mockGetUserStats.mockResolvedValue({
+        userId: "user-1",
+        username: "alice",
+        totalTime: 7200,
+        lastSeen: new Date(base),
+        sessions: [
+          { ...sessions[0], channelId: "private", channelName: "Staff Room" },
+          { ...sessions[1], channelId: "public", channelName: "General" },
+          { ...sessions[2], channelId: "deleted", channelName: "Old Room" },
+        ],
+      });
+      const guild = {
+        channels: {
+          cache: new Map([
+            ["private", { permissionsFor: () => ({ has: () => false }) }],
+            [
+              "public",
+              {
+                name: "General Renamed",
+                permissionsFor: () => ({ has: () => true }),
+              },
+            ],
+          ]),
+        },
+      };
+      const interaction = {
+        ...makeUserInteraction(),
+        guild,
+      } as unknown as MockInteraction;
+      await execute(interaction);
+
+      const content = interaction.editReply.mock.calls[0][0] as string;
+      expect(content).not.toContain("Staff Room");
+      expect(content).toContain("• a voice channel: 1h 0m");
+      // Current channel name, not the one stored with the session.
+      expect(content).toContain("• General Renamed: 1h 0m");
+      expect(content).not.toContain("• General: 1h 0m");
+      // A deleted channel cannot be checked, so it fails closed too.
+      expect(content).not.toContain("Old Room");
+      expect(content.match(/• a voice channel: 1h 0m/g)).toHaveLength(2);
     });
 
     it("orders by startTime even when the stored array is not chronological", async () => {
@@ -267,7 +332,7 @@ describe("VoiceStats Command", () => {
         sessions: shuffled,
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([
@@ -290,15 +355,20 @@ describe("VoiceStats Command", () => {
         lastSeen: new Date(base + day),
         sessions: [
           sessions[0],
-          { startTime: new Date(base + day), channelName: "live" },
+          {
+            startTime: new Date(base + day),
+            channelId: "ch-1",
+            channelName: "live",
+          },
         ],
       });
 
-      const interaction = makeUserInteraction();
+      const interaction = makeViewerInteraction();
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([
-        "• live: ongoing",
+        // ch-1's current name, not the stored "live".
+        "• session-1: ongoing",
         "• session-1: 1h 0m",
       ]);
     });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import winston from "winston";
 import logger from "../../src/utils/logger.js";
 
@@ -226,5 +226,38 @@ describe("Logger Error Handling", () => {
         logger.error("Error occurred:", error);
       }).not.toThrow();
     });
+  });
+});
+
+describe("Logger request-payload redaction (#1152)", () => {
+  it("never writes requestBody or rawError from an error passed as meta", () => {
+    const lines: string[] = [];
+    const spy = jest.spyOn(console, "log").mockImplementation((line) => {
+      lines.push(String(line));
+    });
+    const stdout = (
+      console as unknown as { _stdout?: { write: (s: string) => boolean } }
+    )._stdout;
+    const write = stdout
+      ? jest.spyOn(stdout, "write").mockImplementation((s: string) => {
+          lines.push(String(s));
+          return true;
+        })
+      : undefined;
+
+    const err = Object.assign(new Error("Cannot send messages to this user"), {
+      code: 50007,
+      requestBody: { json: { content: "https://x.test/admin/s/SECRETTOKEN" } },
+      rawError: { message: "https://x.test/admin/s/SECRETTOKEN" },
+    });
+    logger.warn("DM failed", err);
+
+    spy.mockRestore();
+    write?.mockRestore();
+
+    const output = lines.join("\n");
+    expect(output).toContain("DM failed");
+    expect(output).toContain("50007");
+    expect(output).not.toContain("SECRETTOKEN");
   });
 });

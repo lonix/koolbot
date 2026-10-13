@@ -283,9 +283,13 @@ export class VoiceChannelTracker {
     }
   }
 
-  public getActiveSession(userId: string): { channelName: string } | null {
+  public getActiveSession(
+    userId: string,
+  ): { channelId: string; channelName: string } | null {
     const session = this.activeSessions.get(userId);
-    return session ? { channelName: session.channelName } : null;
+    return session
+      ? { channelId: session.channelId, channelName: session.channelName }
+      : null;
   }
 
   /**

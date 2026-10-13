@@ -4,7 +4,7 @@ import type {
   RepliableInteraction,
 } from "discord.js";
 import logger from "./logger.js";
-import { getErrorMessage } from "./error-guards.js";
+import { describeDiscordError } from "./log-sanitize.js";
 
 /**
  * Reply-only fields that `editReply` does not accept. Ephemerality (and the
@@ -55,12 +55,12 @@ export async function safeReply(
     }
     return true;
   } catch (error) {
-    // Pass the original error alongside the summary: the logger's
-    // `format.errors({ stack: true })` needs the Error itself to emit a stack,
-    // which is what makes an intermittent Discord API failure diagnosable.
+    // Log the stack but never the raw error: a DiscordAPIError carries the
+    // request body (the reply content, which may be a one-time sign-in link)
+    // as own fields that the logger would serialise (#1152).
     logger.error(
-      `Failed to deliver response for interaction ${interaction.id}: ${getErrorMessage(error)}`,
-      error,
+      `Failed to deliver response for interaction ${interaction.id}: ${describeDiscordError(error)}`,
+      { stack: error instanceof Error ? error.stack : undefined },
     );
     return false;
   }
