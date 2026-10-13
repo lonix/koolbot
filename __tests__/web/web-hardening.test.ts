@@ -22,6 +22,7 @@ import { PermissionsService } from "../../src/services/permissions-service.js";
 import { signValue, parseCookies } from "../../src/web/cookies.js";
 import { flashRedirectQuery } from "../../src/web/routes/write/helpers.js";
 import { deriveCsrfToken } from "../../src/web/csrf.js";
+import { CONFIRM_SCRIPT } from "../../src/web/html.js";
 import { addNonce, buildCsp } from "../../src/web/security-headers.js";
 import { signFlash, verifyFlashSignature } from "../../src/web/http-flash.js";
 
@@ -191,6 +192,59 @@ describe("Web UI response headers (#1149)", () => {
   });
 });
 
+describe("admin pages under the CSP (#1149)", () => {
+  beforeEach(async () => {
+    await setup("http://127.0.0.1");
+    jest
+      .spyOn(PermissionsService.prototype, "isAdministrator")
+      .mockResolvedValue(true as never);
+    (
+      WebSessionService.getInstance().findById as unknown as jest.Mock<
+        () => Promise<unknown>
+      >
+    ).mockResolvedValue({
+      sessionId: "s1",
+      discordUserId: "u1",
+      guildId: "g1",
+      role: "admin",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as unknown as never);
+  });
+  afterEach(teardown);
+
+  it("serves nonce'd scripts and a working confirm handler on real admin pages", async () => {
+    const now = Date.now();
+    const payload = Buffer.from(
+      JSON.stringify({
+        sid: "s1",
+        uid: "u1",
+        gid: "g1",
+        rol: "admin",
+        iat: now,
+        act: now,
+      }),
+    ).toString("base64url");
+    const cookie = `koolbot_session=${encodeURIComponent(signValue(payload, SECRET))}`;
+    for (const p of [
+      "/admin/",
+      "/admin/settings",
+      "/admin/digest",
+      "/admin/voice-channels",
+      "/admin/birthdays",
+    ]) {
+      const { res, body } = await get(p, cookie);
+      expect(res.status).toBe(200);
+      expectHardened(res, body);
+      expect((body.match(/<script nonce=/g) ?? []).length).toBeGreaterThan(3);
+      // Every admin page ships the delegated handler that the
+      // `data-confirm` destructive forms rely on (no inline handlers).
+      expect(body).toContain(CONFIRM_SCRIPT);
+    }
+  });
+});
+
 describe("Web UI response headers over HTTPS (#1149)", () => {
   beforeEach(() => setup("https://admin.example.com"));
   afterEach(teardown);
@@ -230,6 +284,13 @@ describe("no inline event handlers remain in Web UI markup (#1149)", () => {
       return e.name.endsWith(".ts") ? [full] : [];
     });
   }
+
+  it("keeps data-confirm out of the layout-less consent/error pages", () => {
+    // Only admin-layout and user-layout ship CONFIRM_SCRIPT; views.ts renders
+    // the standalone pages and must not rely on it.
+    const views = fs.readFileSync(path.resolve("src/web/views.ts"), "utf8");
+    expect(views).not.toContain("data-confirm");
+  });
 
   it("has no on*= attribute or javascript: URL in any src/web template", () => {
     const offenders: string[] = [];

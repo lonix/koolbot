@@ -20,9 +20,13 @@ import { env } from "../config/env.js";
  * `script-src 'unsafe-inline'`:
  *  - `script-src 'nonce-<n>'`: only inline scripts carrying this request's
  *    nonce run. The nonce is added to every `<script>` tag of an HTML
- *    response by wrapping `res.send` (`addNonce`). User-supplied text is
- *    HTML-escaped everywhere, so injected markup can never contain a literal
- *    `<script` and therefore never receives a nonce.
+ *    response by wrapping `res.send` (`addNonce`), so no template needs to
+ *    know about it. Limit of this design: it blocks inline event handlers,
+ *    script-scheme URLs and external script sources, but it does NOT stop a
+ *    `<script>` tag that reached the output unescaped, because that tag would
+ *    be given the nonce too. Output escaping (`escapeHtml`) remains the
+ *    defence against script injection; the CSP is a backstop for everything
+ *    else (framing, `<base>`, off-origin forms and fetches, plugins).
  *  - `style-src 'unsafe-inline'`: justified exception. Dozens of
  *    `style="..."` attributes and several `<style>` blocks exist; a style
  *    nonce would disable `'unsafe-inline'` for the attributes too. Style
