@@ -271,17 +271,16 @@ describe("nonce only on trusted scripts, over HTTP (#1149)", () => {
     process.env.WEBUI_BASE_URL = "http://127.0.0.1";
     const app = express();
     app.use(webSecurityHeaders);
-    app.get("/x", (req, res) => {
-      // Simulates an escaping bug: raw attacker text next to a trusted block.
-      res.type("html").send(`${scriptTag("ok()")}${String(req.query.q ?? "")}`);
+    // Simulates an escaping bug with a fixed payload (no request data is
+    // reflected): raw script markup sits next to a trusted block.
+    const evil = '<script>pwn()</script><script nonce="guess">pwn()</script>';
+    app.get("/x", (_req, res) => {
+      res.type("html").send(`${scriptTag("ok()")}${evil}`);
     });
     const srv = createServer(app);
     await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
     const port = (srv.address() as AddressInfo).port;
-    const evil = '<script>pwn()</script><script nonce="guess">pwn()</script>';
-    const get1 = await fetch(
-      `http://127.0.0.1:${port}/x?q=${encodeURIComponent(evil)}`,
-    );
+    const get1 = await fetch(`http://127.0.0.1:${port}/x`);
     const get2 = await fetch(`http://127.0.0.1:${port}/x`);
     const nonce1 = /'nonce-([^']+)'/.exec(
       get1.headers.get("content-security-policy")!,
