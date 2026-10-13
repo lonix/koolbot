@@ -424,27 +424,44 @@ export class NoticesChannelManager {
       if (existingNotice) {
         // Update existing notice if content changed
         if (existingNotice.content !== botInfoContent) {
-          existingNotice.content = botInfoContent;
-          existingNotice.updatedAt = new Date();
-          await existingNotice.save();
-          logger.info("Updated bot info notice with current features");
-          // Checked right before the post: once stop() has landed, leave the
-          // old message in place. The next start reposts from the saved content.
-          if (generation !== this.generation) return;
-
+          // The generation was checked just above, with no await since: once
+          // stop() has landed, leave the old message and the stored content
+          // alone. The next start reposts from the saved content.
+          //
           // Post the new message before deleting the old one, so a pass that
           // fails or is cut short never leaves the channel without a status
-          // message. A post already in flight cannot be recalled: once it has
-          // landed the swap is finished (stop() waits for this pass), which
-          // keeps exactly one message and a stored id that points at it.
+          // message. The new content is stored only once the post has
+          // succeeded: saving it first would make a failed post look like an
+          // up-to-date notice and suppress every later retry.
+          const previousContent = existingNotice.content;
+          const previousUpdatedAt = existingNotice.updatedAt;
           const previousMessageId = existingNotice.messageId;
+          existingNotice.content = botInfoContent; // postNotice reads it
           const messageId = await this.postNotice(existingNotice);
-          if (messageId) {
-            existingNotice.messageId = messageId;
+          if (!messageId) {
+            existingNotice.content = previousContent;
+            return;
+          }
+
+          // A post already in flight cannot be recalled: once it has landed
+          // the swap is finished (stop() waits for this pass), which keeps
+          // exactly one message and a stored id that points at it.
+          existingNotice.messageId = messageId;
+          existingNotice.updatedAt = new Date();
+          try {
             await existingNotice.save();
-            if (previousMessageId) {
-              await this.deleteNoticeMessage(previousMessageId);
-            }
+          } catch (error) {
+            // Content and id are stored together or not at all: take the new
+            // message back down so the old one stays the single status post.
+            existingNotice.content = previousContent;
+            existingNotice.messageId = previousMessageId;
+            existingNotice.updatedAt = previousUpdatedAt;
+            await this.deleteNoticeMessage(messageId);
+            throw error;
+          }
+          logger.info("Updated bot info notice with current features");
+          if (previousMessageId) {
+            await this.deleteNoticeMessage(previousMessageId);
           }
         }
       } else {

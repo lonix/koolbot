@@ -566,7 +566,10 @@ describe("NoticesChannelManager", () => {
       (Notice.findOne as any).mockResolvedValue(notice);
       jest
         .spyOn(manager, "generateBotInfoContent")
-        .mockResolvedValue("fresh" as never);
+        .mockImplementation((async () => {
+          await gates.generate?.promise;
+          return "fresh";
+        }) as never);
       jest.spyOn(manager, "getNoticesChannel").mockResolvedValue(channel);
       manager.configService = {
         removeReloadCallback: jest.fn(),
@@ -586,13 +589,43 @@ describe("NoticesChannelManager", () => {
       expect(notice.messageId).toBe("new-msg-1");
     });
 
-    it("keeps the old status message when the new post fails", async () => {
+    it("keeps the old message and the old stored content when the new post fails, and a later refresh retries", async () => {
       const { manager, messages, channel, notice } = setup();
       channel.send.mockRejectedValueOnce(new Error("discord down") as never);
       await manager.ensureBotInfoNotice();
 
       expect([...messages]).toEqual(["old-msg"]);
       expect(notice.messageId).toBe("old-msg");
+      // Nothing was stored, so the next refresh still sees a difference.
+      expect(notice.content).toBe("stale");
+      expect(notice.save).not.toHaveBeenCalled();
+
+      await manager.ensureBotInfoNotice();
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(notice.messageId).toBe("new-msg-1");
+      expect(notice.content).toBe("fresh");
+    });
+
+    it("stores the content and the new message id together after a successful post", async () => {
+      const { manager, notice, events } = setup();
+      await manager.ensureBotInfoNotice();
+
+      expect(notice.save).toHaveBeenCalledTimes(1);
+      expect(events.indexOf("posted:new-msg-1")).toBeLessThan(
+        events.indexOf("save"),
+      );
+      expect(notice.content).toBe("fresh");
+      expect(notice.messageId).toBe("new-msg-1");
+    });
+
+    it("takes the new message back down when storing it fails, keeping the old one", async () => {
+      const { manager, messages, notice } = setup();
+      notice.save.mockRejectedValueOnce(new Error("mongo down") as never);
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages]).toEqual(["old-msg"]);
+      expect(notice.messageId).toBe("old-msg");
+      expect(notice.content).toBe("stale");
     });
 
     it("stop() while the delete is in flight posts nothing after stop() and leaves one message", async () => {
@@ -614,12 +647,12 @@ describe("NoticesChannelManager", () => {
 
     it("stop() before the repost leaves the old message and posts nothing", async () => {
       const { manager, messages, events, gates, channel } = setup();
-      gates.save = deferred();
+      gates.generate = deferred();
 
       const run = manager.ensureBotInfoNotice();
       await tick();
       const stopping = manager.stop();
-      gates.save.resolve();
+      gates.generate.resolve();
       await Promise.all([run, stopping]);
 
       expect(channel.send).not.toHaveBeenCalled();
