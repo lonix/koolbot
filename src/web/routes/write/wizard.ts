@@ -18,11 +18,7 @@ import {
   isEnabledValue,
 } from "../../../services/config-schema.js";
 import { getEnvConfigValue } from "../../../config/env.js";
-import {
-  FLASH_MAX,
-  signFlash,
-  verifyFlashSignature,
-} from "../../http-flash.js";
+import { FLASH_MAX, signFlash, readSignedFlash } from "../../http-flash.js";
 import { recordAudit } from "../../audit.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import {
@@ -69,14 +65,7 @@ export function createWizardRouter(client: Client): Router {
 
       // POST /wizard/step/:n redirects here with `?flash=warn&msg=…` when
       // coercion drops fields. Surface it via the renderer.
-      const flashType = String(req.query.flash ?? "");
-      const flashMsg = String(req.query.msg ?? "");
-      const flash =
-        flashMsg &&
-        (flashType === "ok" || flashType === "warn" || flashType === "err") &&
-        verifyFlashSignature(flashType, flashMsg, req.query.sig)
-          ? { type: flashType as "ok" | "warn" | "err", text: flashMsg }
-          : null;
+      const flash = readSignedFlash(req.query);
 
       if (existing && Number(req.query.reset) !== 1) {
         const features = existing.selectedFeatures;

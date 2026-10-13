@@ -49,6 +49,30 @@ export function verifyFlashSignature(
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+export interface SignedFlash {
+  type: "ok" | "warn" | "err";
+  text: string;
+}
+
+/**
+ * Read a flash banner from a request's query string, returning it only when
+ * the server signed it (see `signFlash`). Anything else, including a crafted
+ * link, yields `null` and nothing is shown. One shared reader so each page
+ * does not re-implement the check.
+ */
+export function readSignedFlash(query: {
+  flash?: unknown;
+  msg?: unknown;
+  sig?: unknown;
+}): SignedFlash | null {
+  const type = String(query.flash ?? "");
+  const text = String(query.msg ?? "");
+  if (!text) return null;
+  if (type !== "ok" && type !== "warn" && type !== "err") return null;
+  if (!verifyFlashSignature(type, text, query.sig)) return null;
+  return { type, text };
+}
+
 export function truncateFlash(text: string): string {
   return text.length > FLASH_MAX ? `${text.slice(0, FLASH_MAX - 1)}…` : text;
 }

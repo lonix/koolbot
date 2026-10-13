@@ -372,6 +372,19 @@ describe("signed flash messages (#1149)", () => {
     expect(verifyFlashSignature("err", "Saved.", "")).toBe(false);
   });
 
+  it("readSignedFlash shows signed flashes and drops crafted ones", () => {
+    const sig = signFlash("warn", "Heads up");
+    expect(readSignedFlash({ flash: "warn", msg: "Heads up", sig })).toEqual({
+      type: "warn",
+      text: "Heads up",
+    });
+    expect(readSignedFlash({ flash: "warn", msg: "Heads up" })).toBeNull();
+    expect(
+      readSignedFlash({ flash: "err", msg: "Session expired, sign in", sig }),
+    ).toBeNull();
+    expect(readSignedFlash({ flash: "bogus", msg: "x", sig })).toBeNull();
+  });
+
   it("rejects everything when no secret is configured", () => {
     const sig = signFlash("ok", "x");
     delete process.env.WEBUI_SESSION_SECRET;

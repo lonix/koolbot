@@ -24,7 +24,7 @@ import {
 } from "express";
 import { ChannelType, Client, type Guild } from "discord.js";
 import mongoose from "mongoose";
-import { verifyFlashSignature } from "./http-flash.js";
+import { readSignedFlash } from "./http-flash.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -799,15 +799,10 @@ export async function loadLeaderboardRoleState(
 }
 
 function readFlash(req: Request): FlashMessage | null {
-  const type = String(req.query.flash ?? "");
-  const text = String(req.query.msg ?? "");
-  if (!text) return null;
-  if (type !== "ok" && type !== "warn" && type !== "err") return null;
-  // Only render flashes the server itself signed (#1149).
-  if (!verifyFlashSignature(type, text, req.query.sig)) return null;
+  const flash = readSignedFlash(req.query);
   // Cap the rendered message length so a hostile redirect cannot pump
   // megabytes through the banner. Pages already escape on output.
-  return { type, text: text.slice(0, 500) };
+  return flash ? { type: flash.type, text: flash.text.slice(0, 500) } : null;
 }
 
 /**
