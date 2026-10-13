@@ -20,8 +20,12 @@ import ts from "typescript";
  *
  * This walks the TypeScript source of `src/` (the Web UI renders HTML, not
  * Discord messages, and has its own escaping) and fails with the file, line
- * and text of every call that breaks either habit. A genuine exception goes in
- * the allowlists below with a reason; do not weaken the rules.
+ * and text of every offender. It is a heuristic, not a proof: habit 1 sees a
+ * literal `<@` in the send call or in a local variable the call sends, not a
+ * mention built in another function and passed in; habit 2 sees the well-known
+ * name properties and identifiers listed below, not an arbitrary variable that
+ * happens to hold a name. A genuine exception goes in the allowlists below with
+ * a reason; do not weaken the rules.
  */
 
 const SRC = fileURLToPath(new URL("../../src", import.meta.url));
@@ -50,7 +54,7 @@ const SEND_METHODS = new Set([
 
 /** Name-like property accessors whose value a member controls. */
 const NAME_EXPR =
-  /(?:\.|^)(?:displayName|username|nickname|globalName|tag|userTag)$|(?:^|\.)(?:channel|oldChannel|newChannel|mainChannel|voiceChannel|waitingRoom)\.name$/;
+  /(?:\.|^)(?:displayName|username|nickname|globalName|tag|userTag)$|(?:^|\.)(?:channel|oldChannel|newChannel|mainChannel|voiceChannel|waitingRoom)\.name$|^(?:channelName|newName|oldName|savedName)$/;
 
 /**
  * Template literals in these positions are not rendered as Markdown, so
@@ -125,6 +129,57 @@ function lineOf(sf: ts.SourceFile, node: ts.Node): number {
   return sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 }
 
+/** Bare identifiers a send call passes as its message or its `content`. */
+function sentIdentifiers(call: ts.CallExpression): string[] {
+  const names: string[] = [];
+  for (const arg of call.arguments) {
+    if (ts.isIdentifier(arg)) names.push(arg.text);
+    if (ts.isObjectLiteralExpression(arg)) {
+      for (const prop of arg.properties) {
+        if (
+          ts.isShorthandPropertyAssignment(prop) &&
+          prop.name.text === "content"
+        )
+          names.push("content");
+        if (
+          ts.isPropertyAssignment(prop) &&
+          ts.isIdentifier(prop.name) &&
+          prop.name.text === "content" &&
+          ts.isIdentifier(prop.initializer)
+        )
+          names.push(prop.initializer.text);
+      }
+    }
+  }
+  return names;
+}
+
+/** Does the nearest enclosing function declare `name` with a `<@` mention? */
+function localInitializerMentions(
+  call: ts.CallExpression,
+  name: string,
+  sf: ts.SourceFile,
+): boolean {
+  let fn: ts.Node | undefined = call.parent;
+  while (fn && !ts.isFunctionLike(fn)) fn = fn.parent;
+  if (!fn) return false;
+  let found = false;
+  const look = (n: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === name &&
+      n.initializer &&
+      /<@/.test(n.initializer.getText(sf))
+    ) {
+      found = true;
+    }
+    ts.forEachChild(n, look);
+  };
+  look(fn);
+  return found;
+}
+
 interface Finding {
   where: string;
   detail: string;
@@ -147,11 +202,19 @@ function scan(): { pings: Finding[]; names: Finding[] } {
         node.arguments.length > 0
       ) {
         const args = node.arguments.map((a) => a.getText(sf)).join(",");
-        if (/<@/.test(args) && !/allowedMentions/.test(args)) {
-          pings.push({
-            where: `${rel(file)}:${lineOf(sf, node)}`,
-            detail: args.replace(/\s+/g, " ").slice(0, 120),
-          });
+        if (!/allowedMentions/.test(args)) {
+          // A literal mention in the call, or in the initializer of a local
+          // variable the call sends (`const message = [...]; send(message)`).
+          const mentionsInline = /<@/.test(args);
+          const mentionsViaLocal = sentIdentifiers(node).some((name) =>
+            localInitializerMentions(node, name, sf),
+          );
+          if (mentionsInline || mentionsViaLocal) {
+            pings.push({
+              where: `${rel(file)}:${lineOf(sf, node)}`,
+              detail: args.replace(/\s+/g, " ").slice(0, 120),
+            });
+          }
         }
       }
 

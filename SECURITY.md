@@ -157,9 +157,12 @@ weekly recap podium, the birthday member, ticket staff, a poll role). Member
 display names, nicknames, usernames and channel names that reach message text
 are also escaped with `escapeDisplayText`, so a nickname such as `<@id>` or
 `[free nitro](https://...)` shows as plain text rather than a mention or link.
-`__tests__/utils/message-mention-safety-scan.test.ts` fails when a new message
-mentions a member without its own `allowedMentions` or interpolates a name
-unescaped.
+`__tests__/utils/message-mention-safety-scan.test.ts` is a heuristic guard: it
+fails when a send contains a literal `<@id>` (in the call, or in a local variable
+the call sends) without its own `allowedMentions`, or interpolates a well-known
+name property (`displayName`, `username`, `nickname`, `globalName`, `tag`, a
+channel name) into message text unescaped. It cannot see a mention built in
+another function and passed in as a parameter, so review those by hand.
 
 ### Data Privacy
 
