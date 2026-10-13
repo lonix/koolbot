@@ -1,14 +1,23 @@
 import crypto from "node:crypto";
 import { Buffer } from "buffer";
 import { Request, Response, NextFunction } from "express";
-import { parseCookies, setCookie } from "./cookies.js";
+import {
+  hostCookieName,
+  parseCookies,
+  setCookie,
+  shouldUseSecureCookies,
+} from "./cookies.js";
 import { respondFlashError } from "./http-flash.js";
+import { readSessionCookie } from "./session.js";
 import { env } from "../config/env.js";
+
+// Re-exported for existing importers; the implementation lives in cookies.ts.
+export { shouldUseSecureCookies };
 
 export const CSRF_COOKIE = "koolbot_csrf";
 export const CSRF_HEADER = "x-csrf-token";
 /**
- * Cookie path for the CSRF double-submit cookie. Broadened from `/admin`
+ * Cookie path for the pre-sign-in CSRF cookie. Broadened from `/admin`
  * to `/` in #481 so the same token is mirrored back on POSTs to the new
  * `/me/*` surface as well as `/admin/*`. The cookie is not HttpOnly by
  * design — it's the page's mirror of the token — and broadening the
@@ -18,28 +27,61 @@ export const CSRF_HEADER = "x-csrf-token";
 export const CSRF_COOKIE_PATH = "/";
 
 /**
- * Double-submit-cookie CSRF protection. The cookie is non-HttpOnly so the
- * page can mirror it back in a header on state-changing requests; the server
- * compares the two with constant-time equality.
+ * CSRF protection (#1150). Two modes:
+ *
+ * 1. Signed-in (a valid, HMAC-verified session cookie is present): the token
+ *    is derived from the session id, `HMAC(WEBUI_SESSION_SECRET, sid)`. It is
+ *    stable for the life of the session, needs no cookie, and cannot be
+ *    forged or planted by someone who can only set cookies (cookie tossing),
+ *    because they would need the server secret.
+ * 2. Not signed in (the one-time-link consent page, whose POST creates the
+ *    session): there is no session to bind to, so the classic double-submit
+ *    cookie is used. On HTTPS it carries the `__Host-` prefix so a sibling
+ *    sub-domain cannot plant it. On plain HTTP a network attacker could, which
+ *    is inherent to HTTP and why deployments should use HTTPS.
+ *
+ * Sessions issued before this change keep working: the derived token only
+ * needs the session id already in the signed session cookie.
  */
+export function deriveCsrfToken(sessionId: string): string | null {
+  const secret = env.webui.sessionSecret;
+  if (!secret) return null;
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`csrf\0${sessionId}`)
+    .digest("base64url");
+}
+
+function sessionBoundToken(req: Request): string | null {
+  const payload = readSessionCookie(req);
+  return payload ? deriveCsrfToken(payload.sid) : null;
+}
+
 export function ensureCsrfCookie(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
+  const typed = req as Request & { csrfToken?: string };
+  const bound = sessionBoundToken(req);
+  if (bound) {
+    typed.csrfToken = bound;
+    next();
+    return;
+  }
   const cookies = parseCookies(req);
-  const existing = cookies.get(CSRF_COOKIE);
+  const existing = cookies.get(hostCookieName(CSRF_COOKIE));
   if (!existing) {
     const token = crypto.randomBytes(32).toString("base64url");
-    setCookie(res, CSRF_COOKIE, token, {
+    setCookie(res, hostCookieName(CSRF_COOKIE), token, {
       httpOnly: false,
       sameSite: "lax",
       secure: shouldUseSecureCookies(),
       path: CSRF_COOKIE_PATH,
     });
-    (req as Request & { csrfToken?: string }).csrfToken = token;
+    typed.csrfToken = token;
   } else {
-    (req as Request & { csrfToken?: string }).csrfToken = existing;
+    typed.csrfToken = existing;
   }
   next();
 }
@@ -57,8 +99,11 @@ export function requireCsrf(
     next();
     return;
   }
-  const cookies = parseCookies(req);
-  const cookieToken = cookies.get(CSRF_COOKIE);
+  // Signed-in requests are checked against the session-derived token; the
+  // double-submit cookie is only consulted when there is no session.
+  const cookieToken =
+    sessionBoundToken(req) ??
+    parseCookies(req).get(hostCookieName(CSRF_COOKIE));
   const headerToken = req.header(CSRF_HEADER) || (req.body && req.body._csrf);
   // AJAX callers (e.g. the Settings per-section save) get a JSON error so the
   // client can surface a real message instead of a generic toast (issue #612);
@@ -84,24 +129,4 @@ export function requireCsrf(
     return;
   }
   next();
-}
-
-/**
- * Decide whether to set the `Secure` cookie attribute. We key off the
- * configured access scheme (`WEBUI_BASE_URL`) rather than NODE_ENV
- * because operators routinely run NODE_ENV=production while exposing
- * the WebUI over plain HTTP (Docker on a LAN, behind a reverse proxy
- * that terminates TLS without propagating X-Forwarded-Proto, etc.).
- * Setting Secure on an HTTP request causes browsers to silently drop
- * the cookie, which breaks the entire sign-in flow.
- *
- * If WEBUI_BASE_URL is missing or malformed we fall back to the
- * NODE_ENV check so we don't silently disable Secure on a real HTTPS
- * deployment that just forgot to set the variable.
- */
-export function shouldUseSecureCookies(): boolean {
-  const baseUrl = env.webui.baseUrl;
-  if (baseUrl.startsWith("https://")) return true;
-  if (baseUrl.startsWith("http://")) return false;
-  return env.isProduction;
 }

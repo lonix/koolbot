@@ -205,6 +205,8 @@ function isAppReady(): boolean {
 
 function startHealthServer(): void {
   const healthApp = express();
+  // Do not advertise the framework on any response (#1149).
+  healthApp.disable("x-powered-by");
 
   // Liveness: the process is running. Always 200 once the server is listening.
   healthApp.get("/live", (_req: Request, res: Response) => {
@@ -245,6 +247,11 @@ function startHealthServer(): void {
           healthApp.set("trust proxy", asNumber);
         } else if (trustProxyRaw.toLowerCase() === "true") {
           healthApp.set("trust proxy", true);
+          // `true` trusts every hop: any client can then forge
+          // X-Forwarded-For and evade the per-IP rate limits (#1149).
+          logger.warn(
+            'WEBUI_TRUST_PROXY=true trusts every X-Forwarded-For hop, so clients can spoof their IP and bypass the Web UI rate limits. Set it to the number of proxies in front of KoolBot instead (e.g. "1").',
+          );
         } else {
           healthApp.set("trust proxy", trustProxyRaw);
         }

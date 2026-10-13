@@ -18,7 +18,7 @@ import {
   isEnabledValue,
 } from "../../../services/config-schema.js";
 import { getEnvConfigValue } from "../../../config/env.js";
-import { FLASH_MAX } from "../../http-flash.js";
+import { FLASH_MAX, signFlash, readSignedFlash } from "../../http-flash.js";
 import { recordAudit } from "../../audit.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import {
@@ -65,13 +65,7 @@ export function createWizardRouter(client: Client): Router {
 
       // POST /wizard/step/:n redirects here with `?flash=warn&msg=…` when
       // coercion drops fields. Surface it via the renderer.
-      const flashType = String(req.query.flash ?? "");
-      const flashMsg = String(req.query.msg ?? "");
-      const flash =
-        flashMsg &&
-        (flashType === "ok" || flashType === "warn" || flashType === "err")
-          ? { type: flashType as "ok" | "warn" | "err", text: flashMsg }
-          : null;
+      const flash = readSignedFlash(req.query);
 
       if (existing && Number(req.query.reset) !== 1) {
         const features = existing.selectedFeatures;
@@ -382,6 +376,7 @@ export function createWizardRouter(client: Client): Router {
           step: String(stepIndex),
           flash: "warn",
           msg: truncated,
+          sig: signFlash("warn", truncated),
         }).toString();
         res.redirect(303, `/admin/wizard?${qs}`);
         return;
@@ -500,10 +495,12 @@ export function createWizardRouter(client: Client): Router {
         // keys (if any) could not be reverted and are therefore live — and
         // keep the session so they can retry from the confirm step instead
         // of losing their input.
+        const failureMsg = truncateFlash(wizardApplyFailureMessage(result));
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
           flash: "err",
-          msg: truncateFlash(wizardApplyFailureMessage(result)),
+          msg: failureMsg,
+          sig: signFlash("err", failureMsg),
         }).toString();
         res.redirect(303, `/admin/wizard?${qs}`);
       } catch (err) {

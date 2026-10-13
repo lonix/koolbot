@@ -23,7 +23,7 @@ import {
   defaultConfig,
   settingsMetadata,
 } from "../../../services/config-schema.js";
-import { truncateFlash, wantsJson } from "../../http-flash.js";
+import { signFlash, truncateFlash, wantsJson } from "../../http-flash.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { pickCascadeMasterKey } from "../../cascade-master.js";
 import type { AuthenticatedRequest } from "../../session.js";
@@ -132,6 +132,7 @@ export function flashRedirectQuery(
     flash: flash.type,
     msg: truncateFlash(flash.text),
   };
+  params.sig = signFlash(flash.type, params.msg);
   if (invalidKeys.length > 0) {
     params.invalid = invalidKeys.slice(0, INVALID_KEYS_MAX).join(",");
   }

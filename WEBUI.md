@@ -269,6 +269,9 @@ by editing `.env` and restarting the container.
 | `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
 | `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
 
+`WEBUI_TRUST_PROXY=true` trusts every proxy hop, so clients can spoof `X-Forwarded-For`
+and evade the per-IP rate limits. It still works but logs a warning at startup; prefer a hop count.
+
 `WEBUI_SESSION_SECRET` must be at least 32 bytes; a shorter value is
 rejected at startup and the Web UI is not mounted.
 
@@ -417,7 +420,7 @@ With this, `WEBUI_BASE_URL=http://your-host:3000`.
 ⚠️ **No HTTPS — read this before using this recipe in production.**
 
 The Web UI decides the session cookie's `Secure` flag from the scheme of
-`WEBUI_BASE_URL` (see `shouldUseSecureCookies()` in `src/web/csrf.ts`):
+`WEBUI_BASE_URL` (see `shouldUseSecureCookies()` in `src/web/cookies.ts`):
 `https://` sets it, `http://` does not, so a plain-HTTP `WEBUI_BASE_URL`
 such as `http://your-host:3000` works regardless of `NODE_ENV`. Only when
 `WEBUI_BASE_URL` is missing or malformed does it fall back to
@@ -636,6 +639,36 @@ That said:
 - **`/admin/s/<token>` is rate-limited** to 10 attempts per minute per
   IP. Set `WEBUI_TRUST_PROXY` correctly so this rate-limiting actually
   applies per real client and not per proxy.
+- **Response headers.** Every `/admin/*` and `/me/*` response carries a
+  `Content-Security-Policy`, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+  `Cache-Control: no-store`, and `X-Powered-By` is off (`src/web/security-headers.ts`).
+  The CSP is `default-src 'none'` with `script-src` limited to a per-request
+  nonce (trusted templates emit scripts through `scriptTag()`, which the
+  response middleware stamps with the nonce, so a `<script>` injected through
+  unescaped content gets none and does not run; there is no inline event
+  handler, destructive buttons use `data-confirm`), `style-src
+  'unsafe-inline'` (the pages use `style=` attributes), same-origin
+  `connect-src`/`img-src`/`form-action`, and `frame-ancestors 'none'`.
+  `Strict-Transport-Security: max-age=15552000` (180 days, no
+  `includeSubDomains`, no `preload`) is sent only when `WEBUI_BASE_URL` is
+  `https://`. Add `includeSubDomains`/`preload` at your reverse proxy if you
+  own the whole domain and want them. If you extend the UI, never add an
+  inline `on*=` handler or an external script/style/image source: the policy
+  blocks them.
+- **Flash banners are signed.** The `?flash=…&msg=…` text a page shows after
+  an action carries an HMAC signature, so a hand-crafted link cannot put
+  text in front of an admin. Unsigned or altered banners are dropped. (The
+  `/me/*` pages and the adoption pages still show unsigned query flashes.)
+- **CSRF is bound to the session.** While signed in, the CSRF token is
+  derived from the session (`HMAC(WEBUI_SESSION_SECRET, session id)`), so a
+  cookie planted from a sibling sub-domain cannot pass it. Before sign-in
+  (the consent page) a double-submit cookie is used. Over HTTPS both the
+  session and that CSRF cookie use the `__Host-` prefix, and duplicate
+  cookies resolve first-wins. On upgrade, existing sessions keep working
+  (the token needs nothing new); a page opened before the upgrade must be
+  reloaded once, and deployments with an `https://` `WEBUI_BASE_URL` sign in
+  again once because the session cookie was renamed to `__Host-koolbot_session`.
 - **No analytics, no third-party assets.** Every page is rendered
   server-side from `src/web/` with inline CSS. There is no JS bundle to
   pin or CDN to allowlist.

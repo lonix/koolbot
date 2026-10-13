@@ -3,6 +3,7 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
+import { scriptTag } from "./html.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import {
   canRollback,
@@ -113,7 +114,7 @@ ${job}
   ${list}
   <p class="muted">Snapshots are kept for the number of days set in <code>adoption.snapshot.retention_days</code> (0 keeps them forever).</p>
 </div>
-${props.jobId ? `<script>${JOB_SCRIPT(props.jobId)}</script>` : ""}
+${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Adoption history",

@@ -27,6 +27,12 @@ import {
 import { signValue } from "../../src/web/cookies.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
 import type { WebSessionContext } from "../../src/web/session.js";
+import { createHmac } from "node:crypto";
+
+// The CSRF token is derived from the session id (#1150), not a cookie.
+// Computed here (not imported) so no web module loads before the mocks.
+const csrf = (): string =>
+  createHmac("sha256", SECRET).update("csrf\0session-id").digest("base64url");
 
 interface CookiePayload {
   sid: string;
@@ -170,7 +176,7 @@ describe("createUserRouter / index page", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -205,7 +211,7 @@ describe("createUserRouter / index page", () => {
       path: "/",
       baseUrl: "/me",
       headers: { cookie },
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
     } as never as Parameters<typeof router>[0];
     const res = makeRes();
     const next = jest.fn();
@@ -322,7 +328,6 @@ describe("/me/notifications", () => {
     method: "GET" | "POST";
     body?: Record<string, unknown>;
     csrfHeader?: string;
-    csrfCookie?: string;
     prefs?: { achievements: boolean; digest: boolean; rewind: boolean };
     setPrefsImpl?: jest.Mock;
     role?: "admin" | "user";
@@ -341,8 +346,7 @@ describe("/me/notifications", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const csrfCookie = opts.csrfCookie ?? "csrf-1";
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=${csrfCookie}`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -466,7 +470,7 @@ describe("/me/notifications", () => {
       headers,
       body: opts.body ?? {},
       query: {},
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
       header: (name: string) => headers[name.toLowerCase()],
     } as never as Parameters<typeof router>[0];
 
@@ -554,12 +558,12 @@ describe("/me/notifications", () => {
     const out = await dispatch({
       method: "POST",
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         // Only the achievements row was submitted, and the checkbox is
         // absent (= unchecked).
         submitted_achievements: "1",
       },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
       setPrefsImpl: setPrefs,
     });
     expect(out.statusCode).toBe(303);
@@ -576,11 +580,11 @@ describe("/me/notifications", () => {
     const out = await dispatch({
       method: "POST",
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         submitted_achievements: "1",
         achievements: "true",
       },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
     });
     expect(out.statusCode).toBe(303);
     expect(WebAuditLog.create).toHaveBeenCalledWith(
@@ -600,11 +604,11 @@ describe("/me/notifications", () => {
       method: "POST",
       role: "admin",
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         submitted_achievements: "1",
         achievements: "true",
       },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
     });
     expect(out.statusCode).toBe(303);
     expect(WebAuditLog.create).toHaveBeenCalledWith(
@@ -688,7 +692,7 @@ describe("/me/rewind", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -749,7 +753,7 @@ describe("/me/rewind", () => {
       baseUrl: "/me",
       headers: { cookie },
       query: {},
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
       header: (name: string) => (name === "cookie" ? cookie : undefined),
     } as never as Parameters<typeof router>[0];
     const res = makeRes();
@@ -1072,7 +1076,7 @@ describe("/me/voice (#656)", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -1180,7 +1184,7 @@ describe("/me/voice (#656)", () => {
       headers,
       body: opts.body ?? {},
       query: {},
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
       header: (name: string) => headers[name.toLowerCase()],
     } as never as Parameters<typeof router>[0];
 
@@ -1242,7 +1246,7 @@ describe("/me/voice (#656)", () => {
       url: "/voice/name-pattern",
       presetsEnabled: false,
       body: { namePattern: "{username} HQ" },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
       serviceImpl: { setNamePattern },
     });
     expect(setNamePattern).toHaveBeenCalledWith("user-1", "{username} HQ");
@@ -1253,8 +1257,8 @@ describe("/me/voice (#656)", () => {
     const out = await dispatch({
       method: "POST",
       url: "/voice/name-pattern",
-      body: { _csrf: "csrf-1", namePattern: "🎮 {username}" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), namePattern: "🎮 {username}" },
+      csrfHeader: csrf(),
     });
     expect(out.statusCode).toBe(303);
     expect(out.redirectedTo).toMatch(/^\/me\/voice\?/);
@@ -1280,8 +1284,8 @@ describe("/me/voice (#656)", () => {
     const out = await dispatch({
       method: "POST",
       url: "/voice/preset/default",
-      body: { _csrf: "csrf-1", index: "0", expectedName: "Squad" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), index: "0", expectedName: "Squad" },
+      csrfHeader: csrf(),
       serviceImpl: { setDefault },
     });
     expect(out.statusCode).toBe(303);
@@ -1299,8 +1303,8 @@ describe("/me/voice (#656)", () => {
     const out = await dispatch({
       method: "POST",
       url: "/voice/preset/delete",
-      body: { _csrf: "csrf-1", index: "0", expectedName: "Squad" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), index: "0", expectedName: "Squad" },
+      csrfHeader: csrf(),
       serviceImpl: { deletePreset },
     });
     expect(out.statusCode).toBe(303);
@@ -1313,7 +1317,7 @@ describe("/me/voice (#656)", () => {
       method: "POST",
       url: "/voice/preset/edit",
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         index: "0",
         expectedName: "Squad",
         name: "Squad+",
@@ -1321,7 +1325,7 @@ describe("/me/voice (#656)", () => {
         userLimit: "10",
         bitrate: "128",
       },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
       serviceImpl: { editPreset },
     });
     expect(out.statusCode).toBe(303);
@@ -1345,13 +1349,13 @@ describe("/me/voice (#656)", () => {
       method: "POST",
       url: "/voice/preset/edit",
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         index: "0",
         expectedName: "Squad",
         name: "Squad",
         bitrate: "999",
       },
-      csrfHeader: "csrf-1",
+      csrfHeader: csrf(),
       serviceImpl: { editPreset },
     });
     expect(out.statusCode).toBe(303);
@@ -1367,8 +1371,8 @@ describe("/me/voice (#656)", () => {
     const out = await dispatch({
       method: "POST",
       url: "/voice/preset/edit",
-      body: { _csrf: "csrf-1", name: "Squad" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), name: "Squad" },
+      csrfHeader: csrf(),
       serviceImpl: { editPreset },
     });
     expect(out.statusCode).toBe(303);
@@ -1405,7 +1409,7 @@ describe("/me/timezone (#524)", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -1501,7 +1505,7 @@ describe("/me/timezone (#524)", () => {
       headers,
       body: opts.body ?? {},
       query: {},
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
       header: (name: string) => headers[name.toLowerCase()],
     } as never as Parameters<typeof router>[0];
 
@@ -1543,8 +1547,8 @@ describe("/me/timezone (#524)", () => {
   it("saves a chosen timezone and redirects with a success flash", async () => {
     const out = await dispatch({
       method: "POST",
-      body: { _csrf: "csrf-1", timezone: "America/New_York" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), timezone: "America/New_York" },
+      csrfHeader: csrf(),
     });
     expect(out.statusCode).toBe(303);
     expect(out.redirectedTo).toMatch(/^\/me\/timezone\?/);
@@ -1564,8 +1568,8 @@ describe("/me/timezone (#524)", () => {
       });
     const out = await dispatch({
       method: "POST",
-      body: { _csrf: "csrf-1", timezone: "" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), timezone: "" },
+      csrfHeader: csrf(),
       stored: "Europe/Berlin",
       setTimezoneImpl: setTimezone,
     });
@@ -1582,8 +1586,8 @@ describe("/me/timezone (#524)", () => {
       );
     const out = await dispatch({
       method: "POST",
-      body: { _csrf: "csrf-1", timezone: "Mars/Phobos" },
-      csrfHeader: "csrf-1",
+      body: { _csrf: csrf(), timezone: "Mars/Phobos" },
+      csrfHeader: csrf(),
       setTimezoneImpl: setTimezone,
     });
     expect(out.statusCode).toBe(303);
@@ -1648,7 +1652,7 @@ describe("/me/birthday clear (#1033)", () => {
       iat: now - 60_000,
       act: now - 60_000,
     };
-    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+    const cookie = `koolbot_session=${buildCookie(payload)}`;
 
     const svc = WebSessionService.getInstance();
     jest.spyOn(svc, "findById").mockResolvedValue({
@@ -1697,7 +1701,7 @@ describe("/me/birthday clear (#1033)", () => {
 
     const headers: Record<string, unknown> = {
       cookie,
-      "x-csrf-token": "csrf-1",
+      "x-csrf-token": csrf(),
     };
 
     const captured: { statusCode: number; redirectedTo?: string } = {
@@ -1728,7 +1732,7 @@ describe("/me/birthday clear (#1033)", () => {
       headers,
       body: opts.body,
       query: {},
-      csrfToken: "csrf-1",
+      csrfToken: csrf(),
       header: (name: string) => headers[name.toLowerCase()],
     } as never as Parameters<typeof router>[0];
 
@@ -1752,7 +1756,7 @@ describe("/me/birthday clear (#1033)", () => {
     new URLSearchParams((url ?? "").split("?")[1] ?? "");
 
   it("purges through the service instead of a raw delete", async () => {
-    const out = await dispatch({ body: { _csrf: "csrf-1", clear: "1" } });
+    const out = await dispatch({ body: { _csrf: csrf(), clear: "1" } });
     expect(out.purgeForUser).toHaveBeenCalledWith("guild-1", "user-1");
     expect(out.setBirthday).not.toHaveBeenCalled();
     expect(out.statusCode).toBe(303);
@@ -1774,7 +1778,7 @@ describe("/me/birthday clear (#1033)", () => {
       announcementsDeleted: 0,
     });
     const out = await dispatch({
-      body: { _csrf: "csrf-1", clear: "1" },
+      body: { _csrf: csrf(), clear: "1" },
       purgeImpl,
     });
     expect(flashOf(out.redirectedTo).get("flash")).toBe("ok");
@@ -1789,7 +1793,7 @@ describe("/me/birthday clear (#1033)", () => {
       error: "could not revoke the birthday role",
     });
     const out = await dispatch({
-      body: { _csrf: "csrf-1", clear: "1" },
+      body: { _csrf: csrf(), clear: "1" },
       purgeImpl,
     });
     const flash = flashOf(out.redirectedTo);
@@ -1812,7 +1816,7 @@ describe("/me/birthday clear (#1033)", () => {
       removed: 0,
     });
     const out = await dispatch({
-      body: { _csrf: "csrf-1", clear: "1" },
+      body: { _csrf: csrf(), clear: "1" },
       purgeImpl,
     });
     expect(flashOf(out.redirectedTo).get("flash")).toBe("err");
@@ -1821,7 +1825,7 @@ describe("/me/birthday clear (#1033)", () => {
 
   it("still saves a date through setBirthday", async () => {
     const out = await dispatch({
-      body: { _csrf: "csrf-1", month: "3", day: "4" },
+      body: { _csrf: csrf(), month: "3", day: "4" },
     });
     expect(out.setBirthday).toHaveBeenCalledWith("user-1", "guild-1", {
       month: 3,
