@@ -467,6 +467,67 @@ describe("VoiceStats Command", () => {
       );
     });
 
+    // #1146: usernames come from the database and are member-controlled.
+    it("escapes hostile usernames in the leaderboard and the user header", async () => {
+      const hostile = "<@555> @everyone [free](https://evil.example) **b**";
+      const expectNeutral = (text: string): void => {
+        expect(text).not.toContain("<@555>");
+        expect(text).not.toContain("@everyone");
+        expect(text).not.toContain("[free](");
+        expect(text).toContain("\\<@555\\>");
+        expect(text).toContain("\\*\\*b\\*\\*");
+      };
+
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "user-1", username: hostile, totalTime: 3600 },
+      ]);
+      const top = makeTopInteraction(null, "week");
+      await execute(top);
+      expectNeutral(top.editReply.mock.calls[0][0] as string);
+
+      mockGetUserStats.mockResolvedValue({
+        userId: "user-1",
+        username: hostile,
+        totalTime: 3600,
+        lastSeen: new Date(),
+        sessions: [],
+      });
+      mockGetUserStats.mockResolvedValue({
+        userId: "user-1",
+        username: "alice",
+        totalTime: 3600,
+        lastSeen: new Date(),
+        sessions: [
+          {
+            startTime: new Date(),
+            endTime: new Date(),
+            duration: 3600,
+            channelId: "ch-1",
+            channelName: hostile,
+          },
+        ],
+      });
+      const user = {
+        ...makeUserInteraction(),
+        user: { id: "user-1", username: hostile },
+        guild: {
+          channels: {
+            cache: new Map([
+              [
+                "ch-1",
+                { name: hostile, permissionsFor: () => ({ has: () => true }) },
+              ],
+            ]),
+          },
+        },
+      } as unknown as MockInteraction;
+      await execute(user);
+      const text = user.editReply.mock.calls[0][0] as string;
+      expectNeutral(text);
+      // Header and the recent-session line are both escaped.
+      expect(text.match(/\\<@555\\>/g)).toHaveLength(2);
+    });
+
     it("top: edits the deferred reply when there is no activity", async () => {
       mockGetTopUsers.mockResolvedValue([]);
       const interaction = makeTopInteraction(null, "week");

@@ -7,6 +7,7 @@ import {
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
 
@@ -109,7 +110,7 @@ export async function execute(
       .setColor(0xf59e0b)
       .setTitle("⚠️ Warning recorded")
       .setDescription(
-        `**${targetUser.tag}** has been warned.\nThey now have **${total}** entr${
+        `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${
           total === 1 ? "y" : "ies"
         } in the moderation log.`,
       )

@@ -10,6 +10,7 @@ import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 interface QualifyingUser {
   userId: string;
@@ -629,7 +630,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       .setTitle("📊 Your weekly voice digest")
       .setColor(EMBED_COLOR)
       .setDescription(
-        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${user.username}.`,
+        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${escapeDisplayText(user.username)}.`,
       )
       .addFields(fields)
       .setFooter({

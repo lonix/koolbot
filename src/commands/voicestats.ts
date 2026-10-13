@@ -11,6 +11,7 @@ import { ConfigService } from "../services/config-service.js";
 import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
 import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { visibleChannelName } from "../utils/channel-visibility.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
@@ -130,7 +131,7 @@ async function executeTop(
       const rank = index + 1;
       const medal =
         rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}.`;
-      return `${medal} ${user.username}: ${formatTime(user.totalTime)}`;
+      return `${medal} ${escapeDisplayText(user.username)}: ${formatTime(user.totalTime)}`;
     });
 
     // Up to 50 rows of "<rank> <username>: <time>" can exceed the 2000-char
@@ -206,7 +207,7 @@ async function executeUser(
       .slice(0, 5);
 
     const response = [
-      `**Voice Channel Statistics for ${user.username} (${period})**`,
+      `**Voice Channel Statistics for ${escapeDisplayText(user.username)} (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
       `Last Seen: ${lastSeen}`,
       "",
@@ -218,7 +219,7 @@ async function executeUser(
         // Hide the name of a channel the caller cannot view, or that no longer
         // exists and so cannot be checked (#1153).
         const channelName = visibleChannelName(interaction, session.channelId);
-        return `• ${channelName}: ${duration}`;
+        return `• ${escapeDisplayText(channelName)}: ${duration}`;
       }),
     ].join("\n");
 

@@ -15,6 +15,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
@@ -127,7 +128,7 @@ function buildApplyPanel(
         : presets
             .map(
               (p, i) =>
-                `**${i + 1}. ${p.name}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p)}`,
+                `**${i + 1}. ${escapeDisplayText(p.name)}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p)}`,
             )
             .join("\n"),
     )
@@ -190,7 +191,7 @@ function buildManagePanel(
     .setColor(0xed4245)
     .setDescription(
       selected
-        ? `Selected: **${selected.name}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected)}`
+        ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected)}`
         : "Pick a preset below to rename, delete, or set as default.",
     );
 
@@ -562,8 +563,8 @@ async function toggleDefault(
   await switchToManage(interaction, parsed, parsed.presetIndex);
   await interaction.followUp({
     content: result.isDefault
-      ? `⭐ **${result.name}** will auto-apply on your next channel.`
-      : `⭐ **${result.name}** is no longer the default.`,
+      ? `⭐ **${escapeDisplayText(result.name)}** will auto-apply on your next channel.`
+      : `⭐ **${escapeDisplayText(result.name)}** is no longer the default.`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -601,7 +602,7 @@ async function deletePreset(
     await switchToManage(interaction, parsed, null);
   }
   await interaction.followUp({
-    content: `🗑️ Deleted preset **${removed.name}**.`,
+    content: `🗑️ Deleted preset **${escapeDisplayText(removed.name)}**.`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -660,7 +661,7 @@ async function applyPreset(
         .setTitle("✅ Preset applied")
         .setColor(0x57f287)
         .setDescription(
-          `**${preset.name}** applied to this channel.\n${presetSummary(applied as IChannelPreset)}` +
+          `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset)}` +
             (nameSkipped
               ? "\n⚠️ The preset's channel name is reserved, so the name was not changed."
               : ""),

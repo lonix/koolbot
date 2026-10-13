@@ -148,10 +148,18 @@ server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
 
 ### Mentions
 
-The bot sets a safe client-wide `allowedMentions` default (users only), so
-`@everyone`, `@here` and role mentions in text it echoes, such as member display
-names, do not ping. Features that ping a role or everyone on purpose (poll role
-ping, scheduled announcements, ticket staff pings) set their own allow-list.
+The bot sets a safe client-wide `allowedMentions` default of `parse: []`, so a
+message that does not say otherwise pings nobody: `@everyone`, `@here`, role and
+user mentions in text it echoes, such as member display names or nicknames, only
+render and never notify. Every message that pings on purpose names exactly who
+may be pinged in the same call (the voice room owner, a joining member, the
+weekly recap podium, the birthday member, ticket staff, a poll role). Member
+display names, nicknames, usernames and channel names that reach message text
+are also escaped with `escapeDisplayText`, so a nickname such as `<@id>` or
+`[free nitro](https://...)` shows as plain text rather than a mention or link.
+`__tests__/utils/message-mention-safety-scan.test.ts` fails when a new message
+mentions a member without its own `allowedMentions` or interpolates a name
+unescaped.
 
 ### Data Privacy
 

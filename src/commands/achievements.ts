@@ -6,6 +6,7 @@ import {
 import { AchievementsService } from "../services/achievements-service.js";
 import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   clampToLimit,
@@ -76,7 +77,7 @@ export async function execute(
 
     if (!hasBadges && progress.length === 0) {
       await interaction.editReply({
-        content: `${targetUser.username} hasn't earned any badges yet. Keep participating in voice channels!`,
+        content: `${escapeDisplayText(targetUser.username)} hasn't earned any badges yet. Keep participating in voice channels!`,
       });
       return;
     }

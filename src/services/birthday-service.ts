@@ -1,4 +1,5 @@
-import { Client, Guild, TextChannel, escapeMarkdown } from "discord.js";
+import { Client, Guild, TextChannel } from "discord.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { formatInTimeZone } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
@@ -292,7 +293,7 @@ export function renderBirthdayMessage(
     .split("{user}")
     .join(`<@${args.userId}>`)
     .split("{username}")
-    .join(escapeMarkdown(args.displayName, { maskedLink: true }))
+    .join(escapeDisplayText(args.displayName))
     .split("{age}")
     .join(ageText);
   // If the template referenced {age} but we have no year, collapse the

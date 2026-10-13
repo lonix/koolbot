@@ -42,6 +42,35 @@ describe("formatAuditReason", () => {
   });
 });
 
+describe("checkHierarchy refusals escape the target's name (#1146)", () => {
+  const hostile = "<@555> @everyone [free](https://evil.example) **b**";
+  const hostileMember = (position: number, bannable: boolean): never =>
+    ({
+      id: "target",
+      user: { tag: hostile },
+      roles: { highest: { position } },
+      bannable,
+    }) as never;
+
+  it.each([
+    ["role not below the moderator", 5, true],
+    ["bot cannot act on them", 2, false],
+  ])("%s", (_label, position, bannable) => {
+    const text = checkHierarchy({
+      guild,
+      verb: "ban",
+      capability: "bannable",
+      invoker: member("mod", 5),
+      targetMember: hostileMember(position, bannable),
+    }) as string;
+    expect(text).not.toContain("<@555>");
+    expect(text).not.toContain("@everyone");
+    expect(text).not.toContain("[free](");
+    expect(text).toContain("\\<@555\\>");
+    expect(text).toContain("\\*\\*b\\*\\*");
+  });
+});
+
 describe("limits", () => {
   it("matches Discord's own caps", () => {
     expect(MAX_REASON_LENGTH).toBe(512);

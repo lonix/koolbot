@@ -1,4 +1,5 @@
-import { GuildMember, escapeMarkdown } from "discord.js";
+import { GuildMember } from "discord.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { ConfigService } from "./config-service.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
@@ -24,16 +25,6 @@ export interface WelcomePlaceholders {
 }
 
 /**
- * Escape Discord Markdown in a member- or server-controlled name, including
- * masked-link brackets and mention syntax, which `escapeMarkdown` leaves alone.
- */
-function escapeName(text: string): string {
-  // Backslash, link brackets and mention syntax first; the library pass must
-  // not re-escape the backslashes added here.
-  return escapeMarkdown(text.replace(/[\\[\]<]/g, "\\$&"), { escape: false });
-}
-
-/**
  * Fill the placeholders in a welcome message template. `{user}` is a real
  * mention (`<@id>`); whether it pings is decided by the caller's
  * `allowedMentions`. `{roles}` and `{rules}` resolve to the empty string when
@@ -52,8 +43,8 @@ export function renderWelcomeMessage(
   // cannot render as bot-authored links or formatting.
   const values: Record<string, string> = {
     user: `<@${args.userId}>`,
-    username: escapeName(args.displayName),
-    server: escapeName(args.guildName),
+    username: escapeDisplayText(args.displayName),
+    server: escapeDisplayText(args.guildName),
     roles: args.rolesLink,
     rules: args.rulesLink,
   };

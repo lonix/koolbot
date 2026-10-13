@@ -231,9 +231,32 @@ describe("VoiceChannelManager - Transfer Ownership", () => {
         "new-owner-id",
       );
 
-      expect(mockChannel.send).toHaveBeenCalledWith(
-        "Channel ownership has been transferred to NewOwner",
+      expect(mockChannel.send).toHaveBeenCalledWith({
+        content: "Channel ownership has been transferred to NewOwner",
+        allowedMentions: { parse: [] },
+      });
+    });
+
+    it("neutralises a hostile display name in the transfer notice (#1146)", async () => {
+      mockNewOwner.displayName =
+        "<@555> @everyone [free](https://evil.example) **b**";
+
+      await manager.transferOwnership(
+        "channel-id",
+        "old-owner-id",
+        "new-owner-id",
       );
+
+      const payload = mockChannel.send.mock.calls[0][0] as {
+        content: string;
+        allowedMentions: unknown;
+      };
+      expect(payload.allowedMentions).toEqual({ parse: [] });
+      expect(payload.content).not.toContain("<@555>");
+      expect(payload.content).not.toContain("@everyone");
+      expect(payload.content).not.toContain("[free](");
+      expect(payload.content).toContain("\\<@555\\>");
+      expect(payload.content).toContain("\\*\\*b\\*\\*");
     });
 
     it("should throw error when channel is not found", async () => {

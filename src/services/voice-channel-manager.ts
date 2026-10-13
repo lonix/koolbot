@@ -36,6 +36,11 @@ import {
   type ManagedVoiceChannelSource,
 } from "../models/managed-voice-channel.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
+import {
+  NO_MENTIONS,
+  escapeDisplayText,
+  pingUsers,
+} from "../utils/allowed-mentions.js";
 
 const configService = ConfigService.getInstance();
 
@@ -1653,9 +1658,10 @@ export class VoiceChannelManager {
           if (currentOwnerId) {
             const currentOwner = channel.members.get(currentOwnerId);
             if (currentOwner) {
-              await channel.send(
-                `<@${userId}> has requested ownership of this channel. They will receive ownership when you leave.`,
-              );
+              await channel.send({
+                content: `<@${userId}> has requested ownership of this channel. They will receive ownership when you leave.`,
+                allowedMentions: pingUsers(userId),
+              });
             }
           }
         }
@@ -1757,9 +1763,10 @@ export class VoiceChannelManager {
       logger.info(
         `[Manual Transfer] Sending ownership change notification to channel`,
       );
-      await channel.send(
-        `Channel ownership has been transferred to ${newOwner.displayName}`,
-      );
+      await channel.send({
+        content: `Channel ownership has been transferred to ${escapeDisplayText(newOwner.displayName)}`,
+        allowedMentions: NO_MENTIONS,
+      });
 
       logger.info(
         `[Manual Transfer] Successfully completed manual ownership transfer for channel ${channel.name} from ${currentOwnerId} to ${newOwnerId}`,
@@ -1941,10 +1948,12 @@ export class VoiceChannelManager {
   ): Promise<void> {
     try {
       if ("send" in channel && typeof channel.send === "function") {
-        await channel.send(
-          `<@${member.id}> 🔴 **Heads up!** This channel is currently LIVE. ` +
+        await channel.send({
+          content:
+            `<@${member.id}> 🔴 **Heads up!** This channel is currently LIVE. ` +
             "The host may be streaming — please be mindful of their platform's Terms of Service.",
-        );
+          allowedMentions: pingUsers(member.id),
+        });
       }
     } catch (error) {
       logger.error("Error sending live disclaimer:", error);
@@ -1981,7 +1990,8 @@ export class VoiceChannelManager {
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(letin);
 
         await mainChannel.send({
-          content: `<@${ownerId}> ⏳ **${waitingMember.displayName}** is waiting to join your channel!`,
+          content: `<@${ownerId}> ⏳ **${escapeDisplayText(waitingMember.displayName)}** is waiting to join your channel!`,
+          allowedMentions: pingUsers(ownerId),
           components: [row],
         });
       }
@@ -2126,7 +2136,7 @@ export class VoiceChannelManager {
       const embed = new EmbedBuilder()
         .setTitle("🎮 Voice Channel Controls")
         .setDescription(
-          `Manage your voice channel: **${channel.name}**\n\n` +
+          `Manage your voice channel: **${escapeDisplayText(channel.name)}**\n\n` +
             `Privacy: 🌐 Public` +
             (isLive ? "\n🔴 **LIVE**" : ""),
         )
@@ -2195,6 +2205,7 @@ export class VoiceChannelManager {
         try {
           const sent = await channel.send({
             content: `<@${ownerId}>`,
+            allowedMentions: pingUsers(ownerId),
             embeds: [embed],
             components: [row1, row2],
           });
@@ -3512,9 +3523,10 @@ export class VoiceChannelManager {
         logger.info(
           `[Ownership Transfer] Sending ownership change notification to channel`,
         );
-        await channel.send(
-          `Channel ownership has been transferred to ${newOwner.displayName} based on voice time in the last 7 days`,
-        );
+        await channel.send({
+          content: `Channel ownership has been transferred to ${escapeDisplayText(newOwner.displayName)} based on voice time in the last 7 days`,
+          allowedMentions: NO_MENTIONS,
+        });
       } catch (error) {
         logger.error(
           "[Ownership Transfer] Error sending ownership change notification:",
@@ -3648,7 +3660,7 @@ export class VoiceChannelManager {
     const embed = new EmbedBuilder()
       .setTitle("🎮 Voice Channel Controls")
       .setDescription(
-        `Manage your voice channel: **${channel.name}**\n\n` +
+        `Manage your voice channel: **${escapeDisplayText(channel.name)}**\n\n` +
           `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}` +
           (isLive ? "\n🔴 **LIVE**" : ""),
       )
@@ -3712,6 +3724,7 @@ export class VoiceChannelManager {
 
     await message.edit({
       content: `<@${ownerId}>`,
+      allowedMentions: pingUsers(ownerId),
       embeds: [embed],
       components: [row1, row2],
     });

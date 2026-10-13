@@ -19,6 +19,16 @@ const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
   typeof VoiceChannelManager
 >;
 
+const HOSTILE_NAME = "<@555> @everyone [free](https://evil.example) **b**";
+
+function expectNeutralName(text: string): void {
+  expect(text).not.toContain("<@555>");
+  expect(text).not.toContain("@everyone");
+  expect(text).not.toContain("[free](");
+  expect(text).toContain("\\<@555\\>");
+  expect(text).toContain("\\*\\*b\\*\\*");
+}
+
 describe("VCControlButtonHandler", () => {
   let mockInteraction: Partial<ButtonInteraction>;
   let mockGuild: Partial<Guild>;
@@ -381,6 +391,49 @@ describe("VCControlButtonHandler", () => {
           content: expect.stringContaining("waiting room"),
         }),
       );
+    });
+
+    it("escapes a hostile waiting-user name in the let-in confirmation (#1146)", async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue({ id: "channel-id" });
+      mockManagerInstance.getWaitingRoom.mockReturnValue("waiting-room-id");
+      mockInteraction.customId =
+        "vc_control_letin_channel-id_waiting-user-id_owner-id";
+      (mockGuild.members!.fetch as jest.Mock).mockResolvedValue({
+        displayName: HOSTILE_NAME,
+        id: "waiting-user-id",
+        voice: {
+          channelId: "waiting-room-id",
+          setChannel: jest.fn().mockResolvedValue(undefined),
+        },
+      });
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      const sent = [
+        ...(mockInteraction.reply as jest.Mock).mock.calls,
+        ...(mockInteraction.editReply as jest.Mock).mock.calls,
+      ].map((call) => (call[0] as { content: string }).content);
+      const confirmation = sent.find((c) => c.includes("let into the channel"));
+      expect(confirmation).toBeDefined();
+      expectNeutralName(confirmation!);
+    });
+
+    it("escapes a hostile waiting-room name when it is created (#1146)", async () => {
+      mockManagerInstance.getWaitingRoom.mockReturnValue(undefined);
+      mockManagerInstance.createWaitingRoom.mockResolvedValue({
+        name: HOSTILE_NAME,
+      });
+      mockInteraction.customId = "vc_control_waitingroom_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      const sent = [
+        ...(mockInteraction.reply as jest.Mock).mock.calls,
+        ...(mockInteraction.editReply as jest.Mock).mock.calls,
+      ].map((call) => (call[0] as { content: string }).content);
+      const created = sent.find((c) => c.includes("Waiting room"));
+      expect(created).toBeDefined();
+      expectNeutralName(created!);
     });
 
     it("should move user when owner is valid and user is in waiting room", async () => {

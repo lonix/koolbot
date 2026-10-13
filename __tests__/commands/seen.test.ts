@@ -133,6 +133,34 @@ describe("Seen Command", () => {
       );
     });
 
+    // #1146: a username and a channel name are member-controlled text in a
+    // public reply; neither may ping, link or format.
+    it("escapes a hostile username and channel name", async () => {
+      const hostile = "<@555> @everyone [free](https://evil.example) **b**";
+      const expectNeutral = (text: string): void => {
+        expect(text).not.toContain("<@555>");
+        expect(text).not.toContain("@everyone");
+        expect(text).not.toContain("[free](");
+        expect(text).toContain("\\<@555\\>");
+        expect(text).toContain("\\*\\*b\\*\\*");
+      };
+      mockGetActiveSession.mockReturnValue({
+        channelId: "c1",
+        channelName: hostile,
+      });
+      const present = makeInteraction(
+        { id: "user-2", username: hostile },
+        guildWith(true, hostile),
+      );
+      await execute(present);
+      expectNeutral(present.editReply.mock.calls[0][0] as string);
+
+      mockGetActiveSession.mockReturnValue(null);
+      const absent = makeInteraction({ id: "user-2", username: hostile });
+      await execute(absent);
+      expectNeutral(absent.editReply.mock.calls[0][0] as string);
+    });
+
     it("edits the deferred reply when the user is currently in a channel", async () => {
       mockGetActiveSession.mockReturnValue({
         channelId: "c1",

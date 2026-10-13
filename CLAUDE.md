@@ -171,6 +171,14 @@ Use `src/utils/logger.ts` (Winston). Discord-channel logging flows through `Disc
 `core.*` config keys (e.g. `core.errors.enabled` + a channel id). Mirror the `core.startup.*` naming when
 adding a category. Sanitize untrusted values with `utils/log-sanitize.ts`.
 
+### Messages, mentions and member-controlled text (#1146)
+
+The Discord client defaults to `allowedMentions: { parse: [] }` (`utils/allowed-mentions.ts`), so a plain send pings nobody. A message that pings on
+purpose passes its own `allowedMentions` listing exactly who may be pinged (`pingUsers(id)`, `{ roles: [id] }`); discord.js replaces the default with
+the per-call value rather than merging. Escape a display name, nickname, username, tag or derived channel name with `escapeDisplayText` before putting
+it in message content or an embed body (not in button labels, select options, log lines or the names of channels the bot creates).
+`__tests__/utils/message-mention-safety-scan.test.ts` enforces both and lists its reviewed exceptions.
+
 ## CI / release chain
 
 CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.github/workflows/`:

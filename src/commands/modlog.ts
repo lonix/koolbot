@@ -10,6 +10,7 @@ import { ModerationCaseService } from "../services/moderation-case-service.js";
 import { actionLabel, formatCaseLine } from "../utils/moderation-format.js";
 import type { Types } from "mongoose";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   clampToLimit,
@@ -83,7 +84,7 @@ export async function execute(
 
     if (total === 0) {
       await interaction.editReply({
-        content: `**${targetUser.tag}** has no moderation history.`,
+        content: `**${escapeDisplayText(targetUser.tag)}** has no moderation history.`,
       });
       return;
     }

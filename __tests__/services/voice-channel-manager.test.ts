@@ -182,9 +182,10 @@ describe("VoiceChannelManager", () => {
       await manager.requestOwnership("channel-1", "user-2");
 
       expect(queueFor("channel-1")).toEqual(["user-2"]);
-      expect(send).toHaveBeenCalledWith(
-        expect.stringContaining("<@user-2> has requested ownership"),
-      );
+      expect(send).toHaveBeenCalledWith({
+        content: expect.stringContaining("<@user-2> has requested ownership"),
+        allowedMentions: { users: ["user-2"] },
+      });
     });
 
     it("does not queue the same user twice or re-notify", async () => {

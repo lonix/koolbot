@@ -17,6 +17,7 @@ import {
 } from "../utils/moderation-guards.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
@@ -177,7 +178,7 @@ export async function execute(
       .setColor(actionColor("ban"))
       .setTitle("🔨 Member banned")
       .setDescription(
-        `**${targetUser.tag}** has been banned.\nThey now have **${total}** entr${
+        `**${escapeDisplayText(targetUser.tag)}** has been banned.\nThey now have **${total}** entr${
           total === 1 ? "y" : "ies"
         } in the moderation log.`,
       )
