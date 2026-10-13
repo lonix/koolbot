@@ -1259,6 +1259,13 @@ that your own highest role sits above the target's, which is the rule Discord
 applies in its native menu but cannot apply to an action the bot executes on
 your behalf.
 
+`/raidmode` follows the same staff default as `/warn`, `/timeout`, `/ban` and
+`/modlog`: while the Web UI has at least one `staff` or `admin` role group and no
+explicit restriction is set for the command, only members of those groups can run it
+(administrators still bypass). On a server with such a group this narrows `/raidmode`
+from every Moderate Members holder to the staff group; set an explicit restriction on the
+Permissions page to change that.
+
 ### Web UI launcher permissions
 
 | Command   | Permission                                                                    |

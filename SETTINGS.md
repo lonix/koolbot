@@ -1166,6 +1166,12 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   join while it is active (never existing members, never bots), and only when
   the bot is allowed to: the server owner, members at or above the bot's
   highest role, and missing permissions are skipped and counted, never forced.
+  The action settings (`lockdown_action`, `new_account_action`,
+  `min_account_age_hours`) are captured when a lockdown starts, for a manual start
+  the same snapshot the moderator was authorised against, and that lockdown keeps
+  running under them: a change applies to the next lockdown only, and `/raidmode
+  status` shows the action the open lockdown is running. A lockdown restored after
+  a restart takes the settings in force at restore time.
   A young account that joins during a lockdown gets the stronger of the lockdown
   action and the new-account action (kick over quarantine over timeout), so the
   account gate is never weaker during a lockdown. Because of that, a moderator

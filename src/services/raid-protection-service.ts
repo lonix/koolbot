@@ -66,7 +66,9 @@ export const MAX_PENDING_ROWS = 500;
  */
 export const MAX_PENDING_TRANSITIONS = 2000;
 
-function isTransitionRow(row: Record<string, unknown>): boolean {
+type LogRow = Record<string, unknown>;
+
+function isTransitionRow(row: LogRow): boolean {
   return row.action === "raid_lockdown" || row.action === "raid_clear";
 }
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -173,6 +175,27 @@ function freshCounts(): ActionCounts {
   return { actioned: 0, wouldAction: 0, skipped: 0, failed: 0 };
 }
 
+/**
+ * The action-affecting settings an open lockdown runs under, captured when it
+ * starts (for a manual start, the same snapshot the moderator was authorised
+ * against). A settings change therefore affects only the next lockdown, never
+ * one already running, so nobody can widen an authorised lockdown afterwards.
+ * A lockdown restored after a restart snapshots the settings at restore time.
+ */
+export interface LockdownPolicy {
+  lockdownAction: RaidAction;
+  newAccountAction: RaidAction;
+  minAccountAgeHours: number;
+}
+
+function policyOf(settings: RaidSettings): LockdownPolicy {
+  return {
+    lockdownAction: settings.lockdownAction,
+    newAccountAction: settings.newAccountAction,
+    minAccountAgeHours: settings.minAccountAgeHours,
+  };
+}
+
 /** Per-guild runtime state. */
 export interface RaidState {
   lockdown: boolean;
@@ -182,6 +205,8 @@ export interface RaidState {
    * live lockdown nobody asked for.
    */
   dryRun: boolean;
+  /** The policy the open lockdown runs under, or null when none is open. */
+  policy: LockdownPolicy | null;
   /** When the current lockdown began (ms), or null. */
   since: number | null;
   /** The moderator who started it, or null when it was automatic. */
@@ -212,6 +237,7 @@ function freshState(): RaidState {
   return {
     lockdown: false,
     dryRun: false,
+    policy: null,
     since: null,
     startedBy: null,
     joins: [],
@@ -296,8 +322,18 @@ export class RaidProtectionService {
   private readonly warned = new Set<string>();
   private reloadRegistered = false;
   /** Log rows not yet written because the database failed, oldest first. */
-  private pendingRows: Array<Record<string, unknown>> = [];
-  private drainPromise: Promise<void> | null = null;
+  /**
+   * Two write queues. Lockdown/clear rows are the persisted lockdown state and
+   * are written strictly in order; member-action rows are best-effort history.
+   * Keeping them apart means a member row that keeps failing can never hold a
+   * `raid_clear` back. A member row that fails its retries is parked (bounded)
+   * and retried once the database is seen working again.
+   */
+  private transitionRows: LogRow[] = [];
+  private memberRows: LogRow[] = [];
+  private parkedRows: LogRow[] = [];
+  private transitionDrain: Promise<void> | null = null;
+  private memberDrain: Promise<void> | null = null;
   /** Resolved once `initialize()` has finished (or failed); joins wait on it. */
   private initDone = false;
   private waitedOut = false;
@@ -561,6 +597,9 @@ export class RaidProtectionService {
       }
       const state = this.getState(guildId);
       state.lockdown = true;
+      // Snapshot the settings in force now; the original start's snapshot was
+      // not persisted, and this is acceptable for a restored lockdown.
+      state.policy = policyOf(settings);
       state.since = new Date(last.createdAt).getTime();
       state.startedBy =
         last.moderatorId && last.moderatorId !== this.client.user?.id
@@ -665,7 +704,7 @@ export class RaidProtectionService {
   ): Promise<string | null> {
     await this.awaitReady();
     // Retry rows a database outage left unwritten (single attempt, in order).
-    if (this.pendingRows.length > 0) await this.drainPendingRows(false);
+    await this.drainAll(false);
     const state = this.getState(guild.id);
     const inactive = await this.getInactiveReason(settings);
     if (this.destroyed) return "Anti-raid protection has been shut down.";
@@ -792,10 +831,14 @@ export class RaidProtectionService {
       // both apply (a young account joining during lockdown) the stronger of
       // the two configured actions wins: the account gate is never weaker
       // during a lockdown than outside it.
+      // While a lockdown is open its own snapshot decides the actions; outside
+      // one, the live settings do (the account gate on its own).
+      const policy =
+        state.lockdown && state.policy ? state.policy : policyOf(settings);
       let decision: Decision | null = null;
       if (state.lockdown) {
         decision = {
-          action: settings.lockdownAction,
+          action: policy.lockdownAction,
           reason: "Anti-raid: joined during lockdown",
         };
       }
@@ -803,12 +846,12 @@ export class RaidProtectionService {
         isNewAccount(
           member.user.createdTimestamp,
           now,
-          settings.minAccountAgeHours,
+          policy.minAccountAgeHours,
         )
       ) {
         const young: Decision = {
-          action: settings.newAccountAction,
-          reason: `Anti-raid: account younger than ${settings.minAccountAgeHours}h`,
+          action: policy.newAccountAction,
+          reason: `Anti-raid: account younger than ${policy.minAccountAgeHours}h`,
         };
         decision =
           decision === null || isStronger(young.action, decision.action)
@@ -921,12 +964,14 @@ export class RaidProtectionService {
       ),
       joinThreshold: settings.joinThreshold,
       windowSeconds: settings.windowSeconds,
-      lockdownAction: settings.lockdownAction,
-      minAccountAgeHours: settings.minAccountAgeHours,
-      newAccountAction: settings.newAccountAction,
+      // The action the open lockdown is actually running, else the settings
+      // the next one would use.
+      lockdownAction: (state.policy ?? settings).lockdownAction,
+      minAccountAgeHours: (state.policy ?? settings).minAccountAgeHours,
+      newAccountAction: (state.policy ?? settings).newAccountAction,
       counts: { ...state.lockdownCounts },
       gateCounts: { ...state.gateCounts },
-      unrecorded: this.pendingRows.length,
+      unrecorded: this.unrecordedCount(),
     };
   }
 
@@ -979,6 +1024,7 @@ export class RaidProtectionService {
     // sees the lockdown.
     const generation = ++state.generation;
     state.lockdown = true;
+    state.policy = policyOf(settings);
     // The joins that triggered it are spent; the window restarts when it ends.
     state.joins.length = 0;
     state.dryRun = settings.dryRun;
@@ -1024,6 +1070,7 @@ export class RaidProtectionService {
     const summary = `${c.actioned} acted on, ${c.wouldAction} would have been (dry run), ${c.skipped} skipped, ${c.failed} failed`;
     const generation = ++state.generation;
     state.lockdown = false;
+    state.policy = null;
     if (state.expiryTimer) clearTimeout(state.expiryTimer);
     state.expiryTimer = null;
     state.dryRun = false;
@@ -1210,7 +1257,7 @@ export class RaidProtectionService {
       );
       return;
     }
-    this.pendingRows.push({
+    const row: LogRow = {
       // Fixed when the row is queued, in queue order: a retry of an attempt
       // whose outcome was unknown (inserted, but the reply was lost) writes
       // the same `_id` and cannot create a second row, and `_id` order stays
@@ -1223,26 +1270,24 @@ export class RaidProtectionService {
       reason: truncateText(reason, MAX_REASON_LENGTH),
       source: "raid",
       createdAt: new Date(),
+    };
+    if (isTransitionRow(row)) {
+      this.transitionRows.push(row);
+      await this.drain("transition", true);
+      return;
+    }
+    this.memberRows.push(row);
+    if (this.memberRows.length > MAX_PENDING_ROWS) {
+      // Shed the oldest member action. Lockdown/clear rows live in their own
+      // queue and are never shed.
+      this.memberRows.shift();
+      logger.error(
+        "Anti-raid: too many unwritten log rows, dropped the oldest member action row",
+      );
+    }
+    void this.drain("member", true).catch((error) => {
+      logger.error("Anti-raid: error writing log rows:", error);
     });
-    if (this.pendingRows.length > MAX_PENDING_ROWS) {
-      // Shed the oldest member action only. The lockdown/clear rows are the
-      // persisted lockdown state and the audit history of transitions; losing
-      // one would make a restart restore the wrong state.
-      const i = this.pendingRows.findIndex((r) => !isTransitionRow(r));
-      if (i !== -1) {
-        this.pendingRows.splice(i, 1);
-        logger.error(
-          "Anti-raid: too many unwritten log rows, dropped the oldest member action row",
-        );
-      }
-    }
-    if (action === "raid_lockdown" || action === "raid_clear") {
-      await this.drainPendingRows(true);
-    } else {
-      void this.drainPendingRows(true).catch((error) => {
-        logger.error("Anti-raid: error writing log rows:", error);
-      });
-    }
   }
 
   /** Refuse a manual transition while too many are waiting for the database. */
@@ -1259,54 +1304,111 @@ export class RaidProtectionService {
   }
 
   private pendingTransitionCount(): number {
-    return this.pendingRows.filter(isTransitionRow).length;
+    return this.transitionRows.length;
+  }
+
+  private unrecordedCount(): number {
+    return (
+      this.transitionRows.length +
+      this.memberRows.length +
+      this.parkedRows.length
+    );
+  }
+
+  /** Attempt every queued row once, in order (used before reading state). */
+  private async drainAll(withRetries: boolean): Promise<void> {
+    if (this.unrecordedCount() === 0) return;
+    await this.drain("transition", withRetries);
+    await this.drain("member", withRetries);
+    // With nothing queued, a parked row acts as the probe for a recovered
+    // database: one attempt, and the rest follow only if it succeeds.
+    await this.retryParked();
   }
 
   /**
-   * Write queued rows in order. Callers share one drain at a time; a caller
-   * that arrives during a drain waits for it and then drains again, so rows
-   * appended meanwhile are attempted before it returns. Each drain stops at the
-   * first row that still fails after its retries, so every wait is finite.
+   * Write one queue's rows in order. Callers of one queue share one drain at a
+   * time; a caller that arrives during a drain waits for it and then drains
+   * again, so rows appended meanwhile are attempted before it returns. A
+   * transition drain stops at the first row that still fails after its
+   * retries (strict order); a member drain parks that row and carries on. Every
+   * wait is therefore finite.
    */
-  private async drainPendingRows(withRetries: boolean): Promise<void> {
-    while (this.drainPromise) await this.drainPromise;
-    this.drainPromise = this.runDrain(withRetries).finally(() => {
-      this.drainPromise = null;
+  private async drain(
+    kind: "transition" | "member",
+    withRetries: boolean,
+  ): Promise<void> {
+    const slot = kind === "transition" ? "transitionDrain" : "memberDrain";
+    while (this[slot]) await this[slot];
+    this[slot] = this.runDrain(kind, withRetries).finally(() => {
+      this[slot] = null;
     });
-    await this.drainPromise;
+    await this[slot];
   }
 
-  private async runDrain(withRetries: boolean): Promise<void> {
-    while (this.pendingRows.length > 0) {
-      const row = this.pendingRows[0];
-      let written = false;
-      const attempts = withRetries ? ROW_RETRY_DELAYS_MS.length + 1 : 1;
-      for (let i = 0; i < attempts && !written; i++) {
-        try {
-          await ModerationLog.create(row);
-          written = true;
-        } catch (error) {
-          // A duplicate key on our own fixed `_id` means an earlier,
-          // ambiguous attempt did commit: the row is written.
-          if ((error as { code?: number }).code === 11000) {
-            written = true;
-            break;
-          }
+  private async runDrain(
+    kind: "transition" | "member",
+    withRetries: boolean,
+  ): Promise<void> {
+    const queue = kind === "transition" ? this.transitionRows : this.memberRows;
+    const attempts = withRetries ? ROW_RETRY_DELAYS_MS.length + 1 : 1;
+    let wroteAny = false;
+    while (queue.length > 0) {
+      const row = queue[0];
+      const written = await this.tryWrite(row, attempts);
+      if (!written) {
+        if (kind === "transition") return;
+        // Park it so it cannot hold later member rows back.
+        if (queue[0] === row) queue.shift();
+        this.parkedRows.push(row);
+        if (this.parkedRows.length > MAX_PENDING_ROWS) {
+          this.parkedRows.shift();
           logger.error(
-            `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.pendingRows.length} pending):`,
-            error,
+            "Anti-raid: too many parked log rows, dropped the oldest member action row",
           );
-          if (i < attempts - 1) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, ROW_RETRY_DELAYS_MS[i]),
-            );
-          }
+        }
+        continue;
+      }
+      wroteAny = true;
+      // The head may have been dropped by the cap while we were writing.
+      if (queue[0] === row) queue.shift();
+    }
+    // A write just succeeded, so the database is up: give parked rows a go.
+    if (kind === "member" && wroteAny) await this.retryParked();
+  }
+
+  /**
+   * Retry parked member rows oldest first, one attempt each, stopping at the
+   * first failure so a database that is still down costs a single attempt.
+   */
+  private async retryParked(): Promise<void> {
+    while (this.parkedRows.length > 0) {
+      const row = this.parkedRows[0];
+      if (!(await this.tryWrite(row, 1))) return;
+      if (this.parkedRows[0] === row) this.parkedRows.shift();
+    }
+  }
+
+  private async tryWrite(row: LogRow, attempts: number): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await ModerationLog.create(row);
+        return true;
+      } catch (error) {
+        // A duplicate key on our own fixed `_id` means an earlier, ambiguous
+        // attempt did commit: the row is written.
+        if ((error as { code?: number }).code === 11000) return true;
+        logger.error(
+          `Anti-raid: failed to write moderation log row (attempt ${i + 1}/${attempts}, ${this.unrecordedCount()} unrecorded):`,
+          error,
+        );
+        if (i < attempts - 1) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, ROW_RETRY_DELAYS_MS[i]),
+          );
         }
       }
-      if (!written) return;
-      // The head may have been dropped by the cap while we were writing.
-      if (this.pendingRows[0] === row) this.pendingRows.shift();
     }
+    return false;
   }
 
   private async sendAlert(

@@ -1202,7 +1202,7 @@ groups are defined:
   group entry resolves to the group's role at check time, so re-ranking or re-linking a group takes
   effect without editing the command. A group with no role (unlinked) grants nothing, and the
   command stays restricted. While at least one `staff` or `admin` group exists, the moderation
-  commands (`/warn`, `/timeout`, `/ban`, `/modlog`) default to staff unless you set a restriction
+  commands (`/warn`, `/timeout`, `/ban`, `/modlog`, `/raidmode`) default to staff unless you set a restriction
   for them on this page; the page marks them *staff only (default)*. Members with the Administrator
   permission still bypass every check. If the groups can't be read, the check is refused (the user
   is told permissions can't be verified) rather than opening the command.

@@ -54,6 +54,7 @@ export const STAFF_DEFAULT_COMMANDS: ReadonlySet<string> = new Set([
   "timeout",
   "ban",
   "modlog",
+  "raidmode",
 ]);
 
 export const COMMAND_CONFIGS: readonly CommandConfig[] = [

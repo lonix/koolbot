@@ -5,7 +5,10 @@ import {
 } from "../../src/services/config-schema.js";
 import { RAID_CONFIG_KEYS } from "../../src/services/raid-protection-service.js";
 import { MODERATION_SETTING_KEYS } from "../../src/web/read-only-routes.js";
-import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
+import {
+  COMMAND_CONFIGS,
+  STAFF_DEFAULT_COMMANDS,
+} from "../../src/services/command-registry.js";
 import { CONFIG_CATEGORIES } from "../../src/models/config.js";
 import {
   WIZARD_FEATURE_EXTRA_GATES,
@@ -67,5 +70,11 @@ describe("moderation.raid.* keys", () => {
     expect(COMMAND_CONFIGS.find((c) => c.name === "raidmode")?.configKey).toBe(
       "moderation.raid.enabled",
     );
+  });
+
+  it("follows the staff default like the other moderation commands", () => {
+    for (const name of ["warn", "timeout", "ban", "modlog", "raidmode"]) {
+      expect(STAFF_DEFAULT_COMMANDS.has(name)).toBe(true);
+    }
   });
 });

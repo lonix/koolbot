@@ -56,7 +56,7 @@ export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
     }`,
     `**Mode:** ${status.dryRun ? "dry run (nobody is acted on)" : "live"}`,
     `**Joins in the last ${status.windowSeconds}s:** ${status.joinsInWindow} (lockdown above ${status.joinThreshold})`,
-    `**Lockdown action:** ${status.lockdownAction}`,
+    `**Lockdown action:** ${status.lockdownAction}${status.lockdown ? " (fixed for this lockdown)" : ""}`,
     `**New-account gate:** ${
       status.minAccountAgeHours > 0
         ? `under ${status.minAccountAgeHours}h old gets ${status.newAccountAction}`

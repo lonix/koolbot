@@ -746,7 +746,9 @@ describe("RaidProtectionService", () => {
         const status = await service.getStatus(guild);
         expect(status.unrecorded).toBe(0);
         const actions = mockCreate.mock.calls.map((c) => c[0].action);
-        expect(actions).toHaveLength(MAX_PENDING_ROWS);
+        // The member queue is capped at MAX_PENDING_ROWS; the lockdown row is
+        // in its own queue and is never shed.
+        expect(actions).toHaveLength(MAX_PENDING_ROWS + 1);
         expect(actions[0]).toBe("raid_lockdown");
       } finally {
         ROW_RETRY_DELAYS_MS.push(...delays);
@@ -1234,6 +1236,110 @@ describe("RaidProtectionService", () => {
       expect(result.changed).toBe(false);
       expect(jest.getTimerCount()).toBe(0);
       expect(mockCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("an open lockdown keeps the policy it started with", () => {
+    it("a timeout lockdown stays timeout after the setting changes to kick; the next one uses kick and was authorised for it", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      liveConfig({ "moderation.raid.lockdown_action": "kick" });
+
+      const during = makeMember();
+      expect(await service.handleMemberJoin(during.member)).toBe(true);
+      expect(during.timeout).toHaveBeenCalled();
+      expect(during.kick).not.toHaveBeenCalled();
+      const status = await service.getStatus(guild);
+      expect(status.lockdownAction).toBe("timeout");
+
+      await service.setLockdown(guild, false, "mod-1");
+      expect((await service.getStatus(guild)).lockdownAction).toBe("kick");
+      const seen: string[] = [];
+      await service.setLockdown(guild, true, "mod-1", (r) => {
+        seen.push(r.action);
+        return null;
+      });
+      expect(seen).toEqual(["kick"]);
+      const after = makeMember();
+      await service.handleMemberJoin(after.member);
+      expect(after.kick).toHaveBeenCalled();
+    });
+
+    it("enabling a stronger new-account action mid-lockdown does not escalate it", async () => {
+      const service = RaidProtectionService.getInstance(client);
+      await service.setLockdown(guild, true, "mod-1");
+      liveConfig({
+        "moderation.raid.new_account_action": "kick",
+        "moderation.raid.min_account_age_hours": 24,
+      });
+      const young = makeMember({ ageMs: HOUR });
+      await service.handleMemberJoin(young.member);
+      expect(young.kick).not.toHaveBeenCalled();
+      expect(young.timeout).toHaveBeenCalled();
+    });
+
+    it("a restored lockdown snapshots the settings in force at restore time", async () => {
+      liveConfig({ "moderation.raid.lockdown_action": "kick" });
+      mockFindOne.mockReturnValue({
+        sort: () => ({
+          lean: () => ({
+            exec: async () => ({
+              action: "raid_lockdown",
+              createdAt: new Date(),
+              moderatorId: "mod-1",
+              reason: "Manual",
+            }),
+          }),
+        }),
+      });
+      RaidProtectionService.reset();
+      const service = RaidProtectionService.getInstance(client);
+      await service.initialize();
+      liveConfig({ "moderation.raid.lockdown_action": "timeout" });
+      const member = makeMember();
+      await service.handleMemberJoin(member.member);
+      expect(member.kick).toHaveBeenCalled();
+    });
+  });
+
+  describe("member rows never hold back a lockdown transition", () => {
+    it("a persistently failing member row does not block a later raid_clear, and transitions stay in order", async () => {
+      const delays = ROW_RETRY_DELAYS_MS.splice(0);
+      try {
+        const written: string[] = [];
+        mockCreate.mockImplementation(async (row) => {
+          if (row.action === "timeout") throw new Error("member rows fail");
+          written.push(String(row.action));
+          return {};
+        });
+        const service = RaidProtectionService.getInstance(client);
+        await service.setLockdown(guild, true, "mod-1");
+        await service.handleMemberJoin(makeMember().member);
+        await service.setLockdown(guild, false, "mod-1");
+        expect(written).toEqual(["raid_lockdown", "raid_clear"]);
+        expect((await service.getStatus(guild)).unrecorded).toBe(1);
+      } finally {
+        ROW_RETRY_DELAYS_MS.push(...delays);
+      }
+    });
+
+    it("retries a parked member row once the database works again", async () => {
+      const delays = ROW_RETRY_DELAYS_MS.splice(0);
+      try {
+        mockCreate.mockRejectedValue(new Error("db down"));
+        const service = RaidProtectionService.getInstance(client);
+        await service.setLockdown(guild, true, "mod-1");
+        await service.handleMemberJoin(makeMember().member);
+        await service.handleMemberJoin(makeMember().member);
+        mockCreate.mockClear();
+        mockCreate.mockResolvedValue({});
+        const status = await service.getStatus(guild);
+        expect(status.unrecorded).toBe(0);
+        const actions = mockCreate.mock.calls.map((c) => c[0].action);
+        expect(actions).toEqual(["raid_lockdown", "timeout", "timeout"]);
+      } finally {
+        ROW_RETRY_DELAYS_MS.push(...delays);
+      }
     });
   });
 
