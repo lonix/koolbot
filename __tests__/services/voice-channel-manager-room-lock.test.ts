@@ -263,6 +263,60 @@ describe("VoiceChannelManager - room lock (#1143)", () => {
       expect(manager.isRoomOwner("b", "room")).toBe(true);
     });
 
+    it("still revokes the previous owner when granting the new owner fails", async () => {
+      withWaitingRoom();
+      waitingRoom.permissionOverwrites.create.mockRejectedValue(
+        new Error("boom"),
+      );
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      expect(waitingRoom.permissionOverwrites.delete).toHaveBeenCalledWith(
+        "a",
+        expect.any(String),
+      );
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+
+    it("still grants the new owner when revoking (delete and neutralise) fails", async () => {
+      withWaitingRoom();
+      waitingRoom.permissionOverwrites.delete.mockRejectedValue(
+        new Error("boom"),
+      );
+      // neutralise write for "a" fails too, grant for "b" works
+      waitingRoom.permissionOverwrites.create.mockImplementation(
+        async (id: string) => {
+          if (id === "a") throw new Error("boom");
+        },
+      );
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      expect(waitingRoom.permissionOverwrites.create).toHaveBeenCalledWith(
+        "b",
+        { Connect: true, ViewChannel: true, MoveMembers: true },
+      );
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+
+    it("applies the same ordering on the automatic transfer", async () => {
+      withWaitingRoom();
+      waitingRoom.permissionOverwrites.create.mockRejectedValue(
+        new Error("boom"),
+      );
+      releaseCreate();
+
+      await (manager as any).updateChannelOwnership(room, member("b"), "a");
+
+      expect(waitingRoom.permissionOverwrites.delete).toHaveBeenCalledWith(
+        "a",
+        expect.any(String),
+      );
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+
     it("leaves a room without a waiting room unaffected", async () => {
       releaseCreate();
 

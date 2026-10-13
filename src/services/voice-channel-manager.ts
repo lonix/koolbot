@@ -1098,19 +1098,25 @@ export class VoiceChannelManager {
   ): Promise<void> {
     const waitingRoomId = this.waitingRooms.get(mainChannelId);
     if (!waitingRoomId) return;
+    const waitingRoom = this.client.channels.cache.get(waitingRoomId) as
+      VoiceChannel | undefined;
+    if (!waitingRoom?.permissionOverwrites) return;
+
+    // Revoke first, and independently of the grant: a failing grant must never
+    // leave the former owner with Connect/View/MoveMembers here.
+    // revokePreviousOwnerAccess handles its own failures (delete, then
+    // neutralise) and does not throw.
+    await this.revokePreviousOwnerAccess(waitingRoom, previousOwnerId);
+
     try {
-      const waitingRoom = this.client.channels.cache.get(waitingRoomId) as
-        VoiceChannel | undefined;
-      if (!waitingRoom?.permissionOverwrites) return;
       await waitingRoom.permissionOverwrites.create(newOwnerId, {
         Connect: true,
         ViewChannel: true,
         MoveMembers: true,
       });
-      await this.revokePreviousOwnerAccess(waitingRoom, previousOwnerId);
     } catch (error) {
       logger.warn(
-        `Could not reconcile waiting room access for ${mainChannelId}:`,
+        `Could not grant new owner ${newOwnerId} access to the waiting room of ${mainChannelId}:`,
         error,
       );
     }
