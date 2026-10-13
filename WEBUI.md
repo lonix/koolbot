@@ -1482,7 +1482,8 @@ opens the snapshot history.
    safety rules as an apply. It is refused, with a message naming the cause and with nothing changed, when it would:
    remove your own access to a channel or your Administrator permission (you are the admin who clicked Restore, not the one
    who applied); lock the bot out of a channel a feature uses; leave the bot without the Manage Roles permission that the role and
-   permission-overwrite changes in the restore need (a restore of settings only does not need it); or edit a role that is
+   permission-overwrite changes in the restore need, including a role or overwrite that already has the saved value,
+   because the restore still writes it (a restore of settings only does not need it); or edit a role that is
    managed by an integration or sits at or above the bot's highest role. Roles the plan granted to members are revoked by a
    restore, so if you or the bot are among the members it granted a role to, the check treats that role as lost; for a plan
    that granted a role to many members only whether *you* and *the bot* were among them matters, and no member names are shown.

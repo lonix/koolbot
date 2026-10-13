@@ -1144,3 +1144,122 @@ describe("interrupted role creation with 'delete created roles'", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Writes the engine makes even when the value already matches (#1134, round 5)
+// ---------------------------------------------------------------------------
+
+describe("restore writes that are no-ops in the plan", () => {
+  const botWithoutManageRoles = (over: Partial<Scanned> = {}): Scanned =>
+    live({
+      roles: live().roles.map((r) =>
+        r.id === "koolbot" ? { ...r, permissions: VIEW } : r,
+      ),
+      ...over,
+    });
+
+  it("still needs Manage Roles when a role already has the saved permissions", () => {
+    // `plain` already has "0", the saved value, so the planner has nothing to
+    // change, but the engine calls editRole anyway.
+    expect(
+      restoreProblems(roleEditSnapshot("plain"), botWithoutManageRoles(), opts),
+    ).toEqual([expect.stringMatching(/Manage Roles/)]);
+  });
+
+  it("still applies the role limits to a role that already matches", () => {
+    const managed = restoreProblems(
+      roleEditSnapshot("carl"),
+      live(),
+      opts,
+    ).join(" ");
+    expect(managed).toMatch(/Other bot.*managed/);
+    const high = restoreProblems(roleEditSnapshot("high"), live(), opts).join(
+      " ",
+    );
+    expect(high).toMatch(/Above the bot.*at or above the bot's highest role/);
+  });
+
+  it("still needs Manage Roles when an overwrite already has the saved value", () => {
+    const scanned = botWithoutManageRoles({
+      channels: [channel("c1", [ow("plain", "0", VIEW)])],
+    });
+    expect(
+      restoreProblems(
+        overwriteSnapshot("c1", "plain", { allow: "0", deny: VIEW }),
+        scanned,
+        opts,
+      ),
+    ).toEqual([expect.stringMatching(/Manage Roles/)]);
+  });
+
+  it("still needs Manage Roles to remove an overwrite that is already gone", () => {
+    // The plan added an overwrite for `plain`; it is not there any more, but
+    // the engine still calls removeOverwrite.
+    expect(
+      restoreProblems(
+        overwriteSnapshot("c1", "plain", null),
+        botWithoutManageRoles({ channels: [channel("c1")] }),
+        opts,
+      ),
+    ).toEqual([expect.stringMatching(/Manage Roles/)]);
+  });
+
+  it("passes when every write is a no-op and the bot is able to make it", () => {
+    expect(restoreProblems(roleEditSnapshot("plain"), live(), opts)).toEqual(
+      [],
+    );
+    expect(
+      restoreProblems(
+        overwriteSnapshot("c1", "plain", { allow: "0", deny: VIEW }),
+        live({ channels: [channel("c1", [ow("plain", "0", VIEW)])] }),
+        opts,
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not ask for Manage Roles when the restore writes nothing", () => {
+    // A restore of settings only (no role or overwrite step) needs no role
+    // permission.
+    expect(restoreProblems(snapshot(), botWithoutManageRoles(), opts)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("grants on a role that no longer exists", () => {
+  it("is skipped even when the bot lacks Manage Roles, as documented", () => {
+    const snap = snapshot({
+      plan: {
+        operations: [
+          {
+            id: "op-1",
+            type: "member.role.add",
+            class: "additive",
+            roleId: "deleted-role",
+            memberCount: 1,
+            sample: [],
+            memberIds: [],
+          },
+        ],
+      } as never,
+      operations: [{ opId: "op-1", status: "applied" }],
+      memberProgress: {
+        "op-1": { done: 1, failed: [], granted: ["m1"] },
+      } as never,
+    });
+    const noManageRoles = live({
+      roles: live().roles.map((r) =>
+        r.id === "koolbot" ? { ...r, permissions: VIEW } : r,
+      ),
+    });
+    expect(restoreProblems(snap, noManageRoles, opts)).toEqual([]);
+    // With the role present the same restore does need Manage Roles.
+    const present = {
+      ...noManageRoles,
+      roles: [...noManageRoles.roles, role("deleted-role", "Back", 4)],
+    };
+    expect(restoreProblems(snap, present, opts)).toEqual([
+      expect.stringMatching(/Manage Roles/),
+    ]);
+  });
+});

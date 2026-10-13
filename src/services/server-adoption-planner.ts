@@ -193,6 +193,16 @@ export interface PlanOptions {
    * are not among those members.
    */
   revokedGrantRoleIds?: string[];
+  /**
+   * What a rollback will write even where the value already matches the live
+   * server (and so produces no operation): roles it will edit are held to the
+   * same limits as an edit (managed roles, roles at or above the bot), and
+   * `forceManageRoles` makes Manage Roles a requirement. Without these, a
+   * restore whose writes all happen to be no-ops in the plan would skip the
+   * checks for writes the engine still makes.
+   */
+  rollbackEditedRoleIds?: string[];
+  forceManageRoles?: boolean;
 }
 
 interface OpBase {
@@ -1181,8 +1191,16 @@ export function planAdoption(
     const problem = roleLimitProblem(granted, "revoke");
     if (problem) err("role-protected", problem, id);
   }
+  for (const id of options.rollbackEditedRoleIds ?? []) {
+    const edited = rolesById.get(id);
+    if (!edited) continue;
+    const problem = roleLimitProblem(edited, "edit");
+    if (problem) err("role-protected", problem, id);
+  }
   const needsManageRoles =
-    (options.revokedGrantRoleIds?.length ?? 0) > 0 ||
+    !!options.forceManageRoles ||
+    // Only roles that still exist are revoked; a missing one is skipped.
+    (options.revokedGrantRoleIds ?? []).some((id) => rolesById.has(id)) ||
     ordered.some(
       (o) =>
         o.type === "role.create" ||

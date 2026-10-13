@@ -67,6 +67,34 @@ export function buildRestoreDesired(
   scanned: ScannedState,
   options: RestoreCheckOptions,
 ): DesiredState {
+  return buildRestore(snapshot, scanned, options).desired;
+}
+
+/**
+ * What the engine will write on the roles and overwrites, whether or not the
+ * value already matches the live server. The planner drops a desired entry
+ * that already matches, so these are passed separately to its capability and
+ * hierarchy checks (`rollbackEditedRoleIds`, `forceManageRoles`).
+ */
+interface RestoreTouches {
+  roleEditIds: string[];
+  writesRoles: boolean;
+}
+
+function buildRestore(
+  snapshot: AdoptionSnapshotRecord,
+  scanned: ScannedState,
+  options: RestoreCheckOptions,
+): {
+  desired: Required<
+    Pick<
+      DesiredState,
+      "roles" | "overwrites" | "overwriteRemovals" | "deletions" | "approvals"
+    >
+  >;
+  touches: RestoreTouches;
+} {
+  const touches: RestoreTouches = { roleEditIds: [], writesRoles: false };
   const { plan, baseline } = snapshot;
   const remaining = new Set(
     remainingReversibleIds(
@@ -121,6 +149,9 @@ export function buildRestoreDesired(
     const channelId = mapChannel(op.channelId);
     if (!liveChannels.has(channelId)) return; // gone: nothing to restore on
     const prior = priorOverwrite(op.channelId, op.overwriteTargetId);
+    // The engine writes (setOverwrite) or removes (removeOverwrite) here
+    // unconditionally; only an overwrite.remove with nothing saved is a no-op.
+    if (prior || op.type === "overwrite.set") touches.writesRoles = true;
     if (prior) {
       desired.overwrites.push({
         channelId,
@@ -144,6 +175,8 @@ export function buildRestoreDesired(
       const prior = baseline.roles.find((r) => r.id === op.roleId);
       const live = liveRoles.get(roleId);
       if (!prior || !live) continue;
+      touches.roleEditIds.push(roleId);
+      touches.writesRoles = true;
       const want: DesiredRole = { id: roleId, name: live.name };
       if (op.changes.name !== undefined) want.name = prior.name;
       if (op.changes.color !== undefined) want.color = prior.color;
@@ -231,6 +264,7 @@ export function buildRestoreDesired(
       ?.overwrites.find((o) => o.id === oldRoleId);
     const live = mapChannel(channelId);
     if (!prior || !liveChannels.has(live)) continue;
+    touches.writesRoles = true;
     desired.overwrites.push({
       channelId: live,
       target: { id: mapRole(oldRoleId) },
@@ -239,7 +273,7 @@ export function buildRestoreDesired(
       deny: prior.deny,
     });
   }
-  return desired;
+  return { desired, touches };
 }
 
 /**
@@ -308,9 +342,11 @@ export function restoreProblems(
       "the saved role grants could not be read, so the restore can't be checked",
     ];
   }
-  const desired = buildRestoreDesired(snapshot, scanned, options);
+  const { desired, touches } = buildRestore(snapshot, scanned, options);
   const plan = planAdoption(scanned, desired, {
     approverId: options.actorId,
+    rollbackEditedRoleIds: touches.roleEditIds,
+    forceManageRoles: touches.writesRoles,
     revokedAdminRoleIds: revoked.admin,
     revokedBotRoleIds: revoked.bot,
     revokedGrantRoleIds: revoked.all,
