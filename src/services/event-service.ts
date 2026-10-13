@@ -457,7 +457,7 @@ export class EventService extends ScheduledService {
       // (its spawner died before re-checking); a cancelled sibling anywhere
       // in the series settles it, and the flag is carried onto this row.
       event.seriesCancelled = true;
-      await this.cancelOne(event, windows.native);
+      await this.cancelOne(event, windows.native, windows.skipNative);
       return;
     }
 
@@ -846,6 +846,7 @@ export class EventService extends ScheduledService {
   private async cancelOne(
     event: IEvent,
     nativeCache?: NativeCache | null,
+    skipNative = false,
   ): Promise<void> {
     if (event.channelId) {
       const guild = await this.client.guilds
@@ -866,7 +867,12 @@ export class EventService extends ScheduledService {
       event.announcementMessageId = fresh.announcementMessageId;
     }
     await this.updateAnnouncement(event);
-    await this.nativeSync.syncEvent(event, null, nativeCache);
+    // When the scan's shared listing failed, skip (no per-event fetch). The
+    // cancelled row keeps its native id or create marker, so the scan's
+    // terminal-row query picks it up again on a later tick and closes it.
+    if (!skipNative) {
+      await this.nativeSync.syncEvent(event, null, nativeCache);
+    }
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
   }
 
@@ -1136,6 +1142,15 @@ export class EventService extends ScheduledService {
    * announcement retry already attached to it so nothing is orphaned. */
   private async discardDuplicate(event: IEvent): Promise<void> {
     const mine = await Event.findById(event._id).catch(() => null);
+    // The duplicate may already mirror (or be mid-create of) a native event
+    // (#1034). Close it by the terminal rules before the row, and with it the
+    // link to the event, is gone. Marker-only rows get one lookup for a late
+    // event now; a create that lands after that is not tracked (a tombstone
+    // row would collide with the series' unique occurrence key).
+    if (mine && (mine.nativeEventId || mine.nativeCreateStartedAt)) {
+      mine.state = "cancelled"; // in memory only: selects the closing rules
+      await this.nativeSync.syncEvent(mine, null);
+    }
     if (mine?.announcementChannelId && mine.announcementMessageId) {
       await this.deleteAnnouncementPost(
         mine.guildId,

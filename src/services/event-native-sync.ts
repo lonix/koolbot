@@ -572,7 +572,13 @@ export class NativeEventSync {
   ): Promise<void> {
     const nativeId = event.nativeEventId as string;
     const native = await this.fetchNative(guild, nativeId, cache);
-    if (native) await this.finishNative(event, guild, native);
+    if (native) {
+      await this.finishNative(event, guild, native);
+      // `fetch()` hands back its own Collection, which `delete()` does not
+      // touch: drop the closed event so a later row in the same scan with the
+      // same name and start cannot adopt a native event that is already gone.
+      cache?.delete(native.id);
+    }
     await Event.updateOne(
       { _id: event._id, nativeEventId: nativeId },
       { $set: { nativeEventId: null } },

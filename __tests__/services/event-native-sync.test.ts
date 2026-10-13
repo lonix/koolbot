@@ -774,4 +774,24 @@ describe("NativeEventSync.syncEvent", () => {
       expect(await makeSync().loadCache(guild)).toBeNull();
     });
   });
+
+  it("does not let a later row adopt a native event that an earlier row's close just deleted", async () => {
+    const { guild, scheduledEvents } = makeGuild({ natives: [makeNative()] });
+    const cache = await scheduledEvents.fetch();
+    const sync = makeSync();
+    await sync.syncEvent(
+      makeEvent({ _id: "evA", state: "ended", nativeEventId: "n1" }),
+      guild,
+      cache as never,
+    );
+    expect(scheduledEvents.delete).toHaveBeenCalledWith("n1");
+    await sync.syncEvent(makeEvent({ _id: "evB" }), guild, cache as never);
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        $set: expect.objectContaining({ nativeEventId: "n1" }),
+      }),
+    );
+    expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
+  });
 });

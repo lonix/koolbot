@@ -1047,7 +1047,7 @@ describe("recurring event lifecycle", () => {
       seriesCancelled: true,
     });
     expect(late.seriesCancelled).toBe(true);
-    expect(cancelOne).toHaveBeenCalledWith(late, undefined);
+    expect(cancelOne).toHaveBeenCalledWith(late, undefined, undefined);
     expect(created).toHaveLength(0);
   });
 
@@ -1188,7 +1188,7 @@ describe("recurring event lifecycle", () => {
         processEvent: (...a: unknown[]) => Promise<void>;
       }
     ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
-    expect(cancelOne).toHaveBeenCalledWith(open, undefined);
+    expect(cancelOne).toHaveBeenCalledWith(open, undefined, undefined);
     expect(created).toHaveLength(0);
   });
 
@@ -1244,6 +1244,97 @@ describe("recurring event lifecycle", () => {
     expect(created[0].spawnedFrom).toBe("occ-0");
     expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "occ-2" });
     expect(postAnnouncement).toHaveBeenCalledWith(created[0]);
+  });
+
+  describe("native mirror of discarded duplicates and skipped cancels (#1034)", () => {
+    type Priv = {
+      discardDuplicate: (e: unknown) => Promise<void>;
+      cancelOne: (e: unknown, c?: unknown, skip?: boolean) => Promise<void>;
+      processEvent: (...a: unknown[]) => Promise<void>;
+      nativeSync: { syncEvent: jest.Mock };
+    };
+    function withSync() {
+      const { service } = buildService();
+      const order: string[] = [];
+      const syncEvent = jest.fn(async () => {
+        order.push("sync");
+      });
+      (service as unknown as Priv).nativeSync = { syncEvent };
+      EventMock.deleteOne = jest.fn(async () => {
+        order.push("delete");
+        return {};
+      });
+      return { priv: service as unknown as Priv, syncEvent, order };
+    }
+
+    it("closes a duplicate's native event before deleting the row", async () => {
+      const { priv, syncEvent, order } = withSync();
+      EventMock.findById = jest.fn(async () => ({
+        _id: "dup",
+        state: "scheduled",
+        nativeEventId: "n1",
+        nativeCreateStartedAt: null,
+      }));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(syncEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ state: "cancelled", nativeEventId: "n1" }),
+        null,
+      );
+      expect(order).toEqual(["sync", "delete"]);
+    });
+
+    it("looks for a late event of a duplicate with a pending create before deleting", async () => {
+      const { priv, syncEvent, order } = withSync();
+      EventMock.findById = jest.fn(async () => ({
+        _id: "dup",
+        state: "scheduled",
+        nativeEventId: null,
+        nativeCreateStartedAt: new Date(),
+      }));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(syncEvent).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["sync", "delete"]);
+    });
+
+    it("deletes a duplicate with no native mirror as before", async () => {
+      const { priv, syncEvent } = withSync();
+      EventMock.findById = jest.fn(async () => ({
+        _id: "dup",
+        state: "scheduled",
+        nativeEventId: null,
+        nativeCreateStartedAt: null,
+      }));
+      await priv.discardDuplicate({ _id: "dup" });
+      expect(syncEvent).not.toHaveBeenCalled();
+      expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "dup" });
+    });
+
+    it("makes no native call for interrupted series cancels while the listing failed", async () => {
+      const { priv, syncEvent } = withSync();
+      EventMock.findById = jest.fn(async () => null);
+      for (let i = 0; i < 3; i++) {
+        await priv.processEvent(
+          ended({
+            _id: `occ-${i}`,
+            state: "scheduled",
+            seriesCancelled: true,
+            channelId: null,
+          }),
+          {},
+          NOW,
+          { reminderMs: 0, leadMs: 0, graceMs: 0, skipNative: true },
+        );
+      }
+      expect(syncEvent).not.toHaveBeenCalled();
+      // The cancelled rows keep their native link / create marker, so the
+      // scan's terminal-row query retries them once the listing works again.
+      await priv.cancelOne(
+        ended({ state: "scheduled", channelId: null }),
+        null,
+        false,
+      );
+      expect(syncEvent).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("removes its own successor when a lower-indexed sibling already exists", async () => {
