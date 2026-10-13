@@ -142,7 +142,8 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **🎫 Support Tickets** — `/ticket open` creates a private help channel for a member and your staff
 - **🎂 Birthdays** — Timezone-aware birthday announcements
 - **📜 Rules Acceptance** — Optional rules gate: an Accept button that grants an acceptance role
-- **🧭 Server Adoption** — Take over an existing server's roles, categories and channels from the Web UI: scan, preview, apply, and roll back from a saved snapshot
+- **🧭 Server Adoption** — Take over an existing server's roles, categories and channels from the Web UI:
+  scan, preview, apply, and roll back from a saved snapshot
 - **👋 Welcome Messages** — Greet new members, pointing them at self-assign roles and the rules (needs the Server Members Intent)
 - **🛡️ Moderation Log** — `/warn`, `/timeout`, `/ban` and a per-member history
 - **🙋 Member Self-Service** — `/me` for birthday, timezone, notifications, Rewind and privacy tools

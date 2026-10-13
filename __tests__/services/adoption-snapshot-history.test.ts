@@ -88,13 +88,16 @@ describe("adoption snapshot history", () => {
       "class",
       "id",
       "summary",
+      "type",
     ]);
     expect(Object.keys(project.operations.$map.in).sort()).toEqual([
       "opId",
+      "startedAt",
       "status",
     ]);
     // Grants are reduced to the operation names; the granted ids stay put.
     expect(project.grantedOps.$map.in).toBe("$$p.k");
+    expect(project.inflightOps.$map.in).toBe("$$p.k");
     expect(project.memberProgress).toBeUndefined();
     expect(project.plan).toBeUndefined();
   });
@@ -108,6 +111,68 @@ describe("adoption snapshot history", () => {
       { summary: "Create role", destructive: false },
       { summary: "Grant role", destructive: false },
     ]);
+  });
+
+  it("counts interrupted steps a restore may also revert, so the page never under-promises", async () => {
+    mockAggregate.mockResolvedValue([
+      doc({
+        operations: [
+          { opId: "a", status: "applied" },
+          // Started, never recorded as finished: the engine looks it up live.
+          { opId: "b", status: "pending", startedAt: new Date() },
+          { opId: "c", status: "pending", startedAt: new Date() },
+          { opId: "d", status: "failed" },
+          { opId: "e", status: "applied" },
+        ],
+        planOps: [
+          { id: "a", type: "role.edit", summary: "A", class: "additive" },
+          {
+            id: "b",
+            type: "channel.delete",
+            summary: "B",
+            class: "destructive",
+          },
+          // A config write is never reconciled, so it is not "interrupted".
+          { id: "c", type: "config.set", summary: "C", class: "additive" },
+          { id: "d", type: "member.role.add", summary: "D", class: "additive" },
+          { id: "e", type: "role.edit", summary: "E", class: "additive" },
+        ],
+        grantedOps: [],
+        // Member grants that were in flight when the bot died.
+        inflightOps: ["d"],
+        rolledBackOps: ["e"],
+      }),
+    ]);
+    const d = await getSnapshotDetail("g1", ID);
+    expect(d?.operations.map((o) => o.summary)).toEqual(["A"]);
+    expect(d?.interrupted).toBe(2); // b (started delete) and d (in flight)
+  });
+
+  it("offers deleting created roles only for role creations a restore can still reach", async () => {
+    const planOps = [
+      { id: "r1", type: "role.create", summary: "R1", class: "additive" },
+      { id: "r2", type: "role.create", summary: "R2", class: "additive" },
+    ];
+    const operations = [
+      { opId: "r1", status: "applied" },
+      { opId: "r2", status: "applied" },
+    ];
+    // A previous restore with the box unticked still marks both as rolled back.
+    mockAggregate.mockResolvedValue([
+      doc({
+        planOps,
+        operations,
+        rolledBackOps: ["r1", "r2"],
+        createdRoles: 2,
+      }),
+    ]);
+    const spent = await getSnapshotDetail("g1", ID);
+    expect(spent?.createdRoles).toBe(2);
+    expect(spent?.revertibleCreatedRoles).toBe(0);
+    mockAggregate.mockResolvedValue([
+      doc({ planOps, operations, rolledBackOps: ["r1"], createdRoles: 2 }),
+    ]);
+    expect((await getSnapshotDetail("g1", ID))?.revertibleCreatedRoles).toBe(1);
   });
 
   it("answers null for a missing snapshot and never queries a malformed id", async () => {

@@ -36,7 +36,12 @@ describeWithMongo("adoption snapshot history against a real MongoDB", () => {
             summary: "Grant role",
             memberIds: ["secret-member-1", "secret-member-2"],
           },
-          { id: "op-2", class: "destructive", summary: "Delete channel" },
+          {
+            id: "op-2",
+            type: "channel.delete",
+            class: "destructive",
+            summary: "Delete channel",
+          },
         ],
       },
       baseline: { roles: [{ id: "baseline-marker" }] },
@@ -81,6 +86,23 @@ describeWithMongo("adoption snapshot history against a real MongoDB", () => {
     const text = JSON.stringify([page, detail]);
     expect(text).not.toContain("secret-member");
     expect(text).not.toContain("baseline-marker");
+  });
+
+  it("counts interrupted writes and in-flight grants a restore may also revert", async () => {
+    const doc = await make("g1", 1, {
+      operations: [
+        { opId: "op-1", status: "failed" },
+        { opId: "op-2", status: "pending", startedAt: new Date() },
+      ],
+      memberProgress: {
+        "op-1": { done: 0, failed: [], granted: [], inflight: ["secret-3"] },
+      },
+    });
+    const detail = await getSnapshotDetail("g1", String(doc._id));
+    // op-2 is a started channel delete, op-1 has a grant in flight.
+    expect(detail?.interrupted).toBe(2);
+    expect(detail?.operations).toEqual([]);
+    expect(JSON.stringify(detail)).not.toContain("secret-3");
   });
 
   it("scopes a lookup to the server", async () => {

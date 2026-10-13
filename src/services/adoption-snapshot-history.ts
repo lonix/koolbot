@@ -35,8 +35,16 @@ export interface SnapshotOperationRow {
 }
 
 export interface SnapshotDetail extends SnapshotSummary {
-  /** Exactly the operations a rollback would still revert, in plan order. */
+  /** The operations a rollback will revert from the saved record, in plan order. */
   operations: SnapshotOperationRow[];
+  /**
+   * Steps a restore may also revert after it re-checks live Discord state:
+   * writes that were started but never recorded as finished, and member grants
+   * that were in flight. Not decidable from the database alone.
+   */
+  interrupted: number;
+  /** Still-reversible `role.create` steps: what "delete created roles" can reach. */
+  revertibleCreatedRoles: number;
 }
 
 export interface SnapshotPage {
@@ -60,9 +68,11 @@ export const HISTORY_PAGE_SIZE = 25;
 interface RawOp {
   opId?: string;
   status?: string;
+  startedAt?: Date | null;
 }
 interface RawPlanOp {
   id?: string;
+  type?: string;
   summary?: string;
   class?: string;
 }
@@ -79,6 +89,8 @@ interface RawSnapshot {
   planOps?: RawPlanOp[];
   /** Ids of operations that have persisted grants (never the member ids). */
   grantedOps?: string[];
+  /** Ids of operations with in-flight member grants (never the member ids). */
+  inflightOps?: string[];
   rolledBackOps?: string[];
 }
 
@@ -105,6 +117,32 @@ function summarise(doc: RawSnapshot): SnapshotSummary {
 const orEmpty = (path: string): Record<string, unknown> => ({
   $ifNull: [path, []],
 });
+
+/** Names of operations whose `memberProgress.<field>` is non-empty. */
+const opsWithMembers = (field: string): Record<string, unknown> => ({
+  $map: {
+    input: {
+      $filter: {
+        input: { $objectToArray: { $ifNull: ["$memberProgress", {}] } },
+        as: "p",
+        cond: { $gt: [{ $size: orEmpty(`$$p.v.${field}`) }, 0] },
+      },
+    },
+    as: "p",
+    in: "$$p.k",
+  },
+});
+
+/**
+ * Writes the engine's `reconcileForRollback` may promote to applied after a
+ * live check when they were started but not recorded as finished. Keep in step
+ * with that method.
+ */
+const RECONCILED_TYPES = new Set([
+  "role.create",
+  "role.delete",
+  "channel.delete",
+]);
 
 /**
  * The projection is explicit so only what the page uses leaves the database:
@@ -134,29 +172,27 @@ export function snapshotPipeline(
           $map: {
             input: orEmpty("$operations"),
             as: "o",
-            in: { opId: "$$o.opId", status: "$$o.status" },
+            in: {
+              opId: "$$o.opId",
+              status: "$$o.status",
+              startedAt: "$$o.startedAt",
+            },
           },
         },
         planOps: {
           $map: {
             input: orEmpty("$plan.operations"),
             as: "o",
-            in: { id: "$$o.id", summary: "$$o.summary", class: "$$o.class" },
-          },
-        },
-        grantedOps: {
-          $map: {
-            input: {
-              $filter: {
-                input: { $objectToArray: { $ifNull: ["$memberProgress", {}] } },
-                as: "p",
-                cond: { $gt: [{ $size: orEmpty("$$p.v.granted") }, 0] },
-              },
+            in: {
+              id: "$$o.id",
+              type: "$$o.type",
+              summary: "$$o.summary",
+              class: "$$o.class",
             },
-            as: "p",
-            in: "$$p.k",
           },
         },
+        grantedOps: opsWithMembers("granted"),
+        inflightOps: opsWithMembers("inflight"),
       },
     },
   ];
@@ -197,18 +233,39 @@ export async function getSnapshotDetail(
   const doc = docs[0];
   if (!doc) return null;
   const granted = new Set(doc.grantedOps ?? []);
+  const records = (doc.operations ?? []).map((o) => ({
+    opId: o.opId ?? "",
+    status: o.status ?? "pending",
+  }));
+  const rolledBack = new Set(doc.rolledBackOps ?? []);
   const remaining = new Set(
     remainingReversibleIds(
-      (doc.operations ?? []).map((o) => ({
-        opId: o.opId ?? "",
-        status: o.status ?? "pending",
-      })),
+      records,
       (opId) => (granted.has(opId) ? 1 : 0),
       doc.rolledBackOps ?? [],
     ),
   );
+  const typeOf = new Map((doc.planOps ?? []).map((o) => [o.id ?? "", o.type]));
+  // Uncertain steps: not yet counted as reversible, but the restore may promote
+  // them after checking Discord. The page says so instead of under-promising.
+  const uncertain = new Set<string>();
+  for (const o of doc.operations ?? []) {
+    const id = o.opId ?? "";
+    if (remaining.has(id) || rolledBack.has(id) || o.status === "applied")
+      continue;
+    if (o.startedAt && RECONCILED_TYPES.has(typeOf.get(id) ?? "")) {
+      uncertain.add(id);
+    }
+  }
+  for (const id of doc.inflightOps ?? []) {
+    if (!remaining.has(id) && !rolledBack.has(id)) uncertain.add(id);
+  }
   return {
     ...summarise(doc),
+    interrupted: uncertain.size,
+    revertibleCreatedRoles: [...remaining].filter(
+      (id) => typeOf.get(id) === "role.create",
+    ).length,
     operations: (doc.planOps ?? [])
       .filter((o) => remaining.has(o.id ?? ""))
       .map((o) => ({

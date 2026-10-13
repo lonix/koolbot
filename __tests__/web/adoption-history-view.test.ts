@@ -79,6 +79,8 @@ describe("restore confirm page", () => {
   const detail = (over: Record<string, unknown> = {}) => ({
     ...snap(),
     operations: [{ summary: "Delete #old", destructive: true }],
+    interrupted: 0,
+    revertibleCreatedRoles: 2,
     ...over,
   });
 
@@ -95,12 +97,43 @@ describe("restore confirm page", () => {
     expect(html).toContain('name="_csrf" value="tok"');
   });
 
+  it("hides the role option when an earlier restore already spent every role creation", () => {
+    const html = renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({ createdRoles: 2, revertibleCreatedRoles: 0 }),
+      destructiveNote: "n",
+    });
+    expect(html).not.toContain("deleteCreatedRoles");
+  });
+
+  it("counts only reachable roles in the option and tells the admin about interrupted steps", () => {
+    const html = renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({
+        createdRoles: 5,
+        revertibleCreatedRoles: 1,
+        interrupted: 3,
+      }),
+      destructiveNote: "n",
+    });
+    expect(html).toContain("delete the 1 role(s)");
+    expect(html).toContain("3 more step(s) were interrupted");
+    expect(
+      renderRestoreConfirmPage({
+        ...base,
+        snapshot: detail(),
+        destructiveNote: "n",
+      }),
+    ).not.toContain("interrupted");
+  });
+
   it("omits the note and the role option when they don't apply, and blocks a finished snapshot", () => {
     const html = renderRestoreConfirmPage({
       ...base,
       snapshot: detail({
         destructive: 0,
         createdRoles: 0,
+        revertibleCreatedRoles: 0,
         status: "rolled_back",
       }),
       destructiveNote: "NOTE",

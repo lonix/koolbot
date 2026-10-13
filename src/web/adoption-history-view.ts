@@ -143,8 +143,10 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
         `<li>${escapeHtml(o.summary)}${o.destructive ? ' <span class="tag tag-off">destructive</span>' : ""}</li>`,
     )
     .join("");
-  const roles = s.createdRoles
-    ? `<label><input type="checkbox" name="deleteCreatedRoles" value="1"> Also delete the ${s.createdRoles} role(s) this plan created. Unticked, they are left in place (members who hold them keep them).</label>`
+  // Only roles this restore can still reach: a role.create already rolled back
+  // by an earlier restore is not revisited, so it must not be offered.
+  const roles = s.revertibleCreatedRoles
+    ? `<label><input type="checkbox" name="deleteCreatedRoles" value="1"> Also delete the ${s.revertibleCreatedRoles} role(s) this plan created. Unticked, they are left in place (members who hold them keep them).</label>`
     : "";
   const note = s.destructive
     ? `<div class="notice warn" role="status">${escapeHtml(props.destructiveNote)}</div>`
@@ -165,7 +167,8 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
 ${note}
 <div class="card">
   <h2>What will be reverted</h2>
-  ${items ? `<ul>${items}</ul>` : `<p class="muted">Nothing is left to revert in this snapshot.</p>`}
+  ${items ? `<ul>${items}</ul>` : `<p class="muted">Nothing recorded as applied is left to revert in this snapshot.</p>`}
+  ${s.interrupted ? `<p class="notice warn" role="status">${s.interrupted} more step(s) were interrupted (started but not recorded as finished, or in flight). The restore checks Discord first and also reverts any that did go through.</p>` : ""}
   ${form}
 </div>
 `;

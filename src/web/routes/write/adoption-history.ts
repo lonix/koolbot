@@ -14,8 +14,10 @@ import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import {
   DESTRUCTIVE_RESTORE_NOTE,
+  MongoAdoptionStore,
   ServerAdoptionService,
 } from "../../../services/server-adoption-service.js";
+import { ADOPTION_STALE_AFTER_MS } from "../../../models/adoption-snapshot.js";
 import {
   canRollback,
   getSnapshotDetail,
@@ -51,6 +53,22 @@ function readFlash(req: {
 export function createAdoptionHistoryRouter(client: Client): Router {
   const router = Router();
 
+  /**
+   * Release the lock of an apply or rollback whose bot died (no heartbeat for
+   * `ADOPTION_STALE_AFTER_MS`), using the engine's own store. Without it a
+   * snapshot stuck in `rolling_back` would stay unrestorable from the UI.
+   */
+  async function recoverStale(guildId: string): Promise<void> {
+    try {
+      await new MongoAdoptionStore().recoverStale(
+        guildId,
+        ADOPTION_STALE_AFTER_MS,
+      );
+    } catch (error) {
+      logger.warn("adoption history: stale recovery failed", error);
+    }
+  }
+
   async function pageBase(
     req: Parameters<typeof requireSessionContext>[0],
   ): Promise<{
@@ -71,6 +89,7 @@ export function createAdoptionHistoryRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const base = await pageBase(req);
+      await recoverStale(session.guildId);
       const pageNo = Math.min(
         10_000,
         Math.max(1, Number.parseInt(String(req.query.page ?? "1"), 10) || 1),
@@ -128,6 +147,7 @@ export function createAdoptionHistoryRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const base = await pageBase(req);
+      await recoverStale(session.guildId);
       const snapshot = await getSnapshotDetail(
         session.guildId,
         String(req.params.id),
@@ -157,6 +177,7 @@ export function createAdoptionHistoryRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
+      await recoverStale(session.guildId);
       const snapshot = await getSnapshotDetail(session.guildId, id).catch(
         () => null,
       );

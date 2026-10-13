@@ -50,12 +50,16 @@ jest.unstable_mockModule(
       s === "applied" || s === "partial" || s === "rollback_partial",
   }),
 );
+const mockRecoverStale = jest.fn<(...a: any[]) => Promise<number>>();
 const mockStartRollback = jest.fn<(...a: any[]) => any>();
 const mockGetRollbackJob = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule(
   "../../src/services/server-adoption-service.js",
   () => ({
     DESTRUCTIVE_RESTORE_NOTE: "Messages can't be restored.",
+    MongoAdoptionStore: class {
+      recoverStale = mockRecoverStale;
+    },
     ServerAdoptionService: {
       getInstance: async () => ({
         startRollback: mockStartRollback,
@@ -87,6 +91,8 @@ const summary = (over: Record<string, unknown> = {}) => ({
   skipped: 0,
   destructive: 0,
   createdRoles: 1,
+  revertibleCreatedRoles: 1,
+  interrupted: 0,
   operations: [{ summary: "Make #news read-only", destructive: false }],
   ...over,
 });
@@ -116,6 +122,7 @@ beforeEach(() => {
   });
   mockDetail.mockResolvedValue(summary());
   mockStartRollback.mockReturnValue({ id: JOB });
+  mockRecoverStale.mockResolvedValue(0);
 });
 afterEach(async () => {
   await harness?.close();
@@ -154,6 +161,44 @@ describe("GET /adopt/history", () => {
       await harness.get("/adopt/history?job=%22%3E%3Cscript%3E")
     ).text();
     expect(html).not.toContain("ah-job");
+  });
+});
+
+describe("stale lock recovery", () => {
+  it("runs before the list, the confirm page and the restore check, so a stuck rolling_back snapshot becomes restorable", async () => {
+    const order: string[] = [];
+    mockRecoverStale.mockImplementation(async () => {
+      order.push("recover");
+      return 1;
+    });
+    mockList.mockImplementation(async () => {
+      order.push("list");
+      return { snapshots: [], page: 1, hasMore: false };
+    });
+    mockDetail.mockImplementation(async () => {
+      order.push("detail");
+      return summary({ status: "rollback_partial" });
+    });
+    await mount();
+    await harness.get("/adopt/history");
+    await harness.get(`/adopt/history/${SNAP}/restore`);
+    await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(order).toEqual([
+      "recover",
+      "list",
+      "recover",
+      "detail",
+      "recover",
+      "detail",
+    ]);
+    expect(mockRecoverStale).toHaveBeenCalledWith("guild-1", 30 * 60 * 1000);
+    expect(mockStartRollback).toHaveBeenCalled();
+  });
+
+  it("still serves the page when recovery itself fails", async () => {
+    mockRecoverStale.mockRejectedValue(new Error("db"));
+    await mount();
+    expect((await harness.get("/adopt/history")).status).toBe(200);
   });
 });
 
