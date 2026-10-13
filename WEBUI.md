@@ -1475,6 +1475,19 @@ opens the snapshot history.
    can be restored again to finish. Each restore is written to the audit log (`adopt.rollback`). Snapshots are kept for
    `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
 
+   **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore
+   scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same
+   safety rules as an apply. It is refused, with a message naming the cause and with nothing changed, when it would:
+   remove your own access to a channel or your Administrator permission (you are the admin who clicked Restore, not the one
+   who applied); lock the bot out of a channel a feature uses; leave the bot without the Manage Roles permission it needs to
+   restore anything; or edit a role that is managed by an integration or sits at or above the bot's highest role. Choosing
+   **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. The
+   engine runs the same check again after it claims the snapshot and before its first write. If the live server can't be
+   read, Restore is refused. For a snapshot that was already partly restored, only the steps still to be reverted are
+   checked; what was restored earlier is part of the live state. The check never approves anything the planner can't judge:
+   recreating a deleted channel or role, revoking member role grants and putting settings back are not part of it. There is no
+   extra warning for old snapshots: the check looks at the live server, so a snapshot's age does not change the result.
+
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
 `celebrations.channel_id`). When enabled, the bot posts a loud, server-wide

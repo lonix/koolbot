@@ -357,11 +357,24 @@ Error: An invalid token was provided
 5. **Recovering with rollback.** Open the Web UI → **Adoption** (`/admin/adopt/history`), choose the snapshot and click
    **Restore…**. Only steps that were applied are reverted. The restore is refused while another apply or rollback is
    running; wait for it, or if the bot restarted mid-run, wait about 30 minutes for the stale run to be released and try
-   again. A restore that stopped part-way shows *Rollback incomplete* and can be started again.
+   again. A restore that stopped part-way shows *Rollback incomplete* and can be started again. Before it writes anything,
+   Restore checks the live server and may refuse; see "Restore was refused" below.
 6. **What rollback cannot bring back.** If a plan deleted a channel or role (only ever after you approved that step),
    rollback recreates its structure only. Messages, pins, threads, webhooks, role memberships and the original IDs are
    gone for good. Roles the plan created are kept unless you tick the option to delete them.
-7. **The snapshot is missing.** Snapshots are removed after `adoption.snapshot.retention_days` (default 90).
+7. **Restore was refused ("Restore refused, nothing was changed: ...").** Restore compares the server as it is now with the
+   state the restore would produce, and refuses when that would be unsafe. Nothing was written. By cause:
+   - *"This change would remove your own access to ..."* or *"...your own Administrator permission"*: someone gave you
+     access since the apply, and the saved state would take it away (or deleting a created role would). Give yourself
+     access another way (a role you hold), or untick **Also delete the roles this plan created**, then try again. The check
+     is for the admin who clicks Restore, so a different admin may get a different result.
+   - *"...lock the bot out of ..."*: the saved permissions would hide a channel a KoolBot feature uses from the bot. Give the
+     KoolBot role access to that channel first.
+   - *"The bot needs the Manage Roles permission..."*: grant Manage Roles to the KoolBot role; every restore step needs it.
+   - A message naming a role (managed by an integration, or at or above the KoolBot role): move the KoolBot role above it in
+     Server Settings → Roles, or leave that role as it is. Managed roles are never edited.
+   - *"the live server state could not be read"*: Discord or the database could not be reached; try again shortly.
+8. **The snapshot is missing.** Snapshots are removed after `adoption.snapshot.retention_days` (default 90).
    Without one, the changes can only be undone by hand in Discord.
 
 ### Bot logs in but "Used disallowed intents" / login fails

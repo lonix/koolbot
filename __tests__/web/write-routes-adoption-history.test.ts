@@ -51,6 +51,16 @@ jest.unstable_mockModule(
   }),
 );
 const mockRecoverStale = jest.fn<(...a: any[]) => Promise<number>>();
+const mockCheck = jest.fn<(...a: any[]) => Promise<string[]>>();
+const mockRevalidatorFactory = jest.fn<(...a: any[]) => typeof mockCheck>(
+  () => mockCheck,
+);
+jest.unstable_mockModule(
+  "../../src/services/adoption-rollback-check.js",
+  () => ({
+    rollbackRevalidator: mockRevalidatorFactory,
+  }),
+);
 const mockStartRollback = jest.fn<(...a: any[]) => any>();
 const mockGetRollbackJob = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule(
@@ -59,6 +69,7 @@ jest.unstable_mockModule(
     DESTRUCTIVE_RESTORE_NOTE: "Messages can't be restored.",
     MongoAdoptionStore: class {
       recoverStale = mockRecoverStale;
+      get = jest.fn(async () => ({ id: "snap" }));
     },
     ServerAdoptionService: {
       getInstance: async () => ({
@@ -125,6 +136,7 @@ beforeEach(() => {
   mockDetail.mockResolvedValue(summary());
   mockStartRollback.mockReturnValue({ id: JOB });
   mockRecoverStale.mockResolvedValue(0);
+  mockCheck.mockResolvedValue([]);
 });
 afterEach(async () => {
   await harness?.close();
@@ -224,6 +236,50 @@ describe("GET /adopt/history/:id/restore", () => {
   });
 });
 
+describe("POST /adopt/history/:id/restore live-state check (#1134)", () => {
+  it("refuses an unsafe restore before the engine starts, names the cause and audits it", async () => {
+    mockCheck.mockResolvedValue([
+      'This change would remove your own access to "secret".',
+    ]);
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(res.status).toBe(303);
+    const flash = flashOf(res);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("nothing was changed");
+    expect(flash.msg).toContain('remove your own access to "secret"');
+    expect(mockStartRollback).not.toHaveBeenCalled();
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "adopt.rollback",
+        result: "failure",
+        details: expect.objectContaining({ problems: expect.any(Array) }),
+      }),
+    );
+  });
+
+  it("checks with the ticked option, so deleting created roles is judged too", async () => {
+    await mount();
+    await harness.post(`/adopt/history/${SNAP}/restore`, {
+      deleteCreatedRoles: "1",
+    });
+    expect(mockRevalidatorFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      { actorId: session.discordUserId, deleteCreatedRoles: true },
+    );
+  });
+
+  it("fails closed when the live server can't be read", async () => {
+    mockCheck.mockRejectedValue(new Error("discord down"));
+    await mount();
+    const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
+    expect(flashOf(res).msg).toContain("could not be read");
+    expect(mockStartRollback).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /adopt/history/:id/restore", () => {
   it("starts the rollback, audits it, and leaves created roles alone by default", async () => {
     await mount();
@@ -233,7 +289,14 @@ describe("POST /adopt/history/:id/restore", () => {
     expect(mockStartRollback).toHaveBeenCalledWith(SNAP, {
       actor: session,
       deleteCreatedRoles: false,
+      // The engine re-runs the same check after it claims the snapshot.
+      revalidate: mockCheck,
     });
+    expect(mockRevalidatorFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      { actorId: session.discordUserId, deleteCreatedRoles: false },
+    );
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "adopt.rollback", result: "success" }),

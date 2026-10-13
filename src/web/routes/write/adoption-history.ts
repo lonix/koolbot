@@ -12,6 +12,7 @@
 import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
+import { rollbackRevalidator } from "../../../services/adoption-rollback-check.js";
 import {
   DESTRUCTIVE_RESTORE_NOTE,
   MongoAdoptionStore,
@@ -199,9 +200,38 @@ export function createAdoptionHistoryRouter(client: Client): Router {
       try {
         const guild = await client.guilds.fetch(session.guildId);
         const engine = await ServerAdoptionService.getInstance(client, guild);
+        // Live-state safety check (#1134). Run here first so a refusal is
+        // shown at once; the engine runs it again after claiming the snapshot,
+        // before its first write.
+        const store = new MongoAdoptionStore();
+        const revalidate = rollbackRevalidator(guild, () => store.get(id), {
+          actorId: session.discordUserId,
+          deleteCreatedRoles,
+        });
+        let problems: string[];
+        try {
+          problems = await revalidate();
+        } catch (error) {
+          // Fail closed: if the live server can't be read, don't restore.
+          logger.warn("adoption history: restore check failed", error);
+          problems = ["the live server state could not be read"];
+        }
+        if (problems.length > 0) {
+          const text = `Restore refused, nothing was changed: ${problems.join(" ")}`;
+          await recordAudit(session, {
+            action: "adopt.rollback",
+            targetId: id,
+            details: { planId: snapshot.planId, deleteCreatedRoles, problems },
+            result: "failure",
+            errorMessage: text,
+          });
+          flashRedirect(res, HISTORY_PATH, { type: "err", text });
+          return;
+        }
         const job = engine.startRollback(id, {
           actor: session,
           deleteCreatedRoles,
+          revalidate,
         });
         await recordAudit(session, {
           action: "adopt.rollback",
