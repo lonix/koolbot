@@ -232,6 +232,17 @@ describe("reaction role flip limit (#1147)", () => {
     expect(fetches).toBe(30);
   });
 
+  it("does not spend a flip when the role change fails", async () => {
+    const service = createService(1);
+    const failing = makeReaction();
+    failing.rolesAdd.mockRejectedValueOnce(new Error("Missing Permissions"));
+    await service.handleReactionAdd(failing.reaction, user); // fails, released
+
+    const next = makeReaction();
+    await service.handleReactionAdd(next.reaction, user);
+    expect(next.rolesAdd).toHaveBeenCalledTimes(1);
+  });
+
   it("does not limit anything when max_toggles is 0", async () => {
     const service = createService(0);
     const { reaction, rolesAdd, rolesRemove } = makeReaction();

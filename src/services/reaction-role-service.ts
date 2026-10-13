@@ -40,7 +40,11 @@ import { RoleGroupService } from "./role-group-service.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
-import { consumeBurst, waitText } from "../utils/member-cooldown.js";
+import {
+  consumeBurst,
+  reserveBurst,
+  waitText,
+} from "../utils/member-cooldown.js";
 import { forbiddenSelfAssignPermissions } from "../utils/role-safety.js";
 import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
@@ -565,14 +569,20 @@ export class ReactionRoleService {
         // Over the per-member flip limit (#1147): a reaction cannot be
         // answered, so drop it, and take the reaction back so the message does
         // not show a pick that never got its role.
-        if ((await this.flipWaitSeconds(guild.id, user.id)) > 0) {
+        const flip = await this.reserveFlip(guild.id, user.id);
+        if (flip.wait > 0) {
           logger.debug(
             `Reaction role flip limit hit for user ${user.id}; ignoring add`,
           );
           await this.takeBackReaction(reaction, user.id, guild.id);
           return;
         }
-        await member.roles.add(role);
+        try {
+          await member.roles.add(role);
+        } catch (error) {
+          flip.release(); // the role did not change, so the flip is not spent
+          throw error;
+        }
         logger.info(`Added role ${role.name} to user ${user.tag}`);
       } else {
         logger.debug(`User ${user.tag} already has role ${role.name}`);
@@ -581,7 +591,7 @@ export class ReactionRoleService {
         // reaction would run it unbounded once removals are being ignored.
         if (
           config.mode === "unique" &&
-          (await this.flipWaitSeconds(guild.id, user.id)) > 0
+          (await this.reserveFlip(guild.id, user.id)).wait > 0
         ) {
           logger.debug(
             `Reaction role flip limit hit for user ${user.id}; skipping unique-mode cleanup`,
@@ -707,13 +717,19 @@ export class ReactionRoleService {
         return;
       }
 
-      if ((await this.flipWaitSeconds(guild.id, user.id)) > 0) {
+      const flip = await this.reserveFlip(guild.id, user.id);
+      if (flip.wait > 0) {
         logger.debug(
           `Reaction role flip limit hit for user ${user.id}; ignoring remove`,
         );
         return;
       }
-      await member.roles.remove(role);
+      try {
+        await member.roles.remove(role);
+      } catch (error) {
+        flip.release();
+        throw error;
+      }
       logger.info(`Removed role ${role.name} from user ${user.tag}`);
     } catch (error) {
       logger.error("Error removing role from reaction:", error);
@@ -879,13 +895,15 @@ export class ReactionRoleService {
     roleId: string,
     member: GuildMember,
     desired: "add" | "remove",
-  ): Promise<Role | null | "limited"> {
+  ): Promise<"limited" | { role: Role | null; attemptCharged: boolean }> {
     const cached = guild.roles.cache.get(roleId);
-    if (cached) return cached;
-    if (desired === "add" && this.attemptWaitSeconds(guild.id, member.id) > 0) {
-      return "limited";
+    if (cached) return { role: cached, attemptCharged: false };
+    if (desired === "add") {
+      if (this.attemptWaitSeconds(guild.id, member.id) > 0) return "limited";
+      // The grant that follows must not charge this same attempt again.
+      return { role: await guild.roles.fetch(roleId), attemptCharged: true };
     }
-    return guild.roles.fetch(roleId);
+    return { role: await guild.roles.fetch(roleId), attemptCharged: false };
   }
 
   /** Roles already warned about, so a bad binding logs once per process. */
@@ -947,18 +965,20 @@ export class ReactionRoleService {
 
   /**
    * Per-member limit on role flips across reactions, buttons and menus
-   * (#1147). Returns 0 when the flip may go ahead (and records it), otherwise
-   * the seconds to wait. `reactionroles.max_toggles = 0` turns it off.
+   * (#1147). Reserves a slot up front (so concurrent attempts see it): `wait`
+   * is 0 when the flip may go ahead, otherwise the seconds to wait. Call
+   * `release()` if the role change then fails, so only real changes count.
+   * `reactionroles.max_toggles = 0` turns it off.
    */
-  private async flipWaitSeconds(
+  private async reserveFlip(
     guildId: string,
     userId: string,
-  ): Promise<number> {
+  ): Promise<{ wait: number; release: () => void }> {
     const [max, windowSeconds] = await Promise.all([
       this.configService.getNumber("reactionroles.max_toggles", 10),
       this.configService.getNumber("reactionroles.toggle_window_seconds", 30),
     ]);
-    return consumeBurst(`reactrole:${guildId}`, userId, max, windowSeconds);
+    return reserveBurst(`reactrole:${guildId}`, userId, max, windowSeconds);
   }
 
   /**
@@ -971,6 +991,7 @@ export class ReactionRoleService {
     member: GuildMember,
     role: Role,
     desired: "add" | "remove",
+    attemptCharged = false,
   ): Promise<string> {
     const hasRole = member.roles.cache.has(role.id);
 
@@ -982,7 +1003,10 @@ export class ReactionRoleService {
     }
 
     if (desired === "add") {
-      const attemptWait = this.attemptWaitSeconds(member.guild.id, member.id);
+      // Charge the grant attempt once: a cache-miss lookup already did.
+      const attemptWait = attemptCharged
+        ? 0
+        : this.attemptWaitSeconds(member.guild.id, member.id);
       if (attemptWait > 0) {
         return `⏳ You're changing roles too quickly. Please wait ${waitText(attemptWait)} and try again.`;
       }
@@ -996,20 +1020,25 @@ export class ReactionRoleService {
     }
 
     // Only real changes count against the flip limit (#1147).
-    const wait = await this.flipWaitSeconds(member.guild.id, member.id);
-    if (wait > 0) {
-      return `⏳ You're changing roles too quickly. Please wait ${waitText(wait)} and try again.`;
+    const flip = await this.reserveFlip(member.guild.id, member.id);
+    if (flip.wait > 0) {
+      return `⏳ You're changing roles too quickly. Please wait ${waitText(flip.wait)} and try again.`;
     }
 
-    if (desired === "add") {
-      await member.roles.add(role);
-      logger.info(`Added role ${role.name} to user ${member.user.tag}`);
-      return `✅ You now have **${role.name}**.`;
-    }
+    try {
+      if (desired === "add") {
+        await member.roles.add(role);
+        logger.info(`Added role ${role.name} to user ${member.user.tag}`);
+        return `✅ You now have **${role.name}**.`;
+      }
 
-    await member.roles.remove(role);
-    logger.info(`Removed role ${role.name} from user ${member.user.tag}`);
-    return `➖ Removed **${role.name}**.`;
+      await member.roles.remove(role);
+      logger.info(`Removed role ${role.name} from user ${member.user.tag}`);
+      return `➖ Removed **${role.name}**.`;
+    } catch (error) {
+      flip.release(); // the role did not change, so the flip is not spent
+      throw error;
+    }
   }
 
   /**
@@ -1074,7 +1103,7 @@ export class ReactionRoleService {
         });
         return;
       }
-      const role = resolved;
+      const role = resolved.role;
       if (!role) {
         logger.error(
           `Role ${roleId} not found while toggling self-assign role`,
@@ -1091,6 +1120,7 @@ export class ReactionRoleService {
         member,
         role,
         desired,
+        resolved.attemptCharged,
       );
 
       await interaction.reply({
@@ -1178,7 +1208,7 @@ export class ReactionRoleService {
             );
             break;
           }
-          const role = resolved;
+          const role = resolved.role;
           if (!role) {
             logger.error(
               `Role ${roleId} not found while toggling self-assign role`,
@@ -1186,7 +1216,12 @@ export class ReactionRoleService {
             continue;
           }
           lines.push(
-            await this.applyRoleToggleForMember(member, role, desired),
+            await this.applyRoleToggleForMember(
+              member,
+              role,
+              desired,
+              resolved.attemptCharged,
+            ),
           );
         }
       }

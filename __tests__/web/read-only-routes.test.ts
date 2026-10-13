@@ -141,6 +141,8 @@ describe("buildSettingRows (#705)", () => {
       "reactionroles.enabled",
       "reactionroles.message_channel_id",
       "reactionroles.style",
+      "reactionroles.max_toggles",
+      "reactionroles.toggle_window_seconds",
     ]);
     const [enabled, channel, style] = buildSettingRows(
       REACTION_ROLES_SETTING_KEYS,

@@ -76,6 +76,41 @@ export function consumeBurst(
   return 0;
 }
 
+/**
+ * Like {@link consumeBurst}, but the slot is an owned reservation that can be
+ * given back: when the guarded action fails after reserving, `release()`
+ * returns exactly that slot, so a failed action does not count. The slot is
+ * still taken up front, so concurrent attempts see it. `wait` is 0 when
+ * reserved, otherwise the seconds to wait (and `release` is a no-op).
+ */
+export function reserveBurst(
+  scope: string,
+  userId: string,
+  max: number,
+  windowSeconds: number,
+): { wait: number; release: () => void } {
+  const none = { wait: 0, release: (): void => {} };
+  if (!(max > 0) || !(windowSeconds > 0)) return none;
+  const key = `${scope}:${userId}`;
+  const m = manager();
+  if (m.isRateLimited(key, max, windowSeconds)) {
+    return {
+      wait: Math.max(1, m.getRateLimitReset(key, max, windowSeconds)),
+      release: (): void => {},
+    };
+  }
+  const stamp = m.trackCommandExecution(key, windowSeconds);
+  let released = false;
+  return {
+    wait: 0,
+    release: (): void => {
+      if (released) return;
+      released = true;
+      m.releaseCommandExecution(key, stamp);
+    },
+  };
+}
+
 /** Wording for a refusal, e.g. "12 seconds" or "5 minutes". */
 export function waitText(seconds: number): string {
   if (seconds >= 120) return `${Math.ceil(seconds / 60)} minutes`;

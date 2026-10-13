@@ -329,6 +329,54 @@ describe("ReactionRoleService component interactions", () => {
       );
     });
 
+    it("charges an uncached grant attempt once, not twice (#1147)", async () => {
+      // Role missing from the cache but found by the fallback fetch.
+      const member = createMember("user1", []);
+      guild = createGuild(member, {});
+      guild.roles.fetch = jest.fn(async (id: string) => ({
+        id,
+        name: "Gamer",
+        permissions: { bitfield: PermissionFlagsBits.Connect },
+      }));
+      mockFindOne.mockResolvedValue({ roleId: "role1", roleName: "Gamer" });
+      // 15 attempts: charged once each that is 15 of 30; twice would be 30.
+      mockGetNumber.mockImplementation(async (key) =>
+        key === "reactionroles.max_toggles" ? 0 : 30,
+      );
+      for (let i = 0; i < 20; i++) {
+        member.roles.remove.mockClear();
+        await service.handleButtonInteraction(buildInteraction()); // add
+        await service.handleButtonInteraction(buildInteraction()); // remove
+      }
+      // 20 grants went through (charged once each). Charged twice, the cap of
+      // 30 would have stopped them after 15.
+      expect(member.roles.add).toHaveBeenCalledTimes(20);
+    });
+
+    it("gives the flip back when the role change fails, so only real changes count (#1147)", async () => {
+      mockGetNumber.mockImplementation(async (key) =>
+        key === "reactionroles.max_toggles" ? 2 : 30,
+      );
+      const member = createMember("user1", []);
+      guild = createGuild(member, { role1: "Gamer" });
+      mockFindOne.mockResolvedValue({ roleId: "role1", roleName: "Gamer" });
+      member.roles.add.mockRejectedValue(new Error("Missing Permissions"));
+
+      // Three failing attempts: with the limit at 2 they would exhaust it if
+      // failures counted.
+      for (let i = 0; i < 3; i++) {
+        await service.handleButtonInteraction(buildInteraction());
+      }
+      member.roles.add.mockImplementation(async (role: { id: string }) => {
+        member.roles.cache.has = (id: string) => id === role.id;
+      });
+      const ok = buildInteraction();
+      await service.handleButtonInteraction(ok);
+      expect((ok.reply.mock.calls[0][0] as any).content).toContain(
+        "You now have",
+      );
+    });
+
     it("still grants a safe role through the live check", async () => {
       const member = createMember("user1", []);
       guild = createGuild(member, { role1: "Gamer" });

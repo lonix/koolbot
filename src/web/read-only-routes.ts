@@ -266,6 +266,8 @@ export const REACTION_ROLES_SETTING_KEYS = [
   "reactionroles.enabled",
   "reactionroles.message_channel_id",
   "reactionroles.style",
+  "reactionroles.max_toggles",
+  "reactionroles.toggle_window_seconds",
 ] as const;
 
 /**

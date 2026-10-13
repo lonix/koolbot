@@ -10,6 +10,7 @@ import {
   clearMemberCooldown,
   consumeBurst,
   cooldownRemaining,
+  reserveBurst,
   resetMemberCooldowns,
   startCooldown,
   waitText,
@@ -97,6 +98,29 @@ describe("member cooldown helper", () => {
         expect(consumeBurst("s", "u1", 0, 30)).toBe(0);
         expect(consumeBurst("s", "u1", 3, 0)).toBe(0);
       }
+    });
+  });
+
+  describe("reserveBurst", () => {
+    it("takes the slot up front so concurrent attempts see it", () => {
+      expect(reserveBurst("s", "u1", 1, 30).wait).toBe(0);
+      expect(reserveBurst("s", "u1", 1, 30).wait).toBe(30);
+    });
+
+    it("gives back exactly the released slot, once", () => {
+      const first = reserveBurst("s", "u1", 2, 30);
+      const second = reserveBurst("s", "u1", 2, 30);
+      expect(reserveBurst("s", "u1", 2, 30).wait).toBeGreaterThan(0);
+      first.release();
+      first.release(); // a second release must not free another slot
+      expect(reserveBurst("s", "u1", 2, 30).wait).toBe(0);
+      expect(reserveBurst("s", "u1", 2, 30).wait).toBeGreaterThan(0);
+      second.release();
+    });
+
+    it("is off when max or window is 0", () => {
+      expect(reserveBurst("s", "u1", 0, 30).wait).toBe(0);
+      expect(reserveBurst("s", "u1", 3, 0).wait).toBe(0);
     });
   });
 

@@ -204,7 +204,7 @@ export class CooldownManager {
    * @param userId - User ID
    * @param windowSeconds - Time window in seconds (used for cleanup)
    */
-  public trackCommandExecution(userId: string, windowSeconds: number): void {
+  public trackCommandExecution(userId: string, windowSeconds: number): number {
     this.trackRateWindow(windowSeconds);
 
     const now = Date.now();
@@ -216,6 +216,21 @@ export class CooldownManager {
     const recentCommands = userCommands.filter((time) => time > cutoffTime);
     recentCommands.push(now);
     this.rateLimits.set(userId, recentCommands);
+    return now;
+  }
+
+  /**
+   * Give back one slot recorded by {@link trackCommandExecution}, identified by
+   * the timestamp it returned, for an action that was reserved but then did not
+   * happen. Removes a single matching entry; a no-op when it already aged out.
+   */
+  public releaseCommandExecution(userId: string, timestamp: number): void {
+    const userCommands = this.rateLimits.get(userId);
+    if (!userCommands) return;
+    const index = userCommands.indexOf(timestamp);
+    if (index === -1) return;
+    userCommands.splice(index, 1);
+    if (userCommands.length === 0) this.rateLimits.delete(userId);
   }
 
   /**
