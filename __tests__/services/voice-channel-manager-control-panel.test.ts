@@ -36,6 +36,7 @@ describe("VoiceChannelManager - Control Panel Update", () => {
   let mockOldOwner: Partial<GuildMember>;
   let mockPermissionOverwrites: {
     create: jest.Mock;
+    delete: jest.Mock;
     cache: Map<string, any>;
   };
   let mockMembers: Partial<Collection<string, GuildMember>>;
@@ -129,6 +130,7 @@ describe("VoiceChannelManager - Control Panel Update", () => {
     // Mock permission overwrites
     mockPermissionOverwrites = {
       create: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
       cache: new Map(),
     };
 
@@ -204,6 +206,10 @@ describe("VoiceChannelManager - Control Panel Update", () => {
     });
 
     it("should update permissions when transferring ownership", async () => {
+      // The previous owner has an overwrite on the room
+      mockPermissionOverwrites.cache.set("old-owner-id", {
+        allow: { has: () => false },
+      });
       await (manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember,
@@ -217,12 +223,14 @@ describe("VoiceChannelManager - Control Panel Update", () => {
         }),
       );
 
-      // Verify old owner lost ManageChannels permission
-      expect(mockPermissionOverwrites.create).toHaveBeenCalledWith(
+      // Verify the old owner's overwrite was removed (#1143), not rewritten
+      expect(mockPermissionOverwrites.delete).toHaveBeenCalledWith(
         "old-owner-id",
-        expect.objectContaining({
-          ManageChannels: false,
-        }),
+        expect.any(String),
+      );
+      expect(mockPermissionOverwrites.create).not.toHaveBeenCalledWith(
+        "old-owner-id",
+        expect.anything(),
       );
     });
 

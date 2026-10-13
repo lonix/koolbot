@@ -16,6 +16,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
   UserVoicePreferences,
@@ -250,9 +251,16 @@ async function ensureOwnership(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   parsed: ParsedId,
 ): Promise<VoiceChannel | null> {
-  if (interaction.user.id !== parsed.ownerId) {
+  // The customId's ownerId is only a hint; require live ownership too (#1143)
+  if (
+    interaction.user.id !== parsed.ownerId ||
+    !VoiceChannelManager.getInstance(interaction.client).isRoomOwner(
+      interaction.user.id,
+      parsed.channelId,
+    )
+  ) {
     await interaction.reply({
-      content: "❌ Only the channel owner can use these controls.",
+      content: "❌ Only the current channel owner can use these controls.",
       flags: MessageFlags.Ephemeral,
     });
     return null;
@@ -604,25 +612,58 @@ async function applyPreset(
   channel: VoiceChannel,
   index: number,
 ): Promise<void> {
+  // Acknowledge before the DB read and the possibly queued locked apply, which
+  // can outlast Discord's 3-second window (10062). The result edits the
+  // deferred message in place.
+  await interaction.deferUpdate();
   const prefs = await loadPrefs(parsed.ownerId);
   const preset = prefs.presets[index];
   if (!preset) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "❌ Preset no longer exists.",
-      flags: MessageFlags.Ephemeral,
+      embeds: [],
+      components: [],
     });
     return;
   }
 
-  await applyPresetToChannel(channel, preset);
+  // Apply under the room lock with ownership re-checked inside it, so a
+  // transfer that landed after ensureOwnership cannot let a former owner
+  // reconfigure the new owner's room (#1143).
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  let nameSkipped = false;
+  const ran = await manager.runAsRoomOwner(
+    interaction.user.id,
+    parsed.channelId,
+    async () => {
+      const result = await applyPresetToChannel(channel, preset, (name) =>
+        manager.isReservedChannelName(name),
+      );
+      nameSkipped = result.nameSkipped;
+    },
+  );
+  if (!ran) {
+    await interaction.editReply({
+      content: "❌ Only the current channel owner can use these controls.",
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
 
-  await interaction.update({
+  // Do not claim a skipped (reserved) channel name was applied
+  const applied = nameSkipped ? { ...preset, channelName: undefined } : preset;
+  await interaction.editReply({
+    content: "",
     embeds: [
       new EmbedBuilder()
         .setTitle("✅ Preset applied")
         .setColor(0x57f287)
         .setDescription(
-          `**${preset.name}** applied to this channel.\n${presetSummary(preset)}`,
+          `**${preset.name}** applied to this channel.\n${presetSummary(applied as IChannelPreset)}` +
+            (nameSkipped
+              ? "\n⚠️ The preset's channel name is reserved, so the name was not changed."
+              : ""),
         ),
     ],
     components: [],
@@ -632,8 +673,21 @@ async function applyPreset(
 export async function applyPresetToChannel(
   channel: VoiceChannel,
   preset: IChannelPreset,
-): Promise<void> {
-  if (preset.channelName && preset.channelName !== channel.name) {
+  isReservedName?: (name: string) => Promise<boolean>,
+): Promise<{ nameSkipped: boolean }> {
+  // Never apply a name that would make the room look like the lobby (#1148)
+  const nameBlocked =
+    !!preset.channelName &&
+    !!isReservedName &&
+    (await isReservedName(preset.channelName));
+  if (nameBlocked) {
+    logger.warn(`Skipped reserved channel name from preset on ${channel.id}`);
+  }
+  if (
+    !nameBlocked &&
+    preset.channelName &&
+    preset.channelName !== channel.name
+  ) {
     try {
       await channel.setName(preset.channelName.slice(0, 100));
     } catch (error) {
@@ -660,6 +714,7 @@ export async function applyPresetToChannel(
       logger.warn(`Failed to set bitrate from preset on ${channel.id}:`, error);
     }
   }
+  return { nameSkipped: nameBlocked };
 }
 
 export async function getDefaultPreset(
