@@ -189,9 +189,9 @@ Key properties:
   `/me` within seconds. With the intent on, the gateway keeps the cache current
   and no extra REST call is made. `/config` is fixed Administrator-only and is
   not editable on the Permissions page.
-  The `/me` surface is rate limited per client IP (600 requests, 60 writes and
-  30 Rewind loads per 10 minutes, on top of the tighter export and reset
-  limits), and audit rows written from `/me` store only bounded text: a
+  Every `/me` route, including `/me/session/ping`, is rate limited per client IP
+  (600 requests per 10 minutes overall, plus 60 non-GET requests and 30 Rewind
+  loads per 10 minutes, on top of the tighter export and reset limits), and audit rows written from `/me` store only bounded text: a
   rejected timezone is recorded by length, never by value.
   If the check itself cannot be performed (Discord API hiccup, rate
   limit), the request fails with a 503 and the session is left intact —

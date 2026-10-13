@@ -69,6 +69,7 @@ async function post(
   path: string,
   body: Record<string, unknown>,
   ip = "10.0.0.1",
+  method = "POST",
 ): Promise<{ statusCode: number; redirectedTo?: string }> {
   const out: { statusCode: number; redirectedTo?: string } = {
     statusCode: 200,
@@ -94,7 +95,7 @@ async function post(
     return res;
   };
   const req = {
-    method: "POST",
+    method,
     url: path,
     originalUrl: `/me${path}`,
     path,
@@ -154,6 +155,22 @@ describe("/me audit bounds and rate limit (#1142)", () => {
     // The flash redirect must not echo the input either.
     expect(out.redirectedTo!.length).toBeLessThan(1_000);
   });
+
+  it("rate limits the session ping too, since it still validates cookie and DB session", async () => {
+    const router = await makeRouter();
+    let blocked = 0;
+    for (let i = 0; i < 605; i += 1) {
+      const out = await post(
+        router,
+        "/session/ping",
+        {},
+        "203.0.113.20",
+        "GET",
+      );
+      if (out.statusCode === 429) blocked += 1;
+    }
+    expect(blocked).toBeGreaterThan(0);
+  }, 60_000);
 
   it("throttles /me writes per client", async () => {
     const router = await makeRouter();

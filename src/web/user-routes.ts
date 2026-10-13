@@ -496,6 +496,19 @@ export function createUserRouter(
 ): Router {
   const router = Router();
 
+  // General limit for the whole surface (#1142), registered first so even the
+  // session ping (which still does cookie + Mongo validation) is covered. Same in-memory, per-IP
+  // limiter as the export/reset buckets. The general bucket sits before the
+  // session check so a flood of unauthenticated or revalidating requests is
+  // throttled before it reaches Mongo or Discord; writes and the rewind
+  // aggregations get tighter buckets of their own.
+  const generalLimiter = createRateLimiter({
+    windowMs: 10 * 60_000,
+    max: 600,
+    keyName: "me-general",
+  });
+  router.use(generalLimiter);
+
   // Surface-local session ping so the `/me` banner script never has to
   // reach across to `/admin/session/ping`. Identical handler (the ping
   // is surface-neutral — same cookie, same DB row), just mounted on
@@ -524,16 +537,7 @@ export function createUserRouter(
     keyName: "me-privacy-reset",
   });
 
-  // General limits for the whole surface (#1142). Same in-memory, per-IP
-  // limiter as the export/reset buckets. The general bucket sits before the
-  // session check so a flood of unauthenticated or revalidating requests is
-  // throttled before it reaches Mongo or Discord; writes and the rewind
-  // aggregations get tighter buckets of their own.
-  const generalLimiter = createRateLimiter({
-    windowMs: 10 * 60_000,
-    max: 600,
-    keyName: "me-general",
-  });
+  // Tighter buckets for writes and the Rewind aggregations (#1142).
   const writeLimiter = createRateLimiter({
     windowMs: 10 * 60_000,
     max: 60,
@@ -545,7 +549,6 @@ export function createUserRouter(
     keyName: "me-rewind",
   });
 
-  router.use(generalLimiter);
   router.use(requireSession);
   router.use((req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {

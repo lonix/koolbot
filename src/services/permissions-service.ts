@@ -311,12 +311,16 @@ export class PermissionsService {
     if (cached && cached.expiresAt > now) return cached.member;
 
     const member = await guild.members.fetch({ user: userId, force: true });
+    // Re-insert so Map order stays oldest-first (expiry order).
+    this.freshMemberCache.delete(key);
     if (this.freshMemberCache.size >= FRESH_MEMBER_MAX_ENTRIES) {
       for (const [k, v] of this.freshMemberCache) {
         if (v.expiresAt <= now) this.freshMemberCache.delete(k);
       }
+      // Still full of live entries: drop only the oldest one, never the lot.
       if (this.freshMemberCache.size >= FRESH_MEMBER_MAX_ENTRIES) {
-        this.freshMemberCache.clear();
+        const oldest = this.freshMemberCache.keys().next().value;
+        if (oldest !== undefined) this.freshMemberCache.delete(oldest);
       }
     }
     this.freshMemberCache.set(key, {

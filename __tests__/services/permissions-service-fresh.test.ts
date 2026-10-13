@@ -129,4 +129,37 @@ describe("checkCommandPermission fresh option (#1151)", () => {
     });
     expect(fetch).toHaveBeenCalledWith("user1");
   });
+
+  it("at capacity evicts only the oldest live entry, keeping the rest", async () => {
+    const { service, fetch } = build({
+      membersIntent: false,
+      fetch: jest.fn().mockResolvedValue(memberStub()),
+    });
+    for (let i = 0; i < 1000; i += 1) {
+      await service.checkCommandPermission(`u${i}`, "guild1", "me", {
+        fresh: true,
+      });
+    }
+    const cache = (service as never)["freshMemberCache"] as Map<
+      string,
+      unknown
+    >;
+    expect(cache.size).toBe(1000);
+
+    await service.checkCommandPermission("overflow", "guild1", "me", {
+      fresh: true,
+    });
+    expect(cache.size).toBe(1000);
+    expect(cache.has("guild1:u0")).toBe(false);
+    expect(cache.has("guild1:u1")).toBe(true);
+    expect(cache.has("guild1:u999")).toBe(true);
+    expect(cache.has("guild1:overflow")).toBe(true);
+
+    // A surviving entry is still served without another REST read.
+    const calls = fetch.mock.calls.length;
+    await service.checkCommandPermission("u500", "guild1", "me", {
+      fresh: true,
+    });
+    expect(fetch.mock.calls.length).toBe(calls);
+  });
 });
