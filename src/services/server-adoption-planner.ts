@@ -186,6 +186,13 @@ export interface PlanOptions {
    */
   revokedAdminRoleIds?: string[];
   revokedBotRoleIds?: string[];
+  /**
+   * Roles a rollback will take back from members it granted them to. Needs the
+   * bot's Manage Roles permission and the same role limits as editing the role
+   * (managed roles, roles at or above the bot), even when the admin and the bot
+   * are not among those members.
+   */
+  revokedGrantRoleIds?: string[];
 }
 
 interface OpBase {
@@ -1168,16 +1175,24 @@ export function planAdoption(
     });
 
   // ---- the bot must hold the permissions Discord will demand ---------------
-  const needsManageRoles = ordered.some(
-    (o) =>
-      o.type === "role.create" ||
-      o.type === "role.edit" ||
-      o.type === "role.delete" ||
-      o.type === "member.role.add" ||
-      // Editing channel permissions is a Manage Roles action in Discord.
-      o.type === "overwrite.set" ||
-      o.type === "overwrite.remove",
-  );
+  for (const id of options.revokedGrantRoleIds ?? []) {
+    const granted = rolesById.get(id);
+    if (!granted) continue;
+    const problem = roleLimitProblem(granted, "revoke");
+    if (problem) err("role-protected", problem, id);
+  }
+  const needsManageRoles =
+    (options.revokedGrantRoleIds?.length ?? 0) > 0 ||
+    ordered.some(
+      (o) =>
+        o.type === "role.create" ||
+        o.type === "role.edit" ||
+        o.type === "role.delete" ||
+        o.type === "member.role.add" ||
+        // Editing channel permissions is a Manage Roles action in Discord.
+        o.type === "overwrite.set" ||
+        o.type === "overwrite.remove",
+    );
   const needsManageChannels = ordered.some((o) => o.type === "channel.delete");
   if (needsManageRoles && (botBase & ManageRoles) !== ManageRoles) {
     err(

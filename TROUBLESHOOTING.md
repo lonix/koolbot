@@ -374,7 +374,8 @@ Error: An invalid token was provided
    - *"The bot needs the Manage Roles permission..."*: grant Manage Roles to the KoolBot role. It is needed for the role and
      permission-overwrite changes in the restore; a restore that only puts settings back does not need it.
    - A message naming a role (managed by an integration, or at or above the KoolBot role): move the KoolBot role above it in
-     Server Settings → Roles, or leave that role as it is. Managed roles are never edited.
+     Server Settings → Roles, or leave that role as it is. Managed roles are never edited. This also applies to a role the
+     plan granted to members: taking it back is refused while it is managed or sits at or above the KoolBot role.
    - *"the saved role grants could not be read, so the restore can't be checked"*: the snapshot's record of who was granted
      a role is damaged. The restore is refused rather than guessed at; the plan's changes can only be undone by hand.
    - *"the live server state could not be read"*: Discord or the database could not be reached; try again shortly.

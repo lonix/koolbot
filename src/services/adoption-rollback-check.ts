@@ -219,32 +219,40 @@ export function revokedRoleIds(
   snapshot: AdoptionSnapshotRecord,
   scanned: ScannedState,
   options: RestoreCheckOptions,
-): { admin: string[]; bot: string[] } | null {
+): { admin: string[]; bot: string[]; all: string[] } | null {
+  // Anything that is not the shape the engine reads (`state.granted.length`)
+  // is unreadable: refuse rather than treat it as "no grants".
   const progressAll: unknown = snapshot.memberProgress ?? {};
-  if (typeof progressAll !== "object" || progressAll === null) return null;
+  if (!isPlainObject(progressAll)) return null;
   const mapRole = (id: string): string =>
     snapshot.restoredRoles.find((r) => r.oldId === id)?.newId ??
     snapshot.createdRoles.find((r) => r.ref === id)?.roleId ??
     id;
   const admin = new Set<string>();
   const bot = new Set<string>();
+  const all = new Set<string>();
   for (const op of snapshot.plan.operations) {
     if (op.type !== "member.role.add") continue;
     // An operation whose revoke already finished is not revisited.
     if (snapshot.rolledBackOps.includes(op.id)) continue;
-    const progress = (progressAll as Record<string, unknown>)[op.id] as
-      { granted?: unknown; inflight?: unknown } | undefined;
-    if (progress === undefined) continue; // nothing was granted
-    const granted: unknown = progress?.granted ?? [];
-    const inflight: unknown = progress?.inflight ?? [];
+    if (!(op.id in progressAll)) continue; // nothing was granted
+    const progress: unknown = progressAll[op.id];
+    if (!isPlainObject(progress)) return null;
+    const granted: unknown = progress.granted;
+    const inflight: unknown = progress.inflight ?? [];
     if (!Array.isArray(granted) || !Array.isArray(inflight)) return null;
+    if (granted.length + inflight.length === 0) continue; // nothing to revoke
     const ids = new Set<unknown>([...granted, ...inflight]);
     const roleId = mapRole(op.roleId);
+    all.add(roleId);
     if (ids.has(options.actorId)) admin.add(roleId);
     if (ids.has(scanned.botUserId)) bot.add(roleId);
   }
-  return { admin: [...admin], bot: [...bot] };
+  return { admin: [...admin], bot: [...bot], all: [...all] };
 }
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * Problems that make restoring this snapshot unsafe right now, as readable
@@ -267,6 +275,7 @@ export function restoreProblems(
     approverId: options.actorId,
     revokedAdminRoleIds: revoked.admin,
     revokedBotRoleIds: revoked.bot,
+    revokedGrantRoleIds: revoked.all,
   });
   return [
     ...new Set(

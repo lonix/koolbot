@@ -879,3 +879,141 @@ describe("pending dependent repairs", () => {
     expect(desired.overwrites).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Grant data shape and grant-only restores (#1134, review round 3)
+// ---------------------------------------------------------------------------
+
+describe("restore of persisted role grants", () => {
+  const grantOnly = (
+    roleId: string,
+    progress: unknown,
+    over: Partial<Snapshot> = {},
+  ): Snapshot =>
+    snapshot({
+      plan: {
+        operations: [
+          {
+            id: "op-1",
+            type: "member.role.add",
+            class: "additive",
+            roleId,
+            memberCount: 1,
+            sample: [],
+            memberIds: [],
+          },
+        ],
+      } as never,
+      operations: [{ opId: "op-1", status: "applied" }],
+      memberProgress: { "op-1": progress } as never,
+      ...over,
+    });
+  const unrelated = { done: 1, failed: [], granted: ["some-member"] };
+  const unreadable = [expect.stringMatching(/could not be read/)];
+
+  describe("fails closed on malformed grant data", () => {
+    it("rejects an array where the map should be", () => {
+      expect(
+        restoreProblems(
+          grantOnly("plain", unrelated, { memberProgress: [] as never }),
+          live(),
+          opts,
+        ),
+      ).toEqual(unreadable);
+    });
+
+    it("rejects a record that is a string, an array or null", () => {
+      for (const bad of ["corrupt", [], null, 7]) {
+        expect(restoreProblems(grantOnly("plain", bad), live(), opts)).toEqual(
+          unreadable,
+        );
+      }
+    });
+
+    it("rejects a record whose granted list is missing or not an array", () => {
+      for (const bad of [{ done: 1 }, { granted: "x" }, { granted: {} }]) {
+        expect(restoreProblems(grantOnly("plain", bad), live(), opts)).toEqual(
+          unreadable,
+        );
+      }
+    });
+
+    it("still accepts a well-formed record, and one with nothing granted", () => {
+      expect(
+        restoreProblems(grantOnly("plain", unrelated), live(), opts),
+      ).toEqual([]);
+      expect(
+        restoreProblems(
+          grantOnly("plain", { done: 0, failed: [], granted: [] }),
+          live(),
+          opts,
+        ),
+      ).toEqual([]);
+    });
+
+    it("does not look at records of operations the engine will not revisit", () => {
+      expect(
+        restoreProblems(
+          grantOnly("plain", "corrupt", {
+            status: "rollback_partial",
+            rolledBackOps: ["op-1"],
+          }),
+          live(),
+          opts,
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe("a grant-only restore is judged like a role change", () => {
+    it("passes for a grant on an unrelated member when everything is in order", () => {
+      expect(
+        restoreProblems(grantOnly("plain", unrelated), live(), opts),
+      ).toEqual([]);
+    });
+
+    it("refuses when the bot has lost Manage Roles", () => {
+      const scanned = live({
+        roles: live().roles.map((r) =>
+          r.id === "koolbot" ? { ...r, permissions: VIEW } : r,
+        ),
+      });
+      expect(
+        restoreProblems(grantOnly("plain", unrelated), scanned, opts),
+      ).toEqual([expect.stringMatching(/Manage Roles/)]);
+    });
+
+    it("refuses when the granted role now sits above the bot", () => {
+      expect(
+        restoreProblems(grantOnly("high", unrelated), live(), opts).join(" "),
+      ).toMatch(/Above the bot.*at or above the bot's highest role/);
+    });
+
+    it("refuses when the granted role is managed", () => {
+      expect(
+        restoreProblems(grantOnly("carl", unrelated), live(), opts).join(" "),
+      ).toMatch(/Other bot.*managed/);
+    });
+
+    it("ignores a granted role that no longer exists", () => {
+      expect(
+        restoreProblems(grantOnly("deleted-role", unrelated), live(), opts),
+      ).toEqual([]);
+    });
+
+    it("also covers in-flight grants, which the restore may treat as ours", () => {
+      expect(
+        restoreProblems(
+          grantOnly("high", {
+            done: 0,
+            failed: [],
+            granted: [],
+            inflight: ["m"],
+          }),
+          live(),
+          opts,
+        ),
+      ).toHaveLength(1);
+    });
+  });
+});
