@@ -62,16 +62,19 @@ jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
   },
 }));
 
+const mockLoggerError = jest.fn();
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
     warn: jest.fn(),
-    error: jest.fn(),
+    error: mockLoggerError,
     debug: jest.fn(),
   },
 }));
 
 const { execute } = await import("../../src/commands/quote.js");
+const { UserFacingError } =
+  await import("../../src/utils/user-facing-error.js");
 
 /** Build an interaction for a `/quote <sub>` invocation. */
 function interaction(
@@ -253,12 +256,28 @@ describe("/quote add", () => {
     expect(reply.content).toContain("could not post to channel");
   });
 
-  it("reports a service failure instead of throwing", async () => {
-    mockAddQuote.mockRejectedValue(new Error("quote too long"));
+  it("relays a member-facing validation message", async () => {
+    mockAddQuote.mockRejectedValue(new UserFacingError("quote too long"));
     const it_ = interaction(options);
     await expect(execute(it_)).resolves.toBeUndefined();
     const reply = it_.reply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("quote too long");
+  });
+
+  // #1153: Mongoose / driver messages reveal schema and query details.
+  it("replies generically to an unexpected error and keeps the detail in the log", async () => {
+    const detail =
+      'Cast to ObjectId failed for value "x" (type string) at path "_id" for model "Quote"';
+    mockAddQuote.mockRejectedValue(new Error(detail));
+    const it_ = interaction(options);
+    await expect(execute(it_)).resolves.toBeUndefined();
+    const reply = it_.reply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("There was an error");
+    expect(reply.content).not.toContain("ObjectId");
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      "Error executing quote command:",
+      expect.objectContaining({ message: detail }),
+    );
   });
 });
 

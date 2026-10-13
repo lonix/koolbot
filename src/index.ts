@@ -16,6 +16,7 @@ import {
 } from "discord.js";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
+import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { safeReply } from "./utils/safe-reply.js";
 import { ConfigService } from "./services/config-service.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
@@ -951,7 +952,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await reactionRoleService.handleButtonInteraction(interaction);
       } else {
         logger.debug(
-          `Ignoring button interaction with unrecognized customId: ${interaction.customId}`,
+          `Ignoring button interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
         await interaction.reply({
           content:
@@ -980,7 +981,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await reactionRoleService.handleSelectInteraction(interaction);
       } else {
         logger.debug(
-          `Ignoring select menu interaction with unrecognized customId: ${interaction.customId}`,
+          `Ignoring select menu interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
         await interaction.reply({
           content:
@@ -1003,7 +1004,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await handleVCModal(interaction);
       } else {
         logger.debug(
-          `Ignoring modal interaction with unrecognized customId: ${interaction.customId}`,
+          `Ignoring modal interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
         await interaction.reply({
           content:
@@ -1065,7 +1066,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (member) {
       logger.debug(
-        `Voice state update: ${member.displayName} (${member.id}) - Old: ${oldState.channel?.name || "none"} -> New: ${newState.channel?.name || "none"}`,
+        `Voice state update: ${sanitizeForLog(member.displayName)} (${member.id}) - Old: ${sanitizeForLog(oldState.channel?.name) || "none"} -> New: ${sanitizeForLog(newState.channel?.name) || "none"}`,
       );
     }
 
@@ -1264,7 +1265,7 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
     // Check if the channel name changed
     if (oldChannel.name !== newChannel.name) {
       logger.info(
-        `Channel renamed: "${oldChannel.name}" → "${newChannel.name}" (${newChannel.id})`,
+        `Channel renamed: "${sanitizeForLog(oldChannel.name)}" → "${sanitizeForLog(newChannel.name)}" (${newChannel.id})`,
       );
 
       // Try to identify who renamed the channel by checking audit logs
@@ -1282,7 +1283,7 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
         ) {
           const executor = entry.executor;
           logger.info(
-            `Channel renamed by: ${executor?.displayName || executor?.username || "Unknown"} (${executor?.id || "Unknown"})`,
+            `Channel renamed by: ${sanitizeForLog(executor?.displayName || executor?.username) || "Unknown"} (${executor?.id || "Unknown"})`,
           );
         }
       } catch (auditError) {

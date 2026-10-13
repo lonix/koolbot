@@ -7,6 +7,10 @@ import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  HIDDEN_CHANNEL_LABEL,
+  visibleChannelName,
+} from "../utils/channel-visibility.js";
 
 export const data = new SlashCommandBuilder()
   .setName("seen")
@@ -37,8 +41,18 @@ export async function execute(
     // Check if user is currently in a voice channel
     const activeSession = tracker.getActiveSession(targetUser.id);
     if (activeSession) {
+      // Name the channel only if the caller could see it themselves; a locked
+      // or hidden room's name is not theirs to learn from /seen (#1153).
+      const channelName = visibleChannelName(
+        interaction,
+        activeSession.channelId,
+        activeSession.channelName,
+        "hide",
+      );
       await interaction.editReply(
-        `${targetUser.username} is currently in the voice channel "${activeSession.channelName}".`,
+        channelName === HIDDEN_CHANNEL_LABEL
+          ? `${targetUser.username} is currently in ${HIDDEN_CHANNEL_LABEL}.`
+          : `${targetUser.username} is currently in the voice channel "${channelName}".`,
       );
       return;
     }

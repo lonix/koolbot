@@ -18,3 +18,33 @@ export function sanitizeForLog(value: unknown, maxLength = 128): string {
   if (cleaned.length <= maxLength) return cleaned;
   return `${cleaned.slice(0, maxLength)}…`;
 }
+
+/**
+ * Summarise an error for logging without dumping the whole object.
+ *
+ * A `DiscordAPIError` carries `requestBody` (the JSON that was sent, e.g. the
+ * content of a DM) and `rawError` as own enumerable fields; handing the error
+ * to the logger as meta serialises all of them. Log only `code`, `status`,
+ * `method` and `message`, never the request payload (#1152).
+ */
+export function describeDiscordError(err: unknown): string {
+  if (err === null || err === undefined) return "unknown error";
+  if (typeof err !== "object") return sanitizeForLog(err, 256);
+  const e = err as {
+    name?: unknown;
+    code?: unknown;
+    status?: unknown;
+    method?: unknown;
+    message?: unknown;
+  };
+  const parts: string[] = [sanitizeForLog(e.name ?? "Error", 64)];
+  if (e.code !== undefined) parts.push(`code=${sanitizeForLog(e.code, 32)}`);
+  if (e.status !== undefined) {
+    parts.push(`status=${sanitizeForLog(e.status, 16)}`);
+  }
+  if (e.method !== undefined) {
+    parts.push(`method=${sanitizeForLog(e.method, 16)}`);
+  }
+  const message = typeof e.message === "string" ? e.message : "";
+  return `${parts.join(" ")}${message ? `: ${sanitizeForLog(message, 256)}` : ""}`;
+}

@@ -127,9 +127,25 @@ describe("safeReply", () => {
     expect(String(mockLoggerError.mock.calls[0][0])).toContain(
       "Unknown interaction",
     );
-    // The original Error is forwarded so winston's `errors({ stack: true })`
-    // format can emit a stack trace; the summary string alone loses it.
-    expect(mockLoggerError.mock.calls[0][1]).toBe(cause);
+    // The stack is forwarded so a failure stays diagnosable, but never the raw
+    // error: a DiscordAPIError carries the reply body as `requestBody` (#1152).
+    expect(mockLoggerError.mock.calls[0][1]).toEqual({ stack: cause.stack });
+  });
+
+  it("never logs the reply body carried by a Discord API error (#1152)", async () => {
+    const interaction = makeInteraction();
+    const cause = Object.assign(new Error("Unknown interaction"), {
+      code: 10062,
+      requestBody: { json: { content: "https://x.test/admin/s/SECRETTOKEN" } },
+    });
+    interaction.reply.mockRejectedValue(cause as never);
+
+    await safeReply(interaction as never, { content: "boom" });
+
+    expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain(
+      "SECRETTOKEN",
+    );
+    expect(String(mockLoggerError.mock.calls[0][0])).toContain("code=10062");
   });
 
   it("swallows a rejected editReply and followUp too", async () => {

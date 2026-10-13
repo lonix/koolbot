@@ -20,6 +20,7 @@ import {
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { CooldownManager } from "./cooldown-manager.js";
 import { normalizeUserId, userIdMatchForms } from "../utils/user-id.js";
+import { UserFacingError } from "../utils/user-facing-error.js";
 
 const configService = ConfigService.getInstance();
 
@@ -303,13 +304,13 @@ export class QuoteService {
     // Check if quotes are enabled
     const enabled = await configService.getBoolean("quotes.enabled");
     if (!enabled) {
-      throw new Error("Quote system is disabled");
+      throw new UserFacingError("Quote system is disabled");
     }
 
     // Check cooldown
     const cooldown = await configService.getNumber("quotes.cooldown", 60);
     if (this.cooldownManager.isOnCooldown(addedById, "quote_add", cooldown)) {
-      throw new Error(
+      throw new UserFacingError(
         `Please wait ${cooldown} seconds before adding another quote`,
       );
     }
@@ -317,7 +318,7 @@ export class QuoteService {
     // Check quote length
     const maxLength = await configService.getNumber("quotes.max_length", 1000);
     if (content.length > maxLength) {
-      throw new Error(
+      throw new UserFacingError(
         `Quote is too long. Maximum length is ${maxLength} characters`,
       );
     }
@@ -342,7 +343,7 @@ export class QuoteService {
   async getRandomQuote(): Promise<IQuote> {
     const count = await this.model.countDocuments();
     if (count === 0) {
-      throw new Error("No quotes available");
+      throw new UserFacingError("No quotes available");
     }
 
     const random = Math.floor(Math.random() * count);
@@ -375,7 +376,7 @@ export class QuoteService {
   ): Promise<void> {
     const quote = await this.model.findById(quoteId);
     if (!quote) {
-      throw new Error("Quote not found");
+      throw new UserFacingError("Quote not found");
     }
 
     // Check if user has permission to delete
@@ -412,7 +413,7 @@ export class QuoteService {
       quote.addedById === userId; // Allow users to delete their own quotes
 
     if (!hasPermission) {
-      throw new Error("You do not have permission to delete quotes");
+      throw new UserFacingError("You do not have permission to delete quotes");
     }
 
     await this.model.findByIdAndDelete(quoteId);
@@ -751,13 +752,13 @@ export class QuoteService {
   ): Promise<void> {
     const quote = await this.model.findById(quoteId);
     if (!quote) {
-      throw new Error("Quote not found");
+      throw new UserFacingError("Quote not found");
     }
 
     // Check quote length
     const maxLength = await configService.getNumber("quotes.max_length", 1000);
     if (content.length > maxLength) {
-      throw new Error(
+      throw new UserFacingError(
         `Quote is too long. Maximum length is ${maxLength} characters`,
       );
     }
@@ -767,7 +768,7 @@ export class QuoteService {
 
     // Validate that the normalized authorId is a valid Discord user ID (numeric)
     if (!/^\d+$/.test(normalizedAuthorId)) {
-      throw new Error(
+      throw new UserFacingError(
         "Invalid author ID format. Please select a valid Discord user.",
       );
     }

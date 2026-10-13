@@ -247,6 +247,41 @@ describe("VoiceStats Command", () => {
       ]);
     });
 
+    // #1153: do not name a channel the caller cannot view.
+    it("hides the name of a recent-session channel the caller cannot view", async () => {
+      mockGetUserStats.mockResolvedValue({
+        userId: "user-1",
+        username: "alice",
+        totalTime: 7200,
+        lastSeen: new Date(base),
+        sessions: [
+          { ...sessions[0], channelId: "private", channelName: "Staff Room" },
+          { ...sessions[1], channelId: "public", channelName: "General" },
+          { ...sessions[2], channelId: "deleted", channelName: "Old Room" },
+        ],
+      });
+      const guild = {
+        channels: {
+          cache: new Map([
+            ["private", { permissionsFor: () => ({ has: () => false }) }],
+            ["public", { permissionsFor: () => ({ has: () => true }) }],
+          ]),
+        },
+      };
+      const interaction = {
+        ...makeUserInteraction(),
+        guild,
+      } as unknown as MockInteraction;
+      await execute(interaction);
+
+      const content = interaction.editReply.mock.calls[0][0] as string;
+      expect(content).not.toContain("Staff Room");
+      expect(content).toContain("• a voice channel: 1h 0m");
+      expect(content).toContain("• General: 1h 0m");
+      // A deleted channel cannot be checked, so its stored name stays.
+      expect(content).toContain("• Old Room: 1h 0m");
+    });
+
     it("orders by startTime even when the stored array is not chronological", async () => {
       // Shuffle the stored order to prove ordering comes from startTime,
       // not from array position.

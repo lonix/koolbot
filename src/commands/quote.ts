@@ -10,6 +10,7 @@ import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { UserFacingError } from "../utils/user-facing-error.js";
 
 // Hard cap on a restore upload. A quote backup is small text; this stops a
 // misclicked giant attachment from being streamed into memory.
@@ -157,8 +158,10 @@ export async function execute(
     }
   } catch (error) {
     logger.error("Error executing quote command:", error);
+    // Relay only messages written for members; anything else (Mongoose, driver
+    // or Discord errors) stays in the log behind a generic reply (#1153).
     const errorMessage =
-      error instanceof Error
+      error instanceof UserFacingError
         ? error.message
         : "There was an error while executing this command!";
 

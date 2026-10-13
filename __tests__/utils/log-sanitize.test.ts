@@ -1,5 +1,8 @@
 import { describe, it, expect } from "@jest/globals";
-import { sanitizeForLog } from "../../src/utils/log-sanitize.js";
+import {
+  sanitizeForLog,
+  describeDiscordError,
+} from "../../src/utils/log-sanitize.js";
 
 // This suite pins the central log-injection mitigation. CodeQL's
 // js/log-injection query is excluded (see .github/codeql/codeql-config.yml)
@@ -50,5 +53,32 @@ describe("sanitizeForLog", () => {
 
   it("leaves a clean value within the limit untouched", () => {
     expect(sanitizeForLog("clean-value_123")).toBe("clean-value_123");
+  });
+});
+
+describe("describeDiscordError", () => {
+  it("keeps code, status, method and message but not the request body", () => {
+    const err = Object.assign(new Error("Missing Access"), {
+      name: "DiscordAPIError[50001]",
+      code: 50001,
+      status: 403,
+      method: "POST",
+      requestBody: { json: { content: "secret-link" } },
+    });
+    const out = describeDiscordError(err);
+    expect(out).toBe(
+      "DiscordAPIError[50001] code=50001 status=403 method=POST: Missing Access",
+    );
+    expect(out).not.toContain("secret-link");
+  });
+
+  it("sanitises control characters in the message", () => {
+    const out = describeDiscordError(new Error("a\nb\r[ERROR]: forged"));
+    expect(out).not.toMatch(/[\r\n]/);
+  });
+
+  it("handles non-object and empty values", () => {
+    expect(describeDiscordError(undefined)).toBe("unknown error");
+    expect(describeDiscordError("plain\nstring")).toBe("plain string");
   });
 });
