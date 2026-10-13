@@ -8,16 +8,27 @@ services:
       - mongodb
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    # Publish the bot's port 3000 so /health and (when WEBUI_ENABLED=true)
-    # the admin Web UI at /admin/* are reachable from the host. This is the
-    # simplest setup; it is NOT secured for the public internet.
+    # The application code in the image is root-owned and the bot never writes
+    # to disk (logs go to stdout), so the container filesystem can be read-only.
+    # /tmp stays writable for Node and any library that wants scratch space.
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Publish the bot's port 3000 on the HOST'S LOOPBACK ONLY, so /health and
+    # (when WEBUI_ENABLED=true) the admin Web UI at /admin/* are reachable from
+    # the machine itself, an SSH tunnel, or a reverse proxy on the host, and not
+    # from the network (including a VPN address of the host).
+    # Plain HTTP, no TLS: do not expose it publicly as-is. Set METRICS_TOKEN in
+    # .env too, because /metrics is unauthenticated when it is empty.
     #
-    # For internet-facing deployments use a reverse proxy (Caddy, nginx,
-    # Traefik) and remove this publish — let the proxy forward to bot:3000
-    # over the internal Docker network. See WEBUI.md → "Docker Compose
+    # To reach it from other machines (LAN or VPN), change the line below to
+    # "3000:3000" or to a specific interface IP such as "<vpn-ip>:3000:3000".
+    # For internet-facing deployments use a reverse proxy (Caddy, nginx, Traefik)
+    # and remove this publish — let the proxy forward to bot:3000 over the
+    # internal Docker network. See WEBUI.md → "Docker Compose
     # recipes" for a complete Caddy example.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
   mongodb:
     image: mongo:8

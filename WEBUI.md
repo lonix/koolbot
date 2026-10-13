@@ -315,10 +315,10 @@ WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32-output
 
 Pick **one** of:
 
-- **Publish the port directly** (simplest, but no HTTPS — this is what
-  the shipped compose does). See the
-  [Direct port publish (the shipped default)](#direct-port-publish-the-shipped-default)
-  recipe below.
+- **Publish the port directly** (simplest, but no HTTPS). The shipped
+  compose binds to loopback only; change the `ports:` entry to `3000:3000`
+  (or a specific LAN/VPN IP) for access from other machines. See the
+  [Direct port publish](#direct-port-publish) recipe below.
 - **Reverse-proxy it** (recommended for any deployment users will visit
   from a real browser). See [Reverse-proxy guidance](#reverse-proxy-guidance).
 - **Tunnel it** (Tailscale, WireGuard, Cloudflare Tunnel, etc.). Same
@@ -354,17 +354,21 @@ Open the DM, click the link, and you're in.
 ## Docker Compose recipes
 
 The production `docker-compose.yml` shipped in the repo **publishes
-port 3000 by default** so the quick-start magic link is reachable on
-`http://your-host:3000` out of the box. That's the right default for a
-local or LAN install but it has no HTTPS — for anything reachable from
-the public internet, swap the direct publish for a reverse proxy. The
-recipes below are starting points; pick one and drop it into your own
-`docker-compose.yml`.
+port 3000 on the host's loopback only** (`127.0.0.1:3000`), so the
+quick-start magic link works on the machine itself and nothing is exposed
+to the network by default (a loopback bind is not reachable over the host's
+VPN address either). For access from other machines, use the direct publish
+recipe below on a trusted LAN or VPN, or a reverse proxy for anything
+reachable from the public internet. The recipes below are starting points;
+pick one and drop it into your own `docker-compose.yml`.
 
-### Direct port publish (the shipped default)
+### Direct port publish
 
-The simplest setup, and what the repo's `docker-compose.yml` does
-already. The bot listens on port `3000`; you map it to the host.
+The simplest way to reach the Web UI from other machines. The repo's
+`docker-compose.yml` binds to loopback instead (see
+[Bind to localhost only](#bind-to-localhost-only)); to use this recipe,
+change the publish to `3000:3000`. The bot listens on port `3000`; you map
+it to the host on all interfaces.
 
 ```yaml
 services:
@@ -422,8 +426,11 @@ the public internet.
 
 ### Bind to localhost only
 
-If you only want to reach the Web UI from the host machine (and SSH-tunnel
-or VPN in), bind to the loopback:
+This is the shipped default. If you only want to reach the Web UI from the
+host machine, or through an SSH tunnel or a reverse proxy on the host, bind to
+the loopback. A loopback bind is not reachable over the host's VPN address; for
+that, change the `ports:` entry to the VPN IP (`"<vpn-ip>:3000:3000"`) or
+`3000:3000`:
 
 ```yaml
 services:
