@@ -279,6 +279,56 @@ describe("ReactionRoleService component interactions", () => {
       },
     );
 
+    it("stops REST role lookups after the attempt cap for a binding to a deleted role (#1147)", async () => {
+      const member = createMember("user1", []);
+      guild = createGuild(member, {});
+      // The role is gone: not cached, and the fallback fetch finds nothing.
+      guild.roles.fetch = jest.fn(async () => null);
+      mockFindOne.mockResolvedValue({ roleId: "role1", roleName: "Gone" });
+
+      const replies: string[] = [];
+      for (let i = 0; i < 40; i++) {
+        const interaction = buildInteraction();
+        await service.handleButtonInteraction(interaction);
+        replies.push(
+          (interaction.reply.mock.calls[0][0] as { content: string }).content,
+        );
+      }
+
+      expect((guild.roles.fetch as jest.Mock).mock.calls.length).toBe(30);
+      expect(replies[0]).toContain("no longer exists");
+      expect(replies[39]).toContain("too quickly");
+    });
+
+    it("never limits a removal, even past the attempt cap, and a normal grant is unchanged", async () => {
+      const member = createMember("user1", ["role1"]);
+      guild = createGuild(member, {});
+      // Not cached, but the fallback fetch finds the role.
+      guild.roles.fetch = jest.fn(async (id: string) => ({
+        id,
+        name: "Gamer",
+      }));
+      mockFindOne.mockResolvedValue({ roleId: "role1", roleName: "Gamer" });
+      // Exhaust the attempt budget with grant attempts by the same member.
+      const other = createMember("user1", []);
+      const g2 = createGuild(other, {});
+      g2.roles.fetch = jest.fn(async () => null);
+      guild.members.fetch = jest.fn(async () => member);
+      for (let i = 0; i < 31; i++) {
+        const saved = guild;
+        guild = g2;
+        await service.handleButtonInteraction(buildInteraction());
+        guild = saved;
+      }
+
+      const removal = buildInteraction();
+      await service.handleButtonInteraction(removal);
+      expect(member.roles.remove).toHaveBeenCalledTimes(1);
+      expect((removal.reply.mock.calls[0][0] as any).content).toContain(
+        "Removed",
+      );
+    });
+
     it("still grants a safe role through the live check", async () => {
       const member = createMember("user1", []);
       guild = createGuild(member, { role1: "Gamer" });

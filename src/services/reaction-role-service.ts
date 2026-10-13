@@ -867,6 +867,27 @@ export class ReactionRoleService {
     return consumeBurst(`reactrole-attempt:${guildId}`, userId, 30, 60);
   }
 
+  /**
+   * Resolve the role a button or menu acts on. A cache hit costs nothing; a
+   * miss needs a REST fetch (e.g. a binding whose role was deleted), which is
+   * counted against the same per-member attempt budget so repeated clicks on a
+   * stale binding cannot drive unbounded REST reads. Removals are never
+   * limited.
+   */
+  private async resolveRoleForToggle(
+    guild: Guild,
+    roleId: string,
+    member: GuildMember,
+    desired: "add" | "remove",
+  ): Promise<Role | null | "limited"> {
+    const cached = guild.roles.cache.get(roleId);
+    if (cached) return cached;
+    if (desired === "add" && this.attemptWaitSeconds(guild.id, member.id) > 0) {
+      return "limited";
+    }
+    return guild.roles.fetch(roleId);
+  }
+
   /** Roles already warned about, so a bad binding logs once per process. */
   private warnedForbiddenRoles = new Set<string>();
   /** Roles whose live check failed, logged once per process each. */
@@ -1039,8 +1060,21 @@ export class ReactionRoleService {
 
       const guild = await this.client.guilds.fetch(interaction.guildId);
       const member = await guild.members.fetch(interaction.user.id);
-      const role =
-        guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+      const resolved = await this.resolveRoleForToggle(
+        guild,
+        roleId,
+        member,
+        member.roles.cache.has(roleId) ? "remove" : "add",
+      );
+      if (resolved === "limited") {
+        await interaction.reply({
+          content:
+            "⏳ You're changing roles too quickly. Please wait a moment and try again.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const role = resolved;
       if (!role) {
         logger.error(
           `Role ${roleId} not found while toggling self-assign role`,
@@ -1132,8 +1166,19 @@ export class ReactionRoleService {
           (desired === "add" && !hasRole) ||
           (desired === "remove" && hasRole)
         ) {
-          const role =
-            guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+          const resolved = await this.resolveRoleForToggle(
+            guild,
+            roleId,
+            member,
+            desired,
+          );
+          if (resolved === "limited") {
+            lines.push(
+              "⏳ You're changing roles too quickly. Please wait a moment and try again.",
+            );
+            break;
+          }
+          const role = resolved;
           if (!role) {
             logger.error(
               `Role ${roleId} not found while toggling self-assign role`,
