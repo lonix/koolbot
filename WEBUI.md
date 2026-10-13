@@ -1427,6 +1427,30 @@ other roles and members stay as they are, and unrelated bits on a changed overwr
 refuses (as errors, not warnings) any step that would remove your own access, lock the bot out of a channel a
 feature needs, or touch another bot's overwrite. Planning an adopted server again gives an empty plan.
 
+**Adopting an existing server, step by step** (#1025, the guided flow of the server-adoption epic #1017). Adoption lets
+KoolBot take over roles, categories and channels that already exist, instead of creating new ones. It is
+non-destructive by default: it creates, adds and edits, every apply saves a snapshot first, and nothing is deleted
+unless you approve that specific step. A fresh server can skip all of this. The Setup Wizard (`/admin/wizard`) opens with an
+**Adopting an existing server?** card that links to each step in order, and the **Adoption** entry in the navigation
+opens the snapshot history.
+
+1. **Scan** (`/admin/adopt`). Read-only. Fix the red blockers first (for example the KoolBot role must sit above the roles
+   it manages; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#adopting-a-server-role-hierarchy-missing-permissions-and-rollback)).
+   The bot replacement report on the same page shows which other bots KoolBot can replace.
+2. **Role groups** (`/admin/role-groups`). Optional. Tie your existing Admin, Mod or VIP roles to groups, preview the plan
+   and apply it.
+3. **Rules role** (`/admin/rules`). Optional. Only if you want a rules acceptance gate.
+4. **Channel claims** (`/admin/adopt/claims`). Choose, per category or channel, to leave it alone (the default), make it
+   read-only, gate it to groups, or bind it to a feature. **Preview changes** shows the diff; **Apply plan** runs it.
+5. **Check the result.** Planning again gives an empty plan when the server already matches.
+6. **Adoption history** (`/admin/adopt/history`). Every apply is listed with its status and what it changed. **Restore…**
+   opens a confirmation page that lists the steps that will be reverted, newest first. Only steps that were applied are
+   reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
+   this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
+   IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
+   can be restored again to finish. Each restore is written to the audit log (`adopt.rollback`). Snapshots are kept for
+   `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
+
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
 `celebrations.channel_id`). When enabled, the bot posts a loud, server-wide

@@ -142,6 +142,7 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **🎫 Support Tickets** — `/ticket open` creates a private help channel for a member and your staff
 - **🎂 Birthdays** — Timezone-aware birthday announcements
 - **📜 Rules Acceptance** — Optional rules gate: an Accept button that grants an acceptance role
+- **🧭 Server Adoption** — Take over an existing server's roles, categories and channels from the Web UI: scan, preview, apply, and roll back from a saved snapshot
 - **👋 Welcome Messages** — Greet new members, pointing them at self-assign roles and the rules (needs the Server Members Intent)
 - **🛡️ Moderation Log** — `/warn`, `/timeout`, `/ban` and a per-member history
 - **🙋 Member Self-Service** — `/me` for birthday, timezone, notifications, Rewind and privacy tools
@@ -221,6 +222,12 @@ Web UI's Settings page once the bot is running.
    achievements, logging, etc.) and the wizard fills in the relevant
    settings for you.
 
+Already running a Discord server? The wizard's first card, **Adopting an
+existing server?**, links to the adoption flow, which reuses your existing
+roles, categories and channels instead of creating new ones. Every change is
+previewed first and can be restored from the **Adoption** page. See
+[WEBUI.md](WEBUI.md) for the walkthrough.
+
 #### Option 2: Manual configuration
 
 1. Run `/config` in Discord.
@@ -238,7 +245,7 @@ Web UI's Settings page once the bot is running.
 | **Message Tracking** | Per-user, per-channel text activity with retention-trimmed detail |
 | **Reaction Tracking** | Reactions given and received, lifetime and per-year |
 | **Name History** | Remembered usernames, display names and nicknames, shown by `/aka` |
-| **Server Adoption** | Retention for the saved snapshots of server-adoption changes (the planning and rollback engine; admin-defined role groups live on the Web UI Role Groups page; the rest of the guided flow follows) |
+| **Server Adoption** | Retention for the saved snapshots of server-adoption changes (the planning and rollback engine behind the Web UI adoption flow: Server Scan, Role Groups, Rules, Channel Claims and Adoption history, entered from the Setup Wizard) |
 | **Ping** | The `/ping` latency check command |
 | **Quotes** | Cooldowns, permissions, max length |
 | **Rate Limiting** | Command spam protection with admin bypass |
