@@ -391,6 +391,113 @@ describe("NoticesChannelManager", () => {
     });
   });
 
+  describe("serialised refresh and shutdown (#1120)", () => {
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+
+    it("runs one notice sync at a time and exactly one extra pass for changes mid-flight", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const gates = [deferred(), deferred(), deferred()];
+      let started = 0;
+      let active = 0;
+      let maxActive = 0;
+      jest.spyOn(manager, "syncBotInfoNotice").mockImplementation((async () => {
+        const gate = gates[started++];
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await gate.promise;
+        active--;
+      }) as never);
+
+      const first = manager.ensureBotInfoNotice();
+      // Three more requests while the first is running coalesce to one rerun.
+      const second = manager.ensureBotInfoNotice();
+      const third = manager.ensureBotInfoNotice();
+      const fourth = manager.ensureBotInfoNotice();
+      expect(started).toBe(1);
+
+      gates[0].resolve();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(started).toBe(2);
+      gates[1].resolve();
+      await Promise.all([first, second, third, fourth]);
+
+      expect(started).toBe(2);
+      expect(maxActive).toBe(1);
+
+      // A later request starts a fresh run.
+      const fifth = manager.ensureBotInfoNotice();
+      expect(started).toBe(3);
+      gates[2].resolve();
+      await fifth;
+    });
+
+    it("stop() during a sync cancels the pending rerun", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const gate = deferred();
+      const sync = jest
+        .spyOn(manager, "syncBotInfoNotice")
+        .mockImplementation((async () => gate.promise) as never);
+      manager.configService = {
+        removeReloadCallback: jest.fn(),
+        removeChangeListener: jest.fn(),
+      };
+
+      const run = manager.ensureBotInfoNotice();
+      void manager.ensureBotInfoNotice();
+      const stopping = manager.stop();
+      gate.resolve();
+      await Promise.all([run, stopping]);
+
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(manager.noticeRun).toBeNull();
+    });
+
+    it("stop() during initialize registers no jobs and posts nothing afterwards", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const gate = deferred();
+      const registerReloadCallback = jest.fn();
+      manager.configService = {
+        getBoolean: jest.fn(async () => true),
+        getString: jest.fn(async () => {
+          await gate.promise;
+          return "channel123";
+        }),
+        registerReloadCallback,
+        removeReloadCallback: jest.fn(),
+        addChangeListener: jest.fn(),
+        removeChangeListener: jest.fn(),
+      };
+      const spies = [
+        "setupChannelPermissions",
+        "ensureHeaderPost",
+        "ensureBotInfoNotice",
+        "syncNotices",
+        "startCleanupJob",
+      ].map((m) =>
+        jest.spyOn(manager, m).mockResolvedValue(undefined as never),
+      );
+      jest
+        .spyOn(manager, "getNoticesChannel")
+        .mockResolvedValue({ name: "notices" } as never);
+
+      const init = manager.initialize();
+      await new Promise((r) => setTimeout(r, 0));
+      const stopping = manager.stop();
+      gate.resolve();
+      await Promise.all([init, stopping]);
+
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(registerReloadCallback).not.toHaveBeenCalled();
+      expect(manager.initPromise).toBeNull();
+    });
+  });
+
   describe("reload callback lifecycle (#1007)", () => {
     it("initialize() registers the reload callback and stop() removes it", async () => {
       const manager = NoticesChannelManager.getInstance(mockClient) as any;
