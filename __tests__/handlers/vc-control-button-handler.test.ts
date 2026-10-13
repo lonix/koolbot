@@ -112,6 +112,9 @@ describe("VCControlButtonHandler", () => {
         displayName: "OwnerUser",
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
+      deferReply: jest.fn().mockResolvedValue(undefined),
+      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      editReply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       message: {
         edit: jest.fn().mockResolvedValue(undefined),
@@ -216,6 +219,49 @@ describe("VCControlButtonHandler", () => {
       }
       expect(mockManagerInstance.toggleLive).not.toHaveBeenCalled();
       expect(mockManagerInstance.createWaitingRoom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Deferral and let-in race (#1143)", () => {
+    it("defers before the room lock is awaited for privacy/live/waitingroom/letin", async () => {
+      const ids = [
+        "vc_control_privacy_channel-id_owner-id",
+        "vc_control_live_channel-id_owner-id",
+        "vc_control_waitingroom_channel-id_owner-id",
+        "vc_control_letin_channel-id_waiting-user-id_owner-id",
+      ];
+      for (const id of ids) {
+        const order: string[] = [];
+        (mockInteraction.deferReply as jest.Mock) = jest
+          .fn()
+          .mockImplementation(async () => {
+            order.push("defer");
+          });
+        mockManagerInstance.runAsRoomOwner.mockImplementationOnce(async () => {
+          order.push("lock");
+          return true;
+        });
+        mockInteraction.customId = id;
+        await handleVCControlButton(mockInteraction as ButtonInteraction);
+        expect(order).toEqual(["defer", "lock"]);
+      }
+    });
+
+    it("moves nobody when a transfer lands after the let-in preflight", async () => {
+      const setChannel = jest.fn();
+      (mockGuild.members!.fetch as jest.Mock).mockResolvedValue({
+        displayName: "WaitingUser",
+        voice: { channelId: "waiting-room-id", setChannel },
+      } as never);
+      mockManagerInstance.getWaitingRoom.mockReturnValue("waiting-room-id");
+      // Ownership is only re-checked inside the lock
+      mockManagerInstance.isRoomOwner.mockReturnValue(false);
+      mockInteraction.customId =
+        "vc_control_letin_channel-id_waiting-user-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(setChannel).not.toHaveBeenCalled();
     });
   });
 

@@ -22,7 +22,7 @@ export async function handleVCModal(
   //   vc_modal_{action}_{presetIndex}_{nameTag}_{channelId}_{userId}  (7 parts, preset-targeting actions)
   const parts = customId.split("_");
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "modal") {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Invalid modal interaction.",
       flags: MessageFlags.Ephemeral,
     });
@@ -43,17 +43,23 @@ export async function handleVCModal(
 
   // Verify user
   if (userId !== interaction.user.id) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ This modal belongs to another user.",
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
+  // Acknowledge before any slow work: the room-mutating actions can queue
+  // behind an in-flight ownership transfer holding the room lock, which can
+  // outlast Discord's 3-second window (10062). Every reply below goes through
+  // safeReply, which edits the deferred response.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   // Get the voice channel
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Voice channel not found.",
       flags: MessageFlags.Ephemeral,
     });
@@ -74,7 +80,7 @@ export async function handleVCModal(
         break;
       case "renamepreset":
         if (presetIndex === null || !Number.isInteger(presetIndex)) {
-          await interaction.reply({
+          await safeReply(interaction, {
             content: "❌ Invalid preset reference.",
             flags: MessageFlags.Ephemeral,
           });
@@ -88,7 +94,7 @@ export async function handleVCModal(
         );
         break;
       default:
-        await interaction.reply({
+        await safeReply(interaction, {
           content: "❌ Unknown modal action.",
           flags: MessageFlags.Ephemeral,
         });
@@ -121,7 +127,7 @@ async function asLiveOwner(
     work,
   );
   if (!ran) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Only the current channel owner can do this.",
       flags: MessageFlags.Ephemeral,
     });
@@ -136,7 +142,7 @@ async function handleNameModal(
 
   // Validate name length
   if (newName.length > 100) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Channel name must be 100 characters or less.",
       flags: MessageFlags.Ephemeral,
     });
@@ -144,7 +150,7 @@ async function handleNameModal(
   }
 
   if (newName.length < 1) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Channel name cannot be empty.",
       flags: MessageFlags.Ephemeral,
     });
@@ -155,7 +161,7 @@ async function handleNameModal(
   // reserved: a room carrying one could be mistaken for the lobby (#1148).
   const manager = VoiceChannelManager.getInstance(interaction.client);
   if (await manager.isReservedChannelName(newName)) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ That name is reserved. Please choose a different name.",
       flags: MessageFlags.Ephemeral,
     });
@@ -165,7 +171,7 @@ async function handleNameModal(
   try {
     const channel = await interaction.guild?.channels.fetch(channelId);
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: "❌ Voice channel not found.",
         flags: MessageFlags.Ephemeral,
       });
@@ -182,7 +188,7 @@ async function handleNameModal(
       `User ${interaction.user.displayName || interaction.user.username} (${interaction.user.id}) renamed channel "${oldName}" → "${newName}" (${channelId})`,
     );
 
-    await interaction.reply({
+    await safeReply(interaction, {
       content: `✅ Channel renamed to: **${newName}**`,
       flags: MessageFlags.Ephemeral,
     });
@@ -205,7 +211,7 @@ async function handleSavePresetModal(
     false,
   );
   if (!enabled) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Presets are disabled on this server.",
       flags: MessageFlags.Ephemeral,
     });
@@ -216,7 +222,7 @@ async function handleSavePresetModal(
 
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Voice channel not found.",
       flags: MessageFlags.Ephemeral,
     });
@@ -245,7 +251,7 @@ async function handleSavePresetModal(
       `User ${userId} saved preset "${name}" from channel ${channelId}`,
     );
 
-    await interaction.reply({
+    await safeReply(interaction, {
       content: updated
         ? `✅ Preset **${name}** updated from this channel's settings.`
         : `✅ Preset **${name}** saved.`,
@@ -274,7 +280,7 @@ async function handleRenamePresetModal(
     false,
   );
   if (!enabled) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Presets are disabled on this server.",
       flags: MessageFlags.Ephemeral,
     });
@@ -292,7 +298,7 @@ async function handleRenamePresetModal(
   const prefs = await service.getPrefs(userId);
   const target = prefs.presets[presetIndex];
   if (!target || (nameTag !== null && presetNameTag(target.name) !== nameTag)) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content:
         "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
       flags: MessageFlags.Ephemeral,
@@ -308,7 +314,7 @@ async function handleRenamePresetModal(
       target.name,
     );
 
-    await interaction.reply({
+    await safeReply(interaction, {
       content: `✏️ Preset **${oldName}** renamed to **${savedName}**.`,
       flags: MessageFlags.Ephemeral,
     });

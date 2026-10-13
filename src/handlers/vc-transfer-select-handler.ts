@@ -40,24 +40,26 @@ export async function handleVCTransferSelect(
     return;
   }
 
+  // Acknowledge before the fetches and the (possibly queued) locked transfer,
+  // which can outlast Discord's 3-second window (10062). Everything below
+  // edits the deferred message, dropping the select menu.
+  await interaction.deferUpdate();
+  const done = async (content: string): Promise<void> => {
+    await safeReply(interaction, { content, components: [] });
+  };
+
   // Get the selected user
   const targetUserId = interaction.values[0];
 
   if (!targetUserId) {
-    await interaction.reply({
-      content: "❌ Please select a user.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await done("❌ Please select a user.");
     return;
   }
 
   // Get the voice channel
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await interaction.reply({
-      content: "❌ Voice channel not found.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await done("❌ Voice channel not found.");
     return;
   }
 
@@ -65,43 +67,30 @@ export async function handleVCTransferSelect(
     // Get the target member
     const targetMember = await interaction.guild?.members.fetch(targetUserId);
     if (!targetMember) {
-      await interaction.reply({
-        content: "❌ Could not find the target user.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await done("❌ Could not find the target user.");
       return;
     }
 
     // Check if target user is in the same voice channel
     if (targetMember.voice.channelId !== channelId) {
-      await interaction.reply({
-        content: "❌ The target user must be in the same voice channel!",
-        flags: MessageFlags.Ephemeral,
-      });
+      await done("❌ The target user must be in the same voice channel!");
       return;
     }
 
     // Transfer ownership
     await manager.transferOwnership(channelId, ownerId, targetUserId);
 
-    await interaction.update({
-      content: `✅ Channel ownership transferred to ${targetMember.displayName}!`,
-      components: [],
-    });
+    await done(
+      `✅ Channel ownership transferred to ${targetMember.displayName}!`,
+    );
   } catch (error) {
     // transferOwnership re-checks ownership under the room lock; a transfer
     // that landed after our preflight makes this request stale (#1143).
     if (error instanceof NotRoomOwnerError) {
-      await safeReply(interaction, {
-        content: "❌ Only the current channel owner can transfer ownership.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await done("❌ Only the current channel owner can transfer ownership.");
       return;
     }
     logger.error("Error transferring ownership:", error);
-    await safeReply(interaction, {
-      content: "❌ Failed to transfer ownership. Please try again.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await done("❌ Failed to transfer ownership. Please try again.");
   }
 }

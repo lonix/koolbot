@@ -144,6 +144,55 @@ describe("VoiceChannelManager - room lock (#1143)", () => {
     expect(work).toHaveBeenCalledTimes(1);
   });
 
+  describe("automatic transfer scheduled by a departed owner", () => {
+    it("is a no-op when a manual transfer moved the room in the meantime", async () => {
+      releaseCreate();
+      // a manual transfer a -> b landed while the timer gathered stats
+      await manager.transferOwnership("room", "a", "b");
+      room.permissionOverwrites.create.mockClear();
+      room.permissionOverwrites.delete.mockClear();
+
+      const transferred = await (manager as any).updateChannelOwnership(
+        room,
+        member("c"),
+        "a", // owner whose departure scheduled the timer
+      );
+
+      expect(transferred).toBe(false);
+      expect(room.permissionOverwrites.create).not.toHaveBeenCalled();
+      // the new manual owner b is not revoked, and stays owner
+      expect(room.permissionOverwrites.delete).not.toHaveBeenCalled();
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+
+    it("is a no-op when the original owner rejoined", async () => {
+      releaseCreate();
+      room.members.set("a", member("a"));
+
+      const transferred = await (manager as any).updateChannelOwnership(
+        room,
+        member("b"),
+        "a",
+      );
+
+      expect(transferred).toBe(false);
+      expect(manager.isRoomOwner("a", "room")).toBe(true);
+    });
+
+    it("transfers when the original owner still owns the room and is absent", async () => {
+      releaseCreate();
+
+      const transferred = await (manager as any).updateChannelOwnership(
+        room,
+        member("b"),
+        "a",
+      );
+
+      expect(transferred).toBe(true);
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+    });
+  });
+
   describe("controlPanels cleanup on normal deletion paths", () => {
     beforeEach(() => {
       (manager as any).controlPanels.set("room", {

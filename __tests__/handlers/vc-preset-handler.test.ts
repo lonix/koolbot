@@ -98,6 +98,9 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       user: { id: "user1" } as any,
       guild: mockGuild as Guild,
       reply: jest.fn().mockResolvedValue(undefined),
+      deferReply: jest.fn().mockResolvedValue(undefined),
+      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      editReply: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
       followUp: jest.fn().mockResolvedValue(undefined),
       showModal: jest.fn().mockResolvedValue(undefined),
@@ -134,7 +137,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect((mockChannel as any).setName).not.toHaveBeenCalled();
       expect((mockChannel as any).setUserLimit).toHaveBeenCalledWith(4);
-      const arg = (i.update as jest.Mock).mock.calls[0][0] as {
+      const arg = (i.editReply as jest.Mock).mock.calls[0][0] as {
         embeds: Array<{ data: { description: string } }>;
       };
       const text = arg.embeds[0].data.description;
@@ -154,11 +157,39 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect((mockChannel as any).setName).not.toHaveBeenCalled();
       expect((mockChannel as any).setUserLimit).not.toHaveBeenCalled();
-      expect(i.reply).toHaveBeenCalledWith(
+      expect(i.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("current channel owner"),
         }),
       );
+    });
+
+    it("acknowledges (deferUpdate) before the room lock is awaited", async () => {
+      mockFindOne.mockResolvedValue({
+        presets: [{ name: "Mine", channelName: "Cool" }],
+      } as never);
+      const order: string[] = [];
+      const i = applyInteraction();
+      (i.deferUpdate as jest.Mock).mockImplementation(async () => {
+        order.push("defer");
+      });
+      jest.spyOn(VoiceChannelManager, "getInstance").mockReturnValue({
+        isRoomOwner: mockIsRoomOwner,
+        isReservedChannelName: mockIsReserved,
+        runAsRoomOwner: async (
+          _u: string,
+          _c: string,
+          work: () => Promise<void>,
+        ) => {
+          order.push("lock");
+          await work();
+          return true;
+        },
+      } as unknown as VoiceChannelManager);
+
+      await handleVCPresetSelect(i);
+
+      expect(order).toEqual(["defer", "lock"]);
     });
   });
 

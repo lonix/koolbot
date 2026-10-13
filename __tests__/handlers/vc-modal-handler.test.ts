@@ -85,6 +85,9 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         getTextInputValue: jest.fn().mockReturnValue("New Custom Name"),
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
+      deferReply: jest.fn().mockResolvedValue(undefined),
+      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      editReply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       client: {} as any as Client,
     } as any;
@@ -117,6 +120,30 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       expect(mockChannel.setName).not.toHaveBeenCalled();
+    });
+
+    it("acknowledges (deferReply) before the room lock is awaited", async () => {
+      const order: string[] = [];
+      (mockInteraction.deferReply as jest.Mock).mockImplementation(async () => {
+        order.push("defer");
+      });
+      mockGetInstance.mockImplementation(() => ({
+        setCustomChannelName: mockSetCustomChannelName,
+        isReservedChannelName: mockIsReservedChannelName,
+        runAsRoomOwner: async (
+          _u: string,
+          _c: string,
+          work: () => Promise<void>,
+        ) => {
+          order.push("lock");
+          await work();
+          return true;
+        },
+      }));
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(order).toEqual(["defer", "lock"]);
     });
 
     it("rejects a rename to a reserved (lobby) name", async () => {

@@ -52,6 +52,9 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
         },
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
+      deferReply: jest.fn().mockResolvedValue(undefined),
+      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      editReply: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
     } as any;
   });
@@ -64,6 +67,38 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
       "channel-id",
       "owner-id",
       "target-id",
+    );
+  });
+
+  it("acknowledges (deferUpdate) before the locked transfer is awaited", async () => {
+    const order: string[] = [];
+    (interaction.deferUpdate as jest.Mock).mockImplementation(async () => {
+      order.push("defer");
+    });
+    manager.transferOwnership.mockImplementation(async () => {
+      order.push("transfer");
+    });
+
+    await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
+
+    expect(order).toEqual(["defer", "transfer"]);
+  });
+
+  it("tells a stale requester (rejected by the lock) via the deferred message", async () => {
+    const { NotRoomOwnerError } =
+      await import("../../src/services/voice-channel-manager.js");
+    // A real deferUpdate marks the interaction deferred, so replies edit it
+    (interaction.deferUpdate as jest.Mock).mockImplementation(async () => {
+      (interaction as any).deferred = true;
+    });
+    manager.transferOwnership.mockRejectedValue(new NotRoomOwnerError());
+
+    await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("current channel owner"),
+      }),
     );
   });
 

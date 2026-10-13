@@ -267,6 +267,70 @@ describe("VoiceChannelManager - name spoofing and control-panel tracking (#1148,
     });
   });
 
+  describe("final room name on both creation paths", () => {
+    // The configured lobby name equals what the default naming scheme would
+    // generate for a member whose display name is "Lobby".
+    const RESERVED = "🎮 Lobby's Room";
+    const reservedPrefixConfig = (): void => {
+      mockConfigService.getString = jest
+        .fn<any>()
+        .mockImplementation((key: string, def?: string) => {
+          switch (key) {
+            case "voicechannels.lobby.name":
+              return Promise.resolve(RESERVED);
+            case "voicechannels.lobby.offlinename":
+              return Promise.resolve("🔴 Lobby");
+            case "voicechannels.category_id":
+              return Promise.resolve("category-id");
+            default:
+              return Promise.resolve(def ?? "");
+          }
+        });
+    };
+
+    beforeEach(() => {
+      reservedPrefixConfig();
+      (manager as any).persistOwnership = jest.fn(async () => undefined);
+      (manager as any).sendControlPanel = jest.fn(async () => undefined);
+    });
+
+    it("lobby-join path never creates a room named exactly like the lobby", async () => {
+      const member: any = {
+        id: "u1",
+        displayName: "Lobby",
+        guild,
+        voice: { setChannel: jest.fn(async () => undefined) },
+      };
+
+      await (manager as any).createUserChannelUnlocked(member);
+
+      const name = (createMock.mock.calls[0][0] as { name: string }).name;
+      expect(await manager.isReservedChannelName(name)).toBe(false);
+    });
+
+    it("dynamic-channel path never creates a room named exactly like the lobby", async () => {
+      guild.members = {
+        fetch: jest.fn(async () => ({ id: "u1", displayName: "Lobby" })),
+      };
+
+      await (manager as any).createDynamicChannelUnlocked(guild, "u1");
+
+      const name = (createMock.mock.calls[0][0] as { name: string }).name;
+      expect(await manager.isReservedChannelName(name)).toBe(false);
+    });
+
+    it("dynamic-channel path replaces a reserved explicit name with a safe one", async () => {
+      guild.members = {
+        fetch: jest.fn(async () => ({ id: "u1", displayName: "Ann" })),
+      };
+
+      await (manager as any).createDynamicChannelUnlocked(guild, "u1", "Lobby");
+
+      const name = (createMock.mock.calls[0][0] as { name: string }).name;
+      expect(await manager.isReservedChannelName(name)).toBe(false);
+    });
+  });
+
   describe("presets", () => {
     it("skips a preset channel name that is reserved but still applies the rest", async () => {
       const room: any = {

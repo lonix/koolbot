@@ -485,6 +485,23 @@ export class VoiceChannelManager {
   }
 
   /**
+   * A name safe to give a room KoolBot creates or renames: `name` itself, or
+   * a lightly altered one when it equals a reserved name (the lobby, offline
+   * lobby or "New Channel"). Applied to the FINAL generated name on every
+   * creation and transfer-rename path, since the lobby name is configurable
+   * and display names / prefix / suffix feed generated names (#1148).
+   */
+  private async safeRoomName(
+    name: string,
+    fallbackId: string,
+  ): Promise<string> {
+    if (!(await this.isReservedChannelName(name))) return name;
+    const altered = `${name} (room)`;
+    if (!(await this.isReservedChannelName(altered))) return altered;
+    return `Room ${fallbackId}`;
+  }
+
+  /**
    * Does the caller still own this room right now? Authorises control-panel
    * actions against live ownership (the registry), never against the owner ID
    * baked into a button/select custom ID, which goes stale on transfer (#1143).
@@ -1479,10 +1496,16 @@ export class VoiceChannelManager {
           const newOwner = memberStats[0].member;
 
           // Update channel ownership
-          await this.updateChannelOwnership(channelNow, newOwner);
-          logger.info(
-            `Channel ${channelNow.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+          const transferred = await this.updateChannelOwnership(
+            channelNow,
+            newOwner,
+            currentOwnerId,
           );
+          if (transferred) {
+            logger.info(
+              `Channel ${channelNow.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+            );
+          }
 
           // Clear the timer from the map
           this.ownershipTransferTimers.delete(channel.id);
@@ -1619,7 +1642,10 @@ export class VoiceChannelManager {
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channelId)) {
-        const newChannelName = `${newOwner.displayName}'s Channel`;
+        const newChannelName = await this.safeRoomName(
+          `${newOwner.displayName}'s Channel`,
+          newOwnerId,
+        );
         logger.info(`[Manual Transfer] Renaming channel to: ${newChannelName}`);
         await channel.setName(newChannelName);
       } else {
@@ -1914,7 +1940,10 @@ export class VoiceChannelManager {
         "voicechannels.channel.prefix",
         "🎮",
       );
-      const channelName = `${prefix} ${member.displayName}${suffix}`;
+      const channelName = await this.safeRoomName(
+        `${prefix} ${member.displayName}${suffix}`,
+        member.id,
+      );
 
       // The lobby-join path has never set owner overwrites (the room inherits
       // the category's), so only the opt-in status grant is added here; with it
@@ -2430,6 +2459,8 @@ export class VoiceChannelManager {
           ? `${channelPrefix} ${member.displayName}${channelSuffix}`
           : `${channelPrefix} ${userId}`;
       }
+      // Validate the FINAL name, whichever branch produced it (#1148)
+      finalChannelName = await this.safeRoomName(finalChannelName, userId);
 
       const ownerStatusGrant = await this.ownerStatusGrant(guild, category);
 
@@ -3284,19 +3315,39 @@ export class VoiceChannelManager {
     }
   }
 
+  /**
+   * Automatic ownership transfer. `expectedOwnerId` is the owner whose
+   * departure scheduled it: under the room lock the transfer is dropped
+   * unless that user still owns the room and is still absent, so a manual
+   * transfer (or a rejoin) that landed while the timer was gathering stats is
+   * never overridden (#1143). Returns whether ownership was transferred.
+   */
   private async updateChannelOwnership(
     channel: VoiceChannel,
     newOwner: GuildMember,
-  ): Promise<void> {
-    return this.roomLock.run(channel.id, () =>
-      this.updateChannelOwnershipLocked(channel, newOwner),
-    );
+    expectedOwnerId?: string,
+  ): Promise<boolean> {
+    return this.roomLock.run(channel.id, async () => {
+      if (expectedOwnerId !== undefined) {
+        const stale =
+          !this.isRoomOwner(expectedOwnerId, channel.id) ||
+          channel.members.has(expectedOwnerId) ||
+          !channel.members.has(newOwner.id);
+        if (stale) {
+          logger.info(
+            `[Ownership Transfer] Skipping automatic transfer for channel ${channel.id}: ownership or membership changed while it was pending`,
+          );
+          return false;
+        }
+      }
+      return this.updateChannelOwnershipLocked(channel, newOwner);
+    });
   }
 
   private async updateChannelOwnershipLocked(
     channel: VoiceChannel,
     newOwner: GuildMember,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       // Get current owner ID
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
@@ -3333,7 +3384,10 @@ export class VoiceChannelManager {
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channel.id)) {
-        const newChannelName = `${newOwner.displayName}'s Channel`;
+        const newChannelName = await this.safeRoomName(
+          `${newOwner.displayName}'s Channel`,
+          newOwner.id,
+        );
         logger.info(
           `[Ownership Transfer] Renaming channel to: ${newChannelName}`,
         );
@@ -3374,11 +3428,13 @@ export class VoiceChannelManager {
       logger.info(
         `[Ownership Transfer] Successfully completed ownership transfer for channel ${channel.name} to ${newOwner.displayName} (${newOwner.id})`,
       );
+      return true;
     } catch (error) {
       logger.error(
         "[Ownership Transfer] Error updating channel ownership:",
         error,
       );
+      return false;
     }
   }
 

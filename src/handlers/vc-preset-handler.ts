@@ -612,12 +612,17 @@ async function applyPreset(
   channel: VoiceChannel,
   index: number,
 ): Promise<void> {
+  // Acknowledge before the DB read and the possibly queued locked apply, which
+  // can outlast Discord's 3-second window (10062). The result edits the
+  // deferred message in place.
+  await interaction.deferUpdate();
   const prefs = await loadPrefs(parsed.ownerId);
   const preset = prefs.presets[index];
   if (!preset) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "❌ Preset no longer exists.",
-      flags: MessageFlags.Ephemeral,
+      embeds: [],
+      components: [],
     });
     return;
   }
@@ -638,16 +643,18 @@ async function applyPreset(
     },
   );
   if (!ran) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "❌ Only the current channel owner can use these controls.",
-      flags: MessageFlags.Ephemeral,
+      embeds: [],
+      components: [],
     });
     return;
   }
 
   // Do not claim a skipped (reserved) channel name was applied
   const applied = nameSkipped ? { ...preset, channelName: undefined } : preset;
-  await interaction.update({
+  await interaction.editReply({
+    content: "",
     embeds: [
       new EmbedBuilder()
         .setTitle("✅ Preset applied")
