@@ -109,7 +109,11 @@ function renderRoles(scan: ServerScan): string {
   return `
 <div class="card">
   <h2>Roles (${scan.roles.length})</h2>
-  <p class="muted">Member counts come from the cache and may be low (marked <code>+</code>) unless the bot requests the GuildMembers intent. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}</p>
+  <p class="muted">Member counts come from the cache and may be low (marked <code>+</code>) ${
+    scan.readiness.membersIntent
+      ? "."
+      : ` unless the bot requests the GuildMembers intent. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}`
+  }</p>
   <table><caption class="visually-hidden">Roles</caption><thead><tr><th scope="col">Role</th><th scope="col">Position</th><th scope="col">Colour</th><th scope="col">Members</th><th scope="col">Flags</th><th scope="col">KoolBot can manage</th><th scope="col">Used by</th></tr></thead><tbody>${rows}</tbody></table>
 </div>`;
 }

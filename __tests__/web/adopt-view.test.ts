@@ -210,9 +210,19 @@ describe("renderAdoptPage (#1019)", () => {
     const escaped = escapeHtml(GUILD_MEMBERS_INTENT_HOWTO);
     expect(html).toContain(escaped);
     expect(html.split(escaped).length - 1).toBeGreaterThanOrEqual(2);
+    expect(html).toContain("unless the bot requests the GuildMembers intent");
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("GUILD_MEMBERS_INTENT=true");
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("Server Members Intent");
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("developer portal");
+  });
+  it("omits the intent how-to from the Roles caption when the intent is on", () => {
+    const html = renderAdoptPage({
+      ...common,
+      scan: { ...scan, readiness: { ...scan.readiness, membersIntent: true } },
+    });
+    expect(html).not.toContain(escapeHtml(GUILD_MEMBERS_INTENT_HOWTO));
+    expect(html).not.toContain("unless the bot requests the GuildMembers");
+    expect(html).toContain("Member counts come from the cache");
   });
   const botBase = {
     roleIds: [],
