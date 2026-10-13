@@ -22,7 +22,6 @@ describe("CONFIRM_SCRIPT", () => {
     (window as unknown as { confirm: unknown }).confirm = confirmMock;
     // Each run registers its own listeners on a fresh document.
     document.body.innerHTML = "";
-    // eslint-disable-next-line no-new-func
     new Function(CONFIRM_SCRIPT)();
   });
 
