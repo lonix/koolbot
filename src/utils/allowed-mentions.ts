@@ -31,6 +31,11 @@ export const NO_MENTIONS: MessageMentionOptions = { parse: [] };
  * Per-call `allowedMentions` that pings exactly these users and nobody else.
  * Pass the ids the message text is meant to mention, never ids taken from
  * member-controlled text.
+ *
+ * Narrower than the client default: it omits `repliedUser`, so on a reply it
+ * suppresses the notification to the replied-to author, whereas the client
+ * default keeps it. The two are not interchangeable; use this for sends, and
+ * add `repliedUser: true` yourself on a reply that should still notify.
  */
 export function pingUsers(...userIds: string[]): MessageMentionOptions {
   return { users: [...new Set(userIds)] };

@@ -149,9 +149,12 @@ server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
 ### Mentions
 
 The bot sets a safe client-wide `allowedMentions` default of `parse: []`, so a
-message that does not say otherwise pings nobody: `@everyone`, `@here`, role and
-user mentions in text it echoes, such as member display names or nicknames, only
-render and never notify. Every message that pings on purpose names exactly who
+plain send that does not say otherwise pings nobody: `@everyone`, `@here`, role
+and user mentions in text it echoes, such as member display names or nicknames,
+only render and never notify. A reply is the one exception: the default keeps
+`repliedUser: true`, so a reply to a message still notifies the author of that
+message unless the call sets its own `allowedMentions` (the bot currently has
+no `Message.reply` call). Every message that pings on purpose names exactly who
 may be pinged in the same call (the voice room owner, a joining member, the
 weekly recap podium, the birthday member, ticket staff, a poll role). Member
 display names, nicknames, usernames and channel names that reach message text
