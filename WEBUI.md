@@ -1472,7 +1472,9 @@ opens the snapshot history.
    reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
    this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
    IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
-   can be restored again to finish. Each restore is written to the audit log (`adopt.rollback`). Snapshots are kept for
+   can be restored again to finish. Each accepted restore writes a started entry (`adopt.rollback.start`) to the audit log
+   before it runs, and its outcome (`adopt.rollback`) when it ends; if KoolBot restarts in between, only the started entry
+   exists. A refused restore is written as a failed `adopt.rollback`. Snapshots are kept for
    `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
 
    **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore

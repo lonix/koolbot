@@ -271,13 +271,20 @@ export function createAdoptionHistoryRouter(client: Client): Router {
           flashRedirect(res, HISTORY_PATH, { type: "err", text });
           return;
         }
+        // Record that the restore was accepted before it runs, so a restart
+        // can never leave no trace; the outcome entry follows when the job
+        // ends (the engine's second check can still refuse).
+        await recordAudit(session, {
+          action: "adopt.rollback.start",
+          targetId: id,
+          details: { planId: snapshot.planId, deleteCreatedRoles },
+          result: "success",
+        });
         const job = engine.startRollback(id, {
           actor: session,
           deleteCreatedRoles,
           revalidate,
         });
-        // The engine re-checks and may refuse after this response, so the audit
-        // entry is written when the job ends, with its real outcome.
         void auditWhenDone(engine, job.id, session, id, {
           planId: snapshot.planId,
           deleteCreatedRoles,

@@ -241,9 +241,18 @@ describe("GET /adopt/history/:id/restore", () => {
   });
 });
 
-/** The audit entry is written after the response, when the job has ended. */
+const auditActions = (): string[] =>
+  mockRecordAudit.mock.calls.map(
+    (c) => (c as unknown as [unknown, { action: string }])[1].action,
+  );
+
+/** The outcome entry is written after the response, when the job has ended. */
 async function waitForAudit(): Promise<void> {
-  for (let i = 0; i < 50 && mockRecordAudit.mock.calls.length === 0; i += 1) {
+  for (
+    let i = 0;
+    i < 80 && !auditActions().includes("adopt.rollback");
+    i += 1
+  ) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
@@ -259,8 +268,9 @@ describe("restore audit follows the real outcome (#1134)", () => {
     const res = await harness.post(`/adopt/history/${SNAP}/restore`, {});
     expect(res.status).toBe(303); // the first check passed, so the job started
     await waitForAudit();
-    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
-    expect(mockRecordAudit).toHaveBeenCalledWith(
+    // A started entry (the restore was accepted), then the real outcome.
+    expect(auditActions()).toEqual(["adopt.rollback.start", "adopt.rollback"]);
+    expect(mockRecordAudit).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: "adopt.rollback",
@@ -280,10 +290,9 @@ describe("restore audit follows the real outcome (#1134)", () => {
     await mount();
     await harness.post(`/adopt/history/${SNAP}/restore`, {});
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(mockRecordAudit).not.toHaveBeenCalled(); // still running
-    for (let i = 0; i < 80 && mockRecordAudit.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+    // Still running: only the started entry exists, no outcome yet.
+    expect(auditActions()).toEqual(["adopt.rollback.start"]);
+    await waitForAudit();
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -307,6 +316,8 @@ describe("POST /adopt/history/:id/restore live-state check (#1134)", () => {
     expect(flash.msg).toContain("nothing was changed");
     expect(flash.msg).toContain('remove your own access to "secret"');
     expect(mockStartRollback).not.toHaveBeenCalled();
+    // Exactly one entry: the refusal. Nothing was started.
+    expect(auditActions()).toEqual(["adopt.rollback"]);
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -355,8 +366,9 @@ describe("POST /adopt/history/:id/restore", () => {
       expect.any(Function),
       { actorId: session.discordUserId, deleteCreatedRoles: false },
     );
-    // Audited when the job ends, not when it starts.
+    // A started entry is written before the job runs, the outcome when it ends.
     await waitForAudit();
+    expect(auditActions()).toEqual(["adopt.rollback.start", "adopt.rollback"]);
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "adopt.rollback", result: "success" }),

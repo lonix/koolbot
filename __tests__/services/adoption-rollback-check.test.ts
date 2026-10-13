@@ -770,3 +770,112 @@ describe("restore revokes role grants", () => {
     expect(text).not.toContain("secret-9");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Follow-up repairs owed by an earlier, partly finished restore (#1134)
+// ---------------------------------------------------------------------------
+
+describe("pending dependent repairs", () => {
+  /**
+   * The plan deleted role `old-r`; an earlier restore recreated it as `new-r`
+   * and finished that step, but stopped before putting c1's saved overwrite for
+   * the role back (a deny on view).
+   */
+  const earlier = (rolledBackOps: string[]): Snapshot =>
+    snapshot({
+      status: "rollback_partial",
+      plan: {
+        operations: [
+          {
+            id: "op-1",
+            type: "role.delete",
+            class: "destructive",
+            roleId: "old-r",
+          },
+        ],
+      } as never,
+      operations: [{ opId: "op-1", status: "applied" }],
+      baseline: {
+        absentRoleNames: [],
+        roles: [role("old-r", "Old", 4)],
+        channels: [channel("c1", [ow("old-r", "0", VIEW)])],
+        config: {},
+      } as never,
+      restoredRoles: [{ oldId: "old-r", newId: "new-r" }],
+      rolledBackOps,
+    });
+  const world = (adminRoles: string[]): Scanned =>
+    live({
+      adminRoleIds: adminRoles,
+      roles: [...live().roles, role("new-r", "Old", 4)],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("new-r", VIEW),
+          ow("admin-role", VIEW),
+        ]),
+      ],
+    });
+
+  it("refuses when the pending repair would lock the admin out", () => {
+    // The admin sees c1 only through the recreated role's allow; the repair
+    // writes the saved deny back onto it.
+    const scanned = live({
+      adminRoleIds: ["admin-role", "new-r"],
+      roles: [...live().roles, role("new-r", "Old", 4)],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("new-r", VIEW),
+        ]),
+      ],
+    });
+    const problems = restoreProblems(earlier(["op-1"]), scanned, opts);
+    expect(problems.join(" ")).toMatch(/remove your own access to "c1"/);
+  });
+
+  it("passes when that repair is already recorded as done", () => {
+    const scanned = world(["admin-role", "new-r"]);
+    expect(
+      restoreProblems(earlier(["op-1", "c1:old-r"]), scanned, opts),
+    ).toEqual([]);
+  });
+
+  it("passes when the repair does not touch the admin's access", () => {
+    // The admin does not hold the recreated role and sees c1 through admin-role.
+    expect(
+      restoreProblems(earlier(["op-1"]), world(["admin-role"]), opts),
+    ).toEqual([]);
+  });
+
+  it("uses the same pending definition as the confirm page", () => {
+    const desired = buildRestoreDesired(
+      earlier(["op-1"]),
+      world(["admin-role"]),
+      opts,
+    );
+    expect(desired.overwrites).toEqual([
+      {
+        channelId: "c1",
+        target: { id: "new-r" },
+        targetType: "role",
+        allow: "0",
+        deny: VIEW,
+      },
+    ]);
+  });
+
+  it("does not model re-parenting under a recreated category (the planner has no channel moves)", () => {
+    const snap = earlier(["op-1"]);
+    snap.restoredRoles = [];
+    snap.restoredChannels = [{ oldId: "old-cat", newId: "new-cat" }];
+    snap.baseline = {
+      absentRoleNames: [],
+      roles: [],
+      channels: [{ ...channel("c2"), parentId: "old-cat" }],
+      config: {},
+    } as never;
+    const desired = buildRestoreDesired(snap, world(["admin-role"]), opts);
+    expect(desired.overwrites).toEqual([]);
+  });
+});

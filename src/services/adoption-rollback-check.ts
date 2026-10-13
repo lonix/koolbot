@@ -8,7 +8,10 @@ import {
   type PlanOperation,
   type ScannedState,
 } from "./server-adoption-planner.js";
-import { remainingReversibleIds } from "./adoption-rollback-selection.js";
+import {
+  pendingDependentRepairs,
+  remainingReversibleIds,
+} from "./adoption-rollback-selection.js";
 import type { AdoptionSnapshotRecord } from "./server-adoption-service.js";
 
 /**
@@ -157,6 +160,46 @@ export function buildRestoreDesired(
         approve("role.delete", created.roleId);
       }
     }
+  }
+
+  // Follow-up repairs an earlier, partly finished restore still owes: the
+  // engine puts the saved overwrite back on every surviving channel for each
+  // role it recreated, unless that repair is already recorded as done. Same
+  // definition as the confirm page (`pendingDependentRepairs`). Re-parenting
+  // children of a recreated category is not modelled: the planner has no
+  // channel moves, and a move only changes access through permission sync.
+  const pending = pendingDependentRepairs({
+    restoredRoleOldIds: snapshot.restoredRoles.map((r) => r.oldId),
+    restoredChannelOldIds: snapshot.restoredChannels.map((c) => c.oldId),
+    baselineChannels: baseline.channels.map((c) => ({
+      id: c.id,
+      parentId: c.parentId,
+      roleOverwriteIds: c.overwrites
+        .filter((o) => o.type === "role")
+        .map((o) => o.id),
+    })),
+    deletedChannelIds: plan.operations.flatMap((o) =>
+      o.type === "channel.delete" ? [o.channelId] : [],
+    ),
+    rolledBackOps: snapshot.rolledBackOps,
+  });
+  for (const key of pending) {
+    if (key.startsWith("parent:")) continue;
+    const cut = key.indexOf(":");
+    const channelId = key.slice(0, cut);
+    const oldRoleId = key.slice(cut + 1);
+    const prior = baseline.channels
+      .find((c) => c.id === channelId)
+      ?.overwrites.find((o) => o.id === oldRoleId);
+    const live = mapChannel(channelId);
+    if (!prior || !liveChannels.has(live)) continue;
+    desired.overwrites.push({
+      channelId: live,
+      target: { id: mapRole(oldRoleId) },
+      targetType: "role",
+      allow: prior.allow,
+      deny: prior.deny,
+    });
   }
   return desired;
 }
