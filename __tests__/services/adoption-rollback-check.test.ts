@@ -1017,3 +1017,130 @@ describe("restore of persisted role grants", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Interrupted role creations (#1134, review round 4)
+// ---------------------------------------------------------------------------
+
+describe("interrupted role creation with 'delete created roles'", () => {
+  /**
+   * The plan started creating "Staff", but the record never says it finished.
+   * The engine's reconcile (after this check) may find the role and delete it.
+   */
+  const interrupted = (
+    over: { startedAt?: Date | null; status?: string } = {},
+  ): Snapshot =>
+    snapshot({
+      status: "partial",
+      plan: {
+        operations: [
+          {
+            id: "op-1",
+            type: "role.create",
+            class: "additive",
+            ref: "new:staff",
+            name: "Staff",
+            color: 7,
+            permissions: "0",
+            position: null,
+          },
+        ],
+      } as never,
+      operations: [
+        {
+          opId: "op-1",
+          status: over.status ?? "pending",
+          startedAt: over.startedAt === undefined ? new Date() : over.startedAt,
+        },
+      ] as never,
+    });
+  const deleting = { ...opts, deleteCreatedRoles: true };
+  /** The role exists on the server, as it would after a lost completion record. */
+  const withRole = (adminHolds: boolean, over: Partial<Scanned> = {}) =>
+    live({
+      adminRoleIds: adminHolds ? ["admin-role", "found"] : ["admin-role"],
+      roles: [...live().roles, { ...role("found", "Staff", 4), color: 7 }],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("found", VIEW),
+          ow("admin-role", VIEW),
+        ]),
+      ],
+      ...over,
+    });
+  /** Same, but the admin's only way in is the found role. */
+  const onlyThroughRole = () =>
+    withRole(true, {
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("found", VIEW),
+        ]),
+      ],
+    });
+
+  it("refuses when the admin relies on the role the reconcile may find and delete", () => {
+    const problems = restoreProblems(
+      interrupted(),
+      onlyThroughRole(),
+      deleting,
+    );
+    expect(problems.join(" ")).toMatch(/remove your own access to "c1"/);
+  });
+
+  it("also covers an operation recorded as failed after it started", () => {
+    expect(
+      restoreProblems(
+        interrupted({ status: "failed" }),
+        onlyThroughRole(),
+        deleting,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("passes when nobody relies on the role", () => {
+    expect(restoreProblems(interrupted(), withRole(false), deleting)).toEqual(
+      [],
+    );
+  });
+
+  it("is unaffected when deleting created roles is not selected", () => {
+    expect(restoreProblems(interrupted(), onlyThroughRole(), opts)).toEqual([]);
+  });
+
+  it("ignores a creation that never started, and roles that do not match", () => {
+    expect(
+      restoreProblems(
+        interrupted({ startedAt: null }),
+        onlyThroughRole(),
+        deleting,
+      ),
+    ).toEqual([]);
+    const other = withRole(true, {
+      roles: [
+        ...live().roles,
+        { ...role("found", "Another name", 4), color: 7 },
+      ],
+      channels: [
+        channel("c1", [
+          { id: GUILD, type: "role", allow: "0", deny: VIEW },
+          ow("found", VIEW),
+        ]),
+      ],
+    });
+    expect(restoreProblems(interrupted(), other, deleting)).toEqual([]);
+  });
+
+  it("applies the role limits to the role it might delete", () => {
+    const managed = withRole(false, {
+      roles: [
+        ...live().roles,
+        { ...role("found", "Staff", 4, "0", true), color: 7 },
+      ],
+    });
+    expect(restoreProblems(interrupted(), managed, deleting).join(" ")).toMatch(
+      /Staff.*managed/,
+    );
+  });
+});

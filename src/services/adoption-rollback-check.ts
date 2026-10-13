@@ -162,6 +162,44 @@ export function buildRestoreDesired(
     }
   }
 
+  // A role creation that was interrupted (started, never recorded as finished)
+  // is only promoted to applied by the engine's reconcile, which runs *after*
+  // this check. With "delete created roles" ticked it may then delete the role
+  // it finds, so judge every live role that could be that role now: same name,
+  // colour and permissions as the planned one. Conservative on purpose: a
+  // lookalike that is not ours is judged too (and may refuse), never skipped.
+  if (options.deleteCreatedRoles) {
+    const recorded = new Map(
+      snapshot.operations.map((r) => [r.opId, r] as const),
+    );
+    const sameBits = (a: string, b: string): boolean => {
+      try {
+        return BigInt(a) === BigInt(b);
+      } catch {
+        return false;
+      }
+    };
+    for (const op of plan.operations) {
+      if (op.type !== "role.create" || remaining.has(op.id)) continue;
+      if (snapshot.rolledBackOps.includes(op.id)) continue;
+      const record = recorded.get(op.id);
+      if (!record || record.status === "applied" || !record.startedAt) continue;
+      if (snapshot.createdRoles.some((r) => r.ref === op.ref)) continue;
+      const name = op.name.trim().toLowerCase();
+      for (const live of scanned.roles) {
+        if (
+          live.name.trim().toLowerCase() === name &&
+          live.color === op.color &&
+          sameBits(live.permissions, op.permissions) &&
+          !desired.deletions.some((d) => d.id === live.id)
+        ) {
+          desired.deletions.push({ kind: "role", id: live.id });
+          approve("role.delete", live.id);
+        }
+      }
+    }
+  }
+
   // Follow-up repairs an earlier, partly finished restore still owes: the
   // engine puts the saved overwrite back on every surviving channel for each
   // role it recreated, unless that repair is already recorded as done. Same

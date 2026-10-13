@@ -1489,7 +1489,9 @@ opens the snapshot history.
    Every role the restore takes back from members is also judged like a role change, even when neither of you received it:
    the bot needs Manage Roles, and a role that is managed by an integration or sits at or above the bot's highest role
    refuses the restore.
-   Choosing **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. The
+   Choosing **Also delete the roles this plan created** is checked too, because deleting a role you hold can remove your access. This includes a role whose
+   creation was interrupted: any role on the server with the same name, colour and permissions is judged as if it
+   would be deleted, so a lookalike can refuse the restore. The
    engine runs the same check again after it claims the snapshot and before its first write. If the live server can't be
    read, Restore is refused. For a snapshot that was already partly restored, only the steps still to be reverted are
    checked; what was restored earlier is part of the live state. The check never approves anything the planner can't judge:
