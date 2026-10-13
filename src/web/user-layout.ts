@@ -10,6 +10,7 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
+import { CONFIRM_SCRIPT } from "./html.js";
 import { THEME } from "./theme.js";
 import {
   DAY_NAMES,
@@ -372,6 +373,7 @@ export function renderUserPage(opts: UserPageOptions): string {
       privacyEnabled: opts.privacyEnabled,
     })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
+    `<script>${CONFIRM_SCRIPT}</script>`,
     `<script>${FLASH_FOCUS_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
@@ -1558,7 +1560,7 @@ function renderPrivacyResetCard(
     '<a class="btn" href="/me/privacy/export" download>Download my data first (JSON)</a>',
     "</div>",
     cooldown,
-    `<form method="POST" action="/me/privacy/delete" class="stack" onsubmit="return confirm('Reset all of your Koolbot data on this server? This cannot be undone.');">`,
+    `<form method="POST" action="/me/privacy/delete" class="stack" data-confirm="Reset all of your Koolbot data on this server? This cannot be undone.">`,
     `<input type="hidden" name="_csrf" value="${escapeHtml(reset.csrfToken)}">`,
     `<label>Type <code>${word}</code> to confirm: ` +
       `<input type="text" name="confirm" autocomplete="off" placeholder="${word}" required></label>`,

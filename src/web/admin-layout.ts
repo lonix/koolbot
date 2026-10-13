@@ -8,7 +8,7 @@
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getInactivityWindowMs } from "./session.js";
 import { THEME } from "./theme.js";
-import { escapeHtml, escapeJsInAttr } from "./html.js";
+import { CONFIRM_SCRIPT, escapeHtml, escapeJsInAttr } from "./html.js";
 import { getBotVersion } from "../utils/version.js";
 import { formatVersion } from "../utils/semver.js";
 
@@ -834,6 +834,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<nav class="side" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
     `<main id="main" tabindex="-1">${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
+    `<script>${CONFIRM_SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,
     `<script>${CASCADE_DISABLE_SCRIPT}</script>`,
     `<script>${SETTINGS_SAVE_SCRIPT}</script>`,

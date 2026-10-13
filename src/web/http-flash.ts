@@ -1,4 +1,7 @@
+import crypto from "node:crypto";
+import { Buffer } from "buffer";
 import type { Response } from "express";
+import { env } from "../config/env.js";
 
 /**
  * Shared flash/error helpers for the WebUI's state-changing routes.
@@ -11,6 +14,40 @@ import type { Response } from "express";
 
 /** Max length for inline flash/toast text, shared by redirect + JSON paths. */
 export const FLASH_MAX = 500;
+
+/**
+ * Flash redirects carry their text in the query string, which anyone can
+ * forge into a link (#1149). Redirects the server issues therefore add
+ * `sig = HMAC(WEBUI_SESSION_SECRET, type + text)` and pages only render a
+ * flash whose signature verifies, so a crafted `?flash=err&msg=...` link
+ * shows nothing. The signature is not session-bound: a replayed link can
+ * only ever show a message the server itself produced.
+ */
+function flashMac(type: string, text: string): string | null {
+  const secret = env.webui.sessionSecret;
+  if (!secret) return null;
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`flash\0${type}\0${text}`)
+    .digest("base64url");
+}
+
+export function signFlash(type: string, text: string): string {
+  return flashMac(type, text) ?? "";
+}
+
+export function verifyFlashSignature(
+  type: string,
+  text: string,
+  sig: unknown,
+): boolean {
+  if (typeof sig !== "string" || !sig) return false;
+  const expected = flashMac(type, text);
+  if (!expected) return false;
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 export function truncateFlash(text: string): string {
   return text.length > FLASH_MAX ? `${text.slice(0, FLASH_MAX - 1)}…` : text;

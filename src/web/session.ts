@@ -10,12 +10,13 @@ import { WebSessionService } from "../services/web-session-service.js";
 import type { IWebSession, WebSessionRole } from "../models/web-session.js";
 import {
   clearCookie,
+  hostCookieName,
   parseCookies,
   setCookie,
+  shouldUseSecureCookies,
   signValue,
   verifySignedValue,
 } from "./cookies.js";
-import { shouldUseSecureCookies } from "./csrf.js";
 import { env } from "../config/env.js";
 import { renderErrorPage } from "./views.js";
 
@@ -101,7 +102,7 @@ export function writeSessionCookie(
 ): void {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signed = signValue(encoded, getSecret());
-  setCookie(res, SESSION_COOKIE, signed, {
+  setCookie(res, hostCookieName(SESSION_COOKIE), signed, {
     httpOnly: true,
     sameSite: "lax",
     secure: shouldUseSecureCookies(),
@@ -111,7 +112,14 @@ export function writeSessionCookie(
 }
 
 export function clearSessionCookie(res: Response): void {
+  // Clear both spellings so a pre-#1150 cookie never lingers after sign-out.
   clearCookie(res, SESSION_COOKIE, { path: SESSION_COOKIE_PATH });
+  if (hostCookieName(SESSION_COOKIE) !== SESSION_COOKIE) {
+    clearCookie(res, hostCookieName(SESSION_COOKIE), {
+      path: SESSION_COOKIE_PATH,
+      secure: true,
+    });
+  }
 }
 
 /**
@@ -139,9 +147,9 @@ async function loadValidSession(
   return dbSession;
 }
 
-function readSessionCookie(req: Request): CookiePayload | null {
+export function readSessionCookie(req: Request): CookiePayload | null {
   const cookies = parseCookies(req);
-  const raw = cookies.get(SESSION_COOKIE);
+  const raw = cookies.get(hostCookieName(SESSION_COOKIE));
   if (!raw) return null;
   let secret: string;
   try {

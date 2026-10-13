@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Buffer } from "buffer";
 import { Request, Response } from "express";
+import { env } from "../config/env.js";
 
 /**
  * Lightweight cookie helpers. We deliberately avoid pulling in cookie-parser
@@ -11,6 +12,10 @@ import { Request, Response } from "express";
  * Parse the Cookie header into a Map. We use a Map (not a plain object)
  * so user-controlled cookie names cannot mutate any object prototype, and
  * so CodeQL's remote-property-injection query has nothing to flag.
+ *
+ * First occurrence wins (#1150): when a name appears twice, browsers send the
+ * most specific (longest-path, then oldest) cookie first, so a duplicate that
+ * a sibling sub-domain "tossed" into the jar cannot shadow the real one.
  */
 export function parseCookies(req: Request): Map<string, string> {
   const out = new Map<string, string>();
@@ -28,9 +33,44 @@ export function parseCookies(req: Request): Map<string, string> {
     } catch {
       // Keep the raw value on malformed encodings.
     }
-    out.set(name, value);
+    if (!out.has(name)) out.set(name, value);
   }
   return out;
+}
+
+/**
+ * Decide whether to set the `Secure` cookie attribute. We key off the
+ * configured access scheme (`WEBUI_BASE_URL`) rather than NODE_ENV
+ * because operators routinely run NODE_ENV=production while exposing
+ * the WebUI over plain HTTP (Docker on a LAN, behind a reverse proxy
+ * that terminates TLS without propagating X-Forwarded-Proto, etc.).
+ * Setting Secure on an HTTP request causes browsers to silently drop
+ * the cookie, which breaks the entire sign-in flow.
+ *
+ * If WEBUI_BASE_URL is missing or malformed we fall back to the
+ * NODE_ENV check so we don't silently disable Secure on a real HTTPS
+ * deployment that just forgot to set the variable.
+ *
+ * Lives here (re-exported from `csrf.ts`) so `session.ts` and `csrf.ts` can
+ * both use it without importing each other.
+ */
+export function shouldUseSecureCookies(): boolean {
+  const baseUrl = env.webui.baseUrl;
+  if (baseUrl.startsWith("https://")) return true;
+  if (baseUrl.startsWith("http://")) return false;
+  return env.isProduction;
+}
+
+/**
+ * Cookie name for a Web UI cookie. When cookies are `Secure` the name gets
+ * the `__Host-` prefix (#1150), which makes browsers reject any copy that
+ * carries a `Domain` attribute or a non-`/` path, or that was set over plain
+ * HTTP. A sibling sub-domain can therefore no longer plant or shadow the
+ * cookie. On plain-HTTP deployments the prefix is impossible (it requires
+ * `Secure`), so the bare name is used.
+ */
+export function hostCookieName(baseName: string): string {
+  return shouldUseSecureCookies() ? `__Host-${baseName}` : baseName;
 }
 
 export interface CookieOptions {

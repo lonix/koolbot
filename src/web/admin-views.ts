@@ -6,7 +6,6 @@
 
 import {
   escapeHtml,
-  escapeJsInAttr,
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
@@ -1055,7 +1054,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 
   const actionBar = `
 <div class="actions">
-  <form method="POST" action="/admin/settings/reload" onsubmit="return confirm('Reload bot slash commands now? This briefly puts the bot into a config-reload status.');">
+  <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status.">
     <input type="hidden" name="_csrf" value="${csrf}">
     <button type="submit" class="btn">Reload commands</button>
   </form>
@@ -1217,7 +1216,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 <div id="danger-zone" class="card" style="border-color:#7f1d1d">
   <h2>Danger zone</h2>
   <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
-  <form method="POST" action="/admin/settings/reset-defaults" class="stack" onsubmit="return confirm('Reset ALL settings to their defaults? This cannot be undone.');">
+  <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone.">
     <input type="hidden" name="_csrf" value="${csrf}">
     <label>Type <code>${escapeHtml(confirmTarget)}</code> to confirm:
       <input type="text" name="confirm" autocomplete="off" placeholder="${escapeHtml(confirmTarget)}" required>
@@ -2152,7 +2151,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <td class="actions">
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn btn-primary">Post now</button></form>
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" onsubmit="return confirm('Delete announcement ${escapeHtml(a.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
 </tr>`,
     )
@@ -2289,7 +2288,7 @@ export function renderEventsPage(props: EventsProps): string {
   const tableRows = props.rows
     .map((e) => {
       const finished = e.state === "cancelled" || e.state === "ended";
-      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel the whole \\'${escapeJsInAttr(e.title)}\\' series?');">${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
+      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?">${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
       // A finished occurrence still awaiting its successor (e.g. recurrence
       // was switched off meanwhile) keeps the series live: allow stopping it.
       const actions = finished
@@ -2297,7 +2296,7 @@ export function renderEventsPage(props: EventsProps): string {
           ? seriesForm
           : '<span class="muted">—</span>'
         : `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel ${e.recurrence ? "this occurrence of " : ""}event \\'${escapeJsInAttr(e.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
       const channelCell = e.channelId
@@ -2532,7 +2531,7 @@ export function renderPollsPage(props: PollsProps): string {
   </details>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
-  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" onsubmit="return confirm('Delete schedule ${escapeHtml(s.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
 </tr>`,
     )
@@ -2558,7 +2557,7 @@ export function renderPollsPage(props: PollsProps): string {
     </form>
   </details>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" onsubmit="return confirm('Delete poll question?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
 </tr>`,
     )
@@ -2718,7 +2717,7 @@ export interface ReactionRolesProps extends CommonProps {
 
 function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const escapedName = escapeHtml(rr.roleName);
-  const jsName = escapeJsInAttr(rr.roleName);
+  const jsName = escapeHtml(rr.roleName);
   // Legacy rows lack the flag; treat undefined as managed (auto-created).
   const managed = rr.autoCreated ?? true;
   const escapedEmoji = escapeHtml(rr.emoji);
@@ -2730,20 +2729,20 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     // Grouped mappings share a message/category/channel, so they can only be
     // torn down as a unit — offer a single group-delete instead of the
     // per-mapping archive/delete controls.
-    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" onsubmit="return confirm('Permanently delete the whole role group ${jsName} belongs to? This removes the roles the bot created for it (reused roles, and roles still used by another mapping, are kept) and its shared category/channel.');">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" data-confirm="Permanently delete the whole role group ${jsName} belongs to? This removes the roles the bot created for it (reused roles, and roles still used by another mapping, are kept) and its shared category/channel.">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
   } else if (!managed) {
     // Bound mappings point at a pre-existing role and may share a picker
     // message, so they are removed per-mapping (message + emoji) and never
     // archived — that would delete a message other mappings still use.
-    actions = `<form method="POST" action="/admin/reaction-roles/remove-mapping" onsubmit="return confirm('Remove the ${escapeJsInAttr(rr.emoji)} → ${jsName} mapping? The existing role is left untouched.');">${csrfInput}<input type="hidden" name="messageId" value="${escapedMessageId}"><input type="hidden" name="emoji" value="${escapedEmoji}"><button type="submit" class="btn btn-danger">Remove</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/remove-mapping" data-confirm="Remove the ${escapeHtml(rr.emoji)} → ${jsName} mapping? The existing role is left untouched.">${csrfInput}<input type="hidden" name="messageId" value="${escapedMessageId}"><input type="hidden" name="emoji" value="${escapedEmoji}"><button type="submit" class="btn btn-danger">Remove</button></form>`;
   } else if (rr.isArchived) {
     // Managed rows are keyed by their stable mapping id, not roleName, so
     // identically named pickers can't collide (#813).
     actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Unarchive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   } else {
-    actions = `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/archive" data-confirm="Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   }
 
   const typeTag = managed
@@ -3025,7 +3024,7 @@ export function renderNoticesPage(props: NoticesProps): string {
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
-  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" onsubmit="return confirm('Delete notice \\'${escapeJsInAttr(n.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
 </tr>`,
               )
@@ -3059,7 +3058,7 @@ ${renderFeatureSettingsCard({
     <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
     <dt>Total notices</dt><dd>${props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/notices/sync" class="inline-form" onsubmit="return confirm('Resync all notices? This deletes and reposts every notice message.');">
+  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message.">
     ${csrfInput}
     <button type="submit" class="btn btn-primary">Resync notices to channel</button>
     <span class="muted">Deletes and reposts every notice message in the channel.</span>
@@ -3160,7 +3159,7 @@ export function renderQuotesPage(props: QuotesProps): string {
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
-  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" onsubmit="return confirm('Delete quote ${escapeJsInAttr(q.id)}? Its channel post is removed too.');">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
+  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
 </td>
 </tr>`;
     })
@@ -3199,7 +3198,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", feature
     <dt>Header post</dt><dd>${props.headerMessageId ? `<span class="mono">${escapeHtml(props.headerMessageId)}</span> <span class="muted">(auto-managed)</span>` : '<span class="muted">none</span>'}</dd>
     <dt>${props.search ? "Matching quotes" : "Total quotes"}</dt><dd>${props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/quotes/sync" class="inline-form" onsubmit="return confirm('Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes.');">
+  <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes.">
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
     <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
@@ -3354,7 +3353,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
-  <form method="POST" action="/admin/birthdays/${id}/remove" onsubmit="return confirm('Remove the birthday for ${escapeJsInAttr(b.userLabel)}? Any birthday role they hold is taken back and the bot\\'s birthday posts about them are deleted.');">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
+  <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted.">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
 </td>
 </tr>`;
     })
@@ -3411,7 +3410,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", feat
     <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron)}</dd>
     <dt>Stored birthdays</dt><dd>${props.listUnavailable ? '<span class="muted">unavailable</span>' : props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" onsubmit="return confirm('Run the birthday check now?');">
+  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?">
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -3551,7 +3550,7 @@ ${renderFlash(props.flash)}
     <dt>Monthly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.monthlyMonths, "months")}</dd>
     <dt>Yearly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.yearlyYears, "years")}</dd>
   </dl>
-  <form method="POST" action="/admin/database/run-cleanup" class="inline-form" onsubmit="return confirm('Run voice-channel data cleanup now?');">
+  <form method="POST" action="/admin/database/run-cleanup" class="inline-form" data-confirm="Run voice-channel data cleanup now?">
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run cleanup now</button>
     <span class="muted">${runHint}</span>
@@ -3642,7 +3641,7 @@ export function renderStringArrayEditor(
   </details>
   <div class="muted mono">id: ${escapeHtml(item.id)}</div>
 </td>
-<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" onsubmit="return confirm('Delete this entry?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
+<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
 </tr>`,
           )
           .join("");
@@ -4030,7 +4029,7 @@ ${renderFeatureSettingsCard({
 })}
 <div class="card">
   <h2>Cleanup actions</h2>
-  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}');">
+  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" data-confirm="${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}">
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
     <span class="muted">${props.managedOnly ? "Removes empty channels KoolBot created in the category (channels it did not create are never touched, and occupied ones are kept until they empty)" : "Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty)"}, then ensures the lobby exists: ${props.managedOnly ? "an existing lobby is kept and renamed back online if needed, and one is only created when missing." : "an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}</span>
@@ -4202,7 +4201,7 @@ ${renderFeatureSettingsCard({
     <button type="submit" name="preview" value="1" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Preview digest</button>
     <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
   </form>
-  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" onsubmit="return confirm('Send the weekly digest to all qualifying members right now?');">
+  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?">
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${sendDisabled ? " disabled" : ""}>Send now</button>
     <span class="muted">${sendHint}</span>
@@ -4423,7 +4422,7 @@ ${renderFeatureSettingsCard({
 <div class="card">
   <h2>Current holders</h2>
   ${holdersHtml}
-  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" onsubmit="return confirm('Recalculate leaderboard roles now? Roles are granted and revoked immediately.');">
+  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately.">
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -4835,8 +4834,8 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
       <div class="inline-form">
         <button type="submit" class="btn btn-sm">Uphold</button>
         <button type="submit" class="btn btn-sm" formaction="${base}/extend">Extend</button>
-        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" onclick="return confirm('Make this removal permanent? The case closes with no further review.');">Make permanent</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" onclick="return confirm('Record readmission? KoolBot does not unban in Discord; do that there.');">Readmit</button>
+        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="Make this removal permanent? The case closes with no further review.">Make permanent</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there.">Readmit</button>
       </div>
       <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Readmit records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
@@ -4887,7 +4886,7 @@ ${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days
   return `<div class="card">
   <h2>Cases</h2>
   <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided when it came due. Escalation stays a human decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" onsubmit="return confirm('Move every case whose review date has passed into review now?');">
+  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?">
     <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
     <button type="submit" class="btn btn-sm">Run review pass now</button>
   </form>

@@ -20,6 +20,12 @@ import { Buffer } from "buffer";
 import { createUserRouter } from "../../src/web/user-routes.js";
 import { signValue } from "../../src/web/cookies.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
+import { createHmac } from "node:crypto";
+
+// The CSRF token is derived from the session id (#1150), not a cookie.
+// Computed here (not imported) so no web module loads before the mocks.
+const csrf = (): string =>
+  createHmac("sha256", SECRET).update("csrf\0session-id").digest("base64url");
 
 const SECRET = "test-secret-for-user-privacy-routes";
 const USER = "user-1";
@@ -51,7 +57,7 @@ function buildCookie(): string {
       act: now - 60_000,
     }),
   ).toString("base64url");
-  return `koolbot_session=${signValue(encoded, SECRET)}; koolbot_csrf=csrf-1`;
+  return `koolbot_session=${signValue(encoded, SECRET)}`;
 }
 
 function makeRes(captured: Captured): Record<string, unknown> {
@@ -204,7 +210,7 @@ async function dispatch(
     query: {},
     ip: opts.ip ?? "10.0.0.1",
     socket: { remoteAddress: opts.ip ?? "10.0.0.1" },
-    csrfToken: "csrf-1",
+    csrfToken: csrf(),
     header: (name: string) => headers[name.toLowerCase()],
   } as never as Parameters<typeof router>[0];
 

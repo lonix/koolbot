@@ -23,6 +23,12 @@ import { WebSessionService } from "../../src/services/web-session-service.js";
 import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
 import { renderUserPrivacyBody } from "../../src/web/user-layout.js";
+import { createHmac } from "node:crypto";
+
+// The CSRF token is derived from the session id (#1150), not a cookie.
+// Computed here (not imported) so no web module loads before the mocks.
+const csrf = (): string =>
+  createHmac("sha256", SECRET).update("csrf\0session-id").digest("base64url");
 
 const SECRET = "test-secret-for-user-privacy-tracking-routes";
 const USER = "user-1";
@@ -59,7 +65,7 @@ function buildCookie(): string {
       act: now - 60_000,
     }),
   ).toString("base64url");
-  return `koolbot_session=${signValue(encoded, SECRET)}; koolbot_csrf=csrf-1`;
+  return `koolbot_session=${signValue(encoded, SECRET)}`;
 }
 
 async function installMocks(opts: MockOptions = {}): Promise<void> {
@@ -144,11 +150,11 @@ async function post(
     path: "/privacy/tracking",
     baseUrl: "/me",
     headers,
-    body: opts.body ?? { _csrf: "csrf-1", action: "opt-out" },
+    body: opts.body ?? { _csrf: csrf(), action: "opt-out" },
     query: {},
     ip: opts.ip ?? "10.0.0.1",
     socket: { remoteAddress: opts.ip ?? "10.0.0.1" },
-    csrfToken: "csrf-1",
+    csrfToken: csrf(),
     header: (name: string) => headers[name.toLowerCase()],
   } as never as Parameters<typeof router>[0];
 
@@ -259,7 +265,7 @@ describe("POST /me/privacy/tracking", () => {
     await installMocks();
     await post({
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         action: "opt-out",
         userId: "someone-else",
         guildId: "other-guild",
@@ -271,7 +277,7 @@ describe("POST /me/privacy/tracking", () => {
   it("opts the member back in and audits it", async () => {
     await installMocks();
     const { captured } = await post({
-      body: { _csrf: "csrf-1", action: "opt-in" },
+      body: { _csrf: csrf(), action: "opt-in" },
     });
 
     expect(optInCalls).toEqual([[USER, GUILD]]);
@@ -286,7 +292,7 @@ describe("POST /me/privacy/tracking", () => {
   it("keeps the member opted out, and says so, when an opt-in cannot settle", async () => {
     await installMocks({ settled: false });
     const { captured } = await post({
-      body: { _csrf: "csrf-1", action: "opt-in" },
+      body: { _csrf: csrf(), action: "opt-in" },
     });
 
     expect(flashOf(captured).type).toBe("err");
@@ -326,7 +332,7 @@ describe("POST /me/privacy/tracking", () => {
   it("always lets a member opt back in, whatever is switched off", async () => {
     await installMocks({ privacyEnabled: false, optOutEnabled: false });
     const { captured } = await post({
-      body: { _csrf: "csrf-1", action: "opt-in" },
+      body: { _csrf: csrf(), action: "opt-in" },
     });
 
     expect(captured.statusCode).toBe(303);
@@ -336,7 +342,7 @@ describe("POST /me/privacy/tracking", () => {
   describe("redirect landing (#1066)", () => {
     const pathOf = (c: Captured): string =>
       new globalThis.URL(`http://x${c.redirect ?? ""}`).pathname;
-    const optIn = { body: { _csrf: "csrf-1", action: "opt-in" } };
+    const optIn = { body: { _csrf: csrf(), action: "opt-in" } };
 
     it("lands on /me/privacy after an opt-in when the section is enabled", async () => {
       await installMocks({ privacyEnabled: true });
@@ -377,7 +383,7 @@ describe("POST /me/privacy/tracking", () => {
   it("rejects an unknown action without touching anything", async () => {
     await installMocks();
     const { captured } = await post({
-      body: { _csrf: "csrf-1", action: "delete-everyone" },
+      body: { _csrf: csrf(), action: "delete-everyone" },
     });
 
     expect(flashOf(captured).type).toBe("err");
