@@ -483,8 +483,9 @@ describe("Config Schema", () => {
       "welcome.enabled": false,
       "rules.enabled": false,
       "events.enabled": false,
-      // Mirror of events to Discord scheduled events (#1034): opt-in.
-      "events.native.enabled": false,
+      // Mirror of events to Discord scheduled events (#1034): on by default
+      // but inert unless `events.enabled` is on (rule 2, see below).
+      "events.native.enabled": true,
       "lfg.enabled": false,
       "reactionroles.enabled": false,
       "notices.enabled": false,
@@ -594,6 +595,7 @@ describe("Config Schema", () => {
       "notices.header_pin_enabled": "notices.enabled",
       "lfg.voice_channel.enabled": "lfg.enabled",
       "events.recurrence_enabled": "events.enabled",
+      "events.native.enabled": "events.enabled",
     };
 
     it("audits every `*enabled` key in defaultConfig (no drift)", () => {

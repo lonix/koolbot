@@ -825,4 +825,93 @@ describe("NativeEventSync.syncEvent", () => {
       expect((event as { nativeEventId: unknown }).nativeEventId).toBe("n1");
     });
   });
+
+  describe("default-on, gated by the Events feature", () => {
+    const byKey = (events: boolean, native: boolean | undefined) =>
+      config.getBoolean.mockImplementation(async (k: string, d?: boolean) =>
+        k === "events.enabled"
+          ? events
+          : k === "events.native.enabled"
+            ? (native ?? (d as boolean))
+            : (d as boolean),
+      );
+
+    it("does nothing at all when Events are off, even with the mirror toggle on", async () => {
+      byKey(false, true);
+      const { guild, scheduledEvents } = makeGuild({ perms: [] });
+      const sync = makeSync();
+      await sync.syncEvent(makeEvent(), guild);
+      expect(await sync.loadCache(guild)).toBeNull();
+      expect(scheduledEvents.fetch).not.toHaveBeenCalled();
+      expect(scheduledEvents.create).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("mirrors by default (toggle unset) when Events are on", async () => {
+      byKey(true, undefined); // falls back to the code default, which is true
+      const { guild, scheduledEvents } = makeGuild();
+      await makeSync().syncEvent(makeEvent(), guild);
+      expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing when the operator turned the mirror off", async () => {
+      byKey(true, false);
+      const { guild, scheduledEvents } = makeGuild();
+      await makeSync().syncEvent(makeEvent(), guild);
+      expect(scheduledEvents.create).not.toHaveBeenCalled();
+    });
+
+    it("the missing-permission warning says how to switch mirroring off", async () => {
+      byKey(true, true);
+      const { guild } = makeGuild({ perms: [] });
+      await makeSync().syncEvent(makeEvent(), guild);
+      const text = String(logger.warn.mock.calls[0][0]);
+      expect(text).toMatch(/events\.native\.enabled/);
+      expect(text).toMatch(/Create Events/);
+    });
+
+    it("creates at most MAX_CREATES_PER_SCAN native events per scan", async () => {
+      const { MAX_CREATES_PER_SCAN } =
+        await import("../../src/services/event-native-sync.js");
+      const { guild, scheduledEvents } = makeGuild();
+      const sync = makeSync();
+      const cache = (await sync.loadCache(guild)) as never;
+      for (let i = 0; i < MAX_CREATES_PER_SCAN + 3; i++) {
+        await sync.syncEvent(
+          makeEvent({ _id: `ev${i}`, title: `Event ${i}` }),
+          guild,
+          cache,
+        );
+      }
+      expect(scheduledEvents.create).toHaveBeenCalledTimes(
+        MAX_CREATES_PER_SCAN,
+      );
+      // The next scan picks the rest up.
+      const next = (await sync.loadCache(guild)) as never;
+      await sync.syncEvent(
+        makeEvent({ _id: "ev9", title: "Event 9" }),
+        guild,
+        next,
+      );
+      expect(scheduledEvents.create).toHaveBeenCalledTimes(
+        MAX_CREATES_PER_SCAN + 1,
+      );
+    });
+
+    it("never holds back a single create made without a scan cache", async () => {
+      const { MAX_CREATES_PER_SCAN } =
+        await import("../../src/services/event-native-sync.js");
+      const { guild, scheduledEvents } = makeGuild();
+      const sync = makeSync();
+      for (let i = 0; i < MAX_CREATES_PER_SCAN + 2; i++) {
+        await sync.syncEvent(
+          makeEvent({ _id: `ev${i}`, title: `Event ${i}` }),
+          guild,
+        );
+      }
+      expect(scheduledEvents.create).toHaveBeenCalledTimes(
+        MAX_CREATES_PER_SCAN + 2,
+      );
+    });
+  });
 });

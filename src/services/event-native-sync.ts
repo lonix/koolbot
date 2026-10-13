@@ -19,7 +19,8 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  * Mirrors KoolBot events to Discord *native* guild scheduled events (#1034),
  * so members see them in the server's "Events" list.
  *
- * Opt-in (`events.native.enabled`, default off). KoolBot stays the source of
+ * On by default (`events.native.enabled`) but only while the Events feature
+ * itself is on (`events.enabled`). KoolBot stays the source of
  * truth: the native event is created, updated and closed to match the Mongo
  * row, never the other way round in this slice.
  *
@@ -49,6 +50,10 @@ const LOCATION_MAX = 100;
 const DISCORD_UNKNOWN_SCHEDULED_EVENT = 10070;
 /** How long a started-but-unclaimed create is given to show up in Discord
  * (a timed-out request may still complete) before it is retried. */
+/** At most this many native events are created per scan (once a minute), so
+ * enabling mirroring for a guild with many future events backfills in small
+ * steps instead of one burst of REST calls. */
+export const MAX_CREATES_PER_SCAN = 5;
 export const CREATE_GRACE_MS = 5 * MS_PER_MINUTE;
 
 export const DEFAULT_NATIVE_LOCATION =
@@ -146,6 +151,7 @@ type ApiCaller = <T>(call: () => Promise<T>, name: string) => Promise<T>;
 
 export class NativeEventSync {
   private readonly warned = new Set<string>();
+  private createsThisScan = 0;
 
   constructor(
     private readonly client: Client,
@@ -154,10 +160,10 @@ export class NativeEventSync {
 
   public async isEnabled(): Promise<boolean> {
     try {
-      return await ConfigService.getInstance().getBoolean(
-        "events.native.enabled",
-        false,
-      );
+      const config = ConfigService.getInstance();
+      // Inert unless the Events feature is on: no REST calls, no warnings.
+      if (!(await config.getBoolean("events.enabled", false))) return false;
+      return await config.getBoolean("events.native.enabled", true);
     } catch {
       return false;
     }
@@ -172,6 +178,7 @@ export class NativeEventSync {
    */
   public async loadCache(guild: Guild): Promise<NativeCache | null | "failed"> {
     if (!(await this.isEnabled())) return null;
+    this.createsThisScan = 0;
     try {
       return await this.callApi(
         () => guild.scheduledEvents.fetch(),
@@ -249,7 +256,7 @@ export class NativeEventSync {
     }
     this.warnOnce(
       "permission",
-      "Native events are enabled (events.native.enabled) but the bot lacks the Create Events / Manage Events permission; events are not mirrored to Discord's Events list. Grant it to the bot's role to enable mirroring.",
+      "Events are not being mirrored to Discord's Events list because the bot lacks the Create Events / Manage Events permission. Grant it to the bot's role, or set events.native.enabled to false to stop mirroring and silence this warning.",
     );
     return false;
   }
@@ -318,7 +325,12 @@ export class NativeEventSync {
     // A create that was started but never claimed (timeout, crash) may still
     // land in Discord. Adoption above already looked for it; do not create
     // again until the grace period has passed with nothing found.
+    // A scan (it passes the shared cache) creates at most
+    // MAX_CREATES_PER_SCAN; the rest wait for the next tick. A single create
+    // from the Web UI or a cancel path (no cache) is never held back.
+    if (cache && this.createsThisScan >= MAX_CREATES_PER_SCAN) return;
     if (!(await this.markCreateStarted(event))) return;
+    if (cache) this.createsThisScan += 1;
 
     let created: GuildScheduledEvent;
     try {

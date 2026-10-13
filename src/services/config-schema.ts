@@ -447,7 +447,7 @@ export const defaultConfig: ConfigSchema = {
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
   "events.recurrence_enabled": true,
-  "events.native.enabled": false,
+  "events.native.enabled": true, // Inert unless events.enabled is on
   "events.native.location":
     "Voice channel in this server (see the event announcement)",
 
@@ -1847,7 +1847,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.native.enabled": {
     label: "Mirror to Discord scheduled events",
     description:
-      "Also create each event as a Discord native scheduled event (the Events list at the top of the channel list), and keep it in sync when the event is edited, cancelled or finishes. Needs the Create Events (or Manage Events) permission for the bot; without it events are simply not mirrored and a warning is logged.",
+      "On by default, and only when Events are enabled: also create each event as a Discord native scheduled event (the Events list at the top of the channel list), and keep it in sync when the event is edited, cancelled or finishes. Needs the Create Events (or Manage Events) permission for the bot; without it events are simply not mirrored and one warning is logged. Turn this off to keep events inside KoolBot only.",
     category: "events",
     type: "boolean",
   },
