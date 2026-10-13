@@ -266,6 +266,53 @@ describe("sync with Discord (#1021)", () => {
     expect(html).not.toContain("created on apply");
   });
 
+  it("leaves out roles another feature holds when linking or adding (#1023)", () => {
+    const options = [
+      { id: "rf", name: "Free", memberCount: 1, lock: null, taken: false },
+      {
+        id: "rb",
+        name: "Birthday",
+        memberCount: 1,
+        lock: null,
+        taken: false,
+        usedBy: ["Birthdays", "Reaction Roles"],
+      },
+    ];
+    const relink = renderRoleGroupsPage(
+      props({
+        groups: [row({ roleId: null, unlinked: true })],
+        roleOptions: options,
+      }),
+    );
+    expect(relink).toContain('<option value="rf">@Free</option>');
+    expect(relink).not.toContain('<option value="rb">@Birthday</option>');
+    const add = renderRoleGroupsPage(props({ roleOptions: options }));
+    expect(add).toContain(
+      '<option value="rb" disabled>@Birthday · 1 member(s) — used by Birthdays, Reaction Roles</option>',
+    );
+    expect(add).toContain('<option value="rf">@Free');
+  });
+
+  it("shows both notes for a role that backs a group and is held by a feature", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        roleOptions: [
+          {
+            id: "rx",
+            name: "Both",
+            memberCount: 2,
+            lock: null,
+            taken: true,
+            usedBy: ["Birthdays"],
+          },
+        ],
+      }),
+    );
+    expect(html).toContain(
+      '<option value="rx" disabled>@Both · 2 member(s) — already a group; used by Birthdays</option>',
+    );
+  });
+
   it("offers no recreate for an unlinked gate-only group", () => {
     const html = renderRoleGroupsPage(
       props({

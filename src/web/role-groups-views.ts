@@ -56,6 +56,8 @@ export interface RoleGroupRoleOption {
   lock: RoleLock | null;
   /** Already backs a group. */
   taken: boolean;
+  /** Features that hold the role (leaderboard, reaction roles, birthdays). */
+  usedBy?: string[];
 }
 
 export interface RoleGroupsPageProps {
@@ -147,7 +149,10 @@ function relinkForm(
     // A gate-only group links an integration-managed role; any other group
     // an editable one (the same rule the POST handler enforces).
     .filter(
-      (r) => (g.gateOnly ? r.lock === "managed" : r.lock === null) && !r.taken,
+      (r) =>
+        (g.gateOnly ? r.lock === "managed" : r.lock === null) &&
+        !r.taken &&
+        !r.usedBy?.length,
     )
     .map(
       (r) =>
@@ -259,12 +264,14 @@ function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
   const options = props.roleOptions
     .map((r) => {
       const disabled =
-        r.lock === "everyone" || r.lock === "hierarchy" || r.taken;
+        r.lock === "everyone" ||
+        r.lock === "hierarchy" ||
+        r.taken ||
+        !!r.usedBy?.length;
+      const usedNote = r.usedBy?.length ? `used by ${r.usedBy.join(", ")}` : "";
       const note = r.taken
-        ? "already a group"
-        : r.lock
-          ? ROLE_LOCK_LABELS[r.lock]
-          : "";
+        ? ["already a group", usedNote].filter(Boolean).join("; ")
+        : usedNote || (r.lock ? ROLE_LOCK_LABELS[r.lock] : "");
       const count =
         r.memberCount === null ? "" : ` · ${r.memberCount} member(s)`;
       return `<option value="${escapeHtml(r.id)}"${disabled ? " disabled" : ""}>@${escapeHtml(r.name)}${escapeHtml(count)}${note ? ` — ${escapeHtml(note)}` : ""}</option>`;

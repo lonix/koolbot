@@ -94,6 +94,12 @@ export async function loadRoleGroupsPage(
   const taken = new Set(
     built.groups.flatMap((g) => (g.roleId ? [g.roleId] : [])),
   );
+  // Roles another feature holds can't newly back a group (#1023). Unreadable
+  // feature settings leave the list unfiltered; the service rechecks on save.
+  const featureUses = await service.featureRoleUses(guildId).catch((error) => {
+    logger.warn("role groups: feature roles unreadable", error);
+    return new Map<string, string[]>();
+  });
   const groups: RoleGroupRow[] = built.groups.map((g) => {
     const role = g.roleId ? byId.get(g.roleId) : undefined;
     return {
@@ -116,6 +122,7 @@ export async function loadRoleGroupsPage(
       memberCount: built.scan.memberCounts.get(r.id) ?? null,
       lock: lockOf(r.id),
       taken: taken.has(r.id),
+      usedBy: featureUses.get(r.id) ?? [],
     }));
   const botRoleIds = built.groups
     .filter((g) => g.capabilities.includes("bot") && g.roleId)

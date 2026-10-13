@@ -1129,6 +1129,14 @@ every feature keeps its current behaviour.
 - **Locked roles.** @everyone and roles at or above the bot's highest role can't be picked.
   Integration-managed roles (Server Booster, subscriptions, bot roles) can be linked only as
   **gate-only** groups: they can be referenced for gating, never edited, and carry no capability.
+- **Roles other features hold can't newly back a group (#1023).** A role that is a Leaderboard
+  Roles tier, a Reaction Roles role or the birthday role is shown disabled in the add form
+  ("used by …") and left out of the re-link choices; creating or re-linking a group with one is
+  refused with the feature named. This is the mirror of the check that stops those features from
+  picking a group's role. Nothing stored is changed: a role that already backs a group and is
+  also used by a feature keeps working. If the features' settings can't be read, the choice is
+  allowed (the page doesn't filter, the save isn't refused). Deleting a group's role is blocked
+  while the birthday role names it too, as it already was for tiers and reaction roles.
 - **Plan → preview → apply → snapshot.** Saving a group only records what you want. The **Plan**
   card shows what applying would change in Discord (role creates and edits, including position to
   match rank, and bot-group grants) using the shared adoption diff, with blocking errors and

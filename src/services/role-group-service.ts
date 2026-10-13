@@ -17,6 +17,8 @@ import {
 import type { ScannedState } from "./server-adoption-planner.js";
 import type { ScannedMember } from "./role-group-sync.js";
 
+const BIRTHDAY_ROLE_KEY = "birthdays.role_id";
+
 /**
  * Role groups (#1020): admin-defined, ranked handles on Discord roles, plus
  * the query API features use so they never read role ids themselves.
@@ -222,6 +224,10 @@ export class RoleGroupService {
     if (input.roleId && existing.some((g) => g.roleId === input.roleId)) {
       return { ok: false, error: "That role already backs another group." };
     }
+    if (input.roleId) {
+      const used = await this.featureUseMessage(guildId, input.roleId);
+      if (used) return { ok: false, error: used };
+    }
     // New groups go on top unless a rank is given.
     const rank = input.rank ?? (existing.length ? existing[0].rank + 1 : 1);
     try {
@@ -422,6 +428,8 @@ export class RoleGroupService {
     if (all.some((g) => g.roleId === roleId)) {
       return { ok: false, error: "That role already backs another group." };
     }
+    const used = await this.featureUseMessage(guildId, roleId);
+    if (used) return { ok: false, error: used };
     try {
       const doc = await RoleGroup.findOneAndUpdate(
         { _id: groupId, guildId, unlinked: true },
@@ -555,6 +563,37 @@ export class RoleGroupService {
   // ---- adoption support -------------------------------------------------
 
   /**
+   * Which features hold which roles: leaderboard tiers, reaction roles and the
+   * birthday role, keyed by role id (#1023). Throws when a feature's settings
+   * can't be read; callers decide how to degrade.
+   */
+  public async featureRoleUses(
+    guildId: string,
+  ): Promise<Map<string, string[]>> {
+    const uses = new Map<string, string[]>();
+    const add = (roleId: string | null | undefined, feature: string): void => {
+      if (!roleId) return;
+      const list = uses.get(roleId) ?? [];
+      if (!list.includes(feature)) list.push(feature);
+      uses.set(roleId, list);
+    };
+    const config = ConfigService.getInstance();
+    const tiers = parseTierConfig(
+      await config.getStringStrict(TIERS_KEY, ""),
+    ).tiers;
+    for (const t of tiers) add(t.roleId, "Leaderboard Roles");
+    add(
+      (await config.getStringStrict(BIRTHDAY_ROLE_KEY, "")).trim(),
+      "Birthdays",
+    );
+    const reactionRoleIds = (await ReactionRoleConfig.distinct("roleId", {
+      guildId,
+    })) as Array<string | null>;
+    for (const id of reactionRoleIds) add(id, "Reaction Roles");
+    return uses;
+  }
+
+  /**
    * Features that still use a role, so it can't be deleted from under them.
    * Best effort: a feature whose settings can't be read blocks deletion.
    */
@@ -562,21 +601,32 @@ export class RoleGroupService {
     guildId: string,
     roleId: string,
   ): Promise<string[]> {
-    const uses: string[] = [];
     try {
-      const tiers = parseTierConfig(
-        await ConfigService.getInstance().getString(TIERS_KEY, ""),
-      ).tiers;
-      if (tiers.some((t) => t.roleId === roleId))
-        uses.push("Leaderboard Roles");
-      if (await ReactionRoleConfig.exists({ guildId, roleId })) {
-        uses.push("Reaction Roles");
-      }
+      return (await this.featureRoleUses(guildId)).get(roleId) ?? [];
     } catch (error) {
       logger.warn("role groups: feature usage check failed", error);
-      uses.push("a feature whose settings could not be read");
+      return ["a feature whose settings could not be read"];
     }
-    return uses;
+  }
+
+  /**
+   * Refusal text when a feature already holds `roleId`, so it can't newly back
+   * a group (#1023, the other half of `groupBackedRoles`). Null when no feature
+   * holds it. Unreadable feature settings allow the link: this guards a choice,
+   * it is not an access check, and nothing stored is changed.
+   */
+  private async featureUseMessage(
+    guildId: string,
+    roleId: string,
+  ): Promise<string | null> {
+    try {
+      const uses = (await this.featureRoleUses(guildId)).get(roleId);
+      if (!uses || uses.length === 0) return null;
+      return `That role is used by ${uses.join(", ")}, so it can't back a group. Pick a different role, or change that feature first.`;
+    } catch (error) {
+      logger.warn("role groups: feature usage check failed", error);
+      return null;
+    }
   }
 }
 

@@ -69,12 +69,22 @@ jest.unstable_mockModule("../../src/models/role-group.js", () => ({
     ),
   },
 }));
+const settings: Record<string, string> = {};
+let configDown = false;
+const mockDistinct = jest.fn<(...a: any[]) => Promise<string[]>>(
+  async () => [],
+);
 jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
-  ReactionRoleConfig: { exists: jest.fn(async () => null) },
+  ReactionRoleConfig: { distinct: mockDistinct },
 }));
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
-    getInstance: () => ({ getString: jest.fn(async () => "") }),
+    getInstance: () => ({
+      getStringStrict: async (key: string) => {
+        if (configDown) throw new Error("config down");
+        return settings[key] ?? "";
+      },
+    }),
   },
 }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -144,6 +154,10 @@ async function seed(): Promise<void> {
 beforeEach(() => {
   store = [];
   seq = 0;
+  for (const k of Object.keys(settings)) delete settings[k];
+  configDown = false;
+  mockDistinct.mockReset();
+  mockDistinct.mockResolvedValue([]);
   RoleGroupService.reset();
   svc = RoleGroupService.getInstance();
 });
@@ -329,6 +343,78 @@ describe("groupBackedRoles (#1023)", () => {
     expect(await svc.groupBackedRoles(G, ["rNew"])).toEqual([
       { roleId: "rNew", groupName: "New" },
     ]);
+  });
+});
+
+describe("roles held by other features (#1023)", () => {
+  const TIER = "111111111111111111";
+  const BDAY = "222222222222222222";
+  const RR = "333333333333333333";
+
+  it("maps leaderboard, birthday and reaction roles to their feature", async () => {
+    settings["leaderboard_roles.tiers"] = `3:${TIER}`;
+    settings["birthdays.role_id"] = ` ${BDAY} `;
+    mockDistinct.mockResolvedValue([RR, TIER]);
+    const uses = await svc.featureRoleUses(G);
+    expect(uses.get(TIER)).toEqual(["Leaderboard Roles", "Reaction Roles"]);
+    expect(uses.get(BDAY)).toEqual(["Birthdays"]);
+    expect(uses.get(RR)).toEqual(["Reaction Roles"]);
+    expect(await svc.featureUsesOfRole(G, BDAY)).toEqual(["Birthdays"]);
+    expect(await svc.featureUsesOfRole(G, "free")).toEqual([]);
+  });
+
+  it("refuses to back a new group with a role a feature holds", async () => {
+    settings["leaderboard_roles.tiers"] = `3:${TIER}`;
+    settings["birthdays.role_id"] = BDAY;
+    mockDistinct.mockResolvedValue([RR]);
+    for (const [roleId, feature] of [
+      [TIER, "Leaderboard Roles"],
+      [BDAY, "Birthdays"],
+      [RR, "Reaction Roles"],
+    ]) {
+      const res = await svc.create(G, { name: `G${roleId}`, roleId });
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(feature),
+      });
+    }
+    expect(await svc.list(G)).toEqual([]);
+  });
+
+  it("refuses to re-link an unlinked group to a held role", async () => {
+    const a = await svc.create(G, { name: "A", roleId: "r1" });
+    if (!a.ok) throw new Error("setup");
+    await svc.markUnlinked(G, a.group.id, "r1");
+    settings["birthdays.role_id"] = BDAY;
+    expect(await svc.relinkTo(G, a.group.id, BDAY, "B")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Birthdays"),
+    });
+    expect((await svc.get(G, a.group.id))?.unlinked).toBe(true);
+  });
+
+  it("is unchanged when no feature holds the role", async () => {
+    settings["birthdays.role_id"] = BDAY;
+    const res = await svc.create(G, { name: "Free", roleId: "rFree" });
+    expect(res.ok).toBe(true);
+  });
+
+  it("allows the link when feature settings can't be read, but still blocks deletion", async () => {
+    mockDistinct.mockRejectedValue(new Error("db down"));
+    expect((await svc.create(G, { name: "X", roleId: RR })).ok).toBe(true);
+    expect(await svc.featureUsesOfRole(G, RR)).toEqual([
+      "a feature whose settings could not be read",
+    ]);
+  });
+});
+
+describe("config read failure (#1023)", () => {
+  it("refuses deletion, and allows linking, when the config can't be read", async () => {
+    configDown = true;
+    expect(await svc.featureUsesOfRole(G, "333333333333333333")).toEqual([
+      "a feature whose settings could not be read",
+    ]);
+    expect((await svc.create(G, { name: "Y", roleId: "rY" })).ok).toBe(true);
   });
 });
 
