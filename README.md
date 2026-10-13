@@ -439,7 +439,11 @@ through an SSH tunnel) and is not exposed to the network. There is no
 HTTPS. The compose file's `bot.ports` block is the spot to change if you
 want something else:
 
-- **Bind to localhost only (shipped default)** — then SSH-tunnel or VPN in:
+- **Bind to localhost only (shipped default)** — reachable only from the host
+  itself, or through an SSH tunnel or a reverse proxy on the host that forwards
+  to `127.0.0.1:3000`. It is not reachable over the host's VPN address; for that,
+  change the `bot.ports` entry to the VPN interface's IP
+  (`"<vpn-ip>:3000:3000"`) or to `3000:3000`:
 
   ```yaml
   services:
@@ -449,7 +453,8 @@ want something else:
         - "127.0.0.1:3000:3000"
   ```
 
-- **Direct port publish** — fine for LAN-only or VPN-only deployments. Set
+- **Direct port publish** — fine for LAN-only or VPN-only deployments (this binds
+  all interfaces, so firewall it). Set
   `WEBUI_BASE_URL=http://your-host:3000` to match:
 
   ```yaml
