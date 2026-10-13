@@ -193,6 +193,46 @@ describe("VoiceChannelManager - room lock (#1143)", () => {
     });
   });
 
+  describe("a failing cosmetic rename does not abort the transfer", () => {
+    beforeEach(() => {
+      // a rename is attempted: no tracked custom name
+      (manager as any).customChannelNames.delete("room");
+      room.setName.mockRejectedValue(new Error("rename rejected"));
+    });
+
+    it("manual transfer still moves ownership; the old owner's controls are refused", async () => {
+      releaseCreate();
+
+      await manager.transferOwnership("room", "a", "b");
+
+      expect(room.setName).toHaveBeenCalled();
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+      expect(manager.isRoomOwner("a", "room")).toBe(false);
+      expect((manager as any).persistOwnership).toHaveBeenCalledWith(
+        undefined,
+        "room",
+        "b",
+      );
+      const work = jest.fn(async () => undefined);
+      expect(await manager.runAsRoomOwner("a", "room", work)).toBe(false);
+      expect(work).not.toHaveBeenCalled();
+    });
+
+    it("automatic transfer does the same", async () => {
+      releaseCreate();
+
+      const transferred = await (manager as any).updateChannelOwnership(
+        room,
+        member("b"),
+        "a",
+      );
+
+      expect(transferred).toBe(true);
+      expect(manager.isRoomOwner("b", "room")).toBe(true);
+      expect(manager.isRoomOwner("a", "room")).toBe(false);
+    });
+  });
+
   describe("waiting room access follows ownership", () => {
     let waitingRoom: any;
 

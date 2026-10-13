@@ -1047,6 +1047,9 @@ export class VoiceChannelManager {
         const options: Record<string, boolean> = {};
         for (const flag of fromCategory.allow.toArray()) options[flag] = true;
         for (const flag of fromCategory.deny.toArray()) options[flag] = false;
+        // `create` PUTs exactly these flags: it replaces the whole member
+        // overwrite (only `edit` merges with the existing one), so room-only
+        // grants such as ManageChannels do not survive this reset.
         await overwrites.create(previousOwnerId, options, {
           reason: "Ownership transferred",
         });
@@ -1117,6 +1120,37 @@ export class VoiceChannelManager {
     } catch (error) {
       logger.warn(
         `Could not grant new owner ${newOwnerId} access to the waiting room of ${mainChannelId}:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * The cosmetic "<name>'s Channel" rename that accompanies an ownership
+   * transfer. Non-fatal: by now the new owner's overwrite is granted and the
+   * old owner's revoked, so a failure here (name computation or Discord
+   * rejecting the rename) must not abort the transfer before the ownership
+   * map and its persistence are committed, which would leave the former
+   * owner as the live owner for bot authorisation (#1143).
+   */
+  private async renameForNewOwner(
+    channel: VoiceChannel,
+    displayName: string,
+    newOwnerId: string,
+    tag: string,
+  ): Promise<void> {
+    try {
+      const newChannelName = await this.safeRoomName(
+        `${displayName}'s Channel`,
+        newOwnerId,
+      );
+      logger.info(
+        `[${tag}] Renaming channel to: ${sanitizeForLog(newChannelName)}`,
+      );
+      await channel.setName(newChannelName);
+    } catch (error) {
+      logger.warn(
+        `[${tag}] Could not rename channel ${channel.id} for the new owner; continuing the transfer:`,
         error,
       );
     }
@@ -1694,12 +1728,12 @@ export class VoiceChannelManager {
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channelId)) {
-        const newChannelName = await this.safeRoomName(
-          `${newOwner.displayName}'s Channel`,
+        await this.renameForNewOwner(
+          channel,
+          newOwner.displayName,
           newOwnerId,
+          "Manual Transfer",
         );
-        logger.info(`[Manual Transfer] Renaming channel to: ${newChannelName}`);
-        await channel.setName(newChannelName);
       } else {
         logger.info(
           `[Manual Transfer] Channel has custom name, skipping rename`,
@@ -3449,14 +3483,12 @@ export class VoiceChannelManager {
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channel.id)) {
-        const newChannelName = await this.safeRoomName(
-          `${newOwner.displayName}'s Channel`,
+        await this.renameForNewOwner(
+          channel,
+          newOwner.displayName,
           newOwner.id,
+          "Ownership Transfer",
         );
-        logger.info(
-          `[Ownership Transfer] Renaming channel to: ${newChannelName}`,
-        );
-        await channel.setName(newChannelName);
       } else {
         logger.info(
           `[Ownership Transfer] Channel has custom name, skipping rename`,
