@@ -109,7 +109,7 @@ function renderRoles(scan: ServerScan): string {
   return `
 <div class="card">
   <h2>Roles (${scan.roles.length})</h2>
-  <p class="muted">Member counts come from the cache and may be low (marked <code>+</code>) ${
+  <p class="muted">Member counts come from the cache and may be low (marked <code>+</code>)${
     scan.readiness.membersIntent
       ? "."
       : ` unless the bot requests the GuildMembers intent. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}`

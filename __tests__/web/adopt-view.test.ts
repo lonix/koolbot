@@ -210,7 +210,9 @@ describe("renderAdoptPage (#1019)", () => {
     const escaped = escapeHtml(GUILD_MEMBERS_INTENT_HOWTO);
     expect(html).toContain(escaped);
     expect(html.split(escaped).length - 1).toBeGreaterThanOrEqual(2);
-    expect(html).toContain("unless the bot requests the GuildMembers intent");
+    expect(html).toContain(
+      `<p class="muted">Member counts come from the cache and may be low (marked <code>+</code>) unless the bot requests the GuildMembers intent. ${escaped}</p>`,
+    );
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("GUILD_MEMBERS_INTENT=true");
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("Server Members Intent");
     expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("developer portal");
@@ -222,7 +224,9 @@ describe("renderAdoptPage (#1019)", () => {
     });
     expect(html).not.toContain(escapeHtml(GUILD_MEMBERS_INTENT_HOWTO));
     expect(html).not.toContain("unless the bot requests the GuildMembers");
-    expect(html).toContain("Member counts come from the cache");
+    expect(html).toContain(
+      '<p class="muted">Member counts come from the cache and may be low (marked <code>+</code>).</p>',
+    );
   });
   const botBase = {
     roleIds: [],
