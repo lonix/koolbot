@@ -136,6 +136,23 @@ Review bot permissions carefully:
 - **Reaction roles / role rewards**: `ManageRoles`
 - **Avoid**: `Administrator` (use specific permissions instead)
 
+### Guild Scope and Public Bot
+
+KoolBot is built for one server, the one named by `GUILD_ID`. While **Public Bot**
+is on (the Discord default), anyone can add your application to a server they
+control. KoolBot ignores events from such servers and logs a warning, but you
+should also turn **Public Bot** off under your application's **Installation**
+or **Bot** settings in the Discord developer portal. To have the bot leave any
+server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
+(off by default).
+
+### Mentions
+
+The bot sets a safe client-wide `allowedMentions` default (users only), so
+`@everyone`, `@here` and role mentions in text it echoes, such as member display
+names, do not ping. Features that ping a role or everyone on purpose (poll role
+ping, scheduled announcements, ticket staff pings) set their own allow-list.
+
 ### Data Privacy
 
 - **Personal data**: KoolBot stores user IDs and voice activity data

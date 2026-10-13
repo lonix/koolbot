@@ -361,6 +361,30 @@ describe("QuoteService backup & vote persistence", () => {
       });
     });
 
+    // #1153: a database failure must not leak Mongoose/driver text into
+    // result.errors, which /quote import relays to the member.
+    it("reports a generic message when saving an entry throws", async () => {
+      model.findOne.mockResolvedValue(null);
+      model.create.mockRejectedValue(
+        new Error(
+          'E11000 duplicate key error collection: koolbot.quotes index: messageId_1 dup key: { messageId: "x" }',
+        ),
+      );
+
+      const res = await service.importQuotes({
+        quotes: [
+          { id: VALID_ID, content: "hi", authorId: "a", addedById: "b" },
+        ],
+      });
+
+      expect(res.skipped).toBe(1);
+      expect(res.errors).toHaveLength(1);
+      expect(res.errors[0]).toBe(
+        "Quote 1: could not be saved (see the bot log for details)",
+      );
+      expect(res.errors[0]).not.toMatch(/E11000|koolbot|messageId/);
+    });
+
     it("rejects a structurally invalid payload", async () => {
       const res = await service.importQuotes(null);
       expect(res.imported).toBe(0);

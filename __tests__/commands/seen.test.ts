@@ -30,13 +30,26 @@ type MockInteraction = ChatInputCommandInteraction & {
   editReply: jest.Mock;
 };
 
+/** A guild whose only channel, "c1", is (or is not) viewable by the caller. */
+function guildWith(canView: boolean, name = "General"): unknown {
+  return {
+    channels: {
+      cache: new Map([
+        ["c1", { name, permissionsFor: () => ({ has: () => canView }) }],
+      ]),
+    },
+  };
+}
+
 function makeInteraction(
   targetUser: { id: string; username: string } | null = {
     id: "user-2",
     username: "bob",
   },
+  guild: unknown = null,
 ): MockInteraction {
   return {
+    guild,
     options: { getUser: () => targetUser },
     user: { id: "user-1", username: "alice" },
     client: {},
@@ -121,8 +134,11 @@ describe("Seen Command", () => {
     });
 
     it("edits the deferred reply when the user is currently in a channel", async () => {
-      mockGetActiveSession.mockReturnValue({ channelName: "General" });
-      const interaction = makeInteraction();
+      mockGetActiveSession.mockReturnValue({
+        channelId: "c1",
+        channelName: "General",
+      });
+      const interaction = makeInteraction(undefined, guildWith(true));
 
       await execute(interaction);
 
@@ -130,6 +146,56 @@ describe("Seen Command", () => {
       expect(mockGetUserLastSeen).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
         'bob is currently in the voice channel "General".',
+      );
+    });
+
+    // #1153: a locked or hidden room's name is not the caller's to learn.
+    it("does not name a channel the caller cannot view", async () => {
+      mockGetActiveSession.mockReturnValue({
+        channelId: "c1",
+        channelName: "Staff Secret",
+      });
+      const interaction = makeInteraction(undefined, guildWith(false));
+
+      await execute(interaction);
+
+      const reply = interaction.editReply.mock.calls[0][0] as string;
+      expect(reply).toBe("bob is currently in a voice channel.");
+      expect(reply).not.toContain("Staff Secret");
+    });
+
+    // The stored session name is from when tracking started; after a rename
+    // only the channel's current name may be shown (#1153).
+    it("names the channel by its current name, not the stored one", async () => {
+      mockGetActiveSession.mockReturnValue({
+        channelId: "c1",
+        channelName: "Staff Secret",
+      });
+      const interaction = makeInteraction(
+        undefined,
+        guildWith(true, "Public Lounge"),
+      );
+
+      await execute(interaction);
+
+      const reply = interaction.editReply.mock.calls[0][0] as string;
+      expect(reply).toBe(
+        'bob is currently in the voice channel "Public Lounge".',
+      );
+      expect(reply).not.toContain("Staff Secret");
+    });
+
+    it("does not name a channel it cannot resolve in the guild", async () => {
+      mockGetActiveSession.mockReturnValue({
+        channelId: "gone",
+        channelName: "Staff Secret",
+      });
+      const interaction = makeInteraction(undefined, guildWith(true));
+
+      await execute(interaction);
+
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        "bob is currently in a voice channel.",
       );
     });
 

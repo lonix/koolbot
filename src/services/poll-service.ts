@@ -183,9 +183,14 @@ export class PollService {
       }
 
       // Send the poll
+      // The role ping is intentional, so it names the one role it may ping;
+      // the client default no longer resolves role mentions (#1146).
       const sent = await channel.send({
         content: content || undefined,
         poll: pollData,
+        allowedMentions: schedule.roleIdToPing
+          ? { roles: [schedule.roleIdToPing] }
+          : { parse: [] },
       });
 
       // Log the poll run so the weekly recap can count how many polls ran and

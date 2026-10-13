@@ -1,4 +1,5 @@
 import { PermissionsBitField } from "discord.js";
+import { scriptTag } from "./html.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -315,7 +316,7 @@ function renderPlan(props: RoleGroupsPageProps, csrf: string): string {
     props.extraErrors.length === 0 &&
     props.plan.operations.length > 0;
   const form = applicable
-    ? `<form method="POST" action="/admin/role-groups/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
+    ? `<form method="POST" action="/admin/role-groups/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
     : "";
   return `${extra}${bots}${renderAdoptionDiff(props.plan)}${form}`;
 }
@@ -428,7 +429,7 @@ export function renderAdminFixPage(props: AdminFixPageProps): string {
     ...(props.grant ? [`<input type="hidden" name="grant" value="1">`] : []),
   ].join("");
   const form = applicable
-    ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <a class="btn" href="/admin/role-groups">Back</a></form>`
+    ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back.">${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <a class="btn" href="/admin/role-groups">Back</a></form>`
     : `<a class="btn" href="/admin/role-groups">Back</a>`;
   const body = `
 <h1>Administrators outside the admin group</h1>
@@ -487,8 +488,8 @@ ${renderDriftSummary(props)}
   ${renderAddForm(props, csrf)}
 </div>
 <p class="muted">The server owner and members with the Administrator permission always count as <code>admin</code>, with or without a group.</p>
-<script>${PRESET_SCRIPT}</script>
-${props.jobId ? `<script>${JOB_SCRIPT(props.jobId)}</script>` : ""}
+${scriptTag(PRESET_SCRIPT)}
+${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Role Groups",

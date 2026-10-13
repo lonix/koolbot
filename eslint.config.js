@@ -86,7 +86,7 @@ export default [
     // The accessibility suites (#856) run under the jsdom-based environment
     // in `__tests__/jsdom-node-env.cjs`, so they legitimately reach for the
     // DOM globals axe needs. Everything else stays on the node environment.
-    files: ['__tests__/web/a11y-*.ts'],
+    files: ['__tests__/web/a11y-*.ts', '__tests__/web/confirm-script.test.ts'],
     languageOptions: {
       globals: {
         'document': 'readonly',

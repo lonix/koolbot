@@ -543,7 +543,10 @@ describe("PollService", () => {
       return channel;
     }
 
-    async function runTestSchedule(sent: unknown) {
+    async function runTestSchedule(
+      sent: unknown,
+      roleIdToPing: string | null = null,
+    ) {
       const channel = await makeTextChannel(sent);
       const client = {
         isReady: () => true,
@@ -569,7 +572,7 @@ describe("PollService", () => {
         guildId: "guild-1",
         channelId: "chan-1",
         pollDuration: 24,
-        roleIdToPing: null,
+        roleIdToPing,
         save: jest.fn<any>().mockResolvedValue(undefined),
       };
       mockPollScheduleFindById.mockResolvedValue(schedule);
@@ -599,6 +602,25 @@ describe("PollService", () => {
     it("skips the turnout row when the send returns no message id", async () => {
       await runTestSchedule({});
       expect(mockRecordPollPosted).not.toHaveBeenCalled();
+    });
+
+    // #1146: the client default no longer resolves role mentions, so the
+    // intentional role ping has to allow exactly that role itself.
+    it("still pings the configured role, and only that role", async () => {
+      const { channel } = await runTestSchedule({ id: "msg-1" }, "role-77");
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "<@&role-77>",
+          allowedMentions: { roles: ["role-77"] },
+        }),
+      );
+    });
+
+    it("pings nobody when no role is configured", async () => {
+      const { channel } = await runTestSchedule({ id: "msg-1" });
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ allowedMentions: { parse: [] } }),
+      );
     });
   });
 });

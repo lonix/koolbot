@@ -13,6 +13,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import { Buffer } from "buffer";
+import { createHmac } from "node:crypto";
 import { createUserRouter } from "../../src/web/user-routes.js";
 import { signValue } from "../../src/web/cookies.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
@@ -20,6 +21,10 @@ import { UserNotificationPrefsService } from "../../src/services/user-notificati
 import { boundAuditEntry } from "../../src/web/audit.js";
 
 const SECRET = "test-secret-for-me-audit-bounds";
+// The CSRF token is derived from the session id (#1150), not a cookie.
+// Computed here (not imported) so no web module loads before the mocks.
+const csrf = (): string =>
+  createHmac("sha256", SECRET).update("csrf\0session-id").digest("base64url");
 const USER = "user-1";
 const GUILD = "guild-1";
 
@@ -37,7 +42,7 @@ function buildCookie(): string {
       act: now - 60_000,
     }),
   ).toString("base64url");
-  return `koolbot_session=${signValue(encoded, SECRET)}; koolbot_csrf=csrf-1`;
+  return `koolbot_session=${signValue(encoded, SECRET)}`;
 }
 
 async function installMocks(): Promise<void> {
@@ -76,7 +81,7 @@ async function post(
   };
   const headers: Record<string, unknown> = {
     cookie: buildCookie(),
-    "x-csrf-token": "csrf-1",
+    "x-csrf-token": csrf(),
   };
   const res: Record<string, unknown> = {};
   res.status = (c: number): unknown => {
@@ -105,7 +110,7 @@ async function post(
     query: {},
     ip,
     socket: { remoteAddress: ip },
-    csrfToken: "csrf-1",
+    csrfToken: csrf(),
     header: (name: string): unknown => headers[name.toLowerCase()],
   };
   await new Promise<void>((resolve) => {
@@ -139,7 +144,7 @@ describe("/me audit bounds and rate limit (#1142)", () => {
     const router = await makeRouter();
     const huge = "X".repeat(200_000);
     const out = await post(router, "/timezone", {
-      _csrf: "csrf-1",
+      _csrf: csrf(),
       timezone: huge,
     });
 

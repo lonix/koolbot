@@ -2033,6 +2033,17 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
 - `adoption.role_groups.reconcile_cron` (cron, default: `*/30 * * * *`) —
   schedule for that reconcile.
 
+#### Guild scope
+
+KoolBot serves the one server named by `GUILD_ID`. Events from any other server
+the bot has been added to (voice, messages, reactions, polls, audit-log entries,
+member joins and the like) are ignored, and a warning naming the server is logged
+once. `core.guild_scope.leave_other_guilds` (default `false`) additionally makes
+the bot leave every server other than `GUILD_ID`, at startup and whenever it is
+added to one; turning it on in the Web UI takes effect immediately. It is off by
+default so an operator who deliberately keeps the bot in a second server is never
+surprised by it.
+
 #### Web UI sign-in link delivery
 
 `core.webui.link_delivery` (default `dm`) controls how `/me` and `/config` hand out

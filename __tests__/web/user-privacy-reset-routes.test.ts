@@ -23,6 +23,12 @@ import { WebSessionService } from "../../src/services/web-session-service.js";
 import { UserDataDeletionService } from "../../src/services/user-data-deletion-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
 import { renderUserPrivacyBody } from "../../src/web/user-layout.js";
+import { createHmac } from "node:crypto";
+
+// The CSRF token is derived from the session id (#1150), not a cookie.
+// Computed here (not imported) so no web module loads before the mocks.
+const csrf = (): string =>
+  createHmac("sha256", SECRET).update("csrf\0session-id").digest("base64url");
 
 const SECRET = "test-secret-for-user-privacy-reset-routes";
 const USER = "user-1";
@@ -70,7 +76,7 @@ function buildCookie(): string {
       act: now - 60_000,
     }),
   ).toString("base64url");
-  return `koolbot_session=${signValue(encoded, SECRET)}; koolbot_csrf=csrf-1`;
+  return `koolbot_session=${signValue(encoded, SECRET)}`;
 }
 
 async function installMocks(opts: MockOptions = {}): Promise<void> {
@@ -199,11 +205,11 @@ async function post(
     path: "/privacy/delete",
     baseUrl: "/me",
     headers,
-    body: opts.body ?? { _csrf: "csrf-1", confirm: "RESET" },
+    body: opts.body ?? { _csrf: csrf(), confirm: "RESET" },
     query: {},
     ip: opts.ip ?? "10.0.0.1",
     socket: { remoteAddress: opts.ip ?? "10.0.0.1" },
-    csrfToken: "csrf-1",
+    csrfToken: csrf(),
     header: (name: string) => headers[name.toLowerCase()],
   } as never as Parameters<typeof router>[0];
 
@@ -335,7 +341,7 @@ describe("POST /me/privacy/delete", () => {
     async (_label, confirm) => {
       await installMocks();
       const { captured } = await post({
-        body: { _csrf: "csrf-1", ...(confirm ? { confirm } : {}) },
+        body: { _csrf: csrf(), ...(confirm ? { confirm } : {}) },
       });
 
       expect(captured.statusCode).toBe(303);
@@ -481,7 +487,7 @@ describe("POST /me/privacy/delete", () => {
     await installMocks();
     await post({
       body: {
-        _csrf: "csrf-1",
+        _csrf: csrf(),
         confirm: "RESET",
         userId: "someone-else",
         guildId: "other-guild",
@@ -579,7 +585,7 @@ describe("POST /me/privacy/delete", () => {
 
   it("rate-limits repeated attempts from one client on its own bucket", async () => {
     await installMocks();
-    const bad = { _csrf: "csrf-1", confirm: "nope" };
+    const bad = { _csrf: csrf(), confirm: "nope" };
     const first = await post({ ip: "203.0.113.9", body: bad });
     const router = first.router;
     for (let i = 0; i < 4; i += 1) {
@@ -611,7 +617,7 @@ describe("renderUserPrivacyBody reset card", () => {
     expect(html).toContain('name="_csrf" value="tok"');
     expect(html).toContain('name="confirm"');
     expect(html).toContain("<code>RESET</code>");
-    expect(html).toContain('onsubmit="return confirm(');
+    expect(html).toContain('data-confirm="Reset all of your');
     expect(html).toContain("This is a reset, not a deletion.");
     expect(html).toContain("Moderation records and audit logs are kept.");
     expect(html).toContain("Other members' records may still mention you.");

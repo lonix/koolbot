@@ -6,6 +6,7 @@ import { WebSessionService } from "../services/web-session-service.js";
 import { ensureCsrfCookie, requireCsrf } from "./csrf.js";
 import { respondFlashError } from "./http-flash.js";
 import { createRateLimiter } from "./rate-limit.js";
+import { webSecurityHeaders } from "./security-headers.js";
 import {
   AuthenticatedRequest,
   clearSessionCookie,
@@ -32,6 +33,9 @@ import { createUserRouter, SelfScopeError } from "./user-routes.js";
 export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
+
+  // Security headers + no-store on every /admin response (#1149).
+  router.use(webSecurityHeaders);
 
   // Banner "update available" badge on every admin page (#1029), read from
   // the update check's in-memory snapshot — no I/O per render.
@@ -230,6 +234,8 @@ export function webErrorText(status: number): string {
 export function createUserWebRouter(client: Client): Router {
   const router = Router();
 
+  // Security headers + no-store on every /me response (#1149).
+  router.use(webSecurityHeaders);
   router.use(express.urlencoded({ extended: false, limit: "256kb" }));
   router.use(ensureCsrfCookie);
 

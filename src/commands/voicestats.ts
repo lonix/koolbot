@@ -11,6 +11,7 @@ import { ConfigService } from "../services/config-service.js";
 import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
 import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { visibleChannelName } from "../utils/channel-visibility.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   clampToLimit,
@@ -214,7 +215,10 @@ async function executeUser(
         const duration = session.duration
           ? formatTime(session.duration)
           : "ongoing";
-        return `• ${session.channelName}: ${duration}`;
+        // Hide the name of a channel the caller cannot view, or that no longer
+        // exists and so cannot be checked (#1153).
+        const channelName = visibleChannelName(interaction, session.channelId);
+        return `• ${channelName}: ${duration}`;
       }),
     ].join("\n");
 
