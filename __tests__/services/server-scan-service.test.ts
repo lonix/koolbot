@@ -454,6 +454,17 @@ describe("buildReadiness", () => {
     expect(r.ready).toBe(true);
     expect(r.issues).toEqual([]);
   });
+  it("names GUILD_MEMBERS_INTENT when the intent is not requested (#1121)", () => {
+    const r = buildReadiness({
+      ...base,
+      permissionBits: PermissionsBitField.All,
+      administrator: false,
+      membersIntent: false,
+    });
+    const issue = r.issues.find((i) => i.code === "members-intent-off");
+    expect(issue?.message).toContain("GUILD_MEMBERS_INTENT=true");
+    expect(issue?.message).toContain("developer portal");
+  });
   it("warns (does not block) when Set Voice Channel Status is missing", () => {
     const r = buildReadiness({
       ...base,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
+import { escapeHtml } from "../../src/web/html.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../../src/utils/guild-members-intent.js";
 import type { ServerScan } from "../../src/services/server-scan-service.js";
 
 const scan: ServerScan = {
@@ -199,7 +201,32 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("may be out of date");
     expect(html).toContain("&lt;img src=x&gt;#1");
     expect(html).not.toContain("<img src=x>");
-    expect(html).toContain("GuildMembers intent is off");
+    expect(html).toContain("GUILD_MEMBERS_INTENT=true");
+  });
+
+  it("tells the operator how to enable the GuildMembers intent (#1121)", () => {
+    const html = renderAdoptPage({ ...common, scan });
+    // Roles caption plus the bot replacement report note both carry the wording.
+    const escaped = escapeHtml(GUILD_MEMBERS_INTENT_HOWTO);
+    expect(html).toContain(escaped);
+    expect(html.split(escaped).length - 1).toBeGreaterThanOrEqual(2);
+    expect(html).toContain(
+      `<p class="muted">Member counts come from the cache and may be low (marked <code>+</code>) unless the bot requests the GuildMembers intent. ${escaped}</p>`,
+    );
+    expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("GUILD_MEMBERS_INTENT=true");
+    expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("Server Members Intent");
+    expect(GUILD_MEMBERS_INTENT_HOWTO).toContain("developer portal");
+  });
+  it("omits the intent how-to from the Roles caption when the intent is on", () => {
+    const html = renderAdoptPage({
+      ...common,
+      scan: { ...scan, readiness: { ...scan.readiness, membersIntent: true } },
+    });
+    expect(html).not.toContain(escapeHtml(GUILD_MEMBERS_INTENT_HOWTO));
+    expect(html).not.toContain("unless the bot requests the GuildMembers");
+    expect(html).toContain(
+      '<p class="muted">Member counts come from the cache and may be low (marked <code>+</code>).</p>',
+    );
   });
   const botBase = {
     roleIds: [],

@@ -11,6 +11,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import { ConfigService } from "./config-service.js";
 import { getEnvConfigValue } from "../config/env.js";
 import { defaultConfig } from "./config-schema.js";
@@ -553,8 +554,7 @@ export function buildReadiness(input: {
     issues.push({
       code: "members-intent-off",
       severity: "info",
-      message:
-        "The GuildMembers intent is off, so role member counts come from the cache and may be low. Enable it in the Discord developer portal for exact counts.",
+      message: `The bot is not requesting the GuildMembers intent, so role member counts come from the cache and may be low. ${GUILD_MEMBERS_INTENT_HOWTO}`,
       help: TROUBLESHOOTING,
     });
   }

@@ -8,6 +8,7 @@ import {
   type KoolBotFeatureId,
 } from "../content/known-bots.js";
 import type { ScanBot, ServerScan } from "./server-scan-service.js";
+import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 
 /**
  * Bot replacement report (#1026). Pure: turns a `ServerScan` plus the stored
@@ -280,7 +281,7 @@ export function buildBotReplacementReport(
   const warnings: string[] = [];
   if (!scan.readiness.membersIntent) {
     warnings.push(
-      "The GuildMembers intent is off, so a bot without an integration role may be missing from this list. Enable the Server Members Intent in the Discord developer portal for a complete report.",
+      `The bot is not requesting the GuildMembers intent, so a bot without an integration role may be missing from this list. ${GUILD_MEMBERS_INTENT_HOWTO}`,
     );
   }
 
