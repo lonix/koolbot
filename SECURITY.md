@@ -107,7 +107,9 @@ The optional Web UI is protected by single-use, short-lived sign-in links
 (`/config` for administrators, `/me` for members), server-side session
 revocation, double-submit-cookie CSRF protection on every state-changing
 request, and per-IP rate limiting. Admin sessions are re-checked against the
-live Administrator permission. Serve it over HTTPS and set `WEBUI_BASE_URL`
+live Administrator permission, and member sessions against the member's live
+membership. A member who leaves, is kicked or is banned also has their sessions
+revoked as soon as the bot sees the event. Serve it over HTTPS and set `WEBUI_BASE_URL`
 to the `https://` address; behind a reverse proxy, set `WEBUI_TRUST_PROXY`
 so the rate limiter sees real client addresses. See `WEBUI.md`.
 
