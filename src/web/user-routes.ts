@@ -78,7 +78,12 @@ import {
   summariseByCollection,
 } from "../services/user-data-registry.js";
 import { createRateLimiter } from "./rate-limit.js";
-import { recordAudit, recordAuditOrThrow, type AuditEntry } from "./audit.js";
+import {
+  boundAuditEntry,
+  recordAudit as recordAuditUnbounded,
+  recordAuditOrThrow as recordAuditOrThrowUnbounded,
+  type AuditEntry,
+} from "./audit.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import {
   UserDataDeletionService,
@@ -87,6 +92,18 @@ import {
 import { renderSignedOut } from "./views.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+
+// Everything on the `/me` surface may carry member-supplied strings, so every
+// audit row written from here is bounded first (#1142).
+const recordAudit = (
+  session: Parameters<typeof recordAuditUnbounded>[0],
+  entry: AuditEntry,
+): Promise<void> => recordAuditUnbounded(session, boundAuditEntry(entry));
+const recordAuditOrThrow = (
+  session: Parameters<typeof recordAuditOrThrowUnbounded>[0],
+  entry: AuditEntry,
+): Promise<void> =>
+  recordAuditOrThrowUnbounded(session, boundAuditEntry(entry));
 
 function asyncHandler(
   fn: (req: AuthenticatedRequest, res: Response) => Promise<void>,
@@ -479,6 +496,19 @@ export function createUserRouter(
 ): Router {
   const router = Router();
 
+  // General limit for the whole surface (#1142), registered first so even the
+  // session ping (which still does cookie + Mongo validation) is covered. Same in-memory, per-IP
+  // limiter as the export/reset buckets. The general bucket sits before the
+  // session check so a flood of unauthenticated or revalidating requests is
+  // throttled before it reaches Mongo or Discord; writes and the rewind
+  // aggregations get tighter buckets of their own.
+  const generalLimiter = createRateLimiter({
+    windowMs: 10 * 60_000,
+    max: 600,
+    keyName: "me-general",
+  });
+  router.use(generalLimiter);
+
   // Surface-local session ping so the `/me` banner script never has to
   // reach across to `/admin/session/ping`. Identical handler (the ping
   // is surface-neutral — same cookie, same DB row), just mounted on
@@ -507,7 +537,26 @@ export function createUserRouter(
     keyName: "me-privacy-reset",
   });
 
+  // Tighter buckets for writes and the Rewind aggregations (#1142).
+  const writeLimiter = createRateLimiter({
+    windowMs: 10 * 60_000,
+    max: 60,
+    keyName: "me-write",
+  });
+  const rewindLimiter = createRateLimiter({
+    windowMs: 10 * 60_000,
+    max: 30,
+    keyName: "me-rewind",
+  });
+
   router.use(requireSession);
+  router.use((req, res, next) => {
+    if (req.method === "GET" || req.method === "HEAD") {
+      next();
+      return;
+    }
+    writeLimiter(req, res, next);
+  });
 
   // ---------- Index ----------
   router.get(
@@ -763,7 +812,12 @@ export function createUserRouter(
       await recordAudit(session, {
         action: "user.timezone.set",
         targetId: userId,
-        details: result === "success" ? { before, after } : { attempted: raw },
+        // Never store the rejected value itself: it is member-supplied and
+        // unbounded. Its length is enough to tell a typo from abuse (#1142).
+        details:
+          result === "success"
+            ? { before, after }
+            : { reason: "invalid-timezone", attemptedLength: raw.length },
         result,
         errorMessage,
       });
@@ -1077,8 +1131,8 @@ export function createUserRouter(
       }),
     );
   });
-  router.get("/rewind", rewindHandler);
-  router.get("/rewind/:year", rewindHandler);
+  router.get("/rewind", rewindLimiter, rewindHandler);
+  router.get("/rewind/:year", rewindLimiter, rewindHandler);
 
   // ---------- Voice preferences (#656) ----------
   // `/me/voice` manages the per-user name pattern + saved presets. It
@@ -1270,7 +1324,17 @@ export function createUserRouter(
       await recordAudit(session, {
         action,
         targetId: userId,
-        details: { ...details, index, expectedName },
+        // On success `expectedName` matched the stored preset name, so a
+        // bounded copy is harmless; on failure it is unverified input, so
+        // only its length is kept (#1142).
+        details:
+          result === "success"
+            ? {
+                ...details,
+                index,
+                expectedName: sanitizeForLog(expectedName, 64),
+              }
+            : { ...details, index, expectedNameLength: expectedName.length },
         result,
         errorMessage,
       });

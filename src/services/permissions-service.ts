@@ -1,4 +1,4 @@
-import { Client } from "discord.js";
+import { Client, GatewayIntentBits, GuildMember } from "discord.js";
 import {
   CommandPermission,
   ICommandPermission,
@@ -51,6 +51,11 @@ function isUnknownTargetError(error: unknown): boolean {
 /** How long a live Administrator lookup is reused (see `isAdministrator`). */
 const ADMIN_CHECK_TTL_MS = 15_000;
 
+/** How long a live member lookup is reused for `fresh` checks (#1151). */
+const FRESH_MEMBER_TTL_MS = 15_000;
+/** Hard cap on the fresh-member cache so it cannot grow without bound. */
+const FRESH_MEMBER_MAX_ENTRIES = 1_000;
+
 export class PermissionsService {
   private static instance: PermissionsService;
   private client: Client;
@@ -61,6 +66,10 @@ export class PermissionsService {
   private adminCheckCache = new Map<
     string,
     { value: boolean; expiresAt: number }
+  >();
+  private freshMemberCache = new Map<
+    string,
+    { member: GuildMember; expiresAt: number }
   >();
   private cacheInitialized = false;
   private cacheInitializing: Promise<void> | null = null;
@@ -159,13 +168,21 @@ export class PermissionsService {
    *   denial. Neither mode ever falls through to the default-open branch
    *   on such a failure. A definitive Unknown Guild/Member answer from
    *   Discord is a real denial and returns `false` in both modes.
+   *   `fresh` is for long-lived callers (web sessions, #1151) that must see
+   *   a kick, ban or role change: when the bot does not receive member
+   *   events (GuildMembers intent off) the member cache is never refreshed,
+   *   so the member is re-read from Discord and reused for a short TTL so a
+   *   page load does not cost a REST call. With the intent on, the gateway
+   *   keeps the cache current and the normal lookup is used. A failed live
+   *   lookup follows the `onUnavailable` contract; it never falls back to a
+   *   possibly stale cached member.
    * @returns True if user has permission, false otherwise
    */
   public async checkCommandPermission(
     userId: string,
     guildId: string,
     commandName: string,
-    options: { onUnavailable?: "deny" | "throw" } = {},
+    options: { onUnavailable?: "deny" | "throw"; fresh?: boolean } = {},
   ): Promise<boolean> {
     try {
       // Ensure cache is initialized
@@ -179,7 +196,9 @@ export class PermissionsService {
       }
 
       // Get the member
-      const member = await guild.members.fetch(userId);
+      const member = options.fresh
+        ? await this.fetchMemberFresh(guild, guildId, userId)
+        : await guild.members.fetch(userId);
       if (!member) {
         logger.warn(`Member ${userId} not found in guild ${guildId}`);
         return false;
@@ -262,6 +281,53 @@ export class PermissionsService {
       }
       return false;
     }
+  }
+
+  /**
+   * Member lookup that bypasses a stale member cache (#1151). Only forces a
+   * REST read when the GuildMembers intent is off (otherwise the gateway
+   * keeps the cache accurate and a removed member is evicted), and reuses
+   * the result for `FRESH_MEMBER_TTL_MS`.
+   */
+  private async fetchMemberFresh(
+    guild: {
+      members: {
+        fetch: (
+          options: string | { user: string; force: boolean },
+        ) => Promise<GuildMember>;
+      };
+    },
+    guildId: string,
+    userId: string,
+  ): Promise<GuildMember> {
+    const intents = this.client.options?.intents;
+    if (intents?.has(GatewayIntentBits.GuildMembers) === true) {
+      return guild.members.fetch(userId);
+    }
+
+    const key = `${guildId}:${userId}`;
+    const now = Date.now();
+    const cached = this.freshMemberCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.member;
+
+    const member = await guild.members.fetch({ user: userId, force: true });
+    // Re-insert so Map order stays oldest-first (expiry order).
+    this.freshMemberCache.delete(key);
+    if (this.freshMemberCache.size >= FRESH_MEMBER_MAX_ENTRIES) {
+      for (const [k, v] of this.freshMemberCache) {
+        if (v.expiresAt <= now) this.freshMemberCache.delete(k);
+      }
+      // Still full of live entries: drop only the oldest one, never the lot.
+      if (this.freshMemberCache.size >= FRESH_MEMBER_MAX_ENTRIES) {
+        const oldest = this.freshMemberCache.keys().next().value;
+        if (oldest !== undefined) this.freshMemberCache.delete(oldest);
+      }
+    }
+    this.freshMemberCache.set(key, {
+      member,
+      expiresAt: now + FRESH_MEMBER_TTL_MS,
+    });
+    return member;
   }
 
   /**

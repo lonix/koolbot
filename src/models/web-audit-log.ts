@@ -24,6 +24,8 @@ export interface IWebAuditLog extends Document {
   createdAt: Date;
 }
 
+const ERROR_MESSAGE_MAX = 1000;
+
 const WebAuditLogSchema = new Schema<IWebAuditLog>(
   {
     guildId: { type: String, required: true, index: true },
@@ -44,7 +46,16 @@ const WebAuditLogSchema = new Schema<IWebAuditLog>(
       enum: ["success", "failure"],
       required: true,
     },
-    errorMessage: { type: String, default: null },
+    // Truncated on write (a setter, not `maxlength`, so an over-long message
+    // never makes the whole audit row fail validation and vanish; #1142).
+    errorMessage: {
+      type: String,
+      default: null,
+      set: (v: unknown): unknown =>
+        typeof v === "string" && v.length > ERROR_MESSAGE_MAX
+          ? v.slice(0, ERROR_MESSAGE_MAX)
+          : v,
+    },
     createdAt: { type: Date, required: true, default: Date.now, index: true },
   },
   { timestamps: false },
