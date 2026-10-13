@@ -1202,7 +1202,7 @@ groups are defined:
   group entry resolves to the group's role at check time, so re-ranking or re-linking a group takes
   effect without editing the command. A group with no role (unlinked) grants nothing, and the
   command stays restricted. While at least one `staff` or `admin` group exists, the moderation
-  commands (`/warn`, `/timeout`, `/ban`, `/modlog`) default to staff unless you set a restriction
+  commands (`/warn`, `/timeout`, `/ban`, `/modlog`, `/raidmode`) default to staff unless you set a restriction
   for them on this page; the page marks them *staff only (default)*. Members with the Administrator
   permission still bypass every check. If the groups can't be read, the check is refused (the user
   is told permissions can't be verified) rather than opening the command.
@@ -1315,6 +1315,15 @@ table without querying the moderation log. A **Settings** card on the page edits
 (`core.moderation.enabled` / `core.moderation.channel_id`, which also stay in the
 Core section of Settings); saving returns to the page with a flash message, and
 unticking `moderation.enabled` writes only that flag so the other values are kept.
+
+The same Settings card holds the **anti-raid** keys (`moderation.raid.*`, #1045): the master switch, the **dry
+run** switch, the join threshold and window, the lockdown and new-account actions, the minimum account age, the
+timeout length, the quarantine role, the optional auto-expiry and the alert channel. Anti-raid starts as a dry
+run, so you can watch the alert channel and `/raidmode status` for what it would do before it touches anyone.
+Its actions show in the table above like any other: `kick` and `timeout` rows against the member, `quarantine`
+rows for the role action, and `raid lockdown` / `raid cleared` rows for each lockdown (their user column shows the
+server id, since they concern the server rather than a member), all with source `raid`. A raid kick can have a case
+opened on it like any kick, which is the place to record a review or a readmit. The action filter lists every action.
 
 With `moderation.cases.enabled` on, the page also gains a **Cases** section and a **Case** column (#908).
 In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from

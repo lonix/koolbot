@@ -63,6 +63,7 @@ import { EventService } from "./services/event-service.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
+import { RaidProtectionService } from "./services/raid-protection-service.js";
 import { ModerationCaseReviewService } from "./services/moderation-case-review-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
@@ -520,6 +521,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         CommandAuditCleanupService.getInstance().destroy();
         WebAuditLogCleanupService.getInstance().destroy();
         VersionCheckService.getInstance().destroy();
+        RaidProtectionService.getInstance(client).destroy();
         ModerationLogCleanupService.getInstance().destroy();
         moderationCaseReviewService.destroy();
         nameHistoryCleanup?.destroy();
@@ -667,6 +669,17 @@ async function initializeServices(): Promise<void> {
     await configService.initialize();
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.checkForOutdatedSettings();
+
+    // Anti-raid (#1045), as early as config is readable so joins that arrive
+    // during the rest of startup are evaluated against the restored state
+    // (they also wait, bounded, for this). Restore a lockdown that was on
+    // before the restart and warn when the feature is on but a prerequisite
+    // (moderation log, Server Members Intent) is missing. Detection is
+    // event-driven; the only timers are the per-guild lockdown auto-expiry
+    // timers, cleared by `destroy()` on shutdown.
+    const raidProtection = RaidProtectionService.getInstance(client);
+    await raidProtection.initialize();
+    await raidProtection.warnIfInactive();
 
     // Initialize Discord logger AFTER database connection is established
     discordLogger = DiscordLogger.getInstance(client);
@@ -1312,6 +1325,10 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
 // welcome.enabled per event and never throws.
 client.on(Events.GuildMemberAdd, async (member) => {
   recordDiscordEvent("guildMemberAdd");
+  // Anti-raid first (#1045): a member it just acted on is not greeted.
+  const actedOn =
+    await RaidProtectionService.getInstance(client).handleMemberJoin(member);
+  if (actedOn) return;
   await WelcomeService.getInstance().handleMemberJoin(member);
 });
 

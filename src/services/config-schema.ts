@@ -225,6 +225,18 @@ export interface ConfigSchema {
   "moderation.cases.default_review_days": number; // Pre-filled review window
   "moderation.cases.retention_days": number; // Resolved cases; 0 = keep forever
   "moderation.cases.history_grace_days": number; // 0 = protect forever
+  // Anti-raid protection (issue #1045)
+  "moderation.raid.enabled": boolean;
+  "moderation.raid.dry_run": boolean; // Preview: detect and alert, never act on a member
+  "moderation.raid.join_threshold": number; // Lockdown when MORE than this many join in the window
+  "moderation.raid.window_seconds": number;
+  "moderation.raid.lockdown_action": string; // kick | timeout | quarantine
+  "moderation.raid.min_account_age_hours": number; // 0 = new-account gate off
+  "moderation.raid.new_account_action": string; // kick | timeout | quarantine
+  "moderation.raid.timeout_minutes": number;
+  "moderation.raid.quarantine_role_id": string;
+  "moderation.raid.lockdown_max_minutes": number; // 0 = until a moderator clears it
+  "moderation.raid.alert_channel_id": string;
 
   // Name history + /aka (issue #1038)
   "aka.enabled": boolean;
@@ -569,6 +581,23 @@ export const defaultConfig: ConfigSchema = {
   "moderation.cases.default_review_days": 90,
   "moderation.cases.retention_days": 0,
   "moderation.cases.history_grace_days": 365,
+
+  // Anti-raid protection (#1045). Off by default (rule 1), and a first
+  // enablement is a dry run: it detects and alerts but never touches a member
+  // until an operator has seen what it would do and switches `dry_run` off.
+  // Defaults are conservative for a small community: more than 10 joins in 30
+  // seconds, and the reversible action (a timeout) rather than a kick.
+  "moderation.raid.enabled": false,
+  "moderation.raid.dry_run": true,
+  "moderation.raid.join_threshold": 10,
+  "moderation.raid.window_seconds": 30,
+  "moderation.raid.lockdown_action": "timeout",
+  "moderation.raid.min_account_age_hours": 0,
+  "moderation.raid.new_account_action": "timeout",
+  "moderation.raid.timeout_minutes": 60,
+  "moderation.raid.quarantine_role_id": "",
+  "moderation.raid.lockdown_max_minutes": 0,
+  "moderation.raid.alert_channel_id": "",
 
   // Name history (#1038). Both gates off (rule 1). `namehistory.enabled`
   // records names even while the command is off, so history can build up
@@ -2321,6 +2350,105 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,
+  },
+  "moderation.raid.enabled": {
+    label: "Anti-raid protection enabled",
+    description:
+      "Detect join floods and optionally act on new accounts. Needs moderation.enabled (every action is written to the moderation log) and the Server Members Intent (GUILD_MEMBERS_INTENT=true) so join events arrive. Also enables the /raidmode command. Only ever acts on members who join while it is active, never on existing members.",
+    category: "moderation",
+    type: "boolean",
+    dependsOn: ["moderation.enabled"],
+  },
+  "moderation.raid.dry_run": {
+    label: "Anti-raid dry run",
+    description:
+      "While on, anti-raid detects, enters lockdown and posts its alert, but never kicks, times out or role-changes anyone: it only counts and logs what it would have done (see /raidmode status). Turn off once the thresholds look right for your server.",
+    category: "moderation",
+    type: "boolean",
+  },
+  "moderation.raid.join_threshold": {
+    label: "Raid join threshold",
+    description:
+      "Lockdown starts when MORE than this many members join within the window below. Minimum 2.",
+    category: "moderation",
+    type: "number",
+    min: 2,
+  },
+  "moderation.raid.window_seconds": {
+    label: "Raid window (seconds)",
+    description:
+      "The sliding window the join threshold is counted over. Values outside 5 to 3600 are clamped.",
+    category: "moderation",
+    type: "number",
+    min: 5,
+  },
+  "moderation.raid.lockdown_action": {
+    label: "Lockdown action",
+    description:
+      "What happens to each member who joins while the server is in lockdown. A moderator needs the matching permission to start a lockdown with /raidmode on (timeout: Moderate Members; quarantine: Manage Roles; kick: Kick Members), judged on the stronger of this action and the new-account action when that gate is on; administrators always have it.",
+    category: "moderation",
+    type: "string",
+    options: [
+      {
+        value: "timeout",
+        label: "Timeout (reversible, needs Moderate Members)",
+      },
+      { value: "quarantine", label: "Quarantine role (needs Manage Roles)" },
+      { value: "kick", label: "Kick (needs Kick Members)" },
+    ],
+  },
+  "moderation.raid.min_account_age_hours": {
+    label: "Minimum account age (hours)",
+    description:
+      "New-account gate, independent of lockdown: an account younger than this when it joins gets the new-account action. 0 turns the gate off.",
+    category: "moderation",
+    type: "number",
+    min: 0,
+  },
+  "moderation.raid.new_account_action": {
+    label: "New-account action",
+    description:
+      "What happens to a member whose account is younger than the minimum age.",
+    category: "moderation",
+    type: "string",
+    options: [
+      {
+        value: "timeout",
+        label: "Timeout (reversible, needs Moderate Members)",
+      },
+      { value: "quarantine", label: "Quarantine role (needs Manage Roles)" },
+      { value: "kick", label: "Kick (needs Kick Members)" },
+    ],
+  },
+  "moderation.raid.timeout_minutes": {
+    label: "Anti-raid timeout (minutes)",
+    description:
+      "How long the timeout action lasts. Values outside 1 to 40320 (28 days, Discord's limit) are clamped. A moderator can lift a timeout early from Discord.",
+    category: "moderation",
+    type: "number",
+    min: 1,
+  },
+  "moderation.raid.quarantine_role_id": {
+    label: "Quarantine role",
+    description:
+      "Role assigned by the quarantine action. Give it no access to your channels (or deny it everywhere) and keep it below the bot's own role. Remove it from a member in Discord to let them in.",
+    category: "moderation",
+    type: "role",
+  },
+  "moderation.raid.lockdown_max_minutes": {
+    label: "Lockdown auto-expiry (minutes)",
+    description:
+      "End a lockdown automatically this long after it started. 0 keeps it on until a moderator clears it with /raidmode off.",
+    category: "moderation",
+    type: "number",
+    min: 0,
+  },
+  "moderation.raid.alert_channel_id": {
+    label: "Raid alert channel",
+    description:
+      "Text channel that receives a message when lockdown starts or ends. Nothing is posted while this is empty (actions are still logged).",
+    category: "moderation",
+    type: "channel",
   },
   "aka.enabled": {
     label: "/aka command enabled",

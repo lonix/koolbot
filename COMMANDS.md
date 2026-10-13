@@ -43,6 +43,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/timeout](#timeout)
   - [/ban](#ban)
   - [/modlog](#modlog)
+  - [/raidmode](#raidmode)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
   - [/me](#me)
@@ -620,7 +621,7 @@ never pre-created.
 
 **Description:** Post a **"looking for group"** call for something you want
 to play right now, and let people join from the post itself. For a
-*scheduled* session with RSVPs, use [`/event`](#event) instead.
+_scheduled_ session with RSVPs, use [`/event`](#event) instead.
 
 **Enable:** Web UI → Settings → `lfg.enabled = true` → Reload commands.
 
@@ -910,6 +911,48 @@ line with its state, for example `Case #14 — under review, due 12 Mar 2026` or
 `Case #9 — readmitted 4 Feb 2026 by @staff`. Cases are opened and decided on the Web UI moderation page,
 not from Discord.
 
+### `/raidmode`
+
+Manually start, end or inspect the anti-raid **lockdown** (#1045). While a
+lockdown is on, each member who joins gets the configured action (timeout,
+quarantine role or kick) until you clear it. Gated by
+`moderation.raid.enabled`, and you need the **Moderate Members** permission
+to use it (checked again when the command runs, since Discord's own visibility
+gate can be overridden per role). The reply is ephemeral.
+
+`mode:on` makes the bot apply the strongest configured action to every later
+join, so it also needs the permission that action stands for, the same way
+`/ban` needs Ban Members. That is the lockdown action, or the new-account
+action when the account gate is on (minimum age above 0) and that action is
+stronger (kick over quarantine over timeout), because a young account joining
+during a lockdown gets the stronger of the two. `mode:off` and `mode:status` need only Moderate
+Members. Administrators always have every permission.
+
+| Strongest action | Extra permission needed for `mode:on` |
+| ---------------- | ------------------------------------- |
+| `timeout`        | Moderate Members                      |
+| `quarantine`     | Manage Roles                          |
+| `kick`           | Kick Members                          |
+
+```text
+/raidmode mode:on
+/raidmode mode:off
+/raidmode mode:status
+```
+
+**Options:**
+
+- `mode` (required) — `on` starts a lockdown, `off` ends it, `status` shows
+  whether it is on, whether it is a dry run, the joins counted in the current
+  window and what has been done so far
+
+Lockdown also starts by itself when more joins than the threshold arrive in
+the window. It only acts on members who join afterwards, never on existing
+members. Each action is a row in the moderation log (`/modlog`, source `raid`),
+so you can review it and undo it: remove the quarantine role or lift the
+timeout in Discord, or let a kicked member back in. Thresholds, actions and the
+dry run switch are Web UI settings on the Moderation page, not commands.
+
 ---
 
 ## 🔧 Web UI launcher
@@ -962,7 +1005,7 @@ in the command picker, and the handler re-checks the invoker's live guild
 permissions as defence in depth. A non-admin who reaches it gets an
 ephemeral reply pointing them to `/me`. The session it issues is always
 an `admin` session (authorised for both `/admin/*` and the admin's own
-`/me/*`). The Web UI's Permissions page governs the *other* slash
+`/me/*`). The Web UI's Permissions page governs the _other_ slash
 commands, not `/config` itself.
 
 > **Upgrade note (#1016):** members who used `/config` for their personal
@@ -1187,23 +1230,24 @@ surfaces share the same validation.
 
 ### User command permissions
 
-| Command                        | Permission Level | Additional Requirements       |
-| ------------------------------ | ---------------- | ----------------------------- |
-| `/ping`                        | Everyone\*       | Command must be enabled       |
-| `/voicestats`                  | Everyone\*       | Voice tracking enabled        |
-| `/achievements`                | Everyone\*       | Achievements enabled          |
-| `/seen`                        | Everyone\*       | Voice tracking + seen enabled |
-| `/aka`                         | Everyone\*       | Name history enabled          |
-| `/quote`                       | Everyone\*       | Quotes enabled                |
-| `/event list`                  | Everyone\*       | Events enabled                |
-| `/event` create/cancel/start   | Administrator    | Events enabled                |
-| `/lfg`                         | Everyone\*       | LFG enabled                   |
-| `/remind`                      | Everyone\*       | Reminders enabled             |
-| `/ticket`                      | Everyone\*       | Tickets enabled               |
-| `/warn`                        | Moderate Members | Moderation log enabled        |
-| `/timeout`                     | Moderate Members | Moderation log enabled        |
-| `/ban`                         | Ban Members      | Moderation log enabled        |
-| `/modlog`                      | Moderate Members | Moderation log enabled        |
+| Command                      | Permission Level                                           | Additional Requirements       |
+| ---------------------------- | ---------------------------------------------------------- | ----------------------------- |
+| `/ping`                      | Everyone\*                                                 | Command must be enabled       |
+| `/voicestats`                | Everyone\*                                                 | Voice tracking enabled        |
+| `/achievements`              | Everyone\*                                                 | Achievements enabled          |
+| `/seen`                      | Everyone\*                                                 | Voice tracking + seen enabled |
+| `/aka`                       | Everyone\*                                                 | Name history enabled          |
+| `/quote`                     | Everyone\*                                                 | Quotes enabled                |
+| `/event list`                | Everyone\*                                                 | Events enabled                |
+| `/event` create/cancel/start | Administrator                                              | Events enabled                |
+| `/lfg`                       | Everyone\*                                                 | LFG enabled                   |
+| `/remind`                    | Everyone\*                                                 | Reminders enabled             |
+| `/ticket`                    | Everyone\*                                                 | Tickets enabled               |
+| `/warn`                      | Moderate Members                                           | Moderation log enabled        |
+| `/timeout`                   | Moderate Members                                           | Moderation log enabled        |
+| `/ban`                       | Ban Members                                                | Moderation log enabled        |
+| `/modlog`                    | Moderate Members                                           | Moderation log enabled        |
+| `/raidmode`                  | Moderate Members (`on` also needs the action's permission) | Anti-raid enabled             |
 
 \* `/warn`, `/timeout` and `/modlog` are shown to members with the **Moderate
 Members** permission and `/ban` to **Ban Members** (administrators have both).
@@ -1214,6 +1258,13 @@ server's **Integrations** settings. `/timeout` and `/ban` additionally re-check
 that your own highest role sits above the target's, which is the rule Discord
 applies in its native menu but cannot apply to an action the bot executes on
 your behalf.
+
+`/raidmode` follows the same staff default as `/warn`, `/timeout`, `/ban` and
+`/modlog`: while the Web UI has at least one `staff` or `admin` role group and no
+explicit restriction is set for the command, only members of those groups can run it
+(administrators still bypass). On a server with such a group this narrows `/raidmode`
+from every Moderate Members holder to the staff group; set an explicit restriction on the
+Permissions page to change that.
 
 ### Web UI launcher permissions
 

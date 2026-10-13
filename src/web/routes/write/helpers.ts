@@ -8,6 +8,7 @@
  * routers behind `requireSession`, the admin-role check and `requireCsrf`.
  */
 
+import { RAID_CONFIG_KEYS } from "../../../services/raid-protection-service.js";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import {
   isValidCronExpression,
@@ -361,6 +362,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "moderation.cases.enabled",
     "moderation.cases.default_review_days",
     "moderation.cases.review_cron",
+    // Every anti-raid key (#1045), derived so the wizard cannot fall behind.
+    ...RAID_CONFIG_KEYS,
   ],
   events: [
     "events.enabled",
@@ -429,7 +432,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
  */
 export const WIZARD_FEATURE_EXTRA_GATES: Record<string, string[]> = {
   namehistory: ["aka.enabled"],
-  moderation: ["moderation.cases.enabled"],
+  moderation: ["moderation.cases.enabled", "moderation.raid.enabled"],
 };
 
 export const WIZARD_FEATURE_ORDER = [

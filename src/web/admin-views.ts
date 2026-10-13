@@ -31,7 +31,10 @@ import {
 import { MONTH_NAMES } from "./user-layout.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
-import type { ModerationAction } from "../models/moderation-log.js";
+import type {
+  ModerationAction,
+  ModerationSource,
+} from "../models/moderation-log.js";
 import type { TicketStatus } from "../models/ticket.js";
 import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
@@ -4663,13 +4666,13 @@ export interface ModerationRow {
   moderatorLabel: string | null;
   action: ModerationAction;
   reason: string | null;
-  source: "command" | "audit";
+  source: ModerationSource;
 }
 
 export interface ModerationProps extends CommonProps {
   enabled: boolean;
   /** All action types — populates the filter dropdown. */
-  actionOptions: ModerationAction[];
+  actionOptions: readonly ModerationAction[];
   /** Distinct target user IDs on the current page — populates the user filter. */
   userOptions: Array<{ id: string; label: string }>;
   filters: {
@@ -4708,6 +4711,9 @@ const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
   unban: "unban",
   timeout: "timeout",
   untimeout: "untimeout",
+  quarantine: "quarantine",
+  raid_lockdown: "raid lockdown",
+  raid_clear: "raid cleared",
 };
 
 function moderationActionTag(action: ModerationAction): string {
@@ -4715,9 +4721,9 @@ function moderationActionTag(action: ModerationAction): string {
   // Warns/timeouts are cautionary (amber), kicks/bans are severe (red), and the
   // "undo" actions (unban / untimeout) read as positive (green).
   const cls =
-    action === "unban" || action === "untimeout"
+    action === "unban" || action === "untimeout" || action === "raid_clear"
       ? "tag-on"
-      : action === "ban" || action === "kick"
+      : action === "ban" || action === "kick" || action === "raid_lockdown"
         ? "tag-off"
         : "tag-warn";
   return `<span class="tag ${cls}">${escapeHtml(label)}</span>`;

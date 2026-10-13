@@ -173,8 +173,20 @@ const mockConnection = {
   readyState: 1,
 };
 
+// Stand-in for `mongoose.Types.ObjectId`: ids that increase in creation order,
+// like real ones from one process (the anti-raid log rows rely on that order).
+class MockObjectId {
+  private static counter = 0;
+  private readonly value = String(++MockObjectId.counter).padStart(24, "0");
+  toString(): string {
+    return this.value;
+  }
+}
+
 jest.mock("mongoose", () => ({
+  Types: { ObjectId: MockObjectId },
   default: {
+    Types: { ObjectId: MockObjectId },
     connect: jest.fn().mockResolvedValue(undefined),
     connection: mockConnection,
     isValidObjectId: mockIsValidObjectId,

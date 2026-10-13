@@ -23,10 +23,34 @@ import mongoose, { Document, Schema } from "mongoose";
  * `(guildId, userId, createdAt)` so the per-user `/modlog` lookup and the
  * server-wide admin listing are both covered.
  */
-export type ModerationAction =
-  "warn" | "kick" | "ban" | "unban" | "timeout" | "untimeout";
+/**
+ * Every action a row can record. The single source for the model enum, the Web
+ * UI filter and the format tables, so they cannot drift apart.
+ *
+ * `quarantine`, `raid_lockdown` and `raid_clear` are written only by the
+ * anti-raid service (#1045). The two `raid_*` rows are guild-level state
+ * changes rather than actions against a member, so their `userId` is the
+ * guild id: they appear in the server-wide
+ * listing and never in any member's `/modlog` history.
+ */
+export const MODERATION_ACTIONS = [
+  "warn",
+  "kick",
+  "ban",
+  "unban",
+  "timeout",
+  "untimeout",
+  "quarantine",
+  "raid_lockdown",
+  "raid_clear",
+] as const;
 
-export type ModerationSource = "command" | "audit";
+export type ModerationAction = (typeof MODERATION_ACTIONS)[number];
+
+/** `raid` marks rows written by the anti-raid service (#1045). */
+export const MODERATION_SOURCES = ["command", "audit", "raid"] as const;
+
+export type ModerationSource = (typeof MODERATION_SOURCES)[number];
 
 export interface IModerationLog extends Document {
   guildId: string;
@@ -38,7 +62,7 @@ export interface IModerationLog extends Document {
   reason: string | null;
   /**
    * `"command"` for KoolBot-issued warns via `/warn`; `"audit"` for actions
-   * mirrored from the guild audit log.
+   * mirrored from the guild audit log; `"raid"` for anti-raid actions.
    */
   source: ModerationSource;
   createdAt: Date;
@@ -51,13 +75,13 @@ const ModerationLogSchema = new Schema<IModerationLog>(
     moderatorId: { type: String, default: null },
     action: {
       type: String,
-      enum: ["warn", "kick", "ban", "unban", "timeout", "untimeout"],
+      enum: [...MODERATION_ACTIONS],
       required: true,
     },
     reason: { type: String, default: null },
     source: {
       type: String,
-      enum: ["command", "audit"],
+      enum: [...MODERATION_SOURCES],
       required: true,
       default: "command",
     },

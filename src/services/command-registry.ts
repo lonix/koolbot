@@ -54,6 +54,7 @@ export const STAFF_DEFAULT_COMMANDS: ReadonlySet<string> = new Set([
   "timeout",
   "ban",
   "modlog",
+  "raidmode",
 ]);
 
 export const COMMAND_CONFIGS: readonly CommandConfig[] = [
@@ -80,6 +81,11 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   { name: "timeout", configKey: "moderation.enabled", file: "timeout" },
   { name: "ban", configKey: "moderation.enabled", file: "ban" },
   { name: "modlog", configKey: "moderation.enabled", file: "modlog" },
+  {
+    name: "raidmode",
+    configKey: "moderation.raid.enabled",
+    file: "raidmode",
+  },
   { name: "config", configKey: null, file: "config" }, // Always enabled - admin WebUI launcher
   // Derived gate (no `me.enabled` key): Web UI on and a /me/* surface on (#1016)
   { name: "me", configKey: null, isEnabled: isMeCommandEnabled, file: "me" },

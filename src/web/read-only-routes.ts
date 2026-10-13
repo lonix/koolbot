@@ -89,13 +89,17 @@ import {
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
+import { RAID_CONFIG_KEYS } from "../services/raid-protection-service.js";
 import { ModerationCaseService } from "../services/moderation-case-service.js";
 import { SYSTEM_ACTOR } from "../models/moderation-case.js";
 import {
   buildCaseGroups,
   loadModerationCaseData,
 } from "./moderation-case-groups.js";
-import type { ModerationAction } from "../models/moderation-log.js";
+import {
+  MODERATION_ACTIONS,
+  type ModerationAction,
+} from "../models/moderation-log.js";
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
@@ -303,6 +307,7 @@ export const MODERATION_SETTING_KEYS = [
   "moderation.cases.default_review_days",
   "moderation.cases.retention_days",
   "moderation.cases.history_grace_days",
+  ...RAID_CONFIG_KEYS,
   "core.moderation_review.enabled",
   "core.moderation_review.channel_id",
 ] as const;
@@ -2555,15 +2560,6 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Moderation log (#728) ----------
-  const MODERATION_ACTIONS: ModerationAction[] = [
-    "warn",
-    "kick",
-    "ban",
-    "unban",
-    "timeout",
-    "untimeout",
-  ];
-
   router.get(
     "/moderation",
     asyncHandler(async (req, res) => {
@@ -2576,7 +2572,9 @@ export function createReadOnlyRouter(
       const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
 
       const actionRaw = String(req.query.action ?? "").trim();
-      const actionFilter = (MODERATION_ACTIONS as string[]).includes(actionRaw)
+      const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
+        actionRaw,
+      )
         ? (actionRaw as ModerationAction)
         : undefined;
       const userFilter = String(req.query.user ?? "").trim() || undefined;
@@ -2626,7 +2624,9 @@ export function createReadOnlyRouter(
       // back to the raw snowflake at render time.
       const idsOnPage = new Set<string>();
       for (const d of docs) {
-        idsOnPage.add(d.userId);
+        // Anti-raid lockdown rows concern the server, so their user is the
+        // guild id (#1045): not a member, and not worth a lookup.
+        if (d.userId !== common.guildId) idsOnPage.add(d.userId);
         if (d.moderatorId) idsOnPage.add(d.moderatorId);
       }
       for (const c of queueCases) {
@@ -2639,7 +2639,9 @@ export function createReadOnlyRouter(
           if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
         }
       }
-      const labels = new Map<string, string>();
+      const labels = new Map<string, string>([
+        [common.guildId, "Server (anti-raid)"],
+      ]);
       if (idsOnPage.size > 0) {
         try {
           const guild = await client.guilds.fetch(common.guildId);

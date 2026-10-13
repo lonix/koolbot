@@ -244,6 +244,8 @@ describe("Config Schema", () => {
       "achievements.enabled": ["voicetracking.enabled"],
       "celebrations.enabled": ["achievements.enabled"],
       "voicetracking.announcements.enabled": ["voicetracking.enabled"],
+      // Every anti-raid action must land in the moderation log (#1045).
+      "moderation.raid.enabled": ["moderation.enabled"],
       // The update-available note (#1029) has nothing to announce without
       // the update check that finds the newer release.
       "core.updates.enabled": ["core.updatecheck.enabled"],
@@ -492,6 +494,7 @@ describe("Config Schema", () => {
       // Moderation cases (#908) — the lifecycle is its own opt-in on top of
       // the log, so an upgrade changes nothing until an operator turns it on.
       "moderation.cases.enabled": false,
+      "moderation.raid.enabled": false,
       // Name history (#1038) — both gates ship off.
       "aka.enabled": false,
       "namehistory.enabled": false,

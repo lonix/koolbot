@@ -14,9 +14,14 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 }));
 
 const mockDeleteMany = jest.fn<() => Promise<{ deletedCount: number }>>();
+// Newest raid lockdown/clear row per guild (#1045).
+let raidStateRows: Array<{ id: unknown }> = [];
+const mockAggregate = jest.fn<(pipeline: unknown) => unknown>(() => ({
+  exec: async () => raidStateRows,
+}));
 
 jest.unstable_mockModule("../../src/models/moderation-log.js", () => ({
-  ModerationLog: { deleteMany: mockDeleteMany },
+  ModerationLog: { deleteMany: mockDeleteMany, aggregate: mockAggregate },
 }));
 
 // Cases (#908) decide what the log prune must leave alone.
@@ -85,6 +90,8 @@ describe("ModerationLogCleanupService", () => {
     mockCaseDistinct.mockReset();
     mockCaseFind.mockReset();
     protectedCases = [];
+    raidStateRows = [];
+    mockAggregate.mockClear();
     mockCaseDeleteMany.mockResolvedValue({ deletedCount: 0 });
     mockCaseDistinct.mockResolvedValue([]);
     mockCaseFind.mockImplementation(() => {
@@ -201,6 +208,24 @@ describe("ModerationLogCleanupService", () => {
       expect(logFilter().createdAt.$lt).toBeInstanceOf(Date);
       expect(logFilter()._id).toEqual({ $nin: ["kick-entry"] });
       expect(mockCaseDistinct).toHaveBeenCalledWith("originEntryId", {});
+    });
+
+    it("never prunes the newest raid lockdown/clear row of a guild (#1045)", async () => {
+      config({ "moderation.retention_days": 1 });
+      raidStateRows = [{ id: "lockdown-row" }];
+      mockDeleteMany.mockResolvedValue({ deletedCount: 0 });
+      await ModerationLogCleanupService.getInstance().runCleanup();
+      expect(logFilter()._id).toEqual({ $nin: ["lockdown-row"] });
+      const pipeline = mockAggregate.mock.calls[0]?.[0] as Array<
+        Record<string, any>
+      >;
+      // A millisecond tie must resolve to the row written last (`_id` order),
+      // or the retention exemption could keep the lockdown and delete its clear.
+      expect(pipeline[1].$sort).toEqual({ createdAt: -1, _id: -1 });
+      expect(pipeline[0].$match.action.$in).toEqual([
+        "raid_lockdown",
+        "raid_clear",
+      ]);
     });
 
     it("also protects the entry that resolved a case", async () => {

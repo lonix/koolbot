@@ -24,6 +24,12 @@ export function actionLabel(action: ModerationAction): string {
       return "⏳ Timeout";
     case "untimeout":
       return "✅ Timeout lifted";
+    case "quarantine":
+      return "🚧 Quarantine";
+    case "raid_lockdown":
+      return "🛡️ Raid lockdown on";
+    case "raid_clear":
+      return "🛡️ Raid lockdown off";
     default:
       return action;
   }
@@ -39,9 +45,13 @@ export function actionColor(action: ModerationAction): ColorResolvable {
     case "ban":
       return 0xdc2626;
     case "timeout":
+    case "quarantine":
       return 0xeab308;
+    case "raid_lockdown":
+      return 0xdc2626;
     case "unban":
     case "untimeout":
+    case "raid_clear":
       return 0x22c55e;
     default:
       return 0x6366f1;
@@ -56,6 +66,9 @@ const ACTION_NOUNS: Record<ModerationAction, readonly [string, string]> = {
   ban: ["ban", "bans"],
   untimeout: ["timeout lifted", "timeouts lifted"],
   unban: ["unban", "unbans"],
+  quarantine: ["quarantine", "quarantines"],
+  raid_lockdown: ["raid lockdown", "raid lockdowns"],
+  raid_clear: ["raid lockdown lifted", "raid lockdowns lifted"],
 };
 
 /**
@@ -70,6 +83,9 @@ export const ACTION_SUMMARY_ORDER: readonly ModerationAction[] = [
   "ban",
   "untimeout",
   "unban",
+  "quarantine",
+  "raid_lockdown",
+  "raid_clear",
 ];
 
 /**
