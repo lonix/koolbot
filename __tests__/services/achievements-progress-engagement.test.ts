@@ -1,14 +1,13 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { stubMongoGuard } from "../test-utils.js";
+import { stubMongoGuard, usePerModelStubs } from "../test-utils.js";
 import type { Client } from "discord.js";
 
 // Mirrors the proven mocking pattern in achievements-service.test.ts: mock the
 // logger, the UserAchievements model (callable constructor + statics) and the
 // quote service, and rely on the global mongoose mock (setup.ts) for the other
-// models. NB: in this ESM setup every mongoose model shares ONE mocked object,
-// so VoiceChannelTracking/MessageActivityTracking/etc. all share the same
-// `findOne`/`aggregate` — tests craft a single return object that satisfies
-// whichever reader runs.
+// models. Each tracking model gets its own stub (#1089), so a test says which
+// readers see which document instead of relying on one shared `findOne`.
+usePerModelStubs();
 
 jest.mock("../../src/utils/logger.js", () => ({
   default: {
@@ -42,6 +41,9 @@ jest.mock("../../src/services/quote-service.js", () => ({
 import { AchievementsService } from "../../src/services/achievements-service.js";
 import { UserAchievements } from "../../src/models/user-achievements.js";
 import { VoiceChannelTracking } from "../../src/models/voice-channel-tracking.js";
+import { MessageActivityTracking } from "../../src/models/message-activity-tracking.js";
+import { ReactionActivityTracking } from "../../src/models/reaction-activity-tracking.js";
+import { PollParticipationTracking } from "../../src/models/poll-participation-tracking.js";
 
 // Start of the current ISO week — Monday 00:00 UTC. Mirrors the service so
 // crafted sessions land deterministically inside "this week".
@@ -85,12 +87,19 @@ function createService(
   return service;
 }
 
-// Every mongoose model shares ONE mocked object in this setup, so a single
-// findOne return has to satisfy every reader (the achievements record AND the
-// voice/message tracking docs). Set the same object on both handles.
+// A single crafted object serves as the achievements record and every tracking
+// doc a test cares about (voice totals, message count, poll votes). Each model
+// has its own stub, so hand the object to each reader explicitly.
 function setSharedDoc(doc: unknown): void {
-  (UserAchievements.findOne as jest.Mock).mockResolvedValue(doc);
-  (VoiceChannelTracking.findOne as jest.Mock).mockResolvedValue(doc);
+  for (const model of [
+    UserAchievements,
+    VoiceChannelTracking,
+    MessageActivityTracking,
+    ReactionActivityTracking,
+    PollParticipationTracking,
+  ]) {
+    (model.findOne as jest.Mock).mockResolvedValue(doc);
+  }
 }
 
 describe("AchievementsService — progress & engagement (#654)", () => {
@@ -101,6 +110,14 @@ describe("AchievementsService — progress & engagement (#654)", () => {
     (VoiceChannelTracking.findOne as jest.Mock).mockResolvedValue(null);
     (VoiceChannelTracking.aggregate as jest.Mock).mockReset();
     (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+    for (const model of [
+      MessageActivityTracking,
+      ReactionActivityTracking,
+      PollParticipationTracking,
+    ]) {
+      (model.findOne as jest.Mock).mockReset();
+      (model.findOne as jest.Mock).mockResolvedValue(null);
+    }
     (AchievementsService as unknown as { instance: unknown }).instance =
       undefined;
   });

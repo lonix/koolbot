@@ -1,14 +1,16 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { Client } from "discord.js";
+import { usePerModelStubs } from "../test-utils.js";
 
 // This suite follows the repo's model-testing convention: the global mongoose
 // mock in __tests__/setup.ts already replaces `mongoose.model(...)` with a
-// plain object, so we assign the statics we need directly onto the imported
+// plain object (one per model after `usePerModelStubs()`), so we assign the statics we need directly onto the imported
 // model rather than trying to construct it. Assertions therefore target the
 // service's branch behaviour and Discord side effects up to (and including)
 // the point where the DB row would be written — which is exactly where the
 // #813 validation logic lives.
 jest.mock("../../src/models/reaction-role-config.js");
+usePerModelStubs();
 
 import { ReactionRoleService } from "../../src/services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../../src/models/reaction-role-config.js";

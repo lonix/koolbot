@@ -21,11 +21,13 @@ jest.mock("../../src/utils/logger.js", () => ({
   },
 }));
 
+import { usePerModelStubs } from "../test-utils.js";
 import { TrackingOptOut } from "../../src/models/tracking-opt-out.js";
 import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 
-// The global mongoose mock (setup.ts) hands every model one shared stub;
-// give it fresh methods for this suite.
+// TrackingOptOut gets its own stub (#1089), so replacing its methods here
+// cannot leak into any other model; give it fresh methods for this suite.
+usePerModelStubs();
 Object.assign(TrackingOptOut, {
   find: jest.fn(),
   findOne: jest.fn(),

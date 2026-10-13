@@ -1,5 +1,10 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { stubMongoGuard, stubTrackingOptOuts } from "../test-utils.js";
+import {
+  mockModel,
+  stubMongoGuard,
+  stubTrackingOptOuts,
+  usePerModelStubs,
+} from "../test-utils.js";
 import type { Client, PollAnswer, User } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
@@ -12,31 +17,16 @@ jest.mock("../../src/utils/logger.js", () => ({
   isDebugMode: jest.fn(() => false),
 }));
 
-// The global mongoose mock in __tests__/setup.ts hands every `mongoose.model`
-// call the *same* stub object, so the two collections this tracker writes
-// would be indistinguishable. Mock the model modules themselves to keep the
-// participation counters and the per-poll turnout rows apart.
-const PollParticipationTracking = {
-  updateOne: jest.fn(),
-  findOne: jest.fn(),
-  countDocuments: jest.fn(),
-  aggregate: jest.fn(),
-  bulkWrite: jest.fn(),
-};
-const PollTurnout = {
-  updateOne: jest.fn(),
-  countDocuments: jest.fn(),
-  aggregate: jest.fn(),
-  deleteMany: jest.fn(),
-};
-
-jest.unstable_mockModule(
-  "../../src/models/poll-participation-tracking.js",
-  () => ({ PollParticipationTracking }),
-);
-jest.unstable_mockModule("../../src/models/poll-turnout.js", () => ({
-  PollTurnout,
-}));
+// The tracker writes two collections (participation counters and per-poll
+// turnout rows). Each model gets its own stub (#1089), so they stay apart
+// without replacing the model modules.
+usePerModelStubs();
+const PollParticipationTracking = mockModel("PollParticipationTracking");
+const PollTurnout = mockModel("PollTurnout");
+// Not part of the default stub shape, so add what the tracker calls.
+PollParticipationTracking.updateOne = jest.fn();
+PollParticipationTracking.bulkWrite = jest.fn();
+PollTurnout.updateOne = jest.fn();
 
 const { PollParticipationTracker } =
   await import("../../src/services/poll-participation-tracker.js");
