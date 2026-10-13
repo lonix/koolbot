@@ -63,9 +63,11 @@ export async function handleVCModal(
   try {
     switch (action) {
       case "name":
+        if (!(await requireLiveOwner(interaction, channelId))) return;
         await handleNameModal(interaction, channelId);
         break;
       case "savepreset":
+        if (!(await requireLiveOwner(interaction, channelId))) return;
         await handleSavePresetModal(interaction, channelId, userId);
         break;
       case "renamepreset":
@@ -98,6 +100,24 @@ export async function handleVCModal(
   }
 }
 
+/**
+ * The userId in a modal's customId only proves the modal was opened by this
+ * user, not that they still own the room (a transfer can happen while the
+ * modal is open). Re-check live ownership before touching the room (#1143).
+ */
+async function requireLiveOwner(
+  interaction: ModalSubmitInteraction,
+  channelId: string,
+): Promise<boolean> {
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  if (manager.isRoomOwner(interaction.user.id, channelId)) return true;
+  await interaction.reply({
+    content: "❌ Only the current channel owner can do this.",
+    flags: MessageFlags.Ephemeral,
+  });
+  return false;
+}
+
 async function handleNameModal(
   interaction: ModalSubmitInteraction,
   channelId: string,
@@ -121,6 +141,17 @@ async function handleNameModal(
     return;
   }
 
+  // The lobby's name (and the offline lobby / "New Channel" names) are
+  // reserved: a room carrying one could be mistaken for the lobby (#1148).
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  if (await manager.isReservedChannelName(newName)) {
+    await interaction.reply({
+      content: "❌ That name is reserved. Please choose a different name.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   try {
     const channel = await interaction.guild?.channels.fetch(channelId);
     if (!channel || channel.type !== ChannelType.GuildVoice) {
@@ -135,7 +166,6 @@ async function handleNameModal(
     await channel.setName(newName);
 
     // Mark this channel as having a custom name
-    const manager = VoiceChannelManager.getInstance(interaction.client);
     manager.setCustomChannelName(channelId, newName);
 
     logger.info(

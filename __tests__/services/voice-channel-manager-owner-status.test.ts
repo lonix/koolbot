@@ -85,6 +85,7 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
     channelHolds?: boolean;
   }) {
     const create = jest.fn(async () => undefined);
+    const del = jest.fn(async () => undefined);
     const holds = opts.channelHolds ?? true;
     const channel = {
       id: "c",
@@ -93,6 +94,7 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       members: { get: () => ({ id: "new", displayName: "New" }) },
       permissionOverwrites: {
         create,
+        delete: del,
         cache: new Map([
           [
             "old",
@@ -122,11 +124,11 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       async () => undefined,
     );
     (manager as any).persistOwnership = jest.fn(async () => undefined);
-    return { create };
+    return { create, del };
   }
 
-  it("moves the grant to the new owner on transfer and neutralises the old owner's", async () => {
-    const { create } = transferFixture({ oldAllowsStatus: true });
+  it("moves the grant to the new owner on transfer and deletes the old owner's overwrite", async () => {
+    const { create, del } = transferFixture({ oldAllowsStatus: true });
 
     await manager.transferOwnership("c", "old", "new");
 
@@ -137,18 +139,16 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
         SetVoiceChannelStatus: true,
       }),
     );
-    expect(create).toHaveBeenCalledWith(
-      "old",
-      expect.objectContaining({
-        ManageChannels: false,
-        SetVoiceChannelStatus: null,
-      }),
+    // #1143: the old owner's overwrite is removed, not rewritten as an allow
+    expect(del).toHaveBeenCalledWith("old", expect.any(String));
+    expect((create.mock.calls as unknown[][]).some((c) => c[0] === "old")).toBe(
+      false,
     );
   });
 
-  it("still revokes the old owner's grant after grant_status is turned off", async () => {
+  it("still removes the old owner's overwrite after grant_status is turned off", async () => {
     mockGetBoolean.mockResolvedValue(false);
-    const { create } = transferFixture({ oldAllowsStatus: true });
+    const { create, del } = transferFixture({ oldAllowsStatus: true });
 
     await manager.transferOwnership("c", "old", "new");
 
@@ -156,21 +156,18 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       (c) => c[0] === "new",
     )![1] as Record<string, unknown>;
     expect(newCall.SetVoiceChannelStatus).toBeUndefined();
-    expect(create).toHaveBeenCalledWith(
-      "old",
-      expect.objectContaining({ SetVoiceChannelStatus: null }),
-    );
+    expect(del).toHaveBeenCalledWith("old", expect.any(String));
   });
 
-  it("leaves the old owner alone when they never had the grant", async () => {
-    const { create } = transferFixture({ oldAllowsStatus: false });
+  it("removes the old owner's overwrite even when they never had the grant", async () => {
+    const { create, del } = transferFixture({ oldAllowsStatus: false });
 
     await manager.transferOwnership("c", "old", "new");
 
-    const oldCall = (create.mock.calls as unknown[][]).find(
-      (c) => c[0] === "old",
-    )![1] as Record<string, unknown>;
-    expect("SetVoiceChannelStatus" in oldCall).toBe(false);
+    expect(del).toHaveBeenCalledWith("old", expect.any(String));
+    expect((create.mock.calls as unknown[][]).some((c) => c[0] === "old")).toBe(
+      false,
+    );
   });
 
   it("does not touch the status permission when the room denies it to the bot", async () => {
@@ -358,14 +355,16 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
       ).toBe(false);
     });
   });
-  it("automatic transfer (updateChannelOwnership) grants the new owner and neutralises the old", async () => {
+  it("automatic transfer (updateChannelOwnership) grants the new owner and deletes the old owner's overwrite", async () => {
     const create = jest.fn(async () => undefined);
+    const del = jest.fn(async () => undefined);
     const channel: any = {
       id: "c",
       name: "Room",
       guild: guildHolding(true),
       permissionOverwrites: {
         create,
+        delete: del,
         cache: new Map([
           [
             "old",
@@ -401,12 +400,9 @@ describe("VoiceChannelManager owner Set Voice Channel Status grant", () => {
         SetVoiceChannelStatus: true,
       }),
     );
-    expect(create).toHaveBeenCalledWith(
-      "old",
-      expect.objectContaining({
-        ManageChannels: false,
-        SetVoiceChannelStatus: null,
-      }),
+    expect(del).toHaveBeenCalledWith("old", expect.any(String));
+    expect((create.mock.calls as unknown[][]).some((c) => c[0] === "old")).toBe(
+      false,
     );
   });
 });

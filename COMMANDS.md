@@ -1119,7 +1119,10 @@ panel posted in a dynamically created voice channel's text chat.
 
 **Description:** When you create a voice channel (by joining the lobby),
 an interactive control panel is automatically sent to the channel's text
-chat. Only you (the channel owner) can use it.
+chat. Only you (the channel owner) can use it. Every click is checked
+against who owns the room right now, so after ownership moves to someone
+else the previous owner's old panel, Transfer menu or Presets panel stops
+working and they lose their member overwrite on the room.
 
 **Enable:** Web UI → Settings → `voicechannels.controlpanel.enabled = true`
 (default: `true`).
@@ -1175,8 +1178,10 @@ Only the channel owner can use these controls
 
 ### Rename channel
 
-Click **✏️ Rename** to open a modal where you can enter a new name. No
-placeholder requirements — use any name.
+Click **✏️ Rename** to open a modal where you can enter a new name. Any
+name works except the reserved ones: the lobby's name, the offline lobby
+name and `➕ New Channel` are refused, so a room can never pass for the
+lobby.
 
 ### Toggle privacy
 

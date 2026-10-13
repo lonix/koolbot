@@ -29,14 +29,21 @@ describe("VCModalHandler - Custom Name Tracking", () => {
   let mockChannel: Partial<VoiceChannel>;
   let mockSetCustomChannelName: jest.Mock;
   let mockGetInstance: jest.Mock;
+  let mockIsRoomOwner: jest.Mock;
+  let mockIsReservedChannelName: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockSetCustomChannelName = jest.fn();
 
+    mockIsRoomOwner = jest.fn().mockReturnValue(true);
+    mockIsReservedChannelName = jest.fn().mockResolvedValue(false);
+
     mockGetInstance = jest.fn(() => ({
       setCustomChannelName: mockSetCustomChannelName,
+      isRoomOwner: mockIsRoomOwner,
+      isReservedChannelName: mockIsReservedChannelName,
     }));
 
     (mockVoiceChannelManager.getInstance as unknown as jest.Mock) =
@@ -70,6 +77,44 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       guild: mockGuild as Guild,
       client: {} as any as Client,
     } as any;
+  });
+
+  describe("Ownership and reserved names (#1143, #1148)", () => {
+    it("refuses a rename from a user who no longer owns the room", async () => {
+      mockIsRoomOwner.mockReturnValue(false);
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockIsRoomOwner).toHaveBeenCalledWith(
+        "test-user-id",
+        "test-channel-id",
+      );
+      expect(mockChannel.setName).not.toHaveBeenCalled();
+      expect(mockSetCustomChannelName).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("current channel owner"),
+        }),
+      );
+    });
+
+    it("rejects a rename to a reserved (lobby) name", async () => {
+      mockIsReservedChannelName.mockResolvedValue(true);
+      (mockInteraction.fields!.getTextInputValue as jest.Mock).mockReturnValue(
+        "Lobby",
+      );
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockIsReservedChannelName).toHaveBeenCalledWith("Lobby");
+      expect(mockChannel.setName).not.toHaveBeenCalled();
+      expect(mockSetCustomChannelName).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("reserved"),
+        }),
+      );
+    });
   });
 
   describe("Custom name tracking on rename", () => {

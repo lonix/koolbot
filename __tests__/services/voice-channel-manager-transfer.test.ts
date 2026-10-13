@@ -35,6 +35,7 @@ describe("VoiceChannelManager - Transfer Ownership", () => {
     // Mock permission overwrites
     mockPermissionOverwrites = {
       create: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
     };
 
     // Mock members collection
@@ -99,22 +100,101 @@ describe("VoiceChannelManager - Transfer Ownership", () => {
       );
     });
 
-    it("should remove ManageChannels permission from old owner", async () => {
+    it("should delete the old owner's overwrite instead of leaving an explicit allow (#1143)", async () => {
       await manager.transferOwnership(
         "channel-id",
         "old-owner-id",
         "new-owner-id",
       );
 
+      expect(mockPermissionOverwrites.delete).toHaveBeenCalledWith(
+        "old-owner-id",
+        expect.any(String),
+      );
+      // No Connect/Speak/ViewChannel allow may be (re)written for them
+      expect(mockPermissionOverwrites.create).not.toHaveBeenCalledWith(
+        "old-owner-id",
+        expect.anything(),
+      );
+    });
+
+    it("neutralises the old owner's overwrite in place when deleting it fails", async () => {
+      mockPermissionOverwrites.delete.mockRejectedValue(new Error("boom"));
+
+      await manager.transferOwnership(
+        "channel-id",
+        "old-owner-id",
+        "new-owner-id",
+      );
+
+      // Not the old explicit allow: ManageChannels denied, the rest neutral
       expect(mockPermissionOverwrites.create).toHaveBeenCalledWith(
         "old-owner-id",
         {
           ManageChannels: false,
-          Connect: true,
-          Speak: true,
-          ViewChannel: true,
+          Connect: null,
+          Speak: null,
+          ViewChannel: null,
         },
       );
+    });
+
+    it("does nothing for the old owner when the room has no overwrite for them", async () => {
+      // Lobby-join rooms inherit the category's overwrites: nothing to remove
+      (mockPermissionOverwrites as any).cache = new Map();
+
+      await manager.transferOwnership(
+        "channel-id",
+        "old-owner-id",
+        "new-owner-id",
+      );
+
+      expect(mockPermissionOverwrites.delete).not.toHaveBeenCalled();
+      expect(mockPermissionOverwrites.create).not.toHaveBeenCalledWith(
+        "old-owner-id",
+        expect.anything(),
+      );
+    });
+
+    it("resets the old owner's overwrite to the category's instead of dropping a category-level deny", async () => {
+      (mockPermissionOverwrites as any).cache = new Map([
+        ["old-owner-id", { allow: { has: () => false } }],
+      ]);
+      (mockChannel as any).parent = {
+        permissionOverwrites: {
+          cache: new Map([
+            [
+              "old-owner-id",
+              {
+                allow: { toArray: () => ["ViewChannel"] },
+                deny: { toArray: () => ["Connect"] },
+              },
+            ],
+          ]),
+        },
+      };
+
+      await manager.transferOwnership(
+        "channel-id",
+        "old-owner-id",
+        "new-owner-id",
+      );
+
+      expect(mockPermissionOverwrites.delete).not.toHaveBeenCalled();
+      expect(mockPermissionOverwrites.create).toHaveBeenCalledWith(
+        "old-owner-id",
+        { ViewChannel: true, Connect: false },
+        expect.anything(),
+      );
+    });
+
+    it("still completes the transfer when deleting the old overwrite fails", async () => {
+      mockPermissionOverwrites.delete.mockRejectedValue(new Error("boom"));
+
+      await expect(
+        manager.transferOwnership("channel-id", "old-owner-id", "new-owner-id"),
+      ).resolves.toBeUndefined();
+      expect(manager.getUserChannel("new-owner-id")).toBe(mockChannel);
     });
 
     it("should not rename channel when it has a custom name", async () => {

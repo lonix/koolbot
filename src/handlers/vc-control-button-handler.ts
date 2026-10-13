@@ -61,10 +61,17 @@ export async function handleVCControlButton(
   const ownerId = parts[4];
   const userId = interaction.user.id;
 
-  // Verify user is the owner
-  if (userId !== ownerId) {
+  // Verify user is the owner. The ownerId in the customId is only a hint (it
+  // goes stale on transfer); authorise against live ownership (#1143).
+  if (
+    userId !== ownerId ||
+    !VoiceChannelManager.getInstance(interaction.client).isRoomOwner(
+      userId,
+      channelId,
+    )
+  ) {
     await interaction.reply({
-      content: "❌ Only the channel owner can use these controls.",
+      content: "❌ Only the current channel owner can use these controls.",
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -332,8 +339,7 @@ async function handleLetIn(
   const manager = VoiceChannelManager.getInstance(interaction.client);
 
   // Validate current ownership (not just the stale ownerId encoded in the button)
-  const currentOwnerChannel = manager.getUserChannel(interaction.user.id);
-  if (!currentOwnerChannel || currentOwnerChannel.id !== mainChannelId) {
+  if (!manager.isRoomOwner(interaction.user.id, mainChannelId)) {
     await interaction.reply({
       content:
         "❌ Only the current owner of this voice channel can let users in.",

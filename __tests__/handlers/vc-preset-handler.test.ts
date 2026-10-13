@@ -19,6 +19,7 @@ jest.mock("../../src/models/user-voice-preferences.js", () => ({
 import { ConfigService } from "../../src/services/config-service.js";
 import { UserVoicePreferences } from "../../src/models/user-voice-preferences.js";
 import { UserVoicePrefsService } from "../../src/services/user-voice-prefs-service.js";
+import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import {
   handleVCPresetButton,
   presetNameTag,
@@ -30,6 +31,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
   let mockInteraction: Partial<ButtonInteraction>;
   let mockGuild: Partial<Guild>;
   let mockChannel: Partial<VoiceChannel>;
+  let mockIsRoomOwner: jest.Mock;
   let mockService: {
     setDefault: jest.Mock;
     deletePreset: jest.Mock;
@@ -56,6 +58,16 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       .spyOn(UserVoicePrefsService, "getInstance")
       .mockReturnValue(mockService as unknown as UserVoicePrefsService);
 
+    // Live ownership: user1 owns chan1 (the customId alone is not trusted)
+    mockIsRoomOwner = jest.fn(
+      (userId: string, channelId: string) =>
+        userId === "user1" && channelId === "chan1",
+    );
+    jest.spyOn(VoiceChannelManager, "getInstance").mockReturnValue({
+      isRoomOwner: mockIsRoomOwner,
+      isReservedChannelName: jest.fn().mockResolvedValue(false),
+    } as unknown as VoiceChannelManager);
+
     mockChannel = {
       id: "chan1",
       name: "Test Channel",
@@ -80,6 +92,23 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
   const setPresets = (presets: Array<{ name: string; isDefault: boolean }>) =>
     mockFindOne.mockResolvedValue({ presets } as never);
+
+  describe("live ownership (#1143)", () => {
+    it("refuses a preset action from a user who no longer owns the room", async () => {
+      setPresets([squadNight]);
+      mockIsRoomOwner.mockReturnValue(false);
+      mockInteraction.customId = `vc_preset_delete_0_${presetNameTag("Squad Night")}_chan1_user1`;
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(mockService.deletePreset).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("current channel owner"),
+        }),
+      );
+    });
+  });
 
   describe("delete button", () => {
     it("passes the verified preset name through as expectedName", async () => {

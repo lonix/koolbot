@@ -19,7 +19,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  TextChannel,
   PermissionFlagsBits,
   Message,
 } from "discord.js";
@@ -91,9 +90,22 @@ export function stripSurroundingQuotes(value: string): string {
   return match ? match[2] : value;
 }
 
+/** Legacy trigger channel name; reserved so rooms cannot spoof it (#1148). */
+const NEW_CHANNEL_TRIGGER_NAME = "➕ New Channel";
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
+
+  /**
+   * The control-panel message KoolBot posted for each room (channel id ->
+   * where it lives), so an ownership transfer edits that exact message
+   * instead of guessing from the last 50 messages (#1143). In memory only:
+   * after a restart the refresh falls back to the scan, and a stale panel
+   * is harmless because every action re-checks live ownership.
+   */
+  private controlPanels: Map<string, { channelId: string; messageId: string }> =
+    new Map();
   /**
    * Serialises "does this member have a channel, and make one if not" per
    * owner.
@@ -398,7 +410,73 @@ export class VoiceChannelManager {
   }): Promise<boolean> {
     const lobbyId = await this.resolveLobbyChannelId(channel.guild);
     if (lobbyId) return channel.id === lobbyId;
+    // Name fallback (no usable lobby ID configured): a room KoolBot created
+    // for a member is never the lobby, whatever it has been renamed to (#1148).
+    if (this.isTrackedRoom(channel.id)) return false;
     return channel.name === (await this.getLobbyChannelName());
+  }
+
+  /**
+   * Is this a room KoolBot created for a member (owned room or waiting room)?
+   * Identified by channel ID from the ownership registry, which a room owner
+   * cannot influence by renaming, unlike the channel name (#1148).
+   */
+  private isTrackedRoom(channelId: string): boolean {
+    for (const room of this.userChannels.values()) {
+      if (room.id === channelId) return true;
+    }
+    return this.waitingRoomToMain.has(channelId);
+  }
+
+  /**
+   * Find a voice channel in the managed category by exact name, never
+   * returning a member room. Used by the name-based lobby fallback so a
+   * member cannot get their room adopted, renamed or deleted as "the lobby"
+   * by renaming it (#1148).
+   */
+  private findLobbyByName(
+    category: CategoryChannel,
+    name: string,
+  ): VoiceChannel | undefined {
+    return category.children.cache.find(
+      (channel): channel is VoiceChannel =>
+        channel.type === ChannelType.GuildVoice &&
+        channel.name === name &&
+        !this.isTrackedRoom(channel.id),
+    );
+  }
+
+  /**
+   * Is `name` one a room owner must not give their room: the lobby (online or
+   * offline name) or the legacy "New Channel" trigger? Compared trimmed and
+   * case-insensitively. Rooms carrying such a name would be mistaken for the
+   * lobby by anything that still identifies it by name (#1148).
+   */
+  public async isReservedChannelName(name: string): Promise<boolean> {
+    const norm = (v: string): string => v.trim().toLowerCase();
+    const candidate = norm(name);
+    if (!candidate) return false;
+    const offline = await configService.getString(
+      "voicechannels.lobby.offlinename",
+      "🔴 Lobby",
+    );
+    const reserved = [
+      await this.getLobbyChannelName(),
+      offline,
+      NEW_CHANNEL_TRIGGER_NAME,
+    ]
+      .filter((n): n is string => typeof n === "string" && n.trim() !== "")
+      .map(norm);
+    return reserved.includes(candidate);
+  }
+
+  /**
+   * Does the caller still own this room right now? Authorises control-panel
+   * actions against live ownership (the registry), never against the owner ID
+   * baked into a button/select custom ID, which goes stale on transfer (#1143).
+   */
+  public isRoomOwner(userId: string, channelId: string): boolean {
+    return this.userChannels.get(userId)?.id === channelId;
   }
 
   /**
@@ -878,28 +956,76 @@ export class VoiceChannelManager {
   }
 
   /**
-   * Overwrite fields that take the status permission away from a previous
-   * owner, independent of the current grant setting: only when their overwrite
-   * currently allows it (so a server-wide role grant is left alone) and the bot
-   * can change it. Resets to neutral rather than denying.
+   * Take the previous owner's room access back on a transfer. Writing an
+   * explicit Connect/Speak/View allow instead (the old behaviour) let them
+   * keep joining the room, even after the new owner made it private, because
+   * a member allow beats the @everyone deny. Instead the member overwrite is
+   * removed, which also drops ManageChannels and the status grant and leaves
+   * only inherited permissions.
+   *
+   * Edge cases:
+   * - No overwrite on the room (lobby-join rooms inherit the category's): nothing to do.
+   * - The category has its own overwrite for that member (e.g. a moderation
+   *   deny): the room is not synced once overwritten, so deleting would
+   *   silently drop it; the room's overwrite is reset to the category's.
+   * - If removal fails, fall back to neutralising it in place (ManageChannels
+   *   denied, Connect/Speak/View back to neutral), which is still safer than the
+   *   old explicit allow. The status bit is only touched when their overwrite
+   *   allows it and the bot holds it, as Discord rejects (50013) changing a
+   *   permission the bot lacks.
+   *
+   * Never aborts the transfer: control actions are authorised against live
+   * ownership, not this overwrite (#1143).
    */
-  private previousOwnerStatusRevoke(
+  private async revokePreviousOwnerAccess(
     channel: VoiceChannel,
     previousOwnerId: string,
-  ): Partial<Record<"SetVoiceChannelStatus", null>> {
+  ): Promise<void> {
+    const overwrites = channel.permissionOverwrites;
+    const existing = overwrites.cache?.get(previousOwnerId);
+    // A known-empty cache means there is nothing to remove
+    if (overwrites.cache && !existing) return;
+
     try {
-      const existing =
-        channel.permissionOverwrites?.cache?.get(previousOwnerId);
-      if (
+      const fromCategory =
+        channel.parent?.permissionOverwrites?.cache?.get(previousOwnerId);
+      if (fromCategory) {
+        const options: Record<string, boolean> = {};
+        for (const flag of fromCategory.allow.toArray()) options[flag] = true;
+        for (const flag of fromCategory.deny.toArray()) options[flag] = false;
+        await overwrites.create(previousOwnerId, options, {
+          reason: "Ownership transferred",
+        });
+      } else {
+        await overwrites.delete(previousOwnerId, "Ownership transferred");
+      }
+      return;
+    } catch (error) {
+      logger.warn(
+        `Could not remove previous owner ${previousOwnerId}'s overwrite on ${channel.id}; neutralising it instead:`,
+        error,
+      );
+    }
+
+    try {
+      const status =
         existing?.allow?.has(PermissionFlagsBits.SetVoiceChannelStatus) &&
         this.botHoldsStatusPermission(channel.guild, channel)
-      ) {
-        return { SetVoiceChannelStatus: null };
-      }
-    } catch {
-      // fall through: leave their overwrite as is
+          ? { SetVoiceChannelStatus: null }
+          : {};
+      await overwrites.create(previousOwnerId, {
+        ManageChannels: false,
+        Connect: null,
+        Speak: null,
+        ViewChannel: null,
+        ...status,
+      });
+    } catch (error) {
+      logger.error(
+        `Could not neutralise previous owner ${previousOwnerId}'s overwrite on ${channel.id}:`,
+        error,
+      );
     }
-    return {};
   }
 
   /**
@@ -1430,26 +1556,16 @@ export class VoiceChannelManager {
         `[Manual Transfer] Granting ManageChannels permission to new owner ${newOwnerId}`,
       );
       const statusGrant = await this.ownerStatusGrant(channel.guild, channel);
-      const statusRevoke = this.previousOwnerStatusRevoke(
-        channel,
-        currentOwnerId,
-      );
       await channel.permissionOverwrites.create(newOwnerId, {
         ...toOverwriteOptions(VOICE_ROOM_OWNER),
         ...toOverwriteOptions(statusGrant),
       });
 
-      // Remove ManageChannels from previous owner (keep other permissions)
+      // Remove the previous owner's overwrite entirely (#1143)
       logger.info(
-        `[Manual Transfer] Removing ManageChannels permission from previous owner ${currentOwnerId}`,
+        `[Manual Transfer] Removing previous owner ${currentOwnerId}'s permission overwrite`,
       );
-      await channel.permissionOverwrites.create(currentOwnerId, {
-        ManageChannels: false,
-        Connect: true,
-        Speak: true,
-        ViewChannel: true,
-        ...statusRevoke,
-      });
+      await this.revokePreviousOwnerAccess(channel, currentOwnerId);
 
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channelId)) {
@@ -1549,7 +1665,10 @@ export class VoiceChannelManager {
             `Creating channel for ${member.displayName} who joined the lobby`,
           );
           await this.createUserChannel(member);
-        } else if (newChannel.name === "➕ New Channel") {
+        } else if (
+          newChannel.name === NEW_CHANNEL_TRIGGER_NAME &&
+          !this.isTrackedRoom(newChannel.id)
+        ) {
           // If user joins the "New Channel", create a personal channel for them
           logger.info(
             `Creating personal channel for ${member.displayName} who joined the new channel`,
@@ -1608,7 +1727,10 @@ export class VoiceChannelManager {
           await this.createUserChannel(member);
         }
         // If user is moving to the "New Channel", create a personal channel
-        else if (newChannel.name === "➕ New Channel") {
+        else if (
+          newChannel.name === NEW_CHANNEL_TRIGGER_NAME &&
+          !this.isTrackedRoom(newChannel.id)
+        ) {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
@@ -1904,11 +2026,17 @@ export class VoiceChannelManager {
       // Try to send to the voice channel if it supports messaging
       if ("send" in channel && typeof channel.send === "function") {
         try {
-          await channel.send({
+          const sent = await channel.send({
             content: `<@${ownerId}>`,
             embeds: [embed],
             components: [row1, row2],
           });
+          if (sent?.id) {
+            this.controlPanels.set(channel.id, {
+              channelId: channel.id,
+              messageId: sent.id,
+            });
+          }
 
           logger.info(
             `Sent control panel for channel ${channel.name} to voice channel text chat`,
@@ -1922,35 +2050,13 @@ export class VoiceChannelManager {
         }
       }
 
-      // Fallback: Look for a separate text channel in the same category
-      const category = channel.parent;
-      if (!category) {
-        logger.info(
-          `No category found for channel ${channel.name}, cannot send control panel`,
-        );
-        return;
-      }
-
-      // Try to find a text channel in the same category with the same name
-      const textChannel = category.children.cache.find(
-        (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
-      ) as TextChannel | undefined;
-
-      if (textChannel) {
-        await textChannel.send({
-          content: `<@${ownerId}>`,
-          embeds: [embed],
-          components: [row1, row2],
-        });
-
-        logger.info(
-          `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
-        );
-      } else {
-        logger.info(
-          `No text channel found for voice channel ${channel.name}, control panel not sent.`,
-        );
-      }
+      // No name-based text-channel fallback: matching a text channel by the
+      // room's name is spoofable (a room owner controls the room's name), so
+      // the owner ping and buttons could be steered into an unrelated channel
+      // (#1148). The panel lives in the room's own text chat only.
+      logger.info(
+        `Voice channel ${channel.name} has no text chat to post the control panel in, control panel not sent.`,
+      );
     } catch (error) {
       logger.error("Error sending control panel:", error);
     }
@@ -2119,6 +2225,7 @@ export class VoiceChannelManager {
     this.customChannelNames.delete(channelId);
     this.ownershipQueue.delete(channelId);
     this.liveChannels.delete(channelId);
+    this.controlPanels.delete(channelId);
     // Cancel and drop any pending ownership-transfer timer for this channel
     this.cancelOwnershipTransfer(channelId);
     // Drop the persisted ownership row so a restart doesn't re-adopt it (#615).
@@ -2246,6 +2353,17 @@ export class VoiceChannelManager {
           }
         }
       }
+      // A name pattern / explicit name that equals the lobby (or the legacy
+      // "New Channel" trigger) would make this room spoof it (#1148).
+      if (
+        finalChannelName &&
+        (await this.isReservedChannelName(finalChannelName))
+      ) {
+        logger.warn(
+          `Ignoring reserved room name "${finalChannelName}" for ${userId}; using the default naming`,
+        );
+        finalChannelName = null;
+      }
       if (!finalChannelName) {
         // Use default naming
         const channelPrefix = await configService.getString(
@@ -2297,7 +2415,9 @@ export class VoiceChannelManager {
             await import("../handlers/vc-preset-handler.js");
           const defaultPreset = await getDefaultPreset(userId);
           if (defaultPreset) {
-            await applyPresetToChannel(newChannel, defaultPreset);
+            await applyPresetToChannel(newChannel, defaultPreset, (name) =>
+              this.isReservedChannelName(name),
+            );
             logger.info(
               `Auto-applied default preset "${defaultPreset.name}" for user ${userId} on channel ${newChannel.id}`,
             );
@@ -2342,11 +2462,7 @@ export class VoiceChannelManager {
       // Find the lobby channel: by ID when configured, else by name
       const lobbyChannel =
         (await this.getLobbyChannelById(guild)) ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === lobbyName,
-        );
+        this.findLobbyByName(category, lobbyName);
 
       if (lobbyChannel) {
         await lobbyChannel.setName(offlineLobbyName, "Bot shutting down");
@@ -2395,11 +2511,7 @@ export class VoiceChannelManager {
         ? lobbyById.name !== lobbyName
           ? lobbyById
           : undefined
-        : category.children.cache.find(
-            (channel): channel is VoiceChannel =>
-              channel.type === ChannelType.GuildVoice &&
-              channel.name === offlineLobbyName,
-          );
+        : this.findLobbyByName(category, offlineLobbyName);
 
       if (offlineLobbyChannel) {
         // Anyone sitting in the offline lobby was talking together while the
@@ -2551,11 +2663,7 @@ export class VoiceChannelManager {
         ? lobbyById.name === lobbyName
           ? lobbyById
           : undefined
-        : category.children.cache.find(
-            (channel): channel is VoiceChannel =>
-              channel.type === ChannelType.GuildVoice &&
-              channel.name === lobbyName,
-          );
+        : this.findLobbyByName(category, lobbyName);
 
       if (existingLobby) {
         logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
@@ -2565,12 +2673,7 @@ export class VoiceChannelManager {
       // Check if there's an offline lobby we can rename. The channel
       // configured by ID is the lobby whatever its current name.
       const offlineLobbyChannel =
-        lobbyById ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === offlineLobbyName,
-        );
+        lobbyById ?? this.findLobbyByName(category, offlineLobbyName);
 
       if (offlineLobbyChannel) {
         // Rename the offline lobby back to online
@@ -2665,17 +2768,23 @@ export class VoiceChannelManager {
         return this.ensureLobbyChannelExists(guild);
       }
 
-      // Find ALL lobby channels (including duplicates and offline ones).
+      // Find ALL lobby channels (including duplicates and offline ones) by
+      // their exact configured names, never by a "Lobby" substring and never
+      // a member room: a room named "Lobby party" is not the lobby (#1148).
+      const offlineLobbyName = await configService.getString(
+        "voicechannels.lobby.offlinename",
+        "🔴 Lobby",
+      );
       const allLobbyChannels = category.children.cache.filter(
         (channel): channel is VoiceChannel =>
           channel.type === ChannelType.GuildVoice &&
-          (channel.name === lobbyName || channel.name.includes("Lobby")),
+          (channel.name === lobbyName || channel.name === offlineLobbyName) &&
+          !this.isTrackedRoom(channel.id),
       );
 
       // Check if there's an offline lobby that we can rename back to online
       const offlineLobbyChannel = allLobbyChannels.find(
-        (channel) =>
-          channel.name !== lobbyName && channel.name.includes("Lobby"),
+        (channel) => channel.name !== lobbyName,
       );
 
       if (offlineLobbyChannel) {
@@ -2928,8 +3037,11 @@ export class VoiceChannelManager {
           (managedChannelNames.has(channel.name) ||
             managedChannelIds.has(channel.id)) &&
           channel.id !== lobbyChannelId &&
-          channel.name !== lobbyChannelName &&
-          channel.name !== offlineLobbyName &&
+          // A member room that was renamed to a lobby name is still a room
+          // and is cleaned up when empty; only real lobby-named channels skip.
+          (this.isTrackedRoom(channel.id) ||
+            (channel.name !== lobbyChannelName &&
+              channel.name !== offlineLobbyName)) &&
           !this.waitingRoomToMain.has(channel.id) &&
           channel.members.size === 0,
       );
@@ -3017,11 +3129,7 @@ export class VoiceChannelManager {
         ? lobbyById.name !== lobbyChannelName
           ? lobbyById
           : undefined
-        : category.children.cache.find(
-            (channel): channel is VoiceChannel =>
-              channel.type === ChannelType.GuildVoice &&
-              channel.name === offlineLobbyName,
-          );
+        : this.findLobbyByName(category, offlineLobbyName);
 
       if (offlineLobby && lobbyById && offlineLobby.id === lobbyById.id) {
         // Never delete the channel the lobby ID points at: bring it online.
@@ -3097,12 +3205,7 @@ export class VoiceChannelManager {
 
       // Ensure normal lobby exists
       const lobbyChannel =
-        lobbyById ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === lobbyChannelName,
-        );
+        lobbyById ?? this.findLobbyByName(category, lobbyChannelName);
 
       if (!lobbyChannel) {
         logger.warn("Normal lobby not found, creating it...");
@@ -3154,26 +3257,17 @@ export class VoiceChannelManager {
         `[Ownership Transfer] Granting ManageChannels permission to new owner ${newOwner.id}`,
       );
       const statusGrant = await this.ownerStatusGrant(channel.guild, channel);
-      const statusRevoke = currentOwnerId
-        ? this.previousOwnerStatusRevoke(channel, currentOwnerId)
-        : {};
       await channel.permissionOverwrites.create(newOwner.id, {
         ...toOverwriteOptions(VOICE_ROOM_OWNER),
         ...toOverwriteOptions(statusGrant),
       });
 
-      // Remove ManageChannels from previous owner if exists
+      // Remove the previous owner's overwrite entirely (#1143)
       if (currentOwnerId) {
         logger.info(
-          `[Ownership Transfer] Removing ManageChannels permission from previous owner ${currentOwnerId}`,
+          `[Ownership Transfer] Removing previous owner ${currentOwnerId}'s permission overwrite`,
         );
-        await channel.permissionOverwrites.create(currentOwnerId, {
-          ManageChannels: false,
-          Connect: true,
-          Speak: true,
-          ViewChannel: true,
-          ...statusRevoke,
-        });
+        await this.revokePreviousOwnerAccess(channel, currentOwnerId);
       }
 
       // Only rename if channel doesn't have a custom name
@@ -3257,15 +3351,26 @@ export class VoiceChannelManager {
           logger.info(
             `[Control Panel] Fetching messages from voice channel ${channel.name}`,
           );
-          const messages = await channel.messages.fetch({ limit: 50 });
+          // Prefer the exact message recorded when the panel was posted
+          let controlPanelMessage: Message | undefined;
+          const tracked = this.controlPanels.get(channel.id);
+          if (tracked) {
+            controlPanelMessage = await channel.messages
+              .fetch(tracked.messageId)
+              .catch(() => undefined);
+          }
 
-          // Find the control panel message (look for the embed with specific title)
-          const controlPanelMessage = messages.find(
-            (msg) =>
-              msg.author.id === this.client.user?.id &&
-              msg.embeds.length > 0 &&
-              msg.embeds[0].title === "🎮 Voice Channel Controls",
-          );
+          if (!controlPanelMessage) {
+            const messages = await channel.messages.fetch({ limit: 50 });
+
+            // Find the control panel message (look for the embed with specific title)
+            controlPanelMessage = messages.find(
+              (msg) =>
+                msg.author.id === this.client.user?.id &&
+                msg.embeds.length > 0 &&
+                msg.embeds[0].title === "🎮 Voice Channel Controls",
+            );
+          }
 
           if (controlPanelMessage) {
             logger.info(
@@ -3277,6 +3382,10 @@ export class VoiceChannelManager {
               newOwnerId,
               controlPanelMessage,
             );
+            this.controlPanels.set(channel.id, {
+              channelId: channel.id,
+              messageId: controlPanelMessage.id,
+            });
 
             logger.info(
               `[Control Panel] Successfully updated control panel message for new owner ${newOwnerId}`,
@@ -3437,6 +3546,7 @@ export class VoiceChannelManager {
     }
     this.ownershipTransferTimers.clear();
     this.userChannels.clear();
+    this.controlPanels.clear();
     this.customChannelNames.clear();
     this.ownershipQueue.clear();
     this.channelsBeingDeleted.clear();

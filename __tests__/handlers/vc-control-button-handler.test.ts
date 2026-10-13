@@ -30,6 +30,7 @@ describe("VCControlButtonHandler", () => {
     removeWaitingRoom: jest.Mock;
     rebuildControlPanel: jest.Mock;
     getUserChannel: jest.Mock;
+    isRoomOwner: jest.Mock;
   };
 
   beforeEach(() => {
@@ -44,6 +45,14 @@ describe("VCControlButtonHandler", () => {
       removeWaitingRoom: jest.fn().mockResolvedValue(undefined),
       rebuildControlPanel: jest.fn().mockResolvedValue(undefined),
       getUserChannel: jest.fn().mockReturnValue({ id: "channel-id" }),
+      // Live ownership, derived from the same registry mock as getUserChannel
+      isRoomOwner: jest.fn(
+        (userId: string, channelId: string) =>
+          (
+            mockManagerInstance.getUserChannel(userId) as
+              { id: string } | undefined
+          )?.id === channelId,
+      ),
     };
 
     (mockVoiceChannelManager.getInstance as unknown as jest.Mock) = jest.fn(
@@ -110,9 +119,54 @@ describe("VCControlButtonHandler", () => {
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: expect.stringContaining("Only the channel owner"),
+          content: expect.stringContaining("Only the current channel owner"),
         }),
       );
+    });
+  });
+
+  describe("Live ownership (#1143)", () => {
+    it("rejects the previous owner whose customId still names them", async () => {
+      // Ownership moved to someone else: the registry no longer maps this user
+      // to the channel, but the (stale) button still carries their id.
+      mockManagerInstance.getUserChannel.mockReturnValue(undefined);
+      mockInteraction.customId = "vc_control_waitingroom_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("Only the current channel owner"),
+        }),
+      );
+      expect(mockManagerInstance.createWaitingRoom).not.toHaveBeenCalled();
+      expect(mockManagerInstance.toggleLive).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stale rename button before opening the modal", async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue({
+        id: "some-other-channel",
+      });
+      mockInteraction.customId = "vc_control_name_channel-id_owner-id";
+      (mockInteraction as any).showModal = jest.fn();
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect((mockInteraction as any).showModal).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stale privacy button without touching permissions", async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue(undefined);
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(
+        (mockChannel.permissionOverwrites as any).create,
+      ).not.toHaveBeenCalled();
+      expect(
+        (mockChannel.permissionOverwrites as any).delete,
+      ).not.toHaveBeenCalled();
     });
   });
 

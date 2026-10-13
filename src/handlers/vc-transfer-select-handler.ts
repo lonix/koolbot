@@ -26,10 +26,12 @@ export async function handleVCTransferSelect(
   const ownerId = parts[4];
   const userId = interaction.user.id;
 
-  // Verify user is the owner
-  if (userId !== ownerId) {
+  // Verify user is the owner: the customId's ownerId is only a hint, so also
+  // require live ownership (an ephemeral select can outlive a transfer) (#1143).
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  if (userId !== ownerId || !manager.isRoomOwner(userId, channelId)) {
     await interaction.reply({
-      content: "❌ Only the channel owner can transfer ownership.",
+      content: "❌ Only the current channel owner can transfer ownership.",
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -77,7 +79,6 @@ export async function handleVCTransferSelect(
     }
 
     // Transfer ownership
-    const manager = VoiceChannelManager.getInstance(interaction.client);
     await manager.transferOwnership(channelId, ownerId, targetUserId);
 
     await interaction.update({

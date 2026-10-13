@@ -16,6 +16,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
   UserVoicePreferences,
@@ -250,9 +251,16 @@ async function ensureOwnership(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   parsed: ParsedId,
 ): Promise<VoiceChannel | null> {
-  if (interaction.user.id !== parsed.ownerId) {
+  // The customId's ownerId is only a hint; require live ownership too (#1143)
+  if (
+    interaction.user.id !== parsed.ownerId ||
+    !VoiceChannelManager.getInstance(interaction.client).isRoomOwner(
+      interaction.user.id,
+      parsed.channelId,
+    )
+  ) {
     await interaction.reply({
-      content: "❌ Only the channel owner can use these controls.",
+      content: "❌ Only the current channel owner can use these controls.",
       flags: MessageFlags.Ephemeral,
     });
     return null;
@@ -614,7 +622,11 @@ async function applyPreset(
     return;
   }
 
-  await applyPresetToChannel(channel, preset);
+  await applyPresetToChannel(channel, preset, (name) =>
+    VoiceChannelManager.getInstance(interaction.client).isReservedChannelName(
+      name,
+    ),
+  );
 
   await interaction.update({
     embeds: [
@@ -632,8 +644,21 @@ async function applyPreset(
 export async function applyPresetToChannel(
   channel: VoiceChannel,
   preset: IChannelPreset,
+  isReservedName?: (name: string) => Promise<boolean>,
 ): Promise<void> {
-  if (preset.channelName && preset.channelName !== channel.name) {
+  // Never apply a name that would make the room look like the lobby (#1148)
+  const nameBlocked =
+    !!preset.channelName &&
+    !!isReservedName &&
+    (await isReservedName(preset.channelName));
+  if (nameBlocked) {
+    logger.warn(`Skipped reserved channel name from preset on ${channel.id}`);
+  }
+  if (
+    !nameBlocked &&
+    preset.channelName &&
+    preset.channelName !== channel.name
+  ) {
     try {
       await channel.setName(preset.channelName.slice(0, 100));
     } catch (error) {
