@@ -182,8 +182,17 @@ Key properties:
   (`PermissionsService.isAdministrator`, a forced REST lookup reused for
   ~15 s), so a demoted admin is logged out within seconds; a `user` session must pass the `me` command's role
   gating on the Permissions page (with none configured, every member
-  passes). `/config` is fixed Administrator-only and is not editable on
-  the Permissions page.
+  passes). When the optional `GUILD_MEMBERS_INTENT` is off (the default) the
+  bot never hears about kicks, bans or role changes, so a `user` session
+  re-reads the member from Discord (reused for ~15 s) instead of trusting the
+  member cache: a member who left, was kicked or banned, or lost the role loses
+  `/me` within seconds. With the intent on, the gateway keeps the cache current
+  and no extra REST call is made. `/config` is fixed Administrator-only and is
+  not editable on the Permissions page.
+  The `/me` surface is rate limited per client IP (600 requests, 60 writes and
+  30 Rewind loads per 10 minutes, on top of the tighter export and reset
+  limits), and audit rows written from `/me` store only bounded text: a
+  rejected timezone is recorded by length, never by value.
   If the check itself cannot be performed (Discord API hiccup, rate
   limit), the request fails with a 503 and the session is left intact —
   only a definitive denial revokes it.

@@ -237,7 +237,10 @@ export function createSessionMiddleware(
             payload.uid,
             payload.gid,
             "me",
-            { onUnavailable: "throw" },
+            // `fresh` re-reads the member from Discord (short TTL) so a kick,
+            // ban or demotion is noticed even when the GuildMembers intent is
+            // off and the member cache is never refreshed (#1151).
+            { onUnavailable: "throw", fresh: true },
           );
       if (!allowed) {
         clearSessionCookie(res);
