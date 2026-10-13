@@ -355,6 +355,7 @@ describe("buildBotReplacementReport (#1026)", () => {
       {},
       catalog,
     );
-    expect(report.warnings[0]).toContain("GuildMembers intent is off");
+    expect(report.warnings[0]).toContain("GUILD_MEMBERS_INTENT=true");
+    expect(report.warnings[0]).toContain("developer portal");
   });
 });
