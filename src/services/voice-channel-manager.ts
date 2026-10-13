@@ -36,6 +36,7 @@ import {
   type ManagedVoiceChannelSource,
 } from "../models/managed-voice-channel.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
+import { CooldownManager } from "./cooldown-manager.js";
 
 const configService = ConfigService.getInstance();
 
@@ -130,6 +131,13 @@ export class VoiceChannelManager {
    * this map already assumes actually holds.
    */
   private readonly ownerChannelLock = createKeyedLock();
+  /**
+   * Burst limit on room creation from the lobby (#1147). Private to this
+   * manager on purpose: `CooldownManager` keys its rate buckets by member
+   * only, so sharing the command limiter would mix the two counts. In memory,
+   * so a restart forgets it; it is an abuse brake, not a record.
+   */
+  private readonly roomCreateLimiter = new CooldownManager();
   /**
    * Serialises every owner-only room mutation and every ownership transfer
    * per room, so a transfer cannot land between an ownership check and the
@@ -2018,6 +2026,13 @@ export class VoiceChannelManager {
         return;
       }
 
+      // Join/leave churn would otherwise create and delete a room (plus DB
+      // writes) on every join. Counted before `create`, because the REST
+      // cost is paid even when the move below fails.
+      if (await this.refuseIfRoomCreationLimited(member)) {
+        return;
+      }
+
       // Determine channel name using default naming
       const suffix =
         (await configService.getString("voicechannels.channel.suffix")) ||
@@ -2098,6 +2113,68 @@ export class VoiceChannelManager {
     } catch (error) {
       logger.error("Error creating user channel:", error);
     }
+  }
+
+  /**
+   * Per-member burst limit on lobby room creation
+   * (`voicechannels.lobby.max_rooms` per
+   * `voicechannels.lobby.room_window_seconds`, `0` = off). Called under
+   * `ownerChannelLock`, so check and count cannot interleave for one member.
+   *
+   * An over-limit member is NOT moved and keeps sitting in the lobby: the join
+   * itself is never an error, only the new room is held back. Because a voice
+   * event cannot be answered, they get one short notice in the lobby's text
+   * chat per window, saying how long to wait and to leave and rejoin (nothing
+   * fires when the window clears, so rejoining is what retries). Returns true
+   * when creation must be skipped.
+   */
+  private async refuseIfRoomCreationLimited(
+    member: GuildMember,
+  ): Promise<boolean> {
+    const max = await configService.getNumber(
+      "voicechannels.lobby.max_rooms",
+      5,
+    );
+    const windowSeconds = await configService.getNumber(
+      "voicechannels.lobby.room_window_seconds",
+      60,
+    );
+    if (!(max > 0) || !(windowSeconds > 0)) return false;
+
+    const limiter = this.roomCreateLimiter;
+    if (!limiter.isRateLimited(member.id, max, windowSeconds)) {
+      limiter.trackCommandExecution(member.id, windowSeconds);
+      return false;
+    }
+
+    const wait = Math.max(
+      1,
+      limiter.getRateLimitReset(member.id, max, windowSeconds),
+    );
+    logger.warn(
+      `Lobby room creation limited for member ${member.id}: more than ${max} rooms in ${windowSeconds}s`,
+    );
+
+    // One notice per window, or the notice becomes the amplifier.
+    const noticeKey = "lobby-room-notice";
+    if (limiter.isOnCooldown(member.id, noticeKey, windowSeconds)) return true;
+    limiter.setCooldown(member.id, noticeKey);
+    try {
+      const lobby = member.voice?.channel;
+      if (lobby && "send" in lobby && typeof lobby.send === "function") {
+        await lobby.send({
+          // Mention by id only; a display name is never echoed here.
+          content: `<@${member.id}> You have opened several voice rooms in a short time, so a new one is on hold. Leave and rejoin the lobby in about ${wait} second${wait === 1 ? "" : "s"} to get your room.`,
+          allowedMentions: { users: [member.id] },
+        });
+      }
+    } catch (error) {
+      logger.warn(
+        `Could not send the room-limit notice for member ${member.id}:`,
+        error,
+      );
+    }
+    return true;
   }
 
   /**
@@ -3759,6 +3836,9 @@ export class VoiceChannelManager {
       clearTimeout(timer);
     }
     this.ownershipTransferTimers.clear();
+    this.roomCreateLimiter.clearAllRateLimits();
+    this.roomCreateLimiter.clearAllCooldowns();
+    this.roomCreateLimiter.destroy();
     this.userChannels.clear();
     this.controlPanels.clear();
     this.customChannelNames.clear();

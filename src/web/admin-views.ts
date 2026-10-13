@@ -4537,7 +4537,8 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
   const commandOptionsHtml = props.commandOptions
     .map((c) => {
       const sel = c === props.filters.commandName ? " selected" : "";
-      return `<option value="${escapeHtml(c)}"${sel}>/${escapeHtml(c)}</option>`;
+      const shown = c.startsWith("component:") ? c : `/${c}`;
+      return `<option value="${escapeHtml(c)}"${sel}>${escapeHtml(shown)}</option>`;
     })
     .join("");
   const userOptionsHtml = props.userOptions
@@ -4561,9 +4562,11 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
 </tr></thead>
 <tbody>${props.rows
           .map((r) => {
+            // Component rows (#1147) are not slash commands: no leading "/".
+            const lead = r.commandName.startsWith("component:") ? "" : "/";
             const cmd = r.subcommand
-              ? `/${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
-              : `/${escapeHtml(r.commandName)}`;
+              ? `${lead}${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
+              : `${lead}${escapeHtml(r.commandName)}`;
             return `<tr>
 <td class="muted mono">${escapeHtml(r.createdAt)}</td>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
@@ -4587,7 +4590,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
 
   const body = `
 <h1>Slash-command audit log</h1>
-<p class="subtitle">One row per Discord slash-command invocation. Raw command arguments are deliberately omitted.</p>
+<p class="subtitle">One row per Discord slash-command invocation, and per button, select-menu or modal interaction (listed as <code>component:&hellip;</code>). Raw command arguments, custom ids and submitted text are deliberately omitted.</p>
 ${renderFlash(props.flash)}
 
 <div class="card">

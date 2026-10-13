@@ -173,6 +173,12 @@ Key properties:
   that hard cap is bumped to `now + WEBUI_SESSION_LIFETIME_HOURS`
   (default 24h) so an active operator isn't kicked out at the much
   shorter link TTL.
+- **Dead rows are purged.** Sign-in rows hold only a token hash and
+  timestamps. MongoDB removes each one a week after its `expiresAt` (a TTL
+  index on the `WebSession` model, created automatically on first start after
+  upgrading), so a row lives at most `WEBUI_SESSION_LIFETIME_HOURS` plus seven
+  days. The grace is fixed, not a setting. Revoking a session only marks it;
+  the row is purged on the same schedule.
 - **Re-issuing kills the prior session.** Running `/me` or `/config` again revokes
   all of *your* unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
