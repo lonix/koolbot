@@ -87,9 +87,7 @@ const summary = (over: Record<string, unknown> = {}) => ({
   skipped: 0,
   destructive: 0,
   createdRoles: 1,
-  operations: [
-    { summary: "Make #news read-only", destructive: false, status: "applied" },
-  ],
+  operations: [{ summary: "Make #news read-only", destructive: false }],
   ...over,
 });
 
@@ -111,7 +109,11 @@ const flashOf = (res: Response) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockList.mockResolvedValue([summary()]);
+  mockList.mockResolvedValue({
+    snapshots: [summary()],
+    page: 1,
+    hasMore: false,
+  });
   mockDetail.mockResolvedValue(summary());
   mockStartRollback.mockReturnValue({ id: JOB });
 });
@@ -128,7 +130,15 @@ describe("GET /adopt/history", () => {
     const html = await res.text();
     expect(html).toContain("Adoption history");
     expect(html).toContain(`/admin/adopt/history/${SNAP}/restore`);
-    expect(mockList).toHaveBeenCalledWith("guild-1");
+    expect(mockList).toHaveBeenCalledWith("guild-1", 1);
+  });
+
+  it("passes a sanitised page number through", async () => {
+    await mount();
+    await harness.get("/adopt/history?page=3");
+    expect(mockList).toHaveBeenLastCalledWith("guild-1", 3);
+    await harness.get("/adopt/history?page=abc");
+    expect(mockList).toHaveBeenLastCalledWith("guild-1", 1);
   });
 
   it("fails closed when the history can't be read", async () => {

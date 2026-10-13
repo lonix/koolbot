@@ -42,6 +42,9 @@ export interface AdoptionHistoryPageProps {
   navFeatureStatus?: NavFeatureStatus;
   /** Null when the history could not be read. */
   snapshots: SnapshotSummary[] | null;
+  /** 1-based page of the history; older snapshots are reached by paging. */
+  page?: number;
+  hasMore?: boolean;
   flash?: FlashMessage | null;
   /** A rollback started from the confirm page; the page polls it. */
   jobId?: string | null;
@@ -84,15 +87,22 @@ export function renderAdoptionHistoryPage(
   const job = props.jobId
     ? `<div class="notice" id="ah-job" role="status">Restoring…</div>`
     : "";
+  const page = props.page ?? 1;
+  const paging =
+    page > 1 || props.hasMore
+      ? `<p class="actions">${page > 1 ? `<a class="btn" href="${HISTORY_PATH}?page=${page - 1}">Newer</a>` : ""}${props.hasMore ? `<a class="btn" href="${HISTORY_PATH}?page=${page + 1}">Older</a>` : ""}<span class="muted">Page ${page}</span></p>`
+      : "";
   const list =
     props.snapshots === null
       ? `<div class="notice err">The history couldn't be read from the database. Reload to try again.</div>`
-      : props.snapshots.length === 0
-        ? `<p class="muted">Nothing has been applied yet. Snapshots appear here after you apply a plan from Role Groups, Rules or Channel Claims.</p>`
-        : `<table class="adoption-diff">
+      : props.snapshots.length === 0 && page > 1
+        ? `<p class="muted">No older snapshots.</p>${paging}`
+        : props.snapshots.length === 0
+          ? `<p class="muted">Nothing has been applied yet. Snapshots appear here after you apply a plan from Role Groups, Rules or Channel Claims.</p>`
+          : `<table class="adoption-diff">
   <thead><tr><th>When</th><th>Status</th><th>Changes</th><th>Applied by</th><th></th></tr></thead>
   <tbody>${props.snapshots.map(row).join("")}</tbody>
-</table>`;
+</table>${paging}`;
   const body = `
 <h1>Adoption history</h1>
 <p class="subtitle">Every adoption apply saves a snapshot of what it changed. Restore puts the saved state back. Start from the <a href="/admin/wizard">Setup Wizard</a> or <a href="/admin/adopt">Server Scan</a> to adopt a server.</p>
@@ -126,13 +136,11 @@ export interface RestoreConfirmProps {
 
 export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
   const s = props.snapshot;
-  const applied = s.operations.filter(
-    (o) => o.status === "applied" || o.status === "failed",
-  );
-  const items = applied
+  // `operations` is already exactly what the engine would still revert.
+  const items = s.operations
     .map(
       (o) =>
-        `<li>${escapeHtml(o.summary)}${o.destructive ? ' <span class="tag tag-off">destructive</span>' : ""}${o.status === "failed" ? ' <span class="tag tag-warn">failed when applied</span>' : ""}</li>`,
+        `<li>${escapeHtml(o.summary)}${o.destructive ? ' <span class="tag tag-off">destructive</span>' : ""}</li>`,
     )
     .join("");
   const roles = s.createdRoles
@@ -157,7 +165,7 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
 ${note}
 <div class="card">
   <h2>What will be reverted</h2>
-  ${items ? `<ul>${items}</ul>` : `<p class="muted">No step of this plan was applied, so there is nothing to revert.</p>`}
+  ${items ? `<ul>${items}</ul>` : `<p class="muted">Nothing is left to revert in this snapshot.</p>`}
   ${form}
 </div>
 `;

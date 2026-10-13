@@ -71,7 +71,11 @@ export function createAdoptionHistoryRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const base = await pageBase(req);
-      const snapshots = await listSnapshots(session.guildId).catch(
+      const pageNo = Math.min(
+        10_000,
+        Math.max(1, Number.parseInt(String(req.query.page ?? "1"), 10) || 1),
+      );
+      const listed = await listSnapshots(session.guildId, pageNo).catch(
         (error: unknown) => {
           logger.warn("adoption history: list failed", error);
           return null;
@@ -81,7 +85,9 @@ export function createAdoptionHistoryRouter(client: Client): Router {
       res.type("text/html").send(
         renderAdoptionHistoryPage({
           ...base,
-          snapshots,
+          snapshots: listed?.snapshots ?? null,
+          page: pageNo,
+          hasMore: listed?.hasMore ?? false,
           flash: readFlash(req),
           jobId: /^[0-9a-f-]{36}$/i.test(job) ? job : null,
         }),

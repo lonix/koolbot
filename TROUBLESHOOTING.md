@@ -348,8 +348,12 @@ Error: An invalid token was provided
    permission overwrites, and it must be able to see the channels it changes. Grant them on the KoolBot role, or on the
    channel for a single failure, then preview again. The planner refuses (as an error) any step that would remove your
    own access or lock the bot out of a channel a feature needs; change the claim instead of working around it.
-4. **A step failed or an apply stopped part-way.** The snapshot was saved before the first change, so nothing is lost.
-   Fix the cause and apply the same plan again to resume it, or undo it as below.
+4. **A step failed or an apply stopped part-way.** The snapshot of the previous state was saved before the first change,
+   so the steps that ran can be undone as below. The exception is a step you explicitly approved as destructive: what
+   it deleted is only recreated as structure (see step 6). Fix the cause, then open the page you applied from
+   (Role Groups, Rules or Channel Claims) and preview again. The preview is planned from the server as it is now, so
+   it lists only the differences that remain, and applying it saves a new snapshot; the web pages do not resume the
+   old snapshot.
 5. **Recovering with rollback.** Open the Web UI → **Adoption** (`/admin/adopt/history`), choose the snapshot and click
    **Restore…**. Only steps that were applied are reverted. The restore is refused while another apply or rollback is
    running; wait for it, or if the bot restarted mid-run, wait about 30 minutes for the stale run to be released and try

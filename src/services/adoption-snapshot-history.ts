@@ -1,14 +1,17 @@
+import mongoose from "mongoose";
 import {
   AdoptionSnapshot,
   type AdoptionSnapshotStatus,
 } from "../models/adoption-snapshot.js";
+import { remainingReversibleIds } from "./adoption-rollback-selection.js";
 
 /**
  * Read-only listing of saved adoption snapshots for the Web UI history view
  * (#1025). The rollback itself lives in `ServerAdoptionService`; this only
- * reads. It deliberately never selects `baseline` or `memberProgress`: the
- * first is large and the second holds member ids, and neither belongs on a
- * page. Only counts and operation summaries leave this module.
+ * reads. The queries are aggregations with an explicit projection, so member
+ * ids (`memberIds` on a planned operation, `memberProgress` grants) and the
+ * stored `baseline` never leave the database. Only counts, operation summaries
+ * and the names of operations holding grants are returned.
  */
 
 export interface SnapshotSummary {
@@ -29,11 +32,17 @@ export interface SnapshotSummary {
 export interface SnapshotOperationRow {
   summary: string;
   destructive: boolean;
-  status: string;
 }
 
 export interface SnapshotDetail extends SnapshotSummary {
+  /** Exactly the operations a rollback would still revert, in plan order. */
   operations: SnapshotOperationRow[];
+}
+
+export interface SnapshotPage {
+  snapshots: SnapshotSummary[];
+  page: number;
+  hasMore: boolean;
 }
 
 /** Statuses a rollback may claim (see `AdoptionStore.claim` in the engine). */
@@ -46,7 +55,7 @@ export const ROLLBACKABLE_STATUSES: readonly AdoptionSnapshotStatus[] = [
 export const canRollback = (status: AdoptionSnapshotStatus): boolean =>
   ROLLBACKABLE_STATUSES.includes(status);
 
-export const HISTORY_LIMIT = 50;
+export const HISTORY_PAGE_SIZE = 25;
 
 interface RawOp {
   opId?: string;
@@ -66,13 +75,16 @@ interface RawSnapshot {
   rolledBackBy?: string | null;
   rolledBackAt?: Date | null;
   operations?: RawOp[];
-  createdRoles?: unknown[];
-  plan?: { operations?: RawPlanOp[] };
+  createdRoles?: number;
+  planOps?: RawPlanOp[];
+  /** Ids of operations that have persisted grants (never the member ids). */
+  grantedOps?: string[];
+  rolledBackOps?: string[];
 }
 
 function summarise(doc: RawSnapshot): SnapshotSummary {
   const ops = doc.operations ?? [];
-  const planOps = doc.plan?.operations ?? [];
+  const planOps = doc.planOps ?? [];
   const count = (s: string): number => ops.filter((o) => o.status === s).length;
   return {
     id: String(doc._id),
@@ -86,24 +98,88 @@ function summarise(doc: RawSnapshot): SnapshotSummary {
     failed: count("failed"),
     skipped: count("skipped"),
     destructive: planOps.filter((o) => o.class === "destructive").length,
-    createdRoles: (doc.createdRoles ?? []).length,
+    createdRoles: doc.createdRoles ?? 0,
   };
 }
 
-const SELECT =
-  "planId appliedBy status createdAt rolledBackBy rolledBackAt operations createdRoles plan.operations";
+const orEmpty = (path: string): Record<string, unknown> => ({
+  $ifNull: [path, []],
+});
 
-/** Newest first, capped. */
+/**
+ * The projection is explicit so only what the page uses leaves the database:
+ * three fields per planned operation (never `memberIds`), the status of each
+ * operation, and the *names* of operations that hold persisted grants (never
+ * the granted ids, and never `baseline`).
+ */
+export function snapshotPipeline(
+  match: Record<string, unknown>,
+  paging: Record<string, unknown>[] = [],
+): Record<string, unknown>[] {
+  return [
+    { $match: match },
+    { $sort: { createdAt: -1 } },
+    ...paging,
+    {
+      $project: {
+        planId: 1,
+        appliedBy: 1,
+        status: 1,
+        createdAt: 1,
+        rolledBackBy: 1,
+        rolledBackAt: 1,
+        rolledBackOps: orEmpty("$rolledBackOps"),
+        createdRoles: { $size: orEmpty("$createdRoles") },
+        operations: {
+          $map: {
+            input: orEmpty("$operations"),
+            as: "o",
+            in: { opId: "$$o.opId", status: "$$o.status" },
+          },
+        },
+        planOps: {
+          $map: {
+            input: orEmpty("$plan.operations"),
+            as: "o",
+            in: { id: "$$o.id", summary: "$$o.summary", class: "$$o.class" },
+          },
+        },
+        grantedOps: {
+          $map: {
+            input: {
+              $filter: {
+                input: { $objectToArray: { $ifNull: ["$memberProgress", {}] } },
+                as: "p",
+                cond: { $gt: [{ $size: orEmpty("$$p.v.granted") }, 0] },
+              },
+            },
+            as: "p",
+            in: "$$p.k",
+          },
+        },
+      },
+    },
+  ];
+}
+
+/** One page, newest first. Every retained snapshot is reachable by paging. */
 export async function listSnapshots(
   guildId: string,
-  limit: number = HISTORY_LIMIT,
-): Promise<SnapshotSummary[]> {
-  const docs = (await AdoptionSnapshot.find({ guildId })
-    .select(SELECT)
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean()) as unknown as RawSnapshot[];
-  return docs.map(summarise);
+  page = 1,
+  pageSize: number = HISTORY_PAGE_SIZE,
+): Promise<SnapshotPage> {
+  const p = Math.max(1, Math.floor(page) || 1);
+  const docs = (await AdoptionSnapshot.aggregate(
+    snapshotPipeline({ guildId }, [
+      { $skip: (p - 1) * pageSize },
+      { $limit: pageSize + 1 },
+    ]) as never,
+  )) as unknown as RawSnapshot[];
+  return {
+    snapshots: docs.slice(0, pageSize).map(summarise),
+    page: p,
+    hasMore: docs.length > pageSize,
+  };
 }
 
 /** One snapshot of this server, or null (unknown id, or another server's). */
@@ -112,19 +188,32 @@ export async function getSnapshotDetail(
   id: string,
 ): Promise<SnapshotDetail | null> {
   if (!/^[0-9a-f]{24}$/i.test(id)) return null;
-  const doc = (await AdoptionSnapshot.findOne({ _id: id, guildId })
-    .select(SELECT)
-    .lean()) as unknown as RawSnapshot | null;
+  const docs = (await AdoptionSnapshot.aggregate(
+    snapshotPipeline({
+      _id: new mongoose.Types.ObjectId(id),
+      guildId,
+    }) as never,
+  )) as unknown as RawSnapshot[];
+  const doc = docs[0];
   if (!doc) return null;
-  const status = new Map(
-    (doc.operations ?? []).map((o) => [o.opId ?? "", o.status ?? "pending"]),
+  const granted = new Set(doc.grantedOps ?? []);
+  const remaining = new Set(
+    remainingReversibleIds(
+      (doc.operations ?? []).map((o) => ({
+        opId: o.opId ?? "",
+        status: o.status ?? "pending",
+      })),
+      (opId) => (granted.has(opId) ? 1 : 0),
+      doc.rolledBackOps ?? [],
+    ),
   );
   return {
     ...summarise(doc),
-    operations: (doc.plan?.operations ?? []).map((o) => ({
-      summary: o.summary ?? o.id ?? "",
-      destructive: o.class === "destructive",
-      status: status.get(o.id ?? "") ?? "pending",
-    })),
+    operations: (doc.planOps ?? [])
+      .filter((o) => remaining.has(o.id ?? ""))
+      .map((o) => ({
+        summary: o.summary ?? o.id ?? "",
+        destructive: o.class === "destructive",
+      })),
   };
 }

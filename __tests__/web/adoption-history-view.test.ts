@@ -41,6 +41,20 @@ describe("adoption history page", () => {
     expect(html).toContain("In progress");
   });
 
+  it("links to older and newer pages so no retained snapshot is unreachable", () => {
+    const html = renderAdoptionHistoryPage({
+      ...base,
+      snapshots: [snap()],
+      page: 2,
+      hasMore: true,
+    });
+    expect(html).toContain("/admin/adopt/history?page=1");
+    expect(html).toContain("/admin/adopt/history?page=3");
+    expect(
+      renderAdoptionHistoryPage({ ...base, snapshots: [snap()] }),
+    ).not.toContain("?page=");
+  });
+
   it("explains an empty history and a failed read", () => {
     expect(renderAdoptionHistoryPage({ ...base, snapshots: [] })).toContain(
       "Nothing has been applied yet",
@@ -64,10 +78,7 @@ describe("adoption history page", () => {
 describe("restore confirm page", () => {
   const detail = (over: Record<string, unknown> = {}) => ({
     ...snap(),
-    operations: [
-      { summary: "Delete #old", destructive: true, status: "applied" },
-      { summary: "Edit role", destructive: false, status: "pending" },
-    ],
+    operations: [{ summary: "Delete #old", destructive: true }],
     ...over,
   });
 
@@ -78,7 +89,6 @@ describe("restore confirm page", () => {
       destructiveNote: "Messages cannot be restored.",
     });
     expect(html).toContain("Delete #old");
-    expect(html).not.toContain("Edit role");
     expect(html).toContain("Messages cannot be restored.");
     expect(html).toContain('name="deleteCreatedRoles"');
     expect(html).not.toMatch(/deleteCreatedRoles"[^>]*checked/);
