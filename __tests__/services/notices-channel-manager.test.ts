@@ -1,11 +1,22 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import {
   NoticesChannelManager,
   formatFeatureLine,
   getFeatureEnabledKeys,
 } from "../../src/services/notices-channel-manager.js";
-import { defaultConfig } from "../../src/services/config-schema.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+} from "../../src/services/config-schema.js";
 import { getBotVersion } from "../../src/utils/version.js";
+import { BOT_FEATURES } from "../../src/content/bot-features.js";
 
 // Mock dependencies
 jest.mock("../../src/services/config-service.js");
@@ -144,13 +155,21 @@ describe("NoticesChannelManager", () => {
 
     it("picks up a newly added feature flag without generator changes", async () => {
       const config = defaultConfig as unknown as Record<string, unknown>;
+      const meta = settingsMetadata as unknown as Record<string, unknown>;
       config["shinyfeature.enabled"] = false;
+      meta["shinyfeature.enabled"] = {
+        label: "Shiny",
+        description: "Shiny",
+        category: "shinyfeature",
+        type: "boolean",
+      };
       try {
         withEnabled(["shinyfeature.enabled"]);
         const content = await generate();
         expect(content).toContain("Shinyfeature");
       } finally {
         delete config["shinyfeature.enabled"];
+        delete meta["shinyfeature.enabled"];
       }
     });
 
@@ -191,16 +210,111 @@ describe("NoticesChannelManager", () => {
     });
   });
 
+  describe("feature list accuracy (#1119)", () => {
+    const withEnabled = (manager: any, keys: string[]) => {
+      const enabled = new Set(keys);
+      manager.configService = {
+        getBoolean: jest.fn(async (key: string) => enabled.has(key)),
+      };
+    };
+
+    it("does not promote a foreign-prefix toggle (aka.enabled) to a feature", () => {
+      const keys = getFeatureEnabledKeys();
+      expect(keys).toContain("namehistory.enabled");
+      expect(keys).not.toContain("aka.enabled");
+    });
+
+    it("only lists keys whose category is their own prefix", () => {
+      const meta = settingsMetadata as Record<string, { category?: string }>;
+      for (const key of getFeatureEnabledKeys()) {
+        expect(meta[key]?.category).toBe(key.replace(/\.enabled$/, ""));
+      }
+    });
+
+    it("lists Name History exactly once with member-facing copy", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      withEnabled(manager, ["namehistory.enabled", "aka.enabled"]);
+      const content: string = await manager.generateBotInfoContent();
+      expect(content.match(/Name History/g)).toHaveLength(1);
+      expect(content).not.toContain("Namehistory");
+      expect(content).not.toContain("Aka");
+      expect(content).not.toContain("✅");
+      expect(content).not.toContain("GuildMembers");
+    });
+
+    it("has member-facing copy for every feature the notice can list", () => {
+      for (const key of getFeatureEnabledKeys()) {
+        const feature = key.replace(/\.enabled$/, "");
+        expect(BOT_FEATURES).toHaveProperty(feature);
+      }
+    });
+  });
+
+  describe("refresh on settings change (#1120)", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    const setup = () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const ensure = jest
+        .spyOn(manager, "ensureBotInfoNotice")
+        .mockResolvedValue(undefined as never);
+      manager.configService = { getBoolean: jest.fn(async () => true) };
+      manager.isInitialized = true;
+      return { manager, ensure };
+    };
+
+    it("refreshes the notice when a feature gate changes without a reload", async () => {
+      const { manager, ensure } = setup();
+      manager.onConfigChange("polls.enabled");
+      expect(ensure).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(ensure).toHaveBeenCalledTimes(1);
+    });
+
+    it("coalesces a burst of changes into one refresh", async () => {
+      const { manager, ensure } = setup();
+      manager.onConfigChange("polls.enabled");
+      manager.onConfigChange("quotes.enabled");
+      manager.onConfigChange("events.enabled");
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(ensure).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores keys that cannot change the feature list", async () => {
+      const { manager, ensure } = setup();
+      manager.onConfigChange("polls.channel_id");
+      manager.onConfigChange("voicetracking.seen.enabled");
+      manager.onConfigChange("aka.enabled");
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(ensure).not.toHaveBeenCalled();
+    });
+
+    it("does not refresh after stop()", async () => {
+      const { manager, ensure } = setup();
+      manager.configService.removeChangeListener = jest.fn();
+      manager.changeListenerRegistered = true;
+      manager.onConfigChange("polls.enabled");
+      await manager.stop();
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(ensure).not.toHaveBeenCalled();
+    });
+  });
+
   describe("reload callback lifecycle (#1007)", () => {
     it("initialize() registers the reload callback and stop() removes it", async () => {
       const manager = NoticesChannelManager.getInstance(mockClient) as any;
       const registerReloadCallback = jest.fn();
       const removeReloadCallback = jest.fn();
+      const addChangeListener = jest.fn();
+      const removeChangeListener = jest.fn();
       manager.configService = {
         getBoolean: jest.fn(async () => true),
         getString: jest.fn(async () => "channel123"),
         registerReloadCallback,
         removeReloadCallback,
+        addChangeListener,
+        removeChangeListener,
       };
       for (const method of [
         "getNoticesChannel",
@@ -224,13 +338,16 @@ describe("NoticesChannelManager", () => {
       expect(registerReloadCallback).toHaveBeenCalledWith(
         manager.onConfigReload,
       );
+      expect(addChangeListener).toHaveBeenCalledWith(manager.onConfigChange);
 
       await manager.stop();
       expect(removeReloadCallback).toHaveBeenCalledWith(manager.onConfigReload);
+      expect(removeChangeListener).toHaveBeenCalledWith(manager.onConfigChange);
 
       // A second stop() must not try to unregister again.
       await manager.stop();
       expect(removeReloadCallback).toHaveBeenCalledTimes(1);
+      expect(removeChangeListener).toHaveBeenCalledTimes(1);
     });
 
     it("does not register the reload callback when notices are disabled", async () => {

@@ -32,12 +32,27 @@ const FEATURE_ENABLED_KEY = /^([a-z0-9_]+)\.enabled$/;
  * Every top-level `<feature>.enabled` key in the schema, in schema order.
  * Read from `defaultConfig` on each call so the list can never drift from
  * the features that actually exist.
+ *
+ * A key only counts as a feature gate when it lives in the category of its
+ * own prefix (`quotes.enabled` in `quotes`). A toggle that belongs to another
+ * feature's category (`aka.enabled`, the /aka sub-toggle of `namehistory`,
+ * #1119) is not a feature of its own. This is the same rule
+ * `pickCascadeMasterKey` uses to find a category's master switch.
  */
 export function getFeatureEnabledKeys(): string[] {
-  return Object.keys(defaultConfig).filter((key) =>
-    FEATURE_ENABLED_KEY.test(key),
-  );
+  const meta = settingsMetadata as Record<
+    string,
+    { category?: string } | undefined
+  >;
+  return Object.keys(defaultConfig).filter((key) => {
+    const feature = FEATURE_ENABLED_KEY.exec(key)?.[1];
+    return feature !== undefined && meta[key]?.category === feature;
+  });
 }
+
+// Settings saves arrive one key at a time (the Web UI and the wizard write
+// each key separately), so wait for the burst to settle before regenerating.
+const FEATURE_NOTICE_REFRESH_DEBOUNCE_MS = 2000;
 
 /**
  * One notice line for an enabled feature. Uses the copy in `BOT_FEATURES`
@@ -83,6 +98,27 @@ export class NoticesChannelManager {
     );
     if (!enabled) return;
     await this.ensureBotInfoNotice();
+  };
+
+  // Regenerates the features notice when a feature gate is saved from the
+  // Web UI. Those saves call `ConfigService.set()` only and never fire the
+  // reload callbacks, so without this the notice kept listing a feature until
+  // the next `/config reload` or restart (#1120).
+  private changeListenerRegistered = false;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly onConfigChange = (key: string): void => {
+    if (!this.isInitialized) return;
+    if (key !== "notices.enabled" && !getFeatureEnabledKeys().includes(key)) {
+      return;
+    }
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.onConfigReload().catch((error) => {
+        logger.error("Error refreshing features notice after change:", error);
+      });
+    }, FEATURE_NOTICE_REFRESH_DEBOUNCE_MS);
+    this.refreshTimer.unref?.();
   };
 
   private constructor(client: Client) {
@@ -169,6 +205,8 @@ export class NoticesChannelManager {
 
       this.configService.registerReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = true;
+      this.configService.addChangeListener(this.onConfigChange);
+      this.changeListenerRegistered = true;
     } catch (error) {
       logger.error("Error initializing notices channel manager:", error);
     }
@@ -483,6 +521,14 @@ export class NoticesChannelManager {
     if (this.reloadCallbackRegistered) {
       this.configService.removeReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = false;
+    }
+    if (this.changeListenerRegistered) {
+      this.configService.removeChangeListener(this.onConfigChange);
+      this.changeListenerRegistered = false;
+    }
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
     }
     if (this.cleanupJob) {
       this.cleanupJob.stop();
