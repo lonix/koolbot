@@ -1206,6 +1206,69 @@ describe("RaidProtectionService", () => {
       service.destroy();
     });
 
+    describe("a late LIVE lockdown row after the startup wait failed open", () => {
+      const liveRow = () => ({
+        action: "raid_lockdown",
+        createdAt: new Date(),
+        moderatorId: "mod-1",
+        reason: "Manual: started with /raidmode on",
+      });
+
+      async function startWithPendingRestore() {
+        jest.useFakeTimers();
+        RaidProtectionService.reset();
+        let resolveFind: (row: unknown) => void = () => undefined;
+        mockFindOne.mockReturnValue({
+          sort: () => ({
+            lean: () => ({
+              exec: () => new Promise((resolve) => (resolveFind = resolve)),
+            }),
+          }),
+        });
+        const service = RaidProtectionService.getInstance(client);
+        const init = service.initialize();
+        const pending = service.handleMemberJoin(makeMember().member);
+        await jest.advanceTimersByTimeAsync(INIT_WAIT_MS + 1);
+        await pending;
+        mockCreate.mockClear();
+        return { service, init, resolveFind: (r: unknown) => resolveFind(r) };
+      }
+
+      it("with no newer transition, closes the stale row and stays off", async () => {
+        const { service, init, resolveFind } = await startWithPendingRestore();
+        resolveFind(liveRow());
+        await init;
+        expect(rowsWith("raid_clear")).toHaveLength(1);
+        expect(String(rowsWith("raid_clear")[0].reason)).toMatch(
+          /use \/raidmode on/,
+        );
+        expect((await service.getStatus(guild)).lockdown).toBe(false);
+        service.destroy();
+      });
+
+      it("after a newer transition (on then off), writes nothing", async () => {
+        const { service, init, resolveFind } = await startWithPendingRestore();
+        await service.setLockdown(guild, true, "mod-2");
+        await service.setLockdown(guild, false, "mod-2");
+        mockCreate.mockClear();
+        resolveFind(liveRow());
+        await init;
+        expect(mockCreate).not.toHaveBeenCalled();
+        service.destroy();
+      });
+
+      it("while a lockdown is active, writes nothing and keeps it on", async () => {
+        const { service, init, resolveFind } = await startWithPendingRestore();
+        await service.setLockdown(guild, true, "mod-2");
+        mockCreate.mockClear();
+        resolveFind(liveRow());
+        await init;
+        expect(mockCreate).not.toHaveBeenCalled();
+        expect((await service.getStatus(guild)).lockdown).toBe(true);
+        service.destroy();
+      });
+    });
+
     it("stops a join before any member action when destroyed during its settings load", async () => {
       const service = RaidProtectionService.getInstance(client);
       await service.setLockdown(guild, true, "mod-1");

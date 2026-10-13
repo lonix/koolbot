@@ -590,8 +590,29 @@ export class RaidProtectionService {
       // now would reverse that decision behind everyone's back, so ignore it;
       // `/raidmode on` re-applies a lockdown deliberately.
       if (this.waitedOut) {
+        const current = this.getState(guildId);
+        if (
+          current.lockdown ||
+          current.generation !== this.generationAtWaitOut
+        ) {
+          // A newer decision exists; this stale row is not the newest truth.
+          logger.warn(
+            "Anti-raid: ignoring a lockdown restored after the startup wait timed out; the lockdown state changed meanwhile",
+          );
+          return;
+        }
+        // Nothing newer: close the stale row too, so a later restart (when the
+        // database answers in time) cannot bring this lockdown back without a
+        // deliberate `/raidmode on`.
         logger.warn(
-          "Anti-raid: ignoring a lockdown restored after the startup wait timed out; use /raidmode on to apply one",
+          "Anti-raid: ignoring a lockdown restored after the startup wait timed out and closing its row; use /raidmode on to apply one",
+        );
+        await this.writeRow(
+          guildId,
+          guildId,
+          null,
+          "raid_clear",
+          "Automatic: a lockdown found after the startup wait timed out was not restored; use /raidmode on to apply one",
         );
         return;
       }
