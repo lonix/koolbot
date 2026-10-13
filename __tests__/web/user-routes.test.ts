@@ -1682,10 +1682,12 @@ describe("/me/birthday clear (#1033)", () => {
     const purgeForUser =
       opts.purgeImpl ??
       jest.fn<() => Promise<PurgeResult>>().mockResolvedValue(CLEAN_PURGE);
+    // The route removes through `removeOwnBirthday` (purge + cooldown under
+    // one lock); `purgeForUser` is the mock behind it.
     jest.spyOn(BirthdayService, "getInstance").mockReturnValue({
       getBirthday,
       setBirthday,
-      purgeForUser,
+      removeOwnBirthday: purgeForUser,
     } as never);
 
     const { WebAuditLog } = await import("../../src/models/web-audit-log.js");

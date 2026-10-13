@@ -72,6 +72,7 @@ export interface ConfigSchema {
   "ratelimit.max_commands": number; // Maximum commands per time window
   "ratelimit.window_seconds": number; // Time window in seconds
   "ratelimit.bypass_admin": boolean; // Bypass rate limit for admins
+  "ratelimit.max_components": number; // Maximum button/select/modal interactions per time window
 
   // Scheduled Announcements
   "announcements.enabled": boolean;
@@ -106,6 +107,7 @@ export interface ConfigSchema {
   "birthdays.mention": boolean; // Whether the announcement pings the member
   "birthdays.role_id": string; // Optional temporary "birthday" role
   "birthdays.role_duration_hours": number; // How long the temp role is held
+  "birthdays.change_cooldown_seconds": number; // Min seconds between a member changing their birthday date (0 = off)
   "welcome.enabled": boolean;
   "welcome.channel_id": string; // Channel for new-member welcome messages
   "welcome.message": string; // Template; {user}, {username}, {server}, {roles}, {rules}
@@ -147,6 +149,8 @@ export interface ConfigSchema {
   "tickets.category_id": string; // Category private ticket channels are created under
   "tickets.staff_role_id": string; // Role that sees and handles every ticket
   "tickets.transcript_on_close": boolean; // Attach a plain-text message log when a ticket closes
+  "tickets.max_open_per_member": number; // Cap on a member's simultaneously open tickets (0 = no cap)
+  "tickets.open_cooldown_seconds": number; // Min seconds between a member's /ticket open (0 = off)
 
   // Self-service data export (#719)
   "privacy.enabled": boolean; // Gates the /me/privacy page and its export route
@@ -159,6 +163,8 @@ export interface ConfigSchema {
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
   "reactionroles.group_role_colour": string; // #RRGGBB for generated group roles ("" = default)
+  "reactionroles.max_toggles": number; // Role flips one member may make per window (0 = no limit)
+  "reactionroles.toggle_window_seconds": number; // Length of that window in seconds
   "reactionroles.style": string; // Surface style for new role messages: reaction | button | select
 
   // Notices System
@@ -188,6 +194,7 @@ export interface ConfigSchema {
   // that names the text channel the embeds are posted to.
   "core.webui.link_delivery": string; // How /me and /config deliver the sign-in link: dm | ephemeral
   "core.guild_scope.leave_other_guilds": boolean; // Leave any guild other than GUILD_ID (#1144)
+  "core.webui.signin_cooldown_seconds": number; // Min seconds between sign-in links per member (0 = off)
   "core.startup.enabled": boolean;
   "core.startup.channel_id": string;
   "core.errors.enabled": boolean;
@@ -372,6 +379,7 @@ export const defaultConfig: ConfigSchema = {
   "ratelimit.max_commands": 5, // 5 commands
   "ratelimit.window_seconds": 10, // per 10 seconds
   "ratelimit.bypass_admin": true, // Admins bypass rate limits
+  "ratelimit.max_components": 15, // 15 button/select/modal interactions per window
 
   // Scheduled Announcements defaults
   "announcements.enabled": false,
@@ -421,6 +429,7 @@ export const defaultConfig: ConfigSchema = {
   "birthdays.mention": true,
   "birthdays.role_id": "", // Empty → no temporary role granted
   "birthdays.role_duration_hours": 24,
+  "birthdays.change_cooldown_seconds": 300,
 
   // Welcome messages (#767)
   "welcome.enabled": false,
@@ -467,6 +476,8 @@ export const defaultConfig: ConfigSchema = {
   "tickets.category_id": "",
   "tickets.staff_role_id": "",
   "tickets.transcript_on_close": true,
+  "tickets.max_open_per_member": 1,
+  "tickets.open_cooldown_seconds": 300,
 
   // Self-service data export defaults (#719). Master gate off, rule 1 —
   // the Privacy section is hidden from /me and /me/privacy plus the export
@@ -490,6 +501,8 @@ export const defaultConfig: ConfigSchema = {
   "reactionroles.message_channel_id": "",
   "reactionroles.style": "reaction",
   "reactionroles.group_role_colour": "",
+  "reactionroles.max_toggles": 10,
+  "reactionroles.toggle_window_seconds": 30,
 
   // Notices System defaults
   "notices.enabled": false,
@@ -532,6 +545,7 @@ export const defaultConfig: ConfigSchema = {
   // opt-in, and each category needs a channel id before it does anything.
   "core.webui.link_delivery": "dm",
   "core.guild_scope.leave_other_guilds": false,
+  "core.webui.signin_cooldown_seconds": 60,
   "core.startup.enabled": false,
   "core.startup.channel_id": "",
   "core.errors.enabled": false,
@@ -1529,6 +1543,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "ratelimit",
     type: "boolean",
   },
+  "ratelimit.max_components": {
+    label: "Max button/menu clicks per window",
+    description:
+      "Maximum number of button, select-menu and modal interactions a user can make per rate-limit window. Applies when rate limiting is enabled; kept higher than the command limit because several clicks in a row are normal.",
+    category: "ratelimit",
+    type: "number",
+    min: 1,
+  },
 
   // Scheduled Announcements
   "announcements.enabled": {
@@ -1694,6 +1716,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long the temporary birthday role is held before the daily sweep removes it.",
     category: "birthdays",
     type: "number",
+  },
+  "birthdays.change_cooldown_seconds": {
+    label: "Birthday change cooldown (seconds)",
+    description:
+      "Minimum time between a member changing the month/day of their own birthday. Stops a member re-arming the announcement and birthday role by flipping the date back and forth. Saving the same date, or only the year, is never limited. Set to 0 for no cooldown.",
+    category: "birthdays",
+    type: "number",
+    min: 0,
   },
   "welcome.enabled": {
     label: "Welcome messages enabled",
@@ -1940,6 +1970,22 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "tickets",
     type: "boolean",
   },
+  "tickets.max_open_per_member": {
+    label: "Open tickets per member",
+    description:
+      "How many tickets one member may have open (or claimed) at a time. Each ticket is a channel and pings the staff role, so this bounds how many a single member can create. Closed tickets do not count. Set to 0 for no cap. Staff are not exempt.",
+    category: "tickets",
+    type: "number",
+    min: 0,
+  },
+  "tickets.open_cooldown_seconds": {
+    label: "Ticket open cooldown (seconds)",
+    description:
+      "Minimum time between one member opening tickets, counted from their last successful /ticket open. Set to 0 for no cooldown. The timer resets when the bot restarts.",
+    category: "tickets",
+    type: "number",
+    min: 0,
+  },
   "reminders.max_pending": {
     label: "Pending reminders per member",
     description:
@@ -2017,6 +2063,22 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Colour (#RRGGBB) given to roles the grouped-role generator creates on the Reaction Roles page. Leave empty for Discord's default. Generated roles never get any permissions, and existing roles of the same name are reused untouched.",
     category: "reactionroles",
     type: "string",
+  },
+  "reactionroles.max_toggles": {
+    label: "Role flips per member per window",
+    description:
+      "How many times one member may add or remove self-assign roles (reactions, buttons and menus together) within the flip window. Over the limit, further flips are ignored until it passes. Set to 0 for no limit.",
+    category: "reactionroles",
+    type: "number",
+    min: 0,
+  },
+  "reactionroles.toggle_window_seconds": {
+    label: "Role flip window (seconds)",
+    description:
+      "Length of the window for the role flip limit, in seconds. The default allows 10 flips per 30 seconds.",
+    category: "reactionroles",
+    type: "number",
+    min: 1,
   },
 
   // Notices System
@@ -2161,6 +2223,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "KoolBot only works for the server named by GUILD_ID and ignores events from any other server it has been added to. Turn this on to make it leave those servers (now, and whenever it is added to one). Off by default so a bot you deliberately keep in a second server is never removed. Turn off Public Bot in the Discord developer portal to stop others adding it.",
     category: "core",
     type: "boolean",
+  },
+  "core.webui.signin_cooldown_seconds": {
+    label: "Web UI sign-in link cooldown (seconds)",
+    description:
+      "Minimum time between sign-in links for one member via /me or /config. Each new link replaces the previous one, so this bounds how fast one member can create sign-in sessions. Set to 0 for no cooldown.",
+    category: "core",
+    type: "number",
+    min: 0,
   },
   "core.startup.enabled": {
     label: "Startup log to Discord",

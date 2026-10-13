@@ -14,7 +14,10 @@ jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
-    getInstance: () => ({ getString: jest.fn().mockResolvedValue("dm") }),
+    getInstance: () => ({
+      getString: jest.fn().mockResolvedValue("dm"),
+      getNumber: jest.fn().mockResolvedValue(0),
+    }),
   },
 }));
 

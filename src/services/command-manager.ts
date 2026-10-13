@@ -17,6 +17,7 @@ import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
+import { consumeBurst } from "../utils/member-cooldown.js";
 import {
   PermissionCheckError,
   PermissionsService,
@@ -54,6 +55,73 @@ export class CommandManager {
       );
     }
     return CommandManager.instance;
+  }
+
+  /**
+   * Rate limit for button, select-menu and modal interactions (#1147). They
+   * are dispatched straight from `index.ts` and never pass through
+   * `executeCommand`, so the command limiter does not see them. Governed by the
+   * same switch, window and admin bypass (`ratelimit.*`) with its own, higher
+   * ceiling (`ratelimit.max_components`), since several clicks in a row are
+   * normal. Returns 0 when the interaction may proceed (and records it),
+   * otherwise the seconds the member should wait.
+   */
+  public async componentRateLimitWait(interaction: {
+    user: { id: string };
+    memberPermissions?: { has(permission: "Administrator"): boolean } | null;
+  }): Promise<number> {
+    if (!(await this.configService.getBoolean("ratelimit.enabled", false))) {
+      return 0;
+    }
+    const bypassAdmin = await this.configService.getBoolean(
+      "ratelimit.bypass_admin",
+      true,
+    );
+    if (bypassAdmin && interaction.memberPermissions?.has("Administrator")) {
+      return 0;
+    }
+    const max = await this.configService.getNumber(
+      "ratelimit.max_components",
+      15,
+    );
+    const windowSeconds = await this.configService.getNumber(
+      "ratelimit.window_seconds",
+      10,
+    );
+    return consumeBurst("component", interaction.user.id, max, windowSeconds);
+  }
+
+  /**
+   * Apply {@link componentRateLimitWait} and, when over the limit, answer with
+   * a short ephemeral message. Returns true when the interaction must not be
+   * handled. An over-limit interaction is refused even if the refusal message
+   * cannot be delivered; only a failure of the limiter itself fails open.
+   */
+  public async refuseIfComponentRateLimited(
+    interaction: Parameters<CommandManager["componentRateLimitWait"]>[0] & {
+      reply(options: {
+        content: string;
+        flags: MessageFlags.Ephemeral;
+      }): Promise<unknown>;
+    },
+  ): Promise<boolean> {
+    let wait: number;
+    try {
+      wait = await this.componentRateLimitWait(interaction);
+    } catch (error) {
+      logger.error("Error applying the component rate limit:", error);
+      return false;
+    }
+    if (wait <= 0) return false;
+    try {
+      await interaction.reply({
+        content: `⏱️ You're clicking too quickly! Please wait ${wait} second${wait !== 1 ? "s" : ""} before trying again.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (error) {
+      logger.warn("Could not deliver the component rate-limit notice:", error);
+    }
+    return true;
   }
 
   public static reset(): void {

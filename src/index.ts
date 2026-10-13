@@ -982,6 +982,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  // Buttons, select menus and modals skip `executeCommand`, so apply the same
+  // opt-in rate limit here (#1147).
+  if (
+    (interaction.isMessageComponent() || interaction.isModalSubmit()) &&
+    (await commandManager.refuseIfComponentRateLimited(interaction))
+  ) {
+    return;
+  }
+
   // Handle button interactions
   if (interaction.isButton()) {
     try {

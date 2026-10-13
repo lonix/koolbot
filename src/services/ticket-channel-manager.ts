@@ -19,6 +19,8 @@ import { Ticket, type ITicket, type TicketStatus } from "../models/ticket.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
+import { cooldownRemaining, startCooldown } from "../utils/member-cooldown.js";
 
 /**
  * Support tickets (#1004): a private text channel per ticket.
@@ -47,6 +49,15 @@ const MEMBER_ALLOW = [
 
 const EMBED_COLOR = 0x5865f2;
 
+/** Open/claimed tickets count against a member's cap; closed ones do not. */
+const LIVE_STATUSES: TicketStatus[] = ["open", "claimed"];
+
+/**
+ * Serialises `/ticket open` per member so two simultaneous runs cannot both
+ * read "no open ticket" and each create a channel (#1141).
+ */
+const openLock = createKeyedLock();
+
 export type TicketFailure =
   | "disabled"
   | "no-staff-role"
@@ -54,16 +65,35 @@ export type TicketFailure =
   | "already-closed"
   | "not-closed"
   | "already-claimed"
+  | "too-many-open"
+  | "cooldown"
   | "discord-error";
 
 export type TicketResult<T = ITicket> =
-  { ok: true; ticket: T } | { ok: false; reason: TicketFailure };
+  | { ok: true; ticket: T }
+  | {
+      ok: false;
+      reason: TicketFailure;
+      /** For `cooldown`: seconds until the member may open another. */
+      retryAfterSeconds?: number;
+      /** For `too-many-open`: the configured cap the member reached. */
+      maxOpen?: number;
+    };
 
 export interface TicketSettings {
   enabled: boolean;
   categoryId: string;
   staffRoleId: string;
   transcriptOnClose: boolean;
+  /** Most open/claimed tickets one member may hold; 0 = no cap. */
+  maxOpenPerMember: number;
+  /** Seconds between one member's ticket opens; 0 = no cooldown. */
+  openCooldownSeconds: number;
+}
+
+/** Cooldown scope for `/ticket open`; per guild so servers do not share one. */
+function openCooldownScope(guildId: string): string {
+  return `ticket-open:${guildId}`;
 }
 
 /** `ticket-<name>-<4 hex>`: lowercase, hyphenated, inside Discord's 100 chars. */
@@ -136,18 +166,28 @@ export class TicketChannelManager {
   }
 
   public async getSettings(): Promise<TicketSettings> {
-    const [enabled, categoryId, staffRoleId, transcriptOnClose] =
-      await Promise.all([
-        this.configService.getBoolean("tickets.enabled", false),
-        this.configService.getString("tickets.category_id", ""),
-        this.configService.getString("tickets.staff_role_id", ""),
-        this.configService.getBoolean("tickets.transcript_on_close", true),
-      ]);
+    const [
+      enabled,
+      categoryId,
+      staffRoleId,
+      transcriptOnClose,
+      maxOpenPerMember,
+      openCooldownSeconds,
+    ] = await Promise.all([
+      this.configService.getBoolean("tickets.enabled", false),
+      this.configService.getString("tickets.category_id", ""),
+      this.configService.getString("tickets.staff_role_id", ""),
+      this.configService.getBoolean("tickets.transcript_on_close", true),
+      this.configService.getNumber("tickets.max_open_per_member", 1),
+      this.configService.getNumber("tickets.open_cooldown_seconds", 300),
+    ]);
     return {
       enabled,
       categoryId: categoryId.trim(),
       staffRoleId: staffRoleId.trim(),
       transcriptOnClose,
+      maxOpenPerMember: Math.max(0, Math.floor(maxOpenPerMember) || 0),
+      openCooldownSeconds: Math.max(0, openCooldownSeconds || 0),
     };
   }
 
@@ -211,6 +251,69 @@ export class TicketChannelManager {
     if (!settings.enabled) return { ok: false, reason: "disabled" };
     if (!settings.staffRoleId) return { ok: false, reason: "no-staff-role" };
 
+    // One open at a time per member, so the check-then-create below cannot be
+    // raced by two simultaneous commands (#1141).
+    return openLock.run(`${input.guild.id}:${input.authorId}`, async () => {
+      const limited = await this.checkOpenLimits(input, settings);
+      if (limited) return limited;
+      const result = await this.createTicketChannel(input, settings);
+      // Only a ticket that exists starts the cooldown, so a Discord failure
+      // does not lock the member out of trying again.
+      if (result.ok) {
+        startCooldown(
+          openCooldownScope(input.guild.id),
+          input.authorId,
+          settings.openCooldownSeconds,
+        );
+      }
+      return result;
+    });
+  }
+
+  /** Per-member cap and cooldown for opening; null when the member may go. */
+  private async checkOpenLimits(
+    input: { guild: Guild; authorId: string },
+    settings: TicketSettings,
+  ): Promise<{
+    ok: false;
+    reason: TicketFailure;
+    retryAfterSeconds?: number;
+    maxOpen?: number;
+  } | null> {
+    if (settings.maxOpenPerMember > 0) {
+      const live = await Ticket.countDocuments({
+        guildId: input.guild.id,
+        authorId: input.authorId,
+        status: { $in: LIVE_STATUSES },
+      }).exec();
+      if (live >= settings.maxOpenPerMember) {
+        return {
+          ok: false,
+          reason: "too-many-open",
+          maxOpen: settings.maxOpenPerMember,
+        };
+      }
+    }
+    const wait = cooldownRemaining(
+      openCooldownScope(input.guild.id),
+      input.authorId,
+      settings.openCooldownSeconds,
+    );
+    if (wait > 0) {
+      return { ok: false, reason: "cooldown", retryAfterSeconds: wait };
+    }
+    return null;
+  }
+
+  private async createTicketChannel(
+    input: {
+      guild: Guild;
+      authorId: string;
+      authorName: string;
+      subject: string;
+    },
+    settings: TicketSettings,
+  ): Promise<TicketResult<{ ticket: ITicket; channelId: string }>> {
     const subject = input.subject.trim().slice(0, MAX_SUBJECT_LENGTH);
     const manager = CommandManager.getInstance(this.client);
     const botId = this.client.user?.id;

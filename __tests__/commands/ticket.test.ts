@@ -64,6 +64,32 @@ describe("/ticket", () => {
     manager.getSettings.mockResolvedValue({ staffRoleId: "staff" });
   });
 
+  it("names the configured cap when a member has reached it", async () => {
+    manager.openTicket.mockResolvedValue({
+      ok: false,
+      reason: "too-many-open",
+      maxOpen: 3,
+    });
+    const { interaction, editReply } = makeInteraction("open", {
+      subject: "help",
+    });
+    await execute(interaction);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("3 open tickets"),
+    });
+
+    manager.openTicket.mockResolvedValue({
+      ok: false,
+      reason: "too-many-open",
+      maxOpen: 1,
+    });
+    const single = makeInteraction("open", { subject: "help" });
+    await execute(single.interaction);
+    expect(single.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("1 open ticket,"),
+    });
+  });
+
   it("defines open, close and claim subcommands", () => {
     expect(data.toJSON().options?.map((o) => o.name)).toEqual([
       "open",

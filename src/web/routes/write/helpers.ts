@@ -395,6 +395,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "birthdays.mention",
     "birthdays.role_id",
     "birthdays.role_duration_hours",
+    "birthdays.change_cooldown_seconds",
   ],
   welcome: [
     "welcome.enabled",
@@ -417,6 +418,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "tickets.staff_role_id",
     "tickets.category_id",
     "tickets.transcript_on_close",
+    "tickets.max_open_per_member",
+    "tickets.open_cooldown_seconds",
   ],
   leaderboard_roles: [
     "leaderboard_roles.enabled",

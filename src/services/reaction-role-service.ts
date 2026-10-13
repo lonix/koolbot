@@ -39,6 +39,9 @@ import logger from "../utils/logger.js";
 import { RoleGroupService } from "./role-group-service.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { getErrorMessage } from "../utils/error-guards.js";
+import { consumeBurst, waitText } from "../utils/member-cooldown.js";
+import { forbiddenSelfAssignPermissions } from "../utils/role-safety.js";
 import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
   ReactionRoleConfig,
@@ -544,10 +547,47 @@ export class ReactionRoleService {
       }
 
       if (!member.roles.cache.has(config.roleId)) {
+        // Cheap in-memory brake first, so refused or over-limit attempts never
+        // cost a REST read (the live role fetch below).
+        if (this.attemptWaitSeconds(guild.id, user.id) > 0) {
+          logger.debug(
+            `Reaction role attempt limit hit for user ${user.id}; ignoring add`,
+          );
+          return;
+        }
+        // The live role is authoritative: a binding made before the guard
+        // existed, or a role edited since, must not hand out powerful
+        // permissions (#1145).
+        if ((await this.forbiddenPermissionsLive(guild, role)).length > 0) {
+          await this.takeBackReaction(reaction, user.id, guild.id);
+          return;
+        }
+        // Over the per-member flip limit (#1147): a reaction cannot be
+        // answered, so drop it, and take the reaction back so the message does
+        // not show a pick that never got its role.
+        if ((await this.flipWaitSeconds(guild.id, user.id)) > 0) {
+          logger.debug(
+            `Reaction role flip limit hit for user ${user.id}; ignoring add`,
+          );
+          await this.takeBackReaction(reaction, user.id, guild.id);
+          return;
+        }
         await member.roles.add(role);
         logger.info(`Added role ${role.name} to user ${user.tag}`);
       } else {
         logger.debug(`User ${user.tag} already has role ${role.name}`);
+        // The sibling cleanup below does REST work, so a re-add of a role the
+        // member already holds is limited too; otherwise remove/re-add of the
+        // reaction would run it unbounded once removals are being ignored.
+        if (
+          config.mode === "unique" &&
+          (await this.flipWaitSeconds(guild.id, user.id)) > 0
+        ) {
+          logger.debug(
+            `Reaction role flip limit hit for user ${user.id}; skipping unique-mode cleanup`,
+          );
+          return;
+        }
       }
 
       // `unique` (one-of-set): reacting to one option clears the sibling
@@ -667,6 +707,12 @@ export class ReactionRoleService {
         return;
       }
 
+      if ((await this.flipWaitSeconds(guild.id, user.id)) > 0) {
+        logger.debug(
+          `Reaction role flip limit hit for user ${user.id}; ignoring remove`,
+        );
+        return;
+      }
       await member.roles.remove(role);
       logger.info(`Removed role ${role.name} from user ${user.tag}`);
     } catch (error) {
@@ -812,6 +858,89 @@ export class ReactionRoleService {
   }
 
   /**
+   * Generous per-member cap on grant *attempts* (30 a minute), counted before
+   * any REST work. It bounds the live role fetch and the take-back for refused
+   * roles, which never reach the flip budget. Fixed, not a setting: normal use
+   * is far below it.
+   */
+  private attemptWaitSeconds(guildId: string, userId: string): number {
+    return consumeBurst(`reactrole-attempt:${guildId}`, userId, 30, 60);
+  }
+
+  /** Roles already warned about, so a bad binding logs once per process. */
+  private warnedForbiddenRoles = new Set<string>();
+  /** Roles whose live check failed, logged once per process each. */
+  private warnedUnverifiedRoles = new Set<string>();
+
+  /**
+   * Powerful permissions on the *live* role (fetched fresh), logging one
+   * warning per role so the operator can fix the binding (#1145). Fails
+   * closed: when the live role cannot be fetched (REST error or nothing
+   * returned) it cannot be verified, so a non-empty result is returned and the
+   * grant is refused; a role that just gained Administrator must not slip
+   * through while Discord is flaky.
+   */
+  private async forbiddenPermissionsLive(
+    guild: Guild,
+    role: Role,
+  ): Promise<string[]> {
+    let live: Role | null = null;
+    let failure: unknown = null;
+    try {
+      live = await guild.roles.fetch(role.id, { force: true });
+    } catch (error) {
+      failure = error;
+    }
+    if (!live) {
+      if (!this.warnedUnverifiedRoles.has(role.id)) {
+        this.warnedUnverifiedRoles.add(role.id);
+        logger.warn(
+          `Could not verify the live permissions of reaction role "${sanitizeForLog(role.name)}" (${role.id}); refusing to grant it until Discord answers${failure ? `: ${sanitizeForLog(getErrorMessage(failure))}` : ""}`,
+        );
+      }
+      return ["unverified"];
+    }
+    const forbidden = forbiddenSelfAssignPermissions(live);
+    if (forbidden.length > 0 && !this.warnedForbiddenRoles.has(live.id)) {
+      this.warnedForbiddenRoles.add(live.id);
+      logger.warn(
+        `Reaction role "${sanitizeForLog(live.name)}" (${live.id}) carries ${forbidden.join(", ")} and is no longer granted to members. Remove those permissions or unbind the role on the Reaction Roles page.`,
+      );
+    }
+    return forbidden;
+  }
+
+  /**
+   * Take a refused reaction back so the message does not show a pick that got
+   * no role. Bounded per member, so re-adding cannot drive one REST write per
+   * attempt: past the bound the reaction is simply left in place.
+   */
+  private async takeBackReaction(
+    reaction: MessageReaction,
+    userId: string,
+    guildId: string,
+  ): Promise<void> {
+    if (consumeBurst(`reactrole-undo:${guildId}`, userId, 5, 60) > 0) return;
+    await reaction.users.remove(userId).catch(() => undefined);
+  }
+
+  /**
+   * Per-member limit on role flips across reactions, buttons and menus
+   * (#1147). Returns 0 when the flip may go ahead (and records it), otherwise
+   * the seconds to wait. `reactionroles.max_toggles = 0` turns it off.
+   */
+  private async flipWaitSeconds(
+    guildId: string,
+    userId: string,
+  ): Promise<number> {
+    const [max, windowSeconds] = await Promise.all([
+      this.configService.getNumber("reactionroles.max_toggles", 10),
+      this.configService.getNumber("reactionroles.toggle_window_seconds", 30),
+    ]);
+    return consumeBurst(`reactrole:${guildId}`, userId, max, windowSeconds);
+  }
+
+  /**
    * Add or remove a role on an already-fetched member and return a
    * human-readable, ephemeral confirmation line. The caller resolves the guild,
    * member and role once and reuses them, so a multi-role message only pays for
@@ -824,18 +953,39 @@ export class ReactionRoleService {
   ): Promise<string> {
     const hasRole = member.roles.cache.has(role.id);
 
+    if (desired === "add" && hasRole) {
+      return `You already have **${role.name}**.`;
+    }
+    if (desired === "remove" && !hasRole) {
+      return `You don't have **${role.name}**.`;
+    }
+
     if (desired === "add") {
-      if (hasRole) {
-        return `You already have **${role.name}**.`;
+      const attemptWait = this.attemptWaitSeconds(member.guild.id, member.id);
+      if (attemptWait > 0) {
+        return `⏳ You're changing roles too quickly. Please wait ${waitText(attemptWait)} and try again.`;
       }
+      // Never grant a role that carries powerful permissions, judged on the
+      // live role rather than at bind time (#1145).
+      if (
+        (await this.forbiddenPermissionsLive(member.guild, role)).length > 0
+      ) {
+        return `⚠️ **${role.name}** can't be self-assigned right now. Please ask an admin.`;
+      }
+    }
+
+    // Only real changes count against the flip limit (#1147).
+    const wait = await this.flipWaitSeconds(member.guild.id, member.id);
+    if (wait > 0) {
+      return `⏳ You're changing roles too quickly. Please wait ${waitText(wait)} and try again.`;
+    }
+
+    if (desired === "add") {
       await member.roles.add(role);
       logger.info(`Added role ${role.name} to user ${member.user.tag}`);
       return `✅ You now have **${role.name}**.`;
     }
 
-    if (!hasRole) {
-      return `You don't have **${role.name}**.`;
-    }
     await member.roles.remove(role);
     logger.info(`Removed role ${role.name} from user ${member.user.tag}`);
     return `➖ Removed **${role.name}**.`;
@@ -1093,6 +1243,17 @@ export class ReactionRoleService {
       return {
         ok: false,
         message: `**${role.name}** is managed by an integration or bot and can't be assigned manually.`,
+      };
+    }
+
+    // Any member can pick a reaction role up, so a role that carries server
+    // control, moderation or mass-ping permissions would hand them to everyone
+    // (#1145). Name the permissions so the admin knows what to change.
+    const dangerous = forbiddenSelfAssignPermissions(role);
+    if (dangerous.length > 0) {
+      return {
+        ok: false,
+        message: `**${role.name}** has powerful permissions (${dangerous.join(", ")}), so it can't be a self-assign role: any member could pick it up. Remove those permissions from the role, or choose a different role.`,
       };
     }
 

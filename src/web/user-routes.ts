@@ -916,7 +916,7 @@ export function createUserRouter(
           // birthday role and of the bot's posts about the member, so the
           // purge takes those back first and keeps the row if it cannot
           // (#916, #1033).
-          purge = await service.purgeForUser(guildId, userId);
+          purge = await service.removeOwnBirthday(guildId, userId);
           if (purge.error || (purge.matched > 0 && purge.removed === 0)) {
             throw new Error(
               purge.error ?? "the birthday could not be fully removed",

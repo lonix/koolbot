@@ -8,6 +8,12 @@ import { resolveTimezone } from "../utils/timezone.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
+import {
+  cooldownRemaining,
+  startCooldown,
+  waitText,
+} from "../utils/member-cooldown.js";
 import {
   isUnknownChannelError,
   isUnknownMessageError,
@@ -303,6 +309,12 @@ export function renderBirthdayMessage(
   return result;
 }
 
+/**
+ * Serialises birthday saves per member so concurrent date changes cannot all
+ * read the old date and slip past the change cooldown (#1147).
+ */
+const birthdaySaveLock = createKeyedLock();
+
 export class BirthdayService extends ScheduledService<BirthdayRunSummary | null> {
   private static instance: BirthdayService;
 
@@ -400,15 +412,102 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       year = input.year;
     }
 
+    // Only a changed date may re-arm this year's announcement and role, and
+    // only once per cooldown, so a member cannot re-trigger them every cron
+    // tick by re-saving or flipping the date (#1147). Saving the same date
+    // again (e.g. to add the year) touches neither.
+    return birthdaySaveLock.run(`${guildId}:${userId}`, () =>
+      this.saveBirthday(userId, guildId, month, day, year),
+    );
+  }
+
+  /**
+   * A member removing their own birthday (the `/me/birthday` "Remove"
+   * button): the purge and the change-cooldown reservation run under the same
+   * per-member lock as {@link setBirthday}, so a save cannot slip in between
+   * (or race the purge) and recreate the birthday past the cooldown (#1147).
+   * The cooldown starts only for a removal that matched a row and fully
+   * succeeded, and a cooldown of 0 records nothing. The admin page and the
+   * data reset/export path call {@link purgeForUser} directly and never start
+   * it, because they must always work.
+   */
+  public async removeOwnBirthday(
+    guildId: string,
+    userId: string,
+  ): Promise<BirthdayPurgeResult> {
+    return birthdaySaveLock.run(`${guildId}:${userId}`, async () => {
+      const purge = await this.purgeForUser(guildId, userId);
+      const complete =
+        !purge.error && !(purge.matched > 0 && purge.removed === 0);
+      if (complete && purge.matched > 0) {
+        const seconds = await this.configService.getNumber(
+          "birthdays.change_cooldown_seconds",
+          300,
+        );
+        startCooldown(`birthday-change:${guildId}`, userId, seconds);
+      }
+      return purge;
+    });
+  }
+
+  /** The read-check-write of {@link setBirthday}, one at a time per member. */
+  private async saveBirthday(
+    userId: string,
+    guildId: string,
+    month: number,
+    day: number,
+    year: number | undefined,
+  ): Promise<StoredBirthday> {
+    // A strict read: `getBirthday` turns database errors into "not set", which
+    // here would make an existing member look new, unset the announce marker
+    // and skip the cooldown. A failed read aborts the save instead.
+    let existingRow: IUserBirthday | null;
+    try {
+      existingRow = await UserBirthday.findOne({ userId, guildId });
+    } catch (err) {
+      logger.error("Failed to read birthday before saving", err);
+      throw new Error(
+        "your birthday could not be read right now, so nothing was changed. Please try again in a moment",
+        { cause: err },
+      );
+    }
+    const existing = existingRow ? rowToStored(existingRow) : null;
+    const dateChanged =
+      existing === null || existing.month !== month || existing.day !== day;
+    const cooldownScope = `birthday-change:${guildId}`;
+    const cooldownSeconds = await this.configService.getNumber(
+      "birthdays.change_cooldown_seconds",
+      300,
+    );
+    // Also covers a save right after the member removed their birthday: the
+    // removal starts the same cooldown, so remove-then-save cannot dodge it.
+    // A genuinely new member has no cooldown running, so their first save is
+    // free.
+    if (dateChanged) {
+      const wait = cooldownRemaining(cooldownScope, userId, cooldownSeconds);
+      if (wait > 0) {
+        throw new Error(
+          `you changed your birthday recently. Please wait ${waitText(wait)} before changing it again`,
+        );
+      }
+    }
+
     const update: Record<string, unknown> = {
       $set: { month, day, updatedAt: new Date() },
-      // A changed date should be eligible again this year.
-      $unset: { lastAnnouncedYear: "" } as Record<string, unknown>,
+      $unset: {} as Record<string, unknown>,
     };
+    if (dateChanged) {
+      // A changed date should be eligible again this year.
+      (update.$unset as Record<string, unknown>).lastAnnouncedYear = "";
+    }
     if (year !== undefined) {
       (update.$set as Record<string, unknown>).year = year;
     } else {
       (update.$unset as Record<string, unknown>).year = "";
+    }
+    // Older MongoDB servers reject an empty operator.
+    if (Object.keys(update.$unset as Record<string, unknown>).length === 0) {
+      delete update.$unset;
     }
 
     const row = await UserBirthday.findOneAndUpdate(
@@ -420,6 +519,9 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         setDefaultsOnInsert: true,
       },
     );
+    if (existing !== null && dateChanged) {
+      startCooldown(cooldownScope, userId, cooldownSeconds);
+    }
     return row ? rowToStored(row) : { month, day, year: year ?? null };
   }
 

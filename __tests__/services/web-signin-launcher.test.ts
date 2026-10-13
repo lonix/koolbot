@@ -3,12 +3,16 @@ import type { ChatInputCommandInteraction } from "discord.js";
 
 const mockCreate = jest.fn();
 const mockGetString = jest.fn();
+const mockGetNumber =
+  jest.fn<(key: string, fallback: number) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
   WebSessionService: { getInstance: () => ({ create: mockCreate }) },
 }));
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
-  ConfigService: { getInstance: () => ({ getString: mockGetString }) },
+  ConfigService: {
+    getInstance: () => ({ getString: mockGetString, getNumber: mockGetNumber }),
+  },
 }));
 jest.unstable_mockModule("../../src/web/index.js", () => ({
   isWebUIEnabled: () => true,
@@ -26,6 +30,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { runWebSignin } =
   await import("../../src/services/web-signin-launcher.js");
+const { resetMemberCooldowns } =
+  await import("../../src/utils/member-cooldown.js");
 
 describe("runWebSignin link delivery", () => {
   const opts = {
@@ -56,6 +62,8 @@ describe("runWebSignin link delivery", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    resetMemberCooldowns();
+    mockGetNumber.mockResolvedValue(60);
     mockCreate.mockResolvedValue({
       url: "https://x.test/s/tok",
       expiresAt: new Date(Date.now() + 600_000),
@@ -157,5 +165,70 @@ describe("runWebSignin link delivery", () => {
 
     expect(mockLogger.error).toHaveBeenCalled();
     expect(everythingLogged()).not.toContain("tok");
+  });
+
+  describe("sign-in cooldown (#1147)", () => {
+    it("issues one link, then refuses a second ask inside the cooldown", async () => {
+      mockGetString.mockResolvedValue("dm");
+      const first = build(async () => undefined);
+      await runWebSignin(first.interaction, opts);
+      const second = build(async () => undefined);
+      await runWebSignin(second.interaction, opts);
+
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(second.send).not.toHaveBeenCalled();
+      expect(second.editReply).toHaveBeenCalledWith({
+        content: expect.stringMatching(/wait \d+ seconds?/),
+      });
+    });
+
+    it("does not let one member's cooldown block another", async () => {
+      mockGetString.mockResolvedValue("dm");
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      const other = build(async () => undefined);
+      (other.interaction as unknown as { user: { id: string } }).user.id = "u2";
+      await runWebSignin(other.interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives /me and /config separate cooldowns", async () => {
+      mockGetString.mockResolvedValue("dm");
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      await runWebSignin(build(async () => undefined).interaction, {
+        ...opts,
+        commandName: "config",
+        role: "admin" as const,
+      });
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not start the cooldown when issuing the link fails", async () => {
+      mockGetString.mockResolvedValue("dm");
+      mockCreate.mockRejectedValueOnce(new Error("db down"));
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the cooldown when delivery fails after the session was created", async () => {
+      mockGetString.mockResolvedValue("ephemeral");
+      const failing = build(async () => undefined);
+      // The ephemeral reply carrying the link fails, after create() succeeded.
+      failing.editReply.mockRejectedValueOnce(new Error("reply failed"));
+      await runWebSignin(failing.interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+
+      const again = build(async () => undefined);
+      await runWebSignin(again.interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it("is off when the cooldown is 0", async () => {
+      mockGetString.mockResolvedValue("dm");
+      mockGetNumber.mockResolvedValue(0);
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+    });
   });
 });

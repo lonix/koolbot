@@ -7,6 +7,12 @@ import {
 import logger from "../utils/logger.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  clearMemberCooldown,
+  cooldownRemaining,
+  startCooldown,
+  waitText,
+} from "../utils/member-cooldown.js";
 import { ConfigService } from "./config-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import { RoleGroupService } from "./role-group-service.js";
@@ -135,12 +141,34 @@ export async function runWebSignin(
     return;
   }
 
+  // Every link is a new session row that revokes the previous one, so cap how
+  // fast one member can ask (#1147). Started before the awaits below so two
+  // simultaneous invocations cannot both pass; cleared again if issuing fails.
+  const cooldownScope = `web-signin:${guildId}:${role}`;
+  const cooldownSeconds = await ConfigService.getInstance().getNumber(
+    "core.webui.signin_cooldown_seconds",
+    60,
+  );
+  const wait = cooldownRemaining(cooldownScope, userId, cooldownSeconds);
+  if (wait > 0) {
+    logger.info(`/${commandName} rejected for user=${userId}: cooldown`);
+    await interaction.editReply({
+      content: `You just asked for a sign-in link. Please wait ${waitText(wait)}, or use the link I already sent you.`,
+    });
+    return;
+  }
+  startCooldown(cooldownScope, userId, cooldownSeconds);
+
+  // Once a session row exists the issuance the cooldown bounds has happened,
+  // so later (delivery) failures must keep the cooldown.
+  let sessionCreated = false;
   try {
     const session = await WebSessionService.getInstance().create(
       userId,
       guildId,
       role,
     );
+    sessionCreated = true;
     const ttlMinutes = Math.max(
       1,
       Math.round((session.expiresAt.getTime() - Date.now()) / 60_000),
@@ -177,6 +205,7 @@ export async function runWebSignin(
       await safeReply(interaction, { content: dmBody });
     }
   } catch (error) {
+    if (!sessionCreated) clearMemberCooldown(cooldownScope, userId);
     logger.error(
       `Error issuing web sign-in link for user=${userId}: ${describeDiscordError(error)}`,
     );
