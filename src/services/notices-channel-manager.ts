@@ -10,7 +10,7 @@ import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
-import { BOT_FEATURES } from "../content/bot-features.js";
+import { BOT_FEATURES, BotFeatureInfo } from "../content/bot-features.js";
 import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
 import { getBotVersion } from "../utils/version.js";
 
@@ -22,6 +22,9 @@ const CLEANUP_INTERVAL_MINUTES = 5;
 
 // Mirrors the `maxlength` on `Notice.content` (models/notice.ts).
 const NOTICE_CONTENT_MAX_LENGTH = 4000;
+
+// Discord API error code for "Unknown Message": the message is already gone.
+const UNKNOWN_MESSAGE_CODE = 10008;
 
 // A top-level feature gate: exactly `<feature>.enabled`. Sub-feature toggles
 // (`voicetracking.seen.enabled`) and the `core.*` logging categories have
@@ -55,29 +58,21 @@ export function getFeatureEnabledKeys(): string[] {
 const FEATURE_NOTICE_REFRESH_DEBOUNCE_MS = 2000;
 
 /**
- * One notice line for an enabled feature. Uses the copy in `BOT_FEATURES`
- * when present, otherwise falls back to a label built from the key prefix and
- * the key's Settings description, so an undecorated feature still shows up.
+ * The notice copy for a feature gate, or `undefined` when the feature is not
+ * listed. A feature is listed only when `BOT_FEATURES` has an entry for it
+ * with `listed: true` (#1131), so a feature nobody has classified yet stays
+ * out of the post instead of appearing with a generic fallback.
  */
-export function formatFeatureLine(key: string): string {
-  const feature = FEATURE_ENABLED_KEY.exec(key)?.[1] ?? key;
-  const info = hasOwn(BOT_FEATURES, feature)
-    ? BOT_FEATURES[feature]
-    : undefined;
-  const emoji = info?.emoji ?? "✅";
-  const label =
-    info?.label ??
-    feature
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  const meta = (
-    settingsMetadata as Record<string, { description?: string } | undefined>
-  )[key];
-  const description = info?.description ?? meta?.description;
-  return description
-    ? `**${emoji} ${label}** - ${description}`
-    : `**${emoji} ${label}**`;
+export function getListedFeature(key: string): BotFeatureInfo | undefined {
+  const feature = FEATURE_ENABLED_KEY.exec(key)?.[1];
+  if (feature === undefined || !hasOwn(BOT_FEATURES, feature)) return undefined;
+  const info = BOT_FEATURES[feature];
+  return info.listed ? info : undefined;
+}
+
+/** One notice line for a listed feature (see `getListedFeature`). */
+export function formatFeatureLine(info: BotFeatureInfo): string {
+  return `**${info.emoji} ${info.label}** - ${info.description}`;
 }
 
 export class NoticesChannelManager {
@@ -113,6 +108,11 @@ export class NoticesChannelManager {
   private initPromise: Promise<void> | null = null;
   private noticeRun: Promise<void> | null = null;
   private noticeRerunPending = false;
+  // Status messages the bot posted or replaced but could not delete (the
+  // delete failed, typically alongside a failed save during an outage). Nothing
+  // else tracks them and the cleanup job skips bot messages, so each sync pass
+  // retries them. In memory only: a restart reposts every notice anyway.
+  private readonly orphanedMessageIds = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onConfigChange = (key: string): void => {
     // Before the manager is running, only enabling it (or pointing it at a
@@ -417,8 +417,22 @@ export class NoticesChannelManager {
     return this.noticeRun;
   }
 
+  private async retryOrphanedMessages(generation: number): Promise<void> {
+    for (const messageId of [...this.orphanedMessageIds]) {
+      if (generation !== this.generation) return;
+      // true also when Discord says the message is already gone, so an id
+      // never loops once it no longer exists.
+      if (await this.deleteNoticeMessage(messageId)) {
+        this.orphanedMessageIds.delete(messageId);
+      }
+    }
+  }
+
   private async syncBotInfoNotice(generation: number): Promise<void> {
     try {
+      await this.retryOrphanedMessages(generation);
+      if (generation !== this.generation) return;
+
       // Check if a bot info notice already exists
       const existingNotice = await Notice.findOne({
         title: "KoolBot Features & Commands",
@@ -432,19 +446,48 @@ export class NoticesChannelManager {
       if (existingNotice) {
         // Update existing notice if content changed
         if (existingNotice.content !== botInfoContent) {
-          existingNotice.content = botInfoContent;
-          existingNotice.updatedAt = new Date();
-          await existingNotice.save();
-          logger.info("Updated bot info notice with current features");
-
-          // Delete old message and post new one
-          if (existingNotice.messageId) {
-            await this.deleteNoticeMessage(existingNotice.messageId);
-          }
+          // The generation was checked just above, with no await since: once
+          // stop() has landed, leave the old message and the stored content
+          // alone. The next start reposts from the saved content.
+          //
+          // Post the new message before deleting the old one, so a pass that
+          // fails or is cut short never leaves the channel without a status
+          // message. The new content is stored only once the post has
+          // succeeded: saving it first would make a failed post look like an
+          // up-to-date notice and suppress every later retry.
+          const previousContent = existingNotice.content;
+          const previousUpdatedAt = existingNotice.updatedAt;
+          const previousMessageId = existingNotice.messageId;
+          existingNotice.content = botInfoContent; // postNotice reads it
           const messageId = await this.postNotice(existingNotice);
-          if (messageId) {
-            existingNotice.messageId = messageId;
+          if (!messageId) {
+            existingNotice.content = previousContent;
+            return;
+          }
+
+          // A post already in flight cannot be recalled: once it has landed
+          // the swap is finished (stop() waits for this pass), which keeps
+          // exactly one message and a stored id that points at it.
+          existingNotice.messageId = messageId;
+          existingNotice.updatedAt = new Date();
+          try {
             await existingNotice.save();
+          } catch (error) {
+            // Content and id are stored together or not at all: take the new
+            // message back down so the old one stays the single status post.
+            existingNotice.content = previousContent;
+            existingNotice.messageId = previousMessageId;
+            existingNotice.updatedAt = previousUpdatedAt;
+            if (!(await this.deleteNoticeMessage(messageId))) {
+              this.orphanedMessageIds.add(messageId);
+            }
+            throw error;
+          }
+          logger.info("Updated bot info notice with current features");
+          if (previousMessageId) {
+            if (!(await this.deleteNoticeMessage(previousMessageId))) {
+              this.orphanedMessageIds.add(previousMessageId);
+            }
           }
         }
       } else {
@@ -458,6 +501,7 @@ export class NoticesChannelManager {
         });
         await botInfoNotice.save();
         logger.info("Created bot info notice");
+        if (generation !== this.generation) return;
 
         // Post to channel
         const messageId = await this.postNotice(botInfoNotice);
@@ -472,17 +516,20 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Generate bot info content: the running version plus every enabled
-   * feature. The feature list is derived from the schema's top-level
-   * `<feature>.enabled` keys (#1007) rather than a hand-maintained subset, so
-   * a newly shipped feature appears without touching this method.
+   * Generate bot info content: the running version plus every enabled feature
+   * that is classified as member-facing and worth knowing about (#1131). The
+   * candidates come from the schema's top-level `<feature>.enabled` keys
+   * (#1007); `BOT_FEATURES` decides which of them are listed, and a drift test
+   * forces that decision when a feature ships.
    */
   private async generateBotInfoContent(): Promise<string> {
     const features: string[] = [];
 
     for (const key of getFeatureEnabledKeys()) {
+      const info = getListedFeature(key);
+      if (!info) continue;
       if (await this.configService.getBoolean(key, false)) {
-        features.push(formatFeatureLine(key));
+        features.push(formatFeatureLine(info));
       }
     }
 
@@ -585,6 +632,7 @@ export class NoticesChannelManager {
 
   public async stop(): Promise<void> {
     this.generation++;
+    this.orphanedMessageIds.clear();
     if (this.reloadCallbackRegistered) {
       this.configService.removeReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = false;
@@ -604,6 +652,8 @@ export class NoticesChannelManager {
     // Let in-flight work notice the new generation and wind down, so nothing
     // is registered or posted once stop() has returned.
     await Promise.allSettled([this.initPromise, this.noticeRun]);
+    // A pass that was winding down may have remembered one more orphan.
+    this.orphanedMessageIds.clear();
   }
 
   private async getNoticesChannel(): Promise<TextChannel | null> {
@@ -663,13 +713,15 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Delete a notice message from the channel
+   * Delete a notice message from the channel. Resolves true when the message
+   * is gone (deleted now, or Discord reports it no longer exists) and false
+   * when it may still be there, so callers can retry.
    */
-  public async deleteNoticeMessage(messageId: string): Promise<void> {
+  public async deleteNoticeMessage(messageId: string): Promise<boolean> {
     try {
       const channel = await this.getNoticesChannel();
       if (!channel) {
-        return;
+        return false;
       }
 
       const message = await channel.messages.fetch(messageId);
@@ -677,8 +729,13 @@ export class NoticesChannelManager {
         await message.delete();
         logger.info(`Deleted notice message ${messageId}`);
       }
+      return true;
     } catch (error) {
+      if ((error as { code?: unknown })?.code === UNKNOWN_MESSAGE_CODE) {
+        return true;
+      }
       logger.error(`Error deleting notice message ${messageId}:`, error);
+      return false;
     }
   }
 

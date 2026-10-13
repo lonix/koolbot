@@ -8,7 +8,6 @@ import {
 } from "@jest/globals";
 import {
   NoticesChannelManager,
-  formatFeatureLine,
   getFeatureEnabledKeys,
 } from "../../src/services/notices-channel-manager.js";
 import {
@@ -17,6 +16,7 @@ import {
 } from "../../src/services/config-schema.js";
 import { getBotVersion } from "../../src/utils/version.js";
 import { BOT_FEATURES } from "../../src/content/bot-features.js";
+import Notice from "../../src/models/notice.js";
 
 // Mock dependencies
 jest.mock("../../src/services/config-service.js");
@@ -139,11 +139,11 @@ describe("NoticesChannelManager", () => {
     });
 
     it("shows only the enabled features", async () => {
-      withEnabled(["polls.enabled", "moderation.enabled"]);
+      withEnabled(["quotes.enabled", "events.enabled"]);
       const content = await generate();
-      expect(content).toContain("Polls");
-      expect(content).toContain("Moderation");
-      expect(content).not.toContain("Quotes");
+      expect(content).toContain("Quotes");
+      expect(content).toContain("Events");
+      expect(content).not.toContain("Reminders");
       expect(content).not.toContain("More features can be enabled");
     });
 
@@ -153,7 +153,7 @@ describe("NoticesChannelManager", () => {
       expect(content).toContain("More features can be enabled");
     });
 
-    it("picks up a newly added feature flag without generator changes", async () => {
+    it("keeps a newly added, unclassified feature out of the notice (#1131)", async () => {
       const config = defaultConfig as unknown as Record<string, unknown>;
       const meta = settingsMetadata as unknown as Record<string, unknown>;
       config["shinyfeature.enabled"] = false;
@@ -164,19 +164,39 @@ describe("NoticesChannelManager", () => {
         type: "boolean",
       };
       try {
+        expect(getFeatureEnabledKeys()).toContain("shinyfeature.enabled");
         withEnabled(["shinyfeature.enabled"]);
         const content = await generate();
-        expect(content).toContain("Shinyfeature");
+        expect(content).not.toContain("Shiny");
       } finally {
         delete config["shinyfeature.enabled"];
         delete meta["shinyfeature.enabled"];
       }
     });
 
-    it("builds a readable label for an undecorated feature", () => {
-      expect(formatFeatureLine("some_new_thing.enabled")).toBe(
-        "**✅ Some New Thing**",
-      );
+    it("hides a classified-but-unlisted feature even while it is enabled (#1131)", async () => {
+      withEnabled(["messagetracking.enabled", "leaderboard_roles.enabled"]);
+      const content = await generate();
+      expect(content).not.toContain("Message Tracking");
+      expect(content).not.toContain("Leaderboard Roles");
+      expect(content).toContain("More features can be enabled");
+    });
+
+    it("lists a listed feature only while its gate is enabled (#1131)", async () => {
+      withEnabled(["reminders.enabled"]);
+      expect(await generate()).toContain("Reminders");
+      withEnabled([]);
+      expect(await generate()).not.toContain("Reminders");
+    });
+
+    it("lists exactly the listed features when everything is enabled (#1131)", async () => {
+      withEnabled(getFeatureEnabledKeys());
+      const content = await generate();
+      for (const info of Object.values(BOT_FEATURES)) {
+        const line = `**${info.emoji} ${info.label}**`;
+        if (info.listed) expect(content).toContain(line);
+        else expect(content).not.toContain(line);
+      }
     });
 
     it("stays within the Notice content limit with everything enabled", async () => {
@@ -240,13 +260,6 @@ describe("NoticesChannelManager", () => {
       expect(content).not.toContain("Aka");
       expect(content).not.toContain("✅");
       expect(content).not.toContain("GuildMembers");
-    });
-
-    it("has member-facing copy for every feature the notice can list", () => {
-      for (const key of getFeatureEnabledKeys()) {
-        const feature = key.replace(/\.enabled$/, "");
-        expect(BOT_FEATURES).toHaveProperty(feature);
-      }
     });
   });
 
@@ -495,6 +508,241 @@ describe("NoticesChannelManager", () => {
       for (const spy of spies) expect(spy).not.toHaveBeenCalled();
       expect(registerReloadCallback).not.toHaveBeenCalled();
       expect(manager.initPromise).toBeNull();
+    });
+  });
+
+  describe("stop() inside a single refresh pass (#1133)", () => {
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    // A fake notices channel: `messages` is the channel's final state and
+    // `events` records every call in order. `gates` can hold one operation.
+    const setup = () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const messages = new Set<string>(["old-msg"]);
+      const events: string[] = [];
+      const gates: Record<string, ReturnType<typeof deferred> | undefined> = {};
+      const fetchErrors: Record<string, unknown> = {};
+      const deleteErrors: Record<string, unknown> = {};
+      let nextId = 1;
+      const channel = {
+        send: jest.fn(async (): Promise<{ id: string }> => {
+          events.push("send");
+          await gates.send?.promise;
+          const id = `new-msg-${nextId++}`;
+          messages.add(id);
+          events.push(`posted:${id}`);
+          return { id };
+        }),
+        messages: {
+          fetch: jest.fn(async (id: string) => {
+            if (fetchErrors[id]) throw fetchErrors[id];
+            return {
+              id,
+              delete: jest.fn(async () => {
+                if (deleteErrors[id]) throw deleteErrors[id];
+                events.push(`delete:${id}`);
+                await gates.delete?.promise;
+                messages.delete(id);
+                events.push(`deleted:${id}`);
+              }),
+            };
+          }),
+        },
+      };
+      const notice: any = {
+        _id: "notice1",
+        title: "KoolBot Features & Commands",
+        category: "help",
+        content: "stale",
+        messageId: "old-msg",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        save: jest.fn(async () => {
+          events.push("save");
+          await gates.save?.promise;
+        }),
+      };
+      (Notice.findOne as any).mockResolvedValue(notice);
+      jest
+        .spyOn(manager, "generateBotInfoContent")
+        .mockImplementation((async () => {
+          await gates.generate?.promise;
+          return "fresh";
+        }) as never);
+      jest.spyOn(manager, "getNoticesChannel").mockResolvedValue(channel);
+      manager.configService = {
+        removeReloadCallback: jest.fn(),
+        removeChangeListener: jest.fn(),
+      };
+      return {
+        manager,
+        messages,
+        events,
+        gates,
+        channel,
+        notice,
+        fetchErrors,
+        deleteErrors,
+      };
+    };
+
+    it("posts the new message before deleting the old one", async () => {
+      const { manager, messages, events, notice } = setup();
+      await manager.ensureBotInfoNotice();
+
+      expect(events.indexOf("send")).toBeLessThan(
+        events.indexOf("delete:old-msg"),
+      );
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(notice.messageId).toBe("new-msg-1");
+    });
+
+    it("keeps the old message and the old stored content when the new post fails, and a later refresh retries", async () => {
+      const { manager, messages, channel, notice } = setup();
+      channel.send.mockRejectedValueOnce(new Error("discord down") as never);
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages]).toEqual(["old-msg"]);
+      expect(notice.messageId).toBe("old-msg");
+      // Nothing was stored, so the next refresh still sees a difference.
+      expect(notice.content).toBe("stale");
+      expect(notice.save).not.toHaveBeenCalled();
+
+      await manager.ensureBotInfoNotice();
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(notice.messageId).toBe("new-msg-1");
+      expect(notice.content).toBe("fresh");
+    });
+
+    it("stores the content and the new message id together after a successful post", async () => {
+      const { manager, notice, events } = setup();
+      await manager.ensureBotInfoNotice();
+
+      expect(notice.save).toHaveBeenCalledTimes(1);
+      expect(events.indexOf("posted:new-msg-1")).toBeLessThan(
+        events.indexOf("save"),
+      );
+      expect(notice.content).toBe("fresh");
+      expect(notice.messageId).toBe("new-msg-1");
+    });
+
+    it("takes the new message back down when storing it fails, keeping the old one", async () => {
+      const { manager, messages, notice } = setup();
+      notice.save.mockRejectedValueOnce(new Error("mongo down") as never);
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages]).toEqual(["old-msg"]);
+      expect(notice.messageId).toBe("old-msg");
+      expect(notice.content).toBe("stale");
+    });
+
+    it("remembers a post it could not take down and removes it on the next refresh", async () => {
+      const { manager, messages, notice, deleteErrors } = setup();
+      notice.save.mockRejectedValueOnce(new Error("mongo down") as never);
+      deleteErrors["new-msg-1"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages].sort()).toEqual(["new-msg-1", "old-msg"]);
+      expect([...manager.orphanedMessageIds]).toEqual(["new-msg-1"]);
+
+      delete deleteErrors["new-msg-1"];
+      await manager.ensureBotInfoNotice();
+
+      expect([...messages]).toEqual(["new-msg-2"]);
+      expect(notice.messageId).toBe("new-msg-2");
+      expect(manager.orphanedMessageIds.size).toBe(0);
+    });
+
+    it("remembers an old message it could not delete after a successful swap", async () => {
+      const { manager, messages, deleteErrors } = setup();
+      deleteErrors["old-msg"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+      expect([...manager.orphanedMessageIds]).toEqual(["old-msg"]);
+
+      delete deleteErrors["old-msg"];
+      await manager.ensureBotInfoNotice();
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(manager.orphanedMessageIds.size).toBe(0);
+    });
+
+    it("forgets an orphan Discord says no longer exists, without looping", async () => {
+      const { manager, channel, fetchErrors } = setup();
+      manager.orphanedMessageIds.add("ghost");
+      fetchErrors["ghost"] = { code: 10008, message: "Unknown Message" };
+
+      await manager.ensureBotInfoNotice();
+      expect(manager.orphanedMessageIds.size).toBe(0);
+      const ghostFetches = () =>
+        channel.messages.fetch.mock.calls.filter(([id]) => id === "ghost")
+          .length;
+      expect(ghostFetches()).toBe(1);
+
+      await manager.ensureBotInfoNotice();
+      expect(ghostFetches()).toBe(1);
+    });
+
+    it("keeps retrying an orphan while the delete keeps failing, and clears the set on stop()", async () => {
+      const { manager, deleteErrors } = setup();
+      manager.orphanedMessageIds.add("stuck");
+      deleteErrors["stuck"] = new Error("discord down");
+      await manager.ensureBotInfoNotice();
+      expect([...manager.orphanedMessageIds]).toEqual(["stuck"]);
+
+      await manager.stop();
+      expect(manager.orphanedMessageIds.size).toBe(0);
+    });
+
+    it("stop() while the delete is in flight posts nothing after stop() and leaves one message", async () => {
+      const { manager, messages, events, gates, channel } = setup();
+      gates.delete = deferred();
+
+      const run = manager.ensureBotInfoNotice();
+      await tick();
+      expect(events).toContain("delete:old-msg");
+      const sendsBeforeStop = channel.send.mock.calls.length;
+
+      const stopping = manager.stop();
+      gates.delete.resolve();
+      await Promise.all([run, stopping]);
+
+      expect(channel.send.mock.calls.length).toBe(sendsBeforeStop);
+      expect([...messages]).toEqual(["new-msg-1"]);
+    });
+
+    it("stop() before the repost leaves the old message and posts nothing", async () => {
+      const { manager, messages, events, gates, channel } = setup();
+      gates.generate = deferred();
+
+      const run = manager.ensureBotInfoNotice();
+      await tick();
+      const stopping = manager.stop();
+      gates.generate.resolve();
+      await Promise.all([run, stopping]);
+
+      expect(channel.send).not.toHaveBeenCalled();
+      expect(events.some((e) => e.startsWith("delete:"))).toBe(false);
+      expect([...messages]).toEqual(["old-msg"]);
+    });
+
+    it("stop() while the post is in flight ends with one message, never a duplicate", async () => {
+      const { manager, messages, gates, notice } = setup();
+      gates.send = deferred();
+
+      const run = manager.ensureBotInfoNotice();
+      await tick();
+      const stopping = manager.stop();
+      gates.send.resolve();
+      await Promise.all([run, stopping]);
+
+      expect([...messages]).toEqual(["new-msg-1"]);
+      expect(notice.messageId).toBe("new-msg-1");
     });
   });
 
