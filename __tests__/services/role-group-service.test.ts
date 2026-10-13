@@ -70,6 +70,7 @@ jest.unstable_mockModule("../../src/models/role-group.js", () => ({
   },
 }));
 const settings: Record<string, string> = {};
+let configDown = false;
 const mockDistinct = jest.fn<(...a: any[]) => Promise<string[]>>(
   async () => [],
 );
@@ -79,7 +80,10 @@ jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: () => ({
-      getString: async (key: string) => settings[key] ?? "",
+      getStringStrict: async (key: string) => {
+        if (configDown) throw new Error("config down");
+        return settings[key] ?? "";
+      },
     }),
   },
 }));
@@ -151,6 +155,7 @@ beforeEach(() => {
   store = [];
   seq = 0;
   for (const k of Object.keys(settings)) delete settings[k];
+  configDown = false;
   mockDistinct.mockReset();
   mockDistinct.mockResolvedValue([]);
   RoleGroupService.reset();
@@ -400,6 +405,16 @@ describe("roles held by other features (#1023)", () => {
     expect(await svc.featureUsesOfRole(G, RR)).toEqual([
       "a feature whose settings could not be read",
     ]);
+  });
+});
+
+describe("config read failure (#1023)", () => {
+  it("refuses deletion, and allows linking, when the config can't be read", async () => {
+    configDown = true;
+    expect(await svc.featureUsesOfRole(G, "333333333333333333")).toEqual([
+      "a feature whose settings could not be read",
+    ]);
+    expect((await svc.create(G, { name: "Y", roleId: "rY" })).ok).toBe(true);
   });
 });
 

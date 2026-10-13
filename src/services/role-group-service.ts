@@ -578,9 +578,14 @@ export class RoleGroupService {
       uses.set(roleId, list);
     };
     const config = ConfigService.getInstance();
-    const tiers = parseTierConfig(await config.getString(TIERS_KEY, "")).tiers;
+    const tiers = parseTierConfig(
+      await config.getStringStrict(TIERS_KEY, ""),
+    ).tiers;
     for (const t of tiers) add(t.roleId, "Leaderboard Roles");
-    add((await config.getString(BIRTHDAY_ROLE_KEY, "")).trim(), "Birthdays");
+    add(
+      (await config.getStringStrict(BIRTHDAY_ROLE_KEY, "")).trim(),
+      "Birthdays",
+    );
     const reactionRoleIds = (await ReactionRoleConfig.distinct("roleId", {
       guildId,
     })) as Array<string | null>;

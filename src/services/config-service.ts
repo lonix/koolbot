@@ -434,6 +434,23 @@ export class ConfigService {
     return defaultValue;
   }
 
+  /**
+   * Like `getString`, but a failed read rejects instead of returning
+   * `defaultValue`. For callers that must not treat a database hiccup as
+   * "not set" (the role-in-use check before a role is deleted, #1023).
+   */
+  public async getStringStrict(
+    key: string,
+    defaultValue: string = "",
+  ): Promise<string> {
+    const value = await this.readValue(key);
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return defaultValue;
+  }
+
   public async getBoolean(
     key: string,
     defaultValue: boolean = false,
