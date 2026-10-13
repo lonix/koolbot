@@ -28,7 +28,11 @@ import {
   buildCsp,
   webSecurityHeaders,
 } from "../../src/web/security-headers.js";
-import { signFlash, verifyFlashSignature } from "../../src/web/http-flash.js";
+import {
+  readSignedFlash,
+  signFlash,
+  verifyFlashSignature,
+} from "../../src/web/http-flash.js";
 
 const ORIGINAL_ENV = { ...process.env };
 const SECRET = "test-secret-for-web-hardening-0123456789";
