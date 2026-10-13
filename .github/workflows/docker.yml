@@ -100,13 +100,16 @@ jobs:
   # a vulnerable image must never reach GHCR. Release concern only, previews
   # skip it like they skip attestation and signing. A local `load: true` build
   # cannot be multi-platform, so the gate scans the linux/amd64 image; the
-  # arm64 leg is built from the same Dockerfile and lockfile in the push job.
+  # arm64 leg is built in the push job from the same base digest, Dockerfile
+  # and lockfile but is not scanned itself.
   scan-image:
     name: Build and scan image
     runs-on: ubuntu-latest
     needs: hadolint
     timeout-minutes: 20
     if: github.event_name != 'pull_request'
+    outputs:
+      base-image: ${{ steps.base.outputs.ref }}
     permissions:
       contents: read
       # Required for uploading the Trivy SARIF report to the Security tab.
@@ -120,6 +123,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.4.1
 
+      # Resolve the mutable base tag to an immutable index digest ONCE, and
+      # hand the same reference to the scan build and the push build, so a
+      # base image republished between the two jobs cannot make the pushed
+      # image differ from the scanned one. The index digest covers both
+      # platforms, so the arm64 leg uses the same base release too.
+      - name: Resolve base image digest
+        id: base
+        run: |
+          set -euo pipefail
+          digest="$(docker buildx imagetools inspect node:24-alpine --format '{{.Manifest.Digest}}')"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: ${digest}" >&2; exit 1; }
+          echo "ref=node:24-alpine@${digest}" >> "${GITHUB_OUTPUT}"
+
       - name: Build image for scanning (not pushed)
         uses: docker/build-push-action@v7.4.0
         with:
@@ -129,6 +145,7 @@ jobs:
           # Same fresh-base rule as the push build below.
           pull: true
           platforms: linux/amd64
+          build-args: NODE_IMAGE=${{ steps.base.outputs.ref }}
           tags: koolbot-scan:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -261,6 +278,9 @@ jobs:
           # never pick up the fix.
           pull: true
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          # Release builds reuse the digest-pinned base the scan job resolved;
+          # previews (no scan) keep the Dockerfile default tag.
+          build-args: ${{ needs.scan-image.outputs.base-image && format('NODE_IMAGE={0}', needs.scan-image.outputs.base-image) || '' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}

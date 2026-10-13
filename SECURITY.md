@@ -120,8 +120,9 @@ non-administrator commands rather than running them ungated.
 
 Container images are built on `node:24-alpine`, run as a non-root numeric
 user (`1000:1000`), and are signed with cosign (keyless) when published to
-GHCR. Release images are built and scanned with Trivy (fixable CRITICAL
-findings fail the build) before they are pushed, and the Dockerfile is linted
+GHCR. Release images are built and the linux/amd64 image is scanned with
+Trivy (fixable CRITICAL findings fail the build) before anything is pushed (the
+arm64 image is built from the same base digest but not scanned separately), and the Dockerfile is linted
 with hadolint (errors fail the build). CodeQL and dependency review run in CI.
 
 ### Input Validation

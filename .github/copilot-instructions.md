@@ -284,7 +284,7 @@ The repository uses GitHub Actions for automated quality checks. Workflows live 
 - **CodeQL** (`codeql.yml`): code scanning on PRs, pushes, and a weekly cron.
 - **Dependency Review** (`dependency-review.yml`): flags risky dependency changes on PRs.
 - **Docker** (`docker.yml`): on push to `main` and `v*.*.*` tags, runs hadolint
-  (fails on errors), builds the image locally and scans it with Trivy (fixable CRITICAL fails), and
+  (fails on errors), builds the image locally and scans the amd64 build with Trivy (fixable CRITICAL fails; arm64 is not scanned), and
   only then pushes/attests/signs (cosign) it to GHCR.
 - **PR Title Lint** (`pr-title-lint.yml`): enforces Conventional Commit PR titles (see below).
 - **Release Please** (`release-please.yml`): release automation on push to `main`.
