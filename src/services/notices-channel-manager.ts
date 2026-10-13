@@ -105,16 +105,25 @@ export class NoticesChannelManager {
   // reload callbacks, so without this the notice kept listing a feature until
   // the next `/config reload` or restart (#1120).
   private changeListenerRegistered = false;
+  private initializing = false;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onConfigChange = (key: string): void => {
-    if (!this.isInitialized) return;
-    if (key !== "notices.enabled" && !getFeatureEnabledKeys().includes(key)) {
-      return;
-    }
+    // Before the manager is running, only enabling it (or pointing it at a
+    // channel) matters; once running, feature gates change the notice.
+    const relevant = this.isInitialized
+      ? key === "notices.enabled" || getFeatureEnabledKeys().includes(key)
+      : key === "notices.enabled" || key === "notices.channel_id";
+    if (!relevant) return;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      void this.onConfigReload().catch((error) => {
+      // Not running yet (started with notices off): bring it up now that
+      // the setting may be on. When already running, an off value makes
+      // onConfigReload a no-op, so a disabled notice is never refreshed.
+      const task = this.isInitialized
+        ? this.onConfigReload()
+        : this.initialize();
+      void task.catch((error) => {
         logger.error("Error refreshing features notice after change:", error);
       });
     }, FEATURE_NOTICE_REFRESH_DEBOUNCE_MS);
@@ -149,6 +158,15 @@ export class NoticesChannelManager {
     if (this.isInitialized) {
       logger.warn("Notices channel manager already initialized, skipping...");
       return;
+    }
+
+    if (this.initializing) return;
+    this.initializing = true;
+    // Subscribe before the enabled check so an instance that starts with
+    // notices off still hears `notices.enabled` being turned on in the Web UI.
+    if (!this.changeListenerRegistered) {
+      this.configService.addChangeListener(this.onConfigChange);
+      this.changeListenerRegistered = true;
     }
 
     logger.info("Initializing notices channel manager...");
@@ -205,10 +223,10 @@ export class NoticesChannelManager {
 
       this.configService.registerReloadCallback(this.onConfigReload);
       this.reloadCallbackRegistered = true;
-      this.configService.addChangeListener(this.onConfigChange);
-      this.changeListenerRegistered = true;
     } catch (error) {
       logger.error("Error initializing notices channel manager:", error);
+    } finally {
+      this.initializing = false;
     }
   }
 

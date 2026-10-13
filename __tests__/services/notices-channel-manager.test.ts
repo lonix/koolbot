@@ -301,6 +301,96 @@ describe("NoticesChannelManager", () => {
     });
   });
 
+  describe("starting with notices disabled (#1120)", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    const setup = (enabled: { value: boolean }) => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const addChangeListener = jest.fn();
+      const removeChangeListener = jest.fn();
+      manager.configService = {
+        getBoolean: jest.fn(async () => enabled.value),
+        getString: jest.fn(async () => "channel123"),
+        registerReloadCallback: jest.fn(),
+        removeReloadCallback: jest.fn(),
+        addChangeListener,
+        removeChangeListener,
+      };
+      for (const method of [
+        "setupChannelPermissions",
+        "ensureHeaderPost",
+        "ensureBotInfoNotice",
+        "syncNotices",
+        "startCleanupJob",
+      ]) {
+        jest.spyOn(manager, method).mockResolvedValue(undefined as never);
+      }
+      jest
+        .spyOn(manager, "getNoticesChannel")
+        .mockResolvedValue({ name: "notices" } as never);
+      return { manager, addChangeListener, removeChangeListener };
+    };
+
+    it("subscribes while disabled and initializes when notices.enabled turns on", async () => {
+      const enabled = { value: false };
+      const { manager, addChangeListener } = setup(enabled);
+
+      await manager.initialize();
+      expect(addChangeListener).toHaveBeenCalledWith(manager.onConfigChange);
+      expect(manager.isInitialized).toBe(false);
+
+      enabled.value = true;
+      manager.onConfigChange("notices.enabled");
+      await jest.advanceTimersByTimeAsync(5000);
+
+      expect(manager.isInitialized).toBe(true);
+      expect(manager.ensureBotInfoNotice).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores unrelated keys while not running", async () => {
+      const enabled = { value: true };
+      const { manager } = setup(enabled);
+      manager.onConfigChange("polls.enabled");
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(manager.isInitialized).toBe(false);
+    });
+
+    it("does not register the change listener twice on repeated start", async () => {
+      const enabled = { value: false };
+      const { manager, addChangeListener } = setup(enabled);
+      await manager.initialize();
+      await manager.initialize();
+      expect(addChangeListener).toHaveBeenCalledTimes(1);
+
+      enabled.value = true;
+      await manager.initialize();
+      await manager.initialize();
+      expect(addChangeListener).toHaveBeenCalledTimes(1);
+    });
+
+    it("unsubscribes on stop() even if it never became enabled", async () => {
+      const enabled = { value: false };
+      const { manager, removeChangeListener } = setup(enabled);
+      await manager.initialize();
+      await manager.stop();
+      expect(removeChangeListener).toHaveBeenCalledWith(manager.onConfigChange);
+      await manager.stop();
+      expect(removeChangeListener).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops refreshing when notices.enabled turns off", async () => {
+      const enabled = { value: true };
+      const { manager } = setup(enabled);
+      await manager.initialize();
+      (manager.ensureBotInfoNotice as jest.Mock).mockClear();
+      enabled.value = false;
+      manager.onConfigChange("notices.enabled");
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(manager.ensureBotInfoNotice).not.toHaveBeenCalled();
+    });
+  });
+
   describe("reload callback lifecycle (#1007)", () => {
     it("initialize() registers the reload callback and stop() removes it", async () => {
       const manager = NoticesChannelManager.getInstance(mockClient) as any;
@@ -356,6 +446,7 @@ describe("NoticesChannelManager", () => {
       manager.configService = {
         getBoolean: jest.fn(async () => false),
         registerReloadCallback,
+        addChangeListener: jest.fn(),
       };
 
       await manager.initialize();
