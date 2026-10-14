@@ -41,16 +41,30 @@ export function startCooldown(
   scope: string,
   userId: string,
   seconds: number,
-): void {
-  if (!(seconds > 0)) return;
-  manager().setCooldown(userId, scope);
+): CooldownToken | null {
+  if (!(seconds > 0)) return null;
+  const stamp = manager().setCooldown(userId, scope);
   // Registers the window so the periodic sweep can evict the entry.
   manager().getRemainingCooldown(userId, scope, seconds);
+  return stamp;
 }
 
-/** Forget the member's cooldown for `scope` (e.g. the action failed). */
-export function clearMemberCooldown(scope: string, userId: string): void {
-  manager().clearCooldown(userId, scope);
+/** Identifies one reservation made by {@link startCooldown}. */
+export type CooldownToken = number;
+
+/**
+ * Give back the cooldown reservation `token` (e.g. the action failed). Only
+ * the reservation that still matches is cleared: if it already expired and
+ * the member has since started a newer one, that newer cooldown stays. A
+ * null token (the limit was off) is a no-op.
+ */
+export function clearMemberCooldown(
+  scope: string,
+  userId: string,
+  token: CooldownToken | null,
+): void {
+  if (token === null) return;
+  manager().clearCooldownIf(userId, scope, token);
 }
 
 /**

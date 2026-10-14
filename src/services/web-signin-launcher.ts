@@ -157,7 +157,7 @@ export async function runWebSignin(
     });
     return;
   }
-  startCooldown(cooldownScope, userId, cooldownSeconds);
+  const cooldownToken = startCooldown(cooldownScope, userId, cooldownSeconds);
 
   // Once a session row exists the issuance the cooldown bounds has happened,
   // so later (delivery) failures must keep the cooldown.
@@ -205,7 +205,11 @@ export async function runWebSignin(
       await safeReply(interaction, { content: dmBody });
     }
   } catch (error) {
-    if (!sessionCreated) clearMemberCooldown(cooldownScope, userId);
+    // Only our own reservation: a newer one (ours expired while create() was
+    // slow) belongs to another request and must survive.
+    if (!sessionCreated) {
+      clearMemberCooldown(cooldownScope, userId, cooldownToken);
+    }
     logger.error(
       `Error issuing web sign-in link for user=${userId}: ${describeDiscordError(error)}`,
     );

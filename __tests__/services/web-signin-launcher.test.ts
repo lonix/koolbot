@@ -223,6 +223,37 @@ describe("runWebSignin link delivery", () => {
       expect(mockCreate).toHaveBeenCalledTimes(1);
     });
 
+    it("a late failure of request A does not clear request B's newer cooldown", async () => {
+      mockGetString.mockResolvedValue("dm");
+      mockGetNumber.mockResolvedValue(1); // a 1 second cooldown
+      const realNow = Date.now();
+      const nowSpy = jest.spyOn(Date, "now").mockReturnValue(realNow);
+
+      // A reserves, then waits on a create() that will fail later.
+      let failA!: (e: Error) => void;
+      mockCreate.mockImplementationOnce(
+        () => new Promise((_resolve, reject) => (failA = reject)),
+      );
+      const a = runWebSignin(build(async () => undefined).interaction, opts);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // A's 1 second reservation expires; B reserves and succeeds.
+      nowSpy.mockReturnValue(realNow + 2_000);
+      await runWebSignin(build(async () => undefined).interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+
+      // A now fails late. B's cooldown must survive, so C is refused.
+      failA(new Error("db down"));
+      await a;
+      const c = build(async () => undefined);
+      await runWebSignin(c.interaction, opts);
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+      expect(c.editReply).toHaveBeenCalledWith({
+        content: expect.stringMatching(/wait/),
+      });
+      nowSpy.mockRestore();
+    });
+
     it("is off when the cooldown is 0", async () => {
       mockGetString.mockResolvedValue("dm");
       mockGetNumber.mockResolvedValue(0);

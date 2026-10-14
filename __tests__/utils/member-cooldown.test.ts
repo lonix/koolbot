@@ -57,10 +57,36 @@ describe("member cooldown helper", () => {
       expect(cooldownRemaining("a", "u2", 60)).toBe(0);
     });
 
-    it("can be cleared", () => {
-      startCooldown("a", "u1", 60);
-      clearMemberCooldown("a", "u1");
+    it("can be cleared by its own token", () => {
+      const token = startCooldown("a", "u1", 60);
+      clearMemberCooldown("a", "u1", token);
       expect(cooldownRemaining("a", "u1", 60)).toBe(0);
+    });
+
+    it("A expires, B reserves, A clears: B's cooldown survives", () => {
+      const a = startCooldown("a", "u1", 60);
+      jest.advanceTimersByTime(61_000); // A's reservation has expired
+      const b = startCooldown("a", "u1", 60);
+      expect(b).not.toBe(a);
+      clearMemberCooldown("a", "u1", a); // A fails late and tries to clear
+      expect(cooldownRemaining("a", "u1", 60)).toBe(60);
+      clearMemberCooldown("a", "u1", b);
+      expect(cooldownRemaining("a", "u1", 60)).toBe(0);
+    });
+
+    it("gives two reservations in the same millisecond different tokens", () => {
+      const a = startCooldown("a", "u1", 60);
+      const b = startCooldown("a", "u1", 60);
+      expect(b).not.toBe(a);
+      clearMemberCooldown("a", "u1", a);
+      expect(cooldownRemaining("a", "u1", 60)).toBeGreaterThan(0);
+    });
+
+    it("returns no token, and clears nothing, when the limit is off", () => {
+      expect(startCooldown("a", "u1", 0)).toBeNull();
+      startCooldown("a", "u1", 60);
+      clearMemberCooldown("a", "u1", null);
+      expect(cooldownRemaining("a", "u1", 60)).toBe(60);
     });
   });
 
