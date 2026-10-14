@@ -299,6 +299,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "voicechannels.category_id",
     "voicechannels.lobby.name",
     "voicechannels.lobby.offlinename",
+    "voicechannels.lobby.max_rooms",
+    "voicechannels.lobby.room_window_seconds",
     "voicechannels.channel.prefix",
     "voicechannels.channel.suffix",
     "voicechannels.controlpanel.enabled",

@@ -273,6 +273,8 @@ describe("buildSettingRows (#705)", () => {
       "voicechannels.lobby.channel_id",
       "voicechannels.lobby.name",
       "voicechannels.lobby.offlinename",
+      "voicechannels.lobby.max_rooms",
+      "voicechannels.lobby.room_window_seconds",
       "voicechannels.channel.prefix",
       "voicechannels.channel.suffix",
       "voicechannels.controlpanel.enabled",

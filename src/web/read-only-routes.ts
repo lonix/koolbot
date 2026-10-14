@@ -5,6 +5,7 @@
  * no writes.
  */
 
+import { COMPONENT_AUDIT_LABELS } from "../utils/component-audit.js";
 import { loadAdminFixPreview, loadRoleGroupsPage } from "./role-groups-page.js";
 import {
   renderAdminFixPage,
@@ -201,6 +202,8 @@ export const VOICE_CHANNELS_SETTING_KEYS = [
   "voicechannels.lobby.channel_id",
   "voicechannels.lobby.name",
   "voicechannels.lobby.offlinename",
+  "voicechannels.lobby.max_rooms",
+  "voicechannels.lobby.room_window_seconds",
   "voicechannels.channel.prefix",
   "voicechannels.channel.suffix",
   "voicechannels.controlpanel.enabled",
@@ -2533,7 +2536,11 @@ export function createReadOnlyRouter(
         };
       });
 
-      const commandOptions = Array.from(client.commands.keys()).sort();
+      // Component rows (#1147) carry a fixed label, so they can be filtered too.
+      const commandOptions = [
+        ...Array.from(client.commands.keys()).sort(),
+        ...COMPONENT_AUDIT_LABELS,
+      ];
       const userOptions = Array.from(userIdsOnPage)
         .sort()
         .map((id) => ({ id, label: userLabels.get(id) ?? id }));

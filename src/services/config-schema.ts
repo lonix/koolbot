@@ -7,6 +7,8 @@ export interface ConfigSchema {
   "voicechannels.lobby.channel_id": string;
   "voicechannels.lobby.name": string;
   "voicechannels.lobby.offlinename": string;
+  "voicechannels.lobby.max_rooms": number; // Rooms per member per window; 0 = no limit (#1147)
+  "voicechannels.lobby.room_window_seconds": number;
   "voicechannels.channel.prefix": string;
   "voicechannels.channel.suffix": string;
   "voicechannels.cleanup.managed_only": boolean;
@@ -303,6 +305,8 @@ export const defaultConfig: ConfigSchema = {
   "voicechannels.lobby.channel_id": "",
   "voicechannels.lobby.name": "Lobby",
   "voicechannels.lobby.offlinename": "Offline Lobby",
+  "voicechannels.lobby.max_rooms": 5,
+  "voicechannels.lobby.room_window_seconds": 60,
   "voicechannels.channel.prefix": "🎮",
   "voicechannels.channel.suffix": "",
   "voicechannels.cleanup.managed_only": false,
@@ -1200,6 +1204,22 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Display name shown on the lobby channel while the bot is offline. Cosmetic. Emoji shortcodes like :red_circle: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
+  },
+  "voicechannels.lobby.max_rooms": {
+    label: "Lobby rooms per member per window",
+    description:
+      "How many rooms one member can open from the lobby within the window below. Past it the member stays in the lobby with a short notice in the lobby's text chat, and gets a room by leaving and rejoining once the window has passed. Set to 0 for no limit. Held in memory, so it resets on restart.",
+    category: "voicechannels",
+    type: "number",
+    min: 0,
+  },
+  "voicechannels.lobby.room_window_seconds": {
+    label: "Lobby room limit window (seconds)",
+    description:
+      "The window, in seconds, for the lobby room limit above. Ignored when that limit is 0.",
+    category: "voicechannels",
+    type: "number",
+    min: 1,
   },
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
@@ -2359,7 +2379,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.command_audit.enabled": {
     label: "Slash-command audit log enabled",
     description:
-      "Record one row per Discord slash-command invocation (who, what, when, outcome) so operators can audit command usage from the WebUI. Raw command arguments are never recorded.",
+      "Record one row per Discord slash-command invocation (who, what, when, outcome) so operators can audit command usage from the WebUI. Button, select-menu and modal interactions are recorded too, under a fixed component name. Raw command arguments, custom ids and submitted text are never recorded.",
     category: "core",
     type: "boolean",
   },

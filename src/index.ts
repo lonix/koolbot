@@ -19,6 +19,7 @@ import logger, { isDebugMode } from "./utils/logger.js";
 import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { safeReply } from "./utils/safe-reply.js";
 import { ConfigService } from "./services/config-service.js";
+import { startComponentAudit } from "./utils/component-audit.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
 import { runReactionRoleMigrations } from "./services/reaction-role-migrator.js";
 import { CommandManager } from "./services/command-manager.js";
@@ -1002,6 +1003,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Handle button interactions
   if (interaction.isButton()) {
+    const audit = startComponentAudit(interaction, "button");
     try {
       if (interaction.customId.startsWith("vc_control_")) {
         const { handleVCControlButton } =
@@ -1024,6 +1026,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } else if (interaction.customId.startsWith("reactrole:btn:")) {
         await reactionRoleService.handleButtonInteraction(interaction);
       } else {
+        audit.unrecognised();
         logger.debug(
           `Ignoring button interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
@@ -1033,14 +1036,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           flags: MessageFlags.Ephemeral,
         });
       }
+      await audit.done();
     } catch (error) {
       logger.error("Error handling button interaction:", error);
+      await audit.failed(error);
     }
     return;
   }
 
   // Handle select menu interactions
   if (interaction.isStringSelectMenu()) {
+    const audit = startComponentAudit(interaction, "select");
     try {
       if (interaction.customId.startsWith("vc_transfer_select_")) {
         const { handleVCTransferSelect } =
@@ -1053,6 +1059,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } else if (interaction.customId === "reactrole:sel") {
         await reactionRoleService.handleSelectInteraction(interaction);
       } else {
+        audit.unrecognised();
         logger.debug(
           `Ignoring select menu interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
@@ -1062,20 +1069,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
           flags: MessageFlags.Ephemeral,
         });
       }
+      await audit.done();
     } catch (error) {
       logger.error("Error handling select menu interaction:", error);
+      await audit.failed(error);
     }
     return;
   }
 
   // Handle modal submit interactions
   if (interaction.isModalSubmit()) {
+    const audit = startComponentAudit(interaction, "modal");
     try {
       if (interaction.customId.startsWith("vc_modal_")) {
         const { handleVCModal } =
           await import("./handlers/vc-modal-handler.js");
         await handleVCModal(interaction);
       } else {
+        audit.unrecognised();
         logger.debug(
           `Ignoring modal interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
@@ -1085,8 +1096,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           flags: MessageFlags.Ephemeral,
         });
       }
+      await audit.done();
     } catch (error) {
       logger.error("Error handling modal interaction:", error);
+      await audit.failed(error);
     }
     return;
   }
