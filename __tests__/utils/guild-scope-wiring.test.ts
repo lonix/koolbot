@@ -43,6 +43,8 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
     "GuildAuditLogEntryCreate",
     "GuildMemberUpdate",
     "GuildMemberAdd",
+    "GuildMemberRemove",
+    "GuildBanAdd",
   ];
 
   it.each(scoped)("gates %s on the configured guild", (event) => {
@@ -83,6 +85,19 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
       }
     }
     expect(ungated).toEqual([]);
+  });
+
+  // A foreign guild's departure event must not revoke a local member's Web UI
+  // sessions (#1151): the gate has to run before the revoke.
+  it.each([
+    ["GuildMemberRemove", "revokeWebSessionsForDeparture("],
+    ["GuildBanAdd", "revokeWebSessionsForDeparture("],
+    ["GuildAuditLogEntryCreate", "handleDepartureAuditEntry("],
+  ])("%s gates on the guild before revoking sessions", (event, call) => {
+    const [body] = listenerBodies(event);
+    expect(body).toContain(call);
+    expect(body.indexOf("shouldIgnoreGuild(")).toBeGreaterThan(-1);
+    expect(body.indexOf("shouldIgnoreGuild(")).toBeLessThan(body.indexOf(call));
   });
 
   it("re-checks guild scope when the bot is added to a guild", () => {

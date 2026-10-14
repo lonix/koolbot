@@ -107,7 +107,9 @@ The optional Web UI is protected by single-use, short-lived sign-in links
 (`/config` for administrators, `/me` for members), server-side session
 revocation, double-submit-cookie CSRF protection on every state-changing
 request, and per-IP rate limiting. Admin sessions are re-checked against the
-live Administrator permission. Serve it over HTTPS and set `WEBUI_BASE_URL`
+live Administrator permission, and member sessions against the member's live
+membership. A member who leaves, is kicked or is banned also has their sessions
+revoked as soon as the bot sees the event. Serve it over HTTPS and set `WEBUI_BASE_URL`
 to the `https://` address; behind a reverse proxy, set `WEBUI_TRUST_PROXY`
 so the rate limiter sees real client addresses. See `WEBUI.md`.
 
@@ -124,13 +126,19 @@ user (`1000:1000`), are scanned with Trivy, and are signed with cosign
 
 ### Input Validation
 
-All user inputs are validated and sanitized. Report any instances where user input is not properly validated.
+KoolBot validates and bounds the inputs it acts on (slash-command options, Web UI forms, config values), escapes
+untrusted text in the Web UI, strips control characters from values written to logs (`src/utils/log-sanitize.ts`),
+and defaults Discord mentions to users only. That is defence in depth, not a guarantee that every free-text
+value a member types is rewritten before it is stored or echoed: member-supplied text such as names, quote text
+or reasons can still appear in moderation and audit rows and in messages the bot posts. Treat those stores as
+containing raw member input. Report any place where user input is not properly validated through a security
+advisory.
 
 ### Discord Permissions
 
 Review bot permissions carefully:
 
-- **Required**: `SendMessages`, `UseSlashCommands`
+- **Required**: `ViewChannel`, `SendMessages`, `EmbedLinks`, `UseSlashCommands`
 - **Voice features**: `ManageChannels`, `MoveMembers`
 - **Moderation features**: `ViewAuditLog`, `ModerateMembers`, `BanMembers`
 - **Reaction roles / role rewards**: `ManageRoles`
@@ -171,8 +179,20 @@ another function and passed in as a parameter, so review those by hand.
 
 - **Personal data**: KoolBot stores user IDs and voice activity data
 - **Data retention**: Configure cleanup policies to minimize data storage
-- **Data access**: Only bot administrators can access stored data
-- **GDPR compliance**: Members can export or reset their data from the Web UI (`/me`, when `privacy.enabled` is on), or ask a bot administrator to do so
+- **Data access**: Stored data lives in your own MongoDB, so whoever can reach that database or the admin Web UI
+  can read it. Some of it is also shown in Discord by design: `/seen` and `/voicestats` show a member's voice
+  activity to whoever runs them (channel names are hidden when the caller cannot view the channel), `/aka` shows
+  name history, and `/modlog` shows a member's moderation history to moderators (it is registered for
+  **Moderate Members**). Restrict who may run these commands in
+  the Web UI's permissions page, and keep the MongoDB port unpublished.
+  Three things are separate: (a) a member's tracking opt-out (`privacy.tracking_opt_out.enabled`) stops new
+  activity and name-history rows being written; (b) moderation records (warnings and mirrored native actions)
+  are still written for opted-out members, because they are a moderation record, not tracking; (c) rows already
+  tracked stay until the member resets their data.
+- **GDPR compliance**: Members can export or reset their own data from the Web UI (`/me`, when `privacy.enabled`
+  is on; the reset also needs `privacy.delete.enabled`). Both are off by default. There is no administrator-run
+  export or reset of an arbitrary member's data. Admins can remove individual entries on some Web UI pages (for example birthdays),
+  so a request that reaches you as the operator is handled by asking the member to use `/me`, or by acting on your database directly
 - **Optional privileged intents**: the Server Members intent is only requested when you set `GUILD_MEMBERS_INTENT=true`
 - **Outbound requests**: the only request KoolBot makes on its own, beyond Discord and your
   MongoDB, is the update check (`core.updatecheck.enabled`, on by default). It is an anonymous

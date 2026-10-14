@@ -81,6 +81,17 @@ openssl rand -base64 32
 - **CLIENT_ID**: General Information → Application ID
 - **GUILD_ID**: Right-click your server icon in Discord → Copy ID (enable Developer Mode under User Settings → Advanced)
 
+**Lock the application to your server.** KoolBot serves only the server named by `GUILD_ID`.
+New Discord applications start with **Public Bot** on, which lets anyone add your bot to a server they control.
+KoolBot ignores events from other servers, but you should also turn the option off:
+
+- In the Developer Portal, open your application → **Installation** (or **Bot**) and turn **Public Bot** off.
+  Set **Install Link** to **None** (or **Discord Provided Link** only while you invite it yourself).
+- Optional: enable `core.guild_scope.leave_other_guilds` in the Web UI to make the bot leave any server other
+  than `GUILD_ID`. It is off by default. See [SECURITY.md](SECURITY.md#guild-scope-and-public-bot).
+- Invite the bot with least-privilege permissions, never Administrator. See
+  [TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-has-no-permissions) for the invite link.
+
 ### 3. **Start with Docker Compose**
 
 ```bash
