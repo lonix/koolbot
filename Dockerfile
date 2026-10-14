@@ -1,5 +1,8 @@
 # Build stage
-FROM node:24-alpine AS builder
+# CI resolves this tag to an immutable digest once per release run and passes
+# it as NODE_IMAGE, so the image that is scanned is the image that is pushed.
+ARG NODE_IMAGE=node:24-alpine
+FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
 
@@ -16,7 +19,7 @@ COPY . .
 RUN npm run build
 
 # Production dependencies stage
-FROM node:24-alpine AS prod-deps
+FROM ${NODE_IMAGE} AS prod-deps
 
 WORKDIR /app
 
@@ -25,7 +28,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 # Production stage
-FROM node:24-alpine
+FROM ${NODE_IMAGE}
 
 WORKDIR /app
 

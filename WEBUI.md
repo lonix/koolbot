@@ -187,7 +187,15 @@ Key properties:
   re-reads the member from Discord (reused for ~15 s) instead of trusting the
   member cache: a member who left, was kicked or banned, or lost the role loses
   `/me` within seconds. With the intent on, the gateway keeps the cache current
-  and no extra REST call is made. `/config` is fixed Administrator-only and is
+  and no extra REST call is made. On top of that the bot revokes the member's
+  sessions as soon as it sees them go: a kick or ban through the audit-log
+  entry or the ban event (neither needs the Server Members intent; the audit-log
+  entry needs the bot's View Audit Log permission), and a plain leave through
+  the member-remove event (which does need the intent; without it the live
+  re-check above ends the session on the member's next request, and the bot
+  warns once at startup). Revoking is a soft revoke of the session row, stores
+  no new member data, and a failure to revoke is logged and never affects
+  the bot. A timeout does not end a session. `/config` is fixed Administrator-only and is
   not editable on the Permissions page.
   Every `/me` route, including `/me/session/ping`, is rate limited per client IP
   (600 requests per 10 minutes overall, plus 60 non-GET requests and 30 Rewind
@@ -253,9 +261,14 @@ by editing `.env` and restarting the container.
 | `CLIENT_ID`            | yes      | `1234567890123456789`                  |
 | `GUILD_ID`             | yes      | `9876543210987654321`                  |
 | `MONGODB_URI`          | yes      | `mongodb://mongodb:27017/koolbot`      |
-| `NODE_ENV`             | no       | `production` (default) / `development` |
+| `NODE_ENV`             | no       | `development` (unset) / `production`   |
 | `DEBUG`                | no       | `false` (default) / `true`             |
 | `GUILD_MEMBERS_INTENT` | no       | `false` (default) / `true`             |
+
+`NODE_ENV` defaults to `development` when unset (`src/config/env.ts`). The published Docker image
+(`Dockerfile`) sets `NODE_ENV=production`, and `.env.example` ships `NODE_ENV=production`, so containers run as
+production unless you override it; a bare `npm run dev` or `node dist/index.js` does not. Set it to `production`
+for any real deployment.
 
 ### Required when the Web UI is enabled
 
@@ -422,9 +435,9 @@ With this, `WEBUI_BASE_URL=http://your-host:3000`.
 The Web UI decides the session cookie's `Secure` flag from the scheme of
 `WEBUI_BASE_URL` (see `shouldUseSecureCookies()` in `src/web/cookies.ts`):
 `https://` sets it, `http://` does not, so a plain-HTTP `WEBUI_BASE_URL`
-such as `http://your-host:3000` works regardless of `NODE_ENV`. Only when
-`WEBUI_BASE_URL` is missing or malformed does it fall back to
-`NODE_ENV=production`. Keep `WEBUI_BASE_URL` matching the URL you actually
+such as `http://your-host:3000` works regardless of `NODE_ENV`. Startup
+refuses to enable the Web UI when `WEBUI_BASE_URL` does not start with a lower-case `http://` or `https://`
+(`validateWebUIEnvVars`), so a missing or malformed value never silently falls back to `NODE_ENV`. Keep `WEBUI_BASE_URL` matching the URL you actually
 browse to, or the browser will drop the cookie and every page click will
 log you back out.
 
@@ -708,6 +721,8 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 | Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |
 | Click **Finish** in the UI         | Session revoked server-side; cookie cleared                                             |
 | Administrator removed in Discord   | Next request revokes the admin session (live Administrator check)                       |
+| Member is kicked or banned         | All their sessions are revoked as soon as the bot sees the audit-log entry or ban event |
+| Member leaves the server           | Revoked on the leave event (needs `GUILD_MEMBERS_INTENT`); else on their next request   |
 | Bot restart                        | Sessions survive (stored in MongoDB)                                                    |
 | `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid                                    |
 
@@ -1933,8 +1948,8 @@ flags its session cookie `Secure` when `WEBUI_BASE_URL` starts with
   `WEBUI_BASE_URL` starts with `http://`.
 
 A mismatch between `WEBUI_BASE_URL` and the URL in your browser is the
-usual cause. `NODE_ENV` only matters when `WEBUI_BASE_URL` is missing or
-malformed.
+usual cause. `NODE_ENV` is not used for the cookie flag once `WEBUI_BASE_URL` is valid,
+and startup rejects an invalid one.
 
 ### Behind a proxy, rate limits trigger on the proxy's IP
 

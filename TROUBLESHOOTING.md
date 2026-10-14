@@ -277,19 +277,24 @@ Error: An invalid token was provided
 1. **Re-invite bot with correct permissions:**
 
    ```text
-   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands
+   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=1099796860116&scope=bot%20applications.commands
    ```
 
-   Replace `YOUR_CLIENT_ID` with your actual Client ID. `permissions=8`
-   (Administrator) is the quickest way to rule permissions out; once things
-   work, prefer granting only the specific permissions listed below.
+   Replace `YOUR_CLIENT_ID` with your actual Client ID. `permissions=1099796860116`
+   is the least-privilege set: View Channels, Send Messages, Embed Links,
+   Add Reactions, Manage Channels, Manage Roles, Move Members, View Audit Log,
+   Moderate Members and Ban Members. Do not invite the bot with
+   `permissions=8` (Administrator): it lets anyone who compromises the bot
+   token or the Web UI act as a server administrator. If a feature you use
+   needs one more permission, add just that one. Drop the permissions of
+   features you have not enabled (for example Ban Members and Moderate
+   Members without moderation).
 
 2. **Check role hierarchy:**
    - Bot's role must be ABOVE roles it needs to manage
    - Move bot's role higher in Server Settings → Roles
 
 3. **Verify required permissions:**
-   - Administrator (easiest), or:
    - Manage Channels
    - Manage Roles (for reaction roles, leaderboard role rewards)
    - Move Members
@@ -439,7 +444,8 @@ docker compose up -d --force-recreate
 ### `/config` says "Web UI is enabled but its configuration is invalid"
 
 The message lists what is wrong, for example `WEBUI_BASE_URL is missing`,
-`WEBUI_SESSION_SECRET is missing`, or a secret shorter than 32 bytes. Both
+`WEBUI_SESSION_SECRET is missing`, a `WEBUI_BASE_URL` that does not start with
+`http://` or `https://`, or a secret shorter than 32 bytes. Both
 variables must be set in `.env` when `WEBUI_ENABLED=true`. Generate the
 secret on your host first (dotenv does not run shell substitutions):
 
@@ -519,8 +525,9 @@ loaded before the cookie was reissued). Reload the page and submit again.
 Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI sets
 `Secure` on its session cookie based on the scheme of `WEBUI_BASE_URL`
 (`shouldUseSecureCookies()` in `src/web/csrf.ts`): `https://` means
-`Secure`, `http://` means not `Secure`. Only if `WEBUI_BASE_URL` is missing
-or malformed does it fall back to `NODE_ENV=production`. So:
+`Secure`, `http://` means not `Secure`. Startup refuses to enable the Web UI
+when `WEBUI_BASE_URL` does not start with a lower-case `http://` or `https://`, so a typo such as
+`bot.example.com` or `HTTPS://...` is reported instead of silently changing the cookie flag. So:
 
 - If you serve the UI over HTTPS (recommended, see
   [WEBUI.md → Reverse-proxy guidance](WEBUI.md#reverse-proxy-guidance)),

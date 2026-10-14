@@ -32,6 +32,24 @@ describe("validateWebUIEnvVars", () => {
     );
   });
 
+  it("rejects a WEBUI_BASE_URL without an http:// or https:// scheme", () => {
+    process.env.WEBUI_SESSION_SECRET = crypto.randomBytes(32).toString("hex");
+    for (const bad of [
+      "bot.example.com",
+      "HTTPS://bot.example.com",
+      "ftp://x",
+    ]) {
+      process.env.WEBUI_BASE_URL = bad;
+      expect(validateWebUIEnvVars()).toEqual([
+        expect.stringContaining("WEBUI_BASE_URL must start with"),
+      ]);
+    }
+    for (const good of ["http://localhost:3000", "https://bot.example.com"]) {
+      process.env.WEBUI_BASE_URL = good;
+      expect(validateWebUIEnvVars()).toEqual([]);
+    }
+  });
+
   it("flags a short placeholder secret as too weak", () => {
     process.env.WEBUI_BASE_URL = "https://bot.example.com";
     process.env.WEBUI_SESSION_SECRET = "replace-me";
