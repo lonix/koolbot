@@ -82,6 +82,9 @@ const {
   nextBirthday,
 } = await import("../../src/services/birthday-service.js");
 
+const { resetMemberCooldowns } =
+  await import("../../src/utils/member-cooldown.js");
+
 type ServiceInstance = InstanceType<typeof BirthdayService>;
 
 function resetSingleton(): void {
@@ -717,6 +720,7 @@ describe("BirthdayService", () => {
     });
 
     it("upserts a valid birthday and resets lastAnnouncedYear", async () => {
+      mockBirthdayFindOne.mockResolvedValue(null);
       mockBirthdayFindOneAndUpdate.mockResolvedValue({
         month: 6,
         day: 16,
@@ -738,6 +742,7 @@ describe("BirthdayService", () => {
     });
 
     it("$unsets the year when omitted (privacy: date without age)", async () => {
+      mockBirthdayFindOne.mockResolvedValue(null);
       mockBirthdayFindOneAndUpdate.mockResolvedValue({ month: 6, day: 16 });
       const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
       await svc.setBirthday("u1", "g1", { month: 6, day: 16, year: null });
@@ -767,6 +772,216 @@ describe("BirthdayService", () => {
         svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1800 }),
       ).rejects.toThrow(/valid birth year/);
       expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setBirthday re-save limits (#1147)", () => {
+    type Update = {
+      $set: Record<string, unknown>;
+      $unset?: Record<string, unknown>;
+    };
+    const lastUpdate = (): Update =>
+      (mockBirthdayFindOneAndUpdate.mock.calls.at(-1) as [unknown, Update])[1];
+
+    beforeEach(() => {
+      resetMemberCooldowns();
+      mockBirthdayFindOneAndUpdate.mockResolvedValue({ month: 6, day: 16 });
+      mockConfigGetNumber.mockImplementation(
+        async (key: unknown, def: unknown) =>
+          key === "birthdays.change_cooldown_seconds" ? 300 : (def as number),
+      );
+    });
+
+    it("does not re-arm the announcement when the same date is saved again", async () => {
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1990 });
+      expect(lastUpdate().$unset ?? {}).not.toHaveProperty("lastAnnouncedYear");
+      expect(lastUpdate().$set).toMatchObject({ year: 1990 });
+    });
+
+    it("re-arms for a new birthday and for a changed date", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue(null);
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(lastUpdate().$unset).toHaveProperty("lastAnnouncedYear");
+
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 7, day: 1 });
+      expect(lastUpdate().$unset).toHaveProperty("lastAnnouncedYear");
+    });
+
+    it("refuses a second date change inside the cooldown, with a clear message", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 7, day: 1 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+
+      mockBirthdayFindOne.mockResolvedValue({ month: 7, day: 1 });
+      await expect(
+        svc.setBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).rejects.toThrow(/changed your birthday recently.*wait \d+ minutes?/);
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets only one of several simultaneous date changes through", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      let stored = { month: 6, day: 16 };
+      mockBirthdayFindOne.mockImplementation(async () => ({ ...stored }));
+      mockBirthdayFindOneAndUpdate.mockImplementation(async (_f, update) => {
+        stored = {
+          month: (update as Update).$set.month as number,
+          day: (update as Update).$set.day as number,
+        };
+        return { ...stored };
+      });
+
+      const results = await Promise.allSettled([
+        svc.setBirthday("u1", "g1", { month: 7, day: 1 }),
+        svc.setBirthday("u1", "g1", { month: 8, day: 2 }),
+        svc.setBirthday("u1", "g1", { month: 9, day: 3 }),
+      ]);
+
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    const purged = (matched: number, removed = matched, error?: string) => ({
+      matched,
+      removed,
+      roleRevoked: false,
+      announcementsAttempted: 0,
+      announcementsDeleted: 0,
+      announcementsFailed: 0,
+      ...(error ? { error } : {}),
+    });
+
+    it("does not let remove-then-save dodge the change cooldown", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      jest.spyOn(svc, "purgeForUser").mockResolvedValue(purged(1) as never);
+      // The member removes their birthday: the row is gone, the cooldown runs.
+      await svc.removeOwnBirthday("g1", "u1");
+      mockBirthdayFindOne.mockResolvedValue(null);
+      await expect(
+        svc.setBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).rejects.toThrow(/changed your birthday recently/);
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps a genuinely new member's first save free", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue(null);
+      await svc.setBirthday("fresh", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("records no removal cooldown when the cooldown is 0", async () => {
+      mockConfigGetNumber.mockImplementation(
+        async (key: unknown, def: unknown) =>
+          key === "birthdays.change_cooldown_seconds" ? 0 : (def as number),
+      );
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      jest.spyOn(svc, "purgeForUser").mockResolvedValue(purged(1) as never);
+      await svc.removeOwnBirthday("g1", "u1");
+      mockBirthdayFindOne.mockResolvedValue(null);
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("starts no cooldown when the removal matched no row or failed", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const spy = jest.spyOn(svc, "purgeForUser");
+      mockBirthdayFindOne.mockResolvedValue(null);
+
+      spy.mockResolvedValue(purged(0) as never);
+      await svc.removeOwnBirthday("g1", "u1");
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+
+      spy.mockResolvedValue(purged(1, 0) as never);
+      await svc.removeOwnBirthday("g1", "u2");
+      await svc.setBirthday("u2", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it("serialises a save racing a removal so it cannot recreate the birthday past the cooldown", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      let releasePurge!: () => void;
+      jest.spyOn(svc, "purgeForUser").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            releasePurge = () => resolve(purged(1) as never);
+          }),
+      );
+      mockBirthdayFindOne.mockResolvedValue(null);
+
+      const removal = svc.removeOwnBirthday("g1", "u1");
+      // The save starts while the purge is still in flight.
+      const save = svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      const settled = save.then(
+        () => "saved",
+        (e: Error) => e.message,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+
+      releasePurge();
+      await removal;
+      expect(await settled).toMatch(/changed your birthday recently/);
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("aborts the save when the existing birthday cannot be read, writing nothing and starting no cooldown", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockRejectedValueOnce(new Error("db blip"));
+      await expect(
+        svc.setBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).rejects.toThrow(/could not be read right now/);
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+
+      // No cooldown was recorded: a changed date right after is not refused
+      // for a cooldown (the read now works and shows an existing row).
+      mockBirthdayFindOne.mockResolvedValue({ month: 7, day: 1 });
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves behaviour unchanged when the read succeeds", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1990 });
+      expect(lastUpdate().$unset ?? {}).not.toHaveProperty("lastAnnouncedYear");
+    });
+
+    it("lets a first save and its first correction through", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue(null);
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 6, day: 17 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it("never limits re-saving the same date, even during a cooldown", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 7, day: 1 });
+      mockBirthdayFindOne.mockResolvedValue({ month: 7, day: 1 });
+      await svc.setBirthday("u1", "g1", { month: 7, day: 1, year: 1991 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not limit anything when the cooldown is 0", async () => {
+      mockConfigGetNumber.mockImplementation(
+        async (key: unknown, def: unknown) =>
+          key === "birthdays.change_cooldown_seconds" ? 0 : (def as number),
+      );
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue({ month: 6, day: 16 });
+      await svc.setBirthday("u1", "g1", { month: 7, day: 1 });
+      mockBirthdayFindOne.mockResolvedValue({ month: 7, day: 1 });
+      await svc.setBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(2);
     });
   });
 

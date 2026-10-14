@@ -1,5 +1,12 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { Client } from "discord.js";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
+import { PermissionFlagsBits, type Client } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
   default: {
@@ -488,6 +495,82 @@ describe("ReactionRoleService.validateRoleAssignable bot member resolution", () 
       );
       expect(res).toEqual({ ok: true });
       spy.mockRestore();
+    });
+  });
+
+  describe("dangerous permissions (#1145)", () => {
+    const bot = {
+      permissions: { has: () => true },
+      roles: { highest: { comparePositionTo: () => 1 } },
+    };
+    const guild = {
+      id: "g1",
+      members: { me: bot, fetchMe: jest.fn() },
+      roles: { everyone: { id: "everyone" } },
+    };
+    const withPerms = (...bits: bigint[]) => ({
+      id: "r1",
+      name: "Boss",
+      managed: false,
+      permissions: { bitfield: bits.reduce((a, b) => a | b, 0n) },
+    });
+
+    let backedSpy: ReturnType<typeof jest.spyOn>;
+    beforeEach(() => {
+      backedSpy = jest
+        .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
+        .mockResolvedValue([]);
+    });
+    afterEach(() => backedSpy.mockRestore());
+
+    it.each([
+      ["Administrator", PermissionFlagsBits.Administrator],
+      ["ManageGuild", PermissionFlagsBits.ManageGuild],
+      ["ManageRoles", PermissionFlagsBits.ManageRoles],
+      ["ManageChannels", PermissionFlagsBits.ManageChannels],
+      ["BanMembers", PermissionFlagsBits.BanMembers],
+      ["KickMembers", PermissionFlagsBits.KickMembers],
+      ["ModerateMembers", PermissionFlagsBits.ModerateMembers],
+      ["ManageWebhooks", PermissionFlagsBits.ManageWebhooks],
+      ["MentionEveryone", PermissionFlagsBits.MentionEveryone],
+    ])("refuses a role carrying %s and names it", async (name, bit) => {
+      const { service } = createService({});
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        withPerms(PermissionFlagsBits.SendMessages, bit) as never,
+      );
+      expect(res).toMatchObject({
+        ok: false,
+        message: expect.stringContaining(name),
+      });
+      expect((res as { message: string }).message).toContain("**Boss**");
+    });
+
+    it("lists every offending permission", async () => {
+      const { service } = createService({});
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        withPerms(
+          PermissionFlagsBits.Administrator,
+          PermissionFlagsBits.BanMembers,
+        ) as never,
+      );
+      const message = (res as { message: string }).message;
+      expect(message).toContain("Administrator");
+      expect(message).toContain("BanMembers");
+    });
+
+    it("still allows an ordinary cosmetic role", async () => {
+      const { service } = createService({});
+      const res = await service.validateRoleAssignable(
+        guild as never,
+        withPerms(
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.Connect,
+          PermissionFlagsBits.ChangeNickname,
+        ) as never,
+      );
+      expect(res).toEqual({ ok: true });
     });
   });
 

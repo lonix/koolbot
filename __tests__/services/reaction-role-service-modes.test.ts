@@ -58,6 +58,10 @@ function makeReaction(opts: {
       fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(member),
     },
     roles: {
+      fetch: jest.fn(async (id: string) => ({
+        id,
+        name: id === "role1" ? "Cool" : id,
+      })),
       cache: {
         get: (id: string) => ({ id, name: id === "role1" ? "Cool" : id }),
       },

@@ -5,12 +5,15 @@ const mockGetBoolean =
   jest.fn<(key: string, fallback: boolean) => Promise<boolean>>();
 const mockGetString =
   jest.fn<(key: string, fallback: string) => Promise<string>>();
+const mockGetNumber =
+  jest.fn<(key: string, fallback: number) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       getBoolean: mockGetBoolean,
       getString: mockGetString,
+      getNumber: mockGetNumber,
     })),
   },
 }));
@@ -26,6 +29,7 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
 
 const mockCreate = jest.fn<(doc: unknown) => Promise<unknown>>();
 const mockFindOneAndUpdate = jest.fn<(...a: unknown[]) => unknown>();
+const mockCountDocuments = jest.fn<(filter: unknown) => unknown>();
 jest.unstable_mockModule("../../src/models/ticket.js", () => ({
   Ticket: {
     create: mockCreate,
@@ -33,7 +37,7 @@ jest.unstable_mockModule("../../src/models/ticket.js", () => ({
     findOneAndUpdate: mockFindOneAndUpdate,
     updateOne: jest.fn(() => ({ exec: async () => ({}) })),
     find: jest.fn(),
-    countDocuments: jest.fn(),
+    countDocuments: mockCountDocuments,
   },
   TICKET_STATUSES: ["open", "claimed", "closed"],
 }));
@@ -47,6 +51,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
+const { resetMemberCooldowns } =
+  await import("../../src/utils/member-cooldown.js");
 const {
   TicketChannelManager,
   ticketChannelName,
@@ -55,8 +61,12 @@ const {
   renderTranscript,
 } = await import("../../src/services/ticket-channel-manager.js");
 
-function config(overrides: Record<string, boolean | string> = {}): void {
-  const values: Record<string, boolean | string> = {
+function config(
+  overrides: Record<string, boolean | string | number> = {},
+): void {
+  const values: Record<string, boolean | string | number> = {
+    "tickets.max_open_per_member": 1,
+    "tickets.open_cooldown_seconds": 300,
     "tickets.enabled": true,
     "tickets.staff_role_id": "staff-role",
     "tickets.category_id": "cat-1",
@@ -65,6 +75,9 @@ function config(overrides: Record<string, boolean | string> = {}): void {
   };
   mockGetBoolean.mockImplementation(async (k) => values[k] as boolean);
   mockGetString.mockImplementation(async (k) => values[k] as string);
+  mockGetNumber.mockImplementation(async (k) => values[k] as number);
+  // By default the member holds no live ticket.
+  mockCountDocuments.mockReturnValue({ exec: async () => 0 });
 }
 
 function makeClient(): { client: never; sends: jest.Mock } {
@@ -111,6 +124,7 @@ describe("TicketChannelManager.openTicket", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     TicketChannelManager.reset();
+    resetMemberCooldowns();
     config();
   });
 
@@ -219,6 +233,140 @@ describe("TicketChannelManager.openTicket", () => {
 
     expect(result).toEqual({ ok: false, reason: "discord-error" });
     expect(del).toHaveBeenCalled();
+  });
+
+  describe("per-member limits (#1141)", () => {
+    const open = (
+      manager: InstanceType<typeof TicketChannelManager>,
+      guild: never,
+      authorId = "u1",
+    ) =>
+      manager.openTicket({
+        guild,
+        authorId,
+        authorName: "ola",
+        subject: "help",
+      });
+
+    beforeEach(() => {
+      mockCreate.mockResolvedValue({ _id: "t1", authorId: "u1", subject: "x" });
+    });
+
+    it("refuses while the member already has an open or claimed ticket", async () => {
+      mockCountDocuments.mockReturnValue({ exec: async () => 1 });
+      const guild = guildWith(jest.fn());
+      const { client } = makeClient();
+
+      const result = await open(
+        TicketChannelManager.getInstance(client),
+        guild,
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "too-many-open",
+        maxOpen: 1,
+      });
+      expect(
+        (guild as unknown as { channels: { create: jest.Mock } }).channels
+          .create,
+      ).not.toHaveBeenCalled();
+      // Only live tickets count; closed ones free the slot.
+      expect(mockCountDocuments).toHaveBeenCalledWith({
+        guildId: "guild-1",
+        authorId: "u1",
+        status: { $in: ["open", "claimed"] },
+      });
+    });
+
+    it("honours a higher cap from config", async () => {
+      config({ "tickets.max_open_per_member": 3 });
+      mockCountDocuments.mockReturnValue({ exec: async () => 2 });
+      const { client } = makeClient();
+      const result = await open(
+        TicketChannelManager.getInstance(client),
+        guildWith(jest.fn()),
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it("applies no cap when max_open_per_member is 0", async () => {
+      config({
+        "tickets.max_open_per_member": 0,
+        "tickets.open_cooldown_seconds": 0,
+      });
+      mockCountDocuments.mockReturnValue({ exec: async () => 99 });
+      const { client } = makeClient();
+      const manager = TicketChannelManager.getInstance(client);
+      expect((await open(manager, guildWith(jest.fn()))).ok).toBe(true);
+      expect((await open(manager, guildWith(jest.fn()))).ok).toBe(true);
+      expect(mockCountDocuments).not.toHaveBeenCalled();
+    });
+
+    it("makes a member wait between tickets and says how long", async () => {
+      const { client } = makeClient();
+      const manager = TicketChannelManager.getInstance(client);
+      expect((await open(manager, guildWith(jest.fn()))).ok).toBe(true);
+
+      const second = guildWith(jest.fn());
+      const result = await open(manager, second);
+
+      expect(result).toMatchObject({ ok: false, reason: "cooldown" });
+      const wait = (result as { retryAfterSeconds?: number }).retryAfterSeconds;
+      expect(wait).toBeGreaterThan(0);
+      expect(wait).toBeLessThanOrEqual(300);
+      expect(
+        (second as unknown as { channels: { create: jest.Mock } }).channels
+          .create,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("keeps one member's cooldown from blocking another", async () => {
+      const { client } = makeClient();
+      const manager = TicketChannelManager.getInstance(client);
+      await open(manager, guildWith(jest.fn()), "u1");
+      const result = await open(manager, guildWith(jest.fn()), "u2");
+      expect(result.ok).toBe(true);
+    });
+
+    it("does not start the cooldown when the channel could not be created", async () => {
+      mockCreate.mockRejectedValueOnce(new Error("db down"));
+      const { client } = makeClient();
+      const manager = TicketChannelManager.getInstance(client);
+      expect(await open(manager, guildWith(jest.fn()))).toEqual({
+        ok: false,
+        reason: "discord-error",
+      });
+      expect((await open(manager, guildWith(jest.fn()))).ok).toBe(true);
+    });
+
+    it("lets only one of two simultaneous opens through", async () => {
+      // The count is read before either ticket row exists, so without
+      // serialising, both runs would see 0 live tickets and create a channel.
+      config({ "tickets.open_cooldown_seconds": 0 });
+      let live = 0;
+      mockCountDocuments.mockImplementation(() => ({
+        exec: async () => live,
+      }));
+      mockCreate.mockImplementation(async () => {
+        live += 1;
+        return { _id: "t1", authorId: "u1", subject: "x" };
+      });
+      const { client } = makeClient();
+      const manager = TicketChannelManager.getInstance(client);
+      const guild = guildWith(jest.fn());
+
+      const [a, b] = await Promise.all([
+        open(manager, guild),
+        open(manager, guild),
+      ]);
+
+      expect([a.ok, b.ok].sort()).toEqual([false, true]);
+      expect(
+        (guild as unknown as { channels: { create: jest.Mock } }).channels
+          .create,
+      ).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("keeps the ticket when only the welcome message fails", async () => {

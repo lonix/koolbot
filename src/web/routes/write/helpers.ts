@@ -330,6 +330,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "reactionroles.message_channel_id",
     "reactionroles.style",
     "reactionroles.group_role_colour",
+    "reactionroles.max_toggles",
+    "reactionroles.toggle_window_seconds",
   ],
   announcements: ["announcements.enabled"],
   notices: ["notices.enabled", "notices.channel_id", "notices.header_enabled"],
@@ -397,6 +399,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "birthdays.mention",
     "birthdays.role_id",
     "birthdays.role_duration_hours",
+    "birthdays.change_cooldown_seconds",
   ],
   welcome: [
     "welcome.enabled",
@@ -419,6 +422,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "tickets.staff_role_id",
     "tickets.category_id",
     "tickets.transcript_on_close",
+    "tickets.max_open_per_member",
+    "tickets.open_cooldown_seconds",
   ],
   leaderboard_roles: [
     "leaderboard_roles.enabled",

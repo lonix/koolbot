@@ -710,15 +710,16 @@ optional for privacy); there is no slash command. Admins manage the stored
 birthdays, preview the message and run the check on the Web UI **Birthdays**
 page (`/admin/birthdays`), which also edits these settings.
 
-| Setting                         | Default                           | Description                                                                                                                                                                          |
-| ------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `birthdays.enabled`             | `false`                           | Master switch — enables the recurring check and announcements                                                                                                                        |
-| `birthdays.cron`                | `"0 * * * *"`                     | Cron schedule for the check. Hourly by default so the post lands on each member's local day across timezones; a once-daily schedule can miss members far ahead of or behind the host |
-| `birthdays.channel_id`          | `""`                              | Channel where birthday messages are posted (required)                                                                                                                                |
-| `birthdays.message`             | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file)                                              |
-| `birthdays.mention`             | `true`                            | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification                                                                                  |
-| `birthdays.role_id`             | `""`                              | Optional role granted on the birthday and auto-removed later. Leave empty to skip the role                                                                                           |
-| `birthdays.role_duration_hours` | `24`                              | How long the temporary birthday role is held before the sweep removes it                                                                                                             |
+| Setting                             | Default                           | Description                                                                                                                                                                          |
+| ----------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `birthdays.enabled`                 | `false`                           | Master switch — enables the recurring check and announcements                                                                                                                        |
+| `birthdays.cron`                    | `"0 * * * *"`                     | Cron schedule for the check. Hourly by default so the post lands on each member's local day across timezones; a once-daily schedule can miss members far ahead of or behind the host |
+| `birthdays.channel_id`              | `""`                              | Channel where birthday messages are posted (required)                                                                                                                                |
+| `birthdays.message`                 | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file)                                              |
+| `birthdays.mention`                 | `true`                            | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification                                                                                  |
+| `birthdays.role_id`                 | `""`                              | Optional role granted on the birthday and auto-removed later. Leave empty to skip the role                                                                                           |
+| `birthdays.role_duration_hours`     | `24`                              | How long the temporary birthday role is held before the sweep removes it                                                                                                             |
+| `birthdays.change_cooldown_seconds` | `300`                             | Minimum seconds between a member changing the month/day of their own birthday (`0` = no cooldown). Saving the same date, or only the year, is never limited                          |
 
 **Notes:**
 
@@ -995,15 +996,19 @@ UI page, which also lists open, claimed and closed tickets and can reopen one.
 Closing archives the channel (renamed `closed-…`, locked) — it is never
 deleted. See [COMMANDS.md](COMMANDS.md#ticket).
 
-| Setting                       | Default | Description                                                                                                              |
-| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `tickets.enabled`             | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page                                                          |
-| `tickets.staff_role_id`       | `""`    | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
-| `tickets.category_id`         | `""`    | Category new ticket channels are created under. Empty creates them at the top level                                      |
-| `tickets.transcript_on_close` | `true`  | Post a plain-text message log into the channel when a ticket closes                                                      |
+| Setting                         | Default | Description                                                                                                              |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `tickets.enabled`               | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page                                                          |
+| `tickets.staff_role_id`         | `""`    | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
+| `tickets.category_id`           | `""`    | Category new ticket channels are created under. Empty creates them at the top level                                      |
+| `tickets.transcript_on_close`   | `true`  | Post a plain-text message log into the channel when a ticket closes                                                      |
+| `tickets.max_open_per_member`   | `1`     | How many tickets one member may have open or claimed at a time (`0` = no cap). Closed tickets do not count               |
+| `tickets.open_cooldown_seconds` | `300`   | Minimum seconds between one member opening tickets (`0` = no cooldown). Resets when the bot restarts                     |
 
 **Notes:**
 
+- A member at `tickets.max_open_per_member` must have a ticket closed before opening another, and
+  `tickets.open_cooldown_seconds` is counted from their last successful `/ticket open`.
 - Changing `tickets.staff_role_id` applies to **new** tickets only. Existing ticket channels keep the previous role's
   access until you delete them or edit their permissions by hand.
 - The bot needs **Manage Channels** and **Manage Roles** to create channels and
@@ -1265,12 +1270,20 @@ Self-assignable roles via message reactions. Users react to a message
 to get a role and access to a dedicated category. Role CRUD happens on
 the Web UI's **Reaction Roles** page.
 
-| Setting                            | Default    | Description                                                                                       |
-| ---------------------------------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| `reactionroles.enabled`            | `false`    | Enable reaction role system                                                                       |
-| `reactionroles.message_channel_id` | `""`       | Channel ID where reaction-role messages are posted                                                |
-| `reactionroles.style`              | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu)     |
-| `reactionroles.group_role_colour`  | `""`       | Colour (`#RRGGBB`) for roles created by the grouped-role generator; empty keeps Discord's default |
+| Setting                               | Default    | Description                                                                                            |
+| ------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `reactionroles.enabled`               | `false`    | Enable reaction role system                                                                            |
+| `reactionroles.message_channel_id`    | `""`       | Channel ID where reaction-role messages are posted                                                     |
+| `reactionroles.style`                 | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu)          |
+| `reactionroles.group_role_colour`     | `""`       | Colour (`#RRGGBB`) for roles created by the grouped-role generator; empty keeps Discord's default      |
+| `reactionroles.max_toggles`           | `10`       | Role adds/removes one member may make per window, across reactions, buttons and menus (`0` = no limit) |
+| `reactionroles.toggle_window_seconds` | `30`       | Length of that window in seconds                                                                       |
+
+Roles carrying Administrator, Manage Server, Manage Roles, Manage Channels, Ban, Kick, Timeout,
+Manage Webhooks or Mention @everyone are refused when you bind or generate a reaction role, because any member
+can pick one up. The Reaction Roles page shows which permission blocked it. The role is also checked live at every
+grant, so an older binding to such a role (or a role edited later) stops granting: members get a short refusal
+and the bot logs one warning per role. The binding stays listed on the page so you can remove the permissions or unbind it.
 
 ### How it works
 
@@ -1499,12 +1512,13 @@ Web UI yet (that lives in a follow-up). No slash command is introduced.
 
 Protect your bot from command spam with global rate limiting.
 
-| Setting                    | Default | Description                                        |
-| -------------------------- | ------- | -------------------------------------------------- |
-| `ratelimit.enabled`        | `false` | Enable global rate limiting for all commands       |
-| `ratelimit.max_commands`   | `5`     | Maximum number of commands allowed per time window |
-| `ratelimit.window_seconds` | `10`    | Time window in seconds for rate limit tracking     |
-| `ratelimit.bypass_admin`   | `true`  | Allow administrators to bypass rate limits         |
+| Setting                    | Default | Description                                                                                  |
+| -------------------------- | ------- | -------------------------------------------------------------------------------------------- |
+| `ratelimit.enabled`        | `false` | Enable global rate limiting for all commands                                                 |
+| `ratelimit.max_commands`   | `5`     | Maximum number of commands allowed per time window                                           |
+| `ratelimit.window_seconds` | `10`    | Time window in seconds for rate limit tracking                                               |
+| `ratelimit.bypass_admin`   | `true`  | Allow administrators to bypass rate limits                                                   |
+| `ratelimit.max_components` | `15`    | Maximum button, select-menu and modal interactions per window (same window and admin bypass) |
 
 Rate limiting uses a sliding window. When a user exceeds the limit, they
 receive an ephemeral message like:
@@ -1512,6 +1526,9 @@ receive an ephemeral message like:
 ```text
 ⏱️ You're using commands too quickly! Please wait 7 seconds before trying again.
 ```
+
+Button, select-menu and modal interactions do not run through commands, so they are counted
+separately against `ratelimit.max_components` in the same window (and respect the admin bypass).
 
 ---
 
@@ -1770,6 +1787,8 @@ leave the graph in a broken state.
 - `reactionroles.message_channel_id` (string, default: "")
 - `reactionroles.style` (string, default: "reaction"; one of: reaction, button, select)
 - `reactionroles.group_role_colour` (string, default: "")
+- `reactionroles.max_toggles` (number, default: 10)
+- `reactionroles.toggle_window_seconds` (number, default: 30)
 
 #### Leaderboard Role Rewards
 
@@ -1879,6 +1898,7 @@ leave the graph in a broken state.
 - `birthdays.mention` (bool, default: true)
 - `birthdays.role_id` (string, default: "")
 - `birthdays.role_duration_hours` (number, default: 24)
+- `birthdays.change_cooldown_seconds` (number, default: 300)
 
 #### Welcome Messages
 
@@ -1933,6 +1953,8 @@ leave the graph in a broken state.
 - `tickets.category_id` (category, default: "")
 - `tickets.staff_role_id` (role, default: "")
 - `tickets.transcript_on_close` (bool, default: true)
+- `tickets.max_open_per_member` (number, default: 1)
+- `tickets.open_cooldown_seconds` (number, default: 300)
 
 #### Privacy & Data Export
 
@@ -1989,6 +2011,7 @@ leave the graph in a broken state.
 - `ratelimit.max_commands` (number, default: 5)
 - `ratelimit.window_seconds` (number, default: 10)
 - `ratelimit.bypass_admin` (bool, default: true)
+- `ratelimit.max_components` (number, default: 15)
 
 #### Command Metrics (persisted analytics)
 
@@ -2056,6 +2079,11 @@ surprised by it.
 the single-use sign-in link: `dm` sends a direct message and falls back to an
 ephemeral reply when the member's DMs are closed; `ephemeral` replies in the channel,
 visible only to the invoker (no DM needed). Saved changes apply to the next command.
+
+`core.webui.signin_cooldown_seconds` (default `60`, `0` = off) is the minimum time between
+sign-in links for one member. Each link replaces the previous one, so this bounds how fast
+one member can create sign-in sessions. A member who asks too soon is told how long to
+wait; the timer starts only when a link was actually issued and resets on restart.
 
 #### Discord Logging (bot events posted to Discord channels)
 

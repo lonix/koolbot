@@ -269,6 +269,8 @@ export const REACTION_ROLES_SETTING_KEYS = [
   "reactionroles.enabled",
   "reactionroles.message_channel_id",
   "reactionroles.style",
+  "reactionroles.max_toggles",
+  "reactionroles.toggle_window_seconds",
 ] as const;
 
 /**
@@ -301,6 +303,8 @@ export const TICKETS_SETTING_KEYS = [
   "tickets.staff_role_id",
   "tickets.category_id",
   "tickets.transcript_on_close",
+  "tickets.max_open_per_member",
+  "tickets.open_cooldown_seconds",
 ] as const;
 
 export const MODERATION_SETTING_KEYS = [
@@ -384,6 +388,7 @@ export const BIRTHDAYS_SETTING_KEYS = [
   "birthdays.mention",
   "birthdays.role_id",
   "birthdays.role_duration_hours",
+  "birthdays.change_cooldown_seconds",
 ] as const;
 
 /** Sample age the Birthdays page previews `{age}` with (#986). */

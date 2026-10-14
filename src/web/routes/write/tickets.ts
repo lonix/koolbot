@@ -29,6 +29,8 @@ const FAILURE_TEXT: Record<TicketFailure, string> = {
   "already-closed": "That ticket is already closed.",
   "not-closed": "That ticket isn't closed.",
   "already-claimed": "That ticket is already claimed.",
+  "too-many-open": "That member already has the most open tickets allowed.",
+  cooldown: "That member opened a ticket too recently.",
   "discord-error": "Discord refused the change — check the bot's permissions.",
 };
 

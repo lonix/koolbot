@@ -52,7 +52,10 @@ function makeReaction(opts: {
     members: {
       fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(member),
     },
-    roles: { cache: { get: () => ({ id: roleId, name: "Cool" }) } },
+    roles: {
+      cache: { get: () => ({ id: roleId, name: "Cool" }) },
+      fetch: jest.fn(async () => ({ id: roleId, name: "Cool" })),
+    },
   };
   return {
     partial: false,

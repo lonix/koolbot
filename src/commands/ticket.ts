@@ -11,6 +11,7 @@ import {
 import type { ITicket } from "../models/ticket.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { waitText } from "../utils/member-cooldown.js";
 
 /**
  * `/ticket` — member support tickets (#1004).
@@ -67,6 +68,9 @@ const FAILURE_TEXT: Record<TicketFailure, string> = {
   "already-closed": "That ticket is already closed.",
   "not-closed": "That ticket isn't closed.",
   "already-claimed": "That ticket has already been claimed.",
+  "too-many-open":
+    "You already have an open ticket. Please use it, or close it first.",
+  cooldown: "You opened a ticket a moment ago. Please wait a little.",
   "discord-error":
     "Something went wrong talking to Discord. Please try again, or ask a moderator.",
 };
@@ -125,7 +129,14 @@ async function handleOpen(
     subject,
   });
   if (!result.ok) {
-    await interaction.editReply({ content: FAILURE_TEXT[result.reason] });
+    await interaction.editReply({
+      content:
+        result.reason === "cooldown" && result.retryAfterSeconds
+          ? `You opened a ticket a moment ago. Please wait ${waitText(result.retryAfterSeconds)} before opening another.`
+          : result.reason === "too-many-open" && result.maxOpen
+            ? `You already have ${result.maxOpen} open ticket${result.maxOpen === 1 ? "" : "s"}, the most allowed. Please use ${result.maxOpen === 1 ? "it" : "one of them"}, or close ${result.maxOpen === 1 ? "it" : "one"} first.`
+            : FAILURE_TEXT[result.reason],
+    });
     return;
   }
   await interaction.editReply({

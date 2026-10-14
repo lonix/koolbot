@@ -774,6 +774,11 @@ and the staff role access, hides it from everyone else, and posts your
 subject with a ping to the staff role. The reply is ephemeral and links the
 new channel.
 
+Limits: by default you can have one open ticket at a time
+(`tickets.max_open_per_member`; close it first) and must wait five minutes
+between tickets (`tickets.open_cooldown_seconds`). Both can be changed or
+switched off (`0`) by an admin; you are told which limit you hit.
+
 #### `/ticket close`
 
 Run it **inside the ticket channel**. You can close your own ticket; staff can
