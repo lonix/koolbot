@@ -84,7 +84,10 @@ jobs:
           dockerfile: Dockerfile
           format: sarif
           output-file: hadolint.sarif
-          no-fail: true
+          # Gate the push on real Dockerfile errors (#1154). Warnings and
+          # info findings still reach the Security tab through the SARIF
+          # upload below but do not block a release.
+          failure-threshold: error
 
       - name: Upload hadolint SARIF
         if: always()
@@ -93,16 +96,105 @@ jobs:
           sarif_file: hadolint.sarif
           category: hadolint
 
+  # Build the image locally and scan THAT before anything is pushed (#1154):
+  # a vulnerable image must never reach GHCR. Release concern only, previews
+  # skip it like they skip attestation and signing. A local `load: true` build
+  # cannot be multi-platform, so the gate scans the linux/amd64 image; the
+  # arm64 leg is built in the push job from the same base digest, Dockerfile
+  # and lockfile but is not scanned itself.
+  scan-image:
+    name: Build and scan image
+    runs-on: ubuntu-latest
+    needs: hadolint
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request'
+    outputs:
+      base-image: ${{ steps.base.outputs.ref }}
+    permissions:
+      contents: read
+      # Required for uploading the Trivy SARIF report to the Security tab.
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.4.1
+
+      # Resolve the mutable base tag to an immutable index digest ONCE, and
+      # hand the same reference to the scan build and the push build, so a
+      # base image republished between the two jobs cannot make the pushed
+      # image differ from the scanned one. The index digest covers both
+      # platforms, so the arm64 leg uses the same base release too.
+      - name: Resolve base image digest
+        id: base
+        run: |
+          set -euo pipefail
+          digest="$(docker buildx imagetools inspect node:24-alpine --format '{{.Manifest.Digest}}')"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: ${digest}" >&2; exit 1; }
+          echo "ref=node:24-alpine@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build image for scanning (not pushed)
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          # Same fresh-base rule as the push build below.
+          pull: true
+          platforms: linux/amd64
+          build-args: NODE_IMAGE=${{ steps.base.outputs.ref }}
+          tags: koolbot-scan:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # An image loaded into the local daemon cannot carry attestations.
+          provenance: false
+          sbom: false
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: koolbot-scan:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          # CRITICAL only, and only findings that have a fix available, so
+          # the gate fails on things the maintainers can act on (#1154).
+          severity: CRITICAL
+          # trivy-action ignores `severity` for SARIF output unless this is
+          # set, which let Medium findings through to the Security tab (#963).
+          limit-severities-for-sarif: true
+          ignore-unfixed: true
+          # Non-zero exit fails this job, which blocks build-and-push, the
+          # attestation and the signature. The SARIF file is still written
+          # and uploaded below.
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4.38.2
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
   build-and-push:
     name: Build and push
     runs-on: ubuntu-latest
-    needs: hadolint
+    needs: [hadolint, scan-image]
     timeout-minutes: 30
+    # scan-image is skipped on pull_request (previews are not scanned), and a
+    # skipped dependency would skip this job too, so the gate is spelled out:
+    # hadolint must have passed, and the scan must have passed or been skipped
+    # (never failed or cancelled).
+    if: >-
+      !cancelled() && needs.hadolint.result == 'success' &&
+      (needs.scan-image.result == 'success' || needs.scan-image.result == 'skipped')
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
     # Previews run this job too, so it only gets what a push needs. The
-    # release-only grants live on sign-and-scan, which previews never reach.
+    # release-only grants live on attest-and-sign, which previews never reach.
     permissions:
       contents: read
       packages: write
@@ -186,22 +278,26 @@ jobs:
           # never pick up the fix.
           pull: true
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          # Release builds reuse the digest-pinned base the scan job resolved;
+          # previews (no scan) keep the Dockerfile default tag.
+          build-args: ${{ needs.scan-image.outputs.base-image && format('NODE_IMAGE={0}', needs.scan-image.outputs.base-image) || '' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Provenance and SBOM (like sign-and-scan) are release concerns;
+          # Provenance and SBOM (like attest-and-sign) are release concerns;
           # previews skip them to stay fast and cheap.
           provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
           sbom: ${{ github.event_name != 'pull_request' }}
 
-  sign-and-scan:
-    name: Attest, sign and scan
+  attest-and-sign:
+    name: Attest and sign
     runs-on: ubuntu-latest
     needs: build-and-push
     timeout-minutes: 15
-    # Release concern only: preview images are not attested, signed or scanned.
+    # Release concern only: preview images are not attested or signed. The
+    # image was already scanned (scan-image) before it was pushed.
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
@@ -210,8 +306,6 @@ jobs:
       # Required for cosign keyless signing and SLSA provenance attestations.
       id-token: write
       attestations: write
-      # Required for uploading the Trivy SARIF report to the Security tab.
-      security-events: write
 
     steps:
       - name: Checkout repository
@@ -245,26 +339,6 @@ jobs:
           for tag in ${TAGS}; do
             cosign sign --yes "${tag}@${DIGEST}"
           done
-
-      - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          # trivy-action ignores `severity` for SARIF output unless this is
-          # set, which let Medium findings through to the Security tab (#963).
-          limit-severities-for-sarif: true
-          ignore-unfixed: true
-          exit-code: '0'
-
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4.38.2
-        with:
-          sarif_file: trivy-results.sarif
-          category: trivy
 
   preview-comment:
     name: Post preview pull command

@@ -183,8 +183,8 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   changes.
 - **`codeql.yml`** — CodeQL scan (PRs, pushes, weekly cron).
 - **`dependency-review.yml`** — flags risky dependency changes on PRs.
-- **`docker.yml`** — on push to `main` and `v*.*.*` tags: hadolint, then build/scan (Trivy)/sign
-  (cosign)/push the image to GHCR.
+- **`docker.yml`** — on push to `main` and `v*.*.*` tags: hadolint (fails on errors), then a local
+  amd64 build scanned by Trivy (fixable CRITICAL fails; arm64 is not scanned), and only then push/attest/sign (cosign) to GHCR.
 - **`pr-title-lint.yml`** — see below.
 - **`auto-label.yml`** — labels issues and PRs (path map in `.github/labeler.yml`, plus type and
   release-impact labels derived from the Conventional Commit PR title). Runs on
