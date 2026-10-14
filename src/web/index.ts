@@ -328,6 +328,20 @@ export function validateWebUIEnvVars(): string[] {
     if (!getEnv(k)) errors.push(`${k} is missing`);
   }
 
+  // The scheme decides the `Secure` cookie flag, HSTS and the `__Host-` cookie
+  // prefix (`shouldUseSecureCookies`), so a value such as `bot.example.com` or
+  // `HTTPS://...` would silently fall back to NODE_ENV instead of failing.
+  const baseUrl = getEnv("WEBUI_BASE_URL");
+  if (
+    baseUrl &&
+    !baseUrl.startsWith("http://") &&
+    !baseUrl.startsWith("https://")
+  ) {
+    errors.push(
+      "WEBUI_BASE_URL must start with http:// or https:// (lower-case scheme)",
+    );
+  }
+
   const secret = getEnv("WEBUI_SESSION_SECRET") ?? "";
   if (secret && Buffer.byteLength(secret) < MIN_SESSION_SECRET_BYTES) {
     errors.push(
