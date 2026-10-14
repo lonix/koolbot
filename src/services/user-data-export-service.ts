@@ -320,6 +320,7 @@ const READERS: Record<string, CollectionReader> = {
           userId: string;
           status: string;
           respondedAt: Date;
+          source?: string;
         }>;
         const mine = rsvps.find((rsvp) => rsvp.userId === userId);
         return {
@@ -328,7 +329,12 @@ const READERS: Record<string, CollectionReader> = {
           timezone: row.timezone,
           state: row.state,
           yourRsvp: mine
-            ? { status: mine.status, respondedAt: mine.respondedAt }
+            ? {
+                status: mine.status,
+                respondedAt: mine.respondedAt,
+                // Rows from before the field existed were button clicks.
+                source: mine.source ?? "button",
+              }
             : null,
         };
       }),

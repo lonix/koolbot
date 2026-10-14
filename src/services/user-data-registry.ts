@@ -349,7 +349,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "userId",
     exportable: true,
     guildScoped: true,
-    note: "Nested `rsvps[].userId`: the export carries the event and the member's own RSVP, not the other attendees'. An RSVP is written either by the Going / Maybe / Can't buttons or by marking Interested on the mirrored native scheduled event (`rsvps[].source`, #1034); both are covered by the same export and pull.",
+    note: "Nested `rsvps[].userId`: the export carries the event and the member's own RSVP, not the other attendees'. An RSVP is written either by the Going / Maybe / Can't buttons or by marking Interested on the mirrored native scheduled event (`rsvps[].source`, #1034); both are covered by the same export and pull, and the export includes the source of the member's own RSVP.",
     onDelete: "pull-member",
     subject: "self",
     deleteNote:

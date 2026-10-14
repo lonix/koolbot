@@ -16,6 +16,13 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const makeDiscordApiCall = jest.fn(async (call: () => Promise<unknown>) =>
+  call(),
+);
+jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
+  CommandManager: { getInstance: jest.fn(() => ({ makeDiscordApiCall })) },
+}));
+
 jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
   DiscordLogger: { getInstance: jest.fn() },
 }));
@@ -391,6 +398,64 @@ describe("handleNativeInterest", () => {
       { returnDocument: "after" },
     );
     expect(priv.updateAnnouncement).toHaveBeenCalledWith(row);
+  });
+
+  it("fetches a partial user through makeDiscordApiCall before writing", async () => {
+    const { service } = build();
+    makeDiscordApiCall.mockClear();
+    EventMock.findOneAndUpdate = jest.fn(async () => ({ _id: "e1" }));
+    const fetch = jest.fn(async () => ({ id: "user-2", bot: false }));
+
+    expect(
+      await service.handleNativeInterest(
+        GUILD,
+        NATIVE,
+        { id: "user-2", partial: true, fetch } as never,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(makeDiscordApiCall).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ "rsvps.userId": { $ne: "user-2" } }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("ignores a partial user that turns out to be a bot", async () => {
+    const { service } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => ({}));
+    const fetch = jest.fn(async () => ({ id: "b2", bot: true }));
+
+    expect(
+      await service.handleNativeInterest(
+        GUILD,
+        NATIVE,
+        { id: "b2", partial: true, fetch } as never,
+        true,
+      ),
+    ).toBe(false);
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing and does not throw when the user fetch fails", async () => {
+    const { service } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => ({}));
+    const fetch = jest.fn(async () => {
+      throw new Error("Unknown User");
+    });
+
+    await expect(
+      service.handleNativeInterest(
+        GUILD,
+        NATIVE,
+        { id: "u3", partial: true, fetch } as never,
+        true,
+      ),
+    ).resolves.toBe(false);
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("ignores bots and the bot itself without touching the database", async () => {

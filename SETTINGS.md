@@ -886,7 +886,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   never overridden or removed, and bots are ignored. It follows
   `events.native.enabled` (no extra setting) and uses the non-privileged
   `GuildScheduledEvents` gateway intent. It is one-way for removal: clearing
-  a RSVP with the buttons does not un-mark Interested in Discord.
+  an RSVP with the buttons does not un-mark Interested in Discord.
   Not yet covered: adopting existing native events, cover images, and mapping
   recurrence to a native recurrence rule.
 

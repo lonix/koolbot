@@ -486,13 +486,43 @@ describe("UserDataExportService", () => {
         startTime: "2026-03-01T18:00:00.000Z",
         timezone: "Europe/Stockholm",
         state: "ended",
-        yourRsvp: { status: "going", respondedAt: "2026-02-02" },
+        yourRsvp: {
+          status: "going",
+          respondedAt: "2026-02-02",
+          source: "button",
+        },
       },
     ]);
     expect(raw).not.toContain("attendee-2");
     // The organiser is classified as excluded (admin-authored field), so it
     // must not ride along on the RSVP the member IS entitled to.
     expect(raw).not.toContain("organiser-9");
+  });
+
+  it("exports whether the RSVP came from Interested on the native event", async () => {
+    DATA.event = [
+      {
+        title: "Game night",
+        startTime: "2026-03-01T18:00:00.000Z",
+        timezone: "Europe/Stockholm",
+        state: "scheduled",
+        rsvps: [
+          {
+            userId: USER,
+            status: "maybe",
+            respondedAt: "2026-02-02",
+            source: "native",
+          },
+        ],
+      },
+    ];
+
+    const { payload } = await runExport();
+
+    expect(
+      (payload.data["event-rsvp"] as Array<{ yourRsvp: { source: string } }>)[0]
+        .yourRsvp.source,
+    ).toBe("native");
   });
 
   it("returns only which reward roles list the member, not the roster", async () => {
