@@ -254,8 +254,8 @@ async function handleSavePresetModal(
 
     await safeReply(interaction, {
       content: updated
-        ? `✅ Preset **${name}** updated from this channel's settings.`
-        : `✅ Preset **${name}** saved.`,
+        ? `✅ Preset **${escapeDisplayText(name)}** updated from this channel's settings.`
+        : `✅ Preset **${escapeDisplayText(name)}** saved.`,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {

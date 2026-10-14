@@ -54,7 +54,7 @@ const SEND_METHODS = new Set([
 
 /** Name-like property accessors whose value a member controls. */
 const NAME_EXPR =
-  /(?:\.|^)(?:displayName|username|nickname|globalName|tag|userTag)$|(?:^|\.)(?:channel|oldChannel|newChannel|mainChannel|voiceChannel|waitingRoom)\.name$|^(?:channelName|newName|oldName|savedName)$/;
+  /(?:\.|^)(?:displayName|username|nickname|globalName|tag|userTag)$|(?:^|\.)(?:channel|oldChannel|newChannel|mainChannel|voiceChannel|waitingRoom)\.name$|^(?:channelName|newName|oldName|savedName)$|^(?:p|selected|result|removed|preset)\.name$/;
 
 /**
  * Template literals in these positions are not rendered as Markdown, so
@@ -103,6 +103,14 @@ const NAME_ALLOWED_FILES: Record<string, string> = {
  * `file:template source`, each with the reason it is not rendered as Markdown.
  */
 const NAME_ALLOWLIST: Record<string, string> = {
+  "commands/achievements.ts:`${p.emoji} ${bar} **${p.name}** — ${p.current} / ${p.target}${unit}`":
+    "`p` is a built-in achievement definition, not a member-controlled name",
+  "services/server-scan-service.ts:`missing-${p.name}`":
+    "`p` is a Discord permission name, used as a Web UI issue code",
+  "services/server-scan-service.ts:`KoolBot is missing the ${p.name} permission (${p.purpose}). Grant it to the KoolBot role in Server Settings → Roles.`":
+    "`p` is a Discord permission name, shown on the Web UI",
+  "handlers/vc-preset-handler.ts:`⭐ ${p.name}`":
+    "a select-menu option label, plain text in Discord",
   "services/voice-channel-manager.ts:`${displayName}'s Channel`":
     "the name of a channel the bot creates; escaping would bake backslashes in",
   "services/voice-channel-manager.ts:`⏳ ${channel.name} Waiting`":

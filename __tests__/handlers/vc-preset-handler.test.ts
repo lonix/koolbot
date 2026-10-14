@@ -432,6 +432,96 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
     });
   });
 
+  describe("hostile preset name (#1146)", () => {
+    const HOSTILE = "[x](https://evil.example) <@555> @everyone **b**";
+    const preset = { name: HOSTILE, isDefault: false, userLimit: 4 };
+
+    const expectEscaped = (text: string): void => {
+      expect(text).not.toContain("[x](");
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).toContain("\\[x\\](https://evil.example)");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
+    };
+
+    type Embedded = { embeds: Array<{ data: { description: string } }> };
+    const followUpContent = (): string =>
+      (
+        (mockInteraction.followUp as jest.Mock).mock.calls[0][0] as {
+          content: string;
+        }
+      ).content;
+
+    it("escapes it in the apply panel", async () => {
+      setPresets([preset]);
+      const i = {
+        ...mockInteraction,
+        customId: "vc_preset_open_chan1_user1",
+      } as unknown as ButtonInteraction;
+      await handleVCPresetButton(i);
+      expectEscaped(
+        ((i.reply as jest.Mock).mock.calls[0][0] as Embedded).embeds[0].data
+          .description,
+      );
+    });
+
+    it("escapes it in the manage panel's selected line", async () => {
+      setPresets([preset]);
+      const i = {
+        ...mockInteraction,
+        customId: "vc_preset_pick_chan1_user1",
+        values: ["0"],
+      } as unknown as StringSelectMenuInteraction;
+      await handleVCPresetSelect(i);
+      expectEscaped(
+        ((i.update as jest.Mock).mock.calls[0][0] as Embedded).embeds[0].data
+          .description,
+      );
+    });
+
+    it("escapes it in the preset-applied embed", async () => {
+      setPresets([preset]);
+      Object.assign(mockChannel, {
+        setName: jest.fn().mockResolvedValue(undefined),
+        setUserLimit: jest.fn().mockResolvedValue(undefined),
+        setBitrate: jest.fn().mockResolvedValue(undefined),
+      });
+      const i = {
+        ...mockInteraction,
+        customId: "vc_preset_apply_chan1_user1",
+        values: ["0"],
+      } as unknown as StringSelectMenuInteraction;
+      await handleVCPresetSelect(i);
+      expectEscaped(
+        ((i.editReply as jest.Mock).mock.calls[0][0] as Embedded).embeds[0].data
+          .description,
+      );
+    });
+
+    it("escapes it in the set-default confirmation", async () => {
+      setPresets([preset]);
+      mockService.setDefault.mockResolvedValue({
+        name: HOSTILE,
+        isDefault: true,
+      } as never);
+      mockInteraction.customId = `vc_preset_default_0_${presetNameTag(HOSTILE)}_chan1_user1`;
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+      expectEscaped(followUpContent());
+    });
+
+    it("escapes it in the delete confirmation", async () => {
+      setPresets([preset]);
+      mockService.deletePreset.mockResolvedValue({
+        name: HOSTILE,
+        remaining: 1,
+      } as never);
+      mockInteraction.customId = `vc_preset_delete_0_${presetNameTag(HOSTILE)}_chan1_user1`;
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+      expectEscaped(followUpContent());
+    });
+  });
+
   describe("presetNameTag", () => {
     it("is deterministic and safe for the underscore-delimited custom ID", () => {
       const tag = presetNameTag("Squad_Night with_underscores");
