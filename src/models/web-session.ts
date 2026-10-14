@@ -29,10 +29,10 @@ const WebSessionSchema = new Schema<IWebSession>(
       unique: true,
       index: true,
     },
+    // Indexed through the compound `{ discordUserId, revokedAt }` below.
     discordUserId: {
       type: String,
       required: true,
-      index: true,
     },
     guildId: {
       type: String,
@@ -68,6 +68,37 @@ const WebSessionSchema = new Schema<IWebSession>(
     },
   },
   { timestamps: false },
+);
+
+/**
+ * How long a session row is kept after `expiresAt` before MongoDB removes it.
+ *
+ * Rows used to be soft-revoked and never deleted, so a member issuing sign-in
+ * links in a loop grew the collection without bound (#1147). Every read path
+ * (`redeem`, `peek`, the cookie middleware) already refuses a row once
+ * `expiresAt` has passed, so purging one changes nothing a member or an admin
+ * can do; the grace only keeps the "expired" (rather than "not found") reason
+ * in the redeem logs for a week. `expiresAt` is the hard cap for both the
+ * magic link and the redeemed session, so a row lives at most
+ * `WEBUI_SESSION_LIFETIME_HOURS` (default 24h) plus this grace.
+ *
+ * Fixed rather than configurable: a TTL index's `expireAfterSeconds` cannot
+ * follow a setting without an index-options conflict on existing databases,
+ * and the rows hold only token hashes and timestamps.
+ */
+export const WEB_SESSION_PURGE_GRACE_SECONDS = 7 * 24 * 60 * 60;
+
+// `revokeForUser` runs on every sign-in (`{ discordUserId, revokedAt: null }`).
+// Without this it scanned every row the member ever had.
+WebSessionSchema.index({ discordUserId: 1, revokedAt: 1 });
+
+// TTL: MongoDB removes a row once `expiresAt` + the grace has passed. Mongoose
+// creates both indexes at startup on existing databases (autoIndex is left on)
+// without blocking the bot; `syncIndexes` is never used, so no existing index
+// is dropped.
+WebSessionSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: WEB_SESSION_PURGE_GRACE_SECONDS },
 );
 
 export const WebSession = mongoose.model<IWebSession>(

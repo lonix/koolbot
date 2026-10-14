@@ -50,6 +50,15 @@ describe("Setup Wizard coverage", () => {
     expect(stale).toEqual([]);
   });
 
+  it("offers the lobby room limit in the voice channels step (#1147)", () => {
+    expect(WIZARD_FEATURE_SETTINGS.voicechannels).toEqual(
+      expect.arrayContaining([
+        "voicechannels.lobby.max_rooms",
+        "voicechannels.lobby.room_window_seconds",
+      ]),
+    );
+  });
+
   it("has a settings list for every wizard step, using real keys", () => {
     for (const fk of WIZARD_FEATURE_ORDER) {
       const keys = WIZARD_FEATURE_SETTINGS[fk];

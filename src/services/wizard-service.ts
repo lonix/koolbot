@@ -488,6 +488,10 @@ export class WizardService {
         "Discord category ID for managed voice channels",
       "voicechannels.lobby.name": "Name of the lobby channel",
       "voicechannels.lobby.offlinename": "Name of the offline lobby channel",
+      "voicechannels.lobby.max_rooms":
+        "Rooms one member can open from the lobby per window (0 = no limit)",
+      "voicechannels.lobby.room_window_seconds":
+        "Window in seconds for the lobby room limit",
       "voicechannels.channel.prefix": "Prefix for dynamically created channels",
       "voicechannels.channel.suffix": "Suffix for dynamically created channels",
       "voicetracking.enabled": "Enable/disable voice activity tracking",
