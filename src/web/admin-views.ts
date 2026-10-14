@@ -39,6 +39,7 @@ import type { TicketStatus } from "../models/ticket.js";
 import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
 import { formatVersion } from "../utils/semver.js";
+import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -429,6 +430,8 @@ export interface SettingsProps extends CommonProps {
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
   roles: RoleOption[];
+  /** Roles with role groups ahead of them, for keys that take groups (#1023). */
+  groupRoles?: RoleOption[];
   /** Guild id of the session, used as the reset-confirmation fallback. */
   guildId: string;
   /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
@@ -747,6 +750,22 @@ function channelOptionsFor(
 }
 
 /**
+ * Role option list for a `role` / `role_list` control. A key that also takes
+ * role groups (`ROLE_GROUP_SETTING_KEYS`) uses the list with the groups ahead
+ * of the roles when the caller supplied one; every other key keeps raw roles,
+ * so a group token can never be picked where nothing resolves it (#1023).
+ */
+function rolesFor(
+  r: SettingRow,
+  pickers: { roles: RoleOption[]; groupRoles?: RoleOption[] },
+): RoleOption[] {
+  return pickers.groupRoles &&
+    (ROLE_GROUP_SETTING_KEYS as readonly string[]).includes(r.key)
+    ? pickers.groupRoles
+    : pickers.roles;
+}
+
+/**
  * Render a compact, readable summary of the currently-selected entries below a
  * multi-select. A `<select multiple>` buries its picks among unselected rows,
  * and a long voice-exclusion list otherwise reads as an unseparated blob
@@ -831,6 +850,8 @@ function renderSettingControl(
     voiceChannels: ChannelOption[];
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
+    /** Role list with role groups ahead of the roles, for group-aware keys. */
+    groupRoles?: RoleOption[];
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -862,6 +883,8 @@ function renderControlInput(
     voiceChannels: ChannelOption[];
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
+    /** Role list with role groups ahead of the roles, for group-aware keys. */
+    groupRoles?: RoleOption[];
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -939,7 +962,7 @@ function renderControlInput(
         ? channelOptionsFor(r, pickers)
         : r.type === "category"
           ? pickers.categoryChannels
-          : pickers.roles;
+          : rolesFor(r, pickers);
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
@@ -950,7 +973,9 @@ function renderControlInput(
   }
   if (r.type === "channel_list" || r.type === "role_list") {
     const options =
-      r.type === "channel_list" ? channelOptionsFor(r, pickers) : pickers.roles;
+      r.type === "channel_list"
+        ? channelOptionsFor(r, pickers)
+        : rolesFor(r, pickers);
     const prefix = r.type === "role_list" ? "@" : "#";
     const selected = new Set(
       currentStr
@@ -1074,6 +1099,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     voiceChannels: props.voiceChannels,
     categoryChannels: props.categoryChannels,
     roles: props.roles,
+    groupRoles: props.groupRoles,
   };
   // Page-wide enabled-state of every rendered key, derived from the same
   // `current` values shown in the controls. Dependency hints (#666) read from
@@ -1693,6 +1719,8 @@ export interface WizardStepPageProps extends CommonProps {
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
   roles: RoleOption[];
+  /** Roles with role groups ahead of them, for keys that take groups (#1023). */
+  groupRoles?: RoleOption[];
   /**
    * Enabled-state of every key on this step *plus* the cross-feature
    * dependency targets those keys reference (e.g. `achievements.enabled`
@@ -1722,6 +1750,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     voiceChannels: props.voiceChannels,
     categoryChannels: props.categoryChannels,
     roles: props.roles,
+    groupRoles: props.groupRoles,
   };
 
   // Build the same `SettingRow` shape the Settings page feeds to
@@ -3795,6 +3824,8 @@ export interface FeatureSettingsPickers {
   voiceChannels?: ChannelOption[];
   categoryChannels?: ChannelOption[];
   roles?: RoleOption[];
+  /** Roles with role groups ahead of them, for keys that take groups (#1023). */
+  groupRoles?: RoleOption[];
 }
 
 export interface FeatureSettingsCardProps {
@@ -3884,6 +3915,7 @@ export function renderFeatureSettingsCard(
     voiceChannels: props.pickers?.voiceChannels ?? [],
     categoryChannels: props.pickers?.categoryChannels ?? [],
     roles: props.pickers?.roles ?? [],
+    groupRoles: props.pickers?.groupRoles,
   };
   const masterKey = findFeatureMasterKey(props.settingRows);
   const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);

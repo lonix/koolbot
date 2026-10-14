@@ -17,6 +17,13 @@ import type { RoleGroupView } from "./role-group-service.js";
 
 export const GROUP_REF_PREFIX = "group:";
 
+/**
+ * Role-list settings that resolve group references (#1023). Their Web UI
+ * pickers (Settings, wizard, feature pages) offer groups; every other role
+ * setting stays raw roles, because nothing would resolve a group token there.
+ */
+export const ROLE_GROUP_SETTING_KEYS = ["quotes.delete_roles"] as const;
+
 export interface GroupRef {
   groupId: string;
   andAbove: boolean;

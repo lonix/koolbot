@@ -380,8 +380,16 @@ export function renderAdoptPage(props: AdoptPageProps): string {
     const partial = scan.partial.length
       ? `<div class="notice warn">Some parts could not be read: ${escapeHtml(scan.partial.join(", "))}.</div>`
       : "";
+    const webhookNote = scan.webhooks.known
+      ? ""
+      : `<div class="notice warn">${
+          scan.webhooks.unavailable === "missing-permission"
+            ? "KoolBot does not hold Manage Webhooks, so"
+            : "Webhooks could not be read, so"
+        } channels fed by webhooks or followed announcement channels are not marked below. Their absence here does not mean there are none.</div>`;
     content = `
 ${partial}
+${webhookNote}
 ${renderReadiness(scan)}
 ${suggestions ? `<div class="card"><h2>Suggestions</h2><ul>${suggestions}</ul></div>` : ""}
 ${renderRoles(scan)}

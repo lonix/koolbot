@@ -27,7 +27,12 @@ import {
   renderWizardConfirmPage,
   settingValueFieldName,
 } from "../../admin-views.js";
-import { fetchChannelData, fetchRoleData } from "../../read-only-routes.js";
+import {
+  fetchChannelData,
+  fetchRoleData,
+  withRoleGroupOptions,
+} from "../../read-only-routes.js";
+import { ROLE_GROUP_SETTING_KEYS } from "../../../services/role-group-access.js";
 import {
   flashRedirect,
   requireSessionContext,
@@ -181,6 +186,12 @@ export function createWizardRouter(client: Client): Router {
             fetchChannelData(client, session.guildId),
             fetchRoleData(client, session.guildId),
           ]);
+          // `quotes.delete_roles` also takes role groups (#1023).
+          const groupRoles = settingKeys.some((k) =>
+            (ROLE_GROUP_SETTING_KEYS as readonly string[]).includes(k),
+          )
+            ? await withRoleGroupOptions(session.guildId, roleData.roles)
+            : undefined;
           res.type("text/html").send(
             renderWizardStepPage({
               csrfToken,
@@ -200,6 +211,7 @@ export function createWizardRouter(client: Client): Router {
               voiceChannels: chData.voiceChannels,
               categoryChannels: chData.categoryChannels,
               roles: roleData.roles,
+              groupRoles,
               enabledByKey,
               flash,
             }),
