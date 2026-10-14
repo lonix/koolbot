@@ -589,20 +589,36 @@ export class ReactionRoleService {
         // The sibling cleanup below does REST work, so a re-add of a role the
         // member already holds is limited too; otherwise remove/re-add of the
         // reaction would run it unbounded once removals are being ignored.
-        if (
-          config.mode === "unique" &&
-          (await this.reserveFlip(guild.id, user.id)).wait > 0
-        ) {
-          logger.debug(
-            `Reaction role flip limit hit for user ${user.id}; skipping unique-mode cleanup`,
-          );
+        if (config.mode === "unique") {
+          // The fixed attempt cap applies here too (charged once), so the
+          // cleanup stays bounded even when `max_toggles` is 0 or above it.
+          if (this.attemptWaitSeconds(guild.id, user.id) > 0) {
+            logger.debug(
+              `Reaction role attempt limit hit for user ${user.id}; skipping unique-mode cleanup`,
+            );
+            return;
+          }
+          const flip = await this.reserveFlip(guild.id, user.id);
+          if (flip.wait > 0) {
+            logger.debug(
+              `Reaction role flip limit hit for user ${user.id}; skipping unique-mode cleanup`,
+            );
+            return;
+          }
+          try {
+            await this.applyUniqueMode(reaction, member, config);
+          } catch (error) {
+            flip.release(); // the cleanup did not complete, so not spent
+            throw error;
+          }
           return;
         }
       }
 
       // `unique` (one-of-set): reacting to one option clears the sibling
       // roles configured on the same message, so a member ends up with at
-      // most one role from the group (e.g. exactly one colour role).
+      // most one role from the group (e.g. exactly one colour role). Reached
+      // here after a fresh grant, which was already charged above.
       if (config.mode === "unique") {
         await this.applyUniqueMode(reaction, member, config);
       }

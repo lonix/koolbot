@@ -243,6 +243,48 @@ describe("reaction role flip limit (#1147)", () => {
     expect(next.rolesAdd).toHaveBeenCalledTimes(1);
   });
 
+  it("bounds unique-mode cleanup for a held role by the fixed attempt cap even with max_toggles 0", async () => {
+    findOne.mockResolvedValue({
+      roleId: "role1",
+      roleName: "Cool",
+      mode: "unique",
+      messageId: "msg1",
+    });
+    const find = (ReactionRoleConfig as unknown as { find: jest.Mock })
+      .find as jest.Mock;
+    find.mockReset();
+    find.mockResolvedValue([]);
+    const service = createService(0); // flip limit off
+    const { reaction } = makeReaction();
+    await service.handleReactionAdd(reaction, user); // fresh grant (1 attempt)
+
+    // Re-adds of the held role: each is an attempt, capped at 30 a minute.
+    for (let i = 0; i < 60; i++) {
+      await service.handleReactionAdd(reaction, user);
+    }
+    // 1 (fresh) + 29 re-adds got through; the rest were stopped. The fresh
+    // grant also ran the cleanup, so the cleanups equal the attempts allowed.
+    expect(find).toHaveBeenCalledTimes(30);
+  });
+
+  it("leaves a normal unique-mode re-add unaffected", async () => {
+    findOne.mockResolvedValue({
+      roleId: "role1",
+      roleName: "Cool",
+      mode: "unique",
+      messageId: "msg1",
+    });
+    const find = (ReactionRoleConfig as unknown as { find: jest.Mock })
+      .find as jest.Mock;
+    find.mockReset();
+    find.mockResolvedValue([]);
+    const service = createService(10);
+    const { reaction } = makeReaction();
+    await service.handleReactionAdd(reaction, user);
+    await service.handleReactionAdd(reaction, user);
+    expect(find).toHaveBeenCalledTimes(2);
+  });
+
   it("does not limit anything when max_toggles is 0", async () => {
     const service = createService(0);
     const { reaction, rolesAdd, rolesRemove } = makeReaction();
