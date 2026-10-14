@@ -58,6 +58,11 @@ import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
 import { WelcomeService } from "./services/welcome-service.js";
 import {
+  handleDepartureAuditEntry,
+  revokeWebSessionsForDeparture,
+  warnIfLeaveEventsMissing,
+} from "./services/member-departure-sessions.js";
+import {
   RulesService,
   RULES_ACCEPT_CUSTOM_ID,
 } from "./services/rules-service.js";
@@ -893,6 +898,10 @@ async function initializeServices(): Promise<void> {
     // GuildMembers intent is off, since join events then never arrive.
     await WelcomeService.getInstance().warnIfIntentMissing();
 
+    // Web UI sessions end when a member leaves (#1151): warn once when the
+    // leave event cannot arrive. The live membership re-check still covers it.
+    warnIfLeaveEventsMissing(isWebUIEnabled());
+
     // Start the update check (#1029). An anonymous GET of the latest public
     // release, at startup and every 12h; gates on `core.updatecheck.enabled`
     // at run time and never blocks startup on the network round-trip.
@@ -1327,11 +1336,29 @@ client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {
 client.on(Events.GuildAuditLogEntryCreate, async (auditLogEntry, guild) => {
   recordDiscordEvent("guildAuditLogEntryCreate");
   if (shouldIgnoreGuild(guild.id, env.guildId)) return;
+  // A kick or ban ends the target's Web UI sessions (#1151), independent of
+  // whether the moderation log is on. Never throws.
+  await handleDepartureAuditEntry(auditLogEntry);
   try {
     await moderationService.handleAuditLogEntry(auditLogEntry, guild);
   } catch (error) {
     logger.error("Error handling guildAuditLogEntryCreate:", error);
   }
+});
+
+// A member who leaves, or is banned, loses their Web UI sessions at once
+// (#1151). GuildMemberRemove needs the GuildMembers intent; GuildBanAdd and the
+// audit-log kick/ban above do not. The live re-check (#1158) covers the rest.
+client.on(Events.GuildMemberRemove, async (member) => {
+  recordDiscordEvent("guildMemberRemove");
+  if (shouldIgnoreGuild(member.guild.id, env.guildId)) return;
+  await revokeWebSessionsForDeparture(member.id, "left");
+});
+
+client.on(Events.GuildBanAdd, async (ban) => {
+  recordDiscordEvent("guildBanAdd");
+  if (shouldIgnoreGuild(ban.guild.id, env.guildId)) return;
+  await revokeWebSessionsForDeparture(ban.user.id, "ban");
 });
 
 // Handle channel updates to detect renames
