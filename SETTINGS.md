@@ -363,19 +363,21 @@ Schedule CRUD and question CRUD live on the Polls page.
 
 Dynamic voice channel creation and management.
 
-| Setting                              | Default           | Description                                                                                                                                                                                                         |
-| ------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `voicechannels.enabled`              | `false`           | Enable dynamic voice channel management                                                                                                                                                                             |
-| `voicechannels.category_id`          | `""`              | Discord category ID for managed channels (pick from the dropdown in /admin/settings)                                                                                                                                |
-| `voicechannels.cleanup.managed_only` | `false`           | Only clean up channels KoolBot created (tracked by ID). Turn on when `voicechannels.category_id` is a shared, existing category; off keeps the legacy sweep of every empty voice channel in the category. See below |
-| `voicechannels.lobby.channel_id`     | `""`              | Lobby voice channel ID (pick from the dropdown in /admin/voice-channels). Empty = find the lobby by `voicechannels.lobby.name`                                                                                      |
-| `voicechannels.lobby.name`           | `"Lobby"`         | Lobby channel name when bot is online                                                                                                                                                                               |
-| `voicechannels.lobby.offlinename`    | `"Offline Lobby"` | Lobby channel name when bot is offline                                                                                                                                                                              |
-| `voicechannels.channel.prefix`       | `"🎮"`            | Prefix for user-created channels                                                                                                                                                                                    |
-| `voicechannels.channel.suffix`       | `""`              | Suffix for user-created channels                                                                                                                                                                                    |
-| `voicechannels.controlpanel.enabled` | `true`            | Show interactive control panel in channel text chat                                                                                                                                                                 |
-| `voicechannels.presets.enabled`      | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page                  |
-| `voicechannels.presets.max_per_user` | `3`               | Maximum number of presets a single user can save                                                                                                                                                                    |
+| Setting                                   | Default           | Description                                                                                                                                                                                                         |
+| ----------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voicechannels.enabled`                   | `false`           | Enable dynamic voice channel management                                                                                                                                                                             |
+| `voicechannels.category_id`               | `""`              | Discord category ID for managed channels (pick from the dropdown in /admin/settings)                                                                                                                                |
+| `voicechannels.cleanup.managed_only`      | `false`           | Only clean up channels KoolBot created (tracked by ID). Turn on when `voicechannels.category_id` is a shared, existing category; off keeps the legacy sweep of every empty voice channel in the category. See below |
+| `voicechannels.lobby.channel_id`          | `""`              | Lobby voice channel ID (pick from the dropdown in /admin/voice-channels). Empty = find the lobby by `voicechannels.lobby.name`                                                                                      |
+| `voicechannels.lobby.name`                | `"Lobby"`         | Lobby channel name when bot is online                                                                                                                                                                               |
+| `voicechannels.lobby.offlinename`         | `"Offline Lobby"` | Lobby channel name when bot is offline                                                                                                                                                                              |
+| `voicechannels.lobby.max_rooms`           | `5`               | Rooms one member can open from the lobby per window; `0` = no limit. Past it they stay in the lobby with a notice in its text chat and rejoin to get a room                                                         |
+| `voicechannels.lobby.room_window_seconds` | `60`              | Window for `voicechannels.lobby.max_rooms`                                                                                                                                                                          |
+| `voicechannels.channel.prefix`            | `"🎮"`            | Prefix for user-created channels                                                                                                                                                                                    |
+| `voicechannels.channel.suffix`            | `""`              | Suffix for user-created channels                                                                                                                                                                                    |
+| `voicechannels.controlpanel.enabled`      | `true`            | Show interactive control panel in channel text chat                                                                                                                                                                 |
+| `voicechannels.presets.enabled`           | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page                  |
+| `voicechannels.presets.max_per_user`      | `3`               | Maximum number of presets a single user can save                                                                                                                                                                    |
 
 ### Owner channel status
 
@@ -1812,6 +1814,8 @@ leave the graph in a broken state.
 - `voicechannels.lobby.channel_id` (channel, default: "")
 - `voicechannels.lobby.name` (string, default: "Lobby")
 - `voicechannels.lobby.offlinename` (string, default: "Offline Lobby")
+- `voicechannels.lobby.max_rooms` (number, default: 5)
+- `voicechannels.lobby.room_window_seconds` (number, default: 60)
 - `voicechannels.channel.prefix` (string, default: "🎮")
 - `voicechannels.channel.suffix` (string, default: "")
 - `voicechannels.controlpanel.enabled` (bool, default: true)
@@ -2008,8 +2012,10 @@ by default; each has a daily cleanup job that prunes rows past its retention
 window (staggered at 03:00 / 03:15 server time to avoid contention).
 
 - `core.command_audit.enabled` (bool, default: true) — record one row per
-  Discord slash-command invocation (who, what, when, outcome). Raw command
-  arguments are never stored.
+  Discord slash-command invocation (who, what, when, outcome), and one per
+  button, select-menu or modal interaction under a fixed `component:<handler>`
+  name (never the custom id, the submitted text or the error message; at most
+  30 rows per member per minute). Raw command arguments are never stored.
 - `core.command_audit.retention_days` (number, default: 90) — days to keep
   slash-command audit rows before the daily cleanup (03:00) prunes them. Set
   to `0` to keep history forever.

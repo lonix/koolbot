@@ -623,7 +623,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     onDelete: "retain",
     subject: "self",
     deleteNote:
-      "Session infrastructure. `WebSessionService.revokeForUser` soft-revokes ($set revokedAt) rather than destroying rows, which is the right behaviour and matches the export's classification.",
+      "Session infrastructure. `WebSessionService.revokeForUser` soft-revokes ($set revokedAt) rather than destroying rows, which is the right behaviour and matches the export's classification. A purge leaves it alone; MongoDB removes every row a week after its `expiresAt` through the TTL index on the model (#1147), so a row never outlives the session lifetime by more than that.",
   },
   {
     source: "src/models/lfg-post.ts",
