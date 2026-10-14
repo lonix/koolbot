@@ -159,10 +159,24 @@ server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
 
 ### Mentions
 
-The bot sets a safe client-wide `allowedMentions` default (users only), so
-`@everyone`, `@here` and role mentions in text it echoes, such as member display
-names, do not ping. Features that ping a role or everyone on purpose (poll role
-ping, scheduled announcements, ticket staff pings) set their own allow-list.
+The bot sets a safe client-wide `allowedMentions` default of `parse: []`, so a
+plain send that does not say otherwise pings nobody: `@everyone`, `@here`, role
+and user mentions in text it echoes, such as member display names or nicknames,
+only render and never notify. A reply is the one exception: the default keeps
+`repliedUser: true`, so a reply to a message still notifies the author of that
+message unless the call sets its own `allowedMentions` (the bot currently has
+no `Message.reply` call). Every message that pings on purpose names exactly who
+may be pinged in the same call (the voice room owner, a joining member, the
+weekly recap podium, the birthday member, ticket staff, a poll role). Member
+display names, nicknames, usernames and channel names that reach message text
+are also escaped with `escapeDisplayText`, so a nickname such as `<@id>` or
+`[free nitro](https://...)` shows as plain text rather than a mention or link.
+`__tests__/utils/message-mention-safety-scan.test.ts` is a heuristic guard: it
+fails when a send contains a literal `<@id>` (in the call, or in a local variable
+the call sends) without its own `allowedMentions`, or interpolates a well-known
+name property (`displayName`, `username`, `nickname`, `globalName`, `tag`, a
+channel name) into message text unescaped. It cannot see a mention built in
+another function and passed in as a parameter, so review those by hand.
 
 ### Data Privacy
 

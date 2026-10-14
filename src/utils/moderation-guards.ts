@@ -1,4 +1,5 @@
 import { DiscordAPIError, type Guild, type GuildMember } from "discord.js";
+import { escapeDisplayText } from "./allowed-mentions.js";
 import { truncateText } from "./discord-limits.js";
 
 /**
@@ -120,12 +121,12 @@ export function checkHierarchy(input: HierarchyCheckInput): string | null {
     invoker.id !== guild.ownerId &&
     targetMember.roles.highest.position >= invoker.roles.highest.position
   ) {
-    return `You can't ${verb} **${targetMember.user.tag}** — their highest role is not below yours.`;
+    return `You can't ${verb} **${escapeDisplayText(targetMember.user.tag)}** — their highest role is not below yours.`;
   }
 
   if (!targetMember[capability]) {
     return (
-      `I can't ${verb} **${targetMember.user.tag}** — my own role must be above theirs ` +
+      `I can't ${verb} **${escapeDisplayText(targetMember.user.tag)}** — my own role must be above theirs ` +
       `and I need the matching permission. Use Discord's member menu instead, or fix my role position.`
     );
   }

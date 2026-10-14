@@ -6,6 +6,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindService } from "./rewind-service.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 /**
  * End-of-year DM nudge for the Rewind WebUI page (#484).
@@ -290,7 +291,7 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
       .setTitle(`✨ Your Koolbot Rewind for ${year} is ready`)
       .setColor(EMBED_COLOR)
       .setDescription(
-        `Hey ${username}, your year-in-review is waiting for you.\n\n` +
+        `Hey ${escapeDisplayText(username)}, your year-in-review is waiting for you.\n\n` +
           `Open the user portal with **\`/me\`** and follow the magic link to **/me/rewind** to see your top voice and text channels, peak day, longest streak, and the badges you earned this year.\n\n` +
           `_Don't want these? Run \`/me\` → Notifications to manage your preferences._`,
       )

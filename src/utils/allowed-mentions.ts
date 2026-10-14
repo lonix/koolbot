@@ -1,4 +1,4 @@
-import type { MessageMentionOptions } from "discord.js";
+import { escapeMarkdown, type MessageMentionOptions } from "discord.js";
 
 /**
  * Client-level `allowedMentions` default (#1146).
@@ -9,22 +9,70 @@ import type { MessageMentionOptions } from "discord.js";
  * echoes, including member-controlled text such as a nickname. A member called
  * `@everyone` could then make the bot ping the whole channel.
  *
- * `parse: ["users"]` is deliberate rather than `parse: []`: several existing
- * messages ping a single member through a plain `<@id>` and rely on the default
- * to do it (voice-channel control panel, waiting-room and live-channel notices,
- * the weekly voice recap). Users-only still removes the part that matters,
- * `@everyone`, `@here` and role mentions. A call that sets `allowedMentions`
- * replaces this default outright (discord.js does not merge the two), so every
- * existing per-call allow-list behaves exactly as before.
+ * `parse: []` means a plain message pings nobody. A message that is meant to
+ * ping someone says so itself with {@link pingUsers} (or a role list), naming
+ * exactly who may be pinged, so a nickname that contains `<@id>` can never
+ * widen the audience. A call that sets `allowedMentions` replaces this default
+ * outright (discord.js does not merge the two).
  *
  * `repliedUser: true` keeps `Message.reply` pinging its author; once Discord
  * receives any `allowed_mentions` object, `replied_user` otherwise defaults to
  * false.
- *
- * Anything that needs to ping a role or `@everyone` must say so itself, e.g.
- * `{ roles: [roleId] }`.
  */
 export const DEFAULT_ALLOWED_MENTIONS: MessageMentionOptions = {
-  parse: ["users"],
+  parse: [],
   repliedUser: true,
 };
+
+/** A message that must not ping anyone (the same as the client default). */
+export const NO_MENTIONS: MessageMentionOptions = { parse: [] };
+
+/**
+ * Per-call `allowedMentions` that pings exactly these users and nobody else.
+ * Pass the ids the message text is meant to mention, never ids taken from
+ * member-controlled text.
+ *
+ * Narrower than the client default: it omits `repliedUser`, so on a reply it
+ * suppresses the notification to the replied-to author, whereas the client
+ * default keeps it. The two are not interchangeable; use this for sends, and
+ * add `repliedUser: true` yourself on a reply that should still notify.
+ */
+export function pingUsers(...userIds: string[]): MessageMentionOptions {
+  return { users: [...new Set(userIds)] };
+}
+
+/**
+ * Make a member-controlled name (display name, nickname, username, tag or a
+ * channel name derived from one) safe to put in message content or an embed
+ * body, so it renders as plain text:
+ *
+ * - `<` is escaped, which disarms `<@id>`, `<@&id>`, `<#id>`, `</cmd:id>` and
+ *   `<:emoji:id>` as well as `<https://...>` auto-links;
+ * - `[` and `]` are escaped, so a name cannot become a masked link;
+ * - `>` and Markdown, including headings, lists and spoilers, are escaped.
+ *
+ * `@everyone` and `@here` (only as whole words, so `@everyones` and `@hereford`
+ * are left alone) get a zero-width space after the `@` as a second
+ * line of defence: they stay readable, and they never ping because a plain
+ * message carries `allowedMentions: { parse: [] }` anyway.
+ *
+ * Do not use this for button labels, select-menu options, channel names the
+ * bot creates, or log lines: those are not rendered as Markdown and would show
+ * the backslashes.
+ */
+export function escapeDisplayText(text: string): string {
+  // Backslash, brackets, `<` and `>` first; the library pass must not
+  // re-escape the backslashes added here.
+  // Break whole-word mass mentions on the raw text, before Markdown escaping
+  // adds backslashes that would hide the word boundary.
+  const broken = text.replace(
+    /@(?=(?:everyone|here)(?![\p{L}\p{N}_]))/giu,
+    "@\u200b",
+  );
+  return escapeMarkdown(broken.replace(/[\\[\]<>]/g, "\\$&"), {
+    escape: false,
+    heading: true,
+    bulletedList: true,
+    numberedList: true,
+  });
+}

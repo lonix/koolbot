@@ -18,6 +18,7 @@ import {
 import { getErrorMessage } from "../utils/error-guards.js";
 import { formatDuration } from "../utils/time.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 
 const MS_PER_MINUTE = 60 * 1000;
@@ -139,7 +140,7 @@ export async function execute(
     const targetMember = await fetchMemberOrNull(guild, targetUser.id);
     if (!targetMember) {
       await interaction.editReply({
-        content: `**${targetUser.tag}** isn't a member of this server.`,
+        content: `**${escapeDisplayText(targetUser.tag)}** isn't a member of this server.`,
       });
       return;
     }
@@ -199,7 +200,7 @@ export async function execute(
       .setColor(actionColor("timeout"))
       .setTitle("⏳ Member timed out")
       .setDescription(
-        `**${targetUser.tag}** has been timed out for **${formatDuration(
+        `**${escapeDisplayText(targetUser.tag)}** has been timed out for **${formatDuration(
           durationMs,
         )}** (expires <t:${expiresAt}:R>).\nThey now have **${total}** entr${
           total === 1 ? "y" : "ies"

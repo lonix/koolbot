@@ -6,6 +6,7 @@ import {
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   HIDDEN_CHANNEL_LABEL,
@@ -49,8 +50,8 @@ export async function execute(
       );
       await interaction.editReply(
         channelName === HIDDEN_CHANNEL_LABEL
-          ? `${targetUser.username} is currently in ${HIDDEN_CHANNEL_LABEL}.`
-          : `${targetUser.username} is currently in the voice channel "${channelName}".`,
+          ? `${escapeDisplayText(targetUser.username)} is currently in ${HIDDEN_CHANNEL_LABEL}.`
+          : `${escapeDisplayText(targetUser.username)} is currently in the voice channel "${escapeDisplayText(channelName)}".`,
       );
       return;
     }
@@ -59,14 +60,14 @@ export async function execute(
 
     if (!lastSeen) {
       await interaction.editReply(
-        `${targetUser.username} has never been seen in a voice channel.`,
+        `${escapeDisplayText(targetUser.username)} has never been seen in a voice channel.`,
       );
       return;
     }
 
     const timeAgo = formatTimeAgo(lastSeen);
     await interaction.editReply(
-      `${targetUser.username} was last seen in a voice channel ${timeAgo}.`,
+      `${escapeDisplayText(targetUser.username)} was last seen in a voice channel ${timeAgo}.`,
     );
   } catch (error) {
     logger.error("Error in seen command:", error);

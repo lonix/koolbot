@@ -137,6 +137,28 @@ describe("Warn Command", () => {
       expect(payload).not.toHaveProperty("flags");
     });
 
+    it("escapes a hostile target tag in the confirmation (#1146)", async () => {
+      const interaction = makeInteraction({
+        target: {
+          id: "user-2",
+          tag: "<@555> @everyone [free](https://evil.example) **b**",
+          bot: false,
+        },
+      });
+
+      await execute(interaction);
+
+      const payload = interaction.editReply.mock.calls[0][0] as {
+        embeds: Array<{ data: { description: string } }>;
+      };
+      const text = payload.embeds[0].data.description;
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).not.toContain("[free](");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
+    });
+
     it("edits the deferred reply when the moderation log is disabled", async () => {
       mockIsEnabled.mockResolvedValue(false);
       const interaction = makeInteraction();

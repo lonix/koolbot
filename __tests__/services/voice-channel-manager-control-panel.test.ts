@@ -241,9 +241,31 @@ describe("VoiceChannelManager - Control Panel Update", () => {
       );
 
       // Verify notification was sent
-      expect(mockChannel.send).toHaveBeenCalledWith(
-        expect.stringContaining("NewOwner"),
+      expect(mockChannel.send).toHaveBeenCalledWith({
+        content: expect.stringContaining("NewOwner"),
+        allowedMentions: { parse: [] },
+      });
+    });
+
+    it("neutralises a hostile display name in the automatic transfer notice (#1146)", async () => {
+      mockNewOwner.displayName =
+        "<@555> @everyone [free](https://evil.example) **b**";
+
+      await (manager as any).updateChannelOwnership(
+        mockChannel as VoiceChannel,
+        mockNewOwner as GuildMember,
       );
+
+      const payload = (mockChannel.send as jest.Mock).mock.calls[0][0] as {
+        content: string;
+        allowedMentions: unknown;
+      };
+      expect(payload.allowedMentions).toEqual({ parse: [] });
+      expect(payload.content).not.toContain("<@555>");
+      expect(payload.content).not.toContain("@everyone");
+      expect(payload.content).not.toContain("[free](");
+      expect(payload.content).toContain("\\<@555\\>");
+      expect(payload.content).toContain("\\*\\*b\\*\\*");
     });
 
     it("should reflect privacy state in updated control panel", async () => {

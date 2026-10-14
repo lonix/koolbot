@@ -302,8 +302,17 @@ describe("birthday pure helpers", () => {
           age: null,
         }),
       ).toBe(
-        "Happy birthday \\[free nitro](https://evil.example) \\*\\*x\\*\\*!",
+        "Happy birthday \\[free nitro\\](https://evil.example) \\*\\*x\\*\\*!",
       );
+    });
+    it("disarms mention syntax in the display name (#1146)", () => {
+      expect(
+        renderBirthdayMessage("Happy birthday {username}!", {
+          userId: "123",
+          displayName: "<@999> <@&5> @everyone",
+          age: null,
+        }),
+      ).toBe("Happy birthday \\<@999\\> \\<@&5\\> @\u200beveryone!");
     });
     it("uses the display name for {username} without a ping", () => {
       expect(

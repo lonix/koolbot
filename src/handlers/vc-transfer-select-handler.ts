@@ -4,6 +4,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   VoiceChannelManager,
@@ -81,7 +82,7 @@ export async function handleVCTransferSelect(
     await manager.transferOwnership(channelId, ownerId, targetUserId);
 
     await done(
-      `✅ Channel ownership transferred to ${targetMember.displayName}!`,
+      `✅ Channel ownership transferred to ${escapeDisplayText(targetMember.displayName)}!`,
     );
   } catch (error) {
     // transferOwnership re-checks ownership under the room lock; a transfer

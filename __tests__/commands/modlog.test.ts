@@ -51,6 +51,7 @@ const { data, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } =
 function makeInteraction(
   page: number | null = null,
   guildId: string | null = "guild-1",
+  tag = "target#0001",
 ) {
   const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const deferReply = jest
@@ -67,7 +68,7 @@ function makeInteraction(
     options: {
       getUser: () => ({
         id: "target-1",
-        tag: "target#0001",
+        tag,
         displayAvatarURL: () => "https://cdn.example/avatar.png",
       }),
       getInteger: () => page,
@@ -387,6 +388,23 @@ describe("Modlog Command", () => {
       expect(payload.embeds).toHaveLength(1);
       // Ephemerality is set on the deferral; editReply must not repeat it.
       expect(payload).not.toHaveProperty("flags");
+    });
+
+    it("escapes a hostile target tag in the no-history reply (#1146)", async () => {
+      const { interaction, editReply } = makeInteraction(
+        null,
+        "guild-1",
+        "<@555> @everyone [free](https://evil.example) **b**",
+      );
+
+      await execute(interaction);
+
+      const text = (editReply.mock.calls[0][0] as { content: string }).content;
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).not.toContain("[free](");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
     });
 
     it("edits the deferred reply when the member has no history", async () => {

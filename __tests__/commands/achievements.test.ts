@@ -29,7 +29,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 const { data, formatMetadata, formatProgressBar, execute } =
   await import("../../src/commands/achievements.js");
 
-function makeInteraction() {
+function makeInteraction(username = "member") {
   const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const deferReply = jest
     .fn<() => Promise<void>>()
@@ -41,7 +41,7 @@ function makeInteraction() {
     guildId: "guild-1",
     user: {
       id: "user-1",
-      username: "member",
+      username,
       displayAvatarURL: () => "https://cdn.example/avatar.png",
     },
     replied: false,
@@ -398,6 +398,21 @@ describe("Achievements Command", () => {
         content:
           "member hasn't earned any badges yet. Keep participating in voice channels!",
       });
+    });
+
+    it("escapes a hostile username in the no-badges reply (#1146)", async () => {
+      const { interaction, editReply } = makeInteraction(
+        "<@555> @everyone [free](https://evil.example) **b**",
+      );
+
+      await execute(interaction);
+
+      const text = (editReply.mock.calls[0][0] as { content: string }).content;
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).not.toContain("[free](");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
     });
 
     it("delivers the error message via editReply once deferred", async () => {

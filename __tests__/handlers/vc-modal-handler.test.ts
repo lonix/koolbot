@@ -227,7 +227,11 @@ describe("VCModalHandler - Custom Name Tracking", () => {
   });
 
   describe("Rename preset staleness guard", () => {
-    let mockService: { getPrefs: jest.Mock; renamePreset: jest.Mock };
+    let mockService: {
+      getPrefs: jest.Mock;
+      renamePreset: jest.Mock;
+      savePreset?: jest.Mock;
+    };
 
     beforeEach(() => {
       // The feature gate reads real ConfigService (backed by mocked mongoose,
@@ -267,6 +271,56 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         content: "✏️ Preset **Squad Night** renamed to **Renamed Preset**.",
         flags: MessageFlags.Ephemeral,
       });
+    });
+
+    it("escapes hostile preset names in the rename confirmation (#1146)", async () => {
+      const hostile = "[x](https://evil.example) <@555> @everyone **b**";
+      mockService.getPrefs.mockResolvedValue({
+        presets: [{ name: hostile, isDefault: false }],
+      } as never);
+      mockService.renamePreset.mockResolvedValue({
+        oldName: hostile,
+        newName: hostile,
+      } as never);
+      mockInteraction.customId = `vc_modal_renamepreset_0_${presetNameTag(hostile)}_test-channel-id_test-user-id`;
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      const text = (
+        (mockInteraction.reply as jest.Mock).mock.calls[0][0] as {
+          content: string;
+        }
+      ).content;
+      expect(text).not.toContain("[x](");
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text.match(/\\<@555\\>/g)).toHaveLength(2);
+    });
+
+    it("escapes a hostile preset name in the save confirmation (#1146)", async () => {
+      const hostile = "[x](https://evil.example) <@555> @everyone **b**";
+      Object.assign(mockChannel, { userLimit: 4, bitrate: 64000 });
+      mockService.savePreset = jest
+        .fn()
+        .mockResolvedValue({ updated: false, name: hostile } as never);
+      mockInteraction.customId =
+        "vc_modal_savepreset_test-channel-id_test-user-id";
+      mockInteraction.fields = {
+        getTextInputValue: jest.fn().mockReturnValue(hostile),
+      } as any;
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      const text = (
+        (mockInteraction.reply as jest.Mock).mock.calls[0][0] as {
+          content: string;
+        }
+      ).content;
+      expect(text).toContain("saved");
+      expect(text).not.toContain("[x](");
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).toContain("\\<@555\\>");
     });
 
     it("refuses when the preset at the index changed since the modal opened", async () => {

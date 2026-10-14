@@ -15,6 +15,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
@@ -101,9 +102,18 @@ async function loadPrefs(userId: string): Promise<IUserVoicePreferences> {
   );
 }
 
-function presetSummary(p: IChannelPreset): string {
+/**
+ * One-line description of a preset. `markdown: true` for embed text, where the
+ * member-chosen channel name must not render as a mention or link; leave it off
+ * for select-menu descriptions, which are plain text.
+ */
+function presetSummary(p: IChannelPreset, markdown = false): string {
   const bits: string[] = [];
-  if (p.channelName) bits.push(`name "${p.channelName}"`);
+  if (p.channelName) {
+    bits.push(
+      `name "${markdown ? escapeDisplayText(p.channelName) : p.channelName}"`,
+    );
+  }
   if (typeof p.userLimit === "number")
     bits.push(p.userLimit === 0 ? "no limit" : `limit ${p.userLimit}`);
   if (typeof p.bitrate === "number") bits.push(`${p.bitrate}kbps`);
@@ -127,7 +137,7 @@ function buildApplyPanel(
         : presets
             .map(
               (p, i) =>
-                `**${i + 1}. ${p.name}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p)}`,
+                `**${i + 1}. ${escapeDisplayText(p.name)}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p, true)}`,
             )
             .join("\n"),
     )
@@ -190,7 +200,7 @@ function buildManagePanel(
     .setColor(0xed4245)
     .setDescription(
       selected
-        ? `Selected: **${selected.name}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected)}`
+        ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected, true)}`
         : "Pick a preset below to rename, delete, or set as default.",
     );
 
@@ -562,8 +572,8 @@ async function toggleDefault(
   await switchToManage(interaction, parsed, parsed.presetIndex);
   await interaction.followUp({
     content: result.isDefault
-      ? `⭐ **${result.name}** will auto-apply on your next channel.`
-      : `⭐ **${result.name}** is no longer the default.`,
+      ? `⭐ **${escapeDisplayText(result.name)}** will auto-apply on your next channel.`
+      : `⭐ **${escapeDisplayText(result.name)}** is no longer the default.`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -601,7 +611,7 @@ async function deletePreset(
     await switchToManage(interaction, parsed, null);
   }
   await interaction.followUp({
-    content: `🗑️ Deleted preset **${removed.name}**.`,
+    content: `🗑️ Deleted preset **${escapeDisplayText(removed.name)}**.`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -660,7 +670,7 @@ async function applyPreset(
         .setTitle("✅ Preset applied")
         .setColor(0x57f287)
         .setDescription(
-          `**${preset.name}** applied to this channel.\n${presetSummary(applied as IChannelPreset)}` +
+          `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset, true)}` +
             (nameSkipped
               ? "\n⚠️ The preset's channel name is reserved, so the name was not changed."
               : ""),

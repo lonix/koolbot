@@ -1,6 +1,7 @@
 import { ModalSubmitInteraction, ChannelType, MessageFlags } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -189,7 +190,7 @@ async function handleNameModal(
     );
 
     await safeReply(interaction, {
-      content: `✅ Channel renamed to: **${newName}**`,
+      content: `✅ Channel renamed to: **${escapeDisplayText(newName)}**`,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
@@ -253,8 +254,8 @@ async function handleSavePresetModal(
 
     await safeReply(interaction, {
       content: updated
-        ? `✅ Preset **${name}** updated from this channel's settings.`
-        : `✅ Preset **${name}** saved.`,
+        ? `✅ Preset **${escapeDisplayText(name)}** updated from this channel's settings.`
+        : `✅ Preset **${escapeDisplayText(name)}** saved.`,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
@@ -315,7 +316,7 @@ async function handleRenamePresetModal(
     );
 
     await safeReply(interaction, {
-      content: `✏️ Preset **${oldName}** renamed to **${savedName}**.`,
+      content: `✏️ Preset **${escapeDisplayText(oldName)}** renamed to **${escapeDisplayText(savedName)}**.`,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {

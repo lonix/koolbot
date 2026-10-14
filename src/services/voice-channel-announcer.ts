@@ -11,6 +11,7 @@ import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { AchievementsService } from "./achievements-service.js";
 import { quoteService } from "./quote-service.js";
 import { PollParticipationTracker } from "./poll-participation-tracker.js";
+import { escapeDisplayText, pingUsers } from "../utils/allowed-mentions.js";
 
 /** Fallback schedule when the configured one is missing or unparseable. */
 const DEFAULT_ANNOUNCEMENT_SCHEDULE = "0 16 * * 5";
@@ -262,14 +263,21 @@ export class VoiceChannelAnnouncer {
                 : rank === 3
                   ? "🥉"
                   : `${rank}.`;
-          const mention = rank <= 3 ? `<@${user.userId}>` : user.username;
+          const mention =
+            rank <= 3 ? `<@${user.userId}>` : escapeDisplayText(user.username);
           return `${medal} ${mention}: ${formatTime(user.totalTime)}`;
         }),
         "",
         "Keep up the great conversations! 🎮",
       ].join("\n");
 
-      await channel.send(message);
+      // Only the podium is mentioned on purpose; everyone else is plain text.
+      await channel.send({
+        content: message,
+        allowedMentions: pingUsers(
+          ...topUsers.slice(0, 3).map((u) => u.userId),
+        ),
+      });
     } catch (error) {
       logger.error("Error announcing voice stats:", error);
       // Isolated like every other section: never break the rest of the recap.
@@ -300,29 +308,34 @@ export class VoiceChannelAnnouncer {
         await achievementsService.getNewAccoladesSinceLastWeek();
       if (newAccolades.length === 0) return;
 
-      const accoladeMessages = newAccolades
+      const accoladeLines = newAccolades
         .flatMap((userAccolades) =>
-          userAccolades.accolades
-            .map((accolade) => {
-              const definition = achievementsService.getAccoladeDefinition(
-                accolade.type,
-              );
-              if (!definition) return null;
-              return `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`;
-            })
-            .filter(Boolean),
+          userAccolades.accolades.flatMap((accolade) => {
+            const definition = achievementsService.getAccoladeDefinition(
+              accolade.type,
+            );
+            if (!definition) return [];
+            return [
+              {
+                userId: userAccolades.userId,
+                text: `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`,
+              },
+            ];
+          }),
         )
         .slice(0, 10); // Limit to 10 announcements
 
-      if (accoladeMessages.length > 0) {
-        await channel.send(
-          [
+      if (accoladeLines.length > 0) {
+        await channel.send({
+          content: [
             "",
             "🏆 **New Accolades This Week** 🏆",
             "",
-            ...accoladeMessages,
+            ...accoladeLines.map((line) => line.text),
           ].join("\n"),
-        );
+          // Ping exactly the members whose accolade is listed above.
+          allowedMentions: pingUsers(...accoladeLines.map((l) => l.userId)),
+        });
       }
     } catch (error) {
       logger.error("Error announcing accolades:", error);

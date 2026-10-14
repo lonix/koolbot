@@ -99,10 +99,43 @@ describe("VoiceChannelAnnouncer", () => {
         await (service as any).announceVoiceStats(channel);
 
         expect(channel.send).toHaveBeenCalledTimes(1);
-        const msg = channel.send.mock.calls[0][0] as string;
-        expect(msg).toContain("Weekly Voice Channel Activity Report");
-        expect(msg).toContain("🥇 <@111>: 1h 1m");
-        expect(msg).toContain("🥈 <@222>: 0h 10m");
+        const payload = channel.send.mock.calls[0][0] as {
+          content: string;
+          allowedMentions: unknown;
+        };
+        expect(payload.content).toContain(
+          "Weekly Voice Channel Activity Report",
+        );
+        expect(payload.content).toContain("🥇 <@111>: 1h 1m");
+        expect(payload.content).toContain("🥈 <@222>: 0h 10m");
+        // Exactly the podium may be pinged.
+        expect(payload.allowedMentions).toEqual({ users: ["111", "222"] });
+      });
+
+      it("pings only the top three and escapes names below the podium (#1146)", async () => {
+        setConfig({ "voicetracking.announcements.include_voice_stats": true });
+        const hostile = "<@555> @everyone [x](https://evil.example) **b**";
+        ((VoiceChannelTracker as any).getInstance = jest.fn()).mockReturnValue({
+          getTopUsers: jest.fn<any>().mockResolvedValue([
+            { userId: "1", username: "A", totalTime: 5000 },
+            { userId: "2", username: "B", totalTime: 4000 },
+            { userId: "3", username: "C", totalTime: 3000 },
+            { userId: "4", username: hostile, totalTime: 2000 },
+          ]),
+        });
+
+        await (service as any).announceVoiceStats(channel);
+
+        const payload = channel.send.mock.calls[0][0] as {
+          content: string;
+          allowedMentions: { users: string[] };
+        };
+        expect(payload.allowedMentions).toEqual({ users: ["1", "2", "3"] });
+        expect(payload.content).not.toContain("<@555>");
+        expect(payload.content).toContain("\\<@555\\>");
+        expect(payload.content).toContain("@\u200beveryone");
+        expect(payload.content).toContain("\\[x\\](https://evil.example)");
+        expect(payload.content).toContain("\\*\\*b\\*\\*");
       });
 
       it("posts the no-activity note when nobody was active", async () => {
@@ -518,9 +551,13 @@ describe("VoiceChannelAnnouncer", () => {
 
         await (service as any).announceAccolades(channel);
 
-        const msg = channel.send.mock.calls[0][0] as string;
-        expect(msg).toContain("New Accolades This Week");
-        expect(msg).toContain("🎖️ <@777> earned **Chatterbox**!");
+        const payload = channel.send.mock.calls[0][0] as {
+          content: string;
+          allowedMentions: unknown;
+        };
+        expect(payload.content).toContain("New Accolades This Week");
+        expect(payload.content).toContain("🎖️ <@777> earned **Chatterbox**!");
+        expect(payload.allowedMentions).toEqual({ users: ["777"] });
       });
 
       it("swallows its own errors (isolation contract)", async () => {

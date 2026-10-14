@@ -249,6 +249,29 @@ describe("DigestService", () => {
       expect(mockDigestStateFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    it("escapes a hostile username in the digest DM (#1146)", async () => {
+      mockGetTopUsers.mockResolvedValue([
+        {
+          userId: "u1",
+          username: "<@555> @everyone [free](https://evil.example) **b**",
+          totalTime: 60 * 60,
+        },
+      ]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      await svc.runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{ data: { description: string } }>;
+      };
+      const text = payload.embeds[0].data.description;
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).not.toContain("[free](");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
+    });
+
     it("sends a DM and persists DigestState when prefs.digest is true", async () => {
       mockGetTopUsers.mockResolvedValue([
         { userId: "u1", username: "u1", totalTime: 60 * 60 },

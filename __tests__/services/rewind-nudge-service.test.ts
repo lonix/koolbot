@@ -280,6 +280,29 @@ describe("RewindNudgeService", () => {
       expect(mockUserSend).not.toHaveBeenCalled();
     });
 
+    it("escapes a hostile username in the nudge DM (#1146)", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        {
+          _id: "u1",
+          username: "<@555> @everyone [free](https://evil.example) **b**",
+          totalTime: 60 * 60 * 5,
+        },
+      ]);
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      await svc.runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{ data: { description: string } }>;
+      };
+      const text = payload.embeds[0].data.description;
+      expect(text).not.toContain("<@555>");
+      expect(text).not.toContain("@everyone");
+      expect(text).not.toContain("[free](");
+      expect(text).toContain("\\<@555\\>");
+      expect(text).toContain("\\*\\*b\\*\\*");
+    });
+
     it("sends a DM when prefs.rewind is true and writes the delivery marker", async () => {
       mockTrackingAggregate.mockResolvedValueOnce([
         { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },

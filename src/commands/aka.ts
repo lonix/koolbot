@@ -13,6 +13,7 @@ import { NAME_KINDS, NameKind } from "../models/user-name-history.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 export const data = new SlashCommandBuilder()
   .setName("aka")
@@ -29,11 +30,6 @@ const KIND_TITLES: Record<NameKind, string> = {
   globalName: "Display names",
   nickname: "Server nicknames",
 };
-
-/** Escape Discord markdown so a name cannot restyle or ping in the reply. */
-function plain(name: string): string {
-  return name.replace(/([\\*_~`|>[\]()#-])/g, "\\$1").replace(/@/g, "@\u200b");
-}
 
 function stamp(date: Date): string {
   return `<t:${Math.floor(new Date(date).getTime() / 1000)}:D>`;
@@ -52,7 +48,7 @@ export function historyLines(history: NameHistoryByKind): string[] {
     lines.push(`**${KIND_TITLES[kind]}**`);
     for (const row of rows) {
       lines.push(
-        `• **${plain(row.name)}** — first seen ${stamp(row.firstSeenAt)}, last seen ${stamp(row.lastSeenAt)}`,
+        `• **${escapeDisplayText(row.name)}** — first seen ${stamp(row.firstSeenAt)}, last seen ${stamp(row.lastSeenAt)}`,
       );
     }
   }
