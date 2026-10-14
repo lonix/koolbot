@@ -39,6 +39,7 @@ const WRITE_PATHS = [
   "/events/create",
   "/database/run-cleanup",
   "/bot-status/refresh",
+  "/channels/create",
 ];
 
 async function harnessFor(

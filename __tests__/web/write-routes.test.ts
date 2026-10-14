@@ -872,7 +872,7 @@ describe("createWriteRouter (#850)", () => {
       true,
     );
     // Every domain module mounted exactly once.
-    expect(stack.length - 3).toBe(22);
+    expect(stack.length - 3).toBe(23);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -883,6 +883,8 @@ describe("createWriteRouter (#850)", () => {
         "GET /adopt/history",
         "GET /adopt/history/:id/restore",
         "GET /adopt/history/job/:id",
+        "GET /channels",
+        "GET /channels/:id/delete",
         "GET /quotes/export",
         "GET /settings/export",
         "GET /wizard",
@@ -904,6 +906,10 @@ describe("createWriteRouter (#850)", () => {
         "POST /bot-status/pool/:pool/add",
         "POST /bot-status/pool/:pool/import",
         "POST /bot-status/pool/:pool/seed",
+        "POST /channels/:id/delete",
+        "POST /channels/:id/edit",
+        "POST /channels/:id/move",
+        "POST /channels/create",
         "POST /database/run-cleanup",
         "POST /digest/send-now",
         "POST /events/:id/cancel",

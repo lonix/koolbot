@@ -80,7 +80,7 @@ What changes per session:
 - **A `/me/*` handler can only read/write the signed-in user's own rows.**
   This is enforced by the `assertSelfScope` helper (see
   `src/web/user-routes.ts`) and applies to admin-role sessions too — an
-  admin on `/me/notifications` sees *their* prefs, not the guild's. Admins
+  admin on `/me/notifications` sees _their_ prefs, not the guild's. Admins
   who need to act on another user's data do so via the admin panel's
   audit/user tooling, not by impersonating them on `/me/*`.
 
@@ -180,7 +180,7 @@ Key properties:
   days. The grace is fixed, not a setting. Revoking a session only marks it;
   the row is purged on the same schedule.
 - **Re-issuing kills the prior session.** Running `/me` or `/config` again revokes
-  all of *your* unrevoked sessions and mints a new one. Other admins'
+  all of _your_ unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
 - **Permissions re-checked every request.** The cookie-session middleware
   re-validates the session on every hit, per role: an `admin` session
@@ -261,15 +261,15 @@ by editing `.env` and restarting the container.
 
 ### Required for the bot itself
 
-| Variable               | Required | Example                                |
-| ---------------------- | -------- | -------------------------------------- |
-| `DISCORD_TOKEN`        | yes      | `MTIzNDU2Nzg5MDEy...`                  |
-| `CLIENT_ID`            | yes      | `1234567890123456789`                  |
-| `GUILD_ID`             | yes      | `9876543210987654321`                  |
-| `MONGODB_URI`          | yes      | `mongodb://mongodb:27017/koolbot`      |
-| `NODE_ENV`             | no       | `development` (unset) / `production`   |
-| `DEBUG`                | no       | `false` (default) / `true`             |
-| `GUILD_MEMBERS_INTENT` | no       | `false` (default) / `true`             |
+| Variable               | Required | Example                              |
+| ---------------------- | -------- | ------------------------------------ |
+| `DISCORD_TOKEN`        | yes      | `MTIzNDU2Nzg5MDEy...`                |
+| `CLIENT_ID`            | yes      | `1234567890123456789`                |
+| `GUILD_ID`             | yes      | `9876543210987654321`                |
+| `MONGODB_URI`          | yes      | `mongodb://mongodb:27017/koolbot`    |
+| `NODE_ENV`             | no       | `development` (unset) / `production` |
+| `DEBUG`                | no       | `false` (default) / `true`           |
+| `GUILD_MEMBERS_INTENT` | no       | `false` (default) / `true`           |
 
 `NODE_ENV` defaults to `development` when unset (`src/config/env.ts`). The published Docker image
 (`Dockerfile`) sets `NODE_ENV=production`, and `.env.example` ships `NODE_ENV=production`, so containers run as
@@ -278,15 +278,15 @@ for any real deployment.
 
 ### Required when the Web UI is enabled
 
-| Variable                            | Required          | Default | Notes                                                                                            |
-| ----------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `WEBUI_ENABLED`                     | yes (to turn on)  | `false` | `true` mounts `/admin/*`; anything else leaves it 404.                                           |
-| `WEBUI_BASE_URL`                    | yes when enabled  | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.    |
-| `WEBUI_SESSION_SECRET`              | yes when enabled  | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`).  |
-| `WEBUI_SESSION_TTL_MINUTES`         | no                | `10`    | TTL of the DM'd link from issuance.                                                              |
-| `WEBUI_SESSION_LIFETIME_HOURS`      | no                | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window.  |
-| `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
-| `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
+| Variable                           | Required         | Default | Notes                                                                                           |
+| ---------------------------------- | ---------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `WEBUI_ENABLED`                    | yes (to turn on) | `false` | `true` mounts `/admin/*`; anything else leaves it 404.                                          |
+| `WEBUI_BASE_URL`                   | yes when enabled | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.   |
+| `WEBUI_SESSION_SECRET`             | yes when enabled | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`). |
+| `WEBUI_SESSION_TTL_MINUTES`        | no               | `10`    | TTL of the DM'd link from issuance.                                                             |
+| `WEBUI_SESSION_LIFETIME_HOURS`     | no               | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window. |
+| `WEBUI_INACTIVITY_TIMEOUT_MINUTES` | no               | `30`    | Sliding cookie window after redemption.                                                         |
+| `WEBUI_TRUST_PROXY`                | no               | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.    |
 
 `WEBUI_TRUST_PROXY=true` trusts every proxy hop, so clients can spoof `X-Forwarded-For`
 and evade the per-IP rate limits. It still works but logs a warning at startup; prefer a hop count.
@@ -311,10 +311,10 @@ served on the same port (3000) as `/health` whether or not the Web UI is
 enabled. See [Prometheus / OpenMetrics endpoint](#prometheus--openmetrics-endpoint)
 below for the full rundown.
 
-| Variable          | Required | Default | Notes                                                                 |
-| ----------------- | -------- | ------- | --------------------------------------------------------------------- |
-| `METRICS_ENABLED` | no       | `false` | `true` mounts `/metrics`; anything else leaves it 404.                |
-| `METRICS_TOKEN`   | no       | (empty) | When set, requests must send `Authorization: Bearer <token>` or 401.  |
+| Variable          | Required | Default | Notes                                                                |
+| ----------------- | -------- | ------- | -------------------------------------------------------------------- |
+| `METRICS_ENABLED` | no       | `false` | `true` mounts `/metrics`; anything else leaves it 404.               |
+| `METRICS_TOKEN`   | no       | (empty) | When set, requests must send `Authorization: Bearer <token>` or 401. |
 
 ---
 
@@ -413,7 +413,7 @@ services:
     stop_grace_period: 30s
     stop_signal: SIGTERM
     ports:
-      - "3000:3000"   # /health and /admin (when WEBUI_ENABLED=true)
+      - "3000:3000" # /health and /admin (when WEBUI_ENABLED=true)
 
   mongodb:
     image: mongo:8
@@ -555,7 +555,7 @@ forwards `X-Forwarded-For` to the bot. `WEBUI_TRUST_PROXY=1` tells the
 bot's rate limiter to trust exactly one hop (Caddy) when reading client
 IPs.
 
-⚠️ **Trust-proxy is a footgun if the bot is *also* directly reachable.**
+⚠️ **Trust-proxy is a footgun if the bot is _also_ directly reachable.**
 By default the bot ignores `X-Forwarded-*` headers, so a direct client
 cannot spoof its IP. Setting `WEBUI_TRUST_PROXY=1` flips that: any
 request reaching the bot — including a direct one that bypasses Caddy
@@ -570,7 +570,7 @@ trusting forwarded headers.
 
 ### Tailscale / Cloudflare Tunnel
 
-Set `WEBUI_BASE_URL` to whatever URL your tunnel hands out and *don't*
+Set `WEBUI_BASE_URL` to whatever URL your tunnel hands out and _don't_
 publish port `3000` to the public internet. The bot only needs to be
 reachable from the tunnel sidecar's network namespace.
 
@@ -645,7 +645,7 @@ That said:
   `/live` (liveness — always `OK` once the process is up), `/ready`
   (readiness — `OK` only when MongoDB and Discord are reachable, `503`
   otherwise), and `/health` (a backward-compatible alias of `/ready`).
-  They are intentionally minimal, but `/ready`/`/health` *do* report
+  They are intentionally minimal, but `/ready`/`/health` _do_ report
   whether MongoDB and Discord are reachable. Restrict them to your
   monitoring system if you'd rather not advertise that. Kubernetes
   deployments should use `/live` for the livenessProbe and `/ready` for
@@ -667,7 +667,7 @@ That said:
   response middleware stamps with the nonce, so a `<script>` injected through
   unescaped content gets none and does not run; there is no inline event
   handler, destructive buttons use `data-confirm`), `style-src
-  'unsafe-inline'` (the pages use `style=` attributes), same-origin
+'unsafe-inline'` (the pages use `style=` attributes), same-origin
   `connect-src`/`img-src`/`form-action`, and `frame-ancestors 'none'`.
   `Strict-Transport-Security: max-age=15552000` (180 days, no
   `includeSubDomains`, no `preload`) is sent only when `WEBUI_BASE_URL` is
@@ -851,6 +851,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
 | **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
 | **Channel Claims**    | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
+| **Channel Manager**   | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
 | **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
@@ -867,18 +868,18 @@ Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature p
 are switched off sort to the bottom of their group.
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
-next to the latest KoolBot release, with its state: *up to date*, *update
-available* (with the kind: major, minor or patch), or *couldn't check*. It also
+next to the latest KoolBot release, with its state: _up to date_, _update
+available_ (with the kind: major, minor or patch), or _couldn't check_. It also
 links to the release notes and has a **Check now** button. When an update is
 available, the card shows how to update for Docker Compose, plain Docker and
 source installs, and warns that a major update may include breaking changes.
-Every admin page shows the running version in the top banner, plus an *Update
-available* badge when the instance is behind.
+Every admin page shows the running version in the top banner, plus an _Update
+available_ badge when the instance is behind.
 
 The check runs at startup, every 12 hours and on **Check now** (at most once a
 minute). The result is cached, so no page waits on GitHub. A failed check
 (offline, air-gapped, rate-limited) never breaks the page. The card shows
-*couldn't check* with the reason and the last successful result.
+_couldn't check_ with the reason and the last successful result.
 
 - **What is sent:** one anonymous `GET` of
   `https://api.github.com/repos/lonix/koolbot/releases/latest`, public release
@@ -955,21 +956,21 @@ sure the lobby exists. Turn on **Only clean up channels KoolBot created**
 shared one: startup, periodic and forced cleanup then delete only empty channels
 KoolBot created itself, and the card also lets you pick the lobby channel by ID.
 
-The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
-reaction role* mints a brand-new Discord role and posts a picker message; the
-*Create a private category + channel* checkbox is on by default (preserving the
+The **Reaction Roles** page offers two ways to add a mapping (#813). _Create a
+reaction role_ mints a brand-new Discord role and posts a picker message; the
+_Create a private category + channel_ checkbox is on by default (preserving the
 original behaviour) — untick it to opt out and get a plain self-assign role with
-no attached channel. *Bind an existing role* maps an
+no attached channel. _Bind an existing role_ maps an
 emoji to a role you already manage (no role/category/channel is created) and,
 when given an existing message ID, adds the mapping to that message — so one
 picker message can carry many emoji→role mappings. Both paths validate the role
 hierarchy up front (the bot needs **Manage Roles** and a role ranked above the
 target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +
-category + channel) or **bound** (points at a pre-existing role; *Remove* only
+category + channel) or **bound** (points at a pre-existing role; _Remove_ only
 unbinds the mapping and never deletes the role).
 
-A third path, *Create a role group*, posts one shared message with two or more
+A third path, _Create a role group_, posts one shared message with two or more
 role options and an assignment mode: **unique** (pick exactly one, the default
 for groups), **sticky** (add-only, removing the reaction never revokes the role)
 or **toggle** (each option independently added and removed). The two single-role
@@ -1066,7 +1067,7 @@ flipping the feature re-arms the birthday job straight away.
 
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
-inline *"Requires X enabled"* hint until every dependency is on — the hint names
+inline _"Requires X enabled"_ hint until every dependency is on — the hint names
 each unmet dependency by its human label and links to its section (#666). This is
 the friendly front for the write-time validator (#663): both read the same
 `dependsOn` graph, so the greyed control and the server-side rejection never
@@ -1084,13 +1085,13 @@ role / category key gets a real picker dropdown instead of a raw-ID text box,
 fixed-option keys get a `<select>`, and each field is titled by its
 human-readable label (`SettingMetadata.label`) with the dotted config key kept
 only as monospace helper text. The cascade-disable behaviour and the
-*"Requires X enabled"* dependency hints/locks (including cross-feature targets
+_"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
-are in voice: the *empty*, *one user*, and *multiple users* pools. Each
+are in voice: the _empty_, _one user_, and _multiple users_ pools. Each
 pool has an add / edit / remove / reorder list plus a paste-a-list
 import/export box (newline- or JSON-encoded), built on a reusable
 string-array editor. Entries are stored per-guild in MongoDB and take
@@ -1098,7 +1099,7 @@ effect immediately — no redeploy or restart needed. A pool with
 no stored rows falls back to the built-in defaults in
 `src/content/statuses.ts`, so behaviour is unchanged on a fresh install;
 use **Seed defaults into store** to start editing from those defaults.
-Entries in the *multiple users* pool must contain the `{count}`
+Entries in the _multiple users_ pool must contain the `{count}`
 placeholder (replaced with the live user count); the editor rejects saves
 that omit it.
 
@@ -1155,7 +1156,7 @@ voice-leaderboard role rewards. Its settings card edits `leaderboard_roles.enabl
 (on and off), the period (week / month / all time), the recalculation cron and the
 role-change announcement channel; a save that changes the enable flag or the cron
 re-arms the recalculation job immediately, as on the Digest page. The **Tiers** card edits `leaderboard_roles.tiers`
-as rows — a *Top N* number plus a role picker, with **Add tier** / **Remove** (without
+as rows — a _Top N_ number plus a role picker, with **Add tier** / **Remove** (without
 JavaScript, one spare row is rendered and clearing a row removes it). On save each
 Top N must be unique and between 1 and 1000, each tier needs its own role, and every
 role must exist, not be integration-managed, and sit below the bot's highest role;
@@ -1181,8 +1182,8 @@ lets admins name the roles that matter on their server and rank them: as many or
 they like (Admin, Mod, Helper, VIP, Friends, Bots …). Groups are optional; with none defined
 every feature keeps its current behaviour.
 
-- **Create / edit / reorder / delete.** A group is backed by an *existing role* (picked from the
-  server's roles, with its member count) or by a *new role* the engine creates when the plan is
+- **Create / edit / reorder / delete.** A group is backed by an _existing role_ (picked from the
+  server's roles, with its member count) or by a _new role_ the engine creates when the plan is
   applied. Rank is edited with the ↑ / ↓ buttons; the list is shown highest first, and role
   positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, VIP, Bots)
   pre-fill the permission and capability boxes, which stay editable.
@@ -1194,7 +1195,7 @@ every feature keeps its current behaviour.
   with or without a group. Developers: use `RoleGroupService.getGroupsWith(guildId, "staff")`,
   `memberHasCapability(member, "staff")` and `memberIsAtOrAbove(member, groupId)`.
 - **Linking an existing role never moves anyone.** Its current holders keep it, and its
-  permissions and colour are left alone unless you explicitly tick *Set the role's permissions*
+  permissions and colour are left alone unless you explicitly tick _Set the role's permissions_
   or enter a colour. Large cosmetic groups work: counts come from Discord without loading members.
 - **Locked roles.** @everyone and roles at or above the bot's highest role can't be picked.
   Integration-managed roles (Server Booster, subscriptions, bot roles) can be linked only as
@@ -1224,10 +1225,10 @@ every feature keeps its current behaviour.
 - **Staying in sync with Discord (#1021).** People can still rename, re-permission, move or delete
   a group's role in Discord. KoolBot notices (role edit and delete events, plus a periodic
   reconcile that catches changes made while the bot was offline) and shows the **drift** on each
-  group: *permissions* (only where the group sets a permission set), *name* (the role no longer
+  group: _permissions_ (only where the group sets a permission set), _name_ (the role no longer
   carries the name it was linked or created with; older groups start tracking the role's current name
-  the first time the page loads or a reconcile runs), *position* (relative order against rank, so
-  adding an unrelated role never counts), and *deleted*. What happens next is the **sync policy**:
+  the first time the page loads or a reconcile runs), _position_ (relative order against rank, so
+  adding an unrelated role never counts), and _deleted_. What happens next is the **sync policy**:
   `adoption.role_groups.sync_policy`, overridable per group on its edit form.
   - **Flag only** (default): show it and post it to the `core.role_groups.*` log channel, once per
     change. Nothing else happens; applying the plan restores the definition when you want it.
@@ -1242,9 +1243,9 @@ every feature keeps its current behaviour.
     the periodic and startup runs; role edits and deletes in Discord are always checked. Every
     automatic change (unlink, adopt, recreate, fallback to flag-only) is written to the audit log
     under the bot as a system actor.
-- **A deleted role unlinks its group.** The group keeps its definition, is marked *unlinked*, and an
+- **A deleted role unlinks its group.** The group keeps its definition, is marked _unlinked_, and an
   alert is logged. It is never silently recreated: on the page you choose **Create a new role** (the
-  next plan creates it) or **Link another role**. Only the *enforce* policy recreates it on its own,
+  next plan creates it) or **Link another role**. Only the _enforce_ policy recreates it on its own,
   and never for a gate-only group.
 - **Admin group and Administrator.** The group flagged `admin` is meant to carry Discord's
   Administrator permission. A role that lacks it is flagged as drift, but it is **never added as part
@@ -1252,7 +1253,7 @@ every feature keeps its current behaviour.
   grant widens access for everyone holding the role. Tick **Give the admin group Administrator** in
   the **Administrators and the admin group** card and review that plan separately (KoolBot itself
   must hold Administrator to grant it). The same card lists members who hold Administrator through
-  *another* role. Pick members to **move into the admin group** (adds the role, removes nothing)
+  _another_ role. Pick members to **move into the admin group** (adds the role, removes nothing)
   and/or roles to **drop Administrator from**; nothing is pre-selected, and you review a plan before
   applying it. Managed roles, KoolBot's own role, the admin group's own role, any role a bot holds
   Administrator through, and any role whose own group defines Administrator are never dropped, and
@@ -1262,7 +1263,7 @@ every feature keeps its current behaviour.
   owner counts as admin on their own), and without the Server Members intent the card says the member
   list is unavailable.
 - **Web sign-in accepts either.** An admin web session is allowed for members with the Administrator
-  permission *or* in the admin group, and always for the server owner; it is re-checked on every
+  permission _or_ in the admin group, and always for the server owner; it is re-checked on every
   request, so removing someone from the group ends their session. If the groups can't be read it
   falls back to the Administrator permission alone. `/config` applies the same rule when it issues
   the sign-in link, but Discord hides it from members without Administrator in the command picker,
@@ -1275,16 +1276,16 @@ configuration and live in the Web UI only.
 **Other features use the groups too (#1023).** Each of these keeps its current behaviour when no
 groups are defined:
 
-- **Permissions** page: the role picker for each command offers every group, and *group and above*
-  (that group plus every group ranked higher), under a *Role groups* heading above the roles. A
+- **Permissions** page: the role picker for each command offers every group, and _group and above_
+  (that group plus every group ranked higher), under a _Role groups_ heading above the roles. A
   group entry resolves to the group's role at check time, so re-ranking or re-linking a group takes
   effect without editing the command. A group with no role (unlinked) grants nothing, and the
   command stays restricted. While at least one `staff` or `admin` group exists, the moderation
   commands (`/warn`, `/timeout`, `/ban`, `/modlog`, `/raidmode`) default to staff unless you set a restriction
-  for them on this page; the page marks them *staff only (default)*. Members with the Administrator
+  for them on this page; the page marks them _staff only (default)_. Members with the Administrator
   permission still bypass every check. If the groups can't be read, the check is refused (the user
   is told permissions can't be verified) rather than opening the command.
-- **Quotes**: the *Roles allowed to delete quotes* picker (`quotes.delete_roles`) offers the same
+- **Quotes**: the _Roles allowed to delete quotes_ picker (`quotes.delete_roles`) offers the same
   group entries. Left empty, it means the `staff` and `admin` groups once one exists. With no such
   group the setting works as before.
 - **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
@@ -1302,13 +1303,13 @@ settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_la
 
 - **Post the rules message.** KoolBot posts the text with an **Accept** button in the rules
   channel (and edits that same message when you change the text). Make the channel read-only for
-  members in Discord. A press grants the acceptance role and records *accepted at* for the member.
+  members in Discord. A press grants the acceptance role and records _accepted at_ for the member.
   Removing the role again, for example when the rules change and you want re-acceptance, is up
   to you; KoolBot never takes the role back on its own.
 - **Use an existing role.** Pick any role as the acceptance role (for example a "verified" role
-  you already use as a gate), or tick *Create a role* in the rollout to have the engine make one.
+  you already use as a gate), or tick _Create a role_ in the rollout to have the engine make one.
   Members who already hold the role count as accepted: **Record current role holders as
-  accepted** stores them as *adopted* without touching Discord, and a holder who clicks Accept
+  accepted** stores them as _adopted_ without touching Discord, and a holder who clicks Accept
   isn't asked again.
 - **Roll out (plan → preview → apply → snapshot).** Optionally: create the role, **grant it to all
   current members** (so adopting the gate doesn't lock the existing community out; batched and
@@ -1325,7 +1326,7 @@ settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_la
   rules twice.
 - **Welcome message.** Set `welcome.rules_channel_id` to the same channel so `{rules}` in the
   welcome message (#767) points new members at the rules.
-- **Privacy.** *Accepted at* is the member's own data: it is in their `/me/privacy` export and is
+- **Privacy.** _Accepted at_ is the member's own data: it is in their `/me/privacy` export and is
   deleted by a data reset (the Discord role is left alone).
 
 Every write is audited. There is no slash command: this is admin configuration and lives in the
@@ -1358,7 +1359,7 @@ feature, the `events.category_id` channel category, and the
 category or announcement channel is missing, since event channels and RSVP
 messages won't be created without them) plus the resolved event timezone. The
 events table lists each event's title, start time, lifecycle state
-(*scheduled* / *active* / *ended* / *cancelled*), live RSVP tallies (✅ going ·
+(_scheduled_ / _active_ / _ended_ / _cancelled_), live RSVP tallies (✅ going ·
 🤔 maybe · 🚫 can't), channel, and id. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — while finished events show no actions. A
@@ -1441,10 +1442,10 @@ REST call per channel, so it is off by default. The same data is available to co
 
 **Bot replacement report** (a section of `/admin/adopt`, #1026) compares the bots found in the guild with a static catalogue
 shipped in the repo (`src/content/known-bots.ts`). Bots are matched by their Discord id, never by name, and nothing is
-sent to any outside service. Each catalogued bot gets a summary (*Can fully replace*, *Can replace N of M features*, *No
-overlap* or *Keep*), a table of its capabilities with KoolBot's coverage (**Full**, **Partial** with what is missing,
+sent to any outside service. Each catalogued bot gets a summary (_Can fully replace_, _Can replace N of M features_, _No
+overlap_ or _Keep_), a table of its capabilities with KoolBot's coverage (**Full**, **Partial** with what is missing,
 **Planned** with the issue link, **Not covered**, or **Keep** with the reason), whether the matching KoolBot feature is
-currently enabled, and numbered switch-over steps with a link to the right page. A *Left over when it is removed* list shows
+currently enabled, and numbered switch-over steps with a link to the right page. A _Left over when it is removed_ list shows
 the bot's locked integration role, channels it mostly writes to (needs channel ownership hints), channels with a
 member-specific overwrite for the bot, and KoolBot features already bound to its channels. A combined view groups
 capabilities KoolBot covers, capabilities several bots provide (so one of them may already be free to remove) and
@@ -1453,8 +1454,37 @@ shown as **custom** when Discord does not list it as a verified app (KoolBot doe
 otherwise, with a link to suggest a catalogue entry. If the GuildMembers intent is off, the report warns that a bot without
 an integration role may be missing. The report is read-only: removing a bot stays manual in Discord, KoolBot never kicks
 it, and data from other bots cannot be imported. Every catalogued card says the match is by id and the capability list may be
-out of date, and carries an *unverified entry* note until the entry records what it was checked against (`verifiedAgainst`).
+out of date, and carries an _unverified entry_ note until the entry records what it was checked against (`verifiedAgainst`).
 An after-removal cleanup plan is not part of it yet.
+
+**Channel Manager** (`/admin/channels`, #1065) lists the server's categories and their text and voice channels
+live from Discord and lets an admin create, rename, reorder and delete them. It is Web UI admin management, so it
+has no on/off setting: it is always available to admins, behind the same admin sign-in, CSRF check and audit log
+as the other admin pages. It edits structure only; permission overwrites stay in Discord (or the Channel Claims page).
+
+- **Create** a text channel, voice channel or category. Per-channel basics: name, topic (text), user limit and
+  bitrate in kbps (voice), and the parent category. New channels get no overrides of their own.
+- **Edit** the same fields, including moving a channel to another category (permissions are not rewritten on a move).
+  Only fields you changed are sent to Discord, so a no-op save never spends a rename.
+- **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord.
+- **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
+  tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
+  a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
+  category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name),
+  active temporary voice channels and waiting rooms, ticket channels, channels of events that have not ended,
+  open looking-for-group channels, and the server's rules, updates and system channels. A category must be empty
+  before it can be deleted, because Discord would otherwise drop its channels to the top level and break
+  features that look for them under a category. If the managed-channel lookup fails, the delete is refused.
+- **Limits** are checked before Discord is called: names up to 100 characters, topics up to 1024, user limit 0 to
+  99, bitrate from 8 kbps up to your server's boost-level maximum, 500 channels per server and 50 per category.
+- **Manage Channels**: the bot needs this permission. Without it the page shows a warning and disables every
+  control, and any request is refused with the same message.
+
+Only text channels, voice channels and categories are managed; announcement, stage and forum channels are listed
+but left alone. Every change is recorded in the audit log (`channels.create`, `channels.edit`, `channels.move`,
+`channels.delete`, refused deletes included) and goes through the bot's Discord request wrapper (timeout and
+backoff). Creates, edits and moves are not retried after a timeout, because Discord may still apply the original
+request and a retry could rename or create twice.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:
@@ -1540,7 +1570,7 @@ opens the snapshot history.
    because the restore still writes it (a restore of settings only does not need it); or edit a role that is
    managed by an integration or sits at or above the bot's highest role. Roles the plan granted to members are revoked by a
    restore, so if you or the bot are among the members it granted a role to, the check treats that role as lost; for a plan
-   that granted a role to many members only whether *you* and *the bot* were among them matters, and no member names are shown.
+   that granted a role to many members only whether _you_ and _the bot_ were among them matters, and no member names are shown.
    Every role the restore takes back from members is also judged like a role change, even when neither of you received it:
    the bot needs Manage Roles, and a role that is managed by an integration or sits at or above the bot's highest role
    refuses the restore.
@@ -1564,22 +1594,22 @@ existing achievements award detection. `celebrations.enabled` depends on
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                                              |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
-| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.      |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
-| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
-| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.          |
+| Page                                    | What it's for                                                                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
+| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.     |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.           |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row. |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row. |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
 
 **Disabled-feature handling is uniform across `/me/*` (#709).** A
 feature-gated page whose feature an admin has turned off is never hidden
 behind a 404 or silently dropped: the nav link stays visible (greyed with
 an "off" badge, mirroring the admin nav), the Overview lists its card with
-an "off" tag, and opening the page shows one consistent banner — *"Your
-server admin hasn't enabled X yet."* Settings pages (Voice, Birthday) keep
+an "off" tag, and opening the page shows one consistent banner — _"Your
+server admin hasn't enabled X yet."_ Settings pages (Voice, Birthday) keep
 their editable form so members can pre-set a choice that applies the moment
 the feature is enabled; the read-only Rewind page simply shows the banner in
 place of the recap. This makes "not enabled yet, but my choice is
@@ -1629,7 +1659,7 @@ per-user voice preferences that back the Discord control panel's
 **Presets** button. It exposes two things: a **channel name pattern**
 (applied to every channel you spawn from the lobby — use `{username}` as a
 placeholder for your display name; leave blank for the server default
-naming) and your **saved presets**. Presets themselves are still *created*
+naming) and your **saved presets**. Presets themselves are still _created_
 in Discord by snapshotting a live channel (control panel → Presets → Save
 current as preset); the web page lets you **edit** a preset's name, channel
 name, user limit, and bitrate, **set-default** (the default auto-applies on
@@ -1659,7 +1689,7 @@ Years with no data render a friendly empty state.
 The **"when you're online"** block (#675) shows two duration-weighted
 distributions computed from your existing voice sessions — a 24-bar
 hour-of-day histogram and a 7-bar day-of-week breakdown — with your peak hour
-and day called out (e.g. *"Most active: Friday · 10 PM"*). Both are bucketed
+and day called out (e.g. _"Most active: Friday · 10 PM"_). Both are bucketed
 in **your** timezone (set it on the Timezone page), and each session is split
 across the local hour and midnight boundaries it crosses so long and overnight
 sessions land in the right hours/weekdays. The block hides itself when you have
@@ -1688,7 +1718,7 @@ render older snapshots even after the summary shape gains new fields.
 
 The **Privacy** page describes what Koolbot has stored about the signed-in
 member and hands it over as a single JSON file from
-`GET /me/privacy/export`. It is a *record*, not a recap — Rewind is the
+`GET /me/privacy/export`. It is a _record_, not a recap — Rewind is the
 narrative version.
 
 What the file contains is decided by an explicit allowlist registry in
@@ -1879,11 +1909,11 @@ nav stays navigable.
 The conventions above are gated in CI by three Jest suites, so a page that
 breaks one fails the build rather than being found by a user:
 
-| Suite | What it gates |
-| --- | --- |
-| `__tests__/web/a11y-axe.test.ts` | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
-| `__tests__/web/a11y-routes.test.ts` | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too. |
-| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring. |
+| Suite                                 | What it gates                                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__tests__/web/a11y-axe.test.ts`      | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
+| `__tests__/web/a11y-routes.test.ts`   | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too.                 |
+| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring.                           |
 
 The page list the axe scan walks lives in `__tests__/web/a11y-pages.ts`.
 **When you add a page renderer, add a fixture for it there** — a page that
@@ -1919,7 +1949,7 @@ One of:
 
 - It was already redeemed (single-use). Run `/me` again (administrators: `/config`).
 - It expired (default 10 minutes). Run `/me` again (administrators: `/config`).
-- You ran `/me` or `/config` a second time and got a *newer* link, which revoked
+- You ran `/me` or `/config` a second time and got a _newer_ link, which revoked
   this one. Use the most recent DM.
 - `WEBUI_SESSION_SECRET` changed between issuance and redemption.
 

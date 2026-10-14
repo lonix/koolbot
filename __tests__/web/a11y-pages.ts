@@ -40,6 +40,14 @@ import {
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import {
+  renderChannelDeleteConfirmPage,
+  renderChannelManagerPage,
+} from "../../src/web/channel-manager-view.js";
+import {
+  buildChannelTree,
+  type ManagedChannelView,
+} from "../../src/web/channel-manager.js";
+import {
   renderAdoptionHistoryPage,
   renderRestoreConfirmPage,
 } from "../../src/web/adoption-history-view.js";
@@ -67,6 +75,111 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+const MANAGER_CHANNELS: ManagedChannelView[] = [
+  {
+    id: "100000000000000001",
+    name: "Community",
+    kind: "category",
+    typeLabel: "category",
+    parentId: null,
+    position: 0,
+    topic: null,
+    userLimit: null,
+    bitrate: null,
+  },
+  {
+    id: "100000000000000002",
+    name: "general",
+    kind: "text",
+    typeLabel: "text",
+    parentId: "100000000000000001",
+    position: 0,
+    topic: "Say hi",
+    userLimit: null,
+    bitrate: null,
+  },
+  {
+    id: "100000000000000003",
+    name: "Lobby",
+    kind: "voice",
+    typeLabel: "voice",
+    parentId: "100000000000000001",
+    position: 1,
+    topic: null,
+    userLimit: 5,
+    bitrate: 64000,
+  },
+  {
+    id: "100000000000000004",
+    name: "welcome-stage",
+    kind: "other",
+    typeLabel: "GuildStageVoice",
+    parentId: null,
+    position: 2,
+    topic: null,
+    userLimit: null,
+    bitrate: null,
+  },
+];
+
+function channelManagerPages(): A11yPage[] {
+  const base = {
+    ...COMMON,
+    navFeatureStatus: {},
+    channels: MANAGER_CHANNELS,
+    tree: buildChannelTree(MANAGER_CHANNELS),
+    protection: new Map([
+      ["100000000000000003", ["the voicechannels.lobby.channel_id setting"]],
+    ]),
+    botCanManage: true,
+    maxBitrate: 96000,
+  };
+  const lobby = MANAGER_CHANNELS[2];
+  const general = MANAGER_CHANNELS[1];
+  return [
+    { name: "Channel manager", html: renderChannelManagerPage(base) },
+    {
+      name: "Channel manager (no Manage Channels)",
+      html: renderChannelManagerPage({ ...base, botCanManage: false }),
+    },
+    {
+      name: "Channel manager (server unreadable)",
+      html: renderChannelManagerPage({
+        ...base,
+        channels: null,
+        tree: null,
+        protection: null,
+        error: "Discord couldn't be reached.",
+      }),
+    },
+    {
+      name: "Channel delete confirmation",
+      html: renderChannelDeleteConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        channel: general,
+        verdict: { ok: true },
+        botCanManage: true,
+      }),
+    },
+    {
+      name: "Channel delete refused",
+      html: renderChannelDeleteConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        channel: lobby,
+        verdict: {
+          ok: false,
+          reasons: ["the voicechannels.lobby.channel_id setting"],
+          message:
+            'KoolBot manages "Lobby": it is the voicechannels.lobby.channel_id setting.',
+        },
+        botCanManage: true,
+      }),
+    },
+  ];
+}
 
 const ADOPTION_SNAPSHOT = {
   id: "a".repeat(24),
@@ -318,6 +431,7 @@ export function adminPages(): A11yPage[] {
         },
       }),
     },
+    ...channelManagerPages(),
     {
       name: "Channel claims",
       html: renderChannelClaimsPage({
