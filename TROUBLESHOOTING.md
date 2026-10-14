@@ -391,7 +391,8 @@ Error: An invalid token was provided
 
 KoolBot always requests Guilds, GuildMessages, GuildVoiceStates,
 MessageContent, GuildMessageReactions, GuildModeration and
-GuildMessagePolls. **Message Content** is a privileged intent: enable it
+GuildMessagePolls and GuildScheduledEvents (non-privileged, no portal switch).
+**Message Content** is a privileged intent: enable it
 under Developer Portal → Your App → Bot → Privileged Gateway Intents, or
 login is rejected.
 

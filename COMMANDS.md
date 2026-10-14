@@ -625,6 +625,16 @@ to a Discord **scheduled event** that shows in the server's Events list; cancel
 and end are mirrored too. The bot needs the Create Events (or Manage Events)
 permission.
 
+Members who mark **Interested** on the native event are added to the KoolBot
+RSVP list as **Maybe** (so they are in the reminder ping) and the announcement
+counts update. Un-marking Interested removes that RSVP again, but only if it
+still came from Interested: anyone who answers with the Going / Maybe / Can't
+buttons keeps that answer, and Interested never overrides a button answer
+already given. Bots are ignored. This needs the non-privileged
+**Guild Scheduled Events** gateway intent, which KoolBot always requests, and
+only applies while `events.native.enabled` is on. Marking Interested on a
+native event the bot did not create does nothing.
+
 ---
 
 ### `/lfg`

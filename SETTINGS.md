@@ -879,8 +879,16 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   is kept as a hidden-from-the-series cleanup record and removed once the
   native event has been closed, which happens on a later scan; while mirroring
   is off it waits for it to be turned back on.
-  Not yet covered: native "Interested" to RSVP bridge, adopting existing native
-  events, cover images, and mapping recurrence to a native recurrence rule.
+  **Interested bridge:** a member who marks Interested on the mirrored native
+  event is recorded as a **Maybe** RSVP on the KoolBot event (each RSVP stores
+  whether it came from the buttons or from Interested). Un-marking Interested
+  removes the RSVP only if it still came from Interested; a button answer is
+  never overridden or removed, and bots are ignored. It follows
+  `events.native.enabled` (no extra setting) and uses the non-privileged
+  `GuildScheduledEvents` gateway intent. It is one-way for removal: clearing
+  a RSVP with the buttons does not un-mark Interested in Discord.
+  Not yet covered: adopting existing native events, cover images, and mapping
+  recurrence to a native recurrence rule.
 
 ---
 

@@ -273,6 +273,7 @@ describe("setRsvp", () => {
                     userId: "user-1",
                     status: "going",
                     respondedAt: expect.any(Date),
+                    source: "button",
                   },
                 ],
               ],
@@ -299,6 +300,141 @@ describe("setRsvp", () => {
 
     expect(result).toBeNull();
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// #1034. Native "Interested" bridges to a KoolBot RSVP tagged source "native".
+describe("handleNativeInterest", () => {
+  const GUILD = "guild-1";
+  const NATIVE = "native-1";
+  const OPEN = { $nin: ["cancelled", "ended"] };
+
+  type Priv = {
+    nativeSync: { isEnabled: jest.Mock };
+    updateAnnouncement: jest.Mock;
+  };
+
+  function build(enabled = true): {
+    service: InstanceType<typeof EventService>;
+    priv: Priv;
+  } {
+    EventService.reset();
+    const service = EventService.getInstance({
+      user: { id: "bot-self" },
+    } as never);
+    const priv = service as unknown as Priv;
+    priv.nativeSync = { isEnabled: jest.fn(async () => enabled) };
+    priv.updateAnnouncement = jest.fn(async () => true);
+    return { service, priv };
+  }
+
+  const human = { id: "user-1", bot: false, partial: false } as never;
+
+  it("adds an Interested user as a maybe RSVP tagged native, never overriding an existing RSVP", async () => {
+    const { service, priv } = build();
+    const row = { _id: "e1" };
+    EventMock.findOneAndUpdate = jest.fn(async () => row);
+
+    expect(await service.handleNativeInterest(GUILD, NATIVE, human, true)).toBe(
+      true,
+    );
+
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        guildId: GUILD,
+        nativeEventId: NATIVE,
+        state: OPEN,
+        "rsvps.userId": { $ne: "user-1" },
+      },
+      {
+        $push: {
+          rsvps: {
+            userId: "user-1",
+            status: "maybe",
+            respondedAt: expect.any(Date),
+            source: "native",
+          },
+        },
+      },
+      { returnDocument: "after" },
+    );
+    expect(priv.updateAnnouncement).toHaveBeenCalledWith(row);
+  });
+
+  it("does not refresh the announcement when the user already had an RSVP", async () => {
+    const { service, priv } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => null);
+
+    expect(await service.handleNativeInterest(GUILD, NATIVE, human, true)).toBe(
+      false,
+    );
+    expect(priv.updateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("removes only a native-sourced RSVP when Interested is un-marked", async () => {
+    const { service, priv } = build();
+    const row = { _id: "e1" };
+    EventMock.findOneAndUpdate = jest.fn(async () => row);
+
+    expect(
+      await service.handleNativeInterest(GUILD, NATIVE, human, false),
+    ).toBe(true);
+
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        guildId: GUILD,
+        nativeEventId: NATIVE,
+        state: OPEN,
+        rsvps: { $elemMatch: { userId: "user-1", source: "native" } },
+      },
+      { $pull: { rsvps: { userId: "user-1", source: "native" } } },
+      { returnDocument: "after" },
+    );
+    expect(priv.updateAnnouncement).toHaveBeenCalledWith(row);
+  });
+
+  it("ignores bots and the bot itself without touching the database", async () => {
+    const { service } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => ({}));
+
+    expect(
+      await service.handleNativeInterest(
+        GUILD,
+        NATIVE,
+        { id: "b", bot: true, partial: false } as never,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      await service.handleNativeInterest(
+        GUILD,
+        NATIVE,
+        { id: "bot-self", bot: false, partial: false } as never,
+        true,
+      ),
+    ).toBe(false);
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does nothing while native mirroring is off", async () => {
+    const { service } = build(false);
+    EventMock.findOneAndUpdate = jest.fn(async () => ({}));
+
+    expect(await service.handleNativeInterest(GUILD, NATIVE, human, true)).toBe(
+      false,
+    );
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("swallows a database failure", async () => {
+    const { service } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => {
+      throw new Error("db down");
+    });
+
+    expect(await service.handleNativeInterest(GUILD, NATIVE, human, true)).toBe(
+      false,
+    );
   });
 });
 

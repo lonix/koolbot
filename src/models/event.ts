@@ -41,10 +41,21 @@ export const EVENT_RECURRENCES: readonly EventRecurrence[] = [
   "monthly",
 ];
 
+/**
+ * Where an RSVP came from (#1034). `button` is a Going / Maybe / Can't click
+ * on the announcement (and what every row written before this field existed
+ * is treated as); `native` is a member marking "Interested" on the mirrored
+ * Discord scheduled event. Only a `native` RSVP is ever removed when the
+ * member un-marks Interested, so a choice made with the buttons is never
+ * undone from the Events list.
+ */
+export type RsvpSource = "button" | "native";
+
 export interface IEventRsvp {
   userId: string;
   status: RsvpStatus;
   respondedAt: Date;
+  source?: RsvpSource;
 }
 
 export interface IEvent extends Document {
@@ -135,6 +146,7 @@ const EventRsvpSchema = new Schema<IEventRsvp>(
       enum: ["going", "maybe", "cant"],
     },
     respondedAt: { type: Date, required: true },
+    source: { type: String, enum: ["button", "native"], default: "button" },
   },
   { _id: false },
 );

@@ -1382,6 +1382,9 @@ are enabled; switch it off to keep events inside KoolBot. When on, events create
 finished) are mirrored to the server's native Events list; the bot needs the
 Create Events or Manage Events permission, otherwise it logs one warning and
 skips mirroring.
+Members who mark **Interested** on a mirrored event are counted as **Maybe** RSVPs
+on the KoolBot event (see [COMMANDS.md](COMMANDS.md#event)); un-marking removes only
+an RSVP that came from Interested, never one made with the buttons.
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.

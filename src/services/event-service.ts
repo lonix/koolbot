@@ -5,6 +5,8 @@ import {
   CategoryChannel,
   ChannelType,
   Client,
+  type PartialUser,
+  type User,
   DiscordAPIError,
   EmbedBuilder,
   Guild,
@@ -948,7 +950,7 @@ export class EventService extends ScheduledService {
                     cond: { $ne: ["$$rsvp.userId", userId] },
                   },
                 },
-                [{ userId, status, respondedAt: new Date() }],
+                [{ userId, status, respondedAt: new Date(), source: "button" }],
               ],
             },
           },
@@ -957,6 +959,91 @@ export class EventService extends ScheduledService {
       // Mongoose 9 rejects an array update unless `updatePipeline` is set (#1103).
       { returnDocument: "after", updatePipeline: true },
     );
+  }
+
+  /**
+   * A member marked ("add") or un-marked ("remove") Interested on the
+   * mirrored Discord scheduled event (#1034). Returns whether an RSVP was
+   * written or removed.
+   *
+   * Mapping: Interested is recorded as `maybe` with `source: "native"`. It is
+   * the closest KoolBot answer (interest, not commitment) and it is what the
+   * reminder pings, so Interested members still get the pre-start reminder.
+   *
+   * Rules, all enforced inside one atomic update so a button click racing a
+   * native event cannot interleave:
+   * - Never overrides an existing RSVP: a member who already answered with
+   *   the buttons (including "Can't make it") keeps that answer. The filter
+   *   `rsvps.userId: { $ne }` makes "add" a no-op in that case.
+   * - Un-marking only pulls an RSVP whose `source` is `native`. A later button
+   *   click replaces the row with `source: "button"` (see `setRsvp`), after
+   *   which un-marking Interested no longer touches it.
+   * - Bots (and this bot itself) are ignored: they are not attendees.
+   * - Matches on `(guildId, nativeEventId)` of a not-yet-finished event, so
+   *   an event whose native link was released or never made is ignored.
+   * - Only acts while mirroring is on (`events.enabled` and
+   *   `events.native.enabled`).
+   */
+  public async handleNativeInterest(
+    guildId: string,
+    nativeEventId: string,
+    user: User | PartialUser,
+    interested: boolean,
+  ): Promise<boolean> {
+    try {
+      if (!(await this.nativeSync.isEnabled())) return false;
+      let resolved = user;
+      // `bot` is only populated on a full user; resolve a partial first.
+      if (resolved.partial || typeof resolved.bot !== "boolean") {
+        const { CommandManager } = await import("./command-manager.js");
+        const target = resolved;
+        resolved = await CommandManager.getInstance(
+          this.client,
+        ).makeDiscordApiCall(() => target.fetch(), "fetch interested user");
+      }
+      if (resolved.bot || resolved.id === this.client.user?.id) return false;
+
+      const open: { $nin: EventState[] } = { $nin: ["cancelled", "ended"] };
+      const updated = interested
+        ? await Event.findOneAndUpdate(
+            {
+              guildId,
+              nativeEventId,
+              state: open,
+              "rsvps.userId": { $ne: resolved.id },
+            },
+            {
+              $push: {
+                rsvps: {
+                  userId: resolved.id,
+                  status: "maybe",
+                  respondedAt: new Date(),
+                  source: "native",
+                },
+              },
+            },
+            { returnDocument: "after" },
+          )
+        : await Event.findOneAndUpdate(
+            {
+              guildId,
+              nativeEventId,
+              state: open,
+              rsvps: { $elemMatch: { userId: resolved.id, source: "native" } },
+            },
+            { $pull: { rsvps: { userId: resolved.id, source: "native" } } },
+            { returnDocument: "after" },
+          );
+      if (!updated) return false;
+      await this.updateAnnouncement(updated);
+      return true;
+    } catch (error) {
+      logger.error(
+        `Failed to bridge native Interested for event ${sanitizeForLog(nativeEventId)}:`,
+        error,
+      );
+      return false;
+    }
   }
 
   /**

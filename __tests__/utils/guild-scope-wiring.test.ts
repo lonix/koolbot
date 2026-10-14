@@ -45,6 +45,8 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
     "GuildMemberAdd",
     "GuildMemberRemove",
     "GuildBanAdd",
+    "GuildScheduledEventUserAdd",
+    "GuildScheduledEventUserRemove",
   ];
 
   it.each(scoped)("gates %s on the configured guild", (event) => {
@@ -53,6 +55,11 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
     for (const body of bodies) {
       expect(body).toContain("shouldIgnoreGuild(");
     }
+  });
+
+  // The scheduled-event listeners only fire with this non-privileged intent (#1034).
+  it("requests the GuildScheduledEvents intent", () => {
+    expect(source).toContain("GatewayIntentBits.GuildScheduledEvents");
   });
 
   // A listener registered outside index.ts is just as exposed, so any file in

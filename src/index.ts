@@ -149,6 +149,9 @@ const client = new Client({
     // Required to receive messagePollVoteAdd events for poll-participation
     // tracking (#570). The events still only fire for guild polls.
     GatewayIntentBits.GuildMessagePolls,
+    // Non-privileged. Required for guildScheduledEventUserAdd/Remove, which
+    // bridge native "Interested" to the KoolBot RSVP list (#1034).
+    GatewayIntentBits.GuildScheduledEvents,
     // Privileged: only requested when the operator opts in (#1038), because
     // asking for an intent the developer portal has not enabled makes login
     // fail. Feeds guildMemberUpdate for server-nickname history.
@@ -1277,6 +1280,38 @@ client.on(Events.MessageDelete, async (message) => {
     await reactionRoleService.handleMessageDelete(message);
   } catch (error) {
     logger.error("Error handling messageDelete:", error);
+  }
+});
+
+// Native "Interested" on a mirrored scheduled event counts as a KoolBot RSVP
+// (#1034). Bot filtering and enablement live in the service.
+client.on(Events.GuildScheduledEventUserAdd, async (scheduledEvent, user) => {
+  recordDiscordEvent("guildScheduledEventUserAdd");
+  if (shouldIgnoreGuild(scheduledEvent.guildId, env.guildId)) return;
+  try {
+    await eventService.handleNativeInterest(
+      scheduledEvent.guildId,
+      scheduledEvent.id,
+      user,
+      true,
+    );
+  } catch (error) {
+    logger.error("Error handling guildScheduledEventUserAdd:", error);
+  }
+});
+
+client.on(Events.GuildScheduledEventUserRemove, async (event, user) => {
+  recordDiscordEvent("guildScheduledEventUserRemove");
+  if (shouldIgnoreGuild(event.guildId, env.guildId)) return;
+  try {
+    await eventService.handleNativeInterest(
+      event.guildId,
+      event.id,
+      user,
+      false,
+    );
+  } catch (error) {
+    logger.error("Error handling guildScheduledEventUserRemove:", error);
   }
 });
 
