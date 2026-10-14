@@ -102,6 +102,18 @@ describe("escapeDisplayText (#1146)", () => {
     );
   });
 
+  it("only breaks whole-word mass mentions", () => {
+    expect(escapeDisplayText("@everyones @hereford @here_x @everyone1")).toBe(
+      "@everyones @hereford @here\\_x @everyone1",
+    );
+    expect(escapeDisplayText("hi @everyone, @here! (@here)")).toBe(
+      "hi @\u200beveryone, @\u200bhere! (@\u200bhere)",
+    );
+    expect(escapeDisplayText("@everyone@here")).toBe(
+      "@\u200beveryone@\u200bhere",
+    );
+  });
+
   it("neutralises masked links and Markdown", () => {
     expect(escapeDisplayText("[free nitro](https://evil.example)")).toBe(
       "\\[free nitro\\](https://evil.example)",

@@ -102,9 +102,18 @@ async function loadPrefs(userId: string): Promise<IUserVoicePreferences> {
   );
 }
 
-function presetSummary(p: IChannelPreset): string {
+/**
+ * One-line description of a preset. `markdown: true` for embed text, where the
+ * member-chosen channel name must not render as a mention or link; leave it off
+ * for select-menu descriptions, which are plain text.
+ */
+function presetSummary(p: IChannelPreset, markdown = false): string {
   const bits: string[] = [];
-  if (p.channelName) bits.push(`name "${p.channelName}"`);
+  if (p.channelName) {
+    bits.push(
+      `name "${markdown ? escapeDisplayText(p.channelName) : p.channelName}"`,
+    );
+  }
   if (typeof p.userLimit === "number")
     bits.push(p.userLimit === 0 ? "no limit" : `limit ${p.userLimit}`);
   if (typeof p.bitrate === "number") bits.push(`${p.bitrate}kbps`);
@@ -128,7 +137,7 @@ function buildApplyPanel(
         : presets
             .map(
               (p, i) =>
-                `**${i + 1}. ${escapeDisplayText(p.name)}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p)}`,
+                `**${i + 1}. ${escapeDisplayText(p.name)}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p, true)}`,
             )
             .join("\n"),
     )
@@ -191,7 +200,7 @@ function buildManagePanel(
     .setColor(0xed4245)
     .setDescription(
       selected
-        ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected)}`
+        ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected, true)}`
         : "Pick a preset below to rename, delete, or set as default.",
     );
 
@@ -661,7 +670,7 @@ async function applyPreset(
         .setTitle("✅ Preset applied")
         .setColor(0x57f287)
         .setDescription(
-          `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset)}` +
+          `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset, true)}` +
             (nameSkipped
               ? "\n⚠️ The preset's channel name is reserved, so the name was not changed."
               : ""),

@@ -51,7 +51,8 @@ export function pingUsers(...userIds: string[]): MessageMentionOptions {
  * - `[` and `]` are escaped, so a name cannot become a masked link;
  * - `>` and Markdown, including headings, lists and spoilers, are escaped.
  *
- * `@everyone` and `@here` get a zero-width space after the `@` as a second
+ * `@everyone` and `@here` (only as whole words, so `@everyones` and `@hereford`
+ * are left alone) get a zero-width space after the `@` as a second
  * line of defence: they stay readable, and they never ping because a plain
  * message carries `allowedMentions: { parse: [] }` anyway.
  *
@@ -62,11 +63,16 @@ export function pingUsers(...userIds: string[]): MessageMentionOptions {
 export function escapeDisplayText(text: string): string {
   // Backslash, brackets, `<` and `>` first; the library pass must not
   // re-escape the backslashes added here.
-  const escaped = escapeMarkdown(text.replace(/[\\[\]<>]/g, "\\$&"), {
+  // Break whole-word mass mentions on the raw text, before Markdown escaping
+  // adds backslashes that would hide the word boundary.
+  const broken = text.replace(
+    /@(?=(?:everyone|here)(?![\p{L}\p{N}_]))/giu,
+    "@\u200b",
+  );
+  return escapeMarkdown(broken.replace(/[\\[\]<>]/g, "\\$&"), {
     escape: false,
     heading: true,
     bulletedList: true,
     numberedList: true,
   });
-  return escaped.replace(/@(?=everyone|here)/gi, "@\u200b");
 }
