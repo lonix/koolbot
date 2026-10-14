@@ -166,6 +166,48 @@ describe("tree and reordering", () => {
     expect(canMove(list, get(CAT), "up")).toBe(true);
     expect(canMove(list, get("100000000000000009"), "up")).toBe(false);
   });
+
+  it("orders and moves stage channels with the voice channels", () => {
+    const S = "100000000000000030";
+    const V2 = "100000000000000031";
+    const withStage = [
+      ch(CAT, { kind: "category" }),
+      ch(A, { parentId: CAT, position: 0 }),
+      ch(V, { kind: "voice", parentId: CAT, position: 1 }),
+      ch(S, {
+        kind: "other",
+        typeLabel: "GuildStageVoice",
+        parentId: CAT,
+        position: 2,
+      }),
+      ch(V2, { kind: "voice", parentId: CAT, position: 3 }),
+      ch("100000000000000032", {
+        kind: "other",
+        typeLabel: "GuildForum",
+        parentId: CAT,
+        position: 4,
+      }),
+    ];
+    const tree = buildChannelTree(withStage);
+    // Forum (unsupported) stays in the text-like group, ahead of voice and stage.
+    expect(tree.categories[0].children.map((c) => c.id)).toEqual([
+      A,
+      "100000000000000032",
+      V,
+      S,
+      V2,
+    ]);
+    const get = (id: string): ManagedChannelView =>
+      withStage.find((c) => c.id === id)!;
+    // V2 sits after the stage channel, so it can move up past it...
+    expect(canMove(withStage, get(V2), "up")).toBe(true);
+    // ...and V can move down past it (a stage is a voice sibling).
+    expect(canMove(withStage, get(V), "down")).toBe(true);
+    expect(canMove(withStage, get(V2), "down")).toBe(false);
+    // The text channel only has the other text-like channel to move past.
+    expect(canMove(withStage, get(A), "down")).toBe(true);
+    expect(canMove(withStage, get(V), "up")).toBe(false);
+  });
 });
 
 const baseInputs = (
@@ -272,22 +314,77 @@ describe("buildProtectionMap", () => {
     expect(map.has(B)).toBe(false); // same name, but outside the voice category
   });
 
-  it("does not guess by name when the configured lobby exists", () => {
+  const lobbyConfig = {
+    "voicechannels.category_id": CAT,
+    "voicechannels.lobby.name": "Lobby",
+    "voicechannels.lobby.offlinename": "Offline Lobby",
+  };
+
+  it("keeps the real lobby protected when a stale lobby id points at a text channel", () => {
+    // VoiceChannelManager ignores an id that isn't a voice channel and finds
+    // the lobby by name instead, so the name lookup must not be suppressed.
     const channels = [
       ch(V, { kind: "voice", name: "Lobby", parentId: CAT }),
-      ch(A, { kind: "voice", name: "Other", parentId: CAT }),
+      ch(A, { kind: "text", name: "old-lobby", parentId: CAT }),
     ];
     const map = buildProtectionMap(
       baseInputs({
         channels,
-        config: {
-          "voicechannels.lobby.channel_id": A,
-          "voicechannels.lobby.name": "Lobby",
-        },
+        config: { ...lobbyConfig, "voicechannels.lobby.channel_id": A },
       }),
     );
-    expect(map.has(V)).toBe(false);
+    expect(map.has(V)).toBe(true);
     expect(map.get(A)).toEqual(["the voicechannels.lobby.channel_id setting"]);
+  });
+
+  it("keeps the real lobby protected when a stale lobby id points at a voice channel outside the category", () => {
+    const OUT = "100000000000000099";
+    const channels = [
+      ch(V, { kind: "voice", name: "Lobby", parentId: CAT }),
+      ch(A, { kind: "voice", name: "elsewhere", parentId: OUT }),
+    ];
+    const map = buildProtectionMap(
+      baseInputs({
+        channels,
+        config: { ...lobbyConfig, "voicechannels.lobby.channel_id": A },
+      }),
+    );
+    expect(map.has(V)).toBe(true);
+    expect(map.has(A)).toBe(true);
+  });
+
+  it("protects the lobby and offline lobby by name when the id is empty or missing", () => {
+    const channels = [
+      ch(V, { kind: "voice", name: "Lobby", parentId: CAT }),
+      ch(A, { kind: "voice", name: "offline lobby ", parentId: CAT }),
+      ch(B, { kind: "voice", name: "Squad", parentId: CAT }),
+    ];
+    for (const id of [undefined, "", "199999999999999999"]) {
+      const map = buildProtectionMap(
+        baseInputs({
+          channels,
+          config: { ...lobbyConfig, "voicechannels.lobby.channel_id": id },
+        }),
+      );
+      expect(map.has(V)).toBe(true);
+      expect(map.has(A)).toBe(true);
+      expect(map.has(B)).toBe(false);
+    }
+  });
+
+  it("still protects the offline lobby when the lobby id is valid", () => {
+    const channels = [
+      ch(V, { kind: "voice", name: "Lobby", parentId: CAT }),
+      ch(A, { kind: "voice", name: "Offline Lobby", parentId: CAT }),
+    ];
+    const map = buildProtectionMap(
+      baseInputs({
+        channels,
+        config: { ...lobbyConfig, "voicechannels.lobby.channel_id": V },
+      }),
+    );
+    expect(map.get(V)).toContain("the voicechannels.lobby.channel_id setting");
+    expect(map.has(A)).toBe(true);
   });
 });
 

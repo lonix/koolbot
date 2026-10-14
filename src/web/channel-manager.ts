@@ -59,9 +59,18 @@ export function isSnowflake(value: unknown): value is string {
   return typeof value === "string" && SNOWFLAKE.test(value);
 }
 
-/** Text-like channels list above voice channels, as Discord displays them. */
+/** A stage channel: not managed here, but it sorts with the voice channels. */
+function isStage(c: ManagedChannelView): boolean {
+  return c.kind === "other" && c.typeLabel === "GuildStageVoice";
+}
+
+/**
+ * Text-like channels (and unsupported types) list above voice and stage
+ * channels, as Discord displays them; reordering also treats stage channels as
+ * voice siblings.
+ */
 function groupOf(c: ManagedChannelView): number {
-  return c.kind === "voice" ? 1 : 0;
+  return c.kind === "voice" || isStage(c) ? 1 : 0;
 }
 
 function byOrder(a: ManagedChannelView, b: ManagedChannelView): number {
@@ -351,30 +360,31 @@ export function buildProtectionMap(
   }
   for (const d of input.discord) add(d.channelId, d.label);
 
-  // The lobby is found by name when no lobby id is configured (or the
-  // configured one is gone), so it is protected by name inside the voice
-  // category even though no setting points at it.
-  const lobbyId = ids(input.config["voicechannels.lobby.channel_id"])[0];
-  const lobbyKnown = lobbyId
-    ? input.channels.some((c) => c.id === lobbyId)
-    : false;
-  if (!lobbyKnown) {
-    const category = ids(input.config["voicechannels.category_id"])[0];
-    const names = [
-      input.config["voicechannels.lobby.name"],
-      input.config["voicechannels.lobby.offlinename"],
-    ]
-      .map((n) => (typeof n === "string" ? n.trim().toLowerCase() : ""))
-      .filter(Boolean);
-    for (const c of input.channels) {
-      if (c.kind !== "voice") continue;
-      if (category && c.parentId !== category) continue;
-      if (names.includes(c.name.trim().toLowerCase())) {
-        add(
-          c.id,
-          "the voice lobby, found by name (voicechannels.lobby.name / voicechannels.lobby.offlinename)",
-        );
-      }
+  // The voice lobby. VoiceChannelManager only trusts a configured lobby id
+  // while it is a voice channel inside the managed category; otherwise (a stale
+  // id pointing at a text channel or at a channel outside the category) it
+  // falls back to finding the lobby by name, and the offline lobby is always
+  // found by name. A configured id therefore never lets us skip the name
+  // check: voice channels named like the lobby or offline lobby inside the
+  // voice category stay protected whatever the id says. When the category
+  // isn't set, any voice channel with those names is protected. Over-protecting
+  // is the safe side, and the service's exact-match rule is a subset of this
+  // trimmed, case-insensitive one.
+  const category = ids(input.config["voicechannels.category_id"])[0];
+  const names = [
+    input.config["voicechannels.lobby.name"],
+    input.config["voicechannels.lobby.offlinename"],
+  ]
+    .map((n) => (typeof n === "string" ? n.trim().toLowerCase() : ""))
+    .filter(Boolean);
+  for (const c of input.channels) {
+    if (c.kind !== "voice" && !isStage(c)) continue;
+    if (category && c.parentId !== category) continue;
+    if (names.includes(c.name.trim().toLowerCase())) {
+      add(
+        c.id,
+        "the voice lobby, found by name (voicechannels.lobby.name / voicechannels.lobby.offlinename)",
+      );
     }
   }
   return map;
