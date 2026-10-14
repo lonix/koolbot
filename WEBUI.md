@@ -187,7 +187,15 @@ Key properties:
   re-reads the member from Discord (reused for ~15 s) instead of trusting the
   member cache: a member who left, was kicked or banned, or lost the role loses
   `/me` within seconds. With the intent on, the gateway keeps the cache current
-  and no extra REST call is made. `/config` is fixed Administrator-only and is
+  and no extra REST call is made. On top of that the bot revokes the member's
+  sessions as soon as it sees them go: a kick or ban through the audit-log
+  entry or the ban event (neither needs the Server Members intent; the audit-log
+  entry needs the bot's View Audit Log permission), and a plain leave through
+  the member-remove event (which does need the intent; without it the live
+  re-check above ends the session on the member's next request, and the bot
+  warns once at startup). Revoking is a soft revoke of the session row, stores
+  no new member data, and a failure to revoke is logged and never affects
+  the bot. A timeout does not end a session. `/config` is fixed Administrator-only and is
   not editable on the Permissions page.
   Every `/me` route, including `/me/session/ping`, is rate limited per client IP
   (600 requests per 10 minutes overall, plus 60 non-GET requests and 30 Rewind
@@ -708,6 +716,8 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 | Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |
 | Click **Finish** in the UI         | Session revoked server-side; cookie cleared                                             |
 | Administrator removed in Discord   | Next request revokes the admin session (live Administrator check)                       |
+| Member is kicked or banned         | All their sessions are revoked as soon as the bot sees the audit-log entry or ban event |
+| Member leaves the server           | Revoked on the leave event (needs `GUILD_MEMBERS_INTENT`); else on their next request   |
 | Bot restart                        | Sessions survive (stored in MongoDB)                                                    |
 | `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid                                    |
 
