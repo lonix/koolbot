@@ -346,7 +346,13 @@ jobs:
     needs: build-and-push
     timeout-minutes: 5
     # build-and-push only runs on pull_request for a labelled same-repo PR.
-    if: github.event_name == 'pull_request'
+    # scan-image (an ancestor of build-and-push) is skipped on pull_request, and
+    # an `if` without a status function implies success(), which is false when
+    # any ancestor was skipped, so this job would be skipped even though the
+    # preview was built. The explicit condition mirrors build-and-push.
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      needs.build-and-push.result == 'success'
     permissions:
       # Create or update the sticky preview comment on the PR.
       pull-requests: write
