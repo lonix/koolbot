@@ -85,8 +85,8 @@ export function claimsFromForm(
       ...(asString(body[`min_${id}`])
         ? { minGroupId: asString(body[`min_${id}`]) }
         : {}),
-      allowReactions:
-        asFlag(body[`react_${id}`]) || (feed && chosen === "leave"),
+      // A feed keeps reactions open whichever way it was chosen.
+      allowReactions: asFlag(body[`react_${id}`]) || feed,
       lockReplies: asFlag(body[`lock_${id}`]),
       ...(asList(body[`speakers_${id}`]).length
         ? { speakerRoleIds: asList(body[`speakers_${id}`]) }

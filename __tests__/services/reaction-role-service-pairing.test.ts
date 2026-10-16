@@ -23,10 +23,12 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
 const { ReactionRoleService } =
   await import("../../src/services/reaction-role-service.js");
 import { ReactionRoleConfig } from "../../src/models/reaction-role-config.js";
+import { reactionRoleGuildLock } from "../../src/services/reaction-role-guild-lock.js";
 
 const Model = ReactionRoleConfig as unknown as {
   findOne: jest.Mock;
   deleteOne: jest.Mock;
+  countDocuments: jest.Mock;
 };
 
 const OWNER = "snap-1:op-1";
@@ -49,7 +51,11 @@ const unknown = (code: number): DiscordAPIError =>
     {},
   );
 
-function build(rolePermissions = 0n, categoryType = ChannelType.GuildCategory) {
+function build(
+  rolePermissions = 0n,
+  categoryType = ChannelType.GuildCategory,
+  overwriteAllow = 0n,
+) {
   const role = {
     id: "role1",
     name: "Valorant",
@@ -61,11 +67,26 @@ function build(rolePermissions = 0n, categoryType = ChannelType.GuildCategory) {
     id: "cat1",
     type: categoryType,
     delete: jest.fn(),
-    permissionOverwrites: { edit: jest.fn(), delete: jest.fn() },
+    name: "Valorant",
+    permissionOverwrites: {
+      edit: jest.fn(),
+      delete: jest.fn(),
+      cache: new Map([["role1", { allow: { bitfield: overwriteAllow } }]]),
+    },
+  };
+  const botReaction = {
+    emoji: { id: null, name: "🎮" },
+    users: { remove: jest.fn<() => Promise<unknown>>().mockResolvedValue({}) },
   };
   const message = {
     id: "msg1",
     delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+    reactions: {
+      cache: {
+        find: (fn: (r: typeof botReaction) => boolean) =>
+          fn(botReaction) ? botReaction : undefined,
+      },
+    },
   };
   const messageFetch = jest
     .fn<() => Promise<unknown>>()
@@ -107,13 +128,22 @@ function build(rolePermissions = 0n, categoryType = ChannelType.GuildCategory) {
     getBoolean: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
     getNumber: jest.fn(),
   };
-  return { service, role, category, message, messageFetch, channelFetch };
+  return {
+    service,
+    role,
+    category,
+    message,
+    messageFetch,
+    channelFetch,
+    botReaction,
+  };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   Model.findOne = jest.fn<() => Promise<unknown>>().mockResolvedValue(null);
   Model.deleteOne = jest.fn<() => Promise<unknown>>().mockResolvedValue({});
+  Model.countDocuments = jest.fn<() => Promise<number>>().mockResolvedValue(0);
   (ReactionRoleService as unknown as { instance?: unknown }).instance =
     undefined;
 });
@@ -138,6 +168,26 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
       service.registerGatedPairing("guild1", input()),
     ).rejects.toThrow(/powerful permissions/);
   });
+
+  it.each([
+    ["ManageChannels", PermissionFlagsBits.ManageChannels],
+    ["ManageWebhooks", PermissionFlagsBits.ManageWebhooks],
+    ["ManageRoles", PermissionFlagsBits.ManageRoles],
+  ])(
+    "refuses a plain role whose category overwrite grants %s",
+    async (_name, bit) => {
+      const { service } = build(
+        0n,
+        ChannelType.GuildCategory,
+        PermissionFlagsBits.ViewChannel | bit,
+      );
+      const bind = jest.spyOn(service, "bindReactionRole");
+      await expect(
+        service.registerGatedPairing("guild1", input()),
+      ).rejects.toThrow(/powerful permissions in its own overwrite/);
+      expect(bind).not.toHaveBeenCalled();
+    },
+  );
 
   it("requires a real category", async () => {
     const { service } = build(0n, ChannelType.GuildText);
@@ -289,6 +339,49 @@ describe("ReactionRoleService.unregisterGatedPairing (#1022)", () => {
     expect(Model.deleteOne).toHaveBeenCalledWith({ _id: "row1" });
     expect(role.delete).not.toHaveBeenCalled();
     expect(category.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes the picker when nothing else shares it", async () => {
+    const { service, message, botReaction } = build();
+    Model.findOne.mockResolvedValue({ _id: "row1", emoji: "🎮" });
+    await service.unregisterGatedPairing("guild1", un());
+    expect(message.delete).toHaveBeenCalledTimes(1);
+    expect(botReaction.users.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps a picker another mapping was added to: only this mapping's reaction goes", async () => {
+    const { service, message, botReaction } = build();
+    Model.findOne.mockResolvedValue({ _id: "row1", emoji: "🎮" });
+    Model.countDocuments.mockResolvedValue(1);
+    await service.unregisterGatedPairing("guild1", un());
+    expect(Model.countDocuments).toHaveBeenCalledWith({
+      guildId: "guild1",
+      messageId: "msg1",
+      isArchived: false,
+      _id: { $ne: "row1" },
+    });
+    expect(message.delete).not.toHaveBeenCalled();
+    expect(botReaction.users.remove).toHaveBeenCalledWith("bot1");
+    expect(Model.deleteOne).toHaveBeenCalledWith({ _id: "row1" });
+  });
+
+  it("adding a mapping to an existing picker waits for the lock the rollback holds", async () => {
+    const { service } = build();
+    let release!: () => void;
+    const held = reactionRoleGuildLock.run(
+      "guild1",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const binding = service.bindReactionRole("guild1", "role1", "🎮", {
+      messageId: "msg1",
+    });
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    // Blocked behind the in-flight rollback: nothing was looked up yet.
+    expect(Model.findOne).not.toHaveBeenCalled();
+    release();
+    await held;
+    await binding;
+    expect(Model.findOne).toHaveBeenCalled();
   });
 
   it("does nothing for a mapping another plan owns", async () => {

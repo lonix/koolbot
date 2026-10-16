@@ -45,7 +45,10 @@ import {
   reserveBurst,
   waitText,
 } from "../utils/member-cooldown.js";
-import { forbiddenSelfAssignPermissions } from "../utils/role-safety.js";
+import {
+  forbiddenSelfAssignNames,
+  forbiddenSelfAssignPermissions,
+} from "../utils/role-safety.js";
 import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
   ReactionRoleConfig,
@@ -1673,6 +1676,36 @@ export class ReactionRoleService {
     roleId?: string;
     messageId?: string;
   }> {
+    // Adding a mapping to an existing picker takes the same per-guild lock the
+    // adoption rollback holds while it decides whether the picker is shared, so
+    // a mapping added concurrently can't slip past that check. Posting a fresh
+    // picker (the adoption path, which already holds the lock) does not lock.
+    if (options.messageId) {
+      return reactionRoleGuildLock.run(guildId, () =>
+        this.bindReactionRoleUnlocked(guildId, roleId, emoji, options),
+      );
+    }
+    return this.bindReactionRoleUnlocked(guildId, roleId, emoji, options);
+  }
+
+  private async bindReactionRoleUnlocked(
+    guildId: string,
+    roleId: string,
+    emoji: string,
+    options: {
+      messageId?: string;
+      messageChannelId?: string;
+      /** Stored with the mapping from the first save (server adoption, #1022). */
+      categoryId?: string;
+      /** Which adoption step made the mapping (snapshot id + step id). */
+      adoptionOpKey?: string;
+    } = {},
+  ): Promise<{
+    success: boolean;
+    message: string;
+    roleId?: string;
+    messageId?: string;
+  }> {
     let postedMessage: Message | null = null;
 
     try {
@@ -1945,6 +1978,20 @@ export class ReactionRoleService {
     if (!assignable.ok) {
       throw new Error(assignable.message.replace(/\*\*/g, ""));
     }
+    // The live category overwrite counts as well: Manage Channels or Manage
+    // Webhooks granted to the role there would be handed to everyone who picks
+    // it up. Read at apply time, so a change since the preview is caught.
+    const overwriteBits = category.permissionOverwrites?.cache?.get(role.id)
+      ?.allow?.bitfield;
+    const dangerousOverwrite =
+      typeof overwriteBits === "bigint"
+        ? forbiddenSelfAssignNames(overwriteBits)
+        : [];
+    if (dangerousOverwrite.length > 0) {
+      throw new Error(
+        `${category.name} gives ${role.name} powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`,
+      );
+    }
 
     const existing = await ReactionRoleConfig.findOne({
       guildId,
@@ -2031,17 +2078,37 @@ export class ReactionRoleService {
           }),
         `fetch picker channel ${input.channelId}`,
       )) as TextChannel | null;
+      // The picker may have been shared since: the Reaction Roles page can add
+      // another emoji-to-role mapping to it. Deleting the message would leave
+      // that mapping without a working picker, so then only this mapping's own
+      // reaction goes and the message stays.
+      const siblings = await ReactionRoleConfig.countDocuments({
+        guildId,
+        messageId: input.messageId,
+        isArchived: false,
+        _id: { $ne: config._id },
+      });
       if (channel) {
         await api.makeDiscordApiCall(
           () =>
             channel.messages
               .fetch(input.messageId)
-              .then((message) => message.delete())
+              .then(async (message) => {
+                if (siblings === 0) {
+                  await message.delete();
+                  return;
+                }
+                const reaction = message.reactions.cache.find(
+                  (r) => this.buildEmojiIdentifier(r) === config.emoji,
+                );
+                const botId = this.client.user?.id;
+                if (reaction && botId) await reaction.users.remove(botId);
+              })
               .catch((err: unknown) => {
                 if (this.isUnknownEntityError(err, 10008)) return undefined;
                 throw err;
               }),
-          `delete picker ${input.messageId}`,
+          `remove picker ${input.messageId}`,
         );
       }
       await ReactionRoleConfig.deleteOne({ _id: config._id });

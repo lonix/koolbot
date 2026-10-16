@@ -1,3 +1,4 @@
+import { PermissionFlagsBits } from "discord.js";
 import { forbiddenSelfAssignNames } from "../utils/role-safety.js";
 import type { GroupSpec } from "./role-group-plan.js";
 import type { ScanWebhooks, ServerScan } from "./server-scan-service.js";
@@ -54,7 +55,6 @@ export function detectRolePairings(
   scan: Pick<ServerScan, "guildId" | "channels" | "roles" | "scanned">,
   groups: readonly GroupSpec[],
 ): RolePairing[] {
-  const botRoles = new Set(scan.scanned.botRoleIds);
   const roles = new Map(scan.roles.map((r) => [r.id, r]));
   const rawRoles = new Map(scan.scanned.roles.map((r) => [r.id, r]));
   const groupBacked = new Map(
@@ -71,7 +71,8 @@ export function detectRolePairings(
         o.type === "role" &&
         o.id !== scan.guildId &&
         o.allow.includes("ViewChannel") &&
-        !botRoles.has(o.id) &&
+        // Only integration roles (another bot's, or KoolBot's own) are left out.
+        // An ordinary role KoolBot happens to hold still counts as a gate.
         roles.get(o.id)?.botId === null,
     );
     if (gates.length !== 1) continue;
@@ -79,6 +80,15 @@ export function detectRolePairings(
     const raw = rawRoles.get(gates[0].id);
     if (!role || !raw) continue;
     const dangerous = forbiddenSelfAssignNames(BigInt(raw.permissions));
+    // What the category's own overwrite grants the role counts too: Manage
+    // Channels or Manage Webhooks there is category management for every pick.
+    const overwriteBits = (gates[0].allow as string[]).reduce(
+      (acc, name) =>
+        acc |
+        (PermissionFlagsBits[name as keyof typeof PermissionFlagsBits] ?? 0n),
+      0n,
+    );
+    const dangerousOverwrite = forbiddenSelfAssignNames(overwriteBits);
     let state: PairingState = "proposed";
     let reason: string | null = null;
     if (role.managed) {
@@ -90,6 +100,9 @@ export function detectRolePairings(
     } else if (dangerous.length > 0) {
       state = "refused";
       reason = `@${role.name} has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role first.`;
+    } else if (dangerousOverwrite.length > 0) {
+      state = "refused";
+      reason = `"${c.name}" gives @${role.name} powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`;
     } else if (raw.position >= scan.scanned.botHighestRolePosition) {
       state = "refused";
       reason = `@${role.name} sits at or above KoolBot's highest role, so KoolBot can't assign it.`;

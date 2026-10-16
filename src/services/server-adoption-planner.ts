@@ -1039,8 +1039,28 @@ export function planAdoption(
             : role.position >= scanned.botHighestRolePosition
               ? `"${role.name}" sits at or above the bot's highest role, so the bot can't assign it.`
               : null;
-    if (refusal) {
-      err("role-unsafe", refusal, role.id);
+    // The category's own overwrite for the role counts too (as the plan leaves
+    // it): Manage Channels or Manage Webhooks there is category management.
+    let overwriteAllow = big(
+      category.overwrites.find((o) => o.id === role.id)?.allow,
+    );
+    for (const op of ops) {
+      if (
+        op.type === "overwrite.set" &&
+        op.channelId === category.id &&
+        op.overwriteTargetId === role.id
+      ) {
+        overwriteAllow = big(op.allow);
+      }
+    }
+    const dangerousOverwrite = forbiddenSelfAssignNames(overwriteAllow);
+    const unsafe =
+      refusal ??
+      (dangerousOverwrite.length > 0
+        ? `"${category.name}" gives "${role.name}" powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`
+        : null);
+    if (unsafe) {
+      err("role-unsafe", unsafe, role.id);
       continue;
     }
     if (pairedRoles.has(role.id)) {
@@ -1052,9 +1072,15 @@ export function planAdoption(
       continue;
     }
     pairedRoles.add(role.id);
-    const pickerChannelId = String(
-      scanned.config["reactionroles.message_channel_id"] ?? "",
-    );
+    // The destination as this plan leaves the setting: a rebinding in the same
+    // plan runs before the registration, so that is the channel that counts.
+    const plannedPicker = (desired.config ?? {})[
+      "reactionroles.message_channel_id"
+    ];
+    const pickerChannelId =
+      typeof plannedPicker === "string" && plannedPicker !== ""
+        ? plannedPicker
+        : String(scanned.config["reactionroles.message_channel_id"] ?? "");
     if (
       !pickerChannelId ||
       channelsById.get(pickerChannelId)?.kind !== "text"

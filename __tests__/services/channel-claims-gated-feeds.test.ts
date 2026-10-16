@@ -312,6 +312,62 @@ describe("detecting role-gated categories", () => {
     expect(by(CAT_HIGH).reason).toContain("highest role");
   });
 
+  it("refuses a role whose category overwrite grants Manage Channels or Webhooks", () => {
+    const scanned = fixture();
+    scanned.channels.find((c) => c.id === CAT_GAME)!.overwrites = [
+      ow(GUILD, 0n, F.ViewChannel),
+      ow(R_GAME, F.ViewChannel | F.ManageChannels),
+    ];
+    const pairing = detectRolePairings(scanOf(scanned), groups).find(
+      (p) => p.categoryId === CAT_GAME,
+    )!;
+    expect(pairing.state).toBe("refused");
+    expect(pairing.reason).toContain("ManageChannels");
+    expect(pairing.reason).toContain("its own overwrite");
+    const r = plan([pair(CAT_GAME)], { scanned });
+    expect(r.errors).toContain("pairing-refused");
+    expect(r.plan.operations).toHaveLength(0);
+  });
+
+  it("the planner refuses a dangerous category overwrite, including one the same plan adds", () => {
+    const scanned = fixture();
+    scanned.channels.find((c) => c.id === CAT_GAME)!.overwrites = [
+      ow(GUILD, 0n, F.ViewChannel),
+      ow(R_GAME, F.ViewChannel | F.ManageWebhooks),
+    ];
+    const existing = planAdoption(scanned, {
+      reactionRoles: [{ roleId: R_GAME, categoryId: CAT_GAME, emoji: "🎮" }],
+    });
+    expect(existing.errors.map((e) => e.code)).toEqual(["role-unsafe"]);
+    expect(existing.errors[0].message).toContain("ManageWebhooks");
+    const added = planAdoption(fixture(), {
+      overwrites: [
+        {
+          channelId: CAT_GAME,
+          target: { id: R_GAME },
+          allow: (F.ViewChannel | F.ManageChannels).toString(),
+          deny: "0",
+        },
+      ],
+      reactionRoles: [{ roleId: R_GAME, categoryId: CAT_GAME, emoji: "🎮" }],
+    });
+    expect(added.errors.map((e) => e.code)).toContain("role-unsafe");
+  });
+
+  it("a role KoolBot holds still gates a category; only integration roles are ignored", () => {
+    const scanned = fixture({ botRoleIds: [R_KOOL, R_GAME] });
+    const found = detectRolePairings(scanOf(scanned), groups);
+    expect(found.find((p) => p.categoryId === CAT_GAME)).toMatchObject({
+      roleId: R_GAME,
+      state: "proposed",
+    });
+    // The two-role category stays ambiguous when the bot holds one of them.
+    const two = fixture({ botRoleIds: [R_KOOL, R_GAME2] });
+    expect(
+      detectRolePairings(scanOf(two), groups).map((p) => p.categoryId),
+    ).not.toContain(CAT_TWO);
+  });
+
   it("marks a role that is already a reaction role instead of proposing it again", () => {
     const scanned = fixture();
     const scan = scanOf(scanned, undefined, { [R_VIEW]: ["reactionroles"] });
@@ -566,6 +622,23 @@ describe("webhook and followed-channel feeds", () => {
     );
   });
 
+  it("a feed keeps reactions open whether Read-only was chosen or left alone", () => {
+    for (const action of ["read-only", "leave"]) {
+      const parsed = claimsFromForm(
+        { [`feed_${FEED}`]: "1", [`action_${FEED}`]: action },
+        [{ id: FEED, kind: "other", parentId: CAT_GAME }],
+      );
+      expect(parsed.claims[0]).toMatchObject({
+        action: "read-only",
+        allowReactions: true,
+      });
+      const r = plan(parsed.claims);
+      expect(BigInt(setFor(r.plan, FEED, GUILD)!.deny) & F.AddReactions).toBe(
+        0n,
+      );
+    }
+  });
+
   it("the form turns a feed tick on an untouched channel into read-only with reactions open", () => {
     const parsed = claimsFromForm({ [`feed_${FEED}`]: "1" }, [
       { id: FEED, kind: "other", parentId: CAT_GAME },
@@ -785,6 +858,48 @@ describe("review findings on feeds, stage speakers and register-all", () => {
       acceptAllPairs([], pairings).find((c) => c.channelId === CAT_GAME)!
         .pairEmoji,
     ).toBe(DEFAULT_PAIR_EMOJI);
+  });
+
+  it("a picker channel rebound in the same plan is the destination, in the step and the warning", () => {
+    const scanned = fixture({
+      config: { "reactionroles.message_channel_id": FEED },
+    });
+    const r = plan(
+      [
+        {
+          channelId: PICKER,
+          action: "leave",
+          bindKey: "reactionroles.message_channel_id",
+        },
+        pair(CAT_GAME),
+      ],
+      { scanned },
+    );
+    expect(r.errors).toEqual([]);
+    const op = r.plan.operations.find(
+      (o) => o.type === "reactionrole.register",
+    ) as { pickerChannelId: string };
+    expect(op.pickerChannelId).toBe(PICKER);
+    const note = r.built.issues.find((i) => i.code === "pairing-picker")!;
+    expect(note.message).toContain(`<#${PICKER}>`);
+    // The setting runs first, so the registration sees the planned channel.
+    const types = r.plan.operations.map((o) => o.type);
+    expect(types.indexOf("config.set")).toBeLessThan(
+      types.indexOf("reactionrole.register"),
+    );
+    // No channel set before: a binding in the plan is enough.
+    const none = plan(
+      [
+        {
+          channelId: PICKER,
+          action: "leave",
+          bindKey: "reactionroles.message_channel_id",
+        },
+        pair(CAT_GAME),
+      ],
+      { scanned: fixture({ config: {} }) },
+    );
+    expect(none.errors).toEqual([]);
   });
 
   it("the planner pins the picker channel in the step and refuses a non-text one", () => {

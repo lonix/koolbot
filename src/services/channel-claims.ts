@@ -820,9 +820,11 @@ export function buildClaimsDesiredState(
       emoji,
     });
     gatedCategories.push(channel);
-    const pickerChannel = String(
-      scanned.config["reactionroles.message_channel_id"] ?? "",
-    );
+    // A binding of the picker channel in this same plan takes effect first.
+    const pickerChannel =
+      valid.find((v) => v.claim.bindKey === "reactionroles.message_channel_id")
+        ?.channel.id ??
+      String(scanned.config["reactionroles.message_channel_id"] ?? "");
     issues.push({
       code: "pairing-picker",
       message: `Registering @${pairing.roleName} posts a new KoolBot picker${pickerChannel ? ` in <#${pickerChannel}>` : ""} and keeps "${channel.name}" gated by that role. The role and the category are not edited, and any picker another bot runs is left alone.`,
