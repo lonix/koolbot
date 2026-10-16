@@ -2003,6 +2003,33 @@ describe("link announcement and legacy RSVP compatibility (#1175)", () => {
     expect(order).toEqual(["native", "announce"]);
   });
 
+  it("retries a failed link refresh on later scans until it succeeds, then stops", async () => {
+    const service = svc();
+    const event = row({ nativeEventId: null });
+    service.nativeSync = {
+      syncEvent: jest.fn(async () => {
+        event.nativeEventId = event.nativeEventId ?? "native-9";
+      }),
+    };
+    const update = jest
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false) // transient edit failure
+      .mockResolvedValue(true);
+    (
+      service as unknown as { updateAnnouncement: jest.Mock }
+    ).updateAnnouncement = update;
+    const scan = (): Promise<void> =>
+      service.processEvent(event, {}, new Date("2026-07-04T10:00:00Z"), {
+        reminderMs: 0,
+        leadMs: 0,
+        graceMs: 0,
+      });
+    await scan(); // link appears, edit fails
+    await scan(); // ids unchanged, but the refresh is retried and succeeds
+    await scan(); // verified: no more edits
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
   it("refreshes the announcement when the native link appears during a scan", async () => {
     const service = svc();
     const event = row({ nativeEventId: null });

@@ -318,6 +318,9 @@ export class EventService extends ScheduledService {
   private static instance: EventService;
   /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
   private readonly nativeSync: NativeEventSync;
+  /** Open events whose announcement post is known to carry the current native
+   * link (in memory: re-checked once per event after a restart). */
+  private readonly linkVerified = new Set<string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -524,12 +527,22 @@ export class EventService extends ScheduledService {
       const linkedBefore = event.nativeEventId;
       await this.nativeSync.syncEvent(event, guild, windows.native);
       // The announcement carries the native event's link: refresh it when the
-      // link appeared (created or adopted after the post) or went away.
-      if (
-        linkedBefore !== event.nativeEventId &&
-        (event.state === "scheduled" || event.state === "active")
-      ) {
-        await this.updateAnnouncement(event);
+      // link appeared (created or adopted after the post) or went away. The
+      // new id is already stored, so a failed edit would not be noticed by the
+      // next scan comparing ids; `linkVerified` remembers which events' posts
+      // are known to match and retries the rest on every scan (also once per
+      // event after a restart, since this set is in memory only).
+      const id = String(event._id);
+      if (event.state !== "scheduled" && event.state !== "active") {
+        this.linkVerified.delete(id);
+      } else {
+        if (linkedBefore !== event.nativeEventId) this.linkVerified.delete(id);
+        if (!this.linkVerified.has(id)) {
+          const refreshed = await this.updateAnnouncement(event);
+          if (refreshed && event.announcementMessageId) {
+            this.linkVerified.add(id);
+          }
+        }
       }
       // A discarded duplicate's cleanup record has done its job once the
       // native event is closed.
