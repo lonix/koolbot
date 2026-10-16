@@ -1566,6 +1566,44 @@ export function planAdoption(
     }
   }
 
+  // A registration posts a picker and reacts to it, so the bot must be able to
+  // in the picker channel as the plan leaves it (a rebinding in the same plan
+  // and any overwrite it sets included). Blocked here, not discovered at apply
+  // after earlier steps have already changed the server.
+  const pickerNeeds =
+    ViewChannel |
+    PermissionsBitField.Flags.SendMessages |
+    PermissionsBitField.Flags.EmbedLinks |
+    PermissionsBitField.Flags.AddReactions |
+    PermissionsBitField.Flags.ReadMessageHistory;
+  const pickerChecked = new Set<string>();
+  for (const op of ordered) {
+    if (op.type !== "reactionrole.register") continue;
+    if (pickerChecked.has(op.pickerChannelId)) continue;
+    pickerChecked.add(op.pickerChannelId);
+    const picker = channelsById.get(op.pickerChannelId);
+    if (!picker) continue;
+    const after = simulate(scanned, ordered);
+    const botRolesAfter = scanned.botRoleIds.filter(
+      (id) => !after.removedRoles.has(id),
+    );
+    const perms = effectivePermissions({
+      userId: scanned.botUserId,
+      roleIds: botRolesAfter,
+      ownerId: scanned.ownerId,
+      everyoneId,
+      rolePermissions: after.rolePermissions,
+      overwrites: after.channels.get(picker.id),
+    });
+    if ((perms & pickerNeeds) !== pickerNeeds) {
+      err(
+        "picker-channel-unusable",
+        `The bot can't post and react in the picker channel "${picker.name}" (it needs View Channel, Read Message History, Send Messages, Embed Links and Add Reactions there), so the pickers could not be posted. Fix its permissions there first.`,
+        picker.id,
+      );
+    }
+  }
+
   const baseline: PlanBaseline = {
     absentRoleNames: ordered.flatMap((o) =>
       o.type === "role.create" ? [o.name] : [],

@@ -12,7 +12,10 @@ import {
   detectRolePairings,
   isValidPickerEmoji,
 } from "../../src/services/channel-claims-suggestions.js";
-import { acceptAllPairs } from "../../src/services/channel-claims-adoption.js";
+import {
+  acceptAllPairs,
+  claimsForRevalidation,
+} from "../../src/services/channel-claims-adoption.js";
 import { claimsFromForm } from "../../src/services/channel-claims-form.js";
 import {
   permissionNames,
@@ -20,6 +23,7 @@ import {
   type AdoptionPlan,
   type ChannelState,
   type OverwriteState,
+  type PlanOperation,
   type ScannedState,
 } from "../../src/services/server-adoption-planner.js";
 import { bitsOf } from "../../src/utils/channel-permissions.js";
@@ -948,6 +952,153 @@ describe("review findings on feeds, stage speakers and register-all", () => {
     });
     expect(plan([pair(CAT_GAME)], { scanned: category }).errors).toContain(
       "reactionroles-channel-missing",
+    );
+  });
+});
+
+describe("review findings, round four", () => {
+  it("accepts exactly one emoji sequence and refuses several or stray joiners", () => {
+    for (const ok of [
+      "🎮",
+      "👍🏽",
+      "👨‍👩‍👧",
+      "🇳🇴",
+      "1️⃣",
+      "❤️",
+      "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+      "<a:dance:123456789012345678>",
+    ]) {
+      expect(isValidPickerEmoji(ok)).toBe(true);
+    }
+    for (const bad of ["🎮🎯", "🎮 🎯", "‍", "️", "🎮‍", "🇳", "a🎮"]) {
+      expect(isValidPickerEmoji(bad)).toBe(false);
+    }
+    expect(plan([pair(CAT_GAME, "🎮🎯")]).errors).toContain("invalid-emoji");
+  });
+
+  it("revalidation after the additive steps does not detect a pairing the plan itself changed", () => {
+    const claims: ChannelClaim[] = [
+      {
+        channelId: CAT_GAME,
+        action: "gate",
+        roleIds: [R_ADMIN, R_GAME],
+        registerPairing: true,
+      },
+    ];
+    const registration = [
+      { type: "reactionrole.register" } as unknown as PlanOperation,
+    ];
+    const destructive = [
+      { type: "overwrite.remove" } as unknown as PlanOperation,
+    ];
+    // Before anything ran the registration is still checked.
+    expect(claimsForRevalidation(claims, registration)[0].registerPairing).toBe(
+      true,
+    );
+    // Once only destructive steps remain, it is not planned again.
+    expect(claimsForRevalidation(claims, destructive)[0]).toMatchObject({
+      action: "gate",
+      registerPairing: false,
+    });
+    // What it would otherwise hit: the gate leaves two roles on the category,
+    // so it is no longer a pairing.
+    const gatedScan = fixture();
+    gatedScan.channels.find((c) => c.id === CAT_GAME)!.overwrites = [
+      ow(GUILD, 0n, F.ViewChannel),
+      ow(R_GAME, F.ViewChannel),
+      ow(R_ADMIN, F.ViewChannel),
+    ];
+    expect(plan(claims, { scanned: gatedScan }).errors).toContain(
+      "not-a-pairing",
+    );
+    expect(
+      plan(claimsForRevalidation(claims, destructive), { scanned: gatedScan })
+        .errors,
+    ).not.toContain("not-a-pairing");
+  });
+
+  it("refuses posting roles or a group on a feed, so nothing is granted", () => {
+    const withRole = plan([
+      { channelId: FEED, action: "read-only", roleIds: [R_GAME], feed: true },
+    ]);
+    expect(withRole.errors).toContain("feed-no-posters");
+    expect(withRole.plan.operations).toHaveLength(0);
+    const withGroup = plan([
+      {
+        channelId: FEED,
+        action: "read-only",
+        minGroupId: "g-staff",
+        feed: true,
+      },
+    ]);
+    expect(withGroup.errors).toContain("feed-no-posters");
+    expect(
+      plan([{ channelId: FEED, action: "read-only", feed: true }]).errors,
+    ).toEqual([]);
+  });
+
+  it("reports a RequestToSpeak allow on an ordinary role KoolBot also holds", () => {
+    const scanned = fixture({ botRoleIds: [R_KOOL, R_VIEW] });
+    scanned.channels
+      .find((c) => c.id === STAGE)!
+      .overwrites.push(ow(R_VIEW, F.RequestToSpeak));
+    const r = plan(
+      [
+        {
+          channelId: STAGE,
+          action: "gate",
+          roleIds: [R_GAME, R_ADMIN],
+          speakerRoleIds: [R_ADMIN],
+        },
+      ],
+      { scanned },
+    );
+    expect(r.warnings).toContain("speak-not-exclusive");
+  });
+
+  it("blocks a picker channel the bot can't post and react in, as the plan leaves it", () => {
+    const denied = fixture();
+    denied.channels.find((c) => c.id === PICKER)!.overwrites = [
+      ow(BOT, 0n, F.SendMessages | F.AddReactions, "member"),
+    ];
+    // The bot role has Administrator-like All in this fixture, which bypasses
+    // overwrites; a plain bot role is what a real server has.
+    denied.roles.find((r) => r.id === R_KOOL)!.permissions = bitsOf([
+      "ViewChannel",
+      "ManageRoles",
+      "SendMessages",
+      "EmbedLinks",
+      "AddReactions",
+      "ReadMessageHistory",
+    ]);
+    const blocked = plan([pair(CAT_GAME)], { scanned: denied });
+    expect(blocked.errors).toContain("picker-channel-unusable");
+    // The same server with the bot allowed there is fine.
+    const allowed = fixture();
+    allowed.roles.find((r) => r.id === R_KOOL)!.permissions = bitsOf([
+      "ViewChannel",
+      "ManageRoles",
+      "SendMessages",
+      "EmbedLinks",
+      "AddReactions",
+      "ReadMessageHistory",
+    ]);
+    expect(plan([pair(CAT_GAME)], { scanned: allowed }).errors).toEqual([]);
+    // A plan that denies the bot there itself is caught from the after-state.
+    const denies = planAdoption(allowed, {
+      overwrites: [
+        {
+          channelId: PICKER,
+          target: { id: BOT },
+          targetType: "member",
+          allow: "0",
+          deny: F.SendMessages.toString(),
+        },
+      ],
+      reactionRoles: [{ roleId: R_GAME, categoryId: CAT_GAME, emoji: "🎮" }],
+    });
+    expect(denies.errors.map((e) => e.code)).toContain(
+      "picker-channel-unusable",
     );
   });
 });

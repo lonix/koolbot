@@ -153,10 +153,11 @@ export function claimsRevalidator(
   approvedAt: string,
 ): (pending: PlanOperation[]) => Promise<string[]> {
   return async (pending) => {
+    const effective = claimsForRevalidation(claims, pending);
     const fresh = await planChannelClaims(
       guild,
       adminUserId,
-      claims,
+      effective,
       approvedAt,
     );
     const problems = [...fresh.plan.errors, ...fresh.errors].map(
@@ -165,4 +166,25 @@ export function claimsRevalidator(
     problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
     return problems;
   };
+}
+
+/**
+ * The claims to plan again for a live-state check. The destructive phase
+ * re-checks after the additive steps (including the registrations) have
+ * landed. A category gated for more roles by this very plan is no longer
+ * "gated by exactly one role", so detecting its pairing again would fail the
+ * plan on its own changes. A registration is not pending then (the pre-apply
+ * check lists every step, the later one only the destructive ones), so it is
+ * not planned again; everything else is checked as before.
+ */
+export function claimsForRevalidation(
+  claims: readonly ChannelClaim[],
+  pending: readonly PlanOperation[],
+): ChannelClaim[] {
+  const registrationPending = pending.some(
+    (op) => op.type === "reactionrole.register",
+  );
+  return registrationPending
+    ? [...claims]
+    : claims.map((c) => ({ ...c, registerPairing: false }));
 }

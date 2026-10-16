@@ -496,7 +496,6 @@ export function buildClaimsDesiredState(
       if (
         o.id === everyoneId ||
         o.id === scanned.botUserId ||
-        scanned.botRoleIds.includes(o.id) ||
         otherBots.has(o.id) ||
         ctx.integrationRoleIds.has(o.id) ||
         chosen.includes(o.id)
@@ -900,6 +899,16 @@ export function buildClaimsDesiredState(
       err(
         "feed-needs-read-only",
         `"${channel.name}" is marked as a feed, which means read-only for everyone. Choose Read-only (or Leave alone) for it, or untick the feed.`,
+        channel.id,
+      );
+      continue;
+    }
+    // "Read-only for everyone, nothing granted": posting roles or a group would
+    // grant posting back, so they are refused for a feed.
+    if (claim.feed && ((claim.roleIds?.length ?? 0) > 0 || claim.minGroupId)) {
+      err(
+        "feed-no-posters",
+        `"${channel.name}" is marked as a feed, which is read-only for everyone with nothing granted. Remove the posting roles or group, or untick the feed and use Read-only.`,
         channel.id,
       );
       continue;

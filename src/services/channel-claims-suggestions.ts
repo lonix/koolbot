@@ -13,15 +13,24 @@ import type { ScanWebhooks, ServerScan } from "./server-scan-service.js";
 /** Emoji for a pairing's picker when the admin doesn't pick one. */
 export const DEFAULT_PAIR_EMOJI = "🎮";
 
-/** A Unicode emoji or a custom emoji in `<:name:id>` / `<a:name:id>` form. */
+/**
+ * Exactly one emoji: a custom emoji in `<:name:id>` / `<a:name:id>` form, or ONE
+ * Unicode grapheme that is an emoji sequence (a pictograph with an optional
+ * skin tone or variation selector, joined with ZWJ, a flag, a keycap or a tag
+ * sequence). Several emoji ("🎮🎯") or stray joiners and selectors are refused:
+ * Discord can't react with them and the picker would fail after being posted.
+ */
+const EMOJI_SEQUENCE =
+  /^(?:\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*(?:[\u{E0020}-\u{E007E}]+\u{E007F})?|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3)$/u;
+
 export function isValidPickerEmoji(value: string): boolean {
   const v = value.trim();
   if (v.length === 0 || v.length > 64) return false;
   if (/^<a?:\w{2,32}:\d{15,25}>$/.test(v)) return true;
-  // Keycaps and flags are emoji sequences without Extended_Pictographic bases.
-  return /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[0-9#*]\uFE0F?\u20E3|\u200D|\uFE0F|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])+$/u.test(
-    v,
-  );
+  const graphemes = [
+    ...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v),
+  ];
+  return graphemes.length === 1 && EMOJI_SEQUENCE.test(v);
 }
 
 export type PairingState =
