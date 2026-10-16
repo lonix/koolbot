@@ -318,9 +318,9 @@ export class EventService extends ScheduledService {
   private static instance: EventService;
   /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
   private readonly nativeSync: NativeEventSync;
-  /** Open events whose announcement post is known to carry the current native
-   * link (in memory: re-checked once per event after a restart). */
-  private readonly linkVerified = new Set<string>();
+  /** Per open event: the `message|native event` ids of the announcement last
+   * rendered successfully (in memory: re-checked once after a restart). */
+  private readonly linkVerified = new Map<string, string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -524,23 +524,25 @@ export class EventService extends ScheduledService {
     // Keep the native scheduled event in line (#1034): creates it for events
     // that predate the toggle, pushes edits, and closes it on end/cancel.
     if (!windows.skipNative) {
-      const linkedBefore = event.nativeEventId;
       await this.nativeSync.syncEvent(event, guild, windows.native);
-      // The announcement carries the native event's link: refresh it when the
-      // link appeared (created or adopted after the post) or went away. The
-      // new id is already stored, so a failed edit would not be noticed by the
-      // next scan comparing ids; `linkVerified` remembers which events' posts
-      // are known to match and retries the rest on every scan (also once per
-      // event after a restart, since this set is in memory only).
+      // The announcement carries the native event's link. The ids are stored
+      // before the post is edited, so a failed edit (or a post another sender
+      // replaced) would not be noticed by comparing ids between scans.
+      // `linkVerified` instead remembers, per event, the (message, native
+      // event) pair last rendered successfully; any other pair, or none, is
+      // refreshed again on every scan until it succeeds. In memory only, so
+      // each event is re-checked once after a restart.
       const id = String(event._id);
       if (event.state !== "scheduled" && event.state !== "active") {
         this.linkVerified.delete(id);
       } else {
-        if (linkedBefore !== event.nativeEventId) this.linkVerified.delete(id);
-        if (!this.linkVerified.has(id)) {
+        const pair = `${event.announcementMessageId ?? ""}|${event.nativeEventId ?? ""}`;
+        if (this.linkVerified.get(id) !== pair) {
           const refreshed = await this.updateAnnouncement(event);
           if (refreshed && event.announcementMessageId) {
-            this.linkVerified.add(id);
+            this.linkVerified.set(id, pair);
+          } else {
+            this.linkVerified.delete(id);
           }
         }
       }

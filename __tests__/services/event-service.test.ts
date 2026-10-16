@@ -2030,6 +2030,35 @@ describe("link announcement and legacy RSVP compatibility (#1175)", () => {
     expect(update).toHaveBeenCalledTimes(2);
   });
 
+  it("re-renders when the native id or the announcement message changes between scans", async () => {
+    const service = svc();
+    const event = row();
+    service.nativeSync = { syncEvent: jest.fn(async () => undefined) };
+    const update = jest.fn(async () => true);
+    (
+      service as unknown as { updateAnnouncement: jest.Mock }
+    ).updateAnnouncement = update;
+    const scan = (): Promise<void> =>
+      service.processEvent(event, {}, new Date("2026-07-04T10:00:00Z"), {
+        reminderMs: 0,
+        leadMs: 0,
+        graceMs: 0,
+      });
+    await scan();
+    await scan();
+    expect(update).toHaveBeenCalledTimes(1);
+    // Another writer (replica, or the creator after losing a claim) changed
+    // the stored ids; the sync saw no change within this scan.
+    event.nativeEventId = "native-2";
+    await scan();
+    expect(update).toHaveBeenCalledTimes(2);
+    event.announcementMessageId = "msg-2";
+    await scan();
+    expect(update).toHaveBeenCalledTimes(3);
+    await scan();
+    expect(update).toHaveBeenCalledTimes(3);
+  });
+
   it("refreshes the announcement when the native link appears during a scan", async () => {
     const service = svc();
     const event = row({ nativeEventId: null });
