@@ -14,6 +14,9 @@ const owned = jest.fn<(...a: any[]) => any>();
 const tickets = jest.fn<(...a: any[]) => any>();
 const events = jest.fn<(...a: any[]) => any>();
 const lfg = jest.fn<(...a: any[]) => any>();
+const reactionRoles = jest.fn<(...a: any[]) => any>();
+const polls = jest.fn<(...a: any[]) => any>();
+const announcements = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/models/managed-voice-channel.js", () => ({
   ManagedVoiceChannel: { find: managed },
 }));
@@ -28,6 +31,15 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
 }));
 jest.unstable_mockModule("../../src/models/lfg-post.js", () => ({
   LfgPost: { find: lfg },
+}));
+jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
+  ReactionRoleConfig: { find: reactionRoles },
+}));
+jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
+  PollSchedule: { find: polls },
+}));
+jest.unstable_mockModule("../../src/models/scheduled-announcement.js", () => ({
+  ScheduledAnnouncement: { find: announcements },
 }));
 
 const {
@@ -181,18 +193,67 @@ describe("loadProtection", () => {
     lfg.mockReturnValue(
       lean([{ voiceChannelId: null, channelId: "100000000000000006" }]),
     );
+    reactionRoles.mockReturnValue(
+      lean([
+        {
+          _id: "rr1",
+          channelId: "100000000000000007",
+          categoryId: "100000000000000008",
+        },
+      ]),
+    );
+    polls.mockReturnValue(
+      lean([{ _id: "ps1", channelId: "100000000000000009" }]),
+    );
+    announcements.mockReturnValue(
+      lean([{ _id: "an1", channelId: "100000000000000010" }]),
+    );
   });
 
   it("combines config, voice rows, tickets, events, LFG and Discord's channels, scoped to the guild", async () => {
     const map = await loadProtection(guild, []);
-    for (const id of ["1", "2", "3", "4", "5", "6", "90", "91"]) {
+    for (const id of [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "90",
+      "91",
+    ]) {
       expect(map.has(`1000000000000000${id.padStart(2, "0")}`)).toBe(true);
     }
     expect(managed).toHaveBeenCalledWith({ guildId: "g1" });
+    expect(reactionRoles).toHaveBeenCalledWith({
+      guildId: "g1",
+      archivedAt: null,
+    });
+    expect(polls).toHaveBeenCalledWith({ guildId: "g1" });
+    expect(announcements).toHaveBeenCalledWith({ guildId: "g1" });
+    const map2 = await loadProtection(guild, []);
+    expect(map2.get("100000000000000007")![0]).toContain("Reaction Roles");
+    expect(map2.get("100000000000000009")![0]).toContain("Polls");
+    expect(map2.get("100000000000000010")![0]).toContain("Announcements");
     expect(events.mock.calls[0][0]).toMatchObject({
       guildId: "g1",
       state: { $in: ["scheduled", "active"] },
     });
+  });
+
+  it.each([
+    ["reaction roles", reactionRoles],
+    ["poll schedules", polls],
+    ["announcements", announcements],
+  ])("fails closed when the %s lookup fails", async (_n, mock) => {
+    mock.mockImplementation(() => {
+      throw new Error("db down");
+    });
+    await expect(loadProtection(guild, [])).rejects.toThrow("db down");
   });
 
   it("throws when a source can't be read, so a delete fails closed", async () => {

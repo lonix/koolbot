@@ -147,15 +147,19 @@ const fail = (error: string): { ok: false; error: string } => ({
   error,
 });
 
+// U+200C/U+200D (zero-width non-joiner/joiner) are deliberately not listed:
+// compound emoji such as family and flag sequences are built from them.
+/* eslint-disable no-control-regex */
+const NAME_STRIP =
+  /[\u0000-\u001f\u007f-\u009f\u200b\u200e\u200f\u2028-\u202e]+/g;
+/* eslint-enable no-control-regex */
+
 /** Control characters and line breaks removed, runs of spaces collapsed. */
 export function cleanName(raw: unknown): string {
-  return (
-    String(raw ?? "")
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
+  return String(raw ?? "")
+    .replace(NAME_STRIP, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function validateName(raw: unknown, what = "name"): Checked<string> {
@@ -295,6 +299,16 @@ export interface ProtectionInputs {
   }>;
   /** Open looking-for-group posts. */
   lfg: ReadonlyArray<{ voiceChannelId: string | null; channelId: string }>;
+  /** Reaction-role mappings that have not been archived. */
+  reactionRoles: ReadonlyArray<{
+    id: string;
+    channelId: string | null;
+    categoryId: string | null;
+  }>;
+  /** Poll schedules, enabled or not (a disabled one can be turned back on). */
+  pollSchedules: ReadonlyArray<{ id: string; channelId: string }>;
+  /** Scheduled announcements, enabled or not. */
+  announcements: ReadonlyArray<{ id: string; channelId: string }>;
   /** Channels Discord itself points at (community and system channels). */
   discord: { label: string; channelId: string | null }[];
   /** The live channels, for finding the lobby by name. */
@@ -357,6 +371,25 @@ export function buildProtectionMap(
   for (const l of input.lfg) {
     add(l.voiceChannelId, "a looking-for-group voice channel (LFG)");
     add(l.channelId, "a looking-for-group post channel (LFG)");
+  }
+  for (const r of input.reactionRoles) {
+    add(
+      r.channelId,
+      `a reaction role's private channel (Reaction Roles, mapping ${r.id})`,
+    );
+    add(
+      r.categoryId,
+      `a reaction role's private category (Reaction Roles, mapping ${r.id})`,
+    );
+  }
+  for (const p of input.pollSchedules) {
+    add(p.channelId, `a poll schedule's channel (Polls, schedule ${p.id})`);
+  }
+  for (const a of input.announcements) {
+    add(
+      a.channelId,
+      `a scheduled announcement's channel (Announcements, announcement ${a.id})`,
+    );
   }
   for (const d of input.discord) add(d.channelId, d.label);
 

@@ -1480,7 +1480,8 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name),
   active temporary voice channels and waiting rooms, ticket channels, channels of events that have not ended,
-  open looking-for-group channels, and the server's rules, updates and system channels. A category must be empty
+  open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
+  destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break
   features that look for them under a category. If the managed-channel lookup fails, the delete is refused.
 - **Limits** are checked before Discord is called: names up to 100 characters, topics up to 1024, user limit 0 to

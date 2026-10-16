@@ -39,6 +39,12 @@ describe("validateName / cleanName", () => {
   it("strips control characters and collapses whitespace", () => {
     expect(cleanName("  a\u0000b \n\n c​ ")).toBe("a b c");
   });
+  it("keeps zero-width joiners so compound emoji survive", () => {
+    const family = "👨‍👩‍👧‍👦 family";
+    expect(cleanName(family)).toBe(family);
+    expect(validateName(family)).toEqual({ ok: true, value: family });
+    expect(cleanName("a‎b‏c")).toBe("a b c");
+  });
   it("rejects empty and over-long names", () => {
     expect(validateName("   ").ok).toBe(false);
     const long = validateName("x".repeat(101));
@@ -219,9 +225,55 @@ const baseInputs = (
   tickets: [],
   events: [],
   lfg: [],
+  reactionRoles: [],
+  pollSchedules: [],
+  announcements: [],
   discord: [],
   channels: [],
   ...over,
+});
+
+describe("buildProtectionMap: Mongo-backed feature bindings", () => {
+  it("protects reaction-role channels and categories, naming the feature", () => {
+    const map = buildProtectionMap(
+      baseInputs({
+        reactionRoles: [
+          { id: "rr1", channelId: A, categoryId: CAT },
+          { id: "rr2", channelId: null, categoryId: null },
+        ],
+      }),
+    );
+    expect(map.get(A)![0]).toContain("Reaction Roles");
+    expect(map.get(A)![0]).toContain("rr1");
+    expect(map.get(CAT)![0]).toContain("Reaction Roles");
+    expect(map.size).toBe(2);
+  });
+
+  it("protects poll schedule destinations, naming the feature", () => {
+    const map = buildProtectionMap(
+      baseInputs({ pollSchedules: [{ id: "ps1", channelId: B }] }),
+    );
+    expect(map.get(B)![0]).toContain("Polls");
+    expect(map.get(B)![0]).toContain("ps1");
+  });
+
+  it("protects scheduled announcement channels, naming the feature", () => {
+    const map = buildProtectionMap(
+      baseInputs({ announcements: [{ id: "an1", channelId: V }] }),
+    );
+    expect(map.get(V)![0]).toContain("Announcements");
+  });
+
+  it("turns each into a refusal that names the feature", () => {
+    const target = ch(A, { name: "picker" });
+    const map = buildProtectionMap(
+      baseInputs({
+        reactionRoles: [{ id: "rr1", channelId: A, categoryId: null }],
+      }),
+    );
+    const verdict = deleteVerdict(target, [target], map);
+    expect(!verdict.ok && verdict.message).toContain("Reaction Roles");
+  });
 });
 
 describe("buildProtectionMap", () => {

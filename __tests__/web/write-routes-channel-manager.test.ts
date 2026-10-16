@@ -383,6 +383,36 @@ describe("POST /channels/:id/edit", () => {
     });
   });
 
+  it("never renames a channel when only the topic changes, even with a compound-emoji name", async () => {
+    const family = "👨‍👩‍👧‍👦 family";
+    channels[1] = view(TEXT, { name: family, parentId: CAT, topic: "hi" });
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: family,
+      topic: "new topic",
+      parent: CAT,
+    });
+    expect(flashOf(res)).toMatchObject({ type: "ok" });
+    const sent = mockEdit.mock.calls[0][0];
+    expect(sent.topic).toBe("new topic");
+    expect(sent).not.toHaveProperty("name");
+  });
+
+  it("never rewrites an unchanged name that normalisation would alter", async () => {
+    channels[1] = view(TEXT, {
+      name: "double  space",
+      parentId: CAT,
+      topic: "hi",
+    });
+    await mount();
+    await harness.post(`/channels/${TEXT}/edit`, {
+      name: "double  space",
+      topic: "other",
+      parent: CAT,
+    });
+    expect(mockEdit.mock.calls[0][0]).not.toHaveProperty("name");
+  });
+
   it("renames, and reports the name Discord returned", async () => {
     mockEdit.mockResolvedValue({ name: "normalised-name" });
     await mount();
@@ -528,6 +558,37 @@ describe("POST /channels/:id/move", () => {
     });
   });
 
+  it("moves relative to the same-category neighbour when another category's channel sits between them in guild-wide order", async () => {
+    // A (CAT, 0), B (OTHER, 1), C (CAT, 2): discord.js sorts a relative move
+    // inside the channel's own parent and group, so one step up from C is A.
+    const OTHER = "100000000000000070";
+    const B = "100000000000000071";
+    const C = "100000000000000072";
+    channels = [
+      view(CAT, { kind: "category", name: "One", position: 0 }),
+      view(OTHER, { kind: "category", name: "Two", position: 1 }),
+      view(TEXT, { name: "a", parentId: CAT, position: 0 }),
+      view(B, { name: "b", parentId: OTHER, position: 1 }),
+      view(C, { name: "c", parentId: CAT, position: 2 }),
+    ];
+    await mount();
+    const up = await harness.post(`/channels/${C}/move`, { direction: "up" });
+    expect(flashOf(up)).toMatchObject({ type: "ok" });
+    expect(mockSetPosition.mock.calls[0][0]).toBe(-1);
+    expect(mockSetPosition.mock.calls[0][1]).toMatchObject({ relative: true });
+    // B is alone in its category, so it has no neighbour to swap with.
+    const alone = await harness.post(`/channels/${B}/move`, {
+      direction: "down",
+    });
+    expect(flashOf(alone).msg).toContain("already last");
+    // A is first among CAT's channels even though B sits after it overall.
+    const first = await harness.post(`/channels/${TEXT}/move`, {
+      direction: "up",
+    });
+    expect(flashOf(first).msg).toContain("already first");
+    expect(mockSetPosition).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to move past the first or last place", async () => {
     await mount();
     const res = await harness.post(`/channels/${TEXT}/move`, {
@@ -586,6 +647,27 @@ describe("POST /channels/:id/delete", () => {
       result: "failure",
       details: { reasons: ["the quotes.channel_id setting"] },
     });
+  });
+
+  it.each([
+    [
+      "a reaction role's channel",
+      "a reaction role's private channel (Reaction Roles, mapping rr1)",
+      "Reaction Roles",
+    ],
+    [
+      "a poll destination",
+      "a poll schedule's channel (Polls, schedule ps1)",
+      "Polls",
+    ],
+  ])("refuses %s, naming the feature", async (_label, reason, feature) => {
+    protection = new Map([[TEXT2, [reason]]]);
+    await mount();
+    const res = await harness.post(`/channels/${TEXT2}/delete`, {
+      confirm: TEXT2,
+    });
+    expect(flashOf(res).msg).toContain(feature);
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 
   it("refuses a non-empty category", async () => {

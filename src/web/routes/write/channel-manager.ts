@@ -348,10 +348,16 @@ export function createChannelManagerRouter(client: Client): Router {
     write("edit", async (ctx) => {
       const target = targetOf(ctx);
       if ("ok" in target) return target;
-      const name = validateName(ctx.body.name);
-      if (!name.ok) return refuse(name.error);
       const changes: Record<string, unknown> = {};
-      if (name.value !== target.name) changes.name = name.value;
+      // A name posted back exactly as it is now is never validated or
+      // rewritten: normalising it could rename a channel the admin only meant
+      // to change the topic of.
+      const submitted = String(ctx.body.name ?? "");
+      if (submitted !== target.name) {
+        const name = validateName(submitted);
+        if (!name.ok) return refuse(name.error);
+        if (name.value !== target.name) changes.name = name.value;
+      }
       if (target.kind === "text") {
         const topic = validateTopic(ctx.body.topic);
         if (!topic.ok) return refuse(topic.error);

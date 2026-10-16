@@ -16,6 +16,9 @@ import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Ticket } from "../models/ticket.js";
 import { Event } from "../models/event.js";
 import { LfgPost } from "../models/lfg-post.js";
+import { ReactionRoleConfig } from "../models/reaction-role-config.js";
+import { PollSchedule } from "../models/poll-schedule.js";
+import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import {
   buildProtectionMap,
   CHANNEL_LIMITS,
@@ -89,19 +92,31 @@ export async function loadProtection(
   channels: readonly ManagedChannelView[],
 ): Promise<Map<string, string[]>> {
   const guildId = guild.id;
-  const [config, managedVoice, owned, tickets, events, lfg] = await Promise.all(
-    [
-      readEffectiveConfig(),
-      ManagedVoiceChannel.find({ guildId }).lean(),
-      VoiceChannelOwnership.find({ guildId }).lean(),
-      Ticket.find({ guildId }).select("channelId").lean(),
-      Event.find({ guildId, state: { $in: ["scheduled", "active"] } }).lean(),
-      LfgPost.find({
-        guildId,
-        state: { $in: ["creating", "open"] },
-      }).lean(),
-    ],
-  );
+  const [
+    config,
+    managedVoice,
+    owned,
+    tickets,
+    events,
+    lfg,
+    reactionRoles,
+    polls,
+    announcements,
+  ] = await Promise.all([
+    readEffectiveConfig(),
+    ManagedVoiceChannel.find({ guildId }).lean(),
+    VoiceChannelOwnership.find({ guildId }).lean(),
+    Ticket.find({ guildId }).select("channelId").lean(),
+    Event.find({ guildId, state: { $in: ["scheduled", "active"] } }).lean(),
+    LfgPost.find({
+      guildId,
+      state: { $in: ["creating", "open"] },
+    }).lean(),
+    // Archived mappings no longer own their channel.
+    ReactionRoleConfig.find({ guildId, archivedAt: null }).lean(),
+    PollSchedule.find({ guildId }).lean(),
+    ScheduledAnnouncement.find({ guildId }).lean(),
+  ]);
   return buildProtectionMap({
     config,
     managedVoice: managedVoice.map((r) => ({
@@ -122,6 +137,19 @@ export async function loadProtection(
     lfg: lfg.map((l) => ({
       voiceChannelId: l.voiceChannelId ?? null,
       channelId: l.channelId,
+    })),
+    reactionRoles: reactionRoles.map((r) => ({
+      id: String(r._id),
+      channelId: r.channelId ?? null,
+      categoryId: r.categoryId ?? null,
+    })),
+    pollSchedules: polls.map((p) => ({
+      id: String(p._id),
+      channelId: p.channelId,
+    })),
+    announcements: announcements.map((a) => ({
+      id: String(a._id),
+      channelId: a.channelId,
     })),
     discord: [
       {
