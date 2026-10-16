@@ -127,7 +127,7 @@ export interface ConfigSchema {
   // Events — scheduled/temporary voice channels (#708)
   "events.enabled": boolean;
   "events.category_id": string; // Category the temp event voice channels are created under
-  "events.announcement_channel_id": string; // Channel where RSVP + reminder messages post
+  "events.announcement_channel_id": string; // Channel where event announcements + reminders post
   "events.timezone": string; // IANA zone used to interpret event start times (empty → server tz)
   "events.channel_prefix": string; // Prefix for auto-created event channel names
   "events.reminder_minutes": number; // How long before start the reminder is posted
@@ -135,7 +135,6 @@ export interface ConfigSchema {
   "events.default_duration_minutes": number; // Default event length when none is given
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
   "events.recurrence_enabled": boolean; // Allow recurring events (weekly/biweekly/monthly series)
-  "events.native.enabled": boolean; // Mirror events to Discord native scheduled events (#1034)
   "events.native.location": string; // Location text shown on the mirrored native event
 
   // LFG — ad-hoc "looking for group" posts (#957)
@@ -463,7 +462,6 @@ export const defaultConfig: ConfigSchema = {
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
   "events.recurrence_enabled": true,
-  "events.native.enabled": true, // Inert unless events.enabled is on
   "events.native.location":
     "Voice channel in this server (see the event announcement)",
 
@@ -1110,7 +1108,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   events: {
     title: "Events",
     description:
-      "Schedule server events that spin up a temporary voice channel shortly before they start, let members RSVP with buttons, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
+      "Schedule server events that spin up a temporary voice channel shortly before they start, announce each one with a Discord event link members can mark Interested on, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
   },
   lfg: {
     title: "LFG",
@@ -1843,7 +1841,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.announcement_channel_id": {
     label: "Event announcement channel",
     description:
-      "Text channel where the RSVP message and the pre-start reminder are posted.",
+      "Text channel where the event announcement (with the Discord event link) and the pre-start reminder are posted.",
     category: "events",
     type: "channel",
   },
@@ -1893,13 +1891,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Recurring events enabled",
     description:
       "Allow events to repeat weekly, every two weeks or monthly. When off, new events are one-off only and finished recurring events stop spawning their next occurrence (already-scheduled ones are unaffected).",
-    category: "events",
-    type: "boolean",
-  },
-  "events.native.enabled": {
-    label: "Mirror to Discord scheduled events",
-    description:
-      "On by default, and only when Events are enabled: also create each event as a Discord native scheduled event (the Events list at the top of the channel list), and keep it in sync when the event is edited, cancelled or finishes. Needs the Create Events (or Manage Events) permission for the bot; without it events are simply not mirrored and one warning is logged. Turn this off to keep events inside KoolBot only.",
     category: "events",
     type: "boolean",
   },

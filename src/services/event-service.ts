@@ -34,9 +34,11 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  * Unlike the lobby-driven dynamic channels in `VoiceChannelManager`, an
  * event's channel lifecycle is bound to its schedule: the channel is
  * created shortly before the start time and removed once the event ends
- * and empties past a grace period. A member RSVPs via Going / Maybe /
- * Can't buttons on an announcement message that shows a live attendee
- * count.
+ * and empties past a grace period. Every event is also a Discord native
+ * scheduled event (`NativeEventSync`) and is announced with that event's
+ * link: members mark Interested on Discord's own event card (#1175), so
+ * KoolBot runs no RSVP system of its own. Announcements posted before that
+ * change keep their old Going / Maybe / Can't buttons until the event ends.
  *
  * The lifecycle is driven by a single periodic scan (a one-minute
  * `CronJob`, mirroring `BirthdayService`'s "scan and decide" approach)
@@ -83,6 +85,7 @@ function isTerminalState(state: EventState): boolean {
   return state === "ended" || state === "cancelled";
 }
 
+/** @deprecated Legacy RSVP tally (#1175); only announcements posted before native-only events still use it. */
 export interface RsvpCounts {
   going: number;
   maybe: number;
@@ -142,7 +145,7 @@ export function parseEventDateTime(
   return parseZonedDateTime(dateStr, timeStr, tz);
 }
 
-/** Tally RSVPs by response. */
+/** Tally RSVPs by response. @deprecated Legacy RSVP data path (#1175). */
 export function countRsvps(rsvps: Array<{ status: RsvpStatus }>): RsvpCounts {
   const counts: RsvpCounts = { going: 0, maybe: 0, cant: 0 };
   for (const r of rsvps) {
@@ -219,6 +222,11 @@ export function formatEventWhen(event: {
 }): string {
   const zone = resolveTimezone(event.timezone);
   return `${formatInTimeZone(event.startTime, zone, "yyyy-MM-dd HH:mm")} (${zone})`;
+}
+
+/** Link to a native scheduled event; Discord renders it as an event card. */
+export function nativeEventUrl(guildId: string, nativeEventId: string): string {
+  return `https://discord.com/events/${guildId}/${nativeEventId}`;
 }
 
 /** Whether an event row belongs to a repeating series. */
@@ -513,7 +521,16 @@ export class EventService extends ScheduledService {
     // Keep the native scheduled event in line (#1034): creates it for events
     // that predate the toggle, pushes edits, and closes it on end/cancel.
     if (!windows.skipNative) {
+      const linkedBefore = event.nativeEventId;
       await this.nativeSync.syncEvent(event, guild, windows.native);
+      // The announcement carries the native event's link: refresh it when the
+      // link appeared (created or adopted after the post) or went away.
+      if (
+        linkedBefore !== event.nativeEventId &&
+        (event.state === "scheduled" || event.state === "active")
+      ) {
+        await this.updateAnnouncement(event);
+      }
       // A discarded duplicate's cleanup record has done its job once the
       // native event is closed.
       if (
@@ -639,7 +656,6 @@ export class EventService extends ScheduledService {
           categoryId: previous.categoryId,
           state: "scheduled",
           reminderSent: false,
-          rsvps: [],
           recurrence: previous.recurrence,
           seriesId,
           occurrenceIndex: index,
@@ -758,7 +774,6 @@ export class EventService extends ScheduledService {
       categoryId: input.categoryId ?? "",
       state: "scheduled",
       reminderSent: false,
-      rsvps: [],
       recurrence,
       createdBy: input.createdBy,
     });
@@ -769,10 +784,11 @@ export class EventService extends ScheduledService {
       event.seriesStart = input.startTime;
     }
     await event.save();
+    // Create the native event first so the announcement can carry its link.
+    await this.nativeSync.syncEvent(event);
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
     );
-    await this.nativeSync.syncEvent(event);
     logger.info(`Created event ${sanitizeForLog(String(event._id))}`);
     return event;
   }
@@ -927,15 +943,25 @@ export class EventService extends ScheduledService {
    * (the same lost-update defence as `claimEventChannel`'s
    * compare-and-set): the pipeline drops any previous entry for this
    * user and appends the new one in one document update, and the state
-   * filter doubles as the finished/missing guard. */
+   * filter doubles as the finished/missing guard.
+   *
+   * @deprecated Legacy RSVP buttons (#1175). Only announcements posted before
+   * native-only events still have them; new events use Discord's own
+   * Interested. `messageId` pins the click to the event's current
+   * announcement, so a button on any other message is refused. */
   public async setRsvp(
     eventId: string,
     userId: string,
     status: RsvpStatus,
+    messageId: string,
   ): Promise<IEvent | null> {
     if (!isValidObjectId(eventId)) return null;
     return Event.findOneAndUpdate(
-      { _id: eventId, state: { $nin: ["cancelled", "ended"] } },
+      {
+        _id: eventId,
+        state: { $nin: ["cancelled", "ended"] },
+        announcementMessageId: messageId,
+      },
       [
         {
           $set: {
@@ -1081,9 +1107,55 @@ export class EventService extends ScheduledService {
   // Announcement rendering
   // ---------------------------------------------------------------
 
-  /** Build the RSVP embed + button row for an event. Synchronous so the
-   * button handler can refresh the message in a single interaction update. */
+  /**
+   * The announcement for an event (#1175): a plain message whose content holds
+   * the native event's link, which Discord renders as an event card with its
+   * own Interested button. Mentions are disabled so a title or description can
+   * never ping anyone. Without a link (the native event could not be created,
+   * or the event is finished) the message is the same text without the card.
+   */
   public buildAnnouncementPayload(event: IEvent): {
+    content: string;
+    embeds: never[];
+    components: never[];
+    allowedMentions: { parse: never[] };
+  } {
+    const finished = isTerminalState(event.state);
+    const lines: string[] = [
+      event.state === "cancelled"
+        ? `❌ **${event.title}** (cancelled)`
+        : event.state === "ended"
+          ? `📅 **${event.title}** (ended)`
+          : `📅 **${event.title}**`,
+      `🕒 ${formatEventWhen(event)}`,
+    ];
+    if (event.description) lines.push(event.description);
+    if (isRecurring(event)) {
+      lines.push(`🔁 Repeats ${recurrenceLabel(event.recurrence)}`);
+    }
+    if (event.channelId && !finished) {
+      lines.push(`🔊 Voice channel: <#${event.channelId}>`);
+    }
+    if (event.nativeEventId && !finished) {
+      lines.push(nativeEventUrl(event.guildId, event.nativeEventId));
+    }
+    return {
+      content: lines.join("\n"),
+      embeds: [],
+      components: [],
+      allowedMentions: { parse: [] },
+    };
+  }
+
+  /**
+   * Build the old RSVP embed + button row.
+   *
+   * @deprecated Legacy (#1175): only used to keep rendering announcements
+   * posted before native-only events, which still carry Going / Maybe / Can't
+   * buttons. Synchronous so the button handler can refresh the message in a
+   * single interaction update.
+   */
+  public buildLegacyRsvpPayload(event: IEvent): {
     embeds: EmbedBuilder[];
     components: ActionRowBuilder<ButtonBuilder>[];
   } {
@@ -1333,7 +1405,14 @@ export class EventService extends ScheduledService {
     if (!channel) return gone;
     try {
       const message = await channel.messages.fetch(event.announcementMessageId);
-      await message.edit(this.buildAnnouncementPayload(event));
+      // A post that still carries buttons predates native-only events and
+      // keeps its RSVP embed; anything else gets the link announcement.
+      const legacy = message.components.length > 0;
+      await message.edit(
+        legacy
+          ? this.buildLegacyRsvpPayload(event)
+          : this.buildAnnouncementPayload(event),
+      );
       return true;
     } catch (error) {
       // The message, or the channel holding it, can go between the fetch
@@ -1376,9 +1455,15 @@ export class EventService extends ScheduledService {
           (overflow > 0 ? ` …and ${overflow} more` : "")
         : "";
     const where = event.channelId ? ` Join here: <#${event.channelId}>.` : "";
+    const link = event.nativeEventId
+      ? `\n${nativeEventUrl(event.guildId, event.nativeEventId)}`
+      : "";
 
+    // New events have no KoolBot RSVPs and no start-time ping (#1175): Discord
+    // notifies whoever marked Interested. Legacy RSVPs (events created before
+    // native-only events) are still pinged, as shipped in 2.0.0.
     const content =
-      `⏰ **${event.title}** starts at ${formatEventWhen(event)}.${where}` +
+      `⏰ **${event.title}** starts at ${formatEventWhen(event)}.${where}${link}` +
       (mentions ? `\n${mentions}` : "");
 
     await channel.send({

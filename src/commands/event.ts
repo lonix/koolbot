@@ -13,6 +13,7 @@ import {
   parseEventDateTime,
   formatEventWhen,
   countRsvps,
+  nativeEventUrl,
   isRecurring,
   recurrenceLabel,
   RecurrenceDisabledError,
@@ -282,14 +283,24 @@ async function handleList(
     .setColor(0x5865f2);
 
   for (const e of upcoming.slice(0, 15)) {
+    // Legacy RSVPs (events made before native-only events, #1175) still show
+    // their tally; everything else points at the native event.
     const counts = countRsvps(e.rsvps);
+    const legacyTally =
+      e.rsvps.length > 0
+        ? `✅ ${counts.going} · 🤔 ${counts.maybe} · 🚫 ${counts.cant}\n`
+        : "";
+    const link = e.nativeEventId
+      ? `${nativeEventUrl(e.guildId, e.nativeEventId)}\n`
+      : "";
     embed.addFields({
       name: e.title,
       value:
         `${formatEventWhen(e)} · ${e.state}` +
         (isRecurring(e) ? ` · 🔁 ${recurrenceLabel(e.recurrence)}` : "") +
         "\n" +
-        `✅ ${counts.going} · 🤔 ${counts.maybe} · 🚫 ${counts.cant}\n` +
+        legacyTally +
+        link +
         `ID: \`${e._id}\``,
       inline: false,
     });

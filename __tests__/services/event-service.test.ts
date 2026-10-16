@@ -247,13 +247,23 @@ describe("setRsvp", () => {
     };
     EventMock.findOneAndUpdate = jest.fn(async () => updated);
 
-    const result = await buildService().setRsvp(EVENT_ID, "user-1", "going");
+    const result = await buildService().setRsvp(
+      EVENT_ID,
+      "user-1",
+      "going",
+      "msg-1",
+    );
 
     expect(result).toBe(updated);
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
-      // The state filter doubles as the finished-event guard.
-      { _id: EVENT_ID, state: { $nin: ["cancelled", "ended"] } },
+      // The state filter doubles as the finished-event guard, and the click
+      // must come from the event's current announcement message (#1175).
+      {
+        _id: EVENT_ID,
+        state: { $nin: ["cancelled", "ended"] },
+        announcementMessageId: "msg-1",
+      },
       // Pipeline update: drop any previous entry for the user, append the
       // new one — both inside one atomic document update.
       [
@@ -287,7 +297,12 @@ describe("setRsvp", () => {
   it("returns null when the event is missing, ended or cancelled", async () => {
     EventMock.findOneAndUpdate = jest.fn(async () => null);
 
-    const result = await buildService().setRsvp(EVENT_ID, "user-1", "maybe");
+    const result = await buildService().setRsvp(
+      EVENT_ID,
+      "user-1",
+      "maybe",
+      "msg-1",
+    );
 
     expect(result).toBeNull();
   });
@@ -295,7 +310,12 @@ describe("setRsvp", () => {
   it("returns null for a malformed event id without touching the database", async () => {
     EventMock.findOneAndUpdate = jest.fn(async () => null);
 
-    const result = await buildService().setRsvp("not-an-id", "user-1", "cant");
+    const result = await buildService().setRsvp(
+      "not-an-id",
+      "user-1",
+      "cant",
+      "msg-1",
+    );
 
     expect(result).toBeNull();
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
@@ -908,7 +928,7 @@ describe("recurring event lifecycle", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("spawns the next occurrence with fresh RSVPs and the series identity", async () => {
+  it("spawns the next occurrence with the series identity", async () => {
     const { service, postAnnouncement } = buildService();
     const next = await (service as unknown as Spawner).spawnNextOccurrence(
       ended(),
@@ -920,7 +940,6 @@ describe("recurring event lifecycle", () => {
       description: "Bring snacks",
       state: "scheduled",
       reminderSent: false,
-      rsvps: [],
       recurrence: "weekly",
       seriesId: "occ-0",
       occurrenceIndex: 1,
@@ -1787,5 +1806,220 @@ describe("recurring event lifecycle", () => {
       seriesId: "occ-0",
     });
     expect(sort).toHaveBeenCalledWith({ occurrenceIndex: 1 });
+  });
+});
+
+// Native-only events (#1175): new events are announced with the native event
+// link; announcements and RSVPs shipped in 2.0.0 keep working.
+describe("link announcement and legacy RSVP compatibility (#1175)", () => {
+  type Priv = {
+    buildAnnouncementPayload: (e: unknown) => {
+      content: string;
+      embeds: unknown[];
+      components: unknown[];
+      allowedMentions: { parse: unknown[] };
+    };
+    buildLegacyRsvpPayload: (e: unknown) => {
+      embeds: unknown[];
+      components: unknown[];
+    };
+    updateAnnouncement: (e: unknown) => Promise<boolean>;
+    fetchTextChannelDetailed: jest.Mock;
+    fetchTextChannel: jest.Mock;
+    postReminder: (e: unknown) => Promise<void>;
+    postAnnouncement: jest.Mock;
+    nativeSync: { syncEvent: jest.Mock };
+    processEvent: (...a: unknown[]) => Promise<void>;
+  };
+
+  function svc(): Priv {
+    EventService.reset();
+    return EventService.getInstance({} as never) as unknown as Priv;
+  }
+
+  function row(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      _id: "ev-1",
+      guildId: "guild-1",
+      title: "Game Night",
+      description: "Bring snacks",
+      startTime: new Date("2026-07-04T20:00:00Z"),
+      timezone: "UTC",
+      durationMinutes: 120,
+      channelId: null,
+      announcementChannelId: "chan-1",
+      announcementMessageId: "msg-1",
+      state: "scheduled",
+      reminderSent: false,
+      rsvps: [],
+      recurrence: "none",
+      seriesId: null,
+      nativeEventId: "native-1",
+      save: jest.fn(async () => undefined),
+      ...overrides,
+    };
+  }
+
+  it("announces with the native event link, no buttons and no pings", () => {
+    const payload = svc().buildAnnouncementPayload(row());
+    expect(payload.content).toContain("**Game Night**");
+    expect(payload.content).toContain(
+      "https://discord.com/events/guild-1/native-1",
+    );
+    expect(payload.embeds).toEqual([]);
+    expect(payload.components).toEqual([]);
+    expect(payload.allowedMentions).toEqual({ parse: [] });
+  });
+
+  it("omits the link when there is no native event, and for a finished event", () => {
+    expect(
+      svc().buildAnnouncementPayload(row({ nativeEventId: null })).content,
+    ).not.toContain("discord.com/events");
+    const cancelled = svc().buildAnnouncementPayload(
+      row({ state: "cancelled" }),
+    ).content;
+    expect(cancelled).toContain("(cancelled)");
+    expect(cancelled).not.toContain("discord.com/events");
+  });
+
+  function stubMessage(components: unknown[]): {
+    edit: jest.Mock;
+    service: Priv;
+  } {
+    const edit = jest.fn(async () => undefined);
+    const service = svc();
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: {
+        messages: { fetch: jest.fn(async () => ({ components, edit })) },
+      },
+      gone: false,
+    }));
+    return { edit, service };
+  }
+
+  it("re-renders a legacy announcement (it still has buttons) as the RSVP embed", async () => {
+    const { edit, service } = stubMessage([{ type: 1 }]);
+    await service.updateAnnouncement(
+      row({ rsvps: [{ userId: "u", status: "going" }] }),
+    );
+    const sent = edit.mock.calls[0][0] as {
+      embeds: unknown[];
+      components: unknown[];
+    };
+    expect(sent.embeds).toHaveLength(1);
+    expect(sent.components).toHaveLength(1);
+  });
+
+  it("re-renders a link announcement as plain content and clears embeds and components", async () => {
+    const { edit, service } = stubMessage([]);
+    await service.updateAnnouncement(row());
+    const sent = edit.mock.calls[0][0] as {
+      content: string;
+      embeds: unknown[];
+      components: unknown[];
+    };
+    expect(sent.content).toContain("discord.com/events/guild-1/native-1");
+    expect(sent.embeds).toEqual([]);
+    expect(sent.components).toEqual([]);
+  });
+
+  it("disables a legacy announcement's buttons once the event has ended", () => {
+    const payload = svc().buildLegacyRsvpPayload(row({ state: "ended" }));
+    const buttons = (
+      payload.components[0] as {
+        components: Array<{ data: { disabled?: boolean } }>;
+      }
+    ).components;
+    expect(buttons.every((b) => b.data.disabled === true)).toBe(true);
+  });
+
+  async function remind(event: Record<string, unknown>): Promise<unknown> {
+    const service = svc();
+    const send = jest.fn(async () => undefined);
+    service.fetchTextChannel = jest.fn(async () => ({ send }));
+    await service.postReminder(event);
+    return send.mock.calls[0][0];
+  }
+
+  it("the reminder carries the link and pings nobody for a new event", async () => {
+    const sent = (await remind(row())) as {
+      content: string;
+      allowedMentions: unknown;
+    };
+    expect(sent.content).toContain("starts at");
+    expect(sent.content).toContain("discord.com/events/guild-1/native-1");
+    expect(sent.content).not.toContain("<@");
+    expect(sent.allowedMentions).toEqual({ users: [] });
+  });
+
+  it("the reminder still pings Going/Maybe RSVPs of a legacy event with no native fields", async () => {
+    const sent = (await remind(
+      row({
+        nativeEventId: null,
+        rsvps: [
+          { userId: "u1", status: "going" },
+          { userId: "u2", status: "maybe" },
+          { userId: "u3", status: "cant" },
+        ],
+      }),
+    )) as { content: string; allowedMentions: { users: string[] } };
+    expect(sent.content).toContain("<@u1> <@u2>");
+    expect(sent.content).not.toContain("<@u3>");
+    expect(sent.allowedMentions.users).toEqual(["u1", "u2"]);
+  });
+
+  it("createEvent creates the native event before posting the announcement", async () => {
+    const service = svc();
+    const order: string[] = [];
+    service.nativeSync = {
+      syncEvent: jest.fn(async () => {
+        order.push("native");
+      }),
+    };
+    service.postAnnouncement = jest.fn(async () => {
+      order.push("announce");
+    });
+    EventMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: unknown,
+    ) {
+      Object.assign(this, doc, { save: async () => undefined });
+    } as never);
+    await (
+      service as unknown as {
+        createEvent: (i: unknown) => Promise<unknown>;
+      }
+    ).createEvent({
+      guildId: "guild-1",
+      title: "T",
+      description: "",
+      startTime: new Date(),
+      timezone: "UTC",
+      durationMinutes: 60,
+      createdBy: "admin",
+    });
+    expect(order).toEqual(["native", "announce"]);
+  });
+
+  it("refreshes the announcement when the native link appears during a scan", async () => {
+    const service = svc();
+    const event = row({ nativeEventId: null });
+    service.nativeSync = {
+      syncEvent: jest.fn(async () => {
+        event.nativeEventId = "native-9";
+      }),
+    };
+    const update = jest.fn(async () => true);
+    (
+      service as unknown as { updateAnnouncement: jest.Mock }
+    ).updateAnnouncement = update;
+    await service.processEvent(event, {}, new Date("2026-07-04T10:00:00Z"), {
+      reminderMs: 0,
+      leadMs: 0,
+      graceMs: 0,
+    });
+    expect(update).toHaveBeenCalledWith(event);
   });
 });
