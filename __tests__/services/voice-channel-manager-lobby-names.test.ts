@@ -28,8 +28,12 @@ jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
   VoiceChannelTracker: { getInstance: (): unknown => ({}) },
 }));
 
-const { resolveLobbyChannelName, resolveOfflineLobbyNames } =
-  await import("../../src/services/voice-channel-manager.js");
+const {
+  resolveLobbyChannelName,
+  resolveOfflineLobbyNames,
+  isNewChannelTriggerName,
+  VoiceChannelManager,
+} = await import("../../src/services/voice-channel-manager.js");
 
 const reader =
   (values: Record<string, string>) =>
@@ -106,5 +110,55 @@ describe("resolveOfflineLobbyNames", () => {
     );
     expect(names).toContain("Legacy Closed");
     expect(names).not.toContain("");
+  });
+});
+
+describe("isNewChannelTriggerName", () => {
+  it("matches the legacy trigger name exactly", () => {
+    expect(isNewChannelTriggerName("➕ New Channel")).toBe(true);
+    expect(isNewChannelTriggerName("New Channel")).toBe(false);
+    expect(isNewChannelTriggerName("➕ new channel")).toBe(false);
+  });
+});
+
+describe("getInMemoryManagedChannels", () => {
+  it("lists rooms, waiting rooms, pending writes and per-room state", () => {
+    VoiceChannelManager.reset();
+    const manager: any = VoiceChannelManager.getInstance({
+      user: { id: "bot" },
+      channels: { cache: new Map() },
+    } as never);
+    manager.userChannels.set("m1", { id: "room1" });
+    manager.waitingRoomToMain.set("wait1", "room2");
+    manager.waitingRooms.set("room3", "wait3");
+    manager.pendingManagedChannels.set("pend1", {
+      guildId: "g",
+      kind: "channel",
+    });
+    manager.controlPanels.set("panel1", {
+      channelId: "panel1",
+      messageId: "x",
+    });
+    manager.customChannelNames.set("named1", "x");
+    manager.ownershipQueue.set("queued1", ["u"]);
+    manager.liveChannels.add("live1");
+    const ids = manager
+      .getInMemoryManagedChannels()
+      .map((c: { channelId: string }) => c.channelId);
+    for (const id of [
+      "room1",
+      "wait1",
+      "room2",
+      "room3",
+      "wait3",
+      "pend1",
+      "panel1",
+      "named1",
+      "queued1",
+      "live1",
+    ]) {
+      expect(ids).toContain(id);
+    }
+    VoiceChannelManager.reset();
   });
 });

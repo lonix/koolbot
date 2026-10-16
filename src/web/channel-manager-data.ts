@@ -13,8 +13,10 @@ import {
 import { readEffectiveConfig } from "../services/server-scan-service.js";
 import { ConfigService } from "../services/config-service.js";
 import {
+  isNewChannelTriggerName,
   resolveLobbyChannelName,
   resolveOfflineLobbyNames,
+  VoiceChannelManager,
 } from "../services/voice-channel-manager.js";
 import { ManagedVoiceChannel } from "../models/managed-voice-channel.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
@@ -97,6 +99,12 @@ export async function loadProtection(
   channels: readonly ManagedChannelView[],
 ): Promise<Map<string, string[]>> {
   const guildId = guild.id;
+  // What the voice service holds in memory (rooms, waiting rooms, writes that
+  // failed and are queued for retry). Throws if the service isn't there, so a
+  // delete fails closed.
+  const voiceInMemory = VoiceChannelManager.getInstance(
+    guild.client,
+  ).getInMemoryManagedChannels();
   const [
     config,
     managedVoice,
@@ -173,6 +181,8 @@ export async function loadProtection(
       },
     ].map((d) => ({ label: d.label, channelId: d.id ?? null })),
     lobbyNames,
+    isTriggerName: isNewChannelTriggerName,
+    voiceInMemory,
     channels,
   });
 }

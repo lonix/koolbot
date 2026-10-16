@@ -126,6 +126,18 @@ export function siblingsOf(
   );
 }
 
+/** The sibling a one-step move in `direction` swaps with, or null at the edge. */
+export function neighbourOf(
+  channels: readonly ManagedChannelView[],
+  target: ManagedChannelView,
+  direction: "up" | "down",
+): ManagedChannelView | null {
+  const siblings = siblingsOf(channels, target);
+  const at = siblings.findIndex((c) => c.id === target.id);
+  if (at < 0) return null;
+  return siblings[direction === "up" ? at - 1 : at + 1] ?? null;
+}
+
 /** Whether the channel can move one step in `direction` among its siblings. */
 export function canMove(
   channels: readonly ManagedChannelView[],
@@ -301,6 +313,11 @@ export interface ProtectionInputs {
   }>;
   /** Open looking-for-group posts. */
   lfg: ReadonlyArray<{ voiceChannelId: string | null; channelId: string }>;
+  /**
+   * Channels the voice service holds as its own in memory (rooms, waiting
+   * rooms, writes still pending), each with the reason to show.
+   */
+  voiceInMemory: ReadonlyArray<{ channelId: string; reason: string }>;
   /** Reaction-role mappings that have not been archived. */
   reactionRoles: ReadonlyArray<{
     id: string;
@@ -319,6 +336,11 @@ export interface ProtectionInputs {
    * legacy keys and defaults applied).
    */
   lobbyNames: readonly string[];
+  /**
+   * The voice service's own test for the legacy join-to-create trigger name
+   * (`isNewChannelTriggerName`), passed in so there is one definition.
+   */
+  isTriggerName: (name: string) => boolean;
   /** The live channels, for finding the lobby by name. */
   channels: readonly ManagedChannelView[];
 }
@@ -399,6 +421,7 @@ export function buildProtectionMap(
       `a scheduled announcement's channel (Announcements, announcement ${a.id})`,
     );
   }
+  for (const v of input.voiceInMemory) add(v.channelId, v.reason);
   for (const d of input.discord) add(d.channelId, d.label);
 
   // The voice lobby. VoiceChannelManager only trusts a configured lobby id
@@ -416,6 +439,14 @@ export function buildProtectionMap(
     .map((n) => n.trim().toLowerCase())
     .filter(Boolean);
   for (const c of input.channels) {
+    // The legacy join-to-create trigger is identified by name alone, anywhere
+    // in the server, exactly as the voice service does.
+    if (c.kind === "voice" && input.isTriggerName(c.name)) {
+      add(
+        c.id,
+        'the legacy "New Channel" join-to-create trigger (Voice Channels)',
+      );
+    }
     if (c.kind !== "voice" && !isStage(c)) continue;
     if (category && c.parentId !== category) continue;
     if (names.includes(c.name.trim().toLowerCase())) {

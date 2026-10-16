@@ -1475,12 +1475,16 @@ as the other admin pages. It edits structure only; permission overwrites stay in
 - **Edit** the same fields, including moving a channel to another category (permissions are not rewritten on a move).
   Only fields you changed are sent to Discord, so a no-op save never spends a rename. A field posted back as the
   form showed it (a name, a topic, a bitrate shown rounded to whole kbps) counts as unchanged and is never rewritten.
-- **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord.
+  The form remembers what it displayed: only fields you changed are saved, and if a field you changed was altered
+  elsewhere (another admin, Discord) since you opened the page, the save is refused instead of overwriting it.
+- **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord. Each
+  button is drawn for the neighbour it swaps with; if the order changed since the page was opened, the move is refused.
 - **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
-  legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms, ticket channels, channels of events that have not ended,
+  legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms (including ones the voice feature
+  holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break

@@ -29,6 +29,7 @@ import {
   buildChannelTree,
   canMove,
   checkCapacity,
+  neighbourOf,
   confirmationToken,
   deleteVerdict,
   isSnowflake,
@@ -353,61 +354,110 @@ export function createChannelManagerRouter(client: Client): Router {
       const target = targetOf(ctx);
       if ("ok" in target) return target;
       const changes: Record<string, unknown> = {};
-      // A name posted back exactly as it is now is never validated or
-      // rewritten: normalising it could rename a channel the admin only meant
-      // to change the topic of.
-      const submitted = String(ctx.body.name ?? "");
-      if (submitted !== target.name) {
-        const name = validateName(submitted);
+      // The form carries what it displayed (`orig_*` fields). A field counts
+      // as edited only when the admin changed it from that baseline, so saving
+      // one field never writes the others back: not even their normalised
+      // forms (a bitrate shown rounded), and not stale values over a newer
+      // edit made elsewhere. An edited field whose live value no longer matches
+      // the baseline is a lost-update conflict and the whole save is refused.
+      // A request without baselines (a hand-made POST) is compared to the live
+      // channel instead.
+      const body = ctx.body;
+      const posted = (key: string): string => String(body[key] ?? "");
+      const baseline = (key: string, live: string): string =>
+        typeof body[`orig_${key}`] === "string"
+          ? (body[`orig_${key}`] as string)
+          : live;
+      const stale: string[] = [];
+      const nl = (v: string): string => v.replace(/\r\n?/g, "\n");
+      // A browser posts a textarea with CRLF breaks and drops a leading newline.
+      const sameTopic = (a: string, b: string): boolean =>
+        nl(a) === nl(b) ||
+        nl(a) === nl(b).replace(/^\n/, "") ||
+        nl(a).replace(/^\n/, "") === nl(b);
+      const sameNumber = (a: string, b: string): boolean =>
+        a.trim() === b.trim() ||
+        (/^\d*$/.test(a.trim()) &&
+          /^\d*$/.test(b.trim()) &&
+          Number(a.trim() || 0) === Number(b.trim() || 0));
+
+      if (posted("name") !== baseline("name", target.name)) {
+        const name = validateName(posted("name"));
         if (!name.ok) return refuse(name.error);
-        if (name.value !== target.name) changes.name = name.value;
+        if (name.value !== target.name) {
+          if (target.name !== baseline("name", target.name)) stale.push("name");
+          else changes.name = name.value;
+        }
       }
       if (target.kind === "text") {
-        // A browser posts a textarea with CRLF line breaks and drops a leading
-        // newline, so compare in that form before normalising: an untouched
-        // topic is never rewritten.
-        const current = target.topic ?? "";
-        const posted = String(ctx.body.topic ?? "").replace(/\r\n?/g, "\n");
-        if (posted !== current && posted !== current.replace(/^\n/, "")) {
-          const topic = validateTopic(posted);
+        const live = target.topic ?? "";
+        if (!sameTopic(posted("topic"), baseline("topic", live))) {
+          const topic = validateTopic(nl(posted("topic")));
           if (!topic.ok) return refuse(topic.error);
-          if (topic.value !== current) changes.topic = topic.value;
+          if (topic.value !== live) {
+            if (!sameTopic(live, baseline("topic", live))) stale.push("topic");
+            else changes.topic = topic.value;
+          }
         }
       }
       if (target.kind === "voice") {
-        const limit = validateUserLimit(ctx.body.userLimit);
-        if (!limit.ok) return refuse(limit.error);
-        if (limit.value !== (target.userLimit ?? 0)) {
-          changes.userLimit = limit.value;
+        const liveLimit = String(target.userLimit ?? "");
+        if (
+          !sameNumber(posted("userLimit"), baseline("userLimit", liveLimit))
+        ) {
+          const limit = validateUserLimit(posted("userLimit"));
+          if (!limit.ok) return refuse(limit.error);
+          if (limit.value !== (target.userLimit ?? 0)) {
+            if (!sameNumber(liveLimit, baseline("userLimit", liveLimit))) {
+              stale.push("user limit");
+            } else changes.userLimit = limit.value;
+          }
         }
         // The form shows the bitrate rounded to whole kbps (65536 bps shows
-        // 66), so a value posted back equal to what was shown means "left
-        // alone": it is neither validated against the server maximum nor sent.
-        const shown = target.bitrate
+        // 66); a value posted back as shown is neither validated against the
+        // server maximum nor sent.
+        const liveShown = target.bitrate
           ? String(Math.round(target.bitrate / 1000))
           : "";
-        if (String(ctx.body.bitrate ?? "").trim() !== shown) {
-          const bitrate = validateBitrateKbps(ctx.body.bitrate, ctx.maxBitrate);
+        if (
+          posted("bitrate").trim() !== baseline("bitrate", liveShown).trim()
+        ) {
+          const bitrate = validateBitrateKbps(body.bitrate, ctx.maxBitrate);
           if (!bitrate.ok) return refuse(bitrate.error);
           if (bitrate.value !== undefined && bitrate.value !== target.bitrate) {
-            changes.bitrate = bitrate.value;
+            if (liveShown !== baseline("bitrate", liveShown).trim()) {
+              stale.push("bitrate");
+            } else changes.bitrate = bitrate.value;
           }
         }
       }
       if (target.kind !== "category") {
-        const parent = resolveParent(ctx.channels, ctx.body.parent);
-        if (!parent.ok) return refuse(parent.error);
-        if (parent.value !== target.parentId) {
-          const room = checkCapacity(ctx.channels, {
-            parentId: parent.value,
-            creating: false,
-            movingFrom: target.parentId,
-          });
-          if (!room.ok) return refuse(room.error);
-          changes.parent = parent.value;
-          // Moving must not rewrite the channel's permissions.
-          changes.lockPermissions = false;
+        const liveParent = target.parentId ?? "";
+        if (posted("parent").trim() !== baseline("parent", liveParent).trim()) {
+          const parent = resolveParent(ctx.channels, body.parent);
+          if (!parent.ok) return refuse(parent.error);
+          if (parent.value !== target.parentId) {
+            if (liveParent !== baseline("parent", liveParent).trim()) {
+              stale.push("category");
+            } else {
+              const room = checkCapacity(ctx.channels, {
+                parentId: parent.value,
+                creating: false,
+                movingFrom: target.parentId,
+              });
+              if (!room.ok) return refuse(room.error);
+              changes.parent = parent.value;
+              // Moving must not rewrite the channel's permissions.
+              changes.lockPermissions = false;
+            }
+          }
         }
+      }
+      if (stale.length > 0) {
+        return refuse(
+          `"${target.name}" was changed elsewhere since you opened this page (${stale.join(", ")}). Nothing was saved; reload the page and make your edit again.`,
+          { targetId: target.id, details: { stale } },
+        );
       }
       const fields = Object.keys(changes).filter(
         (k) => k !== "lockPermissions",
@@ -455,6 +505,17 @@ export function createChannelManagerRouter(client: Client): Router {
       if (!canMove(ctx.channels, target, direction)) {
         return refuse(
           `"${target.name}" is already ${direction === "up" ? "first" : "last"}.`,
+        );
+      }
+      // The button was drawn for a particular neighbour. If the order changed
+      // since the page was shown, the same click would move it somewhere the
+      // admin didn't see, so refuse and let them look again.
+      const expected = ctx.body.neighbor;
+      const live = neighbourOf(ctx.channels, target, direction);
+      if (typeof expected === "string" && expected !== (live?.id ?? "")) {
+        return refuse(
+          `The order around "${target.name}" changed since you opened this page. Nothing was moved; reload and try again.`,
+          { targetId: target.id, details: { direction, stale: true } },
         );
       }
       const channel = await liveChannel(ctx.guild, target.id);

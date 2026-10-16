@@ -496,6 +496,122 @@ describe("POST /channels/:id/edit", () => {
     expect(mockEdit).not.toHaveBeenCalled();
   });
 
+  it("a topic-only save after the channel was renamed elsewhere leaves the name alone", async () => {
+    // The form was opened when the channel was called "old-name"; someone has
+    // since renamed it. Posting the old name back must not rename it back.
+    channels[1] = view(TEXT, {
+      name: "renamed-elsewhere",
+      parentId: CAT,
+      topic: "hi",
+    });
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "old-name",
+      topic: "new topic",
+      parent: CAT,
+      orig_name: "old-name",
+      orig_topic: "hi",
+      orig_parent: CAT,
+    });
+    expect(flashOf(res)).toMatchObject({ type: "ok" });
+    const sent = mockEdit.mock.calls[0][0];
+    expect(sent.topic).toBe("new topic");
+    expect(sent).not.toHaveProperty("name");
+  });
+
+  it.each([
+    [
+      "topic",
+      { topic: "mine", orig_topic: "hi" },
+      { topic: "changed elsewhere" },
+    ],
+    ["name", { name: "mine", orig_name: "general" }, { name: "theirs" }],
+    [
+      "category",
+      { parent: "", orig_parent: CAT },
+      { parentId: "100000000000000090" },
+    ],
+  ])(
+    "refuses a %s edit when that field was changed elsewhere since the form was opened",
+    async (_field, posted, liveChange) => {
+      channels.push(
+        view("100000000000000090", { kind: "category", name: "Other" }),
+      );
+      channels[1] = view(TEXT, {
+        name: "general",
+        parentId: CAT,
+        topic: "hi",
+        ...liveChange,
+      });
+      await mount();
+      const res = await harness.post(`/channels/${TEXT}/edit`, {
+        name: "general",
+        topic: "hi",
+        parent: CAT,
+        orig_name: "general",
+        orig_topic: "hi",
+        orig_parent: CAT,
+        ...posted,
+      });
+      const flash = flashOf(res);
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("changed elsewhere");
+      expect(mockEdit).not.toHaveBeenCalled();
+      expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("refuses a bitrate or user limit edit that was changed elsewhere in the meantime", async () => {
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 9,
+      bitrate: 80000,
+    });
+    await mount();
+    for (const posted of [
+      {
+        userLimit: "5",
+        orig_userLimit: "4",
+        bitrate: "64",
+        orig_bitrate: "64",
+      },
+      {
+        userLimit: "4",
+        orig_userLimit: "4",
+        bitrate: "70",
+        orig_bitrate: "64",
+      },
+    ]) {
+      const res = await harness.post(`/channels/${VOICE}/edit`, {
+        name: "Hangout",
+        orig_name: "Hangout",
+        parent: CAT,
+        orig_parent: CAT,
+        ...posted,
+      });
+      expect(flashOf(res).msg).toContain("changed elsewhere");
+    }
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+
+  it("saves an edited field while leaving a field changed elsewhere alone", async () => {
+    channels[1] = view(TEXT, { name: "theirs", parentId: CAT, topic: "hi" });
+    await mount();
+    await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      orig_name: "general",
+      topic: "mine",
+      orig_topic: "hi",
+      parent: CAT,
+      orig_parent: CAT,
+    });
+    const sent = mockEdit.mock.calls[0][0];
+    expect(sent).toMatchObject({ topic: "mine" });
+    expect(sent).not.toHaveProperty("name");
+  });
+
   it("renames, and reports the name Discord returned", async () => {
     mockEdit.mockResolvedValue({ name: "normalised-name" });
     await mount();
@@ -669,6 +785,23 @@ describe("POST /channels/:id/move", () => {
       direction: "up",
     });
     expect(flashOf(first).msg).toContain("already first");
+    expect(mockSetPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a move drawn for a neighbour that is no longer adjacent", async () => {
+    await mount();
+    // TEXT2 sits below TEXT; the page showed Up swapping with some other channel.
+    const stale = await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+      neighbor: "100000000000000099",
+    });
+    expect(flashOf(stale).msg).toContain("changed since you opened this page");
+    expect(mockSetPosition).not.toHaveBeenCalled();
+    const fresh = await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+      neighbor: TEXT,
+    });
+    expect(flashOf(fresh).type).toBe("ok");
     expect(mockSetPosition).toHaveBeenCalledTimes(1);
   });
 

@@ -4,6 +4,7 @@ import { escapeHtml } from "./html.js";
 import {
   CHANNEL_LIMITS,
   canMove,
+  neighbourOf,
   type CategoryNode,
   type ChannelTree,
   type DeleteVerdict,
@@ -65,7 +66,13 @@ function fieldRows(
   off: string,
 ): string {
   const kind = c?.kind ?? null;
-  const maxKbps = Math.floor(p.maxBitrate / 1000);
+  // An existing bitrate above today's maximum (the server lost a boost level)
+  // must stay inside the control's range, or the browser would block even an
+  // unrelated edit. The server still validates any value that is changed.
+  const maxKbps = Math.max(
+    Math.floor(p.maxBitrate / 1000),
+    c?.bitrate ? Math.round(c.bitrate / 1000) : 0,
+  );
   const minKbps = CHANNEL_LIMITS.bitrateMin / 1000;
   const topic =
     kind === null || kind === "text"
@@ -78,14 +85,33 @@ function fieldRows(
       <input type="number" name="userLimit" min="0" max="${CHANNEL_LIMITS.userLimitMax}" value="${escapeHtml(c?.userLimit ?? "")}"${off}>
       <span class="muted">0 or empty means no limit</span></label>
     <label>Bitrate in kbps${kind === null ? " (voice only)" : ""}
-      <input type="number" name="bitrate" min="${minKbps}" max="${maxKbps}" value="${c?.bitrate ? escapeHtml(Math.round(c.bitrate / 1000)) : ""}"${off}>
-      <span class="muted">${minKbps} to ${maxKbps}; empty keeps Discord's default</span></label>`
+      <input type="number" name="bitrate" min="${Math.min(minKbps, c?.bitrate ? Math.round(c.bitrate / 1000) : minKbps)}" max="${maxKbps}" value="${c?.bitrate ? escapeHtml(Math.round(c.bitrate / 1000)) : ""}"${off}>
+      <span class="muted">${minKbps} to ${Math.floor(p.maxBitrate / 1000)}; empty keeps Discord's default</span></label>`
       : "";
   const parent =
     kind === "category"
       ? ""
       : parentSelect(tree, c?.parentId ?? null, "Category", off !== "");
   return `${topic}${voice}${parent}`;
+}
+
+/**
+ * What the edit form displayed, as hidden fields. The edit handler writes only
+ * fields the admin changed from these, and refuses the save when a field they
+ * changed was altered elsewhere in the meantime.
+ */
+function baselineInputs(c: ManagedChannelView): string {
+  const field = (name: string, value: string): string =>
+    `<input type="hidden" name="orig_${name}" value="${escapeHtml(value)}">`;
+  return [
+    field("name", c.name),
+    c.kind === "text" ? field("topic", c.topic ?? "") : "",
+    c.kind === "voice" ? field("userLimit", String(c.userLimit ?? "")) : "",
+    c.kind === "voice"
+      ? field("bitrate", c.bitrate ? String(Math.round(c.bitrate / 1000)) : "")
+      : "",
+    c.kind === "category" ? "" : field("parent", c.parentId ?? ""),
+  ].join("");
 }
 
 function protectionNote(c: ManagedChannelView, p: ChannelManagerProps): string {
@@ -121,12 +147,12 @@ function actions(
   const name = escapeHtml(c.name);
   const all = p.channels ?? [];
   const move = (dir: "up" | "down", label: string): string =>
-    `<form method="POST" action="${CHANNELS_PATH}/${id}/move" class="inline-form">${csrf}<input type="hidden" name="direction" value="${dir}"><button type="submit" class="btn btn-sm"${canMove(all, c, dir) && p.botCanManage ? "" : " disabled"} aria-label="Move ${name} ${dir}">${label}</button></form>`;
+    `<form method="POST" action="${CHANNELS_PATH}/${id}/move" class="inline-form">${csrf}<input type="hidden" name="direction" value="${dir}"><input type="hidden" name="neighbor" value="${escapeHtml(neighbourOf(all, c, dir)?.id ?? "")}"><button type="submit" class="btn btn-sm"${canMove(all, c, dir) && p.botCanManage ? "" : " disabled"} aria-label="Move ${name} ${dir}">${label}</button></form>`;
   if (c.kind === "other") {
     return `<span class="muted">Not managed here (${escapeHtml(c.typeLabel)})</span>`;
   }
   const edit = `<details class="inline-edit"><summary>Edit</summary>
-    <form method="POST" action="${CHANNELS_PATH}/${id}/edit" class="stack">${csrf}
+    <form method="POST" action="${CHANNELS_PATH}/${id}/edit" class="stack">${csrf}${baselineInputs(c)}
       <label>Name <input type="text" name="name" value="${name}" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}></label>
       ${fieldRows(c, p, tree, off)}
       <button type="submit" class="btn btn-primary"${off}>Save changes</button>

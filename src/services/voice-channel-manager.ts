@@ -146,6 +146,16 @@ export async function resolveOfflineLobbyNames(
 /** Legacy trigger channel name; reserved so rooms cannot spoof it (#1148). */
 const NEW_CHANNEL_TRIGGER_NAME = "➕ New Channel";
 
+/**
+ * Is this voice channel name the legacy "New Channel" join-to-create trigger?
+ * The one test the voice handlers and the Channel Manager's delete protection
+ * share. It is name-only (not limited to the managed category); callers add
+ * their own "is not one of our rooms" check where it matters.
+ */
+export function isNewChannelTriggerName(name: string): boolean {
+  return name === NEW_CHANNEL_TRIGGER_NAME;
+}
+
 /** Thrown when a transfer is requested by someone who no longer owns the room (#1143). */
 export class NotRoomOwnerError extends Error {
   constructor(message = "Not the current owner of this channel") {
@@ -970,6 +980,56 @@ export class VoiceChannelManager {
    */
   public hasCustomName(channelId: string): boolean {
     return this.customChannelNames.has(channelId);
+  }
+
+  /**
+   * Every channel the service currently holds as its own that may not be in
+   * Mongo yet or at all: member rooms, waiting rooms (and the rooms they serve),
+   * channels whose managed-set write failed and is queued for retry
+   * (`pendingManagedChannels`), rooms with a control panel, custom name,
+   * ownership queue or live flag. Read by the Channel Manager's delete
+   * protection so a database outage or a write that has not landed yet cannot
+   * make an active room look unmanaged.
+   */
+  public getInMemoryManagedChannels(): Array<{
+    channelId: string;
+    reason: string;
+  }> {
+    const room = "a temporary voice channel (Voice Channels, held in memory)";
+    const out: Array<{ channelId: string; reason: string }> = [];
+    for (const channel of this.userChannels.values()) {
+      out.push({ channelId: channel.id, reason: room });
+    }
+    for (const [waitingId, mainId] of this.waitingRoomToMain) {
+      out.push({
+        channelId: waitingId,
+        reason: "a waiting room for a temporary voice channel (Voice Channels)",
+      });
+      out.push({ channelId: mainId, reason: room });
+    }
+    for (const [mainId, waitingId] of this.waitingRooms) {
+      out.push({ channelId: mainId, reason: room });
+      out.push({
+        channelId: waitingId,
+        reason: "a waiting room for a temporary voice channel (Voice Channels)",
+      });
+    }
+    for (const channelId of this.pendingManagedChannels.keys()) {
+      out.push({
+        channelId,
+        reason:
+          "a voice channel KoolBot just created whose record is still being saved (Voice Channels)",
+      });
+    }
+    for (const channelId of [
+      ...this.controlPanels.keys(),
+      ...this.customChannelNames.keys(),
+      ...this.ownershipQueue.keys(),
+      ...this.liveChannels,
+    ]) {
+      out.push({ channelId, reason: room });
+    }
+    return out;
   }
 
   /**
@@ -1898,7 +1958,7 @@ export class VoiceChannelManager {
           );
           await this.createUserChannel(member, newChannel);
         } else if (
-          newChannel.name === NEW_CHANNEL_TRIGGER_NAME &&
+          isNewChannelTriggerName(newChannel.name) &&
           !this.isTrackedRoom(newChannel.id)
         ) {
           // If user joins the "New Channel", create a personal channel for them
@@ -1960,7 +2020,7 @@ export class VoiceChannelManager {
         }
         // If user is moving to the "New Channel", create a personal channel
         else if (
-          newChannel.name === NEW_CHANNEL_TRIGGER_NAME &&
+          isNewChannelTriggerName(newChannel.name) &&
           !this.isTrackedRoom(newChannel.id)
         ) {
           // Clean up the old channel if it was a personal channel

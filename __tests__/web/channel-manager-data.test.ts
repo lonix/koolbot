@@ -77,6 +77,8 @@ const {
   maxBitrateOf,
   viewOf,
 } = await import("../../src/web/channel-manager-data.js");
+const { VoiceChannelManager } =
+  await import("../../src/services/voice-channel-manager.js");
 
 const raw = (over: Record<string, unknown>): any => ({
   isThread: () => false,
@@ -193,7 +195,12 @@ describe("botCanManageChannels", () => {
 });
 
 describe("loadProtection", () => {
+  const fakeClient: any = {
+    user: { id: "bot" },
+    channels: { cache: new Map() },
+  };
   const guild: any = {
+    client: fakeClient,
     id: "g1",
     rulesChannelId: "100000000000000090",
     publicUpdatesChannelId: null,
@@ -202,6 +209,7 @@ describe("loadProtection", () => {
   beforeEach(() => {
     strictConfig = {};
     strictFails = false;
+    VoiceChannelManager.reset();
     mockConfig.mockResolvedValue({ "quotes.channel_id": "100000000000000001" });
     managed.mockReturnValue(
       lean([{ channelId: "100000000000000002", kind: "lobby" }]),
@@ -353,6 +361,44 @@ describe("loadProtection", () => {
     });
     const map = await loadProtection(guild, voiceChannels);
     expect(map.has("100000000000000040")).toBe(true);
+  });
+
+  it("protects rooms the voice service holds only in memory (a managed-row write still pending)", async () => {
+    // createWaitingRoom() keeps the room in memory and queues the failed write
+    // in pendingManagedChannels; Mongo has recovered but the retry has not run,
+    // so no row exists yet.
+    const manager: any = VoiceChannelManager.getInstance(fakeClient);
+    manager.pendingManagedChannels.set("100000000000000060", {
+      guildId: "g1",
+      kind: "waiting_room",
+    });
+    manager.waitingRoomToMain.set("100000000000000061", "100000000000000062");
+    manager.userChannels.set("member-1", { id: "100000000000000063" });
+    manager.controlPanels.set("100000000000000064", {
+      channelId: "100000000000000064",
+      messageId: "m",
+    });
+    const map = await loadProtection(guild, []);
+    for (const id of ["60", "61", "62", "63", "64"]) {
+      expect(map.has(`1000000000000000${id}`)).toBe(true);
+    }
+    expect(map.get("100000000000000060")![0]).toContain("still being saved");
+    expect(map.get("100000000000000061")![0]).toContain("waiting room");
+    VoiceChannelManager.reset();
+  });
+
+  it("protects an untracked legacy New Channel trigger outside the voice category", async () => {
+    mockConfig.mockResolvedValue({
+      "voicechannels.category_id": "100000000000000099",
+    });
+    const trigger = {
+      ...voiceChannels[2],
+      id: "100000000000000070",
+      name: "➕ New Channel",
+      parentId: "100000000000000123",
+    };
+    const map = await loadProtection(guild, [trigger]);
+    expect(map.get("100000000000000070")![0]).toContain("New Channel");
   });
 
   it("fails closed when the lobby name settings can't be read", async () => {

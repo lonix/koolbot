@@ -3,6 +3,7 @@ import {
   buildChannelTree,
   buildProtectionMap,
   canMove,
+  neighbourOf,
   checkCapacity,
   cleanName,
   deleteVerdict,
@@ -229,9 +230,46 @@ const baseInputs = (
   pollSchedules: [],
   announcements: [],
   lobbyNames: [],
+  isTriggerName: (n: string) => n === "➕ New Channel",
+  voiceInMemory: [],
   discord: [],
   channels: [],
   ...over,
+});
+
+describe("buildProtectionMap: voice service memory and legacy trigger", () => {
+  it("protects channels the voice service holds in memory, with its reason", () => {
+    const map = buildProtectionMap(
+      baseInputs({
+        voiceInMemory: [
+          { channelId: A, reason: "a waiting room (Voice Channels)" },
+          { channelId: B, reason: "a voice channel KoolBot just created" },
+        ],
+      }),
+    );
+    expect(map.get(A)).toEqual(["a waiting room (Voice Channels)"]);
+    expect(map.get(B)![0]).toContain("just created");
+  });
+
+  it("protects an untracked legacy trigger anywhere, with no id, row or category setting", () => {
+    const channels = [
+      ch(V, {
+        kind: "voice",
+        name: "➕ New Channel",
+        parentId: "100000000000000099",
+      }),
+      ch(A, { kind: "voice", name: "➕ New Channel", parentId: null }),
+      ch(B, { kind: "text", name: "➕ New Channel" }),
+      ch("100000000000000050", { kind: "voice", name: "Squad" }),
+    ];
+    const map = buildProtectionMap(
+      baseInputs({ channels, config: { "voicechannels.category_id": CAT } }),
+    );
+    expect(map.get(V)![0]).toContain("New Channel");
+    expect(map.has(A)).toBe(true);
+    expect(map.has(B)).toBe(false); // a text channel is not a trigger
+    expect(map.has("100000000000000050")).toBe(false);
+  });
 });
 
 describe("buildProtectionMap: Mongo-backed feature bindings", () => {
@@ -436,6 +474,22 @@ describe("buildProtectionMap", () => {
     );
     expect(map.get(V)).toContain("the voicechannels.lobby.channel_id setting");
     expect(map.has(A)).toBe(true);
+  });
+});
+
+describe("neighbourOf", () => {
+  it("names the sibling a step swaps with, and null at the edges", () => {
+    const list = [
+      ch(CAT, { kind: "category" }),
+      ch(A, { parentId: CAT, position: 0 }),
+      ch(B, { parentId: CAT, position: 1 }),
+    ];
+    const get = (id: string): ManagedChannelView =>
+      list.find((c) => c.id === id)!;
+    expect(neighbourOf(list, get(A), "down")?.id).toBe(B);
+    expect(neighbourOf(list, get(B), "up")?.id).toBe(A);
+    expect(neighbourOf(list, get(A), "up")).toBeNull();
+    expect(neighbourOf(list, get(B), "down")).toBeNull();
   });
 });
 
