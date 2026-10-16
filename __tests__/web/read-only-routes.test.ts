@@ -463,7 +463,8 @@ describe("loadFeatureSettings (#971)", () => {
         ["quotes.delete_roles"],
         [],
       );
-      expect(data.pickers.roles).toEqual([
+      expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
+      expect(data.pickers.groupRoles).toEqual([
         { id: "group:g1", name: "Mods (group)" },
         { id: "group:g1+", name: "Mods and above (group)" },
         { id: "r1", name: "Mods" },
@@ -483,6 +484,7 @@ describe("loadFeatureSettings (#971)", () => {
         [],
       );
       expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
+      expect(data.pickers.groupRoles).toEqual([{ id: "r1", name: "Mods" }]);
       spy.mockRestore();
     });
 
