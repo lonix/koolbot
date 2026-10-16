@@ -458,9 +458,18 @@ export function createChannelManagerRouter(
           const bitrate = validateBitrateKbps(body.bitrate, ctx.maxBitrate);
           if (!bitrate.ok) return refuse(bitrate.error);
           if (bitrate.value !== undefined && bitrate.value !== target.bitrate) {
-            if (liveShown !== baseline("bitrate", liveShown).trim()) {
-              stale.push("bitrate");
-            } else changes.bitrate = bitrate.value;
+            // Conflicts are judged on the exact bits per second the form was
+            // drawn from (two values can round to the same kbps); a request
+            // without it falls back to the rounded value.
+            const exact = body.orig_bitrate_bps;
+            const unchangedElsewhere =
+              typeof exact === "string"
+                ? exact === ""
+                  ? !target.bitrate
+                  : target.bitrate === Number(exact)
+                : liveShown === baseline("bitrate", liveShown).trim();
+            if (!unchangedElsewhere) stale.push("bitrate");
+            else changes.bitrate = bitrate.value;
           }
         }
       }

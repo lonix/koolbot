@@ -187,11 +187,11 @@ describe("messages", () => {
     expect(rateLimitMessage(540_000)).toContain("9 minutes");
   });
 
-  it("describes timeouts as cancelled and other errors as refused", () => {
-    expect(describeWriteFailure(abortError())).toContain("cancelled");
+  it("describes timeouts as an unknown outcome and other errors as refused", () => {
+    expect(describeWriteFailure(abortError())).toContain("unknown");
     expect(
       describeWriteFailure(new Error("Discord API timeout for edit channel")),
-    ).toContain("cancelled");
+    ).toContain("unknown whether the change was applied");
     expect(describeWriteFailure(new Error("Missing Permissions"))).toBe(
       "Discord refused the change: Missing Permissions",
     );

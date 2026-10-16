@@ -111,7 +111,10 @@ function baselineInputs(c: ManagedChannelView): string {
     c.kind === "text" ? field("topic", c.topic ?? "") : "",
     c.kind === "voice" ? field("userLimit", String(c.userLimit ?? "")) : "",
     c.kind === "voice"
-      ? field("bitrate", c.bitrate ? String(Math.round(c.bitrate / 1000)) : "")
+      ? field(
+          "bitrate",
+          c.bitrate ? String(Math.round(c.bitrate / 1000)) : "",
+        ) + field("bitrate_bps", String(c.bitrate ?? ""))
       : "",
     c.kind === "category" ? "" : field("parent", c.parentId ?? ""),
   ].join("");

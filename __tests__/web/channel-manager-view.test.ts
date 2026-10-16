@@ -69,6 +69,8 @@ describe("edit form", () => {
     const html = render([cat, voice(65536)]);
     expect(html).toContain('name="bitrate" min="8" max="96" value="66"');
     expect(html).toContain('name="orig_bitrate" value="66"');
+    // The exact value, for conflict detection.
+    expect(html).toContain('name="orig_bitrate_bps" value="65536"');
   });
 
   it("carries what it displayed as hidden baseline fields, escaped", () => {

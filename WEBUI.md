@@ -1507,8 +1507,10 @@ Discord allows only a few renames and edits per channel every 10 minutes, and th
 would otherwise hold a request behind that limit and apply it minutes later, and re-send a create whose response
 was lost. The page therefore writes (create, edit, move, delete) with its own Discord client: no automatic
 retries, a 30 second limit, and a rate-limit wait longer than 20 seconds is refused at once. If Discord asks for a
-long wait or the request times out, the request is cancelled, nothing is changed, and the page says when to try
-again. Other features keep using the shared client unchanged.
+long wait, nothing was sent or applied and the page says when to try again. If the request times out the outcome
+is unknown (Discord may have accepted it before the answer was lost), so the page says to check Discord before
+trying again; the request is cancelled here so nothing queued is applied later. Other features keep using the
+shared client unchanged.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:

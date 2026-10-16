@@ -75,7 +75,7 @@ export function describeWriteFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : "";
   if (name === "AbortError" || /timeout/i.test(message)) {
-    return "Discord didn't answer within 30 seconds, so the request was cancelled and nothing should have changed. Check the channel in Discord before trying again.";
+    return "Discord didn't answer within 30 seconds, so it is unknown whether the change was applied: the request was cancelled here, but Discord may already have accepted it. Check Discord before trying again.";
   }
   return `Discord refused the change: ${message.slice(0, 200)}`;
 }

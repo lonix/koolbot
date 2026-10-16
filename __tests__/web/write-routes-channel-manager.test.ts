@@ -476,6 +476,55 @@ describe("POST /channels/:id/edit", () => {
     expect(mockEdit.mock.calls[0][0]).not.toHaveProperty("bitrate");
   });
 
+  it("refuses a bitrate edit when the live bitrate differs by less than 1 kbps from the one the form was drawn from", async () => {
+    // The form was drawn at 65536 bps (shown 66); the channel is now 66000
+    // bps, which also shows as 66. Posting 70 must not overwrite that change.
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 66000,
+    });
+    await mount();
+    const res = await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      orig_name: "Hangout",
+      userLimit: "4",
+      orig_userLimit: "4",
+      bitrate: "70",
+      orig_bitrate: "66",
+      orig_bitrate_bps: "65536",
+      parent: CAT,
+      orig_parent: CAT,
+    });
+    expect(flashOf(res).msg).toContain("changed elsewhere");
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+
+  it("saves a bitrate edit when the exact original bitrate is unchanged", async () => {
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 65536,
+    });
+    await mount();
+    await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      orig_name: "Hangout",
+      userLimit: "4",
+      orig_userLimit: "4",
+      bitrate: "70",
+      orig_bitrate: "66",
+      orig_bitrate_bps: "65536",
+      parent: CAT,
+      orig_parent: CAT,
+    });
+    expect(mockEdit.mock.calls[0][0].bitrate).toBe(70000);
+  });
+
   it("still sends a bitrate the admin actually changed", async () => {
     channels[3] = view(VOICE, {
       kind: "voice",
@@ -1248,7 +1297,7 @@ describe("cancellable requests and rate limits", () => {
     },
   );
 
-  it("aborts the request and reports a timeout as cancelled, not as possibly applied", async () => {
+  it("aborts the request and reports a timeout as an unknown outcome, not as unchanged", async () => {
     let signal: AbortSignal | undefined;
     mockEdit.mockImplementation(
       (_body: unknown, options: any) =>
@@ -1269,7 +1318,8 @@ describe("cancellable requests and rate limits", () => {
       parent: CAT,
     });
     const flash = flashOf(res);
-    expect(flash.msg).toContain("cancelled");
+    expect(flash.msg).toContain("unknown whether the change was applied");
+    expect(flash.msg).not.toContain("nothing should have changed");
     expect(flash.msg).not.toContain("may still complete");
     expect(signal?.aborted).toBe(true);
   });
@@ -1293,7 +1343,9 @@ describe("cancellable requests and rate limits", () => {
     });
     expect(mockRest.post.mock.calls[0][0]).toBe("/guilds/guild-1/channels");
     expect(mockRest.post.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
-    expect(flashOf(res).msg).toContain("cancelled");
+    expect(flashOf(res).msg).toContain(
+      "unknown whether the change was applied",
+    );
     // The queued create is dropped, so a retry cannot make a duplicate.
     expect(signal?.aborted).toBe(true);
   });
