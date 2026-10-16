@@ -13,8 +13,7 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { EventEmitter } from "node:events";
-import { ChannelType, type Client } from "discord.js";
+import { ChannelType, RateLimitError, type Client } from "discord.js";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -107,8 +106,10 @@ const mockEdit = jest.fn<(...a: any[]) => Promise<any>>();
 const mockSetPosition = jest.fn<(...a: any[]) => Promise<any>>();
 const mockDelete = jest.fn<(...a: any[]) => Promise<any>>();
 /** The REST client: edits, moves and deletes are raw, cancellable requests. */
-const restEmitter = new EventEmitter();
-const mockRest = Object.assign(restEmitter, {
+const mockRest = {
+  post: jest.fn(async (_route: string, options: any): Promise<unknown> =>
+    mockCreate(options.body, options),
+  ),
   patch: jest.fn(async (route: string, options: any): Promise<unknown> => {
     if (/^\/channels\/\d+$/.test(route)) return mockEdit(options.body, options);
     return mockSetPosition(options.body, options);
@@ -116,7 +117,7 @@ const mockRest = Object.assign(restEmitter, {
   delete: jest.fn(async (_route: string, options: any): Promise<unknown> =>
     mockDelete(options),
   ),
-});
+};
 let liveFlags: { manageable?: boolean; deletable?: boolean } = {};
 let fetchMissing = false;
 
@@ -124,7 +125,6 @@ function makeClient(opts: { guildFails?: boolean } = {}): Client {
   const guild = {
     id: "guild-1",
     channels: {
-      create: mockCreate,
       fetch: jest.fn(async (id: string) =>
         fetchMissing
           ? null
@@ -154,7 +154,7 @@ async function mount(client: Client = makeClient()): Promise<void> {
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
     requireCsrf,
-    createChannelManagerRouter(client),
+    createChannelManagerRouter(client, mockRest as never),
   ]);
 }
 const flashOf = (res: Response) =>
@@ -267,7 +267,7 @@ describe("POST /channels/create", () => {
     expect(mockCreate.mock.calls[0][0]).toMatchObject({
       name: "news",
       type: ChannelType.GuildText,
-      parent: CAT,
+      parent_id: CAT,
       topic: "Headlines",
     });
     expect(mockRecordAudit).toHaveBeenCalledTimes(1);
@@ -288,7 +288,7 @@ describe("POST /channels/create", () => {
     });
     expect(mockCreate.mock.calls[0][0]).toMatchObject({
       type: ChannelType.GuildVoice,
-      userLimit: 5,
+      user_limit: 5,
       bitrate: 64000,
     });
   });
@@ -304,7 +304,7 @@ describe("POST /channels/create", () => {
     const opts = mockCreate.mock.calls[0][0];
     expect(opts.type).toBe(ChannelType.GuildCategory);
     expect(opts.topic).toBeUndefined();
-    expect(opts.parent).toBeUndefined();
+    expect(opts.parent_id).toBeUndefined();
   });
 
   it.each([
@@ -1166,18 +1166,24 @@ describe("CSRF", () => {
 });
 
 describe("cancellable requests and rate limits", () => {
-  const rateLimited = (majorParameter: string, timeToReset: number): void => {
-    restEmitter.emit("rateLimited", {
-      majorParameter,
-      timeToReset,
-      route: "/channels/:id",
+  const rateLimit = (
+    waitMs: number,
+    over: Record<string, unknown> = {},
+  ): RateLimitError =>
+    new RateLimitError({
+      timeToReset: waitMs,
+      retryAfter: waitMs,
+      sublimitTimeout: 0,
+      limit: 2,
       method: "PATCH",
+      hash: "h",
+      url: "https://discord.com/api/v10/channels/1",
+      route: "/channels/:id",
+      majorParameter: "1",
+      global: false,
+      scope: "user",
+      ...over,
     });
-  };
-
-  afterEach(() => {
-    restEmitter.removeAllListeners();
-  });
 
   it("sends a user-limit-only edit as one PATCH with only that field and a cancel signal", async () => {
     channels[3] = view(VOICE, {
@@ -1205,64 +1211,42 @@ describe("cancellable requests and rate limits", () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("cancels the request and says when to retry if Discord reports a long rate-limit wait", async () => {
-    // discord.js's REST client would otherwise hold the request in its queue
-    // for the whole wait and apply it later, after the page reported failure.
-    let signal: AbortSignal | undefined;
-    mockEdit.mockImplementation(
-      (_body: unknown, options: any) =>
-        new Promise((_resolve, reject) => {
-          signal = options.signal;
-          rateLimited(TEXT, 540_000);
-          options.signal.addEventListener("abort", () =>
-            reject(new Error("aborted")),
-          );
-        }),
-    );
-    await mount();
-    const res = await harness.post(`/channels/${TEXT}/edit`, {
-      name: "general",
-      topic: "new",
-      parent: CAT,
-    });
-    const flash = flashOf(res);
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("9 minutes");
-    expect(flash.msg).toContain("cancelled");
-    expect(signal?.aborted).toBe(true);
-    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
-      action: "channels.edit",
-      result: "failure",
-    });
-  });
-
-  it("lets a short rate-limit wait run", async () => {
-    mockEdit.mockImplementation(async () => {
-      rateLimited(TEXT, 5_000);
-      return { name: "general" };
-    });
-    await mount();
-    const res = await harness.post(`/channels/${TEXT}/edit`, {
-      name: "general",
-      topic: "new",
-      parent: CAT,
-    });
-    expect(flashOf(res).type).toBe("ok");
-  });
-
-  it("ignores a rate-limit notice for a different channel", async () => {
-    mockEdit.mockImplementation(async () => {
-      rateLimited("100000000000000999", 540_000);
-      return { name: "general" };
-    });
-    await mount();
-    const res = await harness.post(`/channels/${TEXT}/edit`, {
-      name: "general",
-      topic: "new",
-      parent: CAT,
-    });
-    expect(flashOf(res).type).toBe("ok");
-  });
+  it.each([
+    [
+      "a bucket already known to be empty",
+      { timeToReset: 540_000, retryAfter: 0 },
+      "9 minutes",
+    ],
+    [
+      "an actual 429 with a retry-after",
+      { timeToReset: 0, retryAfter: 120_000 },
+      "2 minutes",
+    ],
+    [
+      "a rename sublimit",
+      { timeToReset: 0, retryAfter: 0, sublimitTimeout: 600_000 },
+      "10 minutes",
+    ],
+  ])(
+    "reports %s with when to retry, changing nothing",
+    async (_label, wait, expected) => {
+      mockEdit.mockRejectedValue(rateLimit(0, wait));
+      await mount();
+      const res = await harness.post(`/channels/${TEXT}/edit`, {
+        name: "general",
+        topic: "new",
+        parent: CAT,
+      });
+      const flash = flashOf(res);
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain(expected);
+      expect(flash.msg).toContain("cancelled");
+      expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+        action: "channels.edit",
+        result: "failure",
+      });
+    },
+  );
 
   it("aborts the request and reports a timeout as cancelled, not as possibly applied", async () => {
     let signal: AbortSignal | undefined;
@@ -1287,6 +1271,30 @@ describe("cancellable requests and rate limits", () => {
     const flash = flashOf(res);
     expect(flash.msg).toContain("cancelled");
     expect(flash.msg).not.toContain("may still complete");
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("sends a create as a cancellable raw POST and aborts it when it times out", async () => {
+    let signal: AbortSignal | undefined;
+    mockCreate.mockImplementation(
+      (_body: unknown, options: any) =>
+        new Promise(() => {
+          signal = options.signal;
+        }),
+    );
+    mockApiCall.mockImplementationOnce(async (fn: () => Promise<unknown>) => {
+      void fn();
+      throw new Error("Discord API timeout for create channel; not retried");
+    });
+    await mount();
+    const res = await harness.post("/channels/create", {
+      type: "text",
+      name: "news",
+    });
+    expect(mockRest.post.mock.calls[0][0]).toBe("/guilds/guild-1/channels");
+    expect(mockRest.post.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    expect(flashOf(res).msg).toContain("cancelled");
+    // The queued create is dropped, so a retry cannot make a duplicate.
     expect(signal?.aborted).toBe(true);
   });
 

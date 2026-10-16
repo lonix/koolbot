@@ -16,14 +16,18 @@ import {
   ChannelType,
   Client,
   Routes,
+  type REST,
   type Guild,
-  type GuildChannelCreateOptions,
   type GuildChannel,
 } from "discord.js";
 import logger from "../../../utils/logger.js";
-import { getErrorMessage } from "../../../utils/error-guards.js";
 import { CommandManager } from "../../../services/command-manager.js";
 import { recordAudit } from "../../audit.js";
+import {
+  cancellableCall,
+  createWriteRest,
+  describeWriteFailure,
+} from "../../channel-write-rest.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import { readSignedFlash } from "../../http-flash.js";
 import {
@@ -64,115 +68,6 @@ import {
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
-/**
- * discord.js's REST client queues a request behind a rate-limit bucket that is
- * exhausted (PATCH /channels/:id allows only a couple of renames and edits per
- * channel every 10 minutes, and the bucket is shared by every field) and waits
- * for the reset, which can be several minutes. If the wait is short we let it
- * run; if Discord says it is longer, we cancel the request and tell the admin.
- */
-const RATE_LIMIT_FAST_FAIL_MS = 20_000;
-
-/** Discord told the REST client to wait longer than we are willing to. */
-class ChannelRateLimitedError extends Error {
-  constructor(readonly waitMs: number) {
-    const minutes = Math.ceil(waitMs / 60_000);
-    super(
-      `Discord is limiting changes to this channel right now (it allows only a few renames and edits per channel every 10 minutes). Nothing was changed and the request was cancelled. Try again in about ${
-        waitMs < 60_000
-          ? `${Math.ceil(waitMs / 1000)} seconds`
-          : `${minutes} minute${minutes === 1 ? "" : "s"}`
-      }.`,
-    );
-    this.name = "ChannelRateLimitedError";
-  }
-}
-
-/** The part of discord.js's REST client the guard listens to. */
-interface RestEvents {
-  on?(
-    event: "rateLimited",
-    listener: (info: {
-      majorParameter?: string;
-      timeToReset?: number;
-      route?: string;
-      method?: string;
-    }) => void,
-  ): unknown;
-  off?(event: "rateLimited", listener: (...args: never[]) => void): unknown;
-}
-
-/**
- * Run one Discord request through `makeDiscordApiCall`, cancellably. Each
- * attempt gets an AbortSignal. It is aborted when the attempt fails or times
- * out (so a request still queued behind a rate limit is dropped, never applied
- * later behind the admin's back), and when Discord reports a rate-limit wait
- * longer than `RATE_LIMIT_FAST_FAIL_MS` for this request's bucket (the admin
- * hears it at once instead of after the 30 s timeout).
- */
-export async function cancellableCall<T>(
-  manager: Pick<CommandManager, "makeDiscordApiCall">,
-  restClient: unknown,
-  fn: (signal: AbortSignal) => Promise<T>,
-  opName: string,
-  scopeId: string,
-  retryOnTimeout: boolean,
-): Promise<T> {
-  const rest = restClient as RestEvents | undefined;
-  const holder: { controller: AbortController | null } = { controller: null };
-  const attempt = (): Promise<T> => {
-    // A retry must not leave the previous attempt queued.
-    holder.controller?.abort();
-    const controller = new AbortController();
-    holder.controller = controller;
-    return new Promise<T>((resolve, reject) => {
-      const onLimit = (info: {
-        majorParameter?: string;
-        timeToReset?: number;
-        route?: string;
-      }): void => {
-        if (info.majorParameter !== scopeId) return;
-        logger.warn(
-          `channel manager: Discord rate limit on ${opName} (${info.route}), reset in ${info.timeToReset}ms`,
-        );
-        if ((info.timeToReset ?? 0) > RATE_LIMIT_FAST_FAIL_MS) {
-          controller.abort();
-          reject(new ChannelRateLimitedError(info.timeToReset ?? 0));
-        }
-      };
-      rest?.on?.("rateLimited", onLimit);
-      const detach = (): void => {
-        rest?.off?.("rateLimited", onLimit);
-      };
-      fn(controller.signal).then(
-        (value) => {
-          detach();
-          resolve(value);
-        },
-        (error: unknown) => {
-          detach();
-          reject(error);
-        },
-      );
-      // The rate-limit rejection above also has to detach.
-      controller.signal.addEventListener("abort", detach, { once: true });
-    });
-  };
-  try {
-    return await manager.makeDiscordApiCall(
-      attempt,
-      opName,
-      30000,
-      3,
-      retryOnTimeout,
-    );
-  } catch (error) {
-    // Cancel whatever is still queued or in flight.
-    holder.controller?.abort();
-    throw error;
-  }
-}
-
 interface Outcome {
   ok: boolean;
   text: string;
@@ -187,19 +82,16 @@ interface ActionContext {
   body: Record<string, unknown>;
   params: { id: string };
   reason: string;
-  /** Discord REST client, for requests that must be cancellable. */
-  rest: Client["rest"];
+  /** The write client: no automatic retries, long rate-limit waits rejected. */
+  rest: REST;
   /**
-   * Run one Discord request through `makeDiscordApiCall`. `fn` gets an
+   * Run one Discord write through `makeDiscordApiCall`. `fn` gets an
    * AbortSignal that is aborted when the attempt fails or times out, so a
-   * request still queued behind a rate limit is cancelled, never applied
-   * later. `scopeId` is the REST bucket's major parameter (the channel or
-   * guild id) so a rate-limit notice for another channel is ignored.
+   * request still queued or in flight is dropped, never applied later.
    */
   call: <T>(
     fn: (signal: AbortSignal) => Promise<T>,
     name: string,
-    scopeId: string,
     retryOnTimeout?: boolean,
   ) => Promise<T>;
 }
@@ -216,8 +108,18 @@ const KINDS = {
   category: ChannelType.GuildCategory,
 } as const;
 
-export function createChannelManagerRouter(client: Client): Router {
+export function createChannelManagerRouter(
+  client: Client,
+  writeRest?: REST,
+): Router {
   const router = Router();
+
+  // Created on first use: the token exists once the bot has logged in.
+  let cachedRest: REST | null = writeRest ?? null;
+  const getWriteRest = (): REST | null => {
+    if (!cachedRest && client.token) cachedRest = createWriteRest(client.token);
+    return cachedRest;
+  };
 
   async function fetchGuild(guildId: string): Promise<Guild | null> {
     try {
@@ -271,6 +173,10 @@ export function createChannelManagerRouter(client: Client): Router {
           outcome = refuse(
             "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
           );
+        } else if (!getWriteRest()) {
+          outcome = refuse(
+            "The bot isn't signed in to Discord yet, so nothing was changed.",
+          );
         } else {
           const manager = CommandManager.getInstance(client);
           outcome = await handler({
@@ -280,28 +186,14 @@ export function createChannelManagerRouter(client: Client): Router {
             body: (req.body as Record<string, unknown> | undefined) ?? {},
             params,
             reason: `KoolBot web UI, by ${session.discordUserId}`,
-            rest: client.rest,
-            call: (fn, opName, scopeId, retryOnTimeout = false) =>
-              cancellableCall(
-                manager,
-                client.rest,
-                fn,
-                opName,
-                scopeId,
-                retryOnTimeout,
-              ),
+            rest: getWriteRest() as REST,
+            call: (fn, opName, retryOnTimeout = false) =>
+              cancellableCall(manager, fn, opName, retryOnTimeout),
           });
         }
       } catch (error) {
         logger.error(`channel manager: ${name} failed`, error);
-        const message = getErrorMessage(error);
-        outcome = refuse(
-          error instanceof ChannelRateLimitedError
-            ? message
-            : /timeout/i.test(message)
-              ? "Discord didn't answer within 30 seconds, so the request was cancelled and nothing should have changed. Check the channel in Discord before trying again."
-              : `Discord refused the change: ${message.slice(0, 200)}`,
-        );
+        outcome = refuse(describeWriteFailure(error));
       }
       await recordAudit(session, {
         action: `channels.${name}`,
@@ -443,17 +335,16 @@ export function createChannelManagerRouter(client: Client): Router {
       }
       const name = validateName(ctx.body.name);
       if (!name.ok) return refuse(name.error);
-      const options: GuildChannelCreateOptions & { type: ChannelType } = {
+      const options: Record<string, unknown> = {
         name: name.value,
         type: KINDS[type],
-        reason: ctx.reason,
-      } as GuildChannelCreateOptions & { type: ChannelType };
+      };
       let parentId: string | null = null;
       if (type !== "category") {
         const parent = resolveParent(ctx.channels, ctx.body.parent);
         if (!parent.ok) return refuse(parent.error);
         parentId = parent.value;
-        if (parentId) options.parent = parentId;
+        if (parentId) options.parent_id = parentId;
       }
       const room = checkCapacity(ctx.channels, { parentId, creating: true });
       if (!room.ok) return refuse(room.error);
@@ -467,16 +358,20 @@ export function createChannelManagerRouter(client: Client): Router {
         if (!limit.ok) return refuse(limit.error);
         const bitrate = validateBitrateKbps(ctx.body.bitrate, ctx.maxBitrate);
         if (!bitrate.ok) return refuse(bitrate.error);
-        options.userLimit = limit.value;
+        options.user_limit = limit.value;
         if (bitrate.value !== undefined) options.bitrate = bitrate.value;
       }
       // A create is not idempotent: never retry it after a timeout.
-      const created = await ctx.call(
-        () => ctx.guild.channels.create(options),
+      const created = (await ctx.call(
+        (signal) =>
+          ctx.rest.post(Routes.guildChannels(ctx.guild.id), {
+            body: options,
+            reason: ctx.reason,
+            signal,
+          }),
         "create channel",
-        ctx.guild.id,
         false,
-      );
+      )) as { id: string; name: string };
       return {
         ok: true,
         text: `Created ${type === "category" ? "category" : `${type} channel`} "${created.name}".`,
@@ -636,7 +531,6 @@ export function createChannelManagerRouter(client: Client): Router {
             signal,
           }),
         "edit channel",
-        target.id,
         false,
       )) as { name?: string } | undefined;
       return {
@@ -695,7 +589,6 @@ export function createChannelManagerRouter(client: Client): Router {
             signal,
           }),
         "reorder channel",
-        ctx.guild.id,
         false,
       );
       return {
@@ -764,7 +657,6 @@ export function createChannelManagerRouter(client: Client): Router {
               signal,
             }),
           "delete channel",
-          target.id,
           true,
         );
       } catch (error) {
