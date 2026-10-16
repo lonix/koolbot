@@ -1500,7 +1500,13 @@ Only text channels, voice channels and categories are managed; announcement, sta
 but left alone. Every change is recorded in the audit log (`channels.create`, `channels.edit`, `channels.move`,
 `channels.delete`, refused deletes included) and goes through the bot's Discord request wrapper (timeout and
 backoff). Creates, edits and moves are not retried after a timeout, because Discord may still apply the original
-request and a retry could rename or create twice.
+request and a retry could rename or create twice. The page's **Recent changes** panel lists the latest of these
+entries (the web audit log has no page of its own).
+
+Discord allows only a few renames and edits per channel every 10 minutes, and the bot's Discord client would
+otherwise hold a request behind that limit and apply it minutes later. Edits, moves and deletes are therefore
+cancellable: if Discord reports a long wait, or the request times out, the request is cancelled, nothing is
+changed, and the page says when to try again.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:

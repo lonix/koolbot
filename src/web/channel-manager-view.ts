@@ -1,6 +1,7 @@
 import { renderAdminPage, type NavFeatureStatus } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { escapeHtml } from "./html.js";
+import type { RecentChange } from "./channel-manager-data.js";
 import {
   CHANNEL_LIMITS,
   canMove,
@@ -30,6 +31,8 @@ export interface ChannelManagerProps {
   /** Channel id -> why KoolBot manages it. Null when it couldn't be read. */
   protection: ReadonlyMap<string, string[]> | null;
   botCanManage: boolean;
+  /** Latest `channels.*` web audit entries; null when unreadable. */
+  recentChanges?: RecentChange[] | null;
   /** Bits per second. */
   maxBitrate: number;
   error?: string;
@@ -218,6 +221,34 @@ function createCard(p: ChannelManagerProps, tree: ChannelTree): string {
 </div>`;
 }
 
+function recentChangesCard(changes: RecentChange[] | null | undefined): string {
+  if (changes === undefined) return "";
+  if (changes === null) {
+    return `<div class="card"><h2>Recent changes</h2><p class="muted">The audit log couldn't be read.</p></div>`;
+  }
+  if (changes.length === 0) {
+    return `<div class="card"><h2>Recent changes</h2><p class="muted">No changes made through this page yet. Every change, including refused ones, is recorded here.</p></div>`;
+  }
+  const rows = changes
+    .map(
+      (c) => `<tr>
+<td class="muted mono">${escapeHtml(c.at)}</td>
+<td>${escapeHtml(c.action.replace(/^channels\./, ""))}</td>
+<td>${escapeHtml(c.channelName ?? c.targetId ?? "")}</td>
+<td><span class="tag ${c.result === "success" ? "tag-on" : "tag-off"}">${c.result === "success" ? "done" : "refused or failed"}</span>${c.message ? ` <span class="muted">${escapeHtml(c.message.length > 200 ? `${c.message.slice(0, 200)}…` : c.message)}</span>` : ""}</td>
+<td class="muted mono">${escapeHtml(c.actorId)}</td>
+</tr>`,
+    )
+    .join("");
+  return `<div class="card">
+  <h2>Recent changes</h2>
+  <p class="muted">The latest entries of the web audit log for this page, newest first.</p>
+  <table>
+<thead><tr><th scope="col">When (UTC)</th><th scope="col">Action</th><th scope="col">Channel</th><th scope="col">Result</th><th scope="col">By</th></tr></thead>
+<tbody>${rows}</tbody></table>
+</div>`;
+}
+
 function layout(
   title: string,
   body: string,
@@ -268,7 +299,8 @@ ${
     ? `<div class="card"><h2>No category</h2>${channelTable(tree.uncategorized, p, tree)}</div>`
     : ""
 }
-${tree.categories.map((n) => categoryCard(n, p, tree)).join("")}`;
+${tree.categories.map((n) => categoryCard(n, p, tree)).join("")}
+${recentChangesCard(p.recentChanges)}`;
   return layout("Channel Manager", body, p);
 }
 

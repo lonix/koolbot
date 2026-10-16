@@ -15,6 +15,7 @@ import { Router } from "express";
 import {
   ChannelType,
   Client,
+  Routes,
   type Guild,
   type GuildChannelCreateOptions,
   type GuildChannel,
@@ -30,6 +31,7 @@ import {
   canMove,
   checkCapacity,
   neighbourOf,
+  siblingsOf,
   confirmationToken,
   deleteVerdict,
   isSnowflake,
@@ -44,6 +46,7 @@ import {
   botCanManageChannels,
   fetchChannelViews,
   loadProtection,
+  loadRecentChanges,
   maxBitrateOf,
 } from "../../channel-manager-data.js";
 import {
@@ -61,6 +64,115 @@ import {
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
+/**
+ * discord.js's REST client queues a request behind a rate-limit bucket that is
+ * exhausted (PATCH /channels/:id allows only a couple of renames and edits per
+ * channel every 10 minutes, and the bucket is shared by every field) and waits
+ * for the reset, which can be several minutes. If the wait is short we let it
+ * run; if Discord says it is longer, we cancel the request and tell the admin.
+ */
+const RATE_LIMIT_FAST_FAIL_MS = 20_000;
+
+/** Discord told the REST client to wait longer than we are willing to. */
+class ChannelRateLimitedError extends Error {
+  constructor(readonly waitMs: number) {
+    const minutes = Math.ceil(waitMs / 60_000);
+    super(
+      `Discord is limiting changes to this channel right now (it allows only a few renames and edits per channel every 10 minutes). Nothing was changed and the request was cancelled. Try again in about ${
+        waitMs < 60_000
+          ? `${Math.ceil(waitMs / 1000)} seconds`
+          : `${minutes} minute${minutes === 1 ? "" : "s"}`
+      }.`,
+    );
+    this.name = "ChannelRateLimitedError";
+  }
+}
+
+/** The part of discord.js's REST client the guard listens to. */
+interface RestEvents {
+  on?(
+    event: "rateLimited",
+    listener: (info: {
+      majorParameter?: string;
+      timeToReset?: number;
+      route?: string;
+      method?: string;
+    }) => void,
+  ): unknown;
+  off?(event: "rateLimited", listener: (...args: never[]) => void): unknown;
+}
+
+/**
+ * Run one Discord request through `makeDiscordApiCall`, cancellably. Each
+ * attempt gets an AbortSignal. It is aborted when the attempt fails or times
+ * out (so a request still queued behind a rate limit is dropped, never applied
+ * later behind the admin's back), and when Discord reports a rate-limit wait
+ * longer than `RATE_LIMIT_FAST_FAIL_MS` for this request's bucket (the admin
+ * hears it at once instead of after the 30 s timeout).
+ */
+export async function cancellableCall<T>(
+  manager: Pick<CommandManager, "makeDiscordApiCall">,
+  restClient: unknown,
+  fn: (signal: AbortSignal) => Promise<T>,
+  opName: string,
+  scopeId: string,
+  retryOnTimeout: boolean,
+): Promise<T> {
+  const rest = restClient as RestEvents | undefined;
+  const holder: { controller: AbortController | null } = { controller: null };
+  const attempt = (): Promise<T> => {
+    // A retry must not leave the previous attempt queued.
+    holder.controller?.abort();
+    const controller = new AbortController();
+    holder.controller = controller;
+    return new Promise<T>((resolve, reject) => {
+      const onLimit = (info: {
+        majorParameter?: string;
+        timeToReset?: number;
+        route?: string;
+      }): void => {
+        if (info.majorParameter !== scopeId) return;
+        logger.warn(
+          `channel manager: Discord rate limit on ${opName} (${info.route}), reset in ${info.timeToReset}ms`,
+        );
+        if ((info.timeToReset ?? 0) > RATE_LIMIT_FAST_FAIL_MS) {
+          controller.abort();
+          reject(new ChannelRateLimitedError(info.timeToReset ?? 0));
+        }
+      };
+      rest?.on?.("rateLimited", onLimit);
+      const detach = (): void => {
+        rest?.off?.("rateLimited", onLimit);
+      };
+      fn(controller.signal).then(
+        (value) => {
+          detach();
+          resolve(value);
+        },
+        (error: unknown) => {
+          detach();
+          reject(error);
+        },
+      );
+      // The rate-limit rejection above also has to detach.
+      controller.signal.addEventListener("abort", detach, { once: true });
+    });
+  };
+  try {
+    return await manager.makeDiscordApiCall(
+      attempt,
+      opName,
+      30000,
+      3,
+      retryOnTimeout,
+    );
+  } catch (error) {
+    // Cancel whatever is still queued or in flight.
+    holder.controller?.abort();
+    throw error;
+  }
+}
+
 interface Outcome {
   ok: boolean;
   text: string;
@@ -75,9 +187,19 @@ interface ActionContext {
   body: Record<string, unknown>;
   params: { id: string };
   reason: string;
+  /** Discord REST client, for requests that must be cancellable. */
+  rest: Client["rest"];
+  /**
+   * Run one Discord request through `makeDiscordApiCall`. `fn` gets an
+   * AbortSignal that is aborted when the attempt fails or times out, so a
+   * request still queued behind a rate limit is cancelled, never applied
+   * later. `scopeId` is the REST bucket's major parameter (the channel or
+   * guild id) so a rate-limit notice for another channel is ignored.
+   */
   call: <T>(
-    fn: () => Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
     name: string,
+    scopeId: string,
     retryOnTimeout?: boolean,
   ) => Promise<T>;
 }
@@ -158,14 +280,27 @@ export function createChannelManagerRouter(client: Client): Router {
             body: (req.body as Record<string, unknown> | undefined) ?? {},
             params,
             reason: `KoolBot web UI, by ${session.discordUserId}`,
-            call: (fn, opName, retryOnTimeout = false) =>
-              manager.makeDiscordApiCall(fn, opName, 30000, 3, retryOnTimeout),
+            rest: client.rest,
+            call: (fn, opName, scopeId, retryOnTimeout = false) =>
+              cancellableCall(
+                manager,
+                client.rest,
+                fn,
+                opName,
+                scopeId,
+                retryOnTimeout,
+              ),
           });
         }
       } catch (error) {
         logger.error(`channel manager: ${name} failed`, error);
+        const message = getErrorMessage(error);
         outcome = refuse(
-          `Discord refused the change: ${getErrorMessage(error).slice(0, 200)}`,
+          error instanceof ChannelRateLimitedError
+            ? message
+            : /timeout/i.test(message)
+              ? "Discord didn't answer within 30 seconds, so the request was cancelled and nothing should have changed. Check the channel in Discord before trying again."
+              : `Discord refused the change: ${message.slice(0, 200)}`,
         );
       }
       await recordAudit(session, {
@@ -208,6 +343,7 @@ export function createChannelManagerRouter(client: Client): Router {
         tree: null as ReturnType<typeof buildChannelTree> | null,
         protection: null as Map<string, string[]> | null,
         botCanManage: false,
+        recentChanges: null as Awaited<ReturnType<typeof loadRecentChanges>>,
         maxBitrate: 0,
         error: undefined as string | undefined,
         flash: flash
@@ -236,6 +372,7 @@ export function createChannelManagerRouter(client: Client): Router {
           props.error = "The server's channels couldn't be read from Discord.";
         }
       }
+      props.recentChanges = await loadRecentChanges(session.guildId);
       res.type("text/html").send(renderChannelManagerPage(props));
     }),
   );
@@ -337,6 +474,7 @@ export function createChannelManagerRouter(client: Client): Router {
       const created = await ctx.call(
         () => ctx.guild.channels.create(options),
         "create channel",
+        ctx.guild.id,
         false,
       );
       return {
@@ -477,18 +615,35 @@ export function createChannelManagerRouter(client: Client): Router {
           `KoolBot can't change "${target.name}": a permission override on it blocks the bot.`,
         );
       }
-      // Rename rate limits are strict and a timed-out request still runs, so
-      // an edit is never retried after a timeout.
-      const edited = await ctx.call(
-        () => channel.edit({ ...changes, reason: ctx.reason }),
+      // Renames and edits share a strict per-channel rate limit, and a request
+      // queued behind it would otherwise run later: the call is cancellable and
+      // never retried after a timeout.
+      const patch: Record<string, unknown> = {};
+      if ("name" in changes) patch.name = changes.name;
+      if ("topic" in changes) patch.topic = changes.topic;
+      if ("userLimit" in changes) patch.user_limit = changes.userLimit;
+      if ("bitrate" in changes) patch.bitrate = changes.bitrate;
+      if ("parent" in changes) {
+        patch.parent_id = changes.parent;
+        // Moving must not rewrite the channel's permissions.
+        patch.lock_permissions = false;
+      }
+      const edited = (await ctx.call(
+        (signal) =>
+          ctx.rest.patch(Routes.channel(target.id), {
+            body: patch,
+            reason: ctx.reason,
+            signal,
+          }),
         "edit channel",
+        target.id,
         false,
-      );
+      )) as { name?: string } | undefined;
       return {
         ok: true,
-        text: `Saved "${edited.name}" (${fields.join(", ")}).`,
+        text: `Saved "${edited?.name ?? target.name}" (${fields.join(", ")}).`,
         targetId: target.id,
-        details: { changed: fields, name: edited.name },
+        details: { changed: fields, name: edited?.name ?? target.name },
       };
     }),
   );
@@ -525,13 +680,22 @@ export function createChannelManagerRouter(client: Client): Router {
           `KoolBot can't move "${target.name}": a permission override on it blocks the bot.`,
         );
       }
+      // What discord.js's relative setPosition sends: the channel's sibling
+      // group (same parent, same text/voice group) renumbered 0..n-1 with the
+      // channel moved one place. Sent directly so the request can be cancelled.
+      const order = siblingsOf(ctx.channels, target);
+      const at = order.findIndex((c) => c.id === target.id);
+      order.splice(at, 1);
+      order.splice(direction === "up" ? at - 1 : at + 1, 0, target);
       await ctx.call(
-        () =>
-          channel.setPosition(direction === "up" ? -1 : 1, {
-            relative: true,
+        (signal) =>
+          ctx.rest.patch(Routes.guildChannels(ctx.guild.id), {
+            body: order.map((c, i) => ({ id: c.id, position: i })),
             reason: ctx.reason,
+            signal,
           }),
         "reorder channel",
+        ctx.guild.id,
         false,
       );
       return {
@@ -594,8 +758,13 @@ export function createChannelManagerRouter(client: Client): Router {
       }
       try {
         await ctx.call(
-          () => channel.delete(ctx.reason),
+          (signal) =>
+            ctx.rest.delete(Routes.channel(target.id), {
+              reason: ctx.reason,
+              signal,
+            }),
           "delete channel",
+          target.id,
           true,
         );
       } catch (error) {

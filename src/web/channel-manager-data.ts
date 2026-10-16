@@ -23,6 +23,7 @@ import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Ticket } from "../models/ticket.js";
 import { Event } from "../models/event.js";
 import { LfgPost } from "../models/lfg-post.js";
+import { WebAuditLog } from "../models/web-audit-log.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import { PollSchedule } from "../models/poll-schedule.js";
 import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
@@ -200,4 +201,51 @@ async function effectiveLobbyNames(): Promise<string[]> {
     await resolveLobbyChannelName(read),
     ...(await resolveOfflineLobbyNames(read)),
   ];
+}
+
+export interface RecentChange {
+  at: string;
+  actorId: string;
+  action: string;
+  targetId: string | null;
+  channelName: string | null;
+  result: "success" | "failure";
+  message: string | null;
+}
+
+/**
+ * The latest `channels.*` entries of the web audit log, newest first. The web
+ * audit log has no page of its own, so the Channel Manager shows its own
+ * entries. Null when they can't be read.
+ */
+export async function loadRecentChanges(
+  guildId: string,
+  limit = 15,
+): Promise<RecentChange[] | null> {
+  try {
+    const rows = await WebAuditLog.find({
+      guildId,
+      action: { $regex: "^channels\\." },
+    })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    return rows.map((r) => {
+      const details = (r.details ?? {}) as { name?: unknown };
+      return {
+        at:
+          r.createdAt instanceof Date
+            ? r.createdAt.toISOString()
+            : String(r.createdAt ?? ""),
+        actorId: r.discordUserId,
+        action: r.action,
+        targetId: r.targetId ?? null,
+        channelName: typeof details.name === "string" ? details.name : null,
+        result: r.result,
+        message: r.errorMessage ?? null,
+      };
+    });
+  } catch {
+    return null;
+  }
 }

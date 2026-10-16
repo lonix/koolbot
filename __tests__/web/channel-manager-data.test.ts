@@ -44,6 +44,7 @@ const lfg = jest.fn<(...a: any[]) => any>();
 const reactionRoles = jest.fn<(...a: any[]) => any>();
 const polls = jest.fn<(...a: any[]) => any>();
 const announcements = jest.fn<(...a: any[]) => any>();
+const auditFind = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/models/managed-voice-channel.js", () => ({
   ManagedVoiceChannel: { find: managed },
   ManagedVoiceMigration: {},
@@ -63,6 +64,9 @@ jest.unstable_mockModule("../../src/models/lfg-post.js", () => ({
 jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
   ReactionRoleConfig: { find: reactionRoles },
 }));
+jest.unstable_mockModule("../../src/models/web-audit-log.js", () => ({
+  WebAuditLog: { find: auditFind },
+}));
 jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
   PollSchedule: { find: polls },
 }));
@@ -74,6 +78,7 @@ const {
   botCanManageChannels,
   fetchChannelViews,
   loadProtection,
+  loadRecentChanges,
   maxBitrateOf,
   viewOf,
 } = await import("../../src/web/channel-manager-data.js");
@@ -413,5 +418,68 @@ describe("loadProtection", () => {
       throw new Error("db down");
     });
     await expect(loadProtection(guild, [])).rejects.toThrow("db down");
+  });
+});
+
+describe("loadRecentChanges", () => {
+  const chain = (rows: unknown[]) => ({
+    sort: () => ({ limit: () => ({ lean: async () => rows }) }),
+  });
+
+  it("reads only this guild's channels.* audit entries, newest first, and maps them", async () => {
+    auditFind.mockReturnValue(
+      chain([
+        {
+          createdAt: new Date("2026-10-16T13:22:36Z"),
+          discordUserId: "u1",
+          action: "channels.edit",
+          targetId: "100000000000000001",
+          details: { name: "general" },
+          result: "success",
+          errorMessage: null,
+        },
+        {
+          createdAt: new Date("2026-10-16T13:20:00Z"),
+          discordUserId: "u1",
+          action: "channels.delete",
+          targetId: null,
+          details: {},
+          result: "failure",
+          errorMessage: "refused",
+        },
+      ]),
+    );
+    const rows = await loadRecentChanges("g1");
+    expect(auditFind).toHaveBeenCalledWith({
+      guildId: "g1",
+      action: { $regex: "^channels\\." },
+    });
+    expect(rows).toEqual([
+      {
+        at: "2026-10-16T13:22:36.000Z",
+        actorId: "u1",
+        action: "channels.edit",
+        targetId: "100000000000000001",
+        channelName: "general",
+        result: "success",
+        message: null,
+      },
+      {
+        at: "2026-10-16T13:20:00.000Z",
+        actorId: "u1",
+        action: "channels.delete",
+        targetId: null,
+        channelName: null,
+        result: "failure",
+        message: "refused",
+      },
+    ]);
+  });
+
+  it("returns null when the log can't be read", async () => {
+    auditFind.mockImplementation(() => {
+      throw new Error("db down");
+    });
+    expect(await loadRecentChanges("g1")).toBeNull();
   });
 });

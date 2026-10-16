@@ -13,6 +13,7 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
+import { EventEmitter } from "node:events";
 import { ChannelType, type Client } from "discord.js";
 import {
   startAdminHarness,
@@ -54,9 +55,11 @@ let channels: ManagedChannelView[] = [];
 let protection = new Map<string, string[]>();
 let canManage = true;
 let protectionFails = false;
+let recent: unknown = [];
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
   fetchChannelViews: async () => channels,
   maxBitrateOf: () => 96000,
+  loadRecentChanges: async () => recent,
   botCanManageChannels: async () => canManage,
   loadProtection: async () => {
     if (protectionFails) throw new Error("db down");
@@ -103,6 +106,17 @@ const mockCreate = jest.fn<(...a: any[]) => Promise<any>>();
 const mockEdit = jest.fn<(...a: any[]) => Promise<any>>();
 const mockSetPosition = jest.fn<(...a: any[]) => Promise<any>>();
 const mockDelete = jest.fn<(...a: any[]) => Promise<any>>();
+/** The REST client: edits, moves and deletes are raw, cancellable requests. */
+const restEmitter = new EventEmitter();
+const mockRest = Object.assign(restEmitter, {
+  patch: jest.fn(async (route: string, options: any): Promise<unknown> => {
+    if (/^\/channels\/\d+$/.test(route)) return mockEdit(options.body, options);
+    return mockSetPosition(options.body, options);
+  }),
+  delete: jest.fn(async (_route: string, options: any): Promise<unknown> =>
+    mockDelete(options),
+  ),
+});
 let liveFlags: { manageable?: boolean; deletable?: boolean } = {};
 let fetchMissing = false;
 
@@ -117,15 +131,13 @@ function makeClient(opts: { guildFails?: boolean } = {}): Client {
           : {
               id,
               isThread: () => false,
-              edit: mockEdit,
-              setPosition: mockSetPosition,
-              delete: mockDelete,
               ...liveFlags,
             },
       ),
     },
   };
   return {
+    rest: mockRest,
     guilds: {
       fetch: jest.fn(async () => {
         if (opts.guildFails) throw new Error("down");
@@ -167,6 +179,7 @@ beforeEach(() => {
   protection = new Map();
   canManage = true;
   protectionFails = false;
+  recent = [];
   liveFlags = {};
   fetchMissing = false;
   mockCreate.mockResolvedValue(created);
@@ -439,7 +452,7 @@ describe("POST /channels/:id/edit", () => {
     });
     expect(flashOf(res)).toMatchObject({ type: "ok" });
     const sent = mockEdit.mock.calls[0][0];
-    expect(sent.userLimit).toBe(7);
+    expect(sent.user_limit).toBe(7);
     expect(sent).not.toHaveProperty("bitrate");
   });
 
@@ -632,7 +645,7 @@ describe("POST /channels/:id/edit", () => {
       parent: CAT,
     });
     expect(mockEdit.mock.calls[0][0]).toMatchObject({
-      userLimit: 10,
+      user_limit: 10,
       bitrate: 96000,
     });
   });
@@ -647,8 +660,8 @@ describe("POST /channels/:id/edit", () => {
       parent: OTHER,
     });
     expect(mockEdit.mock.calls[0][0]).toMatchObject({
-      parent: OTHER,
-      lockPermissions: false,
+      parent_id: OTHER,
+      lock_permissions: false,
     });
   });
 
@@ -659,7 +672,7 @@ describe("POST /channels/:id/edit", () => {
       topic: "hi",
       parent: "",
     });
-    expect(mockEdit.mock.calls[0][0]).toMatchObject({ parent: null });
+    expect(mockEdit.mock.calls[0][0]).toMatchObject({ parent_id: null });
   });
 
   it("does nothing when nothing changed", async () => {
@@ -748,8 +761,11 @@ describe("POST /channels/:id/move", () => {
       direction: "up",
     });
     expect(flashOf(res)).toMatchObject({ type: "ok" });
-    expect(mockSetPosition.mock.calls[0][0]).toBe(-1);
-    expect(mockSetPosition.mock.calls[0][1]).toMatchObject({ relative: true });
+    // TEXT and TEXT2 are renumbered with TEXT2 first.
+    expect(mockSetPosition.mock.calls[0][0]).toEqual([
+      { id: TEXT2, position: 0 },
+      { id: TEXT, position: 1 },
+    ]);
     expect(mockApiCall.mock.calls[0][4]).toBe(false);
     expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
       action: "channels.move",
@@ -773,8 +789,12 @@ describe("POST /channels/:id/move", () => {
     await mount();
     const up = await harness.post(`/channels/${C}/move`, { direction: "up" });
     expect(flashOf(up)).toMatchObject({ type: "ok" });
-    expect(mockSetPosition.mock.calls[0][0]).toBe(-1);
-    expect(mockSetPosition.mock.calls[0][1]).toMatchObject({ relative: true });
+    // Only CAT's text channels are renumbered; B (in the other category) is
+    // not part of the move.
+    expect(mockSetPosition.mock.calls[0][0]).toEqual([
+      { id: C, position: 0 },
+      { id: TEXT, position: 1 },
+    ]);
     // B is alone in its category, so it has no neighbour to swap with.
     const alone = await harness.post(`/channels/${B}/move`, {
       direction: "down",
@@ -999,6 +1019,44 @@ describe("POST /channels/:id/delete", () => {
   });
 });
 
+describe("GET /channels: recent changes", () => {
+  it("shows the page's own audit entries, escaped, so changes can be checked without a database tool", async () => {
+    recent = [
+      {
+        at: "2026-10-16T13:22:36.000Z",
+        actorId: "admin-1",
+        action: "channels.edit",
+        targetId: TEXT,
+        channelName: "<b>general</b>",
+        result: "success",
+        message: null,
+      },
+      {
+        at: "2026-10-16T13:26:58.000Z",
+        actorId: "admin-1",
+        action: "channels.delete",
+        targetId: TEXT2,
+        channelName: "quotes",
+        result: "failure",
+        message: "KoolBot manages quotes: <script>x</script>",
+      },
+    ];
+    await mount();
+    const html = await (await harness.get("/channels")).text();
+    expect(html).toContain("Recent changes");
+    expect(html).toContain("&lt;b&gt;general&lt;/b&gt;");
+    expect(html).toContain("refused or failed");
+    expect(html).not.toContain("<script>x</script>");
+  });
+
+  it("says so when the audit entries can't be read", async () => {
+    recent = null;
+    await mount();
+    const html = await (await harness.get("/channels")).text();
+    expect(html).toContain("The audit log couldn't be read");
+  });
+});
+
 describe("GET /channels", () => {
   it("renders the tree, escaping channel names and topics", async () => {
     channels[1] = view(TEXT, {
@@ -1104,5 +1162,141 @@ describe("CSRF", () => {
     );
     expect(res.status).toBe(403);
     expect(mockDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancellable requests and rate limits", () => {
+  const rateLimited = (majorParameter: string, timeToReset: number): void => {
+    restEmitter.emit("rateLimited", {
+      majorParameter,
+      timeToReset,
+      route: "/channels/:id",
+      method: "PATCH",
+    });
+  };
+
+  afterEach(() => {
+    restEmitter.removeAllListeners();
+  });
+
+  it("sends a user-limit-only edit as one PATCH with only that field and a cancel signal", async () => {
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 64000,
+    });
+    await mount();
+    await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      orig_name: "Hangout",
+      userLimit: "6",
+      orig_userLimit: "4",
+      bitrate: "64",
+      orig_bitrate: "64",
+      parent: CAT,
+      orig_parent: CAT,
+    });
+    expect(mockRest.patch).toHaveBeenCalledTimes(1);
+    expect(mockRest.patch.mock.calls[0][0]).toBe(`/channels/${VOICE}`);
+    const options = mockRest.patch.mock.calls[0][1];
+    expect(options.body).toEqual({ user_limit: 6 });
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("cancels the request and says when to retry if Discord reports a long rate-limit wait", async () => {
+    // discord.js's REST client would otherwise hold the request in its queue
+    // for the whole wait and apply it later, after the page reported failure.
+    let signal: AbortSignal | undefined;
+    mockEdit.mockImplementation(
+      (_body: unknown, options: any) =>
+        new Promise((_resolve, reject) => {
+          signal = options.signal;
+          rateLimited(TEXT, 540_000);
+          options.signal.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "new",
+      parent: CAT,
+    });
+    const flash = flashOf(res);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("9 minutes");
+    expect(flash.msg).toContain("cancelled");
+    expect(signal?.aborted).toBe(true);
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "channels.edit",
+      result: "failure",
+    });
+  });
+
+  it("lets a short rate-limit wait run", async () => {
+    mockEdit.mockImplementation(async () => {
+      rateLimited(TEXT, 5_000);
+      return { name: "general" };
+    });
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "new",
+      parent: CAT,
+    });
+    expect(flashOf(res).type).toBe("ok");
+  });
+
+  it("ignores a rate-limit notice for a different channel", async () => {
+    mockEdit.mockImplementation(async () => {
+      rateLimited("100000000000000999", 540_000);
+      return { name: "general" };
+    });
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "new",
+      parent: CAT,
+    });
+    expect(flashOf(res).type).toBe("ok");
+  });
+
+  it("aborts the request and reports a timeout as cancelled, not as possibly applied", async () => {
+    let signal: AbortSignal | undefined;
+    mockEdit.mockImplementation(
+      (_body: unknown, options: any) =>
+        new Promise(() => {
+          signal = options.signal;
+        }),
+    );
+    mockApiCall.mockImplementationOnce(async (fn: () => Promise<unknown>) => {
+      void fn();
+      throw new Error(
+        "Discord API timeout for edit channel; not retried because it may still complete",
+      );
+    });
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "new",
+      parent: CAT,
+    });
+    const flash = flashOf(res);
+    expect(flash.msg).toContain("cancelled");
+    expect(flash.msg).not.toContain("may still complete");
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("sends moves and deletes as cancellable requests too", async () => {
+    await mount();
+    await harness.post(`/channels/${TEXT2}/move`, { direction: "up" });
+    expect(mockRest.patch.mock.calls[0][0]).toBe("/guilds/guild-1/channels");
+    expect(mockRest.patch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    await harness.post(`/channels/${TEXT2}/delete`, { confirm: tok(TEXT2) });
+    expect(mockRest.delete.mock.calls[0][0]).toBe(`/channels/${TEXT2}`);
+    expect(mockRest.delete.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
   });
 });
