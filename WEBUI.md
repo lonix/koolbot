@@ -1508,9 +1508,11 @@ would otherwise hold a request behind that limit and apply it minutes later, and
 was lost. The page therefore writes (create, edit, move, delete) with its own Discord client: no automatic
 retries, a 30 second limit, and a rate-limit wait longer than 20 seconds is refused at once. If Discord asks for a
 long wait, nothing was sent or applied and the page says when to try again. If the request times out the outcome
-is unknown (Discord may have accepted it before the answer was lost), so the page says to check Discord before
-trying again; the request is cancelled here so nothing queued is applied later. Other features keep using the
-shared client unchanged.
+is unknown (Discord may have accepted it before the answer was lost; the same goes for a lost connection or a server
+error), so the page says to check Discord before trying again. Only an answer Discord gave (a refused permission or
+value) is a definite refusal. Writes to one server also run one at a time, each from a fresh read, so two saves of
+the same page cannot overwrite each other. A request that gives up is cancelled here, so nothing queued is applied
+later. Other features keep using the shared client unchanged.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:

@@ -3,6 +3,7 @@ import {
   buildChannelTree,
   buildProtectionMap,
   canMove,
+  compareIds,
   neighbourOf,
   checkCapacity,
   cleanName,
@@ -523,5 +524,35 @@ describe("deleteVerdict", () => {
     expect(!verdict.ok && verdict.message).toContain("lobby");
     const single = deleteVerdict(cat, [cat, plain], new Map());
     expect(!single.ok && single.message).toContain("1 channel.");
+  });
+});
+
+describe("compareIds", () => {
+  it("orders snowflakes numerically, so a longer id sorts after a shorter one", () => {
+    expect(
+      compareIds("900000000000000000", "1000000000000000000"),
+    ).toBeLessThan(0);
+    expect(
+      compareIds("1000000000000000000", "900000000000000000"),
+    ).toBeGreaterThan(0);
+    expect(compareIds("123", "123")).toBe(0);
+    expect(compareIds("124", "123")).toBeGreaterThan(0);
+  });
+
+  it("breaks position ties by numeric id in the tree and the sibling order", () => {
+    const small = "900000000000000000";
+    const mid = "950000000000000000";
+    const big = "1000000000000000000";
+    const list = [
+      ch(CAT, { kind: "category" }),
+      ch(big, { parentId: CAT, position: 0 }),
+      ch(small, { parentId: CAT, position: 0 }),
+      ch(mid, { parentId: CAT, position: 0 }),
+    ];
+    expect(
+      buildChannelTree(list).categories[0].children.map((c) => c.id),
+    ).toEqual([small, mid, big]);
+    expect(neighbourOf(list, list[2], "down")?.id).toBe(mid);
+    expect(neighbourOf(list, list[1], "up")?.id).toBe(mid);
   });
 });

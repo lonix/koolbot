@@ -17,7 +17,12 @@
  * the shared client or any other service's retry policy.
  */
 
-import { REST, RateLimitError, type RESTOptions } from "discord.js";
+import {
+  DiscordAPIError,
+  REST,
+  RateLimitError,
+  type RESTOptions,
+} from "discord.js";
 import type { CommandManager } from "../services/command-manager.js";
 
 /** A rate-limit wait longer than this is not waited for. */
@@ -67,17 +72,28 @@ export function rateLimitMessage(waitMs: number): string {
   return `Discord is limiting changes right now (it allows only a few renames and edits per channel every 10 minutes). Nothing was changed and the request was cancelled. Try again in about ${when}.`;
 }
 
-/** The admin-facing message for any failed write. */
+/**
+ * The admin-facing message for any failed write. Only a rejection Discord
+ * itself answered (a 4xx API error: missing permission, invalid value) is
+ * definite: the change was not made. Everything else (a timeout, a lost
+ * connection, a 5xx, an unexpected error) leaves it unknown whether Discord
+ * accepted the request before the answer was lost, and a retry could repeat it
+ * (a duplicate channel), so the admin is told to check Discord first.
+ */
 export function describeWriteFailure(error: unknown): string {
   if (error instanceof RateLimitError) {
     return rateLimitMessage(rateLimitWaitMs(error));
   }
   const message = error instanceof Error ? error.message : String(error);
-  const name = error instanceof Error ? error.name : "";
-  if (name === "AbortError" || /timeout/i.test(message)) {
-    return "Discord didn't answer within 30 seconds, so it is unknown whether the change was applied: the request was cancelled here, but Discord may already have accepted it. Check Discord before trying again.";
+  if (error instanceof DiscordAPIError) {
+    return `Discord refused the change: ${message.slice(0, 200)}`;
   }
-  return `Discord refused the change: ${message.slice(0, 200)}`;
+  const timedOut =
+    (error instanceof Error && error.name === "AbortError") ||
+    /timeout/i.test(message);
+  return timedOut
+    ? "Discord didn't answer within 30 seconds, so it is unknown whether the change was applied: the request was cancelled here, but Discord may already have accepted it. Check Discord before trying again."
+    : `Discord didn't confirm the change (${message.slice(0, 120) || "no details"}), so it is unknown whether it was applied: it may already have gone through. Check Discord before trying again.`;
 }
 
 /**

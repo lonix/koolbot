@@ -12,7 +12,7 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { RateLimitError, Routes } from "discord.js";
+import { DiscordAPIError, HTTPError, RateLimitError, Routes } from "discord.js";
 import {
   cancellableCall,
   createWriteRest,
@@ -192,9 +192,33 @@ describe("messages", () => {
     expect(
       describeWriteFailure(new Error("Discord API timeout for edit channel")),
     ).toContain("unknown whether the change was applied");
-    expect(describeWriteFailure(new Error("Missing Permissions"))).toBe(
-      "Discord refused the change: Missing Permissions",
-    );
+    expect(
+      describeWriteFailure(
+        new DiscordAPIError(
+          { message: "Missing Permissions", code: 50013 },
+          50013,
+          403,
+          "POST",
+          "https://discord.com/api/v10/guilds/1/channels",
+          {},
+        ),
+      ),
+    ).toBe("Discord refused the change: Missing Permissions");
+  });
+
+  it("treats a lost connection, a 5xx and unexpected errors as an unconfirmed outcome", () => {
+    // Discord may have accepted the request before the answer was lost, so
+    // a retry could make a duplicate; only a 4xx answer is a definite refusal.
+    for (const error of [
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      new HTTPError(502, "Bad Gateway", "POST", "https://discord.com/x", {}),
+      new TypeError("fetch failed"),
+    ]) {
+      const message = describeWriteFailure(error);
+      expect(message).toContain("unknown whether");
+      expect(message).toContain("Check Discord before trying again");
+      expect(message).not.toContain("refused");
+    }
   });
 });
 

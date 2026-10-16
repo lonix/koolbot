@@ -22,6 +22,7 @@ import {
 } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { CommandManager } from "../../../services/command-manager.js";
+import { createKeyedLock } from "../../../utils/keyed-lock.js";
 import { recordAudit } from "../../audit.js";
 import {
   cancellableCall,
@@ -114,6 +115,11 @@ export function createChannelManagerRouter(
 ): Router {
   const router = Router();
 
+  // Writes to one server run one at a time, each from a fresh read of the
+  // channels: two saves of the same page cannot both pass their checks against
+  // the same snapshot and then silently overwrite each other.
+  const writeLock = createKeyedLock();
+
   // Created on first use: the token exists once the bot has logged in.
   let cachedRest: REST | null = writeRest ?? null;
   const getWriteRest = (): REST | null => {
@@ -164,37 +170,41 @@ export function createChannelManagerRouter(
     return asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const params = { id: String(req.params.id ?? "") };
-      let outcome: Outcome;
-      try {
-        const guild = await fetchGuild(session.guildId);
-        if (!guild) {
-          outcome = refuse("Discord couldn't be reached, so nothing changed.");
-        } else if (!(await botCanManageChannels(guild))) {
-          outcome = refuse(
-            "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
-          );
-        } else if (!getWriteRest()) {
-          outcome = refuse(
-            "The bot isn't signed in to Discord yet, so nothing was changed.",
-          );
-        } else {
-          const manager = CommandManager.getInstance(client);
-          outcome = await handler({
-            guild,
-            channels: await fetchChannelViews(guild),
-            maxBitrate: maxBitrateOf(guild),
-            body: (req.body as Record<string, unknown> | undefined) ?? {},
-            params,
-            reason: `KoolBot web UI, by ${session.discordUserId}`,
-            rest: getWriteRest() as REST,
-            call: (fn, opName, retryOnTimeout = false) =>
-              cancellableCall(manager, fn, opName, retryOnTimeout),
-          });
+      let outcome: Outcome = refuse("");
+      await writeLock.run(session.guildId, async () => {
+        try {
+          const guild = await fetchGuild(session.guildId);
+          if (!guild) {
+            outcome = refuse(
+              "Discord couldn't be reached, so nothing changed.",
+            );
+          } else if (!(await botCanManageChannels(guild))) {
+            outcome = refuse(
+              "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
+            );
+          } else if (!getWriteRest()) {
+            outcome = refuse(
+              "The bot isn't signed in to Discord yet, so nothing was changed.",
+            );
+          } else {
+            const manager = CommandManager.getInstance(client);
+            outcome = await handler({
+              guild,
+              channels: await fetchChannelViews(guild),
+              maxBitrate: maxBitrateOf(guild),
+              body: (req.body as Record<string, unknown> | undefined) ?? {},
+              params,
+              reason: `KoolBot web UI, by ${session.discordUserId}`,
+              rest: getWriteRest() as REST,
+              call: (fn, opName, retryOnTimeout = false) =>
+                cancellableCall(manager, fn, opName, retryOnTimeout),
+            });
+          }
+        } catch (error) {
+          logger.error(`channel manager: ${name} failed`, error);
+          outcome = refuse(describeWriteFailure(error));
         }
-      } catch (error) {
-        logger.error(`channel manager: ${name} failed`, error);
-        outcome = refuse(describeWriteFailure(error));
-      }
+      });
       await recordAudit(session, {
         action: `channels.${name}`,
         targetId: outcome.targetId ?? (params.id || null),

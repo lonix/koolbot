@@ -71,15 +71,21 @@ function isStage(c: ManagedChannelView): boolean {
  * channels, as Discord displays them; reordering also treats stage channels as
  * voice siblings.
  */
+/**
+ * Snowflake order, as Discord and discord.js break position ties: numerically,
+ * so a 19-digit id sorts after an 18-digit one (a string compare would not).
+ */
+export function compareIds(a: string, b: string): number {
+  return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+}
+
 function groupOf(c: ManagedChannelView): number {
   return c.kind === "voice" || isStage(c) ? 1 : 0;
 }
 
 function byOrder(a: ManagedChannelView, b: ManagedChannelView): number {
   return (
-    groupOf(a) - groupOf(b) ||
-    a.position - b.position ||
-    a.id.localeCompare(b.id)
+    groupOf(a) - groupOf(b) || a.position - b.position || compareIds(a.id, b.id)
   );
 }
 
@@ -88,7 +94,7 @@ export function buildChannelTree(
 ): ChannelTree {
   const categories = channels
     .filter((c) => c.kind === "category")
-    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+    .sort((a, b) => a.position - b.position || compareIds(a.id, b.id));
   const known = new Set(categories.map((c) => c.id));
   const rest = channels.filter((c) => c.kind !== "category");
   return {
@@ -121,9 +127,7 @@ export function siblingsOf(
             c.parentId === target.parentId &&
             groupOf(c) === groupOf(target),
         );
-  return list.sort(
-    (a, b) => a.position - b.position || a.id.localeCompare(b.id),
-  );
+  return list.sort((a, b) => a.position - b.position || compareIds(a.id, b.id));
 }
 
 /** The sibling a one-step move in `direction` swaps with, or null at the edge. */

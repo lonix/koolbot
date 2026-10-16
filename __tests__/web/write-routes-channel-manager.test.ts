@@ -13,7 +13,12 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { ChannelType, RateLimitError, type Client } from "discord.js";
+import {
+  ChannelType,
+  DiscordAPIError,
+  RateLimitError,
+  type Client,
+} from "discord.js";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -56,7 +61,9 @@ let canManage = true;
 let protectionFails = false;
 let recent: unknown = [];
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
-  fetchChannelViews: async () => channels,
+  fetchChannelViews: async () => {
+    return channels;
+  },
   maxBitrateOf: () => 96000,
   loadRecentChanges: async () => recent,
   botCanManageChannels: async () => canManage,
@@ -1358,5 +1365,73 @@ describe("cancellable requests and rate limits", () => {
     await harness.post(`/channels/${TEXT2}/delete`, { confirm: tok(TEXT2) });
     expect(mockRest.delete.mock.calls[0][0]).toBe(`/channels/${TEXT2}`);
     expect(mockRest.delete.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("overlapping saves and uncertain outcomes", () => {
+  it("runs a second save only after the first completed, from a fresh read, so it sees the conflict", async () => {
+    channels[1] = view(TEXT, { name: "general", parentId: CAT, topic: "hi" });
+    // The first edit takes a while. Without the per-server lock the second
+    // request would read the same snapshot meanwhile and also pass its checks.
+    mockEdit.mockImplementationOnce(async (body: any) => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      channels = channels.map((c) =>
+        c.id === TEXT ? { ...c, name: body.name } : c,
+      );
+      return { name: body.name };
+    });
+    await mount();
+    const form = (name: string): Record<string, string> => ({
+      name,
+      orig_name: "general",
+      topic: "hi",
+      orig_topic: "hi",
+      parent: CAT,
+      orig_parent: CAT,
+    });
+    const [first, second] = await Promise.all([
+      harness.post(`/channels/${TEXT}/edit`, form("first-rename")),
+      harness.post(`/channels/${TEXT}/edit`, form("second-rename")),
+    ]);
+    expect(flashOf(first).type).toBe("ok");
+    const flash = flashOf(second);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("changed elsewhere");
+    expect(mockEdit).toHaveBeenCalledTimes(1);
+    expect(mockEdit.mock.calls[0][0].name).toBe("first-rename");
+  });
+
+  it("reports a lost connection on a create as unconfirmed, not refused", async () => {
+    mockCreate.mockRejectedValue(
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+    );
+    await mount();
+    const res = await harness.post("/channels/create", {
+      type: "text",
+      name: "news",
+    });
+    const flash = flashOf(res);
+    expect(flash.msg).toContain("unknown whether");
+    expect(flash.msg).toContain("Check Discord before trying again");
+    expect(flash.msg).not.toContain("refused");
+  });
+
+  it("reports a definite Discord rejection as refused", async () => {
+    mockCreate.mockRejectedValue(
+      new DiscordAPIError(
+        { message: "Missing Permissions", code: 50013 },
+        50013,
+        403,
+        "POST",
+        "https://discord.com/api/v10/guilds/guild-1/channels",
+        {},
+      ),
+    );
+    await mount();
+    const res = await harness.post("/channels/create", {
+      type: "text",
+      name: "news",
+    });
+    expect(flashOf(res).msg).toContain("Discord refused the change");
   });
 });

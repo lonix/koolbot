@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { ChannelType, Collection, Guild } from "discord.js";
+import { ChannelType, Collection, Guild, GuildChannel } from "discord.js";
 import {
   siblingsOf,
   type ManagedChannelView,
@@ -90,5 +90,30 @@ describe("discord.js relative-move bucket vs siblingsOf", () => {
         sortedBucket(all, fakeChannel),
       );
     }
+  });
+});
+
+describe("equal positions with ids of different lengths", () => {
+  it("breaks ties by numeric id, as discord.js does for real channels", () => {
+    // Real channels sort ties by ascending numeric id (a 19-digit id after an
+    // 18-digit one). Instances of GuildChannel take that path.
+    const make = (id: string, position: number): Fake =>
+      Object.assign(Object.create(GuildChannel.prototype), {
+        id,
+        type: ChannelType.GuildText,
+        parentId: "100000000000000001",
+        rawPosition: position,
+      });
+    const small = make("900000000000000000", 0);
+    const mid = make("950000000000000000", 0);
+    const big = make("1000000000000000000", 0);
+    const all = [big, small, mid];
+    expect(sortedBucket(all, small)).toEqual([small.id, mid.id, big.id]);
+    const views = all.map((f) => viewOf(f, "text"));
+    expect(siblingsOf(views, views[1]).map((c) => c.id)).toEqual([
+      small.id,
+      mid.id,
+      big.id,
+    ]);
   });
 });
