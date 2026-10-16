@@ -118,6 +118,7 @@ const scan: ServerScan = {
   },
   scheduledEvents: [],
   suggestions: [{ code: "s", message: "Add AFK" }],
+  webhooks: { known: true, list: [], unavailable: null },
   partial: ["webhooks"],
 };
 
@@ -141,6 +142,27 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("Some parts could not be read");
     expect(html).toContain("4+");
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
+  });
+  it("warns that webhook marks are missing when webhooks can't be read", () => {
+    const known = renderAdoptPage({ ...common, scan });
+    expect(known).not.toContain("not marked below");
+    const denied = renderAdoptPage({
+      ...common,
+      scan: {
+        ...scan,
+        webhooks: { known: false, list: [], unavailable: "missing-permission" },
+      },
+    });
+    expect(denied).toContain("does not hold Manage Webhooks");
+    expect(denied).toContain("not marked below");
+    const failed = renderAdoptPage({
+      ...common,
+      scan: {
+        ...scan,
+        webhooks: { known: false, list: [], unavailable: "error" },
+      },
+    });
+    expect(failed).toContain("Webhooks could not be read");
   });
   it("shows onboarding role names, falling back to ids", () => {
     const html = renderAdoptPage({ ...common, scan });
