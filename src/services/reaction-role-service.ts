@@ -1981,16 +1981,30 @@ export class ReactionRoleService {
     // The live category overwrite counts as well: Manage Channels or Manage
     // Webhooks granted to the role there would be handed to everyone who picks
     // it up. Read at apply time, so a change since the preview is caught.
-    const overwriteBits = category.permissionOverwrites?.cache?.get(role.id)
-      ?.allow?.bitfield;
-    const dangerousOverwrite =
-      typeof overwriteBits === "bigint"
-        ? forbiddenSelfAssignNames(overwriteBits)
-        : [];
-    if (dangerousOverwrite.length > 0) {
-      throw new Error(
-        `${category.name} gives ${role.name} powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`,
-      );
+    // Checked on every channel in the guild's cache (the cached overwrites are
+    // already in memory, no REST), not just the category: an unsynced child
+    // channel's own overwrite for the role is just as exploitable.
+    const everyChannel = [
+      category,
+      ...(guild.channels.cache?.values?.() ?? []),
+    ];
+    for (const channel of everyChannel) {
+      const bits = (
+        channel as {
+          permissionOverwrites?: {
+            cache?: {
+              get(id: string): { allow?: { bitfield?: bigint } } | undefined;
+            };
+          };
+        }
+      ).permissionOverwrites?.cache?.get(role.id)?.allow?.bitfield;
+      const dangerous =
+        typeof bits === "bigint" ? forbiddenSelfAssignNames(bits) : [];
+      if (dangerous.length > 0) {
+        throw new Error(
+          `${(channel as { name?: string }).name ?? channel.id} gives ${role.name} powerful permissions in its own overwrite (${dangerous.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`,
+        );
+      }
     }
 
     const existing = await ReactionRoleConfig.findOne({
@@ -2034,6 +2048,28 @@ export class ReactionRoleService {
       channelId: input.channelId,
       reused: false,
     };
+  }
+
+  /**
+   * The picker message of the mapping a step with `ownerKey` saved for `roleId`,
+   * or null. Reads only (under the guild lock, so a registration still running
+   * has finished first); it never posts. Lets a rollback recover a registration
+   * the engine never got to record.
+   */
+  public async findOwnedPairing(
+    guildId: string,
+    input: { roleId: string; ownerKey: string },
+  ): Promise<string | null> {
+    return reactionRoleGuildLock.run(guildId, async () => {
+      const row = await ReactionRoleConfig.findOne({
+        guildId,
+        roleId: input.roleId,
+        adoptionOpKey: input.ownerKey,
+        autoCreated: false,
+        isArchived: false,
+      });
+      return row ? row.messageId : null;
+    });
   }
 
   /**

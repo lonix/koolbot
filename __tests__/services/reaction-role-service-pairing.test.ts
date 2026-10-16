@@ -136,6 +136,7 @@ function build(
     messageFetch,
     channelFetch,
     botReaction,
+    guild,
   };
 }
 
@@ -188,6 +189,39 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
       expect(bind).not.toHaveBeenCalled();
     },
   );
+
+  it("refuses a role whose overwrite on an unsynced child channel grants Manage Webhooks", async () => {
+    const { service, guild } = build();
+    (guild.channels as unknown as { cache: Map<string, unknown> }).cache =
+      new Map([
+        [
+          "child1",
+          {
+            id: "child1",
+            name: "games-chat",
+            permissionOverwrites: {
+              cache: new Map([
+                [
+                  "role1",
+                  {
+                    allow: {
+                      bitfield:
+                        PermissionFlagsBits.ViewChannel |
+                        PermissionFlagsBits.ManageWebhooks,
+                    },
+                  },
+                ],
+              ]),
+            },
+          },
+        ],
+      ]);
+    const bind = jest.spyOn(service, "bindReactionRole");
+    await expect(
+      service.registerGatedPairing("guild1", input()),
+    ).rejects.toThrow(/games-chat gives Valorant powerful permissions/);
+    expect(bind).not.toHaveBeenCalled();
+  });
 
   it("requires a real category", async () => {
     const { service } = build(0n, ChannelType.GuildText);
@@ -382,6 +416,32 @@ describe("ReactionRoleService.unregisterGatedPairing (#1022)", () => {
     await held;
     await binding;
     expect(Model.findOne).toHaveBeenCalled();
+  });
+
+  it("finds the mapping a step saved, by its owner key, without posting", async () => {
+    const { service } = build();
+    Model.findOne.mockResolvedValueOnce({ messageId: "msg-saved" });
+    const bind = jest.spyOn(service, "bindReactionRole");
+    expect(
+      await service.findOwnedPairing("guild1", {
+        roleId: "role1",
+        ownerKey: OWNER,
+      }),
+    ).toBe("msg-saved");
+    expect(Model.findOne).toHaveBeenCalledWith({
+      guildId: "guild1",
+      roleId: "role1",
+      adoptionOpKey: OWNER,
+      autoCreated: false,
+      isArchived: false,
+    });
+    expect(bind).not.toHaveBeenCalled();
+    expect(
+      await service.findOwnedPairing("guild1", {
+        roleId: "role1",
+        ownerKey: "other",
+      }),
+    ).toBeNull();
   });
 
   it("does nothing for a mapping another plan owns", async () => {

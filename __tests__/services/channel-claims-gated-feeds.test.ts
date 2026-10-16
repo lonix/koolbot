@@ -354,6 +354,36 @@ describe("detecting role-gated categories", () => {
     expect(added.errors.map((e) => e.code)).toContain("role-unsafe");
   });
 
+  it("refuses a role whose overwrite on an unsynced child channel grants Manage Channels", () => {
+    const scanned = fixture();
+    scanned.channels.find((c) => c.id === LEAKY)!.overwrites = [
+      ow(R_GAME, F.ViewChannel | F.ManageChannels),
+    ];
+    const pairing = detectRolePairings(scanOf(scanned), groups).find(
+      (p) => p.categoryId === CAT_GAME,
+    )!;
+    expect(pairing.state).toBe("refused");
+    expect(pairing.reason).toContain("ManageChannels");
+    expect(pairing.reason).toContain(`chan-${LEAKY.slice(-2)}`);
+    const direct = planAdoption(scanned, {
+      reactionRoles: [{ roleId: R_GAME, categoryId: CAT_GAME, emoji: "🎮" }],
+    });
+    expect(direct.errors.map((e) => e.code)).toEqual(["role-unsafe"]);
+    // A plan that adds the grant to a child is refused too.
+    const added = planAdoption(fixture(), {
+      overwrites: [
+        {
+          channelId: LEAKY,
+          target: { id: R_GAME },
+          allow: (F.ViewChannel | F.ManageWebhooks).toString(),
+          deny: "0",
+        },
+      ],
+      reactionRoles: [{ roleId: R_GAME, categoryId: CAT_GAME, emoji: "🎮" }],
+    });
+    expect(added.errors.map((e) => e.code)).toContain("role-unsafe");
+  });
+
   it("a role KoolBot holds still gates a category; only integration roles are ignored", () => {
     const scanned = fixture({ botRoleIds: [R_KOOL, R_GAME] });
     const found = detectRolePairings(scanOf(scanned), groups);

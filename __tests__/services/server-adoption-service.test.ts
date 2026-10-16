@@ -184,6 +184,10 @@ function harness() {
           reused: false,
         };
       },
+      findOwned: async (_guildId, i) => {
+        const found = pickers.get(i.roleId);
+        return found && found.ownerKey === i.ownerKey ? found.messageId : null;
+      },
       unregister: async (_guildId, i) => {
         run(`rr.unregister:${i.roleId}:${i.channelId}:${i.messageId}`);
         if (unregisterFails.has(i.roleId)) throw new Error("Discord is down");
@@ -2083,6 +2087,41 @@ describe("reaction role pairings (#1022)", () => {
     await h.service.rollback(first.snapshotId, { actor });
     expect(rr(h)).toEqual(["rr.unregister:member:chat:msg-member"]);
     expect(h.pickers.size).toBe(0);
+  });
+
+  it("rollback recovers a registration saved before a crash that the engine never recorded", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    // The registrar had saved the mapping when the process died.
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: `${first.snapshotId}:op-1`,
+    });
+    h.calls.length = 0;
+    const back = await h.service.rollback(first.snapshotId, { actor });
+    expect(back.failed).toEqual([]);
+    expect(rr(h)).toEqual(["rr.unregister:member:chat:msg-member"]);
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("rollback does not touch a mapping another step owns when this step recorded nothing", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: "other-snap:op-1",
+    });
+    h.calls.length = 0;
+    await h.service.rollback(first.snapshotId, { actor });
+    expect(rr(h)).toEqual([]);
+    expect(h.pickers.size).toBe(1);
   });
 
   it("a failed picker removal fails the rollback step, keeps it open, and a retry finishes it", async () => {

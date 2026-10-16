@@ -197,6 +197,15 @@ export interface AdoptionReactionRoles {
       ownerKey: string;
     },
   ): Promise<void>;
+  /**
+   * Non-posting lookup of the mapping a step with this owner key saved (it may
+   * have landed before a crash, or after a timeout, without the engine
+   * recording it). Returns its picker message id, or null.
+   */
+  findOwned(
+    guildId: string,
+    input: { roleId: string; ownerKey: string },
+  ): Promise<string | null>;
 }
 
 export interface AdoptionDeps {
@@ -345,6 +354,14 @@ export class ServerAdoptionService {
             const { ReactionRoleService } =
               await import("./reaction-role-service.js");
             return ReactionRoleService.getInstance(client).registerGatedPairing(
+              guildId,
+              input,
+            );
+          },
+          findOwned: async (guildId, input): Promise<string | null> => {
+            const { ReactionRoleService } =
+              await import("./reaction-role-service.js");
+            return ReactionRoleService.getInstance(client).findOwnedPairing(
               guildId,
               input,
             );
@@ -867,6 +884,28 @@ export class ServerAdoptionService {
         );
         if (!live) {
           record.status = "applied";
+          changed = true;
+        }
+      } else if (
+        op.type === "reactionrole.register" &&
+        record.startedAt &&
+        this.deps.reactionRoles
+      ) {
+        // The registration may have been saved before a crash (or after a
+        // timeout) without the engine recording it. Look it up by the step's
+        // owner key, without posting anything, so the rollback removes it.
+        const { reactionRoles } = this.deps;
+        const messageId = await callApi(
+          () =>
+            reactionRoles.findOwned(snapshot.guildId, {
+              roleId: op.roleId,
+              ownerKey: `${snapshot.id}:${op.id}`,
+            }),
+          `look up reaction role ${op.roleId}`,
+        );
+        if (messageId) {
+          record.status = "applied";
+          record.resultId = `posted:${op.pickerChannelId}:${messageId}`;
           changed = true;
         }
       } else if (op.type === "member.role.add") {

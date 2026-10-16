@@ -1039,26 +1039,29 @@ export function planAdoption(
             : role.position >= scanned.botHighestRolePosition
               ? `"${role.name}" sits at or above the bot's highest role, so the bot can't assign it.`
               : null;
-    // The category's own overwrite for the role counts too (as the plan leaves
-    // it): Manage Channels or Manage Webhooks there is category management.
-    let overwriteAllow = big(
-      category.overwrites.find((o) => o.id === role.id)?.allow,
-    );
-    for (const op of ops) {
-      if (
-        op.type === "overwrite.set" &&
-        op.channelId === category.id &&
-        op.overwriteTargetId === role.id
-      ) {
-        overwriteAllow = big(op.allow);
+    // The role's own overwrite on ANY channel counts (as the plan leaves it):
+    // Manage Channels or Manage Webhooks on an unsynced child is just as
+    // exploitable as on the category. The scan already holds every channel's
+    // overwrites, so this is one in-memory pass.
+    let overwriteProblem: string | null = null;
+    for (const ch of scanned.channels) {
+      let allow = big(ch.overwrites.find((o) => o.id === role.id)?.allow);
+      for (const op of ops) {
+        if (
+          op.type === "overwrite.set" &&
+          op.channelId === ch.id &&
+          op.overwriteTargetId === role.id
+        ) {
+          allow = big(op.allow);
+        }
+      }
+      const names = forbiddenSelfAssignNames(allow);
+      if (names.length > 0) {
+        overwriteProblem = `"${ch.name}" gives "${role.name}" powerful permissions in its own overwrite (${names.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`;
+        break;
       }
     }
-    const dangerousOverwrite = forbiddenSelfAssignNames(overwriteAllow);
-    const unsafe =
-      refusal ??
-      (dangerousOverwrite.length > 0
-        ? `"${category.name}" gives "${role.name}" powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`
-        : null);
+    const unsafe = refusal ?? overwriteProblem;
     if (unsafe) {
       err("role-unsafe", unsafe, role.id);
       continue;

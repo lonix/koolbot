@@ -1506,13 +1506,14 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   created or edited, so the category stays gated. A picker another bot runs is left alone. The same checks as the
   Reaction Roles page apply and are repeated when the step runs: a role with Administrator, Manage Roles, Manage
   Server and the other dangerous permissions, a managed or role-group role, or one at or above KoolBot's highest role is
-  **refused** and listed with the reason, and so is a plain role whose own overwrite on the category grants such
-  permissions (Manage Channels, Manage Webhooks, Manage Roles there), checked again against the live category when the
-  step runs; a role that is already a reaction role is shown as such. The plan is blocked
+  **refused** and listed with the reason, and so is a plain role whose own overwrite on any channel (the category or
+  an unsynced child) grants such permissions (Manage Channels, Manage Webhooks, Manage Roles there), checked again
+  against the live channels when the step runs; a role that is already a reaction role is shown as such. The plan is blocked
   until the reaction-role message channel is set, and warns when reaction roles are off. The step records the channel it
   will post in, so changing `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
-  Reaction Roles page made is reused, not owned. A rollback deletes only the picker this plan posted, from the channel it
+  Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded (looked up by the step's key,
+  never posted again). A rollback deletes only the picker this plan posted, from the channel it
   was posted to, never the role or the category; if Discord fails while deleting it, the rollback step fails and stays
   open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
   the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.

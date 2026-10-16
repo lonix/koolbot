@@ -60,6 +60,23 @@ export function detectRolePairings(
   const groupBacked = new Map(
     groups.flatMap((g) => (g.roleId ? [[g.roleId, g.name] as const] : [])),
   );
+  // What each role's own overwrites allow, on ANY channel: the dangerous bits
+  // are just as exploitable on an unsynced child as on the category. The scan
+  // already holds every channel's overwrites, so this is one in-memory pass.
+  const grants = new Map<string, { channel: string; names: string[] }>();
+  for (const ch of scan.channels) {
+    for (const o of ch.overwrites) {
+      if (o.type !== "role" || grants.has(o.id)) continue;
+      const bits = (o.allow as string[]).reduce(
+        (acc, name) =>
+          acc |
+          (PermissionFlagsBits[name as keyof typeof PermissionFlagsBits] ?? 0n),
+        0n,
+      );
+      const names = forbiddenSelfAssignNames(bits);
+      if (names.length > 0) grants.set(o.id, { channel: ch.name, names });
+    }
+  }
   const out: RolePairing[] = [];
   const claimedRoles = new Map<string, string>();
   for (const c of scan.channels) {
@@ -80,15 +97,7 @@ export function detectRolePairings(
     const raw = rawRoles.get(gates[0].id);
     if (!role || !raw) continue;
     const dangerous = forbiddenSelfAssignNames(BigInt(raw.permissions));
-    // What the category's own overwrite grants the role counts too: Manage
-    // Channels or Manage Webhooks there is category management for every pick.
-    const overwriteBits = (gates[0].allow as string[]).reduce(
-      (acc, name) =>
-        acc |
-        (PermissionFlagsBits[name as keyof typeof PermissionFlagsBits] ?? 0n),
-      0n,
-    );
-    const dangerousOverwrite = forbiddenSelfAssignNames(overwriteBits);
+    const overwriteGrant = grants.get(role.id);
     let state: PairingState = "proposed";
     let reason: string | null = null;
     if (role.managed) {
@@ -100,9 +109,9 @@ export function detectRolePairings(
     } else if (dangerous.length > 0) {
       state = "refused";
       reason = `@${role.name} has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role first.`;
-    } else if (dangerousOverwrite.length > 0) {
+    } else if (overwriteGrant) {
       state = "refused";
-      reason = `"${c.name}" gives @${role.name} powerful permissions in its own overwrite (${dangerousOverwrite.join(", ")}), so anyone who picks the role would get them there. Remove them from the category first.`;
+      reason = `"${overwriteGrant.channel}" gives @${role.name} powerful permissions in its own overwrite (${overwriteGrant.names.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`;
     } else if (raw.position >= scan.scanned.botHighestRolePosition) {
       state = "refused";
       reason = `@${role.name} sits at or above KoolBot's highest role, so KoolBot can't assign it.`;
