@@ -228,6 +228,7 @@ const baseInputs = (
   reactionRoles: [],
   pollSchedules: [],
   announcements: [],
+  lobbyNames: [],
   discord: [],
   channels: [],
   ...over,
@@ -354,11 +355,8 @@ describe("buildProtectionMap", () => {
     const map = buildProtectionMap(
       baseInputs({
         channels,
-        config: {
-          "voicechannels.category_id": CAT,
-          "voicechannels.lobby.name": "Lobby",
-          "voicechannels.lobby.offlinename": "Offline Lobby",
-        },
+        lobbyNames: ["Lobby", "Offline Lobby"],
+        config: { "voicechannels.category_id": CAT },
       }),
     );
     expect(map.has(V)).toBe(true);
@@ -366,11 +364,8 @@ describe("buildProtectionMap", () => {
     expect(map.has(B)).toBe(false); // same name, but outside the voice category
   });
 
-  const lobbyConfig = {
-    "voicechannels.category_id": CAT,
-    "voicechannels.lobby.name": "Lobby",
-    "voicechannels.lobby.offlinename": "Offline Lobby",
-  };
+  const lobbyConfig = { "voicechannels.category_id": CAT };
+  const lobbyNames = ["Lobby", "Offline Lobby"];
 
   it("keeps the real lobby protected when a stale lobby id points at a text channel", () => {
     // VoiceChannelManager ignores an id that isn't a voice channel and finds
@@ -382,6 +377,7 @@ describe("buildProtectionMap", () => {
     const map = buildProtectionMap(
       baseInputs({
         channels,
+        lobbyNames,
         config: { ...lobbyConfig, "voicechannels.lobby.channel_id": A },
       }),
     );
@@ -398,6 +394,7 @@ describe("buildProtectionMap", () => {
     const map = buildProtectionMap(
       baseInputs({
         channels,
+        lobbyNames,
         config: { ...lobbyConfig, "voicechannels.lobby.channel_id": A },
       }),
     );
@@ -415,6 +412,7 @@ describe("buildProtectionMap", () => {
       const map = buildProtectionMap(
         baseInputs({
           channels,
+          lobbyNames,
           config: { ...lobbyConfig, "voicechannels.lobby.channel_id": id },
         }),
       );
@@ -432,6 +430,7 @@ describe("buildProtectionMap", () => {
     const map = buildProtectionMap(
       baseInputs({
         channels,
+        lobbyNames,
         config: { ...lobbyConfig, "voicechannels.lobby.channel_id": V },
       }),
     );

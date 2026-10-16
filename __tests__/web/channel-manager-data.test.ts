@@ -5,6 +5,33 @@ const lean = <T>(rows: T[]) => ({
   lean: async () => rows,
   select: () => ({ lean: async () => rows }),
 });
+let strictConfig: Record<string, string> = {};
+let strictFails = false;
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: {
+    getInstance: (): unknown => ({
+      getBoolean: jest.fn(async () => false),
+      getNumber: jest.fn(async () => 0),
+      getString: jest.fn(async (k: string, d = "") => strictConfig[k] ?? d),
+      getStringStrict: jest.fn(async (k: string, d = "") => {
+        if (strictFails) throw new Error("config read failed");
+        return strictConfig[k] ?? d;
+      }),
+      registerReloadCallback: jest.fn(),
+    }),
+  },
+}));
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
+  default: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
+jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
+  VoiceChannelTracker: { getInstance: (): unknown => ({}) },
+}));
 const mockConfig = jest.fn<(...a: any[]) => Promise<Record<string, unknown>>>();
 jest.unstable_mockModule("../../src/services/server-scan-service.js", () => ({
   readEffectiveConfig: mockConfig,
@@ -19,6 +46,7 @@ const polls = jest.fn<(...a: any[]) => any>();
 const announcements = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/models/managed-voice-channel.js", () => ({
   ManagedVoiceChannel: { find: managed },
+  ManagedVoiceMigration: {},
 }));
 jest.unstable_mockModule("../../src/models/voice-channel-ownership.js", () => ({
   VoiceChannelOwnership: { find: owned },
@@ -172,6 +200,8 @@ describe("loadProtection", () => {
     systemChannelId: "100000000000000091",
   };
   beforeEach(() => {
+    strictConfig = {};
+    strictFails = false;
     mockConfig.mockResolvedValue({ "quotes.channel_id": "100000000000000001" });
     managed.mockReturnValue(
       lean([{ channelId: "100000000000000002", kind: "lobby" }]),
@@ -254,6 +284,82 @@ describe("loadProtection", () => {
       throw new Error("db down");
     });
     await expect(loadProtection(guild, [])).rejects.toThrow("db down");
+  });
+
+  const voiceChannels = [
+    {
+      id: "100000000000000040",
+      name: "Lobby",
+      kind: "voice" as const,
+      typeLabel: "voice",
+      parentId: "100000000000000099",
+      position: 0,
+      topic: null,
+      userLimit: null,
+      bitrate: null,
+    },
+    {
+      id: "100000000000000041",
+      name: "Old Lobby",
+      kind: "voice" as const,
+      typeLabel: "voice",
+      parentId: "100000000000000099",
+      position: 1,
+      topic: null,
+      userLimit: null,
+      bitrate: null,
+    },
+    {
+      id: "100000000000000042",
+      name: "Squad",
+      kind: "voice" as const,
+      typeLabel: "voice",
+      parentId: "100000000000000099",
+      position: 2,
+      topic: null,
+      userLimit: null,
+      bitrate: null,
+    },
+  ];
+
+  it("protects a lobby whose configured name is quoted (the service strips the quotes)", async () => {
+    strictConfig = { "voicechannels.lobby.name": '"Lobby"' };
+    mockConfig.mockResolvedValue({
+      "voicechannels.category_id": "100000000000000099",
+    });
+    const map = await loadProtection(guild, voiceChannels);
+    expect(map.has("100000000000000040")).toBe(true);
+    expect(map.has("100000000000000042")).toBe(false);
+  });
+
+  it("protects a lobby named by a legacy key when the primary setting is empty", async () => {
+    strictConfig = {
+      "voicechannels.lobby.name": "",
+      "voice_channel.lobby_channel_name": "Old Lobby",
+    };
+    mockConfig.mockResolvedValue({
+      "voicechannels.category_id": "100000000000000099",
+    });
+    const map = await loadProtection(guild, voiceChannels);
+    expect(map.has("100000000000000041")).toBe(true);
+    expect(map.has("100000000000000042")).toBe(false);
+  });
+
+  it("protects an existing lobby that has no configured id and no managed-channel row", async () => {
+    managed.mockReturnValue(lean([]));
+    mockConfig.mockResolvedValue({
+      "voicechannels.category_id": "100000000000000099",
+      "voicechannels.lobby.channel_id": "",
+    });
+    const map = await loadProtection(guild, voiceChannels);
+    expect(map.has("100000000000000040")).toBe(true);
+  });
+
+  it("fails closed when the lobby name settings can't be read", async () => {
+    strictFails = true;
+    await expect(loadProtection(guild, voiceChannels)).rejects.toThrow(
+      "config read failed",
+    );
   });
 
   it("throws when a source can't be read, so a delete fails closed", async () => {

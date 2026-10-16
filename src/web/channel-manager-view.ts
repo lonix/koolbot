@@ -253,6 +253,8 @@ export interface ChannelDeleteConfirmProps {
   /** Null when the channel no longer exists. */
   channel: ManagedChannelView | null;
   verdict: DeleteVerdict;
+  /** `confirmationToken()` of the channel as shown on this page. */
+  confirmToken: string;
   /** The bot lacks Manage Channels. */
   botCanManage: boolean;
 }
@@ -281,7 +283,7 @@ export function renderChannelDeleteConfirmPage(
   <p>You are about to permanently delete ${what}, <strong>${escapeHtml(c.name)}</strong>. ${c.kind === "text" ? "Its messages are deleted with it. " : ""}This can't be undone.</p>
   <form method="POST" action="${CHANNELS_PATH}/${escapeHtml(c.id)}/delete">
     ${csrfInput(p.csrfToken)}
-    <input type="hidden" name="confirm" value="${escapeHtml(c.id)}">
+    <input type="hidden" name="confirm" value="${escapeHtml(p.confirmToken)}">
     <div class="actions">
       <button type="submit" class="btn btn-danger">Delete permanently</button>
       <a class="btn" href="${CHANNELS_PATH}">Cancel</a>

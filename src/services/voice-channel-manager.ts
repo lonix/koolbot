@@ -96,6 +96,53 @@ export function stripSurroundingQuotes(value: string): string {
   return match ? match[2] : value;
 }
 
+/** Reads one config value as a string, with an optional default. */
+export type ConfigStringReader = (
+  key: string,
+  defaultValue?: string,
+) => Promise<string>;
+
+/**
+ * The effective online lobby name: `voicechannels.lobby.name`, else the legacy
+ * `voice_channel.lobby_channel_name`, else `LOBBY_CHANNEL_NAME` (default
+ * "Lobby"), with one pair of surrounding quotes removed. The one definition of
+ * "what counts as the lobby by name": the service and the Channel Manager's
+ * delete protection both call it, so they cannot drift.
+ */
+export async function resolveLobbyChannelName(
+  read: ConfigStringReader,
+): Promise<string> {
+  const raw =
+    (await read("voicechannels.lobby.name")) ||
+    (await read("voice_channel.lobby_channel_name")) ||
+    (await read("LOBBY_CHANNEL_NAME", "Lobby"));
+  return stripSurroundingQuotes(raw);
+}
+
+/**
+ * Every name the service may treat as the offline lobby: the current key, the
+ * legacy `voice_channel.lobby_channel_name_offline`, and the "🔴 Lobby" default
+ * some lookups fall back to, each raw and with surrounding quotes removed. The
+ * service's call sites differ slightly in which fallbacks they apply, so this
+ * is the union, for callers that must not miss any of them.
+ */
+export async function resolveOfflineLobbyNames(
+  read: ConfigStringReader,
+): Promise<string[]> {
+  const raws = [
+    await read("voicechannels.lobby.offlinename"),
+    await read("voice_channel.lobby_channel_name_offline"),
+    "🔴 Lobby",
+  ];
+  return [
+    ...new Set(
+      raws.flatMap((raw) =>
+        raw.trim() ? [raw, stripSurroundingQuotes(raw)] : [],
+      ),
+    ),
+  ];
+}
+
 /** Legacy trigger channel name; reserved so rooms cannot spoof it (#1148). */
 const NEW_CHANNEL_TRIGGER_NAME = "➕ New Channel";
 
@@ -938,11 +985,9 @@ export class VoiceChannelManager {
    * different code paths agree on what counts as the lobby.
    */
   private async getLobbyChannelName(): Promise<string> {
-    const raw =
-      (await configService.getString("voicechannels.lobby.name")) ||
-      (await configService.getString("voice_channel.lobby_channel_name")) ||
-      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
-    return stripSurroundingQuotes(raw);
+    return resolveLobbyChannelName((key, defaultValue) =>
+      configService.getString(key, defaultValue),
+    );
   }
 
   /**

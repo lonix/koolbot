@@ -64,6 +64,7 @@ jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
   },
 }));
 
+const { confirmationToken } = await import("../../src/web/channel-manager.js");
 const { createChannelManagerRouter } =
   await import("../../src/web/routes/write/channel-manager.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -90,6 +91,12 @@ const view = (
   bitrate: null,
   ...over,
 });
+
+const tok = (id: string): string =>
+  confirmationToken(
+    channels.find((c) => c.id === id) as ManagedChannelView,
+    channels,
+  );
 
 const created = { id: "100000000000000099", name: "new-chan" };
 const mockCreate = jest.fn<(...a: any[]) => Promise<any>>();
@@ -413,6 +420,82 @@ describe("POST /channels/:id/edit", () => {
     expect(mockEdit.mock.calls[0][0]).not.toHaveProperty("name");
   });
 
+  it("sends no bitrate for an unrelated edit when the channel's bitrate isn't a whole number of kbps", async () => {
+    // 65536 bps is shown as 66 kbps; posting 66 back means "unchanged".
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      typeLabel: "voice",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 65536,
+    });
+    await mount();
+    const res = await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      userLimit: "7",
+      bitrate: "66",
+      parent: CAT,
+    });
+    expect(flashOf(res)).toMatchObject({ type: "ok" });
+    const sent = mockEdit.mock.calls[0][0];
+    expect(sent.userLimit).toBe(7);
+    expect(sent).not.toHaveProperty("bitrate");
+  });
+
+  it("does not re-validate an unchanged bitrate that is now above the server maximum", async () => {
+    // e.g. the server lost its boost: the stored 128 kbps shows as 128.
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 128000,
+    });
+    await mount();
+    const res = await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      userLimit: "6",
+      bitrate: "128",
+      parent: CAT,
+    });
+    expect(flashOf(res).type).toBe("ok");
+    expect(mockEdit.mock.calls[0][0]).not.toHaveProperty("bitrate");
+  });
+
+  it("still sends a bitrate the admin actually changed", async () => {
+    channels[3] = view(VOICE, {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+      userLimit: 4,
+      bitrate: 65536,
+    });
+    await mount();
+    await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      userLimit: "4",
+      bitrate: "80",
+      parent: CAT,
+    });
+    expect(mockEdit.mock.calls[0][0].bitrate).toBe(80000);
+  });
+
+  it("leaves an untouched multi-line topic alone even though browsers post CRLF", async () => {
+    channels[1] = view(TEXT, {
+      name: "general",
+      parentId: CAT,
+      topic: "line one\nline two",
+    });
+    await mount();
+    await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "line one\r\nline two",
+      parent: CAT,
+    });
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+
   it("renames, and reports the name Discord returned", async () => {
     mockEdit.mockResolvedValue({ name: "normalised-name" });
     await mount();
@@ -611,7 +694,7 @@ describe("POST /channels/:id/delete", () => {
   it("deletes an unmanaged channel after confirmation and audits it", async () => {
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res)).toMatchObject({ type: "ok" });
     expect(mockDelete).toHaveBeenCalledTimes(1);
@@ -632,11 +715,63 @@ describe("POST /channels/:id/delete", () => {
     expect(mockRecordAudit).toHaveBeenCalledTimes(3);
   });
 
+  it("rejects a confirmation shown before the channel was renamed, then accepts a fresh one", async () => {
+    const shown = tok(TEXT2);
+    channels = channels.map((c) =>
+      c.id === TEXT2 ? { ...c, name: "renamed-since" } : c,
+    );
+    await mount();
+    const stale = await harness.post(`/channels/${TEXT2}/delete`, {
+      confirm: shown,
+    });
+    const flash = flashOf(stale);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain(
+      "changed since you opened the confirmation page",
+    );
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "channels.delete",
+      result: "failure",
+    });
+    const fresh = await harness.post(`/channels/${TEXT2}/delete`, {
+      confirm: tok(TEXT2),
+    });
+    expect(flashOf(fresh).type).toBe("ok");
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a confirmation shown before the channel was moved to another category", async () => {
+    const shown = tok(TEXT2);
+    channels = channels.map((c) =>
+      c.id === TEXT2 ? { ...c, parentId: null } : c,
+    );
+    await mount();
+    const res = await harness.post(`/channels/${TEXT2}/delete`, {
+      confirm: shown,
+    });
+    expect(flashOf(res).msg).toContain("changed since");
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty category's confirmation once a channel was added to it", async () => {
+    const EMPTY = "100000000000000080";
+    channels = [...channels, view(EMPTY, { kind: "category", name: "Empty" })];
+    const shown = tok(EMPTY);
+    channels = [...channels, view("100000000000000081", { parentId: EMPTY })];
+    await mount();
+    const res = await harness.post(`/channels/${EMPTY}/delete`, {
+      confirm: shown,
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
   it("refuses a channel KoolBot manages, naming the setting, and audits the refusal", async () => {
     protection = new Map([[TEXT2, ["the quotes.channel_id setting"]]]);
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     const flash = flashOf(res);
     expect(flash.type).toBe("err");
@@ -664,7 +799,7 @@ describe("POST /channels/:id/delete", () => {
     protection = new Map([[TEXT2, [reason]]]);
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).msg).toContain(feature);
     expect(mockDelete).not.toHaveBeenCalled();
@@ -673,7 +808,7 @@ describe("POST /channels/:id/delete", () => {
   it("refuses a non-empty category", async () => {
     await mount();
     const res = await harness.post(`/channels/${CAT}/delete`, {
-      confirm: CAT,
+      confirm: tok(CAT),
     });
     expect(flashOf(res).msg).toContain("still holds 3 channels");
     expect(mockDelete).not.toHaveBeenCalled();
@@ -683,7 +818,7 @@ describe("POST /channels/:id/delete", () => {
     protectionFails = true;
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).msg).toContain("Couldn't verify");
     expect(mockDelete).not.toHaveBeenCalled();
@@ -695,7 +830,7 @@ describe("POST /channels/:id/delete", () => {
     );
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).type).toBe("ok");
   });
@@ -706,7 +841,7 @@ describe("POST /channels/:id/delete", () => {
     );
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).msg).toContain("Missing Access");
   });
@@ -715,7 +850,7 @@ describe("POST /channels/:id/delete", () => {
     liveFlags = { deletable: false };
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).msg).toContain("permission override");
     expect(mockDelete).not.toHaveBeenCalled();
@@ -725,7 +860,7 @@ describe("POST /channels/:id/delete", () => {
     fetchMissing = true;
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/delete`, {
-      confirm: TEXT2,
+      confirm: tok(TEXT2),
     });
     expect(flashOf(res).msg).toContain("no longer exists");
   });
@@ -783,7 +918,7 @@ describe("GET /channels/:id/delete", () => {
     const html = await (await harness.get(`/channels/${TEXT2}/delete`)).text();
     expect(html).toContain("Delete permanently");
     expect(html).toContain(`action="/admin/channels/${TEXT2}/delete"`);
-    expect(html).toContain(`name="confirm" value="${TEXT2}"`);
+    expect(html).toContain(`name="confirm" value="${tok(TEXT2)}"`);
     expect(html).toContain('name="_csrf"');
     // The page itself deletes nothing.
     expect(mockDelete).not.toHaveBeenCalled();
@@ -831,7 +966,7 @@ describe("CSRF", () => {
     await mount();
     const res = await harness.post(
       `/channels/${TEXT2}/delete`,
-      { confirm: TEXT2 },
+      { confirm: tok(TEXT2) },
       { csrfCookie: null, csrfField: null },
     );
     expect(res.status).toBe(403);

@@ -1473,17 +1473,20 @@ as the other admin pages. It edits structure only; permission overwrites stay in
 - **Create** a text channel, voice channel or category. Per-channel basics: name, topic (text), user limit and
   bitrate in kbps (voice), and the parent category. New channels get no overrides of their own.
 - **Edit** the same fields, including moving a channel to another category (permissions are not rewritten on a move).
-  Only fields you changed are sent to Discord, so a no-op save never spends a rename.
+  Only fields you changed are sent to Discord, so a no-op save never spends a rename. A field posted back as the
+  form showed it (a name, a topic, a bitrate shown rounded to whole kbps) counts as unchanged and is never rewritten.
 - **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord.
 - **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
-  category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name),
-  active temporary voice channels and waiting rooms, ticket channels, channels of events that have not ended,
+  category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
+  legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms, ticket channels, channels of events that have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break
-  features that look for them under a category. If the managed-channel lookup fails, the delete is refused.
+  features that look for them under a category. If the managed-channel lookup fails, the delete is refused. The
+  confirmation is tied to the channel as the page showed it (type, name, parent, and a category's contents): if
+  it was renamed, moved or changed after the page was opened, the delete is refused until you confirm again.
 - **Limits** are checked before Discord is called: names up to 100 characters, topics up to 1024, user limit 0 to
   99, bitrate from 8 kbps up to your server's boost-level maximum, 500 channels per server and 50 per category.
 - **Manage Channels**: the bot needs this permission. Without it the page shows a warning and disables every

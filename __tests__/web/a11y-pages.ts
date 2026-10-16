@@ -160,6 +160,7 @@ function channelManagerPages(): A11yPage[] {
         navFeatureStatus: {},
         channel: general,
         verdict: { ok: true },
+        confirmToken: "token",
         botCanManage: true,
       }),
     },
@@ -175,6 +176,7 @@ function channelManagerPages(): A11yPage[] {
           message:
             'KoolBot manages "Lobby": it is the voicechannels.lobby.channel_id setting.',
         },
+        confirmToken: "token",
         botCanManage: true,
       }),
     },

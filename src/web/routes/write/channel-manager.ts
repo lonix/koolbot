@@ -29,6 +29,7 @@ import {
   buildChannelTree,
   canMove,
   checkCapacity,
+  confirmationToken,
   deleteVerdict,
   isSnowflake,
   resolveParent,
@@ -254,8 +255,10 @@ export function createChannelManagerRouter(client: Client): Router {
       }
       let channel: ManagedChannelView | null = null;
       let verdict: ReturnType<typeof deleteVerdict> = { ok: true };
+      let allChannels: ManagedChannelView[] = [];
       try {
         const channels = await fetchChannelViews(guild);
+        allChannels = channels;
         channel = isSnowflake(id)
           ? (channels.find((c) => c.id === id) ?? null)
           : null;
@@ -286,6 +289,7 @@ export function createChannelManagerRouter(client: Client): Router {
           ...base,
           channel,
           verdict,
+          confirmToken: channel ? confirmationToken(channel, allChannels) : "",
           botCanManage: await botCanManageChannels(guild),
         }),
       );
@@ -359,9 +363,16 @@ export function createChannelManagerRouter(client: Client): Router {
         if (name.value !== target.name) changes.name = name.value;
       }
       if (target.kind === "text") {
-        const topic = validateTopic(ctx.body.topic);
-        if (!topic.ok) return refuse(topic.error);
-        if (topic.value !== (target.topic ?? "")) changes.topic = topic.value;
+        // A browser posts a textarea with CRLF line breaks and drops a leading
+        // newline, so compare in that form before normalising: an untouched
+        // topic is never rewritten.
+        const current = target.topic ?? "";
+        const posted = String(ctx.body.topic ?? "").replace(/\r\n?/g, "\n");
+        if (posted !== current && posted !== current.replace(/^\n/, "")) {
+          const topic = validateTopic(posted);
+          if (!topic.ok) return refuse(topic.error);
+          if (topic.value !== current) changes.topic = topic.value;
+        }
       }
       if (target.kind === "voice") {
         const limit = validateUserLimit(ctx.body.userLimit);
@@ -369,10 +380,18 @@ export function createChannelManagerRouter(client: Client): Router {
         if (limit.value !== (target.userLimit ?? 0)) {
           changes.userLimit = limit.value;
         }
-        const bitrate = validateBitrateKbps(ctx.body.bitrate, ctx.maxBitrate);
-        if (!bitrate.ok) return refuse(bitrate.error);
-        if (bitrate.value !== undefined && bitrate.value !== target.bitrate) {
-          changes.bitrate = bitrate.value;
+        // The form shows the bitrate rounded to whole kbps (65536 bps shows
+        // 66), so a value posted back equal to what was shown means "left
+        // alone": it is neither validated against the server maximum nor sent.
+        const shown = target.bitrate
+          ? String(Math.round(target.bitrate / 1000))
+          : "";
+        if (String(ctx.body.bitrate ?? "").trim() !== shown) {
+          const bitrate = validateBitrateKbps(ctx.body.bitrate, ctx.maxBitrate);
+          if (!bitrate.ok) return refuse(bitrate.error);
+          if (bitrate.value !== undefined && bitrate.value !== target.bitrate) {
+            changes.bitrate = bitrate.value;
+          }
         }
       }
       if (target.kind !== "category") {
@@ -469,9 +488,13 @@ export function createChannelManagerRouter(client: Client): Router {
       const target = targetOf(ctx);
       if ("ok" in target) return target;
       const details = { name: target.name, type: target.kind };
-      if (ctx.body.confirm !== target.id) {
+      const posted =
+        typeof ctx.body.confirm === "string" ? ctx.body.confirm : "";
+      if (posted !== confirmationToken(target, ctx.channels)) {
         return refuse(
-          "Deleting needs the confirmation page. Open the channel's Delete button and confirm there.",
+          posted === ""
+            ? "Deleting needs the confirmation page. Open the channel's Delete button and confirm there."
+            : `"${target.name}" changed since you opened the confirmation page (renamed, moved or its contents changed). Nothing was deleted; open Delete again and confirm what is there now.`,
           { targetId: target.id, details },
         );
       }

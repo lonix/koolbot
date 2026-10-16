@@ -11,6 +11,11 @@ import {
   type GuildBasedChannel,
 } from "discord.js";
 import { readEffectiveConfig } from "../services/server-scan-service.js";
+import { ConfigService } from "../services/config-service.js";
+import {
+  resolveLobbyChannelName,
+  resolveOfflineLobbyNames,
+} from "../services/voice-channel-manager.js";
 import { ManagedVoiceChannel } from "../models/managed-voice-channel.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Ticket } from "../models/ticket.js";
@@ -102,6 +107,7 @@ export async function loadProtection(
     reactionRoles,
     polls,
     announcements,
+    lobbyNames,
   ] = await Promise.all([
     readEffectiveConfig(),
     ManagedVoiceChannel.find({ guildId }).lean(),
@@ -116,6 +122,7 @@ export async function loadProtection(
     ReactionRoleConfig.find({ guildId, archivedAt: null }).lean(),
     PollSchedule.find({ guildId }).lean(),
     ScheduledAnnouncement.find({ guildId }).lean(),
+    effectiveLobbyNames(),
   ]);
   return buildProtectionMap({
     config,
@@ -165,6 +172,22 @@ export async function loadProtection(
         id: guild.systemChannelId,
       },
     ].map((d) => ({ label: d.label, channelId: d.id ?? null })),
+    lobbyNames,
     channels,
   });
+}
+
+/**
+ * The names the voice service may treat as the lobby or offline lobby, from
+ * its own resolution (quotes removed, legacy keys applied). Strict reads, so a
+ * database failure rejects instead of reading as "not set".
+ */
+async function effectiveLobbyNames(): Promise<string[]> {
+  const config = ConfigService.getInstance();
+  const read = (key: string, defaultValue?: string): Promise<string> =>
+    config.getStringStrict(key, defaultValue);
+  return [
+    await resolveLobbyChannelName(read),
+    ...(await resolveOfflineLobbyNames(read)),
+  ];
 }

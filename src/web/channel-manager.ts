@@ -8,6 +8,8 @@
  * the live guild and the stores that feed these functions.
  */
 
+import { createHash } from "node:crypto";
+
 /** Discord's documented limits for the structure this page edits. */
 export const CHANNEL_LIMITS = {
   /** Channels per server, categories included (threads excluded). */
@@ -311,6 +313,12 @@ export interface ProtectionInputs {
   announcements: ReadonlyArray<{ id: string; channelId: string }>;
   /** Channels Discord itself points at (community and system channels). */
   discord: { label: string; channelId: string | null }[];
+  /**
+   * Every name the voice service may treat as the lobby or offline lobby
+   * (`resolveLobbyChannelName` / `resolveOfflineLobbyNames`: quotes removed,
+   * legacy keys and defaults applied).
+   */
+  lobbyNames: readonly string[];
   /** The live channels, for finding the lobby by name. */
   channels: readonly ManagedChannelView[];
 }
@@ -404,11 +412,8 @@ export function buildProtectionMap(
   // is the safe side, and the service's exact-match rule is a subset of this
   // trimmed, case-insensitive one.
   const category = ids(input.config["voicechannels.category_id"])[0];
-  const names = [
-    input.config["voicechannels.lobby.name"],
-    input.config["voicechannels.lobby.offlinename"],
-  ]
-    .map((n) => (typeof n === "string" ? n.trim().toLowerCase() : ""))
+  const names = input.lobbyNames
+    .map((n) => n.trim().toLowerCase())
     .filter(Boolean);
   for (const c of input.channels) {
     if (c.kind !== "voice" && !isStage(c)) continue;
@@ -464,4 +469,36 @@ export function deleteVerdict(
     }
   }
   return { ok: true };
+}
+
+/**
+ * Binds a delete confirmation to the channel as the admin saw it: its id, type,
+ * name and parent, and for a category the channels inside it. The confirmation
+ * page carries this in its `confirm` field and the delete re-computes it from
+ * the live server, so a channel renamed, moved or (for a category) emptied or
+ * filled after the page was shown must be confirmed again.
+ */
+export function confirmationToken(
+  target: ManagedChannelView,
+  channels: readonly ManagedChannelView[],
+): string {
+  const children =
+    target.kind === "category"
+      ? channels
+          .filter((c) => c.parentId === target.id)
+          .map((c) => c.id)
+          .sort()
+      : [];
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        target.id,
+        target.kind,
+        target.name,
+        target.parentId,
+        children,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 32);
 }
