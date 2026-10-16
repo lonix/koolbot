@@ -21,9 +21,16 @@ import {
 import { matchesVoiceNamingPattern } from "../utils/voice-naming.js";
 import { defaultConfig } from "./config-schema.js";
 import type { GroupSpec } from "./role-group-plan.js";
+import {
+  DEFAULT_PAIR_EMOJI,
+  isValidPickerEmoji,
+  type FeedDetection,
+  type RolePairing,
+} from "./channel-claims-suggestions.js";
 import type {
   ChannelState,
   ConfigValue,
+  DesiredReactionRole,
   DesiredOverwrite,
   DesiredOverwriteRemoval,
   DesiredState,
@@ -83,6 +90,21 @@ export interface ChannelClaim {
   voiceManagedOnly?: boolean;
   /** Voice category bind: adopt the server's naming prefix. */
   usePrefix?: boolean;
+  /**
+   * Category already gated by one role: register that role as a pickable game
+   * role, reusing both as they are. The role is read from the scan, never from
+   * the form.
+   */
+  registerPairing?: boolean;
+  /** Emoji of the pairing's picker (default: a game controller). */
+  pairEmoji?: string;
+  /**
+   * Channel fed by webhooks or a followed channel, made read-only for
+   * everyone. Its webhooks and follower integrations are never touched.
+   */
+  feed?: boolean;
+  /** gate, stage channels: only these roles may request to speak. */
+  speakerRoleIds?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +286,10 @@ export interface ClaimContext {
   suggestedPrefix: string | null;
   /** The first managed-only cleanup already ran for this server. */
   voiceMigrationDone?: boolean;
+  /** Detected role-gated categories by category id (see the suggestions). */
+  pairings?: ReadonlyMap<string, RolePairing>;
+  /** Detected webhook / followed-channel feeds. */
+  feeds?: FeedDetection;
   /** Stamp for approvals; fixed by the caller so plan ids are reproducible. */
   approvedAt: string;
 }
@@ -438,6 +464,9 @@ export function buildClaimsDesiredState(
     );
   };
 
+  const reactionRoles: DesiredReactionRole[] = [];
+  const pairedRoleIds = new Set<string>();
+  const gatedCategories: ChannelState[] = [];
   const removals: DesiredOverwriteRemoval[] = [];
   const approvals: DestructiveApproval[] = [];
   const config: Record<string, ConfigValue> = {};
@@ -740,9 +769,131 @@ export function buildClaimsDesiredState(
         claimOf.get(c.id)?.action !== "sync",
     );
 
+  /** Register a role-gated category's role as a pickable game role. */
+  const pairCategory = (claim: ChannelClaim, channel: ChannelState): void => {
+    const pairing = ctx.pairings?.get(channel.id);
+    if (channel.kind !== "category" || !pairing) {
+      err(
+        "not-a-pairing",
+        `"${channel.name}" is not a category gated by exactly one role, so there is no game role to register.`,
+        channel.id,
+      );
+      return;
+    }
+    if (pairing.state === "refused") {
+      err(
+        "pairing-refused",
+        `"${channel.name}" can't be registered: ${pairing.reason ?? "the role is not safe to hand out."}`,
+        channel.id,
+      );
+      return;
+    }
+    if (pairing.state === "registered") {
+      issues.push({
+        code: "pairing-already-registered",
+        message: `"${channel.name}": @${pairing.roleName} is already a reaction role, so nothing is registered.`,
+        targetId: channel.id,
+      });
+      return;
+    }
+    if (pairedRoleIds.has(pairing.roleId)) {
+      err(
+        "duplicate-pairing",
+        `@${pairing.roleName} would be registered for more than one category in this plan.`,
+        channel.id,
+      );
+      return;
+    }
+    const emoji = (claim.pairEmoji ?? "").trim() || DEFAULT_PAIR_EMOJI;
+    if (!isValidPickerEmoji(emoji)) {
+      err(
+        "invalid-emoji",
+        `"${claim.pairEmoji}" is not an emoji KoolBot can react with for "${channel.name}".`,
+        channel.id,
+      );
+      return;
+    }
+    pairedRoleIds.add(pairing.roleId);
+    reactionRoles.push({
+      roleId: pairing.roleId,
+      categoryId: channel.id,
+      emoji,
+    });
+    gatedCategories.push(channel);
+    const pickerChannel = String(
+      scanned.config["reactionroles.message_channel_id"] ?? "",
+    );
+    issues.push({
+      code: "pairing-picker",
+      message: `Registering @${pairing.roleName} posts a new KoolBot picker${pickerChannel ? ` in <#${pickerChannel}>` : ""} and keeps "${channel.name}" gated by that role. The role and the category are not edited, and any picker another bot runs is left alone.`,
+      targetId: channel.id,
+    });
+    if (!isTrue(scanned.config["reactionroles.enabled"])) {
+      issues.push({
+        code: "reactionroles-disabled",
+        message: `Reaction roles are turned off, so the picker for @${pairing.roleName} won't hand out the role until reactionroles.enabled is on.`,
+        targetId: channel.id,
+      });
+    }
+  };
+
+  /** A feed channel must really be fed; its webhooks are never touched. */
+  const checkFeed = (channel: ChannelState): boolean => {
+    const feeds = ctx.feeds;
+    if (!feeds || !feeds.known) {
+      err(
+        "feed-data-unavailable",
+        `Webhook data is unavailable${feeds?.unavailable === "missing-permission" ? " (KoolBot lacks Manage Webhooks)" : ""}, so "${channel.name}" can't be treated as a feed. Nothing is guessed about feeds.`,
+        channel.id,
+      );
+      return false;
+    }
+    const feed = feeds.feeds.find((f) => f.channelId === channel.id);
+    if (!feed) {
+      err(
+        "not-a-feed",
+        `"${channel.name}" is not fed by a webhook or a followed announcement channel.`,
+        channel.id,
+      );
+      return false;
+    }
+    issues.push({
+      code: "feed-preserved",
+      message: `"${channel.name}" is fed by ${feed.kinds.map((k) => (k === "channel-follower" ? "a followed announcement channel" : "a webhook")).join(" and ")}. Those webhooks and follower integrations are never modified or removed, and they keep posting because webhook messages ignore channel permissions.`,
+      targetId: channel.id,
+    });
+    return true;
+  };
+
+  /** After the claim's own overwrites: is the feed still visible by itself? */
+  const noteFeedVisibility = (channel: ChannelState): void => {
+    const parent = channel.parentId
+      ? channels.get(channel.parentId)
+      : undefined;
+    if (!parent) return;
+    const parentEveryone = plannedOverwrites(parent).find(
+      (o) => o.id === everyoneId,
+    );
+    const own = plannedOverwrites(channel).find((o) => o.id === everyoneId);
+    const view = PermissionsBitField.Flags.ViewChannel;
+    if (
+      (BigInt(parentEveryone?.deny ?? "0") & view) !== 0n &&
+      (BigInt(own?.allow ?? "0") & view) !== 0n
+    ) {
+      issues.push({
+        code: "feed-not-gated",
+        message: `"${channel.name}" is visible to everyone through its own permissions although its category is gated. Sync it to the category (it is not done for you) if the feed should be gated with it.`,
+        targetId: channel.id,
+      });
+    }
+  };
+
   // ---- per-claim handling -------------------------------------------------
   for (const { claim, channel } of valid) {
     const family = channelFamily(channel.rawType, channel.kind);
+    if (claim.registerPairing) pairCategory(claim, channel);
+    // An invalid feed claim plans nothing at all, not even its read-only part.
+    if (claim.feed && !checkFeed(channel)) continue;
     const feature = bindFeature(claim, channel, family);
     if (feature) {
       if (feature.key === VOICE_CATEGORY) voiceBindChecks(claim, channel);
@@ -776,8 +927,20 @@ export function buildClaimsDesiredState(
       case "leave":
         break;
       case "gate": {
-        const targets = resolveTargets(claim, channel);
-        if (!targets) break;
+        const viewers = resolveTargets(claim, channel);
+        if (!viewers) break;
+        // Stage: who may speak is gated apart from who may see. Speakers must
+        // also be able to see and join, so they are added to the viewers.
+        let speakers: string[] = [];
+        if (family === "stage" && (claim.speakerRoleIds?.length ?? 0) > 0) {
+          const resolved = resolveTargets(
+            { ...claim, roleIds: claim.speakerRoleIds, minGroupId: undefined },
+            channel,
+          );
+          if (!resolved) break;
+          speakers = resolved;
+        }
+        const targets = [...new Set([...viewers, ...speakers])];
         if (targets.length === 0) {
           err(
             "gate-needs-target",
@@ -791,6 +954,23 @@ export function buildClaimsDesiredState(
         const gateFamily = family === "category" ? "mixed" : family;
         const gateBot = botSetFor(gateFamily, feature, false);
         gate(channel, gateFamily, targets, gateBot);
+        if (speakers.length > 0) {
+          layer(channel, everyoneId, "role", {
+            allow: [],
+            deny: ["RequestToSpeak"],
+          });
+          for (const id of targets) {
+            layer(
+              channel,
+              id,
+              "role",
+              speakers.includes(id)
+                ? { allow: ["RequestToSpeak"], deny: [] }
+                : { allow: [], deny: ["RequestToSpeak"] },
+            );
+          }
+        }
+        if (family === "category") gatedCategories.push(channel);
         // Discord does not push a category's overwrites to its channels, so
         // the ones synced to it get the identical set. Mirroring it exactly
         // (rather than a per-type variant) keeps them reading as synced.
@@ -910,6 +1090,8 @@ export function buildClaimsDesiredState(
       }
     }
 
+    if (claim.feed) noteFeedVisibility(channel);
+
     // A bound feature always keeps the bot's access, whatever the action.
     if (feature) {
       layer(channel, scanned.botUserId, "member", feature.botPermissions);
@@ -941,6 +1123,32 @@ export function buildClaimsDesiredState(
               }
             : feature.everyone,
         );
+      }
+    }
+  }
+
+  // A channel that isn't synced to a gated category keeps its own overwrites,
+  // and an explicit @everyone allow there shows (or lets people join) it
+  // anyway. Voice and stage channels must agree on View and Connect.
+  const connectBit = PermissionsBitField.Flags.Connect;
+  const viewBit = PermissionsBitField.Flags.ViewChannel;
+  for (const category of gatedCategories) {
+    for (const child of scanned.channels) {
+      if (child.parentId !== category.id) continue;
+      const fam = channelFamily(child.rawType, child.kind);
+      const everyoneAllow = BigInt(
+        plannedOverwrites(child).find((o) => o.id === everyoneId)?.allow ?? "0",
+      );
+      const leaks =
+        (everyoneAllow & viewBit) !== 0n ||
+        ((fam === "voice" || fam === "stage") &&
+          (everyoneAllow & connectBit) !== 0n);
+      if (leaks) {
+        issues.push({
+          code: "gate-child-not-gated",
+          message: `"${child.name}" in the gated category "${category.name}" allows @everyone to ${(everyoneAllow & viewBit) !== 0n ? "see" : "join"} it through its own permissions, so the gate doesn't cover it. Gate or sync that channel as well if it should be hidden.`,
+          targetId: child.id,
+        });
       }
     }
   }
@@ -990,6 +1198,7 @@ export function buildClaimsDesiredState(
       ...(removals.length ? { overwriteRemovals: removals } : {}),
       ...(approvals.length ? { approvals } : {}),
       config,
+      ...(reactionRoles.length ? { reactionRoles } : {}),
       featureChannels: featureChannels.map((f) => ({
         channelId: f.channelId,
         feature: f.feature,
@@ -1024,6 +1233,12 @@ const WARNING_CODES = new Set([
   "voice-managed-only",
   "voice-handover",
   "no-naming-prefix",
+  "pairing-already-registered",
+  "pairing-picker",
+  "reactionroles-disabled",
+  "feed-preserved",
+  "feed-not-gated",
+  "gate-child-not-gated",
 ]);
 
 export function isBlocking(issue: PlanIssue): boolean {

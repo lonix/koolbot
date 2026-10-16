@@ -132,6 +132,7 @@ function harness() {
   const staleIds = new Set<string>();
   const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
+  const reusedPickerRoles = new Set<string>();
   const lookups: string[] = [];
   const createdRoleIds = new Set<string>();
   let configIssues: string[] = [];
@@ -144,6 +145,18 @@ function harness() {
     if (failOn.has(label)) throw new Error(`boom ${label}`);
   };
   const deps: Deps = {
+    reactionRoles: {
+      register: async (_guildId, i) => {
+        run(`rr.register:${i.roleId}:${i.categoryId}:${i.emoji}`);
+        return {
+          messageId: `msg-${i.roleId}`,
+          reused: reusedPickerRoles.has(i.roleId),
+        };
+      },
+      unregister: async (_guildId, i) => {
+        run(`rr.unregister:${i.roleId}:${i.messageId}`);
+      },
+    },
     gateway: {
       createRole: async (i) => {
         run(`createRole:${i.name}`);
@@ -310,6 +323,7 @@ function harness() {
     staleIds,
     recoveries,
     existingRoleByName,
+    reusedPickerRoles,
     live,
     failStrictAudit: (): void => {
       strictAuditFails = true;
@@ -1883,5 +1897,73 @@ describe("a channel-claims sync plan through the real engine (#1022)", () => {
       }),
     ).rejects.toThrow(/Live check failed/);
     expect(h.calls.some((c) => c.startsWith("removeOverwrite"))).toBe(false);
+  });
+});
+
+describe("reaction role pairings (#1022)", () => {
+  const pairingPlan = () =>
+    planAdoption(
+      scanned({
+        config: {
+          "adoption.snapshot.retention_days": 90,
+          "reactionroles.message_channel_id": "chat",
+        },
+      }),
+      {
+        reactionRoles: [
+          { roleId: "member", categoryId: "old-cat", emoji: "🎮" },
+        ],
+      },
+    );
+
+  it("registers the existing role once, after the overwrites, and records the picker", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    expect(p.errors).toEqual([]);
+    expect(p.operations.map((o) => o.type)).toEqual(["reactionrole.register"]);
+    const result = await h.service.apply(p, opts);
+    expect(result.status).toBe("applied");
+    expect(h.calls.filter((c) => c.startsWith("rr."))).toEqual([
+      "rr.register:member:old-cat:🎮",
+    ]);
+    // Nothing is created or edited: no role, overwrite or channel write.
+    expect(
+      h.calls.filter((c) =>
+        /^(createRole|editRole|setOverwrite|deleteRole|deleteChannel)/.test(c),
+      ),
+    ).toEqual([]);
+    expect(h.records.get(result.snapshotId)!.operations[0].resultId).toBe(
+      "posted:msg-member",
+    );
+  });
+
+  it("rollback removes only the picker KoolBot posted, never the role or the category", async () => {
+    const h = harness();
+    const result = await h.service.apply(pairingPlan(), opts);
+    h.calls.length = 0;
+    const back = await h.service.rollback(result.snapshotId, { actor });
+    expect(back.failed).toEqual([]);
+    expect(
+      h.calls.filter((c) => !c.startsWith("audit:") && c !== "reload"),
+    ).toEqual(["rr.unregister:member:msg-member"]);
+  });
+
+  it("rollback leaves a mapping that already existed before the plan", async () => {
+    const h = harness();
+    h.reusedPickerRoles.add("member");
+    const result = await h.service.apply(pairingPlan(), opts);
+    h.calls.length = 0;
+    await h.service.rollback(result.snapshotId, { actor });
+    expect(h.calls.filter((c) => c.startsWith("rr."))).toEqual([]);
+  });
+
+  it("a refusal from the registrar fails the step and leaves the server alone", async () => {
+    const h = harness();
+    h.deps.reactionRoles!.register = async () => {
+      throw new Error("Member has powerful permissions");
+    };
+    const result = await h.service.apply(pairingPlan(), opts);
+    expect(result.status).toBe("partial");
+    expect(result.failed[0].error).toContain("powerful permissions");
   });
 });

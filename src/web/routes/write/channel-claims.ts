@@ -158,19 +158,31 @@ export function createChannelClaimsRouter(client: Client): Router {
         session.discordUserId,
         parsed.claims,
         approvedAt,
+        {
+          acceptAllPairs: body.pairs_all === "1" || body.pairs_all === "on",
+          pairEmojis: Object.fromEntries(
+            Object.entries(body).flatMap(([k, v]) =>
+              k.startsWith("pairemoji_") && typeof v === "string"
+                ? [[k.slice("pairemoji_".length), v.slice(0, 64)]]
+                : [],
+            ),
+          ),
+        },
       );
       res.type("text/html").send(
         renderChannelClaimsPage({
           ...base,
           scan: planned.scan,
           groups: planned.groups,
-          claims: parsed.claims,
+          // The planned claims include any "accept all detected pairs", so the
+          // apply step replays exactly what was previewed.
+          claims: planned.claims,
           plan: planned,
           problems: parsed.problems,
           previewToken: claimsPreviewStore.put(
             session.sessionId,
             session.guildId,
-            { claims: parsed.claims, approvedAt },
+            { claims: planned.claims, approvedAt },
           ),
         }),
       );
@@ -244,6 +256,10 @@ export function createChannelClaimsRouter(client: Client): Router {
           details: {
             operations: built.plan.operations.length,
             channels: claims.length,
+            pairings: built.plan.operations.filter(
+              (o) => o.type === "reactionrole.register",
+            ).length,
+            feeds: claims.filter((c) => c.feed).length,
           },
           result: "success",
         });

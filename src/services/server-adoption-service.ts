@@ -168,8 +168,28 @@ export interface AdoptionConfigWriter {
   reload(): Promise<void>;
 }
 
+/**
+ * Registers an existing role as a pickable reaction role paired with an
+ * existing category (#1022). `register` throws with the reason when it refuses
+ * (e.g. the role is too powerful to self-assign); it must never create or edit
+ * the role or the category, and `unregister` must only undo what `register`
+ * posted.
+ */
+export interface AdoptionReactionRoles {
+  register(
+    guildId: string,
+    input: { roleId: string; categoryId: string; emoji: string },
+  ): Promise<{ messageId: string; reused: boolean }>;
+  unregister(
+    guildId: string,
+    input: { roleId: string; messageId: string },
+  ): Promise<void>;
+}
+
 export interface AdoptionDeps {
   gateway: AdoptionGateway;
+  /** Needed only for plans that register reaction roles. */
+  reactionRoles?: AdoptionReactionRoles;
   store: AdoptionStore;
   config: AdoptionConfigWriter;
   /** Wraps a Discord REST call (timeout + backoff); default: CommandManager. */
@@ -279,6 +299,8 @@ const WRITE_INTENT_OPS = new Set<PlanOperation["type"]>([
   "role.create",
   "channel.delete",
   "role.delete",
+  // Posts a picker message: a retry must find it again, not post a second one.
+  "reactionrole.register",
 ]);
 
 export class ServerAdoptionService {
@@ -298,6 +320,26 @@ export class ServerAdoptionService {
       const manager = CommandManager.getInstance(client);
       ServerAdoptionService.instance = new ServerAdoptionService({
         gateway: new DiscordAdoptionGateway(guild),
+        reactionRoles: {
+          register: async (
+            guildId,
+            input,
+          ): Promise<{ messageId: string; reused: boolean }> => {
+            const { ReactionRoleService } =
+              await import("./reaction-role-service.js");
+            return ReactionRoleService.getInstance(client).registerGatedPairing(
+              guildId,
+              input,
+            );
+          },
+          unregister: async (guildId, input): Promise<void> => {
+            const { ReactionRoleService } =
+              await import("./reaction-role-service.js");
+            await ReactionRoleService.getInstance(
+              client,
+            ).unregisterGatedPairing(guildId, input);
+          },
+        },
         store: new MongoAdoptionStore(),
         config: new ConfigServiceWriter(),
         callApi: <T>(
@@ -1070,6 +1112,27 @@ export class ServerAdoptionService {
         return op.key;
       case "member.role.add":
         return this.applyMembers(op, snapshot, options, persist);
+      case "reactionrole.register": {
+        const { reactionRoles } = this.deps;
+        if (!reactionRoles) {
+          throw new Error("Reaction roles are not available to the engine.");
+        }
+        // Not retried after a timeout: a late first attempt would post a second
+        // picker. The registrar finds a mapping an earlier attempt stored.
+        const result = await callApi(
+          () =>
+            reactionRoles.register(snapshot.guildId, {
+              roleId: op.roleId,
+              categoryId: op.categoryId,
+              emoji: op.emoji,
+            }),
+          `register reaction role ${op.roleId}`,
+          { once: true },
+        );
+        // `posted:` messages are ours to remove on rollback; `reused:` ones were
+        // already there before this plan.
+        return `${result.reused ? "reused" : "posted"}:${result.messageId}`;
+      }
     }
   }
 
@@ -1435,6 +1498,30 @@ export class ServerAdoptionService {
             }
             state.granted.splice(0, page.length);
             await persist();
+          }
+          break;
+        }
+        case "reactionrole.register": {
+          const resultId = snapshot.operations.find(
+            (r) => r.opId === op.id,
+          )?.resultId;
+          // Only the picker this plan posted is removed. The role, the category
+          // and a mapping that already existed are never touched.
+          if (resultId?.startsWith("posted:")) {
+            const { reactionRoles } = this.deps;
+            if (!reactionRoles) {
+              throw new Error(
+                "Reaction roles are not available to the engine.",
+              );
+            }
+            await callApi(
+              () =>
+                reactionRoles.unregister(snapshot.guildId, {
+                  roleId: op.roleId,
+                  messageId: resultId.slice("posted:".length),
+                }),
+              `remove reaction role picker for ${op.roleId}`,
+            );
           }
           break;
         }

@@ -38,6 +38,13 @@ const role = (over: Record<string, unknown>) => ({
 });
 const scan = {
   guildName: "G",
+  guildId: "g",
+  scanned: { botRoleIds: [], botHighestRolePosition: 50, roles: [] },
+  webhooks: {
+    known: true,
+    unavailable: null,
+    list: [{ id: "w1", name: "bridge", channelId: "11", kind: "incoming" }],
+  },
   roles: [
     role({ id: "r1", name: "<b>Mod</b>", position: 3 }),
     role({ id: "r2", name: "Booster", position: 2, managed: true }),
@@ -226,5 +233,121 @@ describe("renderChannelClaimsPage (#1022)", () => {
     });
     expect(html).toContain('id="cc-job"');
     expect(html).toContain("/admin/role-groups/job/");
+  });
+
+  describe("suggestions", () => {
+    const gatedScan = {
+      ...scan,
+      scanned: {
+        botRoleIds: [],
+        botHighestRolePosition: 50,
+        roles: [
+          { id: "r1", permissions: "0", position: 3 },
+          { id: "r9", permissions: "8", position: 4 },
+        ],
+      },
+      roles: [
+        ...scan.roles,
+        role({ id: "r9", name: "Root <i>", position: 4, usedBy: [] }),
+      ].map((r: any) => ({ usedBy: [], ...r })),
+      channels: [
+        ch({
+          id: "10",
+          name: "Games <script>",
+          kind: "category",
+          typeName: "GuildCategory",
+          overwrites: [
+            { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+            { id: "r1", type: "role", allow: ["ViewChannel"], deny: [] },
+          ],
+        }),
+        ch({
+          id: "20",
+          name: "Admins",
+          kind: "category",
+          typeName: "GuildCategory",
+          overwrites: [
+            { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+            { id: "r9", type: "role", allow: ["ViewChannel"], deny: [] },
+          ],
+        }),
+        ch({ id: "11", name: "news", parentId: "10" }),
+        ch({
+          id: "30",
+          name: "stage",
+          kind: "voice",
+          typeName: "GuildStageVoice",
+          flags: { ...flags, stage: true },
+        }),
+        ch({
+          id: "31",
+          name: "announcements",
+          flags: { ...flags, announcement: true },
+        }),
+      ],
+    } as any;
+
+    it("lists detected pairs with an escaped role, refuses a dangerous one and offers accept-all", () => {
+      const html = renderChannelClaimsPage({ ...empty, scan: gatedScan });
+      expect(html).toContain("Game-role categories");
+      expect(html).toContain('name="pair_10"');
+      expect(html).toContain('name="pairemoji_10"');
+      expect(html).not.toContain('name="pair_20"');
+      expect(html).toContain("refused");
+      expect(html).toContain("powerful permissions (Administrator)");
+      expect(html).toContain("Root &lt;i&gt;");
+      expect(html).not.toContain("Root <i>");
+      expect(html).toContain('name="pairs_all"');
+      expect(html).toContain("Register all 1 detected pair");
+    });
+
+    it("shows the feed choice, and says webhook data is unavailable instead of guessing", () => {
+      const html = renderChannelClaimsPage({ ...empty, scan: gatedScan });
+      expect(html).toContain('name="feed_11"');
+      const off = renderChannelClaimsPage({
+        ...empty,
+        scan: {
+          ...gatedScan,
+          webhooks: {
+            known: false,
+            unavailable: "missing-permission",
+            list: [],
+          },
+        },
+      });
+      expect(off).toContain("Webhook data is unavailable");
+      expect(off).toContain("Manage Webhooks");
+      expect(off).not.toContain('name="feed_11"');
+      expect(off).not.toContain("news feed: read-only is suggested");
+    });
+
+    it("labels an announcement channel without selecting it and offers stage speakers", () => {
+      const html = renderChannelClaimsPage({ ...empty, scan: gatedScan });
+      expect(html).toContain("read-only is suggested (not selected for you)");
+      expect(html).toMatch(
+        /name="action_31"[^>]*><option value="leave" selected/,
+      );
+      expect(html).toContain('name="speakers_30"');
+      expect(html).not.toContain('name="speakers_31"');
+    });
+
+    it("keeps ticked pairs and feeds after a preview", () => {
+      const html = renderChannelClaimsPage({
+        ...empty,
+        scan: gatedScan,
+        claims: [
+          {
+            channelId: "10",
+            action: "leave",
+            registerPairing: true,
+            pairEmoji: "🎯",
+          },
+          { channelId: "11", action: "read-only", feed: true },
+        ],
+      });
+      expect(html).toMatch(/name="pair_10" value="1" checked/);
+      expect(html).toContain('value="🎯"');
+      expect(html).toMatch(/name="feed_11" value="1" checked/);
+    });
   });
 });

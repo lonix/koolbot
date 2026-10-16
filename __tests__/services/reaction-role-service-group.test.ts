@@ -600,6 +600,55 @@ describe("ReactionRoleService.validateRoleAssignable bot member resolution", () 
     });
   });
 
+  it("never deletes an existing category that a bound mapping points at (server adoption)", async () => {
+    const message = {
+      delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+    };
+    const messageChannel = {
+      messages: {
+        fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(message),
+      },
+    };
+    const category = {
+      children: { cache: new Map([["c1", { delete: jest.fn() }]]) },
+      delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+    };
+    const fetchChannel = jest
+      .fn<(id: string) => Promise<unknown>>()
+      .mockImplementation(async (id) =>
+        id === "cat1" ? category : messageChannel,
+      );
+    const guild = {
+      channels: { fetch: fetchChannel },
+      roles: { fetch: jest.fn<() => Promise<unknown>>() },
+    };
+    const client = {
+      guilds: {
+        fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(guild),
+      },
+    };
+    const { service } = createService(client);
+    model.find.mockResolvedValue([
+      {
+        roleId: "existing",
+        messageId: "grp1",
+        categoryId: "cat1",
+        autoCreated: false,
+      },
+    ]);
+    model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+    model.countDocuments.mockResolvedValue(0);
+
+    const result = await service.deleteReactionRoleGroup("g1", "grp1");
+
+    expect(result.success).toBe(true);
+    expect(category.delete).not.toHaveBeenCalled();
+    for (const child of category.children.cache.values()) {
+      expect(child.delete).not.toHaveBeenCalled();
+    }
+    expect(fetchChannel).not.toHaveBeenCalledWith("cat1");
+  });
+
   it("waits for the shared guild lock and releases it after a failure", async () => {
     const client = {
       guilds: { fetch: jest.fn<() => Promise<unknown>>() },

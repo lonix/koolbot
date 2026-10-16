@@ -18,6 +18,13 @@ import type {
   ScanChannel,
 } from "../services/server-scan-service.js";
 import type { RoleGroupView } from "../services/role-group-service.js";
+import {
+  DEFAULT_PAIR_EMOJI,
+  detectFeeds,
+  detectRolePairings,
+  type FeedDetection,
+  type RolePairing,
+} from "../services/channel-claims-suggestions.js";
 
 /**
  * Category and channel claims page (#1022). The admin picks, per category or
@@ -89,12 +96,21 @@ function roleOptions(scan: ServerScan, selected: readonly string[]): string {
     .join("");
 }
 
-function notes(c: ScanChannel): string {
+function notes(
+  c: ScanChannel,
+  feeds: FeedDetection,
+  pairing: RolePairing | undefined,
+): string {
   const out: string[] = [];
   if (c.usedBy.length) out.push(`used by ${c.usedBy.join(", ")}`);
-  if (c.flags.webhookFed || c.flags.followed)
+  if (feeds.feeds.some((f) => f.channelId === c.id))
     out.push("news feed: read-only is suggested; webhooks are never touched");
-  if (c.gatedByRoleIds.length) out.push("already gated by a role");
+  if (c.flags.announcement)
+    out.push(
+      "announcement channel: read-only is suggested (not selected for you)",
+    );
+  if (pairing) out.push("gated by one role: can be registered as a game role");
+  else if (c.gatedByRoleIds.length) out.push("already gated by a role");
   if (c.flags.rules || c.flags.system || c.flags.publicUpdates)
     out.push("a Discord community channel");
   if (c.syncedToParent === false) out.push("own permissions");
@@ -109,6 +125,8 @@ function claimRow(
   groups: RoleGroupView[],
   claim: ChannelClaim | undefined,
   bulk: boolean,
+  feeds: FeedDetection,
+  pairing: RolePairing | undefined,
 ): string {
   const id = escapeHtml(c.id);
   const action = claim?.action ?? "leave";
@@ -146,8 +164,12 @@ function claimRow(
   const forumLock = c.flags.forum
     ? `<label class="check"><input type="checkbox" name="lock_${id}" value="1"${checked(claim?.lockReplies)}> Forum: also stop replies inside posts</label>`
     : "";
+  const stageSpeakers = c.flags.stage
+    ? `<label>Stage: only these roles may speak (gate; they can also join) <select name="speakers_${id}" multiple size="5">${roleOptions(scan, claim?.speakerRoleIds ?? [])}</select></label>`
+    : "";
   const options = `<details><summary>Options</summary><div class="stack">
 <label>Roles (gate: allowed in; read-only: may still post) <select name="roles_${id}" multiple size="5">${roleOptions(scan, claim?.roleIds ?? [])}</select></label>
+${stageSpeakers}
 ${groupSelect}
 <label class="check"><input type="checkbox" name="react_${id}" value="1"${checked(claim?.allowReactions)}> Read-only: members may still react</label>
 ${forumLock}
@@ -155,16 +177,69 @@ ${forumLock}
 ${voiceBind}
 </div></details>`;
   return `<tr>
-<td>${c.kind === "category" ? `<strong>${escapeHtml(c.name)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${escapeHtml(c.name)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c)}</td>
+<td>${c.kind === "category" ? `<strong>${escapeHtml(c.name)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${escapeHtml(c.name)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</td>
 <td>${actionSelect}${bulkSelect}</td>
 <td>${featureOptions(c, claim?.bindKey ?? "")}</td>
 <td>${options}</td>
 </tr>`;
 }
 
+function renderSuggestions(
+  scan: ServerScan,
+  props: ClaimsPageProps,
+  pairings: RolePairing[],
+  feeds: FeedDetection,
+): string {
+  const claimOf = new Map(props.claims.map((c) => [c.channelId, c]));
+  const proposed = pairings.filter((p) => p.state === "proposed");
+  const pairRows = pairings
+    .map((p) => {
+      const cid = escapeHtml(p.categoryId);
+      const claim = claimOf.get(p.categoryId);
+      const action =
+        p.state === "proposed"
+          ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <label>Emoji <input type="text" name="pairemoji_${cid}" value="${escapeHtml(claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI)}" size="6" maxlength="64"><span class="visually-hidden"> for ${escapeHtml(p.categoryName)}</span></label>`
+          : `<span class="tag ${p.state === "refused" ? "tag-off" : "tag-on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
+      return `<tr><td>${escapeHtml(p.categoryName)}</td><td>@${escapeHtml(p.roleName)}</td><td>${action}</td></tr>`;
+    })
+    .join("");
+  const pairing = pairings.length
+    ? `<h3>Game-role categories</h3>
+<p class="muted">These categories are hidden from @everyone and visible to exactly one role. Registering one makes that role pickable through a new KoolBot picker and keeps the category gated: the role and the category are reused as they are and nothing new is created. A role with powerful permissions (Administrator, Manage Roles and similar) is refused.</p>
+<table><caption class="visually-hidden">Detected game-role categories</caption><thead><tr><th scope="col">Category</th><th scope="col">Role</th><th scope="col">Register</th></tr></thead><tbody>${pairRows}</tbody></table>
+${proposed.length ? `<label class="check"><input type="checkbox" name="pairs_all" value="1"> Register all ${proposed.length} detected pair${proposed.length === 1 ? "" : "s"} when previewing</label> <span class="muted">Refused pairs are skipped; each one keeps the emoji shown above.</span>` : ""}`
+    : "";
+  let feedHtml: string;
+  if (!feeds.known) {
+    feedHtml = `<div class="notice warn" role="status">Webhook data is unavailable${feeds.unavailable === "missing-permission" ? " because KoolBot lacks the Manage Webhooks permission" : " because it could not be read"}. No feed suggestions are made: this does not mean no channel is fed by a webhook or a followed channel.</div>`;
+  } else if (feeds.feeds.length === 0) {
+    feedHtml = `<p class="muted">No channel is fed by a webhook or a followed announcement channel.</p>`;
+  } else {
+    const byId = new Map(scan.channels.map((c) => [c.id, c]));
+    feedHtml = `<p class="muted">These channels are fed by a webhook or a followed announcement channel. Making one a feed makes it read-only for everyone (reactions stay open). Its webhooks and follower integrations are never modified or removed.</p>
+<ul class="stack">${feeds.feeds
+      .map((f) => {
+        const ch = byId.get(f.channelId);
+        const fid = escapeHtml(f.channelId);
+        const name = escapeHtml(ch?.name ?? f.channelId);
+        const kinds = f.kinds
+          .map((k) =>
+            k === "channel-follower" ? "followed channel" : "webhook",
+          )
+          .join(" + ");
+        return `<li><label class="check"><input type="checkbox" name="feed_${fid}" value="1"${checked(claimOf.get(f.channelId)?.feed)}> Treat <strong>${name}</strong> as a feed</label> <span class="muted">(${escapeHtml(kinds)})</span></li>`;
+      })
+      .join("")}</ul>`;
+  }
+  return `<section aria-labelledby="cc-suggestions"><h3 id="cc-suggestions">Suggestions</h3>${pairing}<h3>Feeds</h3>${feedHtml}</section>`;
+}
+
 function renderForm(props: ClaimsPageProps, csrf: string): string {
   const { scan } = props;
   if (!scan) return "";
+  const pairings = detectRolePairings(scan, props.groups);
+  const pairingOf = new Map(pairings.map((p) => [p.categoryId, p]));
+  const feeds = detectFeeds(scan);
   const byParent = new Map<string | null, ScanChannel[]>();
   for (const c of scan.channels) {
     const list = byParent.get(c.parentId) ?? [];
@@ -182,18 +257,47 @@ function renderForm(props: ClaimsPageProps, csrf: string): string {
   );
   const rows: string[] = [];
   for (const cat of categories) {
-    rows.push(claimRow(cat, scan, props.groups, claimOf.get(cat.id), true));
+    rows.push(
+      claimRow(
+        cat,
+        scan,
+        props.groups,
+        claimOf.get(cat.id),
+        true,
+        feeds,
+        pairingOf.get(cat.id),
+      ),
+    );
     for (const child of sortChannels(byParent.get(cat.id) ?? [])) {
       rows.push(
-        claimRow(child, scan, props.groups, claimOf.get(child.id), false),
+        claimRow(
+          child,
+          scan,
+          props.groups,
+          claimOf.get(child.id),
+          false,
+          feeds,
+          undefined,
+        ),
       );
     }
   }
   for (const c of loose) {
-    rows.push(claimRow(c, scan, props.groups, claimOf.get(c.id), false));
+    rows.push(
+      claimRow(
+        c,
+        scan,
+        props.groups,
+        claimOf.get(c.id),
+        false,
+        feeds,
+        undefined,
+      ),
+    );
   }
   return `<form method="POST" action="/admin/adopt/claims/preview" class="stack">
 ${csrf}
+${renderSuggestions(scan, props, pairings, feeds)}
 <table><caption class="visually-hidden">Categories and channels</caption><thead><tr><th scope="col">Category / channel</th><th scope="col">Action</th><th scope="col">Feature</th><th scope="col">Options</th></tr></thead><tbody>${rows.join("")}</tbody></table>
 <button type="submit" class="btn btn-primary">Preview changes</button>
 <span class="muted">Nothing is written to Discord yet.</span>

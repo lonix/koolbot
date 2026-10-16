@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { PermissionsBitField } from "discord.js";
 import { defaultConfig } from "./config-schema.js";
 import { coerceConfigValue } from "../web/routes/write/helpers.js";
+import { forbiddenSelfAssignNames } from "../utils/role-safety.js";
 
 /**
  * Pure planner for server adoption (#1018).
@@ -124,6 +125,18 @@ export interface DesiredMemberGrant {
   memberIds: string[];
 }
 
+/**
+ * Register an existing role as a self-assign (reaction) role that is paired
+ * with an existing, role-gated category (#1022). Nothing is created or edited:
+ * the role and the category stay as they are, a KoolBot picker is posted and a
+ * mapping is stored so the role becomes pickable.
+ */
+export interface DesiredReactionRole {
+  roleId: string;
+  categoryId: string;
+  emoji: string;
+}
+
 export interface FeatureChannel {
   channelId: string;
   feature: string;
@@ -148,6 +161,7 @@ export interface DesiredState {
   overwriteRemovals?: DesiredOverwriteRemoval[];
   deletions?: DesiredDeletion[];
   memberGrants?: DesiredMemberGrant[];
+  reactionRoles?: DesiredReactionRole[];
   config?: Record<string, ConfigValue>;
   featureChannels?: FeatureChannel[];
   approvals?: DestructiveApproval[];
@@ -256,6 +270,14 @@ export interface ConfigSetOp extends OpBase {
   valueIsRoleRef?: boolean;
   previous: ConfigValue | null;
 }
+export interface ReactionRoleRegisterOp extends OpBase {
+  type: "reactionrole.register";
+  roleId: string;
+  roleName: string;
+  categoryId: string;
+  categoryName: string;
+  emoji: string;
+}
 export interface OverwriteRemoveOp extends OpBase {
   type: "overwrite.remove";
   channelId: string;
@@ -279,6 +301,7 @@ export type PlanOperation =
   | OverwriteSetOp
   | MemberRoleAddOp
   | ConfigSetOp
+  | ReactionRoleRegisterOp
   | OverwriteRemoveOp
   | ChannelDeleteOp
   | RoleDeleteOp;
@@ -316,6 +339,8 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "overwrite.set": 2, // categories before channels, see `phaseOf`
   "member.role.add": 4,
   "config.set": 5,
+  // After the channel overwrites and the config keys it may depend on.
+  "reactionrole.register": 5.5,
   "overwrite.remove": 6,
   "channel.delete": 6,
   "role.delete": 6,
@@ -977,6 +1002,75 @@ export function planAdoption(
     });
   }
 
+  // ---- reaction-role pairings ------------------------------------------
+  const pairedRoles = new Set<string>();
+  for (const want of desired.reactionRoles ?? []) {
+    const role = rolesById.get(want.roleId);
+    const category = channelsById.get(want.categoryId);
+    if (!role) {
+      err("unknown-role", `Role ${want.roleId} does not exist.`, want.roleId);
+      continue;
+    }
+    if (!category || category.kind !== "category") {
+      err(
+        "unknown-channel",
+        `Category ${want.categoryId} was not found.`,
+        want.categoryId,
+      );
+      continue;
+    }
+    // The same checks the reaction-role service makes before it binds a role
+    // (validateRoleAssignable): a role any member can pick up must not carry
+    // server control, and the bot must be able to hand it out.
+    const dangerous = forbiddenSelfAssignNames(big(role.permissions));
+    const refusal =
+      role.id === everyoneId
+        ? "@everyone can't be a self-assign role."
+        : role.managed
+          ? `"${role.name}" is managed by an integration or bot and can't be handed out.`
+          : dangerous.length > 0
+            ? `"${role.name}" has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role or choose another role.`
+            : role.position >= scanned.botHighestRolePosition
+              ? `"${role.name}" sits at or above the bot's highest role, so the bot can't assign it.`
+              : null;
+    if (refusal) {
+      err("role-unsafe", refusal, role.id);
+      continue;
+    }
+    if (pairedRoles.has(role.id)) {
+      err(
+        "duplicate-pairing",
+        `"${role.name}" is paired with more than one category in this plan.`,
+        role.id,
+      );
+      continue;
+    }
+    pairedRoles.add(role.id);
+    if (!String(scanned.config["reactionroles.message_channel_id"] ?? "")) {
+      err(
+        "reactionroles-channel-missing",
+        "Set the reaction-role message channel first: the picker for each pairing is posted there.",
+        role.id,
+      );
+      continue;
+    }
+    touchedRoles.add(role.id);
+    ops.push({
+      id: "",
+      type: "reactionrole.register",
+      class: "additive",
+      roleId: role.id,
+      roleName: role.name,
+      categoryId: category.id,
+      categoryName: category.name,
+      emoji: want.emoji,
+      summary: `Register "${role.name}" as a pickable game role for "${category.name}"`,
+      targetId: role.id,
+      before: null,
+      after: { role: role.name, category: category.name, emoji: want.emoji },
+    });
+  }
+
   // ---- destructive ---------------------------------------------------
   const requireApproval = (
     kind: ApprovalKind,
@@ -1207,6 +1301,7 @@ export function planAdoption(
         o.type === "role.edit" ||
         o.type === "role.delete" ||
         o.type === "member.role.add" ||
+        o.type === "reactionrole.register" ||
         // Editing channel permissions is a Manage Roles action in Discord.
         o.type === "overwrite.set" ||
         o.type === "overwrite.remove",

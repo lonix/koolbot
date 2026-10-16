@@ -1833,6 +1833,155 @@ export class ReactionRoleService {
   }
 
   /**
+   * Register an **existing** role as a self-assign role paired with an
+   * **existing** role-gated category (server adoption, #1022).
+   *
+   * Nothing is created or edited besides one KoolBot picker message and its
+   * mapping: the role keeps its permissions and the category keeps its
+   * overwrites, so the category stays gated by the role. The mapping is stored
+   * with `autoCreated: false` and the category id, so removing it can never
+   * delete the role or the category (see `deleteReactionRole` and
+   * `deleteReactionRoleGroupLocked`).
+   *
+   * The role must pass {@link validateRoleAssignable}: a role with
+   * Administrator or another dangerous permission is refused (#1159). Throws
+   * with the reason on any refusal. Idempotent: a mapping an earlier attempt
+   * stored for the same role and category is returned instead of posting a
+   * second picker.
+   */
+  public async registerGatedPairing(
+    guildId: string,
+    input: { roleId: string; categoryId: string; emoji: string },
+  ): Promise<{ messageId: string; reused: boolean }> {
+    const api = CommandManager.getInstance(this.client);
+    const guild = await api.makeDiscordApiCall(
+      () => this.client.guilds.fetch(guildId),
+      "fetch guild for pairing",
+    );
+    const role = await api
+      .makeDiscordApiCall(
+        () => guild.roles.fetch(input.roleId),
+        `fetch role ${input.roleId}`,
+      )
+      .catch(() => null);
+    if (!role) {
+      throw new Error(`Role ${input.roleId} was not found in this server.`);
+    }
+    const category = await api
+      .makeDiscordApiCall(
+        () => guild.channels.fetch(input.categoryId),
+        `fetch category ${input.categoryId}`,
+      )
+      .catch(() => null);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      throw new Error(`Category ${input.categoryId} was not found.`);
+    }
+    const botMember = await api
+      .makeDiscordApiCall(
+        async () => guild.members.me ?? (await guild.members.fetchMe()),
+        "fetch bot member",
+      )
+      .catch(() => null);
+    const assignable = await this.validateRoleAssignable(
+      guild,
+      role,
+      botMember,
+    );
+    if (!assignable.ok) {
+      throw new Error(assignable.message.replace(/\*\*/g, ""));
+    }
+
+    const existing = await ReactionRoleConfig.findOne({
+      guildId,
+      roleId: role.id,
+      categoryId: category.id,
+      isArchived: false,
+      autoCreated: false,
+    });
+    if (existing) return { messageId: existing.messageId, reused: true };
+    const elsewhere = await ReactionRoleConfig.findOne({
+      guildId,
+      roleId: role.id,
+      isArchived: false,
+    });
+    if (elsewhere) {
+      throw new Error(
+        `${role.name} is already a reaction role on another picker; it is not registered a second time.`,
+      );
+    }
+
+    const bound = await this.bindReactionRole(guildId, role.id, input.emoji);
+    if (!bound.success || !bound.messageId) {
+      throw new Error(bound.message.replace(/\*\*/g, ""));
+    }
+    const linked = await ReactionRoleConfig.updateOne(
+      {
+        guildId,
+        messageId: bound.messageId,
+        roleId: role.id,
+        emoji: this.normalizeEmoji(input.emoji),
+      },
+      { $set: { categoryId: category.id } },
+    );
+    if (linked.matchedCount === 0) {
+      await this.unregisterGatedPairing(guildId, {
+        roleId: role.id,
+        messageId: bound.messageId,
+      });
+      throw new Error(
+        "The mapping could not be linked to the category, so the picker was removed again.",
+      );
+    }
+    return { messageId: bound.messageId, reused: false };
+  }
+
+  /**
+   * Undo {@link registerGatedPairing}: delete the picker message KoolBot posted
+   * and the mapping. Only a mapping that does not own its role (`autoCreated:
+   * false`) is removed, and the role and the category are never touched.
+   */
+  public async unregisterGatedPairing(
+    guildId: string,
+    input: { roleId: string; messageId: string },
+  ): Promise<void> {
+    const config = await ReactionRoleConfig.findOne({
+      guildId,
+      messageId: input.messageId,
+      roleId: input.roleId,
+      autoCreated: false,
+    });
+    if (!config) return;
+    const api = CommandManager.getInstance(this.client);
+    try {
+      const channelId = await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      );
+      if (channelId) {
+        const guild = await api.makeDiscordApiCall(
+          () => this.client.guilds.fetch(guildId),
+          "fetch guild to remove picker",
+        );
+        const channel = (await guild.channels
+          .fetch(channelId)
+          .catch(() => null)) as TextChannel | null;
+        const message = await channel?.messages
+          .fetch(input.messageId)
+          .catch(() => null);
+        if (message) {
+          await api.makeDiscordApiCall(
+            () => message.delete(),
+            `delete picker ${input.messageId}`,
+          );
+        }
+      }
+    } catch (error) {
+      logger.warn("Could not delete the pairing picker message:", error);
+    }
+    await ReactionRoleConfig.deleteOne({ _id: config._id });
+  }
+
+  /**
    * Remove a single emoji→role mapping identified by its message + emoji.
    * Unlike {@link deleteReactionRole} (which tears down an entire auto-created
    * role + category + channel), this only unbinds one mapping: it removes the
@@ -2305,9 +2454,13 @@ export class ReactionRoleService {
 
       // Delete the shared category (and its child channels).
       try {
-        const category = first.categoryId
-          ? await guild.channels.fetch(first.categoryId)
-          : null;
+        // Only a category the bot created is its to delete. A mapping bound to
+        // an existing, role-gated category (server adoption, #1022) keeps it.
+        const ownsCategory = configs.every((c) => c.autoCreated !== false);
+        const category =
+          first.categoryId && ownsCategory
+            ? await guild.channels.fetch(first.categoryId)
+            : null;
         if (category) {
           const categoryChannel = category as CategoryChannel;
           for (const [, child] of categoryChannel.children.cache) {

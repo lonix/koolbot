@@ -1496,6 +1496,32 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   all of its channels (each row's own choice wins). A sync approval is never carried over by a bulk choice: each
   channel needs its own tick.
 
+**Suggestions** at the top of the Channel Claims form (nothing is selected for you):
+
+- **Game-role categories.** A category hidden from `@everyone` and visible to exactly one role (another bot's
+  integration role and KoolBot's own role are not counted) is listed as a game-role pairing. Ticking **Register**
+  (or "Register all N detected pairs") makes that existing role pickable: KoolBot posts a new picker in
+  `reactionroles.message_channel_id` (reaction style, one picker per role, with the emoji shown, default 🎮) and stores
+  the mapping with the category. The role and the category are reused as they are: no role, category or overwrite is
+  created or edited, so the category stays gated. A picker another bot runs is left alone. The same checks as the
+  Reaction Roles page apply and are repeated when the step runs: a role with Administrator, Manage Roles, Manage
+  Server and the other dangerous permissions, a managed or role-group role, or one at or above KoolBot's highest role is
+  **refused** and listed with the reason; a role that is already a reaction role is shown as such. The plan is blocked
+  until the reaction-role message channel is set, and warns when reaction roles are off. A rollback deletes only the picker
+  this plan posted, never the role or the category, and removing the mapping later on the Reaction Roles page never
+  deletes the category either.
+- **Feeds.** Channels fed by an incoming webhook or a followed announcement channel (from the scan's webhook list;
+  application webhooks don't count) can be made a read-only **feed**: read-only for everyone, reactions open. Their
+  webhooks and follower integrations are never modified or removed (webhook messages ignore channel permissions, so they
+  keep posting), and the plan warns if a feed is still visible through its own overwrite in a gated category. When KoolBot
+  lacks Manage Webhooks the webhook data is **unavailable**: the page says so, suggests no feed, and refuses a feed claim
+  rather than guessing.
+- **Stage speakers.** A group-gated stage channel can also limit who may speak: pick the speaker roles in Options
+  (they are let in too); everyone else who can see it is denied `RequestToSpeak`. KoolBot never grants stage-moderator
+  permissions. An **announcement** channel is only labelled "read-only is suggested"; it is not selected for you.
+- Gating a category warns about channels in it that are not synced and still allow `@everyone` to see or join them through
+  their own overwrites.
+
 Binding `voicechannels.category_id` to a category that holds other voice channels is **blocked** while legacy
 cleanup could delete them. The error lists the empty channels it would remove. Either use a dedicated category,
 or tick "also turn on managed-only cleanup", which sets `voicechannels.cleanup.managed_only` before the category

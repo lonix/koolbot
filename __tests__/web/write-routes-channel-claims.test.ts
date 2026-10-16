@@ -97,6 +97,9 @@ function makeClient(
 
 const scan = {
   guildName: "G",
+  guildId: "guild-1",
+  scanned: { botRoleIds: [], botHighestRolePosition: 50, roles: [] },
+  webhooks: { known: true, unavailable: null, list: [] },
   roles: [],
   channels: [
     {
@@ -108,6 +111,7 @@ const scan = {
       position: 0,
       usedBy: [],
       gatedByRoleIds: [],
+      overwrites: [],
       flags: {},
       syncedToParent: null,
     },
@@ -143,7 +147,8 @@ const flashOf = (res: Response) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockPlan.mockResolvedValue(planned());
+  // The real planner returns the claims it planned.
+  mockPlan.mockImplementation(async (_g, _a, claims) => planned({ claims }));
   mockStartApply.mockReturnValue({
     id: "11111111-1111-1111-1111-111111111111",
   });
@@ -197,9 +202,40 @@ describe("POST /adopt/claims/preview", () => {
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 
+  it("passes accept-all and the typed emoji to the planner, and stores the planned claims", async () => {
+    mockPlan.mockImplementation(async (_g, _a, claims) =>
+      planned({
+        claims: [
+          ...claims,
+          { channelId: CAT, action: "leave", registerPairing: true },
+        ],
+      }),
+    );
+    await mount();
+    const html = await (
+      await harness.post("/adopt/claims/preview", {
+        pairs_all: "1",
+        [`pairemoji_${CAT}`]: "🎯",
+      })
+    ).text();
+    expect(mockPlan.mock.calls[0][4]).toEqual({
+      acceptAllPairs: true,
+      pairEmojis: { [CAT]: "🎯" },
+    });
+    expect(html).toContain("Apply plan");
+    const token = /name="token" value="([^"]+)"/.exec(html)![1];
+    mockPlan.mockClear();
+    await harness.post("/adopt/claims/apply", { planId: "plan-1", token });
+    // The apply step replays the claims exactly as previewed, no flag needed.
+    expect(mockPlan.mock.calls[0][2]).toEqual([
+      { channelId: CAT, action: "leave", registerPairing: true },
+    ]);
+    expect(mockPlan.mock.calls[0][4]).toBeUndefined();
+  });
+
   it("offers no apply button when the plan has errors", async () => {
-    mockPlan.mockResolvedValue(
-      planned({ errors: [{ code: "x", message: "blocked" }] }),
+    mockPlan.mockImplementation(async (_g, _a, claims) =>
+      planned({ claims, errors: [{ code: "x", message: "blocked" }] }),
     );
     await mount();
     const html = await (
@@ -308,8 +344,8 @@ describe("POST /adopt/claims/apply", () => {
   it("refuses a plan with blocking problems", async () => {
     await mount();
     const token = await preview();
-    mockPlan.mockResolvedValue(
-      planned({ errors: [{ code: "x", message: "blocked" }] }),
+    mockPlan.mockImplementation(async (_g, _a, claims) =>
+      planned({ claims, errors: [{ code: "x", message: "blocked" }] }),
     );
     const res = await harness.post("/adopt/claims/apply", {
       planId: "plan-1",

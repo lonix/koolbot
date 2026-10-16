@@ -38,6 +38,15 @@ export function forbiddenSelfAssignPermissions(role: {
 }): string[] {
   const bits = role.permissions?.bitfield;
   if (typeof bits !== "bigint") return [];
+  return forbiddenSelfAssignNames(bits);
+}
+
+/**
+ * The same check on a raw permission bitfield (the adoption planner works on
+ * decimal strings, not discord.js roles), so the planner and the reaction-role
+ * service can never disagree on what is too powerful to self-assign.
+ */
+export function forbiddenSelfAssignNames(bits: bigint): string[] {
   const hit = bits & FORBIDDEN_MASK;
   if (hit === 0n) return [];
   // Name only the bits actually set, read straight from the flag table, so

@@ -42,7 +42,7 @@ function isAction(value: string): value is ClaimAction {
 
 /** Drop everything that is not a no-op, keeping the claim small. */
 function isNoop(c: ChannelClaim): boolean {
-  return c.action === "leave" && !c.bindKey;
+  return c.action === "leave" && !c.bindKey && !c.registerPairing && !c.feed;
 }
 
 /**
@@ -63,7 +63,11 @@ export function claimsFromForm(
   const known = new Set(channels.map((c) => c.id));
 
   const read = (id: string): ChannelClaim | null => {
-    const action = asString(body[`action_${id}`]) || "leave";
+    const feed = asFlag(body[`feed_${id}`]);
+    const chosen = asString(body[`action_${id}`]) || "leave";
+    // A feed is read-only for everyone (reactions stay open): choosing "feed"
+    // on a channel left alone means exactly that, never anything stronger.
+    const action = feed && chosen === "leave" ? "read-only" : chosen;
     if (!isAction(action)) {
       problems.push(`Ignored an unknown action for channel ${id}.`);
       return null;
@@ -81,8 +85,21 @@ export function claimsFromForm(
       ...(asString(body[`min_${id}`])
         ? { minGroupId: asString(body[`min_${id}`]) }
         : {}),
-      allowReactions: asFlag(body[`react_${id}`]),
+      allowReactions:
+        asFlag(body[`react_${id}`]) || (feed && chosen === "leave"),
       lockReplies: asFlag(body[`lock_${id}`]),
+      ...(asList(body[`speakers_${id}`]).length
+        ? { speakerRoleIds: asList(body[`speakers_${id}`]) }
+        : {}),
+      ...(feed ? { feed: true } : {}),
+      ...(asFlag(body[`pair_${id}`])
+        ? {
+            registerPairing: true,
+            ...(asString(body[`pairemoji_${id}`])
+              ? { pairEmoji: asString(body[`pairemoji_${id}`]).slice(0, 64) }
+              : {}),
+          }
+        : {}),
       approveReplace: asFlag(body[`replace_${id}`]),
       voiceManagedOnly: asFlag(body[`vmo_${id}`]),
       usePrefix: asFlag(body[`prefix_${id}`]),

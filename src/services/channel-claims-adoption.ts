@@ -15,6 +15,12 @@ import {
   splitIssues,
   type ChannelClaim,
 } from "./channel-claims.js";
+import {
+  DEFAULT_PAIR_EMOJI,
+  detectFeeds,
+  detectRolePairings,
+  type RolePairing,
+} from "./channel-claims-suggestions.js";
 
 /**
  * Glue between channel claims (#1022) and the adoption engine (#1018): scan the
@@ -27,6 +33,8 @@ export interface ClaimsPlan {
   scan: ServerScan;
   groups: RoleGroupView[];
   plan: AdoptionPlan;
+  /** The claims that were planned, after "accept all detected pairs". */
+  claims: ChannelClaim[];
   /** Blocking problems found while translating the claims. */
   errors: PlanIssue[];
   /** Advice that doesn't stop an apply. */
@@ -58,6 +66,11 @@ export async function planChannelClaims(
   adminUserId: string,
   claims: readonly ChannelClaim[],
   approvedAt: string,
+  options: {
+    acceptAllPairs?: boolean;
+    /** Emoji the admin typed per category id, used by "accept all". */
+    pairEmojis?: Readonly<Record<string, string>>;
+  } = {},
 ): Promise<ClaimsPlan> {
   const [scan, groups, migrated] = await Promise.all([
     ServerScanService.getInstance(guild.client).scanGuild(guild, {
@@ -66,7 +79,11 @@ export async function planChannelClaims(
     RoleGroupService.getInstance().list(guild.id),
     voiceMigrationDone(guild.id),
   ]);
-  const built = buildClaimsDesiredState(claims, {
+  const pairings = detectRolePairings(scan, groups);
+  const finalClaims = options.acceptAllPairs
+    ? acceptAllPairs(claims, pairings, options.pairEmojis)
+    : [...claims];
+  const built = buildClaimsDesiredState(finalClaims, {
     scanned: scan.scanned,
     groups,
     integrationRoleIds: new Set(
@@ -76,6 +93,8 @@ export async function planChannelClaims(
     membersIntent: scan.readiness.membersIntent,
     suggestedPrefix: scan.naming.suggestedPrefix,
     voiceMigrationDone: migrated,
+    pairings: new Map(pairings.map((p) => [p.categoryId, p])),
+    feeds: detectFeeds(scan),
     approvedAt,
   });
   const plan = planAdoption(scan.scanned, built.desired, {
@@ -83,7 +102,36 @@ export async function planChannelClaims(
     gateTargetIds: built.gateTargetIds,
   });
   const { errors, warnings } = splitIssues(built.issues);
-  return { scan, groups, plan, errors, warnings };
+  return { scan, groups, plan, claims: finalClaims, errors, warnings };
+}
+
+/**
+ * "Accept all detected pairs": register every proposed pairing the admin has
+ * not decided on yet. A category that already has a claim keeps its own action
+ * and gains the pairing; refused and already-registered pairings are never
+ * added.
+ */
+export function acceptAllPairs(
+  claims: readonly ChannelClaim[],
+  pairings: readonly RolePairing[],
+  emojis: Readonly<Record<string, string>> = {},
+): ChannelClaim[] {
+  const out = claims.map((c) => ({ ...c }));
+  for (const p of pairings) {
+    if (p.state !== "proposed") continue;
+    const own = out.find((c) => c.channelId === p.categoryId);
+    if (own) {
+      if (!own.registerPairing) own.registerPairing = true;
+      continue;
+    }
+    out.push({
+      channelId: p.categoryId,
+      action: "leave",
+      registerPairing: true,
+      pairEmoji: emojis[p.categoryId]?.trim() || DEFAULT_PAIR_EMOJI,
+    });
+  }
+  return out;
 }
 
 /**
