@@ -692,3 +692,117 @@ describe("leave alone stays the default", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("review findings on feeds, stage speakers and register-all", () => {
+  it("refuses a feed combined with a gate instead of silently applying only the gate", () => {
+    const r = plan([
+      { channelId: FEED, action: "gate", roleIds: [R_ADMIN], feed: true },
+    ]);
+    expect(r.errors).toContain("feed-needs-read-only");
+    expect(r.plan.operations).toHaveLength(0);
+    const parsed = claimsFromForm(
+      { [`feed_${FEED}`]: "1", [`action_${FEED}`]: "gate" },
+      [{ id: FEED, kind: "other", parentId: CAT_GAME }],
+    );
+    expect(parsed.claims[0]).toMatchObject({ action: "gate", feed: true });
+    expect(plan(parsed.claims).errors).toContain("feed-needs-read-only");
+    // Read-only plus feed (the supported combination) still works.
+    expect(
+      plan([{ channelId: FEED, action: "read-only", feed: true }]).errors,
+    ).toEqual([]);
+  });
+
+  it("reports a preserved RequestToSpeak allow instead of promising exclusive speakers", () => {
+    const scanned = fixture();
+    scanned.channels
+      .find((c) => c.id === STAGE)!
+      .overwrites.push(ow(R_VIEW, F.RequestToSpeak));
+    const r = plan(
+      [
+        {
+          channelId: STAGE,
+          action: "gate",
+          roleIds: [R_GAME, R_ADMIN],
+          speakerRoleIds: [R_ADMIN],
+        },
+      ],
+      { scanned },
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toContain("speak-not-exclusive");
+    const warning = r.built.issues.find(
+      (i) => i.code === "speak-not-exclusive",
+    )!;
+    expect(warning.message).toContain("can still request to speak");
+    expect(warning.message).toContain("@role-10");
+    // The exception is kept as it is, and the other bot's overwrite untouched.
+    expect(setFor(r.plan, STAGE, R_VIEW)).toBeUndefined();
+    expect(setFor(r.plan, STAGE, OTHER_BOT)).toBeUndefined();
+  });
+
+  it("no speaker warning when nothing else allows requesting to speak", () => {
+    const r = plan([
+      {
+        channelId: STAGE,
+        action: "gate",
+        roleIds: [R_GAME, R_ADMIN],
+        speakerRoleIds: [R_ADMIN],
+      },
+    ]);
+    expect(r.warnings).not.toContain("speak-not-exclusive");
+  });
+
+  it("register-all merges the typed emoji into a claim that already has an action", () => {
+    const pairings = detectRolePairings(scanOf(fixture()), groups);
+    const typed = { [CAT_GAME]: "🎯" };
+    const merged = acceptAllPairs(
+      [{ channelId: CAT_GAME, action: "read-only" }],
+      pairings,
+      typed,
+    ).find((c) => c.channelId === CAT_GAME)!;
+    expect(merged).toMatchObject({
+      action: "read-only",
+      registerPairing: true,
+      pairEmoji: "🎯",
+    });
+    expect(plan([merged]).built.desired.reactionRoles?.[0].emoji).toBe("🎯");
+    // An emoji chosen with the row's own Register box is kept.
+    const own = acceptAllPairs(
+      [
+        {
+          channelId: CAT_GAME,
+          action: "read-only",
+          registerPairing: true,
+          pairEmoji: "🧩",
+        },
+      ],
+      pairings,
+      typed,
+    ).find((c) => c.channelId === CAT_GAME)!;
+    expect(own.pairEmoji).toBe("🧩");
+    // Nothing typed: the default.
+    expect(
+      acceptAllPairs([], pairings).find((c) => c.channelId === CAT_GAME)!
+        .pairEmoji,
+    ).toBe(DEFAULT_PAIR_EMOJI);
+  });
+
+  it("the planner pins the picker channel in the step and refuses a non-text one", () => {
+    const op = plan([pair(CAT_GAME)]).plan.operations[0] as {
+      pickerChannelId: string;
+    };
+    expect(op.pickerChannelId).toBe(PICKER);
+    const gone = fixture({
+      config: { "reactionroles.message_channel_id": "999999999999999999" },
+    });
+    expect(plan([pair(CAT_GAME)], { scanned: gone }).errors).toContain(
+      "reactionroles-channel-missing",
+    );
+    const category = fixture({
+      config: { "reactionroles.message_channel_id": CAT_PLAIN },
+    });
+    expect(plan([pair(CAT_GAME)], { scanned: category }).errors).toContain(
+      "reactionroles-channel-missing",
+    );
+  });
+});

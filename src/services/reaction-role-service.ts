@@ -1664,6 +1664,8 @@ export class ReactionRoleService {
       messageChannelId?: string;
       /** Stored with the mapping from the first save (server adoption, #1022). */
       categoryId?: string;
+      /** Which adoption step made the mapping (snapshot id + step id). */
+      adoptionOpKey?: string;
     } = {},
   ): Promise<{
     success: boolean;
@@ -1790,6 +1792,9 @@ export class ReactionRoleService {
         autoCreated: false,
         isArchived: false,
         ...(options.categoryId ? { categoryId: options.categoryId } : {}),
+        ...(options.adoptionOpKey
+          ? { adoptionOpKey: options.adoptionOpKey }
+          : {}),
       });
 
       try {
@@ -1845,18 +1850,29 @@ export class ReactionRoleService {
    * Nothing is created or edited besides one KoolBot picker message and its
    * mapping: the role keeps its permissions and the category keeps its
    * overwrites, so the category stays gated by the role. The mapping is stored
-   * with `autoCreated: false` and the category id, so removing it can never
-   * delete the role or the category (see `deleteReactionRole` and
-   * `deleteReactionRoleGroupLocked`).
+   * with `autoCreated: false`, the category id and the caller's `ownerKey`, so
+   * removing it can never delete the role or the category (see
+   * `deleteReactionRole` and `deleteReactionRoleGroupLocked`).
    *
    * The role must pass {@link validateRoleAssignable}: a role with
    * Administrator or another dangerous permission is refused (#1159). Throws
-   * with the reason on any refusal. Idempotent: a mapping an earlier attempt
-   * stored for the same role and category is returned instead of posting a
-   * second picker. With `resumed` set (the engine already began this step once,
-   * and a timed-out first attempt may have finished late) that mapping is this
-   * plan's own picker, so it is reported as posted, not reused, and a rollback
-   * removes it.
+   * with the reason on any refusal.
+   *
+   * Ownership and retries: the mapping stores `ownerKey` (snapshot id + step
+   * id). A retry that finds a mapping with the same key made it itself (a first
+   * attempt that timed out and finished late), so it is reported as posted and
+   * a rollback removes it. A mapping with another key, or none, belongs to
+   * someone else (another plan, the Reaction Roles page) and is reported as
+   * reused: it is never removed by a rollback.
+   *
+   * The whole check-then-post runs under the per-guild reaction-role lock. The
+   * engine's timeout does not cancel a registration, so a resumed attempt
+   * waits for the first one to finish and then finds its mapping, instead of
+   * posting a second picker.
+   *
+   * The picker goes to `input.channelId`, the channel the plan showed. If
+   * `reactionroles.message_channel_id` has changed since, it throws: startup
+   * reconciliation looks messages up in the configured channel.
    */
   public async registerGatedPairing(
     guildId: string,
@@ -1864,10 +1880,35 @@ export class ReactionRoleService {
       roleId: string;
       categoryId: string;
       emoji: string;
-      resumed?: boolean;
+      channelId: string;
+      ownerKey: string;
     },
-  ): Promise<{ messageId: string; reused: boolean }> {
+  ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
+    return reactionRoleGuildLock.run(guildId, () =>
+      this.registerGatedPairingLocked(guildId, input),
+    );
+  }
+
+  private async registerGatedPairingLocked(
+    guildId: string,
+    input: {
+      roleId: string;
+      categoryId: string;
+      emoji: string;
+      channelId: string;
+      ownerKey: string;
+    },
+  ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
     const api = CommandManager.getInstance(this.client);
+    const configured = await this.configService.getString(
+      "reactionroles.message_channel_id",
+      "",
+    );
+    if (configured !== input.channelId) {
+      throw new Error(
+        "The reaction-role message channel changed since the plan was previewed. Preview again.",
+      );
+    }
     const guild = await api.makeDiscordApiCall(
       () => this.client.guilds.fetch(guildId),
       "fetch guild for pairing",
@@ -1913,7 +1954,11 @@ export class ReactionRoleService {
       autoCreated: false,
     });
     if (existing) {
-      return { messageId: existing.messageId, reused: !input.resumed };
+      return {
+        messageId: existing.messageId,
+        channelId: input.channelId,
+        reused: existing.adoptionOpKey !== input.ownerKey,
+      };
     }
     const elsewhere = await ReactionRoleConfig.findOne({
       guildId,
@@ -1926,61 +1971,81 @@ export class ReactionRoleService {
       );
     }
 
-    // The category is stored by the same save as the mapping, so there is no
-    // window where a picker and a mapping exist without the link.
+    // The category and the owner key are stored by the same save as the
+    // mapping, so there is no window where a picker and a mapping exist
+    // without them.
     const bound = await this.bindReactionRole(guildId, role.id, input.emoji, {
+      messageChannelId: input.channelId,
       categoryId: category.id,
+      adoptionOpKey: input.ownerKey,
     });
     if (!bound.success || !bound.messageId) {
       throw new Error(bound.message.replace(/\*\*/g, ""));
     }
-    return { messageId: bound.messageId, reused: false };
+    return {
+      messageId: bound.messageId,
+      channelId: input.channelId,
+      reused: false,
+    };
   }
 
   /**
    * Undo {@link registerGatedPairing}: delete the picker message KoolBot posted
-   * and the mapping. Only a mapping that does not own its role (`autoCreated:
-   * false`) is removed, and the role and the category are never touched.
+   * (in the channel it was posted to, recorded by the caller, not the current
+   * setting) and then the mapping. Only a mapping carrying `ownerKey` and not
+   * owning its role (`autoCreated: false`) is removed; the role and the
+   * category are never touched.
+   *
+   * Only a confirmed Unknown Channel (10003) or Unknown Message (10008) counts
+   * as "already gone". Any other failure throws and the mapping is kept, so the
+   * caller can retry and the picker is never orphaned.
    */
   public async unregisterGatedPairing(
     guildId: string,
-    input: { roleId: string; messageId: string },
+    input: {
+      roleId: string;
+      messageId: string;
+      channelId: string;
+      ownerKey: string;
+    },
   ): Promise<void> {
-    const config = await ReactionRoleConfig.findOne({
-      guildId,
-      messageId: input.messageId,
-      roleId: input.roleId,
-      autoCreated: false,
-    });
-    if (!config) return;
-    const api = CommandManager.getInstance(this.client);
-    try {
-      const channelId = await this.configService.getString(
-        "reactionroles.message_channel_id",
-        "",
+    await reactionRoleGuildLock.run(guildId, async () => {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        messageId: input.messageId,
+        roleId: input.roleId,
+        autoCreated: false,
+        adoptionOpKey: input.ownerKey,
+      });
+      if (!config) return;
+      const api = CommandManager.getInstance(this.client);
+      const guild = await api.makeDiscordApiCall(
+        () => this.client.guilds.fetch(guildId),
+        "fetch guild to remove picker",
       );
-      if (channelId) {
-        const guild = await api.makeDiscordApiCall(
-          () => this.client.guilds.fetch(guildId),
-          "fetch guild to remove picker",
+      const channel = (await api.makeDiscordApiCall(
+        () =>
+          guild.channels.fetch(input.channelId).catch((err: unknown) => {
+            if (this.isUnknownEntityError(err, 10003)) return null;
+            throw err;
+          }),
+        `fetch picker channel ${input.channelId}`,
+      )) as TextChannel | null;
+      if (channel) {
+        await api.makeDiscordApiCall(
+          () =>
+            channel.messages
+              .fetch(input.messageId)
+              .then((message) => message.delete())
+              .catch((err: unknown) => {
+                if (this.isUnknownEntityError(err, 10008)) return undefined;
+                throw err;
+              }),
+          `delete picker ${input.messageId}`,
         );
-        const channel = (await guild.channels
-          .fetch(channelId)
-          .catch(() => null)) as TextChannel | null;
-        const message = await channel?.messages
-          .fetch(input.messageId)
-          .catch(() => null);
-        if (message) {
-          await api.makeDiscordApiCall(
-            () => message.delete(),
-            `delete picker ${input.messageId}`,
-          );
-        }
       }
-    } catch (error) {
-      logger.warn("Could not delete the pairing picker message:", error);
-    }
-    await ReactionRoleConfig.deleteOne({ _id: config._id });
+      await ReactionRoleConfig.deleteOne({ _id: config._id });
+    });
   }
 
   /**

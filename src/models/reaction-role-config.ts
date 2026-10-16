@@ -68,6 +68,12 @@ export interface IReactionRoleConfig extends Document {
   // (#1064). Lets a re-run find the existing group and add only what is
   // missing. Undefined for every other mapping.
   groupKey?: string;
+  /**
+   * Set by server adoption (#1022) on a mapping it posted: `<snapshot id>:<step
+   * id>`. A retry or rollback only treats a mapping as its own when this
+   * matches, so one plan can never remove another plan's picker.
+   */
+  adoptionOpKey?: string;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -133,6 +139,10 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       index: true,
     },
     groupKey: {
+      type: String,
+      required: false,
+    },
+    adoptionOpKey: {
       type: String,
       required: false,
     },

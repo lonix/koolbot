@@ -182,13 +182,20 @@ export interface AdoptionReactionRoles {
       roleId: string;
       categoryId: string;
       emoji: string;
-      /** The engine began this step before: an existing mapping is ours. */
-      resumed?: boolean;
+      /** The channel the plan showed: the picker is posted there. */
+      channelId: string;
+      /** Snapshot id + step id: marks the mapping this step made. */
+      ownerKey: string;
     },
-  ): Promise<{ messageId: string; reused: boolean }>;
+  ): Promise<{ messageId: string; channelId: string; reused: boolean }>;
   unregister(
     guildId: string,
-    input: { roleId: string; messageId: string },
+    input: {
+      roleId: string;
+      messageId: string;
+      channelId: string;
+      ownerKey: string;
+    },
   ): Promise<void>;
 }
 
@@ -330,7 +337,11 @@ export class ServerAdoptionService {
           register: async (
             guildId,
             input,
-          ): Promise<{ messageId: string; reused: boolean }> => {
+          ): Promise<{
+            messageId: string;
+            channelId: string;
+            reused: boolean;
+          }> => {
             const { ReactionRoleService } =
               await import("./reaction-role-service.js");
             return ReactionRoleService.getInstance(client).registerGatedPairing(
@@ -1131,14 +1142,15 @@ export class ServerAdoptionService {
               roleId: op.roleId,
               categoryId: op.categoryId,
               emoji: op.emoji,
-              resumed: started,
+              channelId: op.pickerChannelId,
+              ownerKey: `${snapshot.id}:${op.id}`,
             }),
           `register reaction role ${op.roleId}`,
           { once: true },
         );
         // `posted:` messages are ours to remove on rollback; `reused:` ones were
         // already there before this plan.
-        return `${result.reused ? "reused" : "posted"}:${result.messageId}`;
+        return `${result.reused ? "reused" : "posted"}:${result.channelId}:${result.messageId}`;
       }
     }
   }
@@ -1514,7 +1526,8 @@ export class ServerAdoptionService {
           )?.resultId;
           // Only the picker this plan posted is removed. The role, the category
           // and a mapping that already existed are never touched.
-          if (resultId?.startsWith("posted:")) {
+          const posted = /^posted:([^:]+):([^:]+)$/.exec(resultId ?? "");
+          if (posted) {
             const { reactionRoles } = this.deps;
             if (!reactionRoles) {
               throw new Error(
@@ -1525,7 +1538,9 @@ export class ServerAdoptionService {
               () =>
                 reactionRoles.unregister(snapshot.guildId, {
                   roleId: op.roleId,
-                  messageId: resultId.slice("posted:".length),
+                  channelId: posted[1],
+                  messageId: posted[2],
+                  ownerKey: `${snapshot.id}:${op.id}`,
                 }),
               `remove reaction role picker for ${op.roleId}`,
             );

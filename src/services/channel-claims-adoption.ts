@@ -121,7 +121,11 @@ export function acceptAllPairs(
     if (p.state !== "proposed") continue;
     const own = out.find((c) => c.channelId === p.categoryId);
     if (own) {
-      if (!own.registerPairing) own.registerPairing = true;
+      own.registerPairing = true;
+      // An emoji already chosen for this pairing wins; otherwise the typed one.
+      if (!own.pairEmoji?.trim() && emojis[p.categoryId]?.trim()) {
+        own.pairEmoji = emojis[p.categoryId].trim();
+      }
       continue;
     }
     out.push({

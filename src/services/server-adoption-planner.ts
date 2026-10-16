@@ -277,6 +277,12 @@ export interface ReactionRoleRegisterOp extends OpBase {
   categoryId: string;
   categoryName: string;
   emoji: string;
+  /**
+   * The channel the picker is posted in, as the plan showed it. Part of the
+   * fingerprinted plan, so changing the setting after the preview changes the
+   * plan id, and a rollback removes the picker from this channel.
+   */
+  pickerChannelId: string;
 }
 export interface OverwriteRemoveOp extends OpBase {
   type: "overwrite.remove";
@@ -1046,10 +1052,16 @@ export function planAdoption(
       continue;
     }
     pairedRoles.add(role.id);
-    if (!String(scanned.config["reactionroles.message_channel_id"] ?? "")) {
+    const pickerChannelId = String(
+      scanned.config["reactionroles.message_channel_id"] ?? "",
+    );
+    if (
+      !pickerChannelId ||
+      channelsById.get(pickerChannelId)?.kind !== "text"
+    ) {
       err(
         "reactionroles-channel-missing",
-        "Set the reaction-role message channel first: the picker for each pairing is posted there.",
+        "Set the reaction-role message channel to a text channel first: the picker for each pairing is posted there.",
         role.id,
       );
       continue;
@@ -1064,10 +1076,16 @@ export function planAdoption(
       categoryId: category.id,
       categoryName: category.name,
       emoji: want.emoji,
+      pickerChannelId,
       summary: `Register "${role.name}" as a pickable game role for "${category.name}"`,
       targetId: role.id,
       before: null,
-      after: { role: role.name, category: category.name, emoji: want.emoji },
+      after: {
+        role: role.name,
+        category: category.name,
+        emoji: want.emoji,
+        pickerChannel: pickerChannelId,
+      },
     });
   }
 

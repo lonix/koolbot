@@ -515,7 +515,7 @@ export function buildClaimsDesiredState(
     warned.add(mark);
     issues.push({
       code,
-      message: `"${channel.name}" is only partly ${what}: ${offenders.join(", ")} already ${code === "gate-not-exclusive" ? "can see it" : "can still post or react"} through their own overwrites, which are kept. Change those in Discord, or choose "Sync to category", if you want it exclusive.`,
+      message: `"${channel.name}" is only partly ${what}: ${offenders.join(", ")} already ${code === "gate-not-exclusive" ? "can see it" : code === "speak-not-exclusive" ? "can still request to speak" : "can still post or react"} through their own overwrites, which are kept. Change those in Discord, or choose "Sync to category", if you want it exclusive.`,
       targetId: channel.id,
     });
   };
@@ -892,6 +892,16 @@ export function buildClaimsDesiredState(
   for (const { claim, channel } of valid) {
     const family = channelFamily(channel.rawType, channel.kind);
     if (claim.registerPairing) pairCategory(claim, channel);
+    // A feed is read-only. Combined with another action the claim would
+    // promise read-only and apply something else, so it is refused outright.
+    if (claim.feed && claim.action !== "read-only") {
+      err(
+        "feed-needs-read-only",
+        `"${channel.name}" is marked as a feed, which means read-only for everyone. Choose Read-only (or Leave alone) for it, or untick the feed.`,
+        channel.id,
+      );
+      continue;
+    }
     // An invalid feed claim plans nothing at all, not even its read-only part.
     if (claim.feed && !checkFeed(channel)) continue;
     const feature = bindFeature(claim, channel, family);
@@ -974,6 +984,18 @@ export function buildClaimsDesiredState(
                 : { allow: [], deny: ["RequestToSpeak"] },
             );
           }
+        }
+        if (speakers.length > 0) {
+          // Existing RequestToSpeak allows on other roles or members are kept
+          // (they may belong to another bot) and would still let a viewer who
+          // holds them request to speak: say so, naming them.
+          bypassCheck(
+            channel,
+            ["RequestToSpeak"],
+            speakers,
+            "speak-not-exclusive",
+            "limited to the chosen speakers",
+          );
         }
         if (family === "category") gatedCategories.push(channel);
         // Discord does not push a category's overwrites to its channels, so
@@ -1245,6 +1267,7 @@ const WARNING_CODES = new Set([
   "feed-not-gated",
   "gate-child-not-gated",
   "stage-moderators",
+  "speak-not-exclusive",
 ]);
 
 export function isBlocking(issue: PlanIssue): boolean {

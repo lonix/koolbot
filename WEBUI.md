@@ -1507,11 +1507,16 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   Reaction Roles page apply and are repeated when the step runs: a role with Administrator, Manage Roles, Manage
   Server and the other dangerous permissions, a managed or role-group role, or one at or above KoolBot's highest role is
   **refused** and listed with the reason; a role that is already a reaction role is shown as such. The plan is blocked
-  until the reaction-role message channel is set, and warns when reaction roles are off. A rollback deletes only the picker
-  this plan posted, never the role or the category, and removing the mapping later on the Reaction Roles page never
-  deletes the category either.
+  until the reaction-role message channel is set, and warns when reaction roles are off. The step records the channel it
+  will post in, so changing `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
+  Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
+  Reaction Roles page made is reused, not owned. A rollback deletes only the picker this plan posted, from the channel it
+  was posted to, never the role or the category; if Discord fails while deleting it, the rollback step fails and stays
+  open for a retry (only "unknown channel" or "unknown message" count as already gone). Removing the mapping later on
+  the Reaction Roles page never deletes the category either.
 - **Feeds.** Channels fed by an incoming webhook or a followed announcement channel (from the scan's webhook list;
-  application webhooks don't count) can be made a read-only **feed**: read-only for everyone, reactions open. Their
+  application webhooks don't count) can be made a read-only **feed** (combining it with another action such as Gate is refused, since it would promise
+  read-only and apply something else): read-only for everyone, reactions open. Their
   webhooks and follower integrations are never modified or removed (webhook messages ignore channel permissions, so they
   keep posting), and the plan warns if a feed is still visible through its own overwrite in a gated category. When KoolBot
   lacks Manage Webhooks the webhook data is **unavailable**: the page says so, suggests no feed, and refuses a feed claim
@@ -1519,7 +1524,9 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
 - **Stage speakers.** A group-gated stage channel can also limit who may *request to speak*: pick the speaker roles in
   Options (they are let in too); everyone else who can see it is denied `RequestToSpeak`. Stage moderators (Mute
   Members, Move Members, Manage Channels) can still invite anyone to speak: the plan says so, and KoolBot never grants
-  or removes those permissions. An **announcement** channel is only labelled "read-only is suggested"; it is not selected for you.
+  or removes those permissions. Existing `RequestToSpeak` allows on other roles or members are kept (they may belong to
+  another bot) and are named in the plan, since they let a viewer who holds them request to speak anyway.
+  An **announcement** channel is only labelled "read-only is suggested"; it is not selected for you.
 - Gating a category warns about channels in it that are not synced and still allow `@everyone` to see or join them through
   their own overwrites.
 
