@@ -152,11 +152,11 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
       emoji: "🎮",
     });
     expect(result).toEqual({ messageId: "msg1", reused: false });
-    expect(bind).toHaveBeenCalledWith("guild1", "role1", "🎮");
-    expect(Model.updateOne).toHaveBeenCalledWith(
-      { guildId: "guild1", messageId: "msg1", roleId: "role1", emoji: "🎮" },
-      { $set: { categoryId: "cat1" } },
-    );
+    // The category is stored by the mapping's own first save.
+    expect(bind).toHaveBeenCalledWith("guild1", "role1", "🎮", {
+      categoryId: "cat1",
+    });
+    expect(Model.updateOne).not.toHaveBeenCalled();
     // The role and the category are only read.
     expect(role.delete).not.toHaveBeenCalled();
     expect(category.delete).not.toHaveBeenCalled();
@@ -191,28 +191,18 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
     ).rejects.toThrow(/already a reaction role/);
   });
 
-  it("removes the picker again when the mapping can't be linked", async () => {
-    const { service, message } = build();
-    jest.spyOn(service, "bindReactionRole").mockResolvedValue({
-      success: true,
-      message: "ok",
+  it("a resumed step reports an existing mapping as its own, so a rollback removes it", async () => {
+    const { service } = build();
+    Model.findOne.mockResolvedValueOnce({ messageId: "msg-late" });
+    const bind = jest.spyOn(service, "bindReactionRole");
+    const result = await service.registerGatedPairing("guild1", {
       roleId: "role1",
-      messageId: "msg1",
+      categoryId: "cat1",
+      emoji: "🎮",
+      resumed: true,
     });
-    Model.updateOne.mockResolvedValue({ matchedCount: 0 });
-    Model.findOne
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ _id: "row1" });
-    await expect(
-      service.registerGatedPairing("guild1", {
-        roleId: "role1",
-        categoryId: "cat1",
-        emoji: "🎮",
-      }),
-    ).rejects.toThrow(/could not be linked/);
-    expect(message.delete).toHaveBeenCalledTimes(1);
-    expect(Model.deleteOne).toHaveBeenCalledWith({ _id: "row1" });
+    expect(result).toEqual({ messageId: "msg-late", reused: false });
+    expect(bind).not.toHaveBeenCalled();
   });
 });
 

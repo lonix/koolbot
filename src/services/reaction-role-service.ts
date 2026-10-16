@@ -1659,7 +1659,12 @@ export class ReactionRoleService {
     guildId: string,
     roleId: string,
     emoji: string,
-    options: { messageId?: string; messageChannelId?: string } = {},
+    options: {
+      messageId?: string;
+      messageChannelId?: string;
+      /** Stored with the mapping from the first save (server adoption, #1022). */
+      categoryId?: string;
+    } = {},
   ): Promise<{
     success: boolean;
     message: string;
@@ -1784,6 +1789,7 @@ export class ReactionRoleService {
         roleName: role.name,
         autoCreated: false,
         isArchived: false,
+        ...(options.categoryId ? { categoryId: options.categoryId } : {}),
       });
 
       try {
@@ -1847,11 +1853,19 @@ export class ReactionRoleService {
    * Administrator or another dangerous permission is refused (#1159). Throws
    * with the reason on any refusal. Idempotent: a mapping an earlier attempt
    * stored for the same role and category is returned instead of posting a
-   * second picker.
+   * second picker. With `resumed` set (the engine already began this step once,
+   * and a timed-out first attempt may have finished late) that mapping is this
+   * plan's own picker, so it is reported as posted, not reused, and a rollback
+   * removes it.
    */
   public async registerGatedPairing(
     guildId: string,
-    input: { roleId: string; categoryId: string; emoji: string },
+    input: {
+      roleId: string;
+      categoryId: string;
+      emoji: string;
+      resumed?: boolean;
+    },
   ): Promise<{ messageId: string; reused: boolean }> {
     const api = CommandManager.getInstance(this.client);
     const guild = await api.makeDiscordApiCall(
@@ -1898,7 +1912,9 @@ export class ReactionRoleService {
       isArchived: false,
       autoCreated: false,
     });
-    if (existing) return { messageId: existing.messageId, reused: true };
+    if (existing) {
+      return { messageId: existing.messageId, reused: !input.resumed };
+    }
     const elsewhere = await ReactionRoleConfig.findOne({
       guildId,
       roleId: role.id,
@@ -1910,27 +1926,13 @@ export class ReactionRoleService {
       );
     }
 
-    const bound = await this.bindReactionRole(guildId, role.id, input.emoji);
+    // The category is stored by the same save as the mapping, so there is no
+    // window where a picker and a mapping exist without the link.
+    const bound = await this.bindReactionRole(guildId, role.id, input.emoji, {
+      categoryId: category.id,
+    });
     if (!bound.success || !bound.messageId) {
       throw new Error(bound.message.replace(/\*\*/g, ""));
-    }
-    const linked = await ReactionRoleConfig.updateOne(
-      {
-        guildId,
-        messageId: bound.messageId,
-        roleId: role.id,
-        emoji: this.normalizeEmoji(input.emoji),
-      },
-      { $set: { categoryId: category.id } },
-    );
-    if (linked.matchedCount === 0) {
-      await this.unregisterGatedPairing(guildId, {
-        roleId: role.id,
-        messageId: bound.messageId,
-      });
-      throw new Error(
-        "The mapping could not be linked to the category, so the picker was removed again.",
-      );
     }
     return { messageId: bound.messageId, reused: false };
   }

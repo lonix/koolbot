@@ -165,7 +165,7 @@ function claimRow(
     ? `<label class="check"><input type="checkbox" name="lock_${id}" value="1"${checked(claim?.lockReplies)}> Forum: also stop replies inside posts</label>`
     : "";
   const stageSpeakers = c.flags.stage
-    ? `<label>Stage: only these roles may speak (gate; they can also join) <select name="speakers_${id}" multiple size="5">${roleOptions(scan, claim?.speakerRoleIds ?? [])}</select></label>`
+    ? `<label>Stage: only these roles may request to speak (gate; they can also join) <select name="speakers_${id}" multiple size="5">${roleOptions(scan, claim?.speakerRoleIds ?? [])}</select></label>`
     : "";
   const options = `<details><summary>Options</summary><div class="stack">
 <label>Roles (gate: allowed in; read-only: may still post) <select name="roles_${id}" multiple size="5">${roleOptions(scan, claim?.roleIds ?? [])}</select></label>

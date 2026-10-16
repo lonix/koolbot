@@ -133,6 +133,7 @@ function harness() {
   const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
   const reusedPickerRoles = new Set<string>();
+  const registerCalls: Array<{ roleId: string; resumed?: boolean }> = [];
   const lookups: string[] = [];
   const createdRoleIds = new Set<string>();
   let configIssues: string[] = [];
@@ -147,6 +148,7 @@ function harness() {
   const deps: Deps = {
     reactionRoles: {
       register: async (_guildId, i) => {
+        registerCalls.push({ roleId: i.roleId, resumed: i.resumed });
         run(`rr.register:${i.roleId}:${i.categoryId}:${i.emoji}`);
         return {
           messageId: `msg-${i.roleId}`,
@@ -324,6 +326,7 @@ function harness() {
     recoveries,
     existingRoleByName,
     reusedPickerRoles,
+    registerCalls,
     live,
     failStrictAudit: (): void => {
       strictAuditFails = true;
@@ -1955,6 +1958,32 @@ describe("reaction role pairings (#1022)", () => {
     h.calls.length = 0;
     await h.service.rollback(result.snapshotId, { actor });
     expect(h.calls.filter((c) => c.startsWith("rr."))).toEqual([]);
+  });
+
+  it("a resume tells the registrar the step began before, and a late picker is rolled back as ours", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    expect(h.registerCalls).toEqual([{ roleId: "member", resumed: false }]);
+    // The timed-out first attempt finished late; the retry finds its picker.
+    h.failOn.clear();
+    h.reusedPickerRoles.clear();
+    const second = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+    expect(h.registerCalls[h.registerCalls.length - 1]).toEqual({
+      roleId: "member",
+      resumed: true,
+    });
+    h.calls.length = 0;
+    await h.service.rollback(first.snapshotId, { actor });
+    expect(h.calls.filter((c) => c.startsWith("rr."))).toEqual([
+      "rr.unregister:member:msg-member",
+    ]);
   });
 
   it("a refusal from the registrar fails the step and leaves the server alone", async () => {

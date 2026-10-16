@@ -178,7 +178,13 @@ export interface AdoptionConfigWriter {
 export interface AdoptionReactionRoles {
   register(
     guildId: string,
-    input: { roleId: string; categoryId: string; emoji: string },
+    input: {
+      roleId: string;
+      categoryId: string;
+      emoji: string;
+      /** The engine began this step before: an existing mapping is ours. */
+      resumed?: boolean;
+    },
   ): Promise<{ messageId: string; reused: boolean }>;
   unregister(
     guildId: string,
@@ -1125,6 +1131,7 @@ export class ServerAdoptionService {
               roleId: op.roleId,
               categoryId: op.categoryId,
               emoji: op.emoji,
+              resumed: started,
             }),
           `register reaction role ${op.roleId}`,
           { once: true },

@@ -598,6 +598,7 @@ describe("stage speakers and unsynced children", () => {
       { synced: [[STAGE, false]] },
     );
     expect(r.errors).toEqual([]);
+    expect(r.warnings).toContain("stage-moderators");
     const everyone = setFor(r.plan, STAGE, GUILD)!;
     expect(BigInt(everyone.deny) & F.RequestToSpeak).toBe(F.RequestToSpeak);
     expect(BigInt(everyone.deny) & F.ViewChannel).toBe(F.ViewChannel);

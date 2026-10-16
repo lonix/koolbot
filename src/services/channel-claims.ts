@@ -955,6 +955,11 @@ export function buildClaimsDesiredState(
         const gateBot = botSetFor(gateFamily, feature, false);
         gate(channel, gateFamily, targets, gateBot);
         if (speakers.length > 0) {
+          issues.push({
+            code: "stage-moderators",
+            message: `Only the chosen roles can request to speak in "${channel.name}". Stage moderators (Mute Members, Move Members, Manage Channels) can still invite anyone to speak; KoolBot never grants or removes those permissions.`,
+            targetId: channel.id,
+          });
           layer(channel, everyoneId, "role", {
             allow: [],
             deny: ["RequestToSpeak"],
@@ -1239,6 +1244,7 @@ const WARNING_CODES = new Set([
   "feed-preserved",
   "feed-not-gated",
   "gate-child-not-gated",
+  "stage-moderators",
 ]);
 
 export function isBlocking(issue: PlanIssue): boolean {
