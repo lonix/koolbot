@@ -16,6 +16,7 @@ import {
 import { isValidObjectId } from "mongoose";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 import { DiscordLogger } from "./discord-logger.js";
 import {
   Event,
@@ -312,6 +313,10 @@ export class EventService extends ScheduledService {
   private static instance: EventService;
   /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
   private readonly nativeSync: NativeEventSync;
+  /** Serialises native Interested add/remove per (guild, native event, user),
+   * so gateway arrival order decides the final state even when an add is held
+   * up by a slow partial-user fetch (#1034). Entries clear when idle. */
+  private readonly interestLock = createKeyedLock();
 
   private constructor(client: Client) {
     super(client, {
@@ -981,10 +986,28 @@ export class EventService extends ScheduledService {
    * - Bots (and this bot itself) are ignored: they are not attendees.
    * - Matches on `(guildId, nativeEventId)` of a not-yet-finished event, so
    *   an event whose native link was released or never made is ignored.
+   * - Calls for the same member and event run one at a time in arrival
+   *   order, so an un-mark that arrives while the add is still resolving a
+   *   partial user cannot be overtaken by it (different members do not wait
+   *   for each other).
    * - Only acts while mirroring is on (`events.enabled` and
    *   `events.native.enabled`).
    */
-  public async handleNativeInterest(
+  public handleNativeInterest(
+    guildId: string,
+    nativeEventId: string,
+    user: User | PartialUser,
+    interested: boolean,
+  ): Promise<boolean> {
+    // Queued synchronously, before any await: the lock order is the gateway
+    // arrival order. The work below never rejects, so a failure cannot wedge
+    // the key (the lock tolerates one anyway).
+    return this.interestLock.run(`${guildId}:${nativeEventId}:${user.id}`, () =>
+      this.applyNativeInterest(guildId, nativeEventId, user, interested),
+    );
+  }
+
+  private async applyNativeInterest(
     guildId: string,
     nativeEventId: string,
     user: User | PartialUser,

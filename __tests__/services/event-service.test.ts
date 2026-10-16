@@ -458,6 +458,57 @@ describe("handleNativeInterest", () => {
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it("applies an add and a later remove in arrival order even if the add's user fetch is slow", async () => {
+    const { service } = build();
+    const rsvps: string[] = [];
+    EventMock.findOneAndUpdate = jest.fn(async (_filter, update: any) => {
+      if (update.$push) rsvps.push(update.$push.rsvps.userId);
+      else {
+        const i = rsvps.indexOf(update.$pull.rsvps.userId);
+        if (i === -1) return null;
+        rsvps.splice(i, 1);
+      }
+      return { _id: "e1" };
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = {
+      id: "user-1",
+      partial: true,
+      fetch: jest.fn(async () => {
+        await gate;
+        return { id: "user-1", bot: false };
+      }),
+    };
+
+    const add = service.handleNativeInterest(
+      GUILD,
+      NATIVE,
+      slow as never,
+      true,
+    );
+    const remove = service.handleNativeInterest(GUILD, NATIVE, human, false);
+    release();
+    await Promise.all([add, remove]);
+
+    expect(rsvps).toEqual([]);
+  });
+
+  it("does not serialise different members against each other", async () => {
+    const { service } = build();
+    EventMock.findOneAndUpdate = jest.fn(async () => ({ _id: "e1" }));
+    const slow = {
+      id: "user-9",
+      partial: true,
+      fetch: jest.fn(() => new Promise<never>(() => undefined)),
+    };
+    void service.handleNativeInterest(GUILD, NATIVE, slow as never, true);
+
+    await expect(
+      service.handleNativeInterest(GUILD, NATIVE, human, true),
+    ).resolves.toBe(true);
+  });
+
   it("ignores bots and the bot itself without touching the database", async () => {
     const { service } = build();
     EventMock.findOneAndUpdate = jest.fn(async () => ({}));
