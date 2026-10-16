@@ -15,6 +15,7 @@ import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import { ConfigService } from "./config-service.js";
 import { getEnvConfigValue } from "../config/env.js";
 import { defaultConfig } from "./config-schema.js";
+import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import {
   permissionNames,
   type ChannelKind,
@@ -202,6 +203,41 @@ export interface ScanSuggestion {
   message: string;
 }
 
+/** What feeds a channel through a webhook. */
+export type ScanWebhookKind =
+  /** An incoming webhook, e.g. a bridge or integration posting in. */
+  | "incoming"
+  /** A followed announcement channel from another server. */
+  | "channel-follower"
+  /** A webhook owned by an application (interaction responses). */
+  | "application";
+
+/**
+ * One guild webhook, without its token or URL: the scan only needs to know
+ * which channel it feeds. KoolBot never edits or deletes a webhook.
+ */
+export interface ScanWebhook {
+  id: string;
+  name: string | null;
+  channelId: string;
+  kind: ScanWebhookKind;
+}
+
+/**
+ * The guild's webhooks. Reading them needs the Manage Webhooks permission, so
+ * this always says whether the list is trustworthy: when `known` is false,
+ * `list` is empty because it could not be read, NOT because the guild has none.
+ * Consumers must not treat an empty unknown list as "no channel is webhook-fed"
+ * (the per-channel `flags.webhookFed` / `flags.followed` are false for the same
+ * reason in that case).
+ */
+export interface ScanWebhooks {
+  known: boolean;
+  list: ScanWebhook[];
+  /** Set when `known` is false: no permission, or the read failed. */
+  unavailable: "missing-permission" | "error" | null;
+}
+
 export interface ServerScan {
   guildId: string;
   guildName: string;
@@ -216,6 +252,8 @@ export interface ServerScan {
   naming: NamingConvention;
   scheduledEvents: ScheduledEventInfo[];
   suggestions: ScanSuggestion[];
+  /** Webhooks and followed channels; see {@link ScanWebhooks}. */
+  webhooks: ScanWebhooks;
   /** Parts of the scan that could not be read, and why. */
   partial: string[];
 }
@@ -619,6 +657,10 @@ export class ServerScanService {
 
     const config = await this.readConfig();
     const bindings = mapFeatureBindings(config);
+    // Reaction roles live in the database, not in config keys, so the config
+    // mapping alone would show them as unused (#1023). A failed read leaves
+    // them unlisted and says so, rather than claiming they are free.
+    await this.addReactionRoleBindings(guild.id, bindings.roles, note);
     const botUserId = this.client.user?.id ?? me?.id ?? "";
 
     // ----- Discord-owned features -----
@@ -656,18 +698,12 @@ export class ServerScanService {
       });
     const roleName = new Map(roles.map((r) => [r.id, r.name]));
 
-    // ----- Webhooks / followed channels -----
+    // ----- Webhooks / followed channels (read only) -----
+    const webhooks = await this.readWebhooks(guild, note);
     const webhookFed = new Set<string>();
     const followed = new Set<string>();
-    try {
-      const hooks = await guild.fetchWebhooks();
-      for (const h of hooks.values()) {
-        if (!h.channelId) continue;
-        if (h.type === WebhookType.ChannelFollower) followed.add(h.channelId);
-        else webhookFed.add(h.channelId);
-      }
-    } catch (e) {
-      note("webhooks (needs ManageWebhooks)", e);
+    for (const h of webhooks.list) {
+      (h.kind === "channel-follower" ? followed : webhookFed).add(h.channelId);
     }
 
     // ----- Channels -----
@@ -753,8 +789,68 @@ export class ServerScanService {
       naming,
       scheduledEvents,
       suggestions,
+      webhooks,
       partial,
     };
+  }
+
+  /** Add the guild's reaction roles to the role bindings. Read only. */
+  private async addReactionRoleBindings(
+    guildId: string,
+    roles: Map<string, string[]>,
+    note: (what: string, err: unknown) => void,
+  ): Promise<void> {
+    try {
+      const ids = (await ReactionRoleConfig.distinct("roleId", {
+        guildId,
+      })) as Array<string | null>;
+      for (const id of ids) {
+        if (!id) continue;
+        const list = roles.get(id) ?? [];
+        if (!list.includes("reactionroles")) list.push("reactionroles");
+        roles.set(id, list);
+      }
+    } catch (e) {
+      note("reaction roles (roles they use are not marked as used)", e);
+    }
+  }
+
+  /**
+   * Guild webhooks, token-free. Needs Manage Webhooks: a refusal is reported as
+   * unknown (and noted in `partial`), never as an empty list.
+   */
+  private async readWebhooks(
+    guild: Guild,
+    note: (what: string, err: unknown) => void,
+  ): Promise<ScanWebhooks> {
+    try {
+      const hooks = await guild.fetchWebhooks();
+      const list: ScanWebhook[] = [];
+      for (const h of hooks.values()) {
+        if (!h.channelId) continue;
+        const type = h.type as WebhookType;
+        list.push({
+          id: h.id,
+          name: h.name ?? null,
+          channelId: h.channelId,
+          kind:
+            type === WebhookType.ChannelFollower
+              ? "channel-follower"
+              : type === WebhookType.Application
+                ? "application"
+                : "incoming",
+        });
+      }
+      return { known: true, list, unavailable: null };
+    } catch (e) {
+      note("webhooks (needs ManageWebhooks)", e);
+      const code = (e as { code?: unknown } | null)?.code;
+      return {
+        known: false,
+        list: [],
+        unavailable: code === 50013 ? "missing-permission" : "error",
+      };
+    }
   }
 
   private hasMembersIntent(): boolean {

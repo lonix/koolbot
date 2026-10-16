@@ -1291,8 +1291,15 @@ groups are defined:
   chosen for another feature (a leaderboard tier would take it back from members, a birthday role
   would hand it out). The save is refused with a message naming the group. Choices made earlier are
   never cleared. If the groups can't be read, the pick is allowed, since this guards a choice
-  rather than access. The Role Groups page does not yet list these roles as used by a feature or
-  exclude them from group linking.
+  rather than access. The Role Groups page lists these roles as used by a feature and leaves them
+  out of group linking; the server scan's role table lists them under "Used by" too (reaction roles
+  included, read from the database). If the reaction roles can't be read, the scan says so rather
+  than showing their roles as free.
+- **Group pickers**: the Settings page offers role groups for `quotes.delete_roles`, like the Quotes
+  page, and shows a stored group by name. The Setup Wizard renderer supports the same picker, but the
+  Quotes wizard step does not list this key, so it is not offered there. Other role lists only take
+  roles. Group support for quote deletion is in the service and the picker; deletion
+  itself is an admin action in the Web UI and its route is unchanged.
 
 The **Rules** page (`/admin/rules`, #1024, part of the server-adoption epic #1017) manages the
 optional rules / terms acceptance gate. It is off by default (`rules.enabled`) and is the one
@@ -1435,8 +1442,9 @@ channels where they have overwrites) and **bot readiness**: the bot's guild perm
 position, and actionable warnings (for example "move the KoolBot role above X") that link to
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-cant-manage-roles-or-channels). It also shows what Discord already
 handles (Community, rules/system/public-updates channels, Onboarding prompts and the roles they hand out), the
-AFK channel, webhook-fed and followed channels, role-gated categories, the server's channel naming convention
-and native scheduled events. The scan never pages through the member list: role member counts come from the
+AFK channel, webhook-fed and followed channels (reading webhooks needs the Manage Webhooks permission; without
+it the scan warns that these marks are missing instead of showing none, and never edits a webhook), role-gated
+categories, the server's channel naming convention and native scheduled events. The scan never pages through the member list: role member counts come from the
 cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Include channel ownership
 hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
 REST call per channel, so it is off by default. The same data is available to code as

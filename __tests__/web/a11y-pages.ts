@@ -314,6 +314,7 @@ export function adminPages(): A11yPage[] {
           },
           scheduledEvents: [],
           suggestions: [],
+          webhooks: { known: true, list: [], unavailable: null },
           partial: [],
         },
       }),

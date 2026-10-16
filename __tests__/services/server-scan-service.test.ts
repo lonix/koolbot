@@ -1,14 +1,21 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { ChannelType, PermissionsBitField } from "discord.js";
-import {
+import { defaultConfig } from "../../src/services/config-schema.js";
+import { ConfigService } from "../../src/services/config-service.js";
+
+const mockDistinct = jest.fn<(...a: any[]) => Promise<Array<string | null>>>(
+  async () => [],
+);
+jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
+  ReactionRoleConfig: { distinct: mockDistinct },
+}));
+const {
   ServerScanService,
   botVerified,
   buildReadiness,
   detectNamingConvention,
   mapFeatureBindings,
-} from "../../src/services/server-scan-service.js";
-import { defaultConfig } from "../../src/services/config-schema.js";
-import { ConfigService } from "../../src/services/config-service.js";
+} = await import("../../src/services/server-scan-service.js");
 
 const F = PermissionsBitField.Flags;
 const bits = (...f: bigint[]): bigint => f.reduce((a, b) => a | b, 0n);
@@ -174,6 +181,8 @@ function makeGuild(): { guild: any; write: jest.Mock } {
 describe("ServerScanService (#1019)", () => {
   beforeEach(() => {
     ServerScanService.reset();
+    mockDistinct.mockReset();
+    mockDistinct.mockResolvedValue(["r-low", null]);
     jest.spyOn(ConfigService, "getInstance").mockReturnValue({
       getAll: async () => [
         { key: "quotes.channel_id", value: "ch-quotes-real" },
@@ -282,6 +291,107 @@ describe("ServerScanService (#1019)", () => {
     expect(hier.message).toContain('"Mod"');
     expect(hier.message).toContain("Move the KoolBot role above");
     expect(readiness.ready).toBe(false);
+  });
+
+  it("shows roles used by reaction roles as used, scoped to the guild", async () => {
+    const { guild } = makeGuild();
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(mockDistinct).toHaveBeenCalledWith("roleId", {
+      guildId: "g1",
+    });
+    expect(scan.roles.find((r) => r.id === "r-low")!.usedBy).toEqual([
+      "reactionroles",
+    ]);
+    expect(scan.roles.find((r) => r.id === "r-mod")!.usedBy).toEqual([]);
+  });
+
+  it("does not claim reaction roles are free when they can't be read", async () => {
+    mockDistinct.mockRejectedValue(new Error("db down"));
+    const { guild } = makeGuild();
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(scan.partial.join(" ")).toContain("reaction roles");
+    expect(scan.roles.length).toBeGreaterThan(0);
+  });
+
+  it("exposes webhooks as a typed, token-free list without touching them", async () => {
+    const { guild } = makeGuild();
+    const edit = jest.fn();
+    const del = jest.fn();
+    guild.fetchWebhooks = jest.fn(
+      async () =>
+        new Map<string, any>([
+          [
+            "w1",
+            {
+              id: "w1",
+              name: "News",
+              channelId: "ch-news",
+              type: 2,
+              token: "SECRET",
+              url: "https://discord.com/api/webhooks/w1/SECRET",
+              edit,
+              delete: del,
+            },
+          ],
+          [
+            "w2",
+            {
+              id: "w2",
+              name: null,
+              channelId: "ch-quotes",
+              type: 1,
+              edit,
+              delete: del,
+            },
+          ],
+          ["w3", { id: "w3", name: "App", channelId: "ch-quotes", type: 3 }],
+          ["w4", { id: "w4", name: "Orphan", channelId: null, type: 1 }],
+        ]),
+    );
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(scan.webhooks).toEqual({
+      known: true,
+      unavailable: null,
+      list: [
+        {
+          id: "w1",
+          name: "News",
+          channelId: "ch-news",
+          kind: "channel-follower",
+        },
+        { id: "w2", name: null, channelId: "ch-quotes", kind: "incoming" },
+        { id: "w3", name: "App", channelId: "ch-quotes", kind: "application" },
+      ],
+    });
+    expect(JSON.stringify(scan)).not.toContain("SECRET");
+    expect(edit).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("reports webhooks as unknown, not empty, without Manage Webhooks", async () => {
+    const { guild } = makeGuild();
+    guild.fetchWebhooks = jest.fn(async () => {
+      throw Object.assign(new Error("Missing Permissions"), { code: 50013 });
+    });
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(scan.webhooks).toEqual({
+      known: false,
+      list: [],
+      unavailable: "missing-permission",
+    });
+    expect(scan.partial.join(" ")).toContain("ManageWebhooks");
+    const news = scan.channels.find((c) => c.id === "ch-news")!;
+    expect(news.flags.followed).toBe(false);
+  });
+
+  it("tells a failed webhook read from a missing permission", async () => {
+    const { guild } = makeGuild();
+    guild.fetchWebhooks = jest.fn(async () => {
+      throw new Error("503");
+    });
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(scan.webhooks.known).toBe(false);
+    expect(scan.webhooks.unavailable).toBe("error");
   });
 
   it("survives failing webhook and onboarding reads and records them", async () => {
