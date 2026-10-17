@@ -364,6 +364,51 @@ describe("LeaderboardRoleService", () => {
       );
     });
 
+    it("reads the live role: a cached safe role that is privileged on a fresh fetch is not granted", async () => {
+      setup(0n);
+      mockGuildRolesFetch.mockImplementation(
+        async (_id: unknown, opts?: unknown) => ({
+          id: "111",
+          name: "Top 2",
+          permissions: {
+            bitfield: (opts as { force?: boolean } | undefined)?.force
+              ? ADMIN
+              : 0n,
+          },
+        }),
+      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+    });
+
+    it("refuses the grant, warning once, when the live role cannot be read", async () => {
+      setup(0n);
+      // The reconcile's own lookup succeeds; only the forced refresh fails.
+      mockGuildRolesFetch.mockImplementation(
+        async (_id: unknown, opts?: unknown) => {
+          if ((opts as { force?: boolean } | undefined)?.force) {
+            throw new Error("rest down");
+          }
+          return { id: "111", name: "Top 2", permissions: { bitfield: 0n } };
+        },
+      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+      await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+      const warnings = mockLoggerWarn.mock.calls.filter((c) =>
+        String(c[0]).includes("could not be verified"),
+      );
+      expect(warnings).toHaveLength(1);
+    });
+
     it("does not grant the admin role group's role either", async () => {
       setup(0n);
       mockGetRoleIdsWith.mockResolvedValue(["111"]);

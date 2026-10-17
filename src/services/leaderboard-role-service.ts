@@ -27,9 +27,10 @@ const UNKNOWN_ROLE = 10011;
 async function fetchRoleOrNull(
   guild: Guild,
   roleId: string,
+  force = false,
 ): Promise<Role | null> {
   try {
-    return await guild.roles.fetch(roleId);
+    return await guild.roles.fetch(roleId, force ? { force: true } : undefined);
   } catch (error) {
     if (error instanceof DiscordAPIError && error.code === UNKNOWN_ROLE) {
       return null;
@@ -438,13 +439,32 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     guild: Guild,
     role: Role,
   ): Promise<string | null> {
+    // The grant decision reads the live role, not the cache: a role that just
+    // gained Administrator must not slip through on stale permissions. A
+    // deleted role is left to the caller's own lookup; any other failure
+    // refuses the grant this run.
+    let live: Role | null;
+    try {
+      live = await fetchRoleOrNull(guild, role.id, true);
+    } catch (error) {
+      const key = `${role.id}:unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) could not be verified, so it is not granted until Discord answers:`,
+          error,
+        );
+      }
+      return "could not be verified";
+    }
+    if (!live) return null;
     const adminRoleIds = await RoleGroupService.getInstance()
       .getRoleIdsWith(guild.id, "admin")
       .catch((error: unknown) => {
         logger.warn("Leaderboard role check: role groups unreadable", error);
         return [] as string[];
       });
-    const reason = automaticGrantBlockReason(role, adminRoleIds);
+    const reason = automaticGrantBlockReason(live, adminRoleIds);
     if (reason) {
       const key = `${role.id}:${reason}`;
       if (!this.warnedBlockedRoles.has(key)) {

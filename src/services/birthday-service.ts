@@ -1364,14 +1364,18 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     roleId: string,
   ): Promise<string | null> {
     try {
-      const role = await guild.roles.fetch(roleId).catch((error: unknown) => {
-        // A deleted role is reported as null or as Unknown Role (10011);
-        // either way there is nothing to guard and the grant fails as before.
-        if (error instanceof DiscordAPIError && error.code === 10011) {
-          return null;
-        }
-        throw error;
-      });
+      // Forced: the decision reads the live role, not the cache, so a role
+      // that just gained Administrator is not granted on stale permissions.
+      const role = await guild.roles
+        .fetch(roleId, { force: true })
+        .catch((error: unknown) => {
+          // A deleted role is reported as null or as Unknown Role (10011);
+          // either way there is nothing to guard and the grant fails as before.
+          if (error instanceof DiscordAPIError && error.code === 10011) {
+            return null;
+          }
+          throw error;
+        });
       if (!role) return null;
       const adminRoleIds = await RoleGroupService.getInstance()
         .getRoleIdsWith(guild.id, "admin")
@@ -1391,10 +1395,14 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       }
       return reason;
     } catch (error) {
-      logger.warn(
-        `Birthday role ${sanitizeForLog(roleId)} could not be checked, so it is not granted this run:`,
-        error,
-      );
+      const key = `${roleId}:unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Birthday role ${sanitizeForLog(roleId)} could not be verified, so it is not granted until Discord answers:`,
+          error,
+        );
+      }
       return "could not be checked";
     }
   }

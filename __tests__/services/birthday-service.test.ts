@@ -805,6 +805,32 @@ describe("BirthdayService", () => {
       expect(rolesAdd).not.toHaveBeenCalled();
     });
 
+    it("reads the live role: a cached safe role that is privileged on a fresh fetch is not granted", async () => {
+      const { rolesAdd } = await runWithRole(
+        0n,
+        jest.fn(async (_id: string, opts?: { force?: boolean }) => ({
+          id: "role-1",
+          permissions: { bitfield: opts?.force ? ADMIN : 0n },
+        })),
+      );
+
+      expect(rolesAdd).not.toHaveBeenCalled();
+      expect(blockedWarnings()).toHaveLength(1);
+    });
+
+    it("warns once, not per run, when the live role cannot be read", async () => {
+      const failing = jest.fn(async () => {
+        throw new Error("rest down");
+      });
+      const first = await runWithRole(0n, failing);
+      expect(first.rolesAdd).not.toHaveBeenCalled();
+      const unverified = (): unknown[][] =>
+        mockLoggerWarn.mock.calls.filter((c) =>
+          String(c[0]).includes("could not be verified"),
+        );
+      expect(unverified()).toHaveLength(1);
+    });
+
     it("skips the grant when the role cannot be read, and still announces", async () => {
       const { summary, rolesAdd } = await runWithRole(
         0n,
@@ -834,7 +860,7 @@ describe("BirthdayService", () => {
 
       expect(rolesAdd).toHaveBeenCalledTimes(2);
       expect(mockLoggerWarn).not.toHaveBeenCalledWith(
-        expect.stringContaining("could not be checked"),
+        expect.stringContaining("could not be verified"),
         expect.anything(),
       );
     });
