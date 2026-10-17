@@ -733,17 +733,23 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     deleteNote:
       "Admin-authored event belonging to the guild; the member's own RSVP on the same row IS purged (see `event-rsvp`).",
   },
+  // Event groups (#1188). Nothing writes these two fields yet, so the notes say
+  // so in member terms. Owed by the issues that start writing them: #1191
+  // (assignment) and #1195 (leaders) must make their field exportable with a
+  // reader, and add a purge (`$pull` from `groups.$[].memberIds`, clear a
+  // matching `captainId`), in the same change. Finished events are kept, so
+  // `retain` is only true while the fields stay empty.
   {
     source: "src/models/event.ts",
     collection: "event-group-member",
     field: "memberIds",
     exportable: false,
     guildScoped: true,
-    note: "Nested `groups[].memberIds` (#1188): the members assigned to an event group. Always empty today, nothing writes it until group assignment (#1191), which must make it exportable with a reader in the same change.",
-    onDelete: "expires",
+    note: "Which event group a member was placed in. No group memberships are recorded yet.",
+    onDelete: "retain",
     subject: "self",
     deleteNote:
-      "Always empty until #1191, so there is nothing to purge yet. #1191 must add a pull-member deleter (`$pull` from `groups.$[].memberIds`) with the assignment code; the group rows are removed with the event.",
+      "No group memberships are recorded yet, so there is nothing to remove.",
   },
   {
     source: "src/models/event.ts",
@@ -751,11 +757,11 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "captainId",
     exportable: false,
     guildScoped: true,
-    note: "Nested `groups[].captainId` (#1188): the member leading an event group. Always null today, nothing writes it until group leaders (#1195), which must make it exportable with a reader in the same change.",
-    onDelete: "expires",
+    note: "Which member leads an event group. No group leaders are recorded yet.",
+    onDelete: "retain",
     subject: "self",
     deleteNote:
-      "Always null until #1195, so there is nothing to purge yet. #1195 must add a deleter that clears a matching `captainId` with the leader code; the group rows are removed with the event.",
+      "No group leaders are recorded yet, so there is nothing to remove.",
   },
 ];
 

@@ -87,6 +87,13 @@ export interface RawGroupRow {
   size: string;
   tag: string;
   marker: string;
+  /**
+   * The key of an existing group when its setup is re-validated (host panel,
+   * live editing), so edits keep each group's identity. Kept only when it is a
+   * well-formed key not used twice; otherwise a new one is minted. The form of
+   * a new event leaves it out.
+   */
+  key?: string;
 }
 
 /** The group section of the event form, before validation. */
@@ -163,6 +170,9 @@ export function normalizeGroupText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/** A group key: `g_` and eight hex digits. */
+const GROUP_KEY_PATTERN = /^g_[0-9a-f]{8}$/;
+
 function newGroupKey(taken: ReadonlySet<string>): string {
   let key: string;
   do {
@@ -192,8 +202,10 @@ function clampInt(
 }
 
 /**
- * Validate the form's group section and build the setup to store. Pure: the
- * caller supplies the configured group cap. A section that is switched off
+ * Validate the form's group section and build the setup to store. No I/O: the
+ * caller supplies the configured group cap. The groups it returns carry only
+ * the setup (channel, captain and members are empty), so a caller re-validating
+ * a live event merges those back by `key`. A section that is switched off
  * yields the empty setup whatever else was posted, so a plain event stores
  * exactly what it did before groups existed.
  *
@@ -277,7 +289,14 @@ export function validateGroupSetup(
 
   const groups: IEventGroup[] = [];
   const seenNames = new Map<string, number>();
-  const keys = new Set<string>();
+  // Keys the caller asked to keep, reserved first so a minted key can never
+  // collide with one a later row keeps.
+  const keys = new Set<string>(
+    rows.flatMap((r) =>
+      r.key && GROUP_KEY_PATTERN.test(r.key) ? [r.key] : [],
+    ),
+  );
+  const usedKeys = new Set<string>();
   let leadsRow: number | null = null;
   for (const row of rows) {
     const where = `Group ${row.position}`;
@@ -348,8 +367,12 @@ export function validateGroupSetup(
       errors.push(`${where} marker: control characters are not allowed.`);
     }
 
-    const key = newGroupKey(keys);
-    keys.add(key);
+    let key = row.key ?? "";
+    if (!GROUP_KEY_PATTERN.test(key) || usedKeys.has(key)) {
+      key = newGroupKey(keys);
+      keys.add(key);
+    }
+    usedKeys.add(key);
     groups.push({
       key,
       name,

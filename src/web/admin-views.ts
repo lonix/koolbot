@@ -2574,6 +2574,8 @@ const EVENT_GROUPS_SCRIPT =
   "form.elements['group_'+i+'_size'].value=g.size==null?'':g.size;" +
   "form.elements['group_'+i+'_tag'].value=g.tag||'';" +
   "form.elements['group_'+i+'_marker'].value=g.marker||''}" +
+  // Typing in a group row switches groups on, so rows are never silently dropped.
+  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true});" +
   "if(preset)preset.addEventListener('change',function(){" +
   "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
   "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +

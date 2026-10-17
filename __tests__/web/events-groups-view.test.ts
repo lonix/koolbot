@@ -78,6 +78,10 @@ describe("renderEventsPage Groups section (#1188)", () => {
     expect(html).toContain("data-add-group");
     expect(html).toContain("data-group-errors");
     expect(html).toContain("koolbot-event-form-draft");
+    // Typing in a row ticks "use groups", so rows are never silently dropped.
+    expect(html).toContain(
+      "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true})",
+    );
   });
 
   it("states honestly that group channels are not created yet", () => {

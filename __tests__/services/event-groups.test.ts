@@ -321,6 +321,44 @@ describe("validateGroupSetup", () => {
   });
 });
 
+describe("validateGroupSetup keys on re-validation", () => {
+  it("keeps a well-formed key so an edit does not change a group's identity", () => {
+    const result = validateGroupSetup(
+      input({
+        rows: [
+          row(1, { key: "g_0123abcd" }),
+          row(2, { key: "g_deadbeef" }),
+          row(3),
+        ],
+      }),
+      { maxCount: 15 },
+    );
+    if (!result.ok) throw new Error(result.errors.join(" "));
+    const keys = result.setup.groups.map((g) => g.key);
+    expect(keys.slice(0, 2)).toEqual(["g_0123abcd", "g_deadbeef"]);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("mints a new key for a malformed or repeated one", () => {
+    const result = validateGroupSetup(
+      input({
+        rows: [
+          row(1, { key: "g_0123abcd" }),
+          row(2, { key: "g_0123abcd" }),
+          row(3, { key: "not a key" }),
+        ],
+      }),
+      { maxCount: 15 },
+    );
+    if (!result.ok) throw new Error(result.errors.join(" "));
+    const keys = result.setup.groups.map((g) => g.key);
+    expect(keys[0]).toBe("g_0123abcd");
+    expect(keys[1]).not.toBe("g_0123abcd");
+    expect(keys[2]).toMatch(/^g_[0-9a-f]{8}$/);
+    expect(new Set(keys).size).toBe(3);
+  });
+});
+
 describe("parseGroupForm", () => {
   it("reads the flat indexed fields, skips blank rows and keeps the form position", () => {
     const parsed = parseGroupForm({
