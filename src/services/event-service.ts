@@ -23,6 +23,7 @@ import {
   type RsvpStatus,
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
+import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -407,6 +408,11 @@ export class EventService extends ScheduledService {
         },
       ],
     });
+
+    // Drop the covers of finished events and series (#1181).
+    await sweepOrphanCovers(guildId).catch((error) =>
+      logger.warn("Event covers: cleanup failed:", error),
+    );
 
     const reminderMs =
       (await this.configService.getNumber("events.reminder_minutes", 30)) *
@@ -817,38 +823,51 @@ export class EventService extends ScheduledService {
         seriesId,
         occurrenceIndex: index,
       };
-      let next: IEvent | null = await Event.findOne(key);
-      let created = false;
-      if (!next) {
-        const doc = new Event({
-          guildId: previous.guildId,
-          title: previous.title,
-          description: previous.description,
-          startTime: start,
-          timezone: previous.timezone,
-          durationMinutes: previous.durationMinutes,
-          categoryId: previous.categoryId,
-          state: "scheduled",
-          reminderSent: false,
-          recurrence: previous.recurrence,
-          seriesId,
-          occurrenceIndex: index,
-          seriesStart: anchor,
-          spawnedFrom: String(previous._id),
-          nextSpawned: false,
-          seriesCancelled: false,
-          createdBy: previous.createdBy,
-        });
-        try {
-          await doc.save();
-          next = doc;
-          created = true;
-        } catch (error) {
-          // Lost the insert race to another caller: adopt their row.
-          if ((error as { code?: number }).code !== 11000) throw error;
-          next = await Event.findOne(key);
-        }
-      }
+      // Hold the series' cover lock from reading the cover hash to saving the
+      // row, so an upload, replace or remove (which holds it across both its
+      // writes) either finishes first and is read here, or runs after the
+      // insert and its bulk update covers the new row (#1181).
+      const spawned = await withCoverLock(
+        previous.guildId,
+        seriesId,
+        async (): Promise<{ next: IEvent | null; created: boolean }> => {
+          const existing: IEvent | null = await Event.findOne(key);
+          if (existing) return { next: existing, created: false };
+          const latest = await Event.findById(previous._id);
+          const doc = new Event({
+            guildId: previous.guildId,
+            title: previous.title,
+            description: previous.description,
+            startTime: start,
+            timezone: previous.timezone,
+            durationMinutes: previous.durationMinutes,
+            categoryId: previous.categoryId,
+            state: "scheduled",
+            reminderSent: false,
+            recurrence: previous.recurrence,
+            seriesId,
+            occurrenceIndex: index,
+            seriesStart: anchor,
+            spawnedFrom: String(previous._id),
+            nextSpawned: false,
+            seriesCancelled: false,
+            // Each occurrence is mirrored with the series' cover (#1181); the
+            // image itself is shared, only its hash is copied.
+            coverHash: latest?.coverHash ?? null,
+            createdBy: previous.createdBy,
+          });
+          try {
+            await doc.save();
+            return { next: doc, created: true };
+          } catch (error) {
+            // Lost the insert race to another caller: adopt their row.
+            if ((error as { code?: number }).code !== 11000) throw error;
+            return { next: await Event.findOne(key), created: false };
+          }
+        },
+      );
+      const next = spawned.next;
+      const created = spawned.created;
       if (!next) return null;
 
       if (created) {

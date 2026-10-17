@@ -1391,6 +1391,25 @@ lifecycle controls — **Start now** (spin the event up immediately) and
 **Schedule a new event** form creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
 
+The **Cover image** column (#1181) sets, replaces and removes an optional cover
+for a scheduled or active event. The image is mirrored to the native Discord event
+within a minute: sent when it is new or changed (never on every scan) and cleared
+when removed. A recurring series has one cover, shared by every occurrence (each
+mirrored occurrence uses it), and the control says so. Accepted: PNG, JPEG or GIF
+up to 2 MB, checked on the server by the file's real signature (not its name or
+declared type), with a clear message when a file is rejected. The image is stored
+in KoolBot's own database (`event-images` collection, one document per event or
+series; event rows hold only its hash) and deleted when the event or series
+finishes or is cancelled. The upload is the raw file sent by the page script with
+the CSRF token in a header (it needs JavaScript; there is no multipart parser).
+A failed send to Discord is logged and retried a few times, never blocking the rest
+of the sync. Events adopted from an existing Discord event (Adopt Events) show no
+control: they keep the cover they have in Discord and KoolBot never changes it.
+A one-off event whose Discord event was deleted by someone is no longer mirrored,
+so it shows a note instead of a control; a recurring series stays editable for its
+future occurrences.
+Events scheduled without a cover behave exactly as before.
+
 Its **Settings** card (#975) edits every `events.*` key in place: the enable
 toggle, the channel category (`events.category_id`, a category picker), the
 announcement channel (`events.announcement_channel_id`, a text-channel picker),

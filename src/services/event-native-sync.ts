@@ -12,6 +12,11 @@ import {
 } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import { Event, type IEvent } from "../models/event.js";
+import {
+  coverKeyFor,
+  loadEventCover,
+  MAX_COVER_ATTEMPTS,
+} from "./event-cover.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -488,7 +493,11 @@ export class NativeEventSync {
     }
     cache?.set(created.id, created);
 
-    if (!(await this.claim(event, created.id))) {
+    const claimed = await this.claim(event, created.id);
+    // The cover goes in its own edit, never in the create: a rejected image
+    // must not stop the event from being mirrored (see `syncCover`).
+    if (claimed) await this.syncCover(event, guild, created.id);
+    if (!claimed) {
       // Lost the claim. Only an unreferenced event is a duplicate: another
       // row may have adopted it meanwhile, and deleting that would take its
       // mirror away.
@@ -623,7 +632,10 @@ export class NativeEventSync {
 
     const want = await this.wantedFields(event);
     const diff = diffNativeFields(native, want);
-    if (Object.keys(diff).length === 0) return;
+    if (Object.keys(diff).length === 0) {
+      await this.syncCover(event, guild, native.id);
+      return;
+    }
 
     // The conversion back to an external event is its own patch, so a Discord
     // rejection of it can never block the name/description/time updates.
@@ -688,6 +700,91 @@ export class NativeEventSync {
         );
       }
     }
+
+    await this.syncCover(event, guild, native.id);
+  }
+
+  // ---------------------------------------------------------------
+  // Cover image (#1181)
+  // ---------------------------------------------------------------
+
+  /**
+   * Bring the native event's cover in line with the row's `coverHash`. The row
+   * remembers what was last sent (`nativeCoverHash`), so the image travels only
+   * when it is new or changed, never on every scan, and a row that never had a
+   * cover costs nothing here (both hashes are null, no query, no REST call).
+   *
+   * It is always a separate edit: a rejected image can never block the
+   * name/time/location sync or the creation of the event. A failure is logged
+   * and counted on the row; after `MAX_COVER_ATTEMPTS` the sync stops until the
+   * image changes (which resets the count).
+   *
+   * Removing a cover sends `image: null`: discord.js forwards the option as
+   * `image && resolveImage(image)`, so `null` reaches the REST body as `null`,
+   * which `RESTPatchAPIGuildScheduledEventJSONBody` allows to clear it, while
+   * an omitted option is left out of the request.
+   *
+   * Adopted rows never get here (`syncEvent` returns first).
+   */
+  private async syncCover(
+    event: IEvent,
+    guild: Guild,
+    nativeId: string,
+  ): Promise<void> {
+    const wanted = event.coverHash ?? null;
+    const synced = event.nativeCoverHash ?? null;
+    // A failed send may still have landed in Discord (the call times out
+    // without cancelling the request), and the row cannot tell. Removing the
+    // cover keeps a non-zero attempt count (see `removeEventCover`), which
+    // asks for one `image: null` even though nothing is recorded as sent.
+    const unconfirmed = wanted === null && (event.nativeCoverAttempts ?? 0) > 0;
+    if (wanted === synced && !unconfirmed) return;
+    if ((event.nativeCoverAttempts ?? 0) >= MAX_COVER_ATTEMPTS) return;
+
+    let image: string | null = null;
+    let sentHash: string | null = null;
+    try {
+      if (wanted) {
+        const cover = await loadEventCover(event);
+        if (!cover) {
+          this.warnOnce(
+            `cover-missing:${String(event._id)}:${wanted}`,
+            `Native events: event ${sanitizeForLog(String(event._id))} names a cover image (${sanitizeForLog(coverKeyFor(event))}) that is not stored; skipping it.`,
+          );
+          return;
+        }
+        image = cover.dataUri;
+        sentHash = cover.hash;
+      }
+      await this.callApi(
+        () =>
+          guild.scheduledEvents.edit(nativeId, {
+            image,
+            reason: "KoolBot event cover",
+          } as unknown as EditOptions),
+        "edit guild scheduled event cover",
+      );
+    } catch (error) {
+      const attempts = (event.nativeCoverAttempts ?? 0) + 1;
+      event.nativeCoverAttempts = attempts;
+      await Event.updateOne(
+        { _id: event._id, coverHash: wanted },
+        { $inc: { nativeCoverAttempts: 1 } },
+      ).catch(() => undefined);
+      logger.warn(
+        attempts >= MAX_COVER_ATTEMPTS
+          ? `Native events: could not send the cover of ${sanitizeForLog(nativeId)} ${attempts} times; giving up until the image changes:`
+          : `Native events: could not send the cover of ${sanitizeForLog(nativeId)} (attempt ${attempts} of ${MAX_COVER_ATTEMPTS}); will retry:`,
+        error,
+      );
+      return;
+    }
+    await Event.updateOne(
+      { _id: event._id },
+      { $set: { nativeCoverHash: sentHash, nativeCoverAttempts: 0 } },
+    );
+    event.nativeCoverHash = sentHash;
+    event.nativeCoverAttempts = 0;
   }
 
   // ---------------------------------------------------------------
