@@ -1993,14 +1993,27 @@ export interface AnnouncementsProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
+/** Who is expected to show up, from the native event's Interested list. */
+export type EventExpected =
+  | {
+      kind: "ok";
+      count: number;
+      names: string[];
+      truncated: boolean;
+    }
+  | { kind: "unavailable" | "none"; message: string };
+
 export interface EventRow {
   id: string;
   title: string;
   when: string;
   state: string;
-  going: number;
-  maybe: number;
-  cant: number;
+  /** Legacy KoolBot RSVP tally, for events posted before native-only events
+   * (#1175); null when there are none or the event is over. */
+  legacyRsvps?: { going: number; maybe: number; cant: number } | null;
+  /** Native "Interested" members, read live from Discord (#1175); null when
+   * the event is finished and was not looked up. */
+  expected?: EventExpected | null;
   channelId: string | null;
   /** Cadence label (e.g. "weekly") when part of a recurring series, else null (#744). */
   recurrence?: string | null;
@@ -2015,6 +2028,9 @@ export interface EventsProps extends CommonProps {
   enabled: boolean;
   categoryConfigured: boolean;
   announcementConfigured: boolean;
+  /** The bot lacks Create Events / Manage Events, so events get no native
+   * Discord event (and no Interested button). */
+  nativePermissionMissing?: boolean;
   timezone: string;
   rows: EventRow[];
   /**
@@ -2312,6 +2328,28 @@ function eventStateTag(state: string): string {
   return `<span class="tag ${cls}">${escapeHtml(state)}</span>`;
 }
 
+function renderExpected(e: EventRow): string {
+  const x = e.expected;
+  let html: string;
+  if (!x) {
+    html = '<span class="muted">—</span>';
+  } else if (x.kind === "ok") {
+    const count = `${x.count}${x.truncated ? "+" : ""}`;
+    const names =
+      x.names.length > 0
+        ? `<br><span class="muted">${x.names.map((n) => escapeHtml(n)).join(", ")}${x.count > x.names.length || x.truncated ? ", …" : ""}</span>`
+        : "";
+    html = `<span aria-hidden="true">⭐</span> ${count} interested${names}`;
+  } else {
+    html = `<span class="muted">${escapeHtml(x.message)}</span>`;
+  }
+  const l = e.legacyRsvps;
+  if (l) {
+    html += `<br><span class="muted">Old RSVP buttons: ${l.going} going · ${l.maybe} maybe · ${l.cant} can't</span>`;
+  }
+  return html;
+}
+
 export function renderEventsPage(props: EventsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
@@ -2340,7 +2378,7 @@ export function renderEventsPage(props: EventsProps): string {
       }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
 <td>${eventStateTag(e.state)}</td>
-<td><span aria-hidden="true">✅</span> ${e.going} going · <span aria-hidden="true">🤔</span> ${e.maybe} maybe · <span aria-hidden="true">🚫</span> ${e.cant} can't</td>
+<td>${renderExpected(e)}</td>
 <td>${channelCell}</td>
 <td class="mono">${escapeHtml(e.id)}</td>
 <td class="actions">${actions}</td>
@@ -2351,7 +2389,7 @@ export function renderEventsPage(props: EventsProps): string {
   const tableHtml =
     props.rows.length > 0
       ? `<table class="data">
-<thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th><th scope="col">RSVPs</th><th scope="col">Channel</th><th scope="col">ID</th><th scope="col">Actions</th></tr></thead>
+<thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th><th scope="col">Expected to show up</th><th scope="col">Channel</th><th scope="col">ID</th><th scope="col">Actions</th></tr></thead>
 <tbody>${tableRows}</tbody>
 </table>`
       : '<p class="muted">No events scheduled yet.</p>';
@@ -2366,11 +2404,15 @@ export function renderEventsPage(props: EventsProps): string {
     : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category ${where}.</div>`;
   const announcementWarn = props.announcementConfigured
     ? ""
-    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel ${where}.</div>`;
+    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — event announcements and reminders won't be posted until you pick a channel ${where}.</div>`;
+
+  const permissionWarn = props.nativePermissionMissing
+    ? `<div class="notice warn">The bot lacks the <strong>Create Events</strong> (or Manage Events) permission, so events are not created in Discord's Events list: announcements have no event card and members cannot mark Interested. Grant it to the bot's role.</div>`
+    : "";
 
   const body = `
 <h1>Events</h1>
-<p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, collect RSVPs, remind attendees, and clean themselves up afterward.</p>
+<p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({
   enabled: props.enabled,
@@ -2390,6 +2432,7 @@ ${renderFeatureDisabledNotice({
   </dl>
   ${categoryWarn}
   ${announcementWarn}
+  ${permissionWarn}
 </div>
 ${renderFeatureSettingsCard({
   intro:

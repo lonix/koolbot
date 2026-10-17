@@ -806,27 +806,26 @@ button or because they already held the role). It is part of the member's
 Schedule server events backed by a **temporary voice channel** — for
 servers that don't run static voice channels. Instead of pre-creating a
 channel by hand, an admin schedules an event and KoolBot spins up a voice
-channel shortly before it starts, collects RSVPs via **Going / Maybe /
-Can't** buttons with a live attendee count, posts a reminder beforehand,
+channel shortly before it starts, announces it with a Discord event link (members mark **Interested** on
+Discord's own event card), posts a reminder beforehand,
 and deletes the channel once the event ends and empties.
 
 Manage events from the **`/admin/events`** page or the **`/event`** slash
 command (see [COMMANDS.md](COMMANDS.md#event)).
 
-| Setting                           | Default   | Description                                                                                                                                                                 |
-| --------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `events.enabled`                  | `false`   | Master switch — enables the feature, the `/event` command, and the `/admin/events` page                                                                                     |
-| `events.category_id`              | `""`      | Category the temporary event voice channels are created under (**required** for channels to spin up)                                                                        |
-| `events.announcement_channel_id`  | `""`      | Text channel where the RSVP message and the pre-start reminder are posted                                                                                                   |
-| `events.timezone`                 | `""`      | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone                                           |
-| `events.channel_prefix`           | `"📅"`    | Prefix prepended to the event title when naming the voice channel                                                                                                           |
-| `events.reminder_minutes`         | `30`      | How long before start the reminder is posted. Set to `0` to disable reminders                                                                                               |
-| `events.create_lead_minutes`      | `15`      | How long before start the temporary voice channel is created                                                                                                                |
-| `events.default_duration_minutes` | `120`     | Duration applied to an event when the organiser doesn't specify one                                                                                                         |
-| `events.channel_grace_minutes`    | `15`      | How long after an event ends the bot waits before deleting its (now empty) channel                                                                                          |
-| `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                                                                    |
-| `events.native.enabled`           | `true`    | Also mirror events to Discord's native scheduled events (the "Events" list). Applies only when `events.enabled` is on. Needs the bot to have Create Events or Manage Events |
-| `events.native.location`          | see Notes | Location text shown on the mirrored native event (max 100 characters)                                                                                                       |
+| Setting                           | Default   | Description                                                                                                                       |
+| --------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `events.enabled`                  | `false`   | Master switch — enables the feature, the `/event` command, and the `/admin/events` page                                           |
+| `events.category_id`              | `""`      | Category the temporary event voice channels are created under (**required** for channels to spin up)                              |
+| `events.announcement_channel_id`  | `""`      | Text channel where the event announcement (with the Discord event link) and the pre-start reminder are posted                     |
+| `events.timezone`                 | `""`      | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
+| `events.channel_prefix`           | `"📅"`    | Prefix prepended to the event title when naming the voice channel                                                                 |
+| `events.reminder_minutes`         | `30`      | How long before start the reminder is posted. Set to `0` to disable reminders                                                     |
+| `events.create_lead_minutes`      | `15`      | How long before start the temporary voice channel is created                                                                      |
+| `events.default_duration_minutes` | `120`     | Duration applied to an event when the organiser doesn't specify one                                                               |
+| `events.channel_grace_minutes`    | `15`      | How long after an event ends the bot waits before deleting its (now empty) channel                                                |
+| `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
+| `events.native.location`          | see Notes | Location text shown on the native Discord event (max 100 characters)                                                              |
 
 **Notes:**
 
@@ -844,7 +843,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 - **Recurring events** (weekly / every 2 weeks / monthly, same wall-clock
   time) are a _series_ of ordinary event rows sharing a `seriesId`. Future
   occurrences are not pre-created: when an occurrence ends, the scan spawns
-  the next one with a fresh RSVP message and temporary channel. The cadence
+  the next one with a fresh announcement and temporary channel. The cadence
   is anchored to the first occurrence's date and time in its timezone, so it
   survives DST changes and monthly series on the 29th–31st return to their
   day after a short month. Occurrences missed while the bot was offline are
@@ -852,34 +851,28 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   cancelling the series stops it. Turn the whole thing off with
   `events.recurrence_enabled`. Anything fancier than a fixed cadence (RRULE
   patterns, "2nd Tuesday", holiday exceptions) is not supported.
-- **Discord scheduled events** (`events.native.enabled`, on by default but only when `events.enabled` is on, #1034): each
-  KoolBot event is also created as a native guild scheduled event so it shows
-  in the server's Events list. The native event is an _external_ event whose
-  location is `events.native.location` (default "Voice channel in this server
-  (see the event announcement)"), because the temporary voice channel only
-  exists shortly before the start. KoolBot is the source of truth: edits to
-  the title, description, start or duration are pushed to Discord, cancelling
-  an event cancels the native one, and a finished event completes it. The bot
-  needs **Create Events** (or **Manage Events**); without it events are not
-  mirrored and one warning is logged. The link is stored on the event, so a
-  restart never duplicates it. Turning the toggle on also mirrors existing
-  future events, and so does upgrading an existing server (the default is on):
-  once the bot has the permission, its future events are mirrored on the next
-  scans, at most five new native events per scan so a long backlog fills in
-  over a few minutes rather than in one burst. To keep events inside KoolBot
-  only, set `events.native.enabled` to `false`. Turning it off stops syncing
-  and leaves existing native events as they are. With `events.enabled` off the
-  mirror does nothing at all. A native event deleted by hand is not recreated, and one
-  switched to a voice or stage event by hand is put back to an external event.
-  A create that times out is not repeated for five minutes; the bot looks for
-  the late event first and adopts it.
+- **Discord scheduled events** (#1034, #1175): every KoolBot event is also created as a native guild scheduled event, and
+  that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
+  starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
+  KoolBot has no Going / Maybe / Can't buttons and sends no start-time ping. The native event is an _external_ event
+  whose location is `events.native.location`, because the temporary voice channel only exists shortly before the start.
+  KoolBot is the source of truth: edits to the title, description, start or duration are pushed to Discord, cancelling
+  an event cancels the native one, and a finished event completes it. Recurring events stay KoolBot's own: the bot
+  creates each occurrence and mirrors it as its own one-off native event. The bot needs **Create Events** (or **Manage
+  Events**); without it events are not mirrored, the announcement has no event card, and one warning is logged. The link
+  is stored on the event, so a restart never duplicates it, and at most five new native events are created per scan. A
+  native event deleted by hand is not recreated, and one switched to a voice or stage event by hand is put back to an
+  external event. A create that times out is not repeated for five minutes; the bot looks for the late event first and
+  adopts it. The former "mirror to Discord events" toggle is gone (native is the only mode); a stored value is ignored and
+  removed by the startup cleanup of unknown settings. Announcements posted before this change keep their old RSVP buttons
+  until the event ends; their stored RSVPs stay in the database (and in member export and erasure) and are not migrated.
   A discarded duplicate occurrence (a recurrence race) that already has a
   native event is closed before its row is deleted. If the close cannot be
-  confirmed (mirroring turned off, permission missing, Discord error), the row
+  confirmed (permission missing, Discord error), the row
   is kept as a hidden-from-the-series cleanup record and removed once the
-  native event has been closed, which happens on a later scan; while mirroring
-  is off it waits for it to be turned back on.
-  Not yet covered: native "Interested" to RSVP bridge, adopting existing native
+  native event has been closed, which happens on a later scan; while Events
+  are off it waits for them to be turned back on.
+  Not yet covered: adopting existing native
   events, cover images, and mapping recurrence to a native recurrence rule.
 
 ---
@@ -1208,7 +1201,7 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
   `min_account_age_hours`) are captured when a lockdown starts, for a manual start
   the same snapshot the moderator was authorised against, and that lockdown keeps
   running under them: a change applies to the next lockdown only, and `/raidmode
-  status` shows the action the open lockdown is running. A lockdown restored after
+status` shows the action the open lockdown is running. A lockdown restored after
   a restart takes the settings in force at restore time.
   A young account that joins during a lockdown gets the stronger of the lockdown
   action and the new-account action (kick over quarantine over timeout), so the
@@ -1930,7 +1923,6 @@ leave the graph in a broken state.
 - `events.default_duration_minutes` (number, default: 120)
 - `events.channel_grace_minutes` (number, default: 15)
 - `events.recurrence_enabled` (bool, default: true)
-- `events.native.enabled` (bool, default: true)
 - `events.native.location` (string, default: "Voice channel in this server (see the event announcement)")
 
 #### LFG (Looking for Group)
