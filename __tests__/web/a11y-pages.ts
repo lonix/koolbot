@@ -40,6 +40,7 @@ import {
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
+import { renderRoleDeletePage } from "../../src/web/role-groups-views.js";
 import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
 import {
   renderChannelDeleteConfirmPage,
@@ -356,6 +357,52 @@ export function adminPages(): A11yPage[] {
           lastAttemptAt: new Date("2026-09-24T08:00:00Z"),
           lastError: null,
         },
+      }),
+    },
+    {
+      // The destructive section and the typed-name confirmation (#1184).
+      name: "Role group deletion review",
+      html: renderRoleDeletePage({
+        ...COMMON,
+        navFeatureStatus: {},
+        groupId: "g1",
+        groupName: "Moderators",
+        plan: {
+          id: "plan-1",
+          guildId: "g",
+          plannedBy: "a",
+          operations: [
+            {
+              id: "op-1",
+              type: "role.delete",
+              class: "destructive",
+              roleId: "r1",
+              approval: {
+                kind: "role.delete",
+                targetId: "r1",
+                approvedBy: "a",
+                approvedAt: "2026-10-17T10:00:00.000Z",
+              },
+              summary: 'Delete role "Moderators"',
+              targetId: "r1",
+              before: { name: "Moderators", permissions: "8" },
+              after: null,
+            },
+          ],
+          warnings: [],
+          errors: [],
+          baseline: {
+            absentRoleNames: [],
+            roles: [],
+            channels: [],
+            config: {},
+          },
+        } as never,
+        extraErrors: [],
+        approvedAt: "2026-10-17T10:00:00.000Z",
+        confirmName: "Moderators",
+        roleId: "r1",
+        validForMinutes: 15,
       }),
     },
     {

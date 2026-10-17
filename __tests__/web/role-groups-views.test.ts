@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
 import {
   renderAdminFixPage,
+  renderRoleDeletePage,
   renderRoleGroupsPage,
   type RoleGroupRow,
   type RoleGroupsPageProps,
@@ -162,15 +163,19 @@ describe("renderRoleGroupsPage", () => {
     ).not.toContain('action="/admin/role-groups/apply"');
   });
 
-  it("requires approval wording for deleting a pre-existing role, not a created one", () => {
-    const existing = renderRoleGroupsPage(props());
-    expect(existing).toContain('name="approveRoleDelete"');
-    expect(existing).toContain("3 member(s)");
-    const created = renderRoleGroupsPage(
-      props({ groups: [row({ createdByKoolbot: true })] }),
+  it("deleting the Discord role is a link to the review, never a tick box (#1184)", () => {
+    const html = renderRoleGroupsPage(props());
+    expect(html).not.toContain('name="approveRoleDelete"');
+    expect(html).toContain('href="/admin/role-groups/g1/delete-role"');
+    // The plain delete form can only keep the role.
+    expect(html).toContain(
+      '<input type="hidden" name="roleAction" value="keep">',
     );
-    expect(created).not.toContain('name="approveRoleDelete"');
-    expect(created).toContain("KoolBot created it");
+    // A gate-only or missing role offers no role deletion at all.
+    const gateOnly = renderRoleGroupsPage(
+      props({ groups: [row({ gateOnly: true })] }),
+    );
+    expect(gateOnly).not.toContain("/delete-role");
   });
 
   it("explains bot handling and notices when bots can't be listed", () => {
@@ -510,5 +515,64 @@ describe("renderAdminFixPage", () => {
     const html = renderAdminFixPage(p({ losing: ["Bob <b>"] }));
     expect(html).toContain("1 member(s) lose Administrator");
     expect(html).toContain("Bob &lt;b&gt;");
+  });
+});
+
+describe("renderRoleDeletePage (#1184)", () => {
+  const deletePlan = () =>
+    plan({
+      operations: [
+        {
+          id: "op1",
+          type: "role.delete",
+          class: "destructive",
+          summary: 'Delete role "Mods <b>"',
+          before: { name: "Mods <b>", permissions: "0" },
+          after: null,
+        },
+      ],
+    }) as NonNullable<RoleGroupsPageProps["plan"]>;
+  const p = (over: Record<string, unknown> = {}) => ({
+    csrfToken: "tok",
+    remainingMs: 1000,
+    groupId: "g1",
+    groupName: "Mods",
+    plan: deletePlan(),
+    extraErrors: [],
+    approvedAt: "2026-10-17T10:00:00.000Z",
+    confirmName: "Mods <b>" as string | null,
+    roleId: "r1",
+    validForMinutes: 15,
+    ...over,
+  });
+
+  it("shows the plan with its destructive section and asks for the typed name", () => {
+    const html = renderRoleDeletePage(p());
+    expect(html).toContain("Destructive steps (1)");
+    expect(html).toContain('action="/admin/role-groups/g1/delete-role/apply"');
+    expect(html).toContain('name="planId" value="plan-1"');
+    expect(html).toContain(
+      'name="approvedAt" value="2026-10-17T10:00:00.000Z"',
+    );
+    expect(html).toContain('name="confirmName"');
+    expect(html).toContain("Mods &lt;b&gt;");
+    expect(html).not.toContain("Mods <b>");
+  });
+
+  it("says the role ID and member assignments can't be restored", () => {
+    const html = renderRoleDeletePage(p());
+    expect(html).toContain("role ID");
+    expect(html).toContain("member assignments");
+  });
+
+  it("offers no apply when blocked or when there is no role to delete", () => {
+    const blocked = renderRoleDeletePage(
+      p({ extraErrors: [{ code: "role-in-use", message: "Used by X" }] }),
+    );
+    expect(blocked).toContain("Used by X");
+    expect(blocked).not.toContain("delete-role/apply");
+    expect(renderRoleDeletePage(p({ confirmName: null }))).not.toContain(
+      "delete-role/apply",
+    );
   });
 });

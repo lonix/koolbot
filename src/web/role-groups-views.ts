@@ -213,23 +213,80 @@ ${permissionChecks(g.permissions)}</fieldset>
 
 function deleteForm(g: RoleGroupRow, csrf: string): string {
   const canDeleteRole = g.roleId !== null && !g.roleMissing && !g.gateOnly;
-  const members =
-    g.memberCount === null ? "an unknown number of" : String(g.memberCount);
+  // Deleting the Discord role too is a separate, reviewed step (#1184): the
+  // link opens the plan preview, where the role is deleted only after its
+  // name is typed.
   const roleOption = canDeleteRole
-    ? `<label class="check"><input type="radio" name="roleAction" value="delete"> Also delete the Discord role${g.createdByKoolbot ? " (KoolBot created it)" : ""}</label>
-${
-  g.createdByKoolbot
-    ? ""
-    : `<label class="check"><input type="checkbox" name="approveRoleDelete" value="1"> I approve deleting <strong>@${escapeHtml(g.roleName ?? g.roleId ?? "")}</strong>, a role that already existed. It removes it from its ${escapeHtml(members)} member(s); that can't be restored.</label>`
-}`
+    ? `<p><a class="btn btn-danger" href="/admin/role-groups/${escapeHtml(g.id)}/delete-role">Review deleting the group and its Discord role…</a></p>`
     : "";
   return `<details><summary>Delete</summary>
 <form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/delete" class="stack">
 ${csrf}
-<label class="check"><input type="radio" name="roleAction" value="keep" checked> Remove the group and keep the Discord role (default)</label>
-${roleOption}
-<button type="submit" class="btn btn-danger">Delete group</button>
-</form></details>`;
+<input type="hidden" name="roleAction" value="keep">
+<p class="muted">Removes the group and keeps its Discord role.</p>
+<button type="submit" class="btn btn-danger">Delete group, keep role</button>
+</form>
+${roleOption}</details>`;
+}
+
+/** How long a role-deletion review can be applied after it was shown. */
+export const ROLE_DELETE_REVIEW_MINUTES = 15;
+
+export interface RoleDeletePageProps {
+  csrfToken: string;
+  remainingMs: number;
+  navFeatureStatus?: NavFeatureStatus;
+  groupId: string;
+  groupName: string;
+  plan: AdoptionPlan;
+  extraErrors: PlanIssue[];
+  /** Fixed at preview time and sent back on apply, so the plan id matches. */
+  approvedAt: string;
+  /** Name to type to confirm; null when the plan has no role delete step. */
+  confirmName: string | null;
+  /** The role id the delete step targets. */
+  roleId: string | null;
+  /** How long the review stays valid, in minutes. */
+  validForMinutes: number;
+}
+
+/** Preview of deleting a group's Discord role, applied by POST (#1184). */
+export function renderRoleDeletePage(props: RoleDeletePageProps): string {
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const errors = props.extraErrors.length
+    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${props.extraErrors.length})</h3><ul>${props.extraErrors
+        .map(
+          (i) =>
+            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
+        )
+        .join("")}</ul></div>`
+    : "";
+  const applicable =
+    props.plan.errors.length === 0 &&
+    props.extraErrors.length === 0 &&
+    props.confirmName !== null;
+  const form = applicable
+    ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><input type="hidden" name="approvedAt" value="${escapeHtml(props.approvedAt)}">
+<p>I understand that deleting <strong>@${escapeHtml(props.confirmName ?? "")}</strong> removes it from every member who holds it. A rollback can recreate a role with the same settings, but not its role ID or its member assignments, so anything that referred to the old ID stays disconnected.</p>
+<label>Type the role name to confirm <input type="text" name="confirmName" required autocomplete="off" placeholder="${escapeHtml(props.confirmName ?? "")}"></label>
+<button type="submit" class="btn btn-danger">Delete role and group</button> <a class="btn" href="/admin/role-groups">Cancel</a>
+<span class="muted">This review is valid for ${props.validForMinutes} minutes. A snapshot is saved first.</span></form>`
+    : `<a class="btn" href="/admin/role-groups">Back</a>`;
+  const body = `
+<h1>Delete group "${escapeHtml(props.groupName)}" and its role</h1>
+<p class="subtitle">Review what would change in Discord. Nothing is deleted until you confirm below.</p>
+<h2>Plan</h2>
+${errors}${renderAdoptionDiff(props.plan)}
+<h2>Confirm</h2>
+${form}`;
+  return renderAdminPage({
+    title: "Role Groups",
+    active: "/admin/role-groups",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
 }
 
 function renderGroups(props: RoleGroupsPageProps, csrf: string): string {

@@ -871,8 +871,8 @@ describe("createWriteRouter (#850)", () => {
     expect(stack.slice(3).every((l) => !l.route && !!l.handle.stack)).toBe(
       true,
     );
-    // Every domain module mounted exactly once.
-    expect(stack.length - 3).toBe(24);
+    // The adoption rate limits plus every domain module, each mounted once.
+    expect(stack.length - 3).toBe(25);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -956,6 +956,7 @@ describe("createWriteRouter (#850)", () => {
         "POST /reaction-roles/remove-mapping",
         "POST /reaction-roles/unarchive",
         "POST /role-groups/:id/delete",
+        "POST /role-groups/:id/delete-role/apply",
         "POST /role-groups/:id/edit",
         "POST /role-groups/:id/relink",
         "POST /role-groups/admin-fix/apply",

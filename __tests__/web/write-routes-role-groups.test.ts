@@ -391,126 +391,214 @@ describe("POST /role-groups/:id/delete", () => {
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 
-  it("needs an explicit approval to delete a pre-existing role", async () => {
-    await mount();
-    const res = await harness.post("/role-groups/g1/delete", {
-      roleAction: "delete",
-    });
-    expect(flashOf(res).type).toBe("err");
-    expect(svc.remove).not.toHaveBeenCalled();
-    expect(mockStartApply).not.toHaveBeenCalled();
-  });
-
-  it("deletes an approved role through the engine and then removes the group", async () => {
-    const plan = { id: "p", errors: [], operations: [{}] };
-    mockPlanDelete.mockResolvedValue({ plan, extraErrors: [] });
-    mockStartApply.mockReturnValue({
-      id: "11111111-1111-1111-1111-111111111111",
-    });
+  it("never deletes a role from this route: it sends the admin to the review (#1184)", async () => {
     await mount();
     const res = await harness.post("/role-groups/g1/delete", {
       roleAction: "delete",
       approveRoleDelete: "1",
     });
+    expect(flashOf(res).type).toBe("warn");
+    expect(flashOf(res).msg).toContain("review");
+    expect(svc.remove).not.toHaveBeenCalled();
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+    expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("says when the group is already gone", async () => {
+    svc.get.mockResolvedValue(null);
+    await mount();
+    const res = await harness.post("/role-groups/g1/delete", {
+      roleAction: "keep",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(svc.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /role-groups/:id/delete-role/apply (#1184)", () => {
+  const JOB = "11111111-1111-1111-1111-111111111111";
+  const stamp = (offsetMs = 0): string =>
+    new Date(Date.now() + offsetMs).toISOString();
+  const deletePlan = (over = {}) => ({
+    id: "p1",
+    errors: [],
+    operations: [
+      {
+        type: "role.delete",
+        class: "destructive",
+        before: { name: "Helpers", permissions: "0" },
+      },
+    ],
+    ...over,
+  });
+  const body = (over: Record<string, string> = {}) => ({
+    planId: "p1",
+    approvedAt: stamp(),
+    confirmName: "Helpers",
+    ...over,
+  });
+
+  beforeEach(() => {
+    mockPlanDelete.mockResolvedValue({ plan: deletePlan(), extraErrors: [] });
+    mockStartApply.mockReturnValue({ id: JOB });
+  });
+
+  it("deletes the role through the engine once the plan id and typed name match, then removes the group", async () => {
+    const check = jest.fn(async () => []);
+    mockRevalidator.mockReturnValue(check);
+    await mount();
+    const form = body();
+    const res = await harness.post("/role-groups/g1/delete-role/apply", form);
     expect(mockPlanDelete).toHaveBeenCalledWith(
       expect.anything(),
       session.discordUserId,
       expect.objectContaining({ id: "g1" }),
       true,
+      form.approvedAt,
     );
-    expect(mockStartApply).toHaveBeenCalledWith(plan, {
-      actor: session,
-      revalidate: expect.any(Function),
-    });
-    expect(svc.remove).toHaveBeenCalled();
-    expect(res.headers.get("location")).toBe(
-      "/admin/role-groups?job=11111111-1111-1111-1111-111111111111",
-    );
-  });
-
-  it("passes a live-state check so the destructive role delete is accepted (#1097)", async () => {
-    const plan = {
-      id: "p",
-      errors: [],
-      operations: [{ type: "role.delete", class: "destructive" }],
-    };
-    const check = jest.fn(async () => []);
-    mockPlanDelete.mockResolvedValue({ plan, extraErrors: [] });
-    mockRevalidator.mockReturnValue(check);
-    mockStartApply.mockReturnValue({
-      id: "11111111-1111-1111-1111-111111111111",
-    });
-    await mount();
-    const res = await harness.post("/role-groups/g1/delete", {
-      roleAction: "delete",
-      approveRoleDelete: "1",
-    });
     expect(mockRevalidator).toHaveBeenCalledWith(
       expect.anything(),
       session.discordUserId,
       expect.objectContaining({ id: "g1" }),
       true,
+      form.approvedAt,
     );
-    expect(mockStartApply).toHaveBeenCalledWith(plan, {
+    expect(mockStartApply).toHaveBeenCalledWith(deletePlan(), {
       actor: session,
       revalidate: check,
     });
-    expect(svc.remove).toHaveBeenCalled();
-    expect(res.headers.get("location")).toContain("?job=");
+    expect(svc.remove).toHaveBeenCalledWith("guild-1", "g1");
+    expect(res.headers.get("location")).toBe(`/admin/role-groups?job=${JOB}`);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({
+        action: "role-groups.delete",
+        details: expect.objectContaining({ deleteRole: true }),
+        result: "success",
+      }),
+    );
   });
 
-  it("keeps the group and says why when the engine refuses to start", async () => {
-    mockPlanDelete.mockResolvedValue({
-      plan: {
-        id: "p",
-        errors: [],
-        operations: [{ type: "role.delete", class: "destructive" }],
-      },
-      extraErrors: [],
-    });
-    mockRevalidator.mockReturnValue(undefined);
+  it("refuses when the typed name does not match, deleting nothing", async () => {
     await mount();
-    const res = await harness.post("/role-groups/g1/delete", {
-      roleAction: "delete",
-      approveRoleDelete: "1",
-    });
-    expect(flashOf(res).type).toBe("err");
-    expect(flashOf(res).msg).toContain("live-state check");
+    for (const typed of ["", "helpers", "Other"]) {
+      const res = await harness.post(
+        "/role-groups/g1/delete-role/apply",
+        body({ confirmName: typed }),
+      );
+      expect(flashOf(res).type).toBe("err");
+      expect(flashOf(res).msg).toContain("doesn't match");
+    }
+    expect(mockStartApply).not.toHaveBeenCalled();
     expect(svc.remove).not.toHaveBeenCalled();
   });
 
-  it("lets a role KoolBot created go without approval", async () => {
-    svc.get.mockResolvedValue(group({ createdByKoolbot: true }));
-    mockPlanDelete.mockResolvedValue({ plan: { errors: [] }, extraErrors: [] });
-    mockStartApply.mockReturnValue({
-      id: "11111111-1111-1111-1111-111111111111",
-    });
+  it("refuses a plan id the admin did not review", async () => {
     await mount();
-    await harness.post("/role-groups/g1/delete", { roleAction: "delete" });
-    expect(mockPlanDelete).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      false,
+    const res = await harness.post(
+      "/role-groups/g1/delete-role/apply",
+      body({ planId: "old" }),
     );
-    expect(mockStartApply).toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("warn");
+    expect(mockStartApply).not.toHaveBeenCalled();
+    expect(svc.remove).not.toHaveBeenCalled();
   });
 
-  it("keeps the group when the role can't be deleted (e.g. a feature uses it)", async () => {
+  it("refuses an expired, future-dated or malformed review stamp without planning", async () => {
+    await mount();
+    for (const approvedAt of [
+      stamp(-16 * 60_000),
+      stamp(10 * 60_000),
+      "yesterday",
+      "",
+    ]) {
+      const res = await harness.post(
+        "/role-groups/g1/delete-role/apply",
+        body({ approvedAt }),
+      );
+      expect(flashOf(res).type).toBe("warn");
+      expect(flashOf(res).msg).toContain("expired");
+    }
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+    expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("keeps the group when a feature uses the role or the plan is blocked", async () => {
     mockPlanDelete.mockResolvedValue({
-      plan: { errors: [] },
+      plan: deletePlan(),
       extraErrors: [
         { code: "role-in-use", message: "Used by Leaderboard Roles." },
       ],
     });
     await mount();
-    const res = await harness.post("/role-groups/g1/delete", {
-      roleAction: "delete",
-      approveRoleDelete: "1",
-    });
+    const res = await harness.post("/role-groups/g1/delete-role/apply", body());
     expect(flashOf(res).type).toBe("err");
     expect(flashOf(res).msg).toContain("Leaderboard Roles");
+    expect(mockStartApply).not.toHaveBeenCalled();
     expect(svc.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps the group when the plan has no role delete step (role already gone)", async () => {
+    mockPlanDelete.mockResolvedValue({
+      plan: deletePlan({ operations: [] }),
+      extraErrors: [],
+    });
+    await mount();
+    const res = await harness.post("/role-groups/g1/delete-role/apply", body());
+    expect(flashOf(res).type).toBe("err");
+    expect(mockStartApply).not.toHaveBeenCalled();
+    expect(svc.remove).not.toHaveBeenCalled();
+  });
+
+  it("needs no approval for a role KoolBot created, but still the typed name", async () => {
+    svc.get.mockResolvedValue(group({ createdByKoolbot: true }));
+    await mount();
+    const wrong = await harness.post(
+      "/role-groups/g1/delete-role/apply",
+      body({ confirmName: "nope" }),
+    );
+    expect(flashOf(wrong).type).toBe("err");
+    expect(mockStartApply).not.toHaveBeenCalled();
+    await harness.post("/role-groups/g1/delete-role/apply", body());
+    expect(mockPlanDelete).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      false,
+      expect.any(String),
+    );
+    expect(mockStartApply).toHaveBeenCalled();
+  });
+
+  it("keeps the group and says why when the engine refuses to start", async () => {
+    mockRevalidator.mockReturnValue(undefined);
+    await mount();
+    const res = await harness.post("/role-groups/g1/delete-role/apply", body());
+    expect(flashOf(res).type).toBe("err");
+    expect(flashOf(res).msg).toContain("live-state check");
+    expect(svc.remove).not.toHaveBeenCalled();
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ result: "failure" }),
+    );
+  });
+
+  it("deletes nothing when Discord can't be reached or the group is gone", async () => {
+    await mount(makeClient({ fetchFails: true }));
+    const down = await harness.post(
+      "/role-groups/g1/delete-role/apply",
+      body(),
+    );
+    expect(flashOf(down).type).toBe("err");
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+    await harness.close();
+    svc.get.mockResolvedValue(null);
+    await mount();
+    const gone = await harness.post(
+      "/role-groups/g1/delete-role/apply",
+      body(),
+    );
+    expect(flashOf(gone).type).toBe("err");
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 });

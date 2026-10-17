@@ -290,6 +290,75 @@ describe("POST /adopt/claims/apply", () => {
     );
   });
 
+  describe("destructive steps (#1184)", () => {
+    const destructivePlan = (claims: unknown) =>
+      planned({
+        claims,
+        plan: {
+          id: "plan-1",
+          errors: [],
+          warnings: [],
+          operations: [
+            { id: "op-1", class: "additive", summary: "Add" },
+            {
+              id: "op-2",
+              class: "destructive",
+              type: "overwrite.remove",
+              summary: "Remove overwrite",
+              before: {},
+              after: null,
+            },
+          ],
+        },
+      });
+
+    it("shows its own section and a separate confirmation in the apply form", async () => {
+      mockPlan.mockImplementation(async (_g, _a, claims) =>
+        destructivePlan(claims),
+      );
+      await mount();
+      const html = await (
+        await harness.post("/adopt/claims/preview", {
+          [`action_${CH}`]: "read-only",
+        })
+      ).text();
+      expect(html).toContain("Destructive steps (1)");
+      expect(html).toContain('name="confirmDestructive"');
+    });
+
+    it("does not apply a plan with destructive steps without the confirmation", async () => {
+      mockPlan.mockImplementation(async (_g, _a, claims) =>
+        destructivePlan(claims),
+      );
+      await mount();
+      const token = await preview();
+      const res = await harness.post("/adopt/claims/apply", {
+        planId: "plan-1",
+        token,
+      });
+      expect(flashOf(res).type).toBe("warn");
+      expect(flashOf(res).msg).toContain("destructive");
+      expect(mockStartApply).not.toHaveBeenCalled();
+      const ok = await harness.post("/adopt/claims/apply", {
+        planId: "plan-1",
+        token,
+        confirmDestructive: "1",
+      });
+      expect(ok.headers.get("location")).toContain("job=");
+      expect(mockStartApply).toHaveBeenCalledTimes(1);
+    });
+
+    it("asks for no confirmation when every step is additive", async () => {
+      await mount();
+      const html = await (
+        await harness.post("/adopt/claims/preview", {
+          [`action_${CH}`]: "read-only",
+        })
+      ).text();
+      expect(html).not.toContain("confirmDestructive");
+    });
+  });
+
   it("re-plans exactly the previewed claims with the preview's own approval stamp", async () => {
     await mount();
     const token = await preview();

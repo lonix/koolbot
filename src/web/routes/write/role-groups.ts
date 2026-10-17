@@ -7,8 +7,9 @@
  *
  * Group writes only change the saved *desired* state. Discord is written
  * solely by `/role-groups/apply` and the optional role deletion in
- * `/role-groups/:id/delete`, both through the adoption engine (plan →
- * snapshot → apply), never directly from here.
+ * `/role-groups/:id/delete-role/apply` (after a previewed plan and a typed
+ * role name), both through the adoption engine (plan → snapshot → apply),
+ * never directly from here.
  */
 
 import { Router } from "express";
@@ -29,6 +30,7 @@ import {
   roleLockReason,
 } from "../../../services/role-group-plan.js";
 import { recordAudit } from "../../audit.js";
+import { ROLE_DELETE_REVIEW_MINUTES } from "../../role-groups-views.js";
 import {
   asyncHandler,
   flashRedirect,
@@ -374,6 +376,8 @@ export function createRoleGroupsRouter(client: Client): Router {
     }),
   );
 
+  // Removes the group and keeps its Discord role. Deleting the role as well
+  // is a reviewed step of its own (`/role-groups/:id/delete-role`, #1184).
   router.post(
     "/role-groups/:id/delete",
     asyncHandler(async (req, res) => {
@@ -387,78 +391,150 @@ export function createRoleGroupsRouter(client: Client): Router {
         });
         return;
       }
-      const deleteRole = getString(req, "roleAction") === "delete";
-      let jobId: string | null = null;
-      if (deleteRole) {
-        const approved = getCheckbox(req, "approveRoleDelete");
-        if (!group.createdByKoolbot && !approved) {
-          flashRedirect(res, PAGE, {
-            type: "err",
-            text: "Deleting a role that already existed needs your explicit approval. Tick the approval box, or keep the role.",
-          });
-          return;
-        }
-        const guild = await fetchGuild(session.guildId);
-        if (!guild) {
-          flashRedirect(res, PAGE, {
-            type: "err",
-            text: "Discord couldn't be reached, so nothing was deleted.",
-          });
-          return;
-        }
-        const { plan, extraErrors } = await planRoleDeletion(
-          guild,
-          session.discordUserId,
-          group,
-          approved,
-        );
-        const blocked = [...plan.errors, ...extraErrors];
-        if (blocked.length > 0) {
-          flashRedirect(res, PAGE, {
-            type: "err",
-            text: `The role can't be deleted: ${blocked.map((e) => e.message).join(" ")} The group was kept.`,
-          });
-          return;
-        }
-        const engine = await ServerAdoptionService.getInstance(client, guild);
-        try {
-          jobId = engine.startApply(plan, {
-            actor: session,
-            // Required for the destructive role delete: the engine re-checks
-            // the live server before running it (#1097).
-            revalidate: roleDeletionRevalidator(
-              guild,
-              session.discordUserId,
-              group,
-              approved,
-            ),
-          }).id;
-        } catch (error) {
-          const text = error instanceof Error ? error.message : "Unknown error";
-          logger.error("role groups: role delete failed to start", error);
-          flashRedirect(res, PAGE, {
-            type: "err",
-            text: `The role can't be deleted: ${text} The group was kept.`,
-          });
-          return;
-        }
+      if (getString(req, "roleAction") === "delete") {
+        // Never delete a role from a single POST: send the admin to the
+        // preview, which asks for the role name.
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "Deleting the Discord role needs a review first. Use “Review deleting the group and its Discord role” on the group.",
+        });
+        return;
       }
       await groups().remove(session.guildId, id);
       await recordAudit(session, {
         action: "role-groups.delete",
         targetId: id,
-        details: { name: group.name, roleId: group.roleId, deleteRole },
+        details: { name: group.name, roleId: group.roleId, deleteRole: false },
         result: "success",
       });
-      const text = deleteRole
-        ? `Group "${group.name}" removed; its Discord role is being deleted.`
-        : `Group "${group.name}" removed. Its Discord role was kept.`;
-      const target = jobId ? `${PAGE}?job=${encodeURIComponent(jobId)}` : PAGE;
-      if (jobId) {
-        res.redirect(303, target);
-      } else {
-        flashRedirect(res, PAGE, { type: "ok", text });
+      flashRedirect(res, PAGE, {
+        type: "ok",
+        text: `Group "${group.name}" removed. Its Discord role was kept.`,
+      });
+    }),
+  );
+
+  // Applies the previewed deletion of a group's Discord role (#1184): the plan
+  // id must match what the admin reviewed, and the role's name must be typed.
+  router.post(
+    "/role-groups/:id/delete-role/apply",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      // Everything the request carries is read here, before the first await.
+      const planId = getString(req, "planId");
+      const approvedAt = getString(req, "approvedAt");
+      const typedName = getString(req, "confirmName").trim();
+      const stamp = Date.parse(approvedAt);
+      const age = Date.now() - stamp;
+      if (
+        Number.isNaN(stamp) ||
+        new Date(stamp).toISOString() !== approvedAt ||
+        age < -60_000 ||
+        age > ROLE_DELETE_REVIEW_MINUTES * 60_000
+      ) {
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "That review expired. Open the review again and confirm.",
+        });
+        return;
       }
+      const group = await groups().get(session.guildId, id);
+      if (!group) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "That group no longer exists.",
+        });
+        return;
+      }
+      const guild = await fetchGuild(session.guildId);
+      if (!guild) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "Discord couldn't be reached, so nothing was deleted.",
+        });
+        return;
+      }
+      // A role KoolBot created needs no approval; the typed name below is the
+      // approval for any other.
+      const approved = !group.createdByKoolbot;
+      const { plan, extraErrors } = await planRoleDeletion(
+        guild,
+        session.discordUserId,
+        group,
+        approved,
+        approvedAt,
+      );
+      if (plan.id !== planId) {
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "The server or the group changed since you reviewed the deletion. Open the review again.",
+        });
+        return;
+      }
+      const blocked = [...plan.errors, ...extraErrors];
+      if (blocked.length > 0) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: `The role can't be deleted: ${blocked.map((e) => e.message).join(" ")} The group was kept.`,
+        });
+        return;
+      }
+      const step = plan.operations.find((o) => o.type === "role.delete");
+      const roleName = step?.before?.["name"];
+      if (!step || typeof roleName !== "string") {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "There is no Discord role to delete any more. The group was kept.",
+        });
+        return;
+      }
+      if (typedName !== roleName) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "The name you typed doesn't match the role, so nothing was deleted.",
+        });
+        return;
+      }
+      const engine = await ServerAdoptionService.getInstance(client, guild);
+      let jobId: string;
+      try {
+        jobId = engine.startApply(plan, {
+          actor: session,
+          // Required for the destructive role delete: the engine re-checks
+          // the live server before running it (#1097).
+          revalidate: roleDeletionRevalidator(
+            guild,
+            session.discordUserId,
+            group,
+            approved,
+            approvedAt,
+          ),
+        }).id;
+      } catch (error) {
+        const text = error instanceof Error ? error.message : "Unknown error";
+        logger.error("role groups: role delete failed to start", error);
+        await recordAudit(session, {
+          action: "role-groups.delete",
+          targetId: id,
+          details: { name: group.name, roleId: group.roleId, deleteRole: true },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: `The role can't be deleted: ${text} The group was kept.`,
+        });
+        return;
+      }
+      await groups().remove(session.guildId, id);
+      await recordAudit(session, {
+        action: "role-groups.delete",
+        targetId: id,
+        details: { name: group.name, roleId: group.roleId, deleteRole: true },
+        result: "success",
+      });
+      res.redirect(303, `${PAGE}?job=${encodeURIComponent(jobId)}`);
     }),
   );
 

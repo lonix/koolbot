@@ -21,6 +21,10 @@ import {
 } from "../../../services/channel-claims-adoption.js";
 import { claimsFromForm } from "../../../services/channel-claims-form.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
+import {
+  DESTRUCTIVE_CONFIRM_FIELD,
+  hasDestructiveSteps,
+} from "../../adoption-diff.js";
 import { claimsPreviewStore } from "../../claims-preview-store.js";
 import { recordAudit } from "../../audit.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
@@ -29,6 +33,7 @@ import { renderChannelClaimsPage } from "../../channel-claims-view.js";
 import {
   asyncHandler,
   flashRedirect,
+  getCheckbox,
   getCsrfFromReq,
   getString,
   navStatusForPage,
@@ -234,6 +239,18 @@ export function createChannelClaimsRouter(client: Client): Router {
         flashRedirect(res, PAGE, {
           type: "err",
           text: "This plan can't be applied. Resolve the listed problems first.",
+        });
+        return;
+      }
+      // The destructive steps get their own confirmation (#1184); checked on
+      // the plan that is about to run, not on what the browser claims.
+      if (
+        hasDestructiveSteps(built.plan) &&
+        !getCheckbox(req, DESTRUCTIVE_CONFIRM_FIELD)
+      ) {
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "This plan has destructive steps. Tick the separate confirmation for them, then apply.",
         });
         return;
       }
