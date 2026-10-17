@@ -142,6 +142,7 @@ function harness() {
     roleId: string;
     channelId: string;
     ownerKey: string;
+    retry?: boolean;
   }> = [];
   const unregisterFails = new Set<string>();
   const lookups: string[] = [];
@@ -162,6 +163,7 @@ function harness() {
           roleId: i.roleId,
           channelId: i.channelId,
           ownerKey: i.ownerKey,
+          retry: i.retry,
         });
         run(`rr.register:${i.roleId}:${i.categoryId}:${i.emoji}`);
         const existing = pickers.get(i.roleId);
@@ -1983,7 +1985,12 @@ describe("reaction role pairings (#1022)", () => {
     expect(result.status).toBe("applied");
     expect(rr(h)).toEqual(["rr.register:member:old-cat:🎮"]);
     expect(h.registerCalls).toEqual([
-      { roleId: "member", channelId: "chat", ownerKey: "snap-1:op-1" },
+      {
+        roleId: "member",
+        channelId: "chat",
+        ownerKey: "snap-1:op-1",
+        retry: false,
+      },
     ]);
     // Nothing is created or edited: no role, overwrite or channel write.
     expect(
@@ -2060,6 +2067,16 @@ describe("reaction role pairings (#1022)", () => {
     // B's own rollback still removes its picker.
     await h.service.rollback(b.snapshotId, { actor });
     expect(h.pickers.size).toBe(0);
+  });
+
+  it("a resume tells the registrar the step began before, so it looks for a picker it posted", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    h.failOn.clear();
+    await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
+    expect(h.registerCalls.map((c) => c.retry)).toEqual([false, true]);
   });
 
   it("a picker the same step posted late is recognised on resume and rolled back as its own", async () => {

@@ -1514,9 +1514,10 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
   Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
-  (looked up by the step's key, never posted again). A rollback deletes only the picker this plan posted, from the channel it
-  was posted to, never the role or the category; if Discord fails while deleting it, the rollback step fails and stays
-  open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
+  (looked up by the step's key, never posted again). The picker's footer carries that key, so a picker posted before its
+  mapping was saved is found again: a retry completes it instead of posting a second one, and a rollback deletes it.
+  A rollback deletes only the picker this plan posted, from the channel it was posted to, never the role or the category; if Discord fails while deleting it,
+  the rollback step fails and stays open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
   the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.
   A picker channel rebound in the same plan is the destination. Removing the mapping later on
   the Reaction Roles page never deletes the category either.

@@ -60,6 +60,29 @@ import {
 } from "../models/reaction-role-config.js";
 
 /**
+ * A picker posted by a server-adoption step carries the step's key in its embed
+ * footer. The message exists before its mapping is saved, so after a crash the
+ * key is how a retry or a rollback finds (and proves ownership of) it.
+ */
+const PICKER_REF_SEPARATOR = " · ";
+const PICKER_REF_PREFIX = "ref ";
+const isMarkedPicker = (
+  message: {
+    author?: { id: string };
+    embeds?: Array<{ footer?: { text?: string } | null }>;
+  },
+  botId: string | undefined,
+  ownerKey: string,
+): boolean =>
+  !!botId &&
+  message.author?.id === botId &&
+  (message.embeds ?? []).some((e) =>
+    (e.footer?.text ?? "").endsWith(
+      `${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${ownerKey}`,
+    ),
+  );
+
+/**
  * customId prefixes for component-backed self-assign roles. Buttons encode the
  * target roleId (`reactrole:btn:<roleId>`) so a single click maps to exactly
  * one config; select menus carry roleIds as their option values and use a
@@ -1793,7 +1816,11 @@ export class ReactionRoleService {
           .setDescription(
             `React with ${emoji} to get the **${role.name}** role!`,
           )
-          .setFooter({ text: "Remove your reaction to lose the role" })
+          .setFooter({
+            text: options.adoptionOpKey
+              ? `Remove your reaction to lose the role${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${options.adoptionOpKey}`
+              : "Remove your reaction to lose the role",
+          })
           .setTimestamp();
         postedMessage = await messageChannel.send({ embeds: [embed] });
         targetMessage = postedMessage;
@@ -1915,6 +1942,8 @@ export class ReactionRoleService {
       emoji: string;
       channelId: string;
       ownerKey: string;
+      /** The engine began this step before: look for a picker it posted. */
+      retry?: boolean;
     },
   ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
     return reactionRoleGuildLock.run(guildId, () =>
@@ -1930,6 +1959,7 @@ export class ReactionRoleService {
       emoji: string;
       channelId: string;
       ownerKey: string;
+      retry?: boolean;
     },
   ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
     const api = CommandManager.getInstance(this.client);
@@ -2032,14 +2062,25 @@ export class ReactionRoleService {
       );
     }
 
-    // The category and the owner key are stored by the same save as the
-    // mapping, so there is no window where a picker and a mapping exist
-    // without them.
-    const bound = await this.bindReactionRole(guildId, role.id, input.emoji, {
-      messageChannelId: input.channelId,
-      categoryId: category.id,
-      adoptionOpKey: input.ownerKey,
-    });
+    // A retry first looks for a picker this step posted before the process
+    // died (posted, but its mapping never saved). It is completed (reaction and
+    // mapping) instead of posting a second one. Only on a retry: the first
+    // attempt needs no history read.
+    const orphan = input.retry
+      ? await this.findMarkedPicker(guild, input.channelId, input.ownerKey)
+      : null;
+    // The lock is already held, so the unlocked bind is called directly.
+    const bound = await this.bindReactionRoleUnlocked(
+      guildId,
+      role.id,
+      input.emoji,
+      {
+        messageChannelId: input.channelId,
+        categoryId: category.id,
+        adoptionOpKey: input.ownerKey,
+        ...(orphan ? { messageId: orphan.id } : {}),
+      },
+    );
     if (!bound.success || !bound.messageId) {
       throw new Error(bound.message.replace(/\*\*/g, ""));
     }
@@ -2050,6 +2091,33 @@ export class ReactionRoleService {
     };
   }
 
+  /** The most recent message in `channelId` carrying `ownerKey`'s marker. */
+  private async findMarkedPicker(
+    guild: Guild,
+    channelId: string,
+    ownerKey: string,
+  ): Promise<Message | null> {
+    const api = CommandManager.getInstance(this.client);
+    const channel = (await api.makeDiscordApiCall(
+      () =>
+        guild.channels.fetch(channelId).catch((err: unknown) => {
+          if (this.isUnknownEntityError(err, 10003)) return null;
+          throw err;
+        }),
+      `fetch picker channel ${channelId}`,
+    )) as TextChannel | null;
+    if (!channel?.messages) return null;
+    const recent = await api.makeDiscordApiCall(
+      () => channel.messages.fetch({ limit: 100 }),
+      `read recent messages in ${channelId}`,
+    );
+    const botId = this.client.user?.id;
+    return (
+      [...recent.values()].find((m) => isMarkedPicker(m, botId, ownerKey)) ??
+      null
+    );
+  }
+
   /**
    * The picker message of the mapping a step with `ownerKey` saved for `roleId`,
    * or null. Reads only (under the guild lock, so a registration still running
@@ -2058,7 +2126,7 @@ export class ReactionRoleService {
    */
   public async findOwnedPairing(
     guildId: string,
-    input: { roleId: string; ownerKey: string },
+    input: { roleId: string; ownerKey: string; channelId: string },
   ): Promise<string | null> {
     return reactionRoleGuildLock.run(guildId, async () => {
       const row = await ReactionRoleConfig.findOne({
@@ -2068,7 +2136,20 @@ export class ReactionRoleService {
         autoCreated: false,
         isArchived: false,
       });
-      return row ? row.messageId : null;
+      if (row) return row.messageId;
+      // No mapping: the picker may still have been posted before the process
+      // died. Its footer marker proves it was this step's.
+      const api = CommandManager.getInstance(this.client);
+      const guild = await api.makeDiscordApiCall(
+        () => this.client.guilds.fetch(guildId),
+        "fetch guild to look for a picker",
+      );
+      const orphan = await this.findMarkedPicker(
+        guild,
+        input.channelId,
+        input.ownerKey,
+      );
+      return orphan ? orphan.id : null;
     });
   }
 
@@ -2100,8 +2181,43 @@ export class ReactionRoleService {
         autoCreated: false,
         adoptionOpKey: input.ownerKey,
       });
-      if (!config) return;
       const api = CommandManager.getInstance(this.client);
+      if (!config) {
+        // No mapping (the step died before saving it): the picker is only ours
+        // to delete if its footer carries this step's marker.
+        const guildForOrphan = await api.makeDiscordApiCall(
+          () => this.client.guilds.fetch(guildId),
+          "fetch guild to remove picker",
+        );
+        const orphanChannel = (await api.makeDiscordApiCall(
+          () =>
+            guildForOrphan.channels
+              .fetch(input.channelId)
+              .catch((err: unknown) => {
+                if (this.isUnknownEntityError(err, 10003)) return null;
+                throw err;
+              }),
+          `fetch picker channel ${input.channelId}`,
+        )) as TextChannel | null;
+        if (!orphanChannel?.messages) return;
+        const botId = this.client.user?.id;
+        await api.makeDiscordApiCall(
+          () =>
+            orphanChannel.messages
+              .fetch(input.messageId)
+              .then(async (message) => {
+                if (isMarkedPicker(message, botId, input.ownerKey)) {
+                  await message.delete();
+                }
+              })
+              .catch((err: unknown) => {
+                if (this.isUnknownEntityError(err, 10008)) return undefined;
+                throw err;
+              }),
+          `remove orphan picker ${input.messageId}`,
+        );
+        return;
+      }
       const guild = await api.makeDiscordApiCall(
         () => this.client.guilds.fetch(guildId),
         "fetch guild to remove picker",

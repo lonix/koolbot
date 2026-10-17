@@ -32,6 +32,19 @@ const Model = ReactionRoleConfig as unknown as {
 };
 
 const OWNER = "snap-1:op-1";
+type Binder = {
+  bindReactionRoleUnlocked: (...args: unknown[]) => Promise<unknown>;
+};
+// The registrar holds the guild lock itself, so it calls the unlocked bind.
+const spyBind = (service: unknown) =>
+  jest.spyOn(service as Binder, "bindReactionRoleUnlocked");
+const MARK = ` · ref ${OWNER}`;
+const picker = (id: string, footer: string, authorId = "bot1") => ({
+  id,
+  author: { id: authorId },
+  embeds: [{ footer: { text: footer } }],
+  delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+});
 const input = (over: Record<string, unknown> = {}) => ({
   roleId: "role1",
   categoryId: "cat1",
@@ -91,8 +104,17 @@ function build(
   const messageFetch = jest
     .fn<() => Promise<unknown>>()
     .mockResolvedValue(message);
+  const sent = {
+    id: "sent1",
+    react: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+    delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+  };
+  const send = jest
+    .fn<(payload: unknown) => Promise<unknown>>()
+    .mockResolvedValue(sent);
   const pickerChannel = {
     isTextBased: () => true,
+    send,
     messages: { fetch: messageFetch },
   };
   const botMember = {
@@ -137,6 +159,8 @@ function build(
     channelFetch,
     botReaction,
     guild,
+    send,
+    pickerChannel,
   };
 }
 
@@ -152,7 +176,7 @@ beforeEach(() => {
 describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
   it("refuses a role with Administrator before posting anything", async () => {
     const { service } = build(PermissionFlagsBits.Administrator);
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     await expect(
       service.registerGatedPairing("guild1", input()),
     ).rejects.toThrow(/powerful permissions \(Administrator\)/);
@@ -182,7 +206,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
         ChannelType.GuildCategory,
         PermissionFlagsBits.ViewChannel | bit,
       );
-      const bind = jest.spyOn(service, "bindReactionRole");
+      const bind = spyBind(service);
       await expect(
         service.registerGatedPairing("guild1", input()),
       ).rejects.toThrow(/powerful permissions in its own overwrite/);
@@ -216,7 +240,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
           },
         ],
       ]);
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     await expect(
       service.registerGatedPairing("guild1", input()),
     ).rejects.toThrow(/games-chat gives Valorant powerful permissions/);
@@ -232,7 +256,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
 
   it("refuses when the reaction-role channel changed since the preview", async () => {
     const { service } = build();
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     await expect(
       service.registerGatedPairing("guild1", input({ channelId: "old" })),
     ).rejects.toThrow(/channel changed since the plan was previewed/);
@@ -241,7 +265,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
 
   it("binds the existing role in the planned channel, storing category and owner with the mapping", async () => {
     const { service, role, category } = build();
-    const bind = jest.spyOn(service, "bindReactionRole").mockResolvedValue({
+    const bind = spyBind(service).mockResolvedValue({
       success: true,
       message: "ok",
       roleId: "role1",
@@ -271,7 +295,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
       messageId: "msg-late",
       adoptionOpKey: OWNER,
     });
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     const result = await service.registerGatedPairing("guild1", input());
     expect(result).toEqual({
       messageId: "msg-late",
@@ -283,7 +307,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
 
   it("a mapping another plan (or none) made is reported as reused, never as owned", async () => {
     const { service } = build();
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     Model.findOne.mockResolvedValueOnce({
       messageId: "msg-b",
       adoptionOpKey: "snap-2:op-1",
@@ -315,7 +339,7 @@ describe("ReactionRoleService.registerGatedPairing (#1022)", () => {
       (query as { categoryId?: string }).categoryId ? stored : null,
     );
     let release!: () => void;
-    const bind = jest.spyOn(service, "bindReactionRole").mockImplementation(
+    const bind = spyBind(service).mockImplementation(
       () =>
         new Promise((resolve) => {
           release = () => {
@@ -419,13 +443,14 @@ describe("ReactionRoleService.unregisterGatedPairing (#1022)", () => {
   });
 
   it("finds the mapping a step saved, by its owner key, without posting", async () => {
-    const { service } = build();
+    const { service, messageFetch } = build();
     Model.findOne.mockResolvedValueOnce({ messageId: "msg-saved" });
-    const bind = jest.spyOn(service, "bindReactionRole");
+    const bind = spyBind(service);
     expect(
       await service.findOwnedPairing("guild1", {
         roleId: "role1",
         ownerKey: OWNER,
+        channelId: "picker",
       }),
     ).toBe("msg-saved");
     expect(Model.findOne).toHaveBeenCalledWith({
@@ -436,10 +461,12 @@ describe("ReactionRoleService.unregisterGatedPairing (#1022)", () => {
       isArchived: false,
     });
     expect(bind).not.toHaveBeenCalled();
+    messageFetch.mockResolvedValue(new Map());
     expect(
       await service.findOwnedPairing("guild1", {
         roleId: "role1",
         ownerKey: "other",
+        channelId: "picker",
       }),
     ).toBeNull();
   });
@@ -482,5 +509,115 @@ describe("ReactionRoleService.unregisterGatedPairing (#1022)", () => {
     expect(Model.deleteOne).not.toHaveBeenCalled();
     await service.unregisterGatedPairing("guild1", un());
     expect(Model.deleteOne).toHaveBeenCalledWith({ _id: "row1" });
+  });
+});
+
+describe("pickers that exist before their mapping is saved (#1022)", () => {
+  const un = (over: Record<string, unknown> = {}) => ({
+    roleId: "role1",
+    messageId: "orphan1",
+    channelId: "picker",
+    ownerKey: OWNER,
+    ...over,
+  });
+
+  it("a picker posted by an adoption step carries the step key in its footer", async () => {
+    const { service, send } = build();
+    // The mapping can't be saved under the global model mock; the post is what
+    // matters here.
+    await service.bindReactionRole("guild1", "role1", "🎮", {
+      adoptionOpKey: OWNER,
+    });
+    const payload = send.mock.calls[0][0] as {
+      embeds: Array<{ data: { footer: { text: string } } }>;
+    };
+    expect(payload.embeds[0].data.footer.text.endsWith(MARK)).toBe(true);
+  });
+
+  it("a retry completes the picker it posted before dying instead of posting a second one", async () => {
+    const { service, pickerChannel, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([
+        ["other", picker("other", "Remove your reaction to lose the role")],
+        ["theirs", picker("theirs", `x${MARK}`, "someone-else")],
+        ["orphan1", picker("orphan1", `Remove your reaction${MARK}`)],
+      ]),
+    );
+    const bind = spyBind(service).mockResolvedValue({
+      success: true,
+      message: "ok",
+      roleId: "role1",
+      messageId: "orphan1",
+    });
+    const result = await service.registerGatedPairing(
+      "guild1",
+      input({ retry: true }),
+    );
+    expect(result).toEqual({
+      messageId: "orphan1",
+      channelId: "picker",
+      reused: false,
+    });
+    // Completed on the existing message (reaction and mapping), nothing sent.
+    expect(bind).toHaveBeenCalledWith("guild1", "role1", "🎮", {
+      messageChannelId: "picker",
+      categoryId: "cat1",
+      adoptionOpKey: OWNER,
+      messageId: "orphan1",
+    });
+    expect(pickerChannel.send).not.toHaveBeenCalled();
+  });
+
+  it("the first attempt reads no history", async () => {
+    const { service, messageFetch } = build();
+    spyBind(service).mockResolvedValue({
+      success: true,
+      message: "ok",
+      roleId: "role1",
+      messageId: "msg1",
+    });
+    await service.registerGatedPairing("guild1", input());
+    expect(messageFetch).not.toHaveBeenCalled();
+  });
+
+  it("finds an unmapped picker by its marker for the rollback", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([["orphan1", picker("orphan1", `Remove${MARK}`)]]),
+    );
+    expect(
+      await service.findOwnedPairing("guild1", {
+        roleId: "role1",
+        ownerKey: OWNER,
+        channelId: "picker",
+      }),
+    ).toBe("orphan1");
+    messageFetch.mockResolvedValue(
+      new Map([["x", picker("x", "Remove your reaction to lose the role")]]),
+    );
+    expect(
+      await service.findOwnedPairing("guild1", {
+        roleId: "role1",
+        ownerKey: OWNER,
+        channelId: "picker",
+      }),
+    ).toBeNull();
+  });
+
+  it("a rollback deletes an unmapped picker only when its marker is this step's", async () => {
+    const { service, messageFetch } = build();
+    const mine = picker("orphan1", `Remove${MARK}`);
+    messageFetch.mockResolvedValue(mine);
+    await service.unregisterGatedPairing("guild1", un());
+    expect(mine.delete).toHaveBeenCalledTimes(1);
+    expect(Model.deleteOne).not.toHaveBeenCalled();
+    const notMine = picker("orphan1", "Remove your reaction to lose the role");
+    messageFetch.mockResolvedValue(notMine);
+    await service.unregisterGatedPairing("guild1", un());
+    expect(notMine.delete).not.toHaveBeenCalled();
+    const other = picker("orphan1", `Remove${MARK}`, "someone-else");
+    messageFetch.mockResolvedValue(other);
+    await service.unregisterGatedPairing("guild1", un());
+    expect(other.delete).not.toHaveBeenCalled();
   });
 });

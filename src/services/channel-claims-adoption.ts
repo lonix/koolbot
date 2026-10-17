@@ -19,6 +19,7 @@ import {
   DEFAULT_PAIR_EMOJI,
   detectFeeds,
   detectRolePairings,
+  judgeRecordedPairings,
   type RolePairing,
 } from "./channel-claims-suggestions.js";
 
@@ -70,6 +71,12 @@ export async function planChannelClaims(
     acceptAllPairs?: boolean;
     /** Emoji the admin typed per category id, used by "accept all". */
     pairEmojis?: Readonly<Record<string, string>>;
+    /**
+     * Registrations a pending plan already recorded (category id, role id). They
+     * are judged again for safety but not re-detected, so a plan that also gated
+     * the category for another role can resume its registration.
+     */
+    recordedPairings?: ReadonlyArray<{ categoryId: string; roleId: string }>;
   } = {},
 ): Promise<ClaimsPlan> {
   const [scan, groups, migrated] = await Promise.all([
@@ -79,7 +86,17 @@ export async function planChannelClaims(
     RoleGroupService.getInstance().list(guild.id),
     voiceMigrationDone(guild.id),
   ]);
-  const pairings = detectRolePairings(scan, groups);
+  const detected = detectRolePairings(scan, groups);
+  const recorded = judgeRecordedPairings(
+    scan,
+    groups,
+    options.recordedPairings ?? [],
+  );
+  const recordedCategories = new Set(recorded.map((p) => p.categoryId));
+  const pairings = [
+    ...detected.filter((p) => !recordedCategories.has(p.categoryId)),
+    ...recorded,
+  ];
   const finalClaims = options.acceptAllPairs
     ? acceptAllPairs(claims, pairings, options.pairEmojis)
     : [...claims];
@@ -159,6 +176,13 @@ export function claimsRevalidator(
       adminUserId,
       effective,
       approvedAt,
+      {
+        recordedPairings: pending.flatMap((op) =>
+          op.type === "reactionrole.register"
+            ? [{ categoryId: op.categoryId, roleId: op.roleId }]
+            : [],
+        ),
+      },
     );
     const problems = [...fresh.plan.errors, ...fresh.errors].map(
       (e) => e.message,

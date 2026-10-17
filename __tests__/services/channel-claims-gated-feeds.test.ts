@@ -11,6 +11,7 @@ import {
   detectFeeds,
   detectRolePairings,
   isValidPickerEmoji,
+  judgeRecordedPairings,
 } from "../../src/services/channel-claims-suggestions.js";
 import {
   acceptAllPairs,
@@ -1100,5 +1101,93 @@ describe("review findings, round four", () => {
     expect(denies.errors.map((e) => e.code)).toContain(
       "picker-channel-unusable",
     );
+  });
+});
+
+describe("review findings, round five", () => {
+  it("a recorded registration is judged again but not re-detected after the plan's own gate", () => {
+    // After the gate ran, the category lets two roles in: not a pairing any more.
+    const gated = fixture();
+    gated.channels.find((c) => c.id === CAT_GAME)!.overwrites = [
+      ow(GUILD, 0n, F.ViewChannel),
+      ow(R_GAME, F.ViewChannel),
+      ow(R_ADMIN, F.ViewChannel),
+    ];
+    const scan = scanOf(gated);
+    expect(
+      detectRolePairings(scan, groups).map((p) => p.categoryId),
+    ).not.toContain(CAT_GAME);
+    const recorded = judgeRecordedPairings(scan, groups, [
+      { categoryId: CAT_GAME, roleId: R_GAME },
+    ]);
+    expect(recorded).toEqual([
+      expect.objectContaining({
+        categoryId: CAT_GAME,
+        roleId: R_GAME,
+        state: "proposed",
+      }),
+    ]);
+    // Resuming the registration: no `not-a-pairing`.
+    const claims: ChannelClaim[] = [
+      { channelId: CAT_GAME, action: "leave", registerPairing: true },
+    ];
+    const ctx: ClaimContext = {
+      scanned: gated,
+      groups,
+      integrationRoleIds: new Set([R_INTEG]),
+      syncedToParent: new Map(),
+      membersIntent: true,
+      suggestedPrefix: null,
+      pairings: new Map(recorded.map((p) => [p.categoryId, p])),
+      feeds: detectFeeds(scan),
+      approvedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const built = buildClaimsDesiredState(claims, ctx);
+    expect(built.issues.map((i) => i.code)).not.toContain("not-a-pairing");
+    expect(built.desired.reactionRoles).toHaveLength(1);
+    // The live safety checks still apply: a role that turned dangerous is refused.
+    const dangerous = fixture();
+    dangerous.roles.find((r) => r.id === R_GAME)!.permissions = bitsOf([
+      "Administrator",
+    ]);
+    expect(
+      judgeRecordedPairings(scanOf(dangerous), groups, [
+        { categoryId: CAT_GAME, roleId: R_GAME },
+      ])[0].state,
+    ).toBe("refused");
+  });
+
+  it("a category's posting group is not left able to post in a child marked as a feed", () => {
+    const r = plan(
+      [
+        { channelId: CAT_GAME, action: "read-only", roleIds: [R_GROUP] },
+        {
+          channelId: FEED,
+          action: "read-only",
+          feed: true,
+          allowReactions: true,
+        },
+      ],
+      { synced: [[FEED, true]] },
+    );
+    expect(r.errors).toEqual([]);
+    const staff = setFor(r.plan, FEED, R_GROUP)!;
+    // The group's posting allow that the category pass mirrored is closed again.
+    expect(BigInt(staff.allow) & F.SendMessages).toBe(0n);
+    expect(BigInt(staff.deny) & F.SendMessages).toBe(F.SendMessages);
+  });
+
+  it("reports an exception a parent claim added to a child as a preserved allow", () => {
+    // A child with its own posting role chosen keeps that role, but a role the
+    // category let post that the child did not choose is still closed.
+    const r = plan(
+      [
+        { channelId: CAT_GAME, action: "read-only", roleIds: [R_GROUP] },
+        { channelId: LEAKY, action: "read-only", roleIds: [R_VIEW] },
+      ],
+      { synced: [[LEAKY, true]] },
+    );
+    const staff = setFor(r.plan, LEAKY, R_GROUP)!;
+    expect(BigInt(staff.allow) & F.SendMessages).toBe(0n);
   });
 });

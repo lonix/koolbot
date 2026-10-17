@@ -186,6 +186,8 @@ export interface AdoptionReactionRoles {
       channelId: string;
       /** Snapshot id + step id: marks the mapping this step made. */
       ownerKey: string;
+      /** The engine began this step before: look for a picker it posted. */
+      retry?: boolean;
     },
   ): Promise<{ messageId: string; channelId: string; reused: boolean }>;
   unregister(
@@ -204,7 +206,7 @@ export interface AdoptionReactionRoles {
    */
   findOwned(
     guildId: string,
-    input: { roleId: string; ownerKey: string },
+    input: { roleId: string; ownerKey: string; channelId: string },
   ): Promise<string | null>;
 }
 
@@ -900,6 +902,7 @@ export class ServerAdoptionService {
             reactionRoles.findOwned(snapshot.guildId, {
               roleId: op.roleId,
               ownerKey: `${snapshot.id}:${op.id}`,
+              channelId: op.pickerChannelId,
             }),
           `look up reaction role ${op.roleId}`,
         );
@@ -1183,6 +1186,7 @@ export class ServerAdoptionService {
               emoji: op.emoji,
               channelId: op.pickerChannelId,
               ownerKey: `${snapshot.id}:${op.id}`,
+              retry: started,
             }),
           `register reaction role ${op.roleId}`,
           { once: true },

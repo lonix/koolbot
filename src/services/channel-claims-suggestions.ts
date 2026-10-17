@@ -60,18 +60,18 @@ export interface RolePairing {
  * A detected role that can't safely be self-assigned is returned as `refused`
  * with the reason, never hidden.
  */
-export function detectRolePairings(
-  scan: Pick<ServerScan, "guildId" | "channels" | "roles" | "scanned">,
-  groups: readonly GroupSpec[],
-): RolePairing[] {
-  const roles = new Map(scan.roles.map((r) => [r.id, r]));
-  const rawRoles = new Map(scan.scanned.roles.map((r) => [r.id, r]));
-  const groupBacked = new Map(
-    groups.flatMap((g) => (g.roleId ? [[g.roleId, g.name] as const] : [])),
-  );
-  // What each role's own overwrites allow, on ANY channel: the dangerous bits
-  // are just as exploitable on an unsynced child as on the category. The scan
-  // already holds every channel's overwrites, so this is one in-memory pass.
+type PairingScan = Pick<
+  ServerScan,
+  "guildId" | "channels" | "roles" | "scanned"
+>;
+
+/** What each role's own overwrites allow on ANY channel (dangerous bits only). */
+function dangerousGrants(
+  scan: PairingScan,
+): Map<string, { channel: string; names: string[] }> {
+  // The dangerous bits are just as exploitable on an unsynced child as on the
+  // category. The scan already holds every channel's overwrites, so this is one
+  // in-memory pass.
   const grants = new Map<string, { channel: string; names: string[] }>();
   for (const ch of scan.channels) {
     for (const o of ch.overwrites) {
@@ -86,6 +86,68 @@ export function detectRolePairings(
       if (names.length > 0) grants.set(o.id, { channel: ch.name, names });
     }
   }
+  return grants;
+}
+
+/** The safety verdict for pairing `roleId` with `categoryId`. */
+function judgePairing(
+  scan: PairingScan,
+  groups: readonly GroupSpec[],
+  grants: ReturnType<typeof dangerousGrants>,
+  categoryId: string,
+  roleId: string,
+  claimedRoles: Map<string, string>,
+): RolePairing | null {
+  const c = scan.channels.find((x) => x.id === categoryId);
+  const role = scan.roles.find((r) => r.id === roleId);
+  const raw = scan.scanned.roles.find((r) => r.id === roleId);
+  if (!c || c.kind !== "category" || !role || !raw) return null;
+  const groupBacked = new Map(
+    groups.flatMap((g) => (g.roleId ? [[g.roleId, g.name] as const] : [])),
+  );
+  const dangerous = forbiddenSelfAssignNames(BigInt(raw.permissions));
+  const overwriteGrant = grants.get(role.id);
+  let state: PairingState = "proposed";
+  let reason: string | null = null;
+  if (role.managed) {
+    state = "refused";
+    reason = `@${role.name} is managed by an integration and can't be handed out.`;
+  } else if (groupBacked.has(role.id)) {
+    state = "refused";
+    reason = `@${role.name} backs the role group "${groupBacked.get(role.id)}"; manage it through the group.`;
+  } else if (dangerous.length > 0) {
+    state = "refused";
+    reason = `@${role.name} has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role first.`;
+  } else if (overwriteGrant) {
+    state = "refused";
+    reason = `"${overwriteGrant.channel}" gives @${role.name} powerful permissions in its own overwrite (${overwriteGrant.names.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`;
+  } else if (raw.position >= scan.scanned.botHighestRolePosition) {
+    state = "refused";
+    reason = `@${role.name} sits at or above KoolBot's highest role, so KoolBot can't assign it.`;
+  } else if (role.usedBy.includes("reactionroles")) {
+    state = "registered";
+    reason = `@${role.name} is already a reaction role.`;
+  } else if (claimedRoles.has(role.id)) {
+    state = "refused";
+    reason = `@${role.name} already gates "${claimedRoles.get(role.id)}"; a role is registered once.`;
+  }
+  if (state === "proposed") claimedRoles.set(role.id, c.name);
+  return {
+    categoryId: c.id,
+    categoryName: c.name,
+    roleId: role.id,
+    roleName: role.name,
+    state,
+    reason,
+  };
+}
+
+export function detectRolePairings(
+  scan: PairingScan,
+  groups: readonly GroupSpec[],
+): RolePairing[] {
+  const roles = new Map(scan.roles.map((r) => [r.id, r]));
+  const grants = dangerousGrants(scan);
   const out: RolePairing[] = [];
   const claimedRoles = new Map<string, string>();
   for (const c of scan.channels) {
@@ -102,46 +164,44 @@ export function detectRolePairings(
         roles.get(o.id)?.botId === null,
     );
     if (gates.length !== 1) continue;
-    const role = roles.get(gates[0].id);
-    const raw = rawRoles.get(gates[0].id);
-    if (!role || !raw) continue;
-    const dangerous = forbiddenSelfAssignNames(BigInt(raw.permissions));
-    const overwriteGrant = grants.get(role.id);
-    let state: PairingState = "proposed";
-    let reason: string | null = null;
-    if (role.managed) {
-      state = "refused";
-      reason = `@${role.name} is managed by an integration and can't be handed out.`;
-    } else if (groupBacked.has(role.id)) {
-      state = "refused";
-      reason = `@${role.name} backs the role group "${groupBacked.get(role.id)}"; manage it through the group.`;
-    } else if (dangerous.length > 0) {
-      state = "refused";
-      reason = `@${role.name} has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role first.`;
-    } else if (overwriteGrant) {
-      state = "refused";
-      reason = `"${overwriteGrant.channel}" gives @${role.name} powerful permissions in its own overwrite (${overwriteGrant.names.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`;
-    } else if (raw.position >= scan.scanned.botHighestRolePosition) {
-      state = "refused";
-      reason = `@${role.name} sits at or above KoolBot's highest role, so KoolBot can't assign it.`;
-    } else if (role.usedBy.includes("reactionroles")) {
-      state = "registered";
-      reason = `@${role.name} is already a reaction role.`;
-    } else if (claimedRoles.has(role.id)) {
-      state = "refused";
-      reason = `@${role.name} already gates "${claimedRoles.get(role.id)}"; a role is registered once.`;
-    }
-    if (state === "proposed") claimedRoles.set(role.id, c.name);
-    out.push({
-      categoryId: c.id,
-      categoryName: c.name,
-      roleId: role.id,
-      roleName: role.name,
-      state,
-      reason,
-    });
+    const verdict = judgePairing(
+      scan,
+      groups,
+      grants,
+      c.id,
+      gates[0].id,
+      claimedRoles,
+    );
+    if (verdict) out.push(verdict);
   }
   return out;
+}
+
+/**
+ * Pairings for steps that were already planned: the role and the category are
+ * the ones the plan recorded, judged again against the live server (role
+ * safety, overwrites on every channel) but NOT required to still be "gated by
+ * exactly one role": a plan that also gates the category for another role must
+ * be able to resume its registration after that gate has been applied.
+ */
+export function judgeRecordedPairings(
+  scan: PairingScan,
+  groups: readonly GroupSpec[],
+  recorded: ReadonlyArray<{ categoryId: string; roleId: string }>,
+): RolePairing[] {
+  const grants = dangerousGrants(scan);
+  const claimedRoles = new Map<string, string>();
+  return recorded.flatMap((r) => {
+    const verdict = judgePairing(
+      scan,
+      groups,
+      grants,
+      r.categoryId,
+      r.roleId,
+      claimedRoles,
+    );
+    return verdict ? [verdict] : [];
+  });
 }
 
 export type FeedKind = "incoming" | "channel-follower";

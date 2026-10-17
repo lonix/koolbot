@@ -492,7 +492,10 @@ export function buildClaimsDesiredState(
   ): void => {
     const bits = BigInt(bitsOf(names));
     const offenders: string[] = [];
-    for (const o of channel.overwrites) {
+    // As the plan leaves the channel so far: an allow a parent claim already
+    // layered onto it (a category's posters mirrored onto a synced child)
+    // counts as much as one it had before.
+    for (const o of plannedOverwrites(channel)) {
       if (
         o.id === everyoneId ||
         o.id === scanned.botUserId ||
@@ -501,8 +504,7 @@ export function buildClaimsDesiredState(
         chosen.includes(o.id)
       )
         continue;
-      const now = running.get(key(channel.id, o.id));
-      if ((BigInt(now?.allow ?? o.allow) & bits) === 0n) continue;
+      if ((BigInt(o.allow) & bits) === 0n) continue;
       offenders.push(
         o.type === "role"
           ? `@${roles.get(o.id)?.name ?? o.id}`
@@ -571,7 +573,9 @@ export function buildClaimsDesiredState(
     const postBits = BigInt(bitsOf(denyPost.deny));
     for (const g of ctx.groups) {
       if (!g.roleId || posters.includes(g.roleId)) continue;
-      const existing = channel.overwrites.find((o) => o.id === g.roleId);
+      const existing = plannedOverwrites(channel).find(
+        (o) => o.id === g.roleId,
+      );
       if (existing && (BigInt(existing.allow) & postBits) !== 0n) {
         layer(channel, g.roleId, "role", denyPost);
       }
