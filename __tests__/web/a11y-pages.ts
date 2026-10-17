@@ -447,6 +447,22 @@ export function adminPages(): A11yPage[] {
         plan: null,
         scan: {
           guildName: "Guild",
+          guildId: "g",
+          scanned: {
+            botRoleIds: [],
+            botHighestRolePosition: 50,
+            roles: [
+              { id: "r1", permissions: "0", position: 3 },
+              { id: "r2", permissions: "8", position: 4 },
+            ],
+          },
+          webhooks: {
+            known: true,
+            unavailable: null,
+            list: [
+              { id: "w1", name: "bridge", channelId: "11", kind: "incoming" },
+            ],
+          },
           roles: [
             {
               id: "r1",
@@ -455,6 +471,16 @@ export function adminPages(): A11yPage[] {
               managed: false,
               isEveryone: false,
               botId: null,
+              usedBy: [],
+            },
+            {
+              id: "r2",
+              name: "Admins",
+              position: 4,
+              managed: false,
+              isEveryone: false,
+              botId: null,
+              usedBy: [],
             },
           ],
           channels: [
@@ -466,8 +492,28 @@ export function adminPages(): A11yPage[] {
               parentId: null,
               position: 0,
               usedBy: [],
-              gatedByRoleIds: [],
+              gatedByRoleIds: ["r1"],
               syncedToParent: null,
+              overwrites: [
+                { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+                { id: "r1", type: "role", allow: ["ViewChannel"], deny: [] },
+              ],
+              flags: {},
+            },
+            {
+              id: "20",
+              name: "Staff",
+              kind: "category",
+              typeName: "GuildCategory",
+              parentId: null,
+              position: 2,
+              usedBy: [],
+              gatedByRoleIds: ["r2"],
+              syncedToParent: null,
+              overwrites: [
+                { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+                { id: "r2", type: "role", allow: ["ViewChannel"], deny: [] },
+              ],
               flags: {},
             },
             {
@@ -480,6 +526,7 @@ export function adminPages(): A11yPage[] {
               usedBy: [],
               gatedByRoleIds: [],
               syncedToParent: true,
+              overwrites: [],
               flags: {},
             },
           ],

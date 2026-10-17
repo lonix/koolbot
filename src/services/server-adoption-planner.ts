@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { PermissionsBitField } from "discord.js";
 import { defaultConfig } from "./config-schema.js";
 import { coerceConfigValue } from "../web/routes/write/helpers.js";
+import { forbiddenSelfAssignNames } from "../utils/role-safety.js";
 
 /**
  * Pure planner for server adoption (#1018).
@@ -124,6 +125,18 @@ export interface DesiredMemberGrant {
   memberIds: string[];
 }
 
+/**
+ * Register an existing role as a self-assign (reaction) role that is paired
+ * with an existing, role-gated category (#1022). Nothing is created or edited:
+ * the role and the category stay as they are, a KoolBot picker is posted and a
+ * mapping is stored so the role becomes pickable.
+ */
+export interface DesiredReactionRole {
+  roleId: string;
+  categoryId: string;
+  emoji: string;
+}
+
 export interface FeatureChannel {
   channelId: string;
   feature: string;
@@ -148,6 +161,7 @@ export interface DesiredState {
   overwriteRemovals?: DesiredOverwriteRemoval[];
   deletions?: DesiredDeletion[];
   memberGrants?: DesiredMemberGrant[];
+  reactionRoles?: DesiredReactionRole[];
   config?: Record<string, ConfigValue>;
   featureChannels?: FeatureChannel[];
   approvals?: DestructiveApproval[];
@@ -256,6 +270,20 @@ export interface ConfigSetOp extends OpBase {
   valueIsRoleRef?: boolean;
   previous: ConfigValue | null;
 }
+export interface ReactionRoleRegisterOp extends OpBase {
+  type: "reactionrole.register";
+  roleId: string;
+  roleName: string;
+  categoryId: string;
+  categoryName: string;
+  emoji: string;
+  /**
+   * The channel the picker is posted in, as the plan showed it. Part of the
+   * fingerprinted plan, so changing the setting after the preview changes the
+   * plan id, and a rollback removes the picker from this channel.
+   */
+  pickerChannelId: string;
+}
 export interface OverwriteRemoveOp extends OpBase {
   type: "overwrite.remove";
   channelId: string;
@@ -279,6 +307,7 @@ export type PlanOperation =
   | OverwriteSetOp
   | MemberRoleAddOp
   | ConfigSetOp
+  | ReactionRoleRegisterOp
   | OverwriteRemoveOp
   | ChannelDeleteOp
   | RoleDeleteOp;
@@ -316,6 +345,8 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "overwrite.set": 2, // categories before channels, see `phaseOf`
   "member.role.add": 4,
   "config.set": 5,
+  // After the channel overwrites and the config keys it may depend on.
+  "reactionrole.register": 5.5,
   "overwrite.remove": 6,
   "channel.delete": 6,
   "role.delete": 6,
@@ -977,6 +1008,116 @@ export function planAdoption(
     });
   }
 
+  // ---- reaction-role pairings ------------------------------------------
+  const pairedRoles = new Set<string>();
+  for (const want of desired.reactionRoles ?? []) {
+    const role = rolesById.get(want.roleId);
+    const category = channelsById.get(want.categoryId);
+    if (!role) {
+      err("unknown-role", `Role ${want.roleId} does not exist.`, want.roleId);
+      continue;
+    }
+    if (!category || category.kind !== "category") {
+      err(
+        "unknown-channel",
+        `Category ${want.categoryId} was not found.`,
+        want.categoryId,
+      );
+      continue;
+    }
+    // The same checks the reaction-role service makes before it binds a role
+    // (validateRoleAssignable): a role any member can pick up must not carry
+    // server control, and the bot must be able to hand it out.
+    const dangerous = forbiddenSelfAssignNames(big(role.permissions));
+    const refusal =
+      role.id === everyoneId
+        ? "@everyone can't be a self-assign role."
+        : role.managed
+          ? `"${role.name}" is managed by an integration or bot and can't be handed out.`
+          : dangerous.length > 0
+            ? `"${role.name}" has powerful permissions (${dangerous.join(", ")}), so any member could pick it up. Remove those permissions from the role or choose another role.`
+            : role.position >= scanned.botHighestRolePosition
+              ? `"${role.name}" sits at or above the bot's highest role, so the bot can't assign it.`
+              : null;
+    // The role's own overwrite on ANY channel counts (as the plan leaves it):
+    // Manage Channels or Manage Webhooks on an unsynced child is just as
+    // exploitable as on the category. The scan already holds every channel's
+    // overwrites, so this is one in-memory pass.
+    let overwriteProblem: string | null = null;
+    for (const ch of scanned.channels) {
+      let allow = big(ch.overwrites.find((o) => o.id === role.id)?.allow);
+      for (const op of ops) {
+        if (
+          op.type === "overwrite.set" &&
+          op.channelId === ch.id &&
+          op.overwriteTargetId === role.id
+        ) {
+          allow = big(op.allow);
+        }
+      }
+      const names = forbiddenSelfAssignNames(allow);
+      if (names.length > 0) {
+        overwriteProblem = `"${ch.name}" gives "${role.name}" powerful permissions in its own overwrite (${names.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`;
+        break;
+      }
+    }
+    const unsafe = refusal ?? overwriteProblem;
+    if (unsafe) {
+      err("role-unsafe", unsafe, role.id);
+      continue;
+    }
+    if (pairedRoles.has(role.id)) {
+      err(
+        "duplicate-pairing",
+        `"${role.name}" is paired with more than one category in this plan.`,
+        role.id,
+      );
+      continue;
+    }
+    pairedRoles.add(role.id);
+    // The destination as this plan leaves the setting: a rebinding in the same
+    // plan runs before the registration, so that is the channel that counts.
+    const plannedPicker = (desired.config ?? {})[
+      "reactionroles.message_channel_id"
+    ];
+    const pickerChannelId =
+      typeof plannedPicker === "string" && plannedPicker !== ""
+        ? plannedPicker
+        : String(scanned.config["reactionroles.message_channel_id"] ?? "");
+    if (
+      !pickerChannelId ||
+      channelsById.get(pickerChannelId)?.kind !== "text"
+    ) {
+      err(
+        "reactionroles-channel-missing",
+        "Set the reaction-role message channel to a text channel first: the picker for each pairing is posted there.",
+        role.id,
+      );
+      continue;
+    }
+    touchedRoles.add(role.id);
+    ops.push({
+      id: "",
+      type: "reactionrole.register",
+      class: "additive",
+      roleId: role.id,
+      roleName: role.name,
+      categoryId: category.id,
+      categoryName: category.name,
+      emoji: want.emoji,
+      pickerChannelId,
+      summary: `Register "${role.name}" as a pickable game role for "${category.name}"`,
+      targetId: role.id,
+      before: null,
+      after: {
+        role: role.name,
+        category: category.name,
+        emoji: want.emoji,
+        pickerChannel: pickerChannelId,
+      },
+    });
+  }
+
   // ---- destructive ---------------------------------------------------
   const requireApproval = (
     kind: ApprovalKind,
@@ -1207,6 +1348,7 @@ export function planAdoption(
         o.type === "role.edit" ||
         o.type === "role.delete" ||
         o.type === "member.role.add" ||
+        o.type === "reactionrole.register" ||
         // Editing channel permissions is a Manage Roles action in Discord.
         o.type === "overwrite.set" ||
         o.type === "overwrite.remove",
@@ -1421,6 +1563,44 @@ export function planAdoption(
           `The bot already lacks access to "${channel.name}", which the ${feature.feature} feature needs.`,
           channel.id,
         );
+    }
+  }
+
+  // A registration posts a picker and reacts to it, so the bot must be able to
+  // in the picker channel as the plan leaves it (a rebinding in the same plan
+  // and any overwrite it sets included). Blocked here, not discovered at apply
+  // after earlier steps have already changed the server.
+  const pickerNeeds =
+    ViewChannel |
+    PermissionsBitField.Flags.SendMessages |
+    PermissionsBitField.Flags.EmbedLinks |
+    PermissionsBitField.Flags.AddReactions |
+    PermissionsBitField.Flags.ReadMessageHistory;
+  const pickerChecked = new Set<string>();
+  for (const op of ordered) {
+    if (op.type !== "reactionrole.register") continue;
+    if (pickerChecked.has(op.pickerChannelId)) continue;
+    pickerChecked.add(op.pickerChannelId);
+    const picker = channelsById.get(op.pickerChannelId);
+    if (!picker) continue;
+    const after = simulate(scanned, ordered);
+    const botRolesAfter = scanned.botRoleIds.filter(
+      (id) => !after.removedRoles.has(id),
+    );
+    const perms = effectivePermissions({
+      userId: scanned.botUserId,
+      roleIds: botRolesAfter,
+      ownerId: scanned.ownerId,
+      everyoneId,
+      rolePermissions: after.rolePermissions,
+      overwrites: after.channels.get(picker.id),
+    });
+    if ((perms & pickerNeeds) !== pickerNeeds) {
+      err(
+        "picker-channel-unusable",
+        `The bot can't post and react in the picker channel "${picker.name}" (it needs View Channel, Read Message History, Send Messages, Embed Links and Add Reactions there), so the pickers could not be posted. Fix its permissions there first.`,
+        picker.id,
+      );
     }
   }
 

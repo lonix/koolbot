@@ -1547,6 +1547,50 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   all of its channels (each row's own choice wins). A sync approval is never carried over by a bulk choice: each
   channel needs its own tick.
 
+**Suggestions** at the top of the Channel Claims form (nothing is selected for you):
+
+- **Game-role categories.** A category hidden from `@everyone` and visible to exactly one role (another bot's
+  integration role and KoolBot's own role are not counted) is listed as a game-role pairing. Ticking **Register**
+  (or "Register all N detected pairs") makes that existing role pickable: KoolBot posts a new picker in
+  `reactionroles.message_channel_id` (reaction style, one picker per role, with the emoji shown, default 🎮) and stores
+  the mapping with the category. The role and the category are reused as they are: no role, category or overwrite is
+  created or edited, so the category stays gated. A picker another bot runs is left alone. The same checks as the
+  Reaction Roles page apply and are repeated when the step runs: a role with Administrator, Manage Roles, Manage
+  Server and the other dangerous permissions, a managed or role-group role, or one at or above KoolBot's highest role is
+  **refused** and listed with the reason, and so is a plain role whose own overwrite on any channel (the category or
+  an unsynced child) grants such permissions (Manage Channels, Manage Webhooks, Manage Roles there), checked again
+  against the live channels when the step runs; a role that is already a reaction role is shown as such. The plan is blocked
+  until the reaction-role message channel is set and KoolBot can post and react there (as the plan leaves it), and
+  warns when reaction roles are off. The step records the channel it will post in, so changing
+  `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
+  Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
+  Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
+  (looked up by the step's key, never posted again). The picker's footer carries that key, so a picker posted before its
+  mapping was saved is found again: a retry completes it instead of posting a second one, and a rollback deletes it.
+  The search reads the channel back to when the snapshot was created (and says so, changing nothing, if it can't finish).
+  Deletions run under the guild lock until they finish, and a retry also removes this step's own unsaved picker when it
+  finds another plan's mapping for the same pair.
+  A rollback deletes only the picker this plan posted, from the channel it was posted to, never the role or the category; if Discord fails while deleting it,
+  the rollback step fails and stays open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
+  the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.
+  A picker channel rebound in the same plan is the destination. Removing the mapping later on
+  the Reaction Roles page never deletes the category either.
+- **Feeds.** Channels fed by an incoming webhook or a followed announcement channel (from the scan's webhook list;
+  application webhooks don't count) can be made a read-only **feed** (combining it with another action such as Gate is refused, since it would promise
+  read-only and apply something else): read-only for everyone, reactions open (posting roles or a group are refused for a feed). Their
+  webhooks and follower integrations are never modified or removed (webhook messages ignore channel permissions, so they
+  keep posting), and the plan warns if a feed is still visible through its own overwrite in a gated category. When KoolBot
+  lacks Manage Webhooks the webhook data is **unavailable**: the page says so, suggests no feed, and refuses a feed claim
+  rather than guessing.
+- **Stage speakers.** A group-gated stage channel can also limit who may _request to speak_: pick the speaker roles in
+  Options (they are let in too); everyone else who can see it is denied `RequestToSpeak`. Stage moderators (Mute
+  Members, Move Members, Manage Channels) can still invite anyone to speak: the plan says so, and KoolBot never grants
+  or removes those permissions. Existing `RequestToSpeak` allows on other roles or members are kept (they may belong to
+  another bot) and are named in the plan, since they let a viewer who holds them request to speak anyway.
+  An **announcement** channel is only labelled "read-only is suggested"; it is not selected for you.
+- Gating a category warns about channels in it that are not synced and still allow `@everyone` to see or join them through
+  their own overwrites.
+
 Binding `voicechannels.category_id` to a category that holds other voice channels is **blocked** while legacy
 cleanup could delete them. The error lists the empty channels it would remove. Either use a dedicated category,
 or tick "also turn on managed-only cleanup", which sets `voicechannels.cleanup.managed_only` before the category

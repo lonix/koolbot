@@ -31,6 +31,7 @@ import {
   GuildTextBasedChannel,
   DiscordAPIError,
   MessageFlags,
+  SnowflakeUtil,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -45,7 +46,10 @@ import {
   reserveBurst,
   waitText,
 } from "../utils/member-cooldown.js";
-import { forbiddenSelfAssignPermissions } from "../utils/role-safety.js";
+import {
+  forbiddenSelfAssignNames,
+  forbiddenSelfAssignPermissions,
+} from "../utils/role-safety.js";
 import { reactionRoleGuildLock } from "./reaction-role-guild-lock.js";
 import {
   ReactionRoleConfig,
@@ -55,6 +59,30 @@ import {
   ReactionRoleMode,
   REACTION_ROLE_MODES,
 } from "../models/reaction-role-config.js";
+
+/**
+ * A picker posted by a server-adoption step carries the step's key in its embed
+ * footer. The message exists before its mapping is saved, so after a crash the
+ * key is how a retry or a rollback finds (and proves ownership of) it.
+ */
+const PICKER_SEARCH_MAX_PAGES = 50;
+const PICKER_REF_SEPARATOR = " · ";
+const PICKER_REF_PREFIX = "ref ";
+const isMarkedPicker = (
+  message: {
+    author?: { id: string };
+    embeds?: Array<{ footer?: { text?: string } | null }>;
+  },
+  botId: string | undefined,
+  ownerKey: string,
+): boolean =>
+  !!botId &&
+  message.author?.id === botId &&
+  (message.embeds ?? []).some((e) =>
+    (e.footer?.text ?? "").endsWith(
+      `${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${ownerKey}`,
+    ),
+  );
 
 /**
  * customId prefixes for component-backed self-assign roles. Buttons encode the
@@ -1659,7 +1687,44 @@ export class ReactionRoleService {
     guildId: string,
     roleId: string,
     emoji: string,
-    options: { messageId?: string; messageChannelId?: string } = {},
+    options: {
+      messageId?: string;
+      messageChannelId?: string;
+      /** Stored with the mapping from the first save (server adoption, #1022). */
+      categoryId?: string;
+      /** Which adoption step made the mapping (snapshot id + step id). */
+      adoptionOpKey?: string;
+    } = {},
+  ): Promise<{
+    success: boolean;
+    message: string;
+    roleId?: string;
+    messageId?: string;
+  }> {
+    // Adding a mapping to an existing picker takes the same per-guild lock the
+    // adoption rollback holds while it decides whether the picker is shared, so
+    // a mapping added concurrently can't slip past that check. Posting a fresh
+    // picker (the adoption path, which already holds the lock) does not lock.
+    if (options.messageId) {
+      return reactionRoleGuildLock.run(guildId, () =>
+        this.bindReactionRoleUnlocked(guildId, roleId, emoji, options),
+      );
+    }
+    return this.bindReactionRoleUnlocked(guildId, roleId, emoji, options);
+  }
+
+  private async bindReactionRoleUnlocked(
+    guildId: string,
+    roleId: string,
+    emoji: string,
+    options: {
+      messageId?: string;
+      messageChannelId?: string;
+      /** Stored with the mapping from the first save (server adoption, #1022). */
+      categoryId?: string;
+      /** Which adoption step made the mapping (snapshot id + step id). */
+      adoptionOpKey?: string;
+    } = {},
   ): Promise<{
     success: boolean;
     message: string;
@@ -1753,7 +1818,11 @@ export class ReactionRoleService {
           .setDescription(
             `React with ${emoji} to get the **${role.name}** role!`,
           )
-          .setFooter({ text: "Remove your reaction to lose the role" })
+          .setFooter({
+            text: options.adoptionOpKey
+              ? `Remove your reaction to lose the role${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${options.adoptionOpKey}`
+              : "Remove your reaction to lose the role",
+          })
           .setTimestamp();
         postedMessage = await messageChannel.send({ embeds: [embed] });
         targetMessage = postedMessage;
@@ -1784,6 +1853,10 @@ export class ReactionRoleService {
         roleName: role.name,
         autoCreated: false,
         isArchived: false,
+        ...(options.categoryId ? { categoryId: options.categoryId } : {}),
+        ...(options.adoptionOpKey
+          ? { adoptionOpKey: options.adoptionOpKey }
+          : {}),
       });
 
       try {
@@ -1830,6 +1903,451 @@ export class ReactionRoleService {
         message: `Failed to bind reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
       };
     }
+  }
+
+  /**
+   * Register an **existing** role as a self-assign role paired with an
+   * **existing** role-gated category (server adoption, #1022).
+   *
+   * Nothing is created or edited besides one KoolBot picker message and its
+   * mapping: the role keeps its permissions and the category keeps its
+   * overwrites, so the category stays gated by the role. The mapping is stored
+   * with `autoCreated: false`, the category id and the caller's `ownerKey`, so
+   * removing it can never delete the role or the category (see
+   * `deleteReactionRole` and `deleteReactionRoleGroupLocked`).
+   *
+   * The role must pass {@link validateRoleAssignable}: a role with
+   * Administrator or another dangerous permission is refused (#1159). Throws
+   * with the reason on any refusal.
+   *
+   * Ownership and retries: the mapping stores `ownerKey` (snapshot id + step
+   * id). A retry that finds a mapping with the same key made it itself (a first
+   * attempt that timed out and finished late), so it is reported as posted and
+   * a rollback removes it. A mapping with another key, or none, belongs to
+   * someone else (another plan, the Reaction Roles page) and is reported as
+   * reused: it is never removed by a rollback.
+   *
+   * The whole check-then-post runs under the per-guild reaction-role lock. The
+   * engine's timeout does not cancel a registration, so a resumed attempt
+   * waits for the first one to finish and then finds its mapping, instead of
+   * posting a second picker.
+   *
+   * The picker goes to `input.channelId`, the channel the plan showed. If
+   * `reactionroles.message_channel_id` has changed since, it throws: startup
+   * reconciliation looks messages up in the configured channel.
+   */
+  public async registerGatedPairing(
+    guildId: string,
+    input: {
+      roleId: string;
+      categoryId: string;
+      emoji: string;
+      channelId: string;
+      ownerKey: string;
+      /** The engine began this step before: look for a picker it posted. */
+      retry?: boolean;
+    },
+  ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
+    return reactionRoleGuildLock.run(guildId, () =>
+      this.registerGatedPairingLocked(guildId, input),
+    );
+  }
+
+  private async registerGatedPairingLocked(
+    guildId: string,
+    input: {
+      roleId: string;
+      categoryId: string;
+      emoji: string;
+      channelId: string;
+      ownerKey: string;
+      retry?: boolean;
+    },
+  ): Promise<{ messageId: string; channelId: string; reused: boolean }> {
+    const api = CommandManager.getInstance(this.client);
+    const configured = await this.configService.getString(
+      "reactionroles.message_channel_id",
+      "",
+    );
+    if (configured !== input.channelId) {
+      throw new Error(
+        "The reaction-role message channel changed since the plan was previewed. Preview again.",
+      );
+    }
+    const guild = await api.makeDiscordApiCall(
+      () => this.client.guilds.fetch(guildId),
+      "fetch guild for pairing",
+    );
+    const role = await api
+      .makeDiscordApiCall(
+        () => guild.roles.fetch(input.roleId),
+        `fetch role ${input.roleId}`,
+      )
+      .catch(() => null);
+    if (!role) {
+      throw new Error(`Role ${input.roleId} was not found in this server.`);
+    }
+    const category = await api
+      .makeDiscordApiCall(
+        () => guild.channels.fetch(input.categoryId),
+        `fetch category ${input.categoryId}`,
+      )
+      .catch(() => null);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      throw new Error(`Category ${input.categoryId} was not found.`);
+    }
+    const botMember = await api
+      .makeDiscordApiCall(
+        async () => guild.members.me ?? (await guild.members.fetchMe()),
+        "fetch bot member",
+      )
+      .catch(() => null);
+    const assignable = await this.validateRoleAssignable(
+      guild,
+      role,
+      botMember,
+    );
+    if (!assignable.ok) {
+      throw new Error(assignable.message.replace(/\*\*/g, ""));
+    }
+    // The live category overwrite counts as well: Manage Channels or Manage
+    // Webhooks granted to the role there would be handed to everyone who picks
+    // it up. Read at apply time, so a change since the preview is caught.
+    // Checked on every channel in the guild's cache (the cached overwrites are
+    // already in memory, no REST), not just the category: an unsynced child
+    // channel's own overwrite for the role is just as exploitable.
+    const everyChannel = [
+      category,
+      ...(guild.channels.cache?.values?.() ?? []),
+    ];
+    for (const channel of everyChannel) {
+      const bits = (
+        channel as {
+          permissionOverwrites?: {
+            cache?: {
+              get(id: string): { allow?: { bitfield?: bigint } } | undefined;
+            };
+          };
+        }
+      ).permissionOverwrites?.cache?.get(role.id)?.allow?.bitfield;
+      const dangerous =
+        typeof bits === "bigint" ? forbiddenSelfAssignNames(bits) : [];
+      if (dangerous.length > 0) {
+        throw new Error(
+          `${(channel as { name?: string }).name ?? channel.id} gives ${role.name} powerful permissions in its own overwrite (${dangerous.join(", ")}), so anyone who picks the role would get them there. Remove them from that channel first.`,
+        );
+      }
+    }
+
+    const existing = await ReactionRoleConfig.findOne({
+      guildId,
+      roleId: role.id,
+      categoryId: category.id,
+      isArchived: false,
+      autoCreated: false,
+    });
+    if (existing) {
+      const ours = existing.adoptionOpKey === input.ownerKey;
+      if (!ours && input.retry) {
+        // Another owner's mapping is reused, but this step may have posted its
+        // own picker before dying. It is not recorded anywhere a rollback would
+        // look once the result is "reused", so remove it now: only if it is
+        // marked as this step's and no mapping uses it. The other owner's
+        // mapping and picker are never touched.
+        const orphan = await this.findMarkedPicker(
+          guild,
+          input.channelId,
+          input.ownerKey,
+        );
+        if (orphan && orphan.id !== existing.messageId) {
+          const used = await ReactionRoleConfig.countDocuments({
+            guildId,
+            messageId: orphan.id,
+            isArchived: false,
+          });
+          if (used === 0) await this.deleteMessageUnderLock(orphan);
+        }
+      }
+      return {
+        messageId: existing.messageId,
+        channelId: input.channelId,
+        reused: !ours,
+      };
+    }
+    const elsewhere = await ReactionRoleConfig.findOne({
+      guildId,
+      roleId: role.id,
+      isArchived: false,
+    });
+    if (elsewhere) {
+      throw new Error(
+        `${role.name} is already a reaction role on another picker; it is not registered a second time.`,
+      );
+    }
+
+    // A retry first looks for a picker this step posted before the process
+    // died (posted, but its mapping never saved). It is completed (reaction and
+    // mapping) instead of posting a second one. Only on a retry: the first
+    // attempt needs no history read.
+    const orphan = input.retry
+      ? await this.findMarkedPicker(guild, input.channelId, input.ownerKey)
+      : null;
+    // The lock is already held, so the unlocked bind is called directly.
+    const bound = await this.bindReactionRoleUnlocked(
+      guildId,
+      role.id,
+      input.emoji,
+      {
+        messageChannelId: input.channelId,
+        categoryId: category.id,
+        adoptionOpKey: input.ownerKey,
+        ...(orphan ? { messageId: orphan.id } : {}),
+      },
+    );
+    if (!bound.success || !bound.messageId) {
+      throw new Error(bound.message.replace(/\*\*/g, ""));
+    }
+    return {
+      messageId: bound.messageId,
+      channelId: input.channelId,
+      reused: false,
+    };
+  }
+
+  /** The most recent message in `channelId` carrying `ownerKey`'s marker. */
+  private async findMarkedPicker(
+    guild: Guild,
+    channelId: string,
+    ownerKey: string,
+  ): Promise<Message | null> {
+    const api = CommandManager.getInstance(this.client);
+    const channel = (await api.makeDiscordApiCall(
+      () =>
+        guild.channels.fetch(channelId).catch((err: unknown) => {
+          if (this.isUnknownEntityError(err, 10003)) return null;
+          throw err;
+        }),
+      `fetch picker channel ${channelId}`,
+    )) as TextChannel | null;
+    if (!channel?.messages) return null;
+    const botId = this.client.user?.id;
+    // Search back to when the step began. The snapshot id is a Mongo ObjectId,
+    // whose first four bytes are its creation time, and a picker can't be older
+    // than the snapshot, so that is a durable boundary that needs no extra
+    // record. An unreadable key has no boundary, so the page limit applies.
+    const created = /^([0-9a-f]{24}):/i.exec(ownerKey);
+    const boundary = created
+      ? parseInt(created[1].slice(0, 8), 16) * 1000 - 1000
+      : null;
+    let before: string | undefined;
+    for (let page = 0; page < PICKER_SEARCH_MAX_PAGES; page++) {
+      const batch = await api.makeDiscordApiCall(
+        () =>
+          channel.messages.fetch({
+            limit: 100,
+            ...(before ? { before } : {}),
+          }),
+        `read messages in ${channelId}`,
+      );
+      const list = [...batch.values()];
+      const hit = list.find((m) => isMarkedPicker(m, botId, ownerKey));
+      if (hit) return hit;
+      // Fewer than a full page: the history is exhausted.
+      if (list.length < 100) return null;
+      const oldest = list.reduce((a, b) =>
+        BigInt(a.id) < BigInt(b.id) ? a : b,
+      );
+      if (
+        boundary !== null &&
+        SnowflakeUtil.timestampFrom(oldest.id) < boundary
+      ) {
+        return null;
+      }
+      before = oldest.id;
+    }
+    // Not found, but not proven absent either: never report "none".
+    throw new Error(
+      `The history of the reaction-role channel is too long to search for an unsaved picker (${PICKER_SEARCH_MAX_PAGES} pages). Nothing was changed; delete any picker marked "${ownerKey}" by hand and try again.`,
+    );
+  }
+
+  /**
+   * Delete a message. This is a mutation, so it is NOT run through the timed
+   * `makeDiscordApiCall` race: a timeout there returns while the request is
+   * still in flight, which would let it land after the guild lock is released.
+   * Called directly, the lock is held until the request settles (the REST
+   * client has its own timeout). Unknown Message counts as already gone.
+   */
+  private async deleteMessageUnderLock(message: Message): Promise<void> {
+    try {
+      await message.delete();
+    } catch (err) {
+      if (!this.isUnknownEntityError(err, 10008)) throw err;
+    }
+  }
+
+  /**
+   * The picker message of the mapping a step with `ownerKey` saved for `roleId`,
+   * or null. Reads only (under the guild lock, so a registration still running
+   * has finished first); it never posts. Lets a rollback recover a registration
+   * the engine never got to record.
+   */
+  public async findOwnedPairing(
+    guildId: string,
+    input: { roleId: string; ownerKey: string; channelId: string },
+  ): Promise<string | null> {
+    return reactionRoleGuildLock.run(guildId, async () => {
+      const row = await ReactionRoleConfig.findOne({
+        guildId,
+        roleId: input.roleId,
+        adoptionOpKey: input.ownerKey,
+        autoCreated: false,
+        isArchived: false,
+      });
+      if (row) return row.messageId;
+      // No mapping: the picker may still have been posted before the process
+      // died. Its footer marker proves it was this step's.
+      const api = CommandManager.getInstance(this.client);
+      const guild = await api.makeDiscordApiCall(
+        () => this.client.guilds.fetch(guildId),
+        "fetch guild to look for a picker",
+      );
+      const orphan = await this.findMarkedPicker(
+        guild,
+        input.channelId,
+        input.ownerKey,
+      );
+      return orphan ? orphan.id : null;
+    });
+  }
+
+  /**
+   * Undo {@link registerGatedPairing}: delete the picker message KoolBot posted
+   * (in the channel it was posted to, recorded by the caller, not the current
+   * setting) and then the mapping. Only a mapping carrying `ownerKey` and not
+   * owning its role (`autoCreated: false`) is removed; the role and the
+   * category are never touched.
+   *
+   * Only a confirmed Unknown Channel (10003) or Unknown Message (10008) counts
+   * as "already gone". Any other failure throws and the mapping is kept, so the
+   * caller can retry and the picker is never orphaned.
+   */
+  public async unregisterGatedPairing(
+    guildId: string,
+    input: {
+      roleId: string;
+      messageId: string;
+      channelId: string;
+      ownerKey: string;
+    },
+  ): Promise<void> {
+    await reactionRoleGuildLock.run(guildId, async () => {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        messageId: input.messageId,
+        roleId: input.roleId,
+        autoCreated: false,
+        adoptionOpKey: input.ownerKey,
+      });
+      const api = CommandManager.getInstance(this.client);
+      if (!config) {
+        // No mapping (the step died before saving it): the picker is only ours
+        // to delete if its footer carries this step's marker.
+        const guildForOrphan = await api.makeDiscordApiCall(
+          () => this.client.guilds.fetch(guildId),
+          "fetch guild to remove picker",
+        );
+        const orphanChannel = (await api.makeDiscordApiCall(
+          () =>
+            guildForOrphan.channels
+              .fetch(input.channelId)
+              .catch((err: unknown) => {
+                if (this.isUnknownEntityError(err, 10003)) return null;
+                throw err;
+              }),
+          `fetch picker channel ${input.channelId}`,
+        )) as TextChannel | null;
+        if (!orphanChannel?.messages) return;
+        // The marker survives a mapping being unbound or another being added:
+        // the guard that protects a shared picker applies here as well. The
+        // lock is held, so no mapping can be added while this is decided.
+        const sharedBy = await ReactionRoleConfig.countDocuments({
+          guildId,
+          messageId: input.messageId,
+          isArchived: false,
+        });
+        if (sharedBy > 0) return;
+        const botId = this.client.user?.id;
+        // Timed read, then the delete under the lock (see deleteMessageUnderLock).
+        const orphan = await api.makeDiscordApiCall(
+          () =>
+            orphanChannel.messages
+              .fetch(input.messageId)
+              .catch((err: unknown) => {
+                if (this.isUnknownEntityError(err, 10008)) return null;
+                throw err;
+              }),
+          `read orphan picker ${input.messageId}`,
+        );
+        if (orphan && isMarkedPicker(orphan, botId, input.ownerKey)) {
+          await this.deleteMessageUnderLock(orphan);
+        }
+        return;
+      }
+      const guild = await api.makeDiscordApiCall(
+        () => this.client.guilds.fetch(guildId),
+        "fetch guild to remove picker",
+      );
+      const channel = (await api.makeDiscordApiCall(
+        () =>
+          guild.channels.fetch(input.channelId).catch((err: unknown) => {
+            if (this.isUnknownEntityError(err, 10003)) return null;
+            throw err;
+          }),
+        `fetch picker channel ${input.channelId}`,
+      )) as TextChannel | null;
+      // The picker may have been shared since: the Reaction Roles page can add
+      // another emoji-to-role mapping to it. Deleting the message would leave
+      // that mapping without a working picker, so then only this mapping's own
+      // reaction goes and the message stays.
+      const siblings = await ReactionRoleConfig.countDocuments({
+        guildId,
+        messageId: input.messageId,
+        isArchived: false,
+        _id: { $ne: config._id },
+      });
+      if (channel) {
+        // Timed read, then the mutation under the lock: a timed-out callback
+        // keeps running after the race returns, and must not delete after the
+        // lock is released and another mapping has been added.
+        const message = await api.makeDiscordApiCall(
+          () =>
+            channel.messages.fetch(input.messageId).catch((err: unknown) => {
+              if (this.isUnknownEntityError(err, 10008)) return null;
+              throw err;
+            }),
+          `read picker ${input.messageId}`,
+        );
+        if (message) {
+          if (siblings === 0) {
+            await this.deleteMessageUnderLock(message);
+          } else {
+            const reaction = message.reactions.cache.find(
+              (r) => this.buildEmojiIdentifier(r) === config.emoji,
+            );
+            const botId = this.client.user?.id;
+            if (reaction && botId) {
+              try {
+                await reaction.users.remove(botId);
+              } catch (err) {
+                if (!this.isUnknownEntityError(err, 10008)) throw err;
+              }
+            }
+          }
+        }
+      }
+      await ReactionRoleConfig.deleteOne({ _id: config._id });
+    });
   }
 
   /**
@@ -2305,9 +2823,13 @@ export class ReactionRoleService {
 
       // Delete the shared category (and its child channels).
       try {
-        const category = first.categoryId
-          ? await guild.channels.fetch(first.categoryId)
-          : null;
+        // Only a category the bot created is its to delete. A mapping bound to
+        // an existing, role-gated category (server adoption, #1022) keeps it.
+        const ownsCategory = configs.every((c) => c.autoCreated !== false);
+        const category =
+          first.categoryId && ownsCategory
+            ? await guild.channels.fetch(first.categoryId)
+            : null;
         if (category) {
           const categoryChannel = category as CategoryChannel;
           for (const [, child] of categoryChannel.children.cache) {

@@ -132,6 +132,19 @@ function harness() {
   const staleIds = new Set<string>();
   const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
+  // Pickers by role id, with the step that posted each: what the real
+  // registrar keeps on the stored mapping.
+  const pickers = new Map<
+    string,
+    { messageId: string; channelId: string; ownerKey: string }
+  >();
+  const registerCalls: Array<{
+    roleId: string;
+    channelId: string;
+    ownerKey: string;
+    retry?: boolean;
+  }> = [];
+  const unregisterFails = new Set<string>();
   const lookups: string[] = [];
   const createdRoleIds = new Set<string>();
   let configIssues: string[] = [];
@@ -144,6 +157,48 @@ function harness() {
     if (failOn.has(label)) throw new Error(`boom ${label}`);
   };
   const deps: Deps = {
+    reactionRoles: {
+      register: async (_guildId, i) => {
+        registerCalls.push({
+          roleId: i.roleId,
+          channelId: i.channelId,
+          ownerKey: i.ownerKey,
+          retry: i.retry,
+        });
+        run(`rr.register:${i.roleId}:${i.categoryId}:${i.emoji}`);
+        const existing = pickers.get(i.roleId);
+        if (existing) {
+          return {
+            messageId: existing.messageId,
+            channelId: i.channelId,
+            reused: existing.ownerKey !== i.ownerKey,
+          };
+        }
+        const made = {
+          messageId: `msg-${i.roleId}`,
+          channelId: i.channelId,
+          ownerKey: i.ownerKey,
+        };
+        pickers.set(i.roleId, made);
+        return {
+          messageId: made.messageId,
+          channelId: i.channelId,
+          reused: false,
+        };
+      },
+      findOwned: async (_guildId, i) => {
+        const found = pickers.get(i.roleId);
+        return found && found.ownerKey === i.ownerKey ? found.messageId : null;
+      },
+      unregister: async (_guildId, i) => {
+        run(`rr.unregister:${i.roleId}:${i.channelId}:${i.messageId}`);
+        if (unregisterFails.has(i.roleId)) throw new Error("Discord is down");
+        // Only the step that posted a picker removes it.
+        if (pickers.get(i.roleId)?.ownerKey === i.ownerKey) {
+          pickers.delete(i.roleId);
+        }
+      },
+    },
     gateway: {
       createRole: async (i) => {
         run(`createRole:${i.name}`);
@@ -310,6 +365,9 @@ function harness() {
     staleIds,
     recoveries,
     existingRoleByName,
+    pickers,
+    registerCalls,
+    unregisterFails,
     live,
     failStrictAudit: (): void => {
       strictAuditFails = true;
@@ -1883,5 +1941,227 @@ describe("a channel-claims sync plan through the real engine (#1022)", () => {
       }),
     ).rejects.toThrow(/Live check failed/);
     expect(h.calls.some((c) => c.startsWith("removeOverwrite"))).toBe(false);
+  });
+});
+
+describe("reaction role pairings (#1022)", () => {
+  const pairingPlan = (channel = "chat") =>
+    planAdoption(
+      scanned({
+        config: {
+          "adoption.snapshot.retention_days": 90,
+          "reactionroles.message_channel_id": channel,
+        },
+        channels: [
+          ...scanned().channels,
+          {
+            id: "picker-b",
+            name: "picker-b",
+            kind: "text",
+            rawType: 0,
+            parentId: null,
+            position: 3,
+            topic: null,
+            overwrites: [],
+            voiceMemberCount: 0,
+          },
+        ],
+      }),
+      {
+        reactionRoles: [
+          { roleId: "member", categoryId: "old-cat", emoji: "🎮" },
+        ],
+      },
+    );
+  const rr = (h: ReturnType<typeof harness>): string[] =>
+    h.calls.filter((c) => c.startsWith("rr."));
+
+  it("registers the existing role once, after the overwrites, and records the picker and its channel", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    expect(p.errors).toEqual([]);
+    expect(p.operations.map((o) => o.type)).toEqual(["reactionrole.register"]);
+    const result = await h.service.apply(p, opts);
+    expect(result.status).toBe("applied");
+    expect(rr(h)).toEqual(["rr.register:member:old-cat:🎮"]);
+    expect(h.registerCalls).toEqual([
+      {
+        roleId: "member",
+        channelId: "chat",
+        ownerKey: "snap-1:op-1",
+        retry: false,
+      },
+    ]);
+    // Nothing is created or edited: no role, overwrite or channel write.
+    expect(
+      h.calls.filter((c) =>
+        /^(createRole|editRole|setOverwrite|deleteRole|deleteChannel)/.test(c),
+      ),
+    ).toEqual([]);
+    expect(h.records.get(result.snapshotId)!.operations[0].resultId).toBe(
+      "posted:chat:msg-member",
+    );
+  });
+
+  it("the plan names the picker channel, so a changed setting is a different plan", () => {
+    const a = pairingPlan("chat");
+    const b = pairingPlan("picker-b");
+    const opA = a.operations[0] as { pickerChannelId: string };
+    const opB = b.operations[0] as { pickerChannelId: string };
+    expect(opA.pickerChannelId).toBe("chat");
+    expect(opB.pickerChannelId).toBe("picker-b");
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("rollback removes the picker from the channel it was posted to, not the current setting", async () => {
+    const h = harness();
+    const result = await h.service.apply(pairingPlan("chat"), opts);
+    // The setting now points elsewhere; the rollback still uses the record.
+    h.liveConfig.set("reactionroles.message_channel_id", "picker-b");
+    h.calls.length = 0;
+    const back = await h.service.rollback(result.snapshotId, { actor });
+    expect(back.failed).toEqual([]);
+    expect(rr(h)).toEqual(["rr.unregister:member:chat:msg-member"]);
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("rollback leaves a mapping that already existed before the plan", async () => {
+    const h = harness();
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: "someone-else:op-9",
+    });
+    const result = await h.service.apply(pairingPlan(), opts);
+    expect(h.records.get(result.snapshotId)!.operations[0].resultId).toBe(
+      "reused:chat:msg-member",
+    );
+    h.calls.length = 0;
+    await h.service.rollback(result.snapshotId, { actor });
+    expect(rr(h)).toEqual([]);
+    expect(h.pickers.size).toBe(1);
+  });
+
+  it("plan A fails, plan B registers, A resumes: A does not own B's picker and its rollback leaves it", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const a = await h.service.apply(p, opts);
+    expect(a.status).toBe("partial");
+    h.failOn.clear();
+    const b = await h.service.apply(p, opts);
+    expect(b.status).toBe("applied");
+    expect(h.pickers.get("member")!.ownerKey).toBe(`${b.snapshotId}:op-1`);
+    const resumed = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: a.snapshotId,
+    });
+    expect(resumed.status).toBe("applied");
+    expect(h.records.get(a.snapshotId)!.operations[0].resultId).toBe(
+      "reused:chat:msg-member",
+    );
+    h.calls.length = 0;
+    await h.service.rollback(a.snapshotId, { actor });
+    expect(rr(h)).toEqual([]);
+    expect(h.pickers.size).toBe(1);
+    // B's own rollback still removes its picker.
+    await h.service.rollback(b.snapshotId, { actor });
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("a resume tells the registrar the step began before, so it looks for a picker it posted", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    h.failOn.clear();
+    await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
+    expect(h.registerCalls.map((c) => c.retry)).toEqual([false, true]);
+  });
+
+  it("a picker the same step posted late is recognised on resume and rolled back as its own", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    // The timed-out first attempt finished late, under the same step key.
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: `${first.snapshotId}:op-1`,
+    });
+    h.failOn.clear();
+    const second = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+    expect(h.records.get(first.snapshotId)!.operations[0].resultId).toBe(
+      "posted:chat:msg-member",
+    );
+    h.calls.length = 0;
+    await h.service.rollback(first.snapshotId, { actor });
+    expect(rr(h)).toEqual(["rr.unregister:member:chat:msg-member"]);
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("rollback recovers a registration saved before a crash that the engine never recorded", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    // The registrar had saved the mapping when the process died.
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: `${first.snapshotId}:op-1`,
+    });
+    h.calls.length = 0;
+    const back = await h.service.rollback(first.snapshotId, { actor });
+    expect(back.failed).toEqual([]);
+    expect(rr(h)).toEqual(["rr.unregister:member:chat:msg-member"]);
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("rollback does not touch a mapping another step owns when this step recorded nothing", async () => {
+    const h = harness();
+    const p = pairingPlan();
+    h.failOn.add("rr.register:member:old-cat:🎮");
+    const first = await h.service.apply(p, opts);
+    h.pickers.set("member", {
+      messageId: "msg-member",
+      channelId: "chat",
+      ownerKey: "other-snap:op-1",
+    });
+    h.calls.length = 0;
+    await h.service.rollback(first.snapshotId, { actor });
+    expect(rr(h)).toEqual([]);
+    expect(h.pickers.size).toBe(1);
+  });
+
+  it("a failed picker removal fails the rollback step, keeps it open, and a retry finishes it", async () => {
+    const h = harness();
+    const result = await h.service.apply(pairingPlan(), opts);
+    h.unregisterFails.add("member");
+    const first = await h.service.rollback(result.snapshotId, { actor });
+    expect(first.failed).toHaveLength(1);
+    expect(h.records.get(result.snapshotId)!.status).toBe("rollback_partial");
+    expect(h.pickers.size).toBe(1);
+    h.unregisterFails.clear();
+    const retry = await h.service.rollback(result.snapshotId, { actor });
+    expect(retry.failed).toEqual([]);
+    expect(h.pickers.size).toBe(0);
+  });
+
+  it("a refusal from the registrar fails the step and leaves the server alone", async () => {
+    const h = harness();
+    h.deps.reactionRoles!.register = async () => {
+      throw new Error("Member has powerful permissions");
+    };
+    const result = await h.service.apply(pairingPlan(), opts);
+    expect(result.status).toBe("partial");
+    expect(result.failed[0].error).toContain("powerful permissions");
   });
 });

@@ -15,6 +15,13 @@ import {
   splitIssues,
   type ChannelClaim,
 } from "./channel-claims.js";
+import {
+  DEFAULT_PAIR_EMOJI,
+  detectFeeds,
+  detectRolePairings,
+  judgeRecordedPairings,
+  type RolePairing,
+} from "./channel-claims-suggestions.js";
 
 /**
  * Glue between channel claims (#1022) and the adoption engine (#1018): scan the
@@ -27,6 +34,8 @@ export interface ClaimsPlan {
   scan: ServerScan;
   groups: RoleGroupView[];
   plan: AdoptionPlan;
+  /** The claims that were planned, after "accept all detected pairs". */
+  claims: ChannelClaim[];
   /** Blocking problems found while translating the claims. */
   errors: PlanIssue[];
   /** Advice that doesn't stop an apply. */
@@ -58,6 +67,17 @@ export async function planChannelClaims(
   adminUserId: string,
   claims: readonly ChannelClaim[],
   approvedAt: string,
+  options: {
+    acceptAllPairs?: boolean;
+    /** Emoji the admin typed per category id, used by "accept all". */
+    pairEmojis?: Readonly<Record<string, string>>;
+    /**
+     * Registrations a pending plan already recorded (category id, role id). They
+     * are judged again for safety but not re-detected, so a plan that also gated
+     * the category for another role can resume its registration.
+     */
+    recordedPairings?: ReadonlyArray<{ categoryId: string; roleId: string }>;
+  } = {},
 ): Promise<ClaimsPlan> {
   const [scan, groups, migrated] = await Promise.all([
     ServerScanService.getInstance(guild.client).scanGuild(guild, {
@@ -66,7 +86,21 @@ export async function planChannelClaims(
     RoleGroupService.getInstance().list(guild.id),
     voiceMigrationDone(guild.id),
   ]);
-  const built = buildClaimsDesiredState(claims, {
+  const detected = detectRolePairings(scan, groups);
+  const recorded = judgeRecordedPairings(
+    scan,
+    groups,
+    options.recordedPairings ?? [],
+  );
+  const recordedCategories = new Set(recorded.map((p) => p.categoryId));
+  const pairings = [
+    ...detected.filter((p) => !recordedCategories.has(p.categoryId)),
+    ...recorded,
+  ];
+  const finalClaims = options.acceptAllPairs
+    ? acceptAllPairs(claims, pairings, options.pairEmojis)
+    : [...claims];
+  const built = buildClaimsDesiredState(finalClaims, {
     scanned: scan.scanned,
     groups,
     integrationRoleIds: new Set(
@@ -76,6 +110,8 @@ export async function planChannelClaims(
     membersIntent: scan.readiness.membersIntent,
     suggestedPrefix: scan.naming.suggestedPrefix,
     voiceMigrationDone: migrated,
+    pairings: new Map(pairings.map((p) => [p.categoryId, p])),
+    feeds: detectFeeds(scan),
     approvedAt,
   });
   const plan = planAdoption(scan.scanned, built.desired, {
@@ -83,7 +119,40 @@ export async function planChannelClaims(
     gateTargetIds: built.gateTargetIds,
   });
   const { errors, warnings } = splitIssues(built.issues);
-  return { scan, groups, plan, errors, warnings };
+  return { scan, groups, plan, claims: finalClaims, errors, warnings };
+}
+
+/**
+ * "Accept all detected pairs": register every proposed pairing the admin has
+ * not decided on yet. A category that already has a claim keeps its own action
+ * and gains the pairing; refused and already-registered pairings are never
+ * added.
+ */
+export function acceptAllPairs(
+  claims: readonly ChannelClaim[],
+  pairings: readonly RolePairing[],
+  emojis: Readonly<Record<string, string>> = {},
+): ChannelClaim[] {
+  const out = claims.map((c) => ({ ...c }));
+  for (const p of pairings) {
+    if (p.state !== "proposed") continue;
+    const own = out.find((c) => c.channelId === p.categoryId);
+    if (own) {
+      own.registerPairing = true;
+      // An emoji already chosen for this pairing wins; otherwise the typed one.
+      if (!own.pairEmoji?.trim() && emojis[p.categoryId]?.trim()) {
+        own.pairEmoji = emojis[p.categoryId].trim();
+      }
+      continue;
+    }
+    out.push({
+      channelId: p.categoryId,
+      action: "leave",
+      registerPairing: true,
+      pairEmoji: emojis[p.categoryId]?.trim() || DEFAULT_PAIR_EMOJI,
+    });
+  }
+  return out;
 }
 
 /**
@@ -101,11 +170,19 @@ export function claimsRevalidator(
   approvedAt: string,
 ): (pending: PlanOperation[]) => Promise<string[]> {
   return async (pending) => {
+    const effective = claimsForRevalidation(claims, pending);
     const fresh = await planChannelClaims(
       guild,
       adminUserId,
-      claims,
+      effective,
       approvedAt,
+      {
+        recordedPairings: pending.flatMap((op) =>
+          op.type === "reactionrole.register"
+            ? [{ categoryId: op.categoryId, roleId: op.roleId }]
+            : [],
+        ),
+      },
     );
     const problems = [...fresh.plan.errors, ...fresh.errors].map(
       (e) => e.message,
@@ -113,4 +190,31 @@ export function claimsRevalidator(
     problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
     return problems;
   };
+}
+
+/**
+ * The claims to plan again for a live-state check. The destructive phase
+ * re-checks after the additive steps (including the registrations) have
+ * landed. A category gated for more roles by this very plan is no longer
+ * "gated by exactly one role", so detecting its pairing again would fail the
+ * plan on its own changes. A registration is not pending then (the pre-apply
+ * check lists every step, the later one only the destructive ones), so it is
+ * not planned again; everything else is checked as before.
+ */
+export function claimsForRevalidation(
+  claims: readonly ChannelClaim[],
+  pending: readonly PlanOperation[],
+): ChannelClaim[] {
+  // Only a category whose registration is still pending keeps it: one that
+  // already registered may no longer look like a pairing (the plan gated it
+  // for more roles), and planning it again would block the others' retry.
+  const pendingCategories = new Set(
+    pending.flatMap((op) =>
+      op.type === "reactionrole.register" ? [op.categoryId] : [],
+    ),
+  );
+  return claims.map((c) => ({
+    ...c,
+    registerPairing: !!c.registerPairing && pendingCategories.has(c.channelId),
+  }));
 }
