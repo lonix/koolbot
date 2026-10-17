@@ -872,8 +872,10 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   is kept as a hidden-from-the-series cleanup record and removed once the
   native event has been closed, which happens on a later scan; while Events
   are off it waits for them to be turned back on.
-  Not yet covered: adopting existing native
-  events, cover images, and mapping recurrence to a native recurrence rule.
+  An existing Discord event can be adopted as a KoolBot event from the Web UI (**Server Scan** → **Adopt these as KoolBot
+  events**, `/admin/adopt/events`); see [WEBUI.md](WEBUI.md). An adopted event stays the member's: the sync only reads
+  it and never edits, cancels or deletes it. Not yet covered: cover images, and mapping recurrence to a native
+  recurrence rule.
 
 ---
 

@@ -203,6 +203,12 @@ export class NativeEventSync {
   ): Promise<void> {
     try {
       if (!(await this.isEnabled())) return;
+      if (event.nativeAdopted) {
+        // An adopted event belongs to whoever made it in Discord: nothing here
+        // writes to it (see `releaseAdopted` and `pullAdopted`).
+        await this.releaseAdopted(event);
+        return;
+      }
       const terminal = event.state === "ended" || event.state === "cancelled";
       const pendingCreate = terminal && !event.nativeEventId;
       // A terminal row with no id is only interesting while a create it
@@ -232,6 +238,106 @@ export class NativeEventSync {
         error,
       );
     }
+  }
+
+  // ---------------------------------------------------------------
+  // Adopted events (#1034): read-only towards Discord
+  // ---------------------------------------------------------------
+
+  /**
+   * A finished or cancelled adopted row only lets go of its native event. The
+   * native event is left exactly as it is: it was made by a member, so it is
+   * never cancelled, completed or deleted from here.
+   */
+  private async releaseAdopted(event: IEvent): Promise<void> {
+    const terminal = event.state === "ended" || event.state === "cancelled";
+    if (!terminal || !event.nativeEventId) return;
+    const nativeId = event.nativeEventId;
+    await Event.updateOne(
+      { _id: event._id, nativeEventId: nativeId },
+      { $set: { nativeEventId: null } },
+    );
+    event.nativeEventId = null;
+  }
+
+  /**
+   * Follow the native event of an adopted row, which stays the source of truth:
+   * its name, description, start and length are copied onto the row (so
+   * reminders follow it), and `"gone"` is returned when it was deleted or
+   * cancelled in Discord before it started, so the caller can cancel the row. Never writes to
+   * Discord. A failed read is "ok": try again on the next scan.
+   */
+  public async pullAdopted(
+    event: IEvent,
+    guild: Guild,
+    cache?: NativeCache | null,
+  ): Promise<"ok" | "gone"> {
+    try {
+      if (!event.nativeAdopted || !event.nativeEventId) return "ok";
+      // Only a row still waiting to start follows a deletion. A running one
+      // finishes on its own end time: a missing listing entry can't tell a
+      // deleted event from one that was ended, and its channel may be in use.
+      if (event.state !== "scheduled") return "ok";
+      const native = await this.fetchNative(guild, event.nativeEventId, cache);
+      if (!native || native.status === GuildScheduledEventStatus.Canceled) {
+        return "gone";
+      }
+      // A running event keeps the schedule its channel and reminder were
+      // based on; only a waiting one follows edits.
+      if (
+        event.state !== "scheduled" ||
+        native.status !== GuildScheduledEventStatus.Scheduled ||
+        !native.scheduledStartAt
+      ) {
+        return "ok";
+      }
+      const start = native.scheduledStartAt;
+      const minutes = native.scheduledEndTimestamp
+        ? Math.max(
+            1,
+            Math.ceil((native.scheduledEndTimestamp - start.getTime()) / 60000),
+          )
+        : event.durationMinutes;
+      const next = {
+        title: native.name.slice(0, NAME_MAX),
+        description: (native.description ?? "").slice(0, DESCRIPTION_MAX),
+        startTime: start,
+        durationMinutes: minutes,
+      };
+      if (
+        next.title !== event.title ||
+        next.description !== event.description ||
+        next.startTime.getTime() !== event.startTime.getTime() ||
+        next.durationMinutes !== event.durationMinutes
+      ) {
+        await Event.updateOne(
+          { _id: event._id, state: "scheduled" },
+          { $set: next },
+        );
+        Object.assign(event, next);
+      }
+      return "ok";
+    } catch (error) {
+      logger.warn(
+        `Native events: could not read adopted event ${sanitizeForLog(String(event._id))}:`,
+        error,
+      );
+      return "ok";
+    }
+  }
+
+  /**
+   * Whether the adopted event happens in a Discord channel of its own (a voice
+   * or stage event), in which case KoolBot makes no temporary channel for it.
+   * `null` when that is not known this scan (no listing, event not in it).
+   */
+  public adoptedHasChannel(
+    event: IEvent,
+    cache?: NativeCache | null,
+  ): boolean | null {
+    if (!event.nativeEventId || !cache) return null;
+    const native = cache.get(event.nativeEventId);
+    return native ? !!native.channelId : null;
   }
 
   // ---------------------------------------------------------------

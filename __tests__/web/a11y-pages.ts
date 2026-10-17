@@ -39,6 +39,8 @@ import {
 } from "../../src/web/admin-views.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
+import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
+import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
 import {
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
@@ -435,6 +437,25 @@ export function adminPages(): A11yPage[] {
       }),
     },
     ...channelManagerPages(),
+    {
+      name: "Adopt Discord events (preview)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (unreadable)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: null,
+        error: "Discord couldn't be reached.",
+        previewing: false,
+      }),
+    },
     {
       name: "Channel claims",
       html: renderChannelClaimsPage({

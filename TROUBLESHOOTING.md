@@ -386,6 +386,11 @@ Error: An invalid token was provided
    - *"the live server state could not be read"*: Discord or the database could not be reached; try again shortly.
 8. **The snapshot is missing.** Snapshots are removed after `adoption.snapshot.retention_days` (default 90).
    Without one, the changes can only be undone by hand in Discord.
+9. **An event can't be adopted, or an event rollback stopped.** On **Adopt Discord events** (`/admin/adopt/events`) each
+   event that can't be adopted says why: already a KoolBot event, running or finished, repeating in Discord, made by a bot,
+   a same-named KoolBot event, or the bot lacking **Manage Events** (grant it to the bot's role, then reload). Adoption
+   never changes the Discord event. If rolling back stops with "temporary voice channel is in use", wait until the channel
+   is empty and restore again.
 
 ### Bot logs in but "Used disallowed intents" / login fails
 

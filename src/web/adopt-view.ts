@@ -363,7 +363,8 @@ function renderCommunity(scan: ServerScan): string {
   ${
     scan.scheduledEvents.length === 0
       ? `<p class="muted">No native scheduled events.</p>`
-      : `<ul>${scan.scheduledEvents.map((e) => `<li>${escapeHtml(e.name)} <span class="muted">${escapeHtml(e.startsAt ?? "")}</span></li>`).join("")}</ul>`
+      : `<ul>${scan.scheduledEvents.map((e) => `<li>${escapeHtml(e.name)} <span class="muted">${escapeHtml(e.startsAt ?? "")}</span></li>`).join("")}</ul>
+  <p><a href="/admin/adopt/events">Adopt these as KoolBot events</a> <span class="muted">(preview first; the Discord events are not changed)</span></p>`
   }
 </div>`;
 }
