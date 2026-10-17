@@ -203,7 +203,7 @@ export const REQUIRED_WHEN_ENABLED: ReadonlyArray<{
   {
     gate: "events.enabled",
     key: "events.announcement_channel_id",
-    consequence: "RSVP and reminder messages have nowhere to post",
+    consequence: "event announcements and reminders have nowhere to post",
   },
 ];
 

@@ -1585,9 +1585,6 @@ describe("renderEventsPage", () => {
       title: "Game Night",
       when: "2026-07-04 20:00 (UTC)",
       state: "scheduled",
-      going: 0,
-      maybe: 0,
-      cant: 0,
       channelId: null,
     };
     const html = renderEventsPage({
@@ -1615,9 +1612,6 @@ describe("renderEventsPage", () => {
       title: "Game Night",
       when: "2026-07-04 20:00 (UTC)",
       state: "ended",
-      going: 0,
-      maybe: 0,
-      cant: 0,
       channelId: null,
       recurrence: "weekly",
       occurrence: 3,
@@ -1637,7 +1631,7 @@ describe("renderEventsPage", () => {
     expect(done).not.toContain('name="scope"');
   });
 
-  it("renders a scheduled event row with RSVP counts and actions", () => {
+  it("renders a scheduled event row with the Interested list and actions", () => {
     const html = renderEventsPage({
       ...EVENTS_COMMON,
       enabled: true,
@@ -1647,21 +1641,89 @@ describe("renderEventsPage", () => {
           title: "Game <Night>",
           when: "2026-07-04 20:00 (UTC)",
           state: "scheduled",
-          going: 3,
-          maybe: 1,
-          cant: 0,
+          expected: {
+            kind: "ok",
+            count: 3,
+            names: ["Alice", "<img src=x onerror=alert(1)>"],
+            truncated: false,
+          },
           channelId: null,
         },
       ],
     });
     // Title is HTML-escaped.
     expect(html).toContain("Game &lt;Night&gt;");
-    // RSVP counts are worded, not emoji-only (#855); the glyph is decorative.
-    expect(html).toContain(
-      '<span aria-hidden="true">✅</span> 3 going · <span aria-hidden="true">🤔</span> 1 maybe · <span aria-hidden="true">🚫</span> 0 can\'t',
-    );
+    expect(html).toContain("Expected to show up");
+    expect(html).toContain("3 interested");
+    expect(html).toContain("Alice");
+    // Member names from Discord are escaped.
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain("Old RSVP buttons");
     expect(html).toContain("/admin/events/e1/start-now");
     expect(html).toContain("/admin/events/e1/cancel");
+  });
+
+  it("marks a truncated Interested count and shows a clear message when it cannot be read", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [
+        {
+          id: "e1",
+          title: "Big",
+          when: "x",
+          state: "scheduled",
+          expected: { kind: "ok", count: 300, names: [], truncated: true },
+          channelId: null,
+        },
+        {
+          id: "e2",
+          title: "Broken",
+          when: "x",
+          state: "scheduled",
+          expected: {
+            kind: "unavailable",
+            message: "Could not read <b>Interested</b> members",
+          },
+          channelId: null,
+        },
+      ],
+    });
+    expect(html).toContain("300+ interested");
+    expect(html).toContain(
+      "Could not read &lt;b&gt;Interested&lt;/b&gt; members",
+    );
+  });
+
+  it("still shows the tally of legacy RSVP buttons on an event that has them", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [
+        {
+          id: "e1",
+          title: "Old",
+          when: "x",
+          state: "scheduled",
+          legacyRsvps: { going: 3, maybe: 1, cant: 2 },
+          expected: { kind: "none", message: "Not on the Events list yet." },
+          channelId: null,
+        },
+      ],
+    });
+    expect(html).toContain("Old RSVP buttons: 3 going · 1 maybe · 2 can't");
+    expect(html).toContain("Not on the Events list yet.");
+  });
+
+  it("warns when the bot cannot create native events", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      nativePermissionMissing: true,
+      rows: [],
+    });
+    expect(html).toContain("Create Events");
   });
 
   it("hides actions for a finished (cancelled) event", () => {
@@ -1674,9 +1736,6 @@ describe("renderEventsPage", () => {
           title: "Old Event",
           when: "2026-01-01 12:00 (UTC)",
           state: "cancelled",
-          going: 0,
-          maybe: 0,
-          cant: 0,
           channelId: null,
         },
       ],

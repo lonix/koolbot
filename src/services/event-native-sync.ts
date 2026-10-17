@@ -19,7 +19,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  * Mirrors KoolBot events to Discord *native* guild scheduled events (#1034),
  * so members see them in the server's "Events" list.
  *
- * On by default (`events.native.enabled`) but only while the Events feature
+ * Native is the only mode (#1175): the sync runs whenever the Events feature
  * itself is on (`events.enabled`). KoolBot stays the source of
  * truth: the native event is created, updated and closed to match the Mongo
  * row, never the other way round in this slice.
@@ -162,8 +162,7 @@ export class NativeEventSync {
     try {
       const config = ConfigService.getInstance();
       // Inert unless the Events feature is on: no REST calls, no warnings.
-      if (!(await config.getBoolean("events.enabled", false))) return false;
-      return await config.getBoolean("events.native.enabled", true);
+      return await config.getBoolean("events.enabled", false);
     } catch {
       return false;
     }
@@ -256,7 +255,7 @@ export class NativeEventSync {
     }
     this.warnOnce(
       "permission",
-      "Events are not being mirrored to Discord's Events list because the bot lacks the Create Events / Manage Events permission. Grant it to the bot's role, or set events.native.enabled to false to stop mirroring and silence this warning.",
+      "Events are not being created in Discord's Events list because the bot lacks the Create Events / Manage Events permission, so announcements have no event card and members cannot mark Interested. Grant it to the bot's role.",
     );
     return false;
   }

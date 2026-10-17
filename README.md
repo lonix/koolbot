@@ -148,7 +148,7 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **🌐 Web UI Admin** — Magic-link sign-in, no persistent OAuth setup
 - **📝 Discord Logging** — Bot events logged to Discord channels
 - **🎭 Quote System** — Save and retrieve memorable quotes
-- **🎪 Events** — Scheduled events with RSVPs and temporary voice channels
+- **🎪 Events** — Scheduled events (Discord native events) with temporary voice channels
 - **🎮 Looking for Group** — Ad-hoc `/lfg` posts with a live roster
 - **⏰ Reminders** — Personal one-off reminders KoolBot DMs when due
 - **🎫 Support Tickets** — `/ticket open` creates a private help channel for a member and your staff
@@ -270,7 +270,7 @@ previewed first and can be restored from the **Adoption** page. See
 | **Birthdays** | Timezone-aware birthday announcements and a temporary role |
 | **Rules Acceptance** | Optional rules / terms gate: an Accept button in a read-only channel grants an acceptance role |
 | **Welcome Messages** | Greet new members in a channel, with links to self-assign roles and the rules |
-| **Events** | Scheduled events with RSVPs and temporary voice channels |
+| **Events** | Scheduled events (Discord native events) with temporary voice channels |
 | **LFG** | Ad-hoc "looking for group" posts with a live roster and Join buttons |
 | **Reminders** | Personal one-off `/remind` reminders, DM'd when due, with a per-member cap |
 | **Tickets** | Private support-ticket channels per member, staff claim/close, optional transcripts |

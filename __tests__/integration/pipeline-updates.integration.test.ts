@@ -33,16 +33,17 @@ describeWithMongo("pipeline updates against a real MongoDB (#1103)", () => {
         title: "Game night",
         startTime: new Date(Date.now() + 3_600_000),
         createdBy: "host",
+        announcementMessageId: "msg-1",
       });
       const id = String(event._id);
 
-      const added = await events().setRsvp(id, "user-a", "going");
+      const added = await events().setRsvp(id, "user-a", "going", "msg-1");
       expect(added?.rsvps.map((r) => [r.userId, r.status])).toEqual([
         ["user-a", "going"],
       ]);
 
-      await events().setRsvp(id, "user-b", "maybe");
-      const switched = await events().setRsvp(id, "user-a", "cant");
+      await events().setRsvp(id, "user-b", "maybe", "msg-1");
+      const switched = await events().setRsvp(id, "user-a", "cant", "msg-1");
       expect(switched?.rsvps.map((r) => [r.userId, r.status]).sort()).toEqual([
         ["user-a", "cant"],
         ["user-b", "maybe"],
@@ -57,7 +58,7 @@ describeWithMongo("pipeline updates against a real MongoDB (#1103)", () => {
       // Ended events are not announcement-rendered, so removeRsvp needs no
       // Discord client; setRsvp itself refuses them, which is asserted too.
       await Event.updateOne({ _id: id }, { $set: { state: "ended" } });
-      expect(await events().setRsvp(id, "user-c", "going")).toBeNull();
+      expect(await events().setRsvp(id, "user-c", "going", "msg-1")).toBeNull();
 
       const result = await events().removeRsvp("guild-1", "user-a");
       expect(result).toEqual({ matched: 1, removed: 1, rendersFailed: 0 });

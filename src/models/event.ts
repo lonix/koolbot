@@ -67,6 +67,12 @@ export interface IEvent extends Document {
   announcementMessageId: string | null;
   state: EventState;
   reminderSent: boolean;
+  /**
+   * @deprecated Legacy KoolBot RSVPs (#1175). New events leave this empty:
+   * members mark Interested on the native Discord event instead. Kept so
+   * announcements and RSVPs from 2.0.x keep working and stay in member
+   * export and erasure; retire once no such event remains.
+   */
   rsvps: IEventRsvp[];
   /**
    * Recurrence (#744). A series is a set of occurrence rows sharing one
