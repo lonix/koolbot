@@ -2051,7 +2051,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "reactionroles.message_channel_id": {
     label: "Reaction-role message channel",
-    description: "Channel ID where reaction-role messages are posted.",
+    description:
+      "Channel ID where reaction-role messages are posted. Pickers do not move when this changes: existing ones stay in the old channel, and startup keeps (does not archive) mappings whose picker is not found here. Delete and regenerate the pickers, or change it back.",
     category: "reactionroles",
     type: "channel",
   },

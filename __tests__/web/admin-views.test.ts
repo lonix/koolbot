@@ -2488,6 +2488,30 @@ describe("renderReactionRolesPage", () => {
     expect(new Set(labels).size).toBe(80);
   });
 
+  it("warns that changing the message channel does not move existing pickers (#1113)", () => {
+    const base = {
+      ...COMMON,
+      enabled: true,
+      configChannel: null,
+      archived: [],
+    };
+    const none = renderReactionRolesPage({ ...base, active: [] });
+    expect(none).not.toContain("does not move existing pickers");
+    const some = renderReactionRolesPage({
+      ...base,
+      active: [
+        {
+          mappingId: "m1",
+          roleName: "Gamer",
+          roleId: "1",
+          emoji: "x",
+          messageId: "2",
+        } as never,
+      ],
+    });
+    expect(some).toContain("does not move existing pickers");
+  });
+
   it("shows the empty state for active and archived", () => {
     const html = renderReactionRolesPage({
       ...COMMON,

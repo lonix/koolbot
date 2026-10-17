@@ -2908,6 +2908,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
     <dt>Archived mappings</dt><dd>${props.archived.length}</dd>
   </dl>
 </div>
+${props.active.length > 0 ? `<div class="notice warn" role="note"><strong>Changing the message channel does not move existing pickers.</strong> They stay in the channel they were posted in. If you change <code>reactionroles.message_channel_id</code> while mappings exist, delete and regenerate them, or change it back; until then startup leaves them untouched instead of archiving them.</div>` : ""}
 ${settingsCard}
 <div class="card">
   <h2>Active</h2>

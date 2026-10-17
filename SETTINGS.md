@@ -1268,7 +1268,7 @@ the Web UI's **Reaction Roles** page.
 | Setting                               | Default    | Description                                                                                            |
 | ------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `reactionroles.enabled`               | `false`    | Enable reaction role system                                                                            |
-| `reactionroles.message_channel_id`    | `""`       | Channel ID where reaction-role messages are posted                                                     |
+| `reactionroles.message_channel_id`    | `""`       | Channel ID where reaction-role messages are posted (see the note below on changing it)                 |
 | `reactionroles.style`                 | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu)          |
 | `reactionroles.group_role_colour`     | `""`       | Colour (`#RRGGBB`) for roles created by the grouped-role generator; empty keeps Discord's default      |
 | `reactionroles.max_toggles`           | `10`       | Role adds/removes one member may make per window, across reactions, buttons and menus (`0` = no limit) |
@@ -1279,6 +1279,13 @@ Manage Webhooks or Mention @everyone are refused when you bind or generate a rea
 can pick one up. The Reaction Roles page shows which permission blocked it. The role is also checked live at every
 grant, so an older binding to such a role (or a role edited later) stops granting: members get a short refusal
 and the bot logs one warning per role. The binding stays listed on the page so you can remove the permissions or unbind it.
+
+**Changing `reactionroles.message_channel_id` is not supported once pickers exist (#1113).** A mapping does not
+remember which channel its picker was posted in, so existing pickers stay in the old channel and every lookup
+uses the new one. To protect them, startup reconciliation does not archive a guild's mappings when none of its
+pickers can be found in the configured channel: it keeps them active and logs a warning. Either change the
+setting back, or delete the pickers and regenerate them in the new channel. Pickers that are individually
+deleted in a guild where others still resolve are archived as before.
 
 ### How it works
 
