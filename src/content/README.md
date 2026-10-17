@@ -15,6 +15,7 @@ contributors edit copy without touching unrelated code.
 | `achievements.ts`         | `services/achievements-service.ts`        | Display metadata for time-based achievements                               |
 | `bot-features.ts`         | `services/notices-channel-manager.ts`     | Emoji / label / blurb per feature in the auto-maintained features notice   |
 | `reaction-role-groups.ts` | `services/reaction-role-group-service.ts` | Preset role groups (regions, countries) for the Reaction Roles generator   |
+| `event-group-presets.ts`  | `services/event-groups.ts`                | Built-in event group presets (Red vs Blue, EVE factions, Wardogs)          |
 
 ## What does **not** belong here
 

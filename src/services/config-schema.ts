@@ -136,6 +136,8 @@ export interface ConfigSchema {
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
   "events.recurrence_enabled": boolean; // Allow recurring events (weekly/biweekly/monthly series)
   "events.native.location": string; // Location text shown on the mirrored native event
+  "events.groups.default_count": number; // Group rows the event form offers up front
+  "events.groups.max_count": number; // Most groups one event may have
 
   // LFG — ad-hoc "looking for group" posts (#957)
   "lfg.enabled": boolean;
@@ -464,6 +466,8 @@ export const defaultConfig: ConfigSchema = {
   "events.recurrence_enabled": true,
   "events.native.location":
     "Voice channel in this server (see the event announcement)",
+  "events.groups.default_count": 2,
+  "events.groups.max_count": 15,
 
   // LFG (#957) — feature gate off by default (rule 1)
   "lfg.enabled": false,
@@ -1900,6 +1904,24 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Location line shown on the mirrored Discord scheduled event (max 100 characters). The temporary voice channel only exists shortly before the start, so the native event is an external one with this text.",
     category: "events",
     type: "string",
+  },
+  "events.groups.default_count": {
+    label: "Event groups offered by default",
+    description:
+      "How many empty group rows the Groups section of the event form shows up front (1 to the maximum below). Organisers can add more, and a preset fills in its own groups.",
+    category: "events",
+    type: "number",
+    min: 1,
+    reloadOnSave: true,
+  },
+  "events.groups.max_count": {
+    label: "Most groups per event",
+    description:
+      "The most groups one event may have (each becomes its own voice channel). Values above 25 are treated as 25, since a Discord category holds 50 channels.",
+    category: "events",
+    type: "number",
+    min: 1,
+    reloadOnSave: true,
   },
   "lfg.enabled": {
     label: "LFG enabled",

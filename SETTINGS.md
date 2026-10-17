@@ -826,6 +826,8 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 | `events.channel_grace_minutes`    | `15`      | How long after an event ends the bot waits before deleting its (now empty) channel                                                |
 | `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
 | `events.native.location`          | see Notes | Location text shown on the native Discord event (max 100 characters)                                                              |
+| `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |
+| `events.groups.max_count`         | `15`      | The most groups one event may have. Values above 25 count as 25 (a Discord category holds 50 channels)                            |
 
 **Notes:**
 
@@ -851,6 +853,14 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   cancelling the series stops it. Turn the whole thing off with
   `events.recurrence_enabled`. Anything fancier than a fixed cadence (RRULE
   patterns, "2nd Tuesday", holiday exceptions) is not supported.
+- **Event groups** (#1188): an event can carry a set of groups (teams, squads, breakout rooms, raid parties), set up in
+  the Groups section of the event form. There is no master switch: the section is off for every event unless the
+  organiser ticks "Use groups for this event", and a plain event stores and behaves exactly as before. The setup is
+  stored with the event (each group has a name, a kind of team, open or leads, an optional size of 1 to 99, an optional
+  tag of up to 8 characters and an optional colour marker) and a recurring series copies it to the next occurrence
+  without members. An event can also set its own **channel creation time**; empty uses `events.create_lead_minutes`, and
+  a set value moves when the event's channel is created. Voice channels for the groups themselves are not created yet.
+  `events.groups.default_count` and `events.groups.max_count` only shape the form and cap the number of groups.
 - **Discord scheduled events** (#1034, #1175): every KoolBot event is also created as a native guild scheduled event, and
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
@@ -1933,6 +1943,8 @@ leave the graph in a broken state.
 - `events.channel_grace_minutes` (number, default: 15)
 - `events.recurrence_enabled` (bool, default: true)
 - `events.native.location` (string, default: "Voice channel in this server (see the event announcement)")
+- `events.groups.default_count` (number, default: 2)
+- `events.groups.max_count` (number, default: 15)
 
 #### LFG (Looking for Group)
 
