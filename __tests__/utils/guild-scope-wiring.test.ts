@@ -100,6 +100,15 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
     expect(body.indexOf("shouldIgnoreGuild(")).toBeLessThan(body.indexOf(call));
   });
 
+  // `userUpdate` carries no guild, so it is gated on membership instead.
+  it("only records UserUpdate name changes for guild members", () => {
+    const [body] = listenerBodies("UserUpdate");
+    expect(body).toContain("isConfiguredGuildMember(");
+    expect(body.indexOf("isConfiguredGuildMember(")).toBeLessThan(
+      body.indexOf("recordUser("),
+    );
+  });
+
   it("re-checks guild scope when the bot is added to a guild", () => {
     expect(listenerBodies("GuildCreate")[0]).toContain("enforceGuildScope");
   });

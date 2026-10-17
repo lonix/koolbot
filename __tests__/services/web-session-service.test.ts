@@ -81,6 +81,48 @@ describe("WebSessionService", () => {
     expect(result.role).toBe("user");
   });
 
+  it("create refuses a guild other than GUILD_ID (#1144)", async () => {
+    process.env.GUILD_ID = "guild-1";
+    const create = jest.fn().mockResolvedValue({ _id: "abc" });
+    (WebSession as unknown as { create: unknown }).create = create;
+    const svc = WebSessionService.getInstance();
+    await expect(svc.create("user-1", "guild-2", "admin")).rejects.toThrow(
+      /GUILD_ID/,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("redeem only matches links of GUILD_ID (#1144)", async () => {
+    process.env.GUILD_ID = "guild-1";
+    const findOneAndUpdate = jest.fn().mockResolvedValue(null);
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      findOneAndUpdate;
+    (WebSession as unknown as { findOne: unknown }).findOne = jest
+      .fn()
+      .mockResolvedValue(null);
+    await WebSessionService.getInstance().redeem("tok");
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({
+      guildId: "guild-1",
+    });
+  });
+
+  it("peek refuses a link issued for another guild (#1144)", async () => {
+    process.env.GUILD_ID = "guild-1";
+    (WebSession as unknown as { findOne: unknown }).findOne = jest
+      .fn()
+      .mockResolvedValue({
+        _id: "x",
+        guildId: "guild-2",
+        discordUserId: "u",
+        role: "admin",
+        scopes: [],
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+    expect(await WebSessionService.getInstance().peek("tok")).toBeNull();
+  });
+
   it("redeem returns null when no matching unused session exists", async () => {
     (WebSession as unknown as { updateMany: unknown }).updateMany = jest
       .fn()

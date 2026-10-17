@@ -268,7 +268,9 @@ Then reload commands.
 **Notes:** Server nicknames are only recorded when the bot runs with
 `GUILD_MEMBERS_INTENT=true` (see [SETTINGS.md](SETTINGS.md#-name-history));
 `/aka` says when they are not. Members who opted out of tracking are not
-recorded.
+recorded. Names are only recorded for current members of the server; for
+someone who is not a member `/aka` still shows what was recorded earlier and
+says nothing new was saved.
 
 ---
 

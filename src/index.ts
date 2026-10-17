@@ -75,7 +75,11 @@ import { ModerationCaseReviewService } from "./services/moderation-case-review-s
 import { WizardService } from "./services/wizard-service.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "./utils/guild-members-intent.js";
 import { DEFAULT_ALLOWED_MENTIONS } from "./utils/allowed-mentions.js";
-import { applyGuildScope, shouldIgnoreGuild } from "./utils/guild-scope.js";
+import {
+  applyGuildScope,
+  isConfiguredGuildMember,
+  shouldIgnoreGuild,
+} from "./utils/guild-scope.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createUserWebRouter,
@@ -1428,10 +1432,12 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
 
 // Name history (#1038). `userUpdate` needs no privileged intent but only fires
 // for cached users; it carries no guild, so it is attributed to the bot's
-// configured guild (the bot is single-guild via GUILD_ID).
+// configured guild (the bot is single-guild via GUILD_ID), and only for users
+// who are members of it (#1144).
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   recordDiscordEvent("userUpdate");
   if (!env.guildId) return;
+  if (!isConfiguredGuildMember(client, env.guildId, newUser.id)) return;
   await NameHistoryService.getInstance().recordUser(
     env.guildId,
     newUser,

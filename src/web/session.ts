@@ -18,6 +18,7 @@ import {
   verifySignedValue,
 } from "./cookies.js";
 import { env } from "../config/env.js";
+import { isForeignGuild } from "../utils/guild-scope.js";
 import { renderErrorPage } from "./views.js";
 
 export const SESSION_COOKIE = "koolbot_session";
@@ -140,7 +141,10 @@ async function loadValidSession(
     dbSession.revokedAt ||
     dbSession.expiresAt.getTime() <= now ||
     dbSession.discordUserId !== payload.uid ||
-    dbSession.guildId !== payload.gid
+    dbSession.guildId !== payload.gid ||
+    // Pinned to the configured guild (#1144): a session row for any other
+    // guild is refused here, so it also fails `/session/ping`.
+    isForeignGuild(dbSession.guildId, env.guildId)
   ) {
     return null;
   }

@@ -12,12 +12,59 @@ const {
   shouldIgnoreGuild,
   applyGuildScope,
   resetForeignGuildWarnings,
+  isConfiguredGuildMember,
+  resetMembershipWarning,
 } = await import("../../src/utils/guild-scope.js");
 
 describe("guild scope (#1144)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetForeignGuildWarnings();
+    resetMembershipWarning();
+    delete process.env.GUILD_MEMBERS_INTENT;
+  });
+
+  describe("isConfiguredGuildMember", () => {
+    const clientWith = (ids: string[]) => ({
+      guilds: {
+        cache: {
+          get: (id: string) =>
+            id === "g1"
+              ? { members: { cache: { has: (u: string) => ids.includes(u) } } }
+              : undefined,
+        },
+      },
+    });
+
+    it("is true for a cached member", () => {
+      expect(isConfiguredGuildMember(clientWith(["u1"]), "g1", "u1")).toBe(
+        true,
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+    it("is false for a stranger without warning when the intent is on", () => {
+      process.env.GUILD_MEMBERS_INTENT = "true";
+      expect(isConfiguredGuildMember(clientWith(["u1"]), "g1", "u2")).toBe(
+        false,
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+    it("warns once with the intent guidance when the intent is off", () => {
+      const c = clientWith([]);
+      expect(isConfiguredGuildMember(c, "g1", "u2")).toBe(false);
+      expect(isConfiguredGuildMember(c, "g1", "u3")).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("Server Members Intent");
+      expect(warn.mock.calls[0][0]).toContain("GUILD_MEMBERS_INTENT=true");
+    });
+    it("is false when no guild is configured or the guild is unknown", () => {
+      expect(isConfiguredGuildMember(clientWith(["u1"]), undefined, "u1")).toBe(
+        false,
+      );
+      expect(isConfiguredGuildMember(clientWith(["u1"]), "g9", "u1")).toBe(
+        false,
+      );
+    });
   });
 
   describe("isForeignGuild", () => {
