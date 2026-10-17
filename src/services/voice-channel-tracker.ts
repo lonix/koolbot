@@ -15,6 +15,7 @@ import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { AchievementsService } from "./achievements-service.js";
+import { isPublicToEveryone } from "../utils/channel-visibility.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -35,13 +36,23 @@ interface IUserStats {
     duration?: number;
     channelId: string;
     channelName: string;
+    everyoneCanView?: boolean;
   }>;
+}
+
+/** A channel's identity, name and public state taken in one step (#1162). */
+interface ChannelSnapshot {
+  id: string;
+  name: string;
+  isPublic: boolean;
 }
 
 interface VoiceSession {
   startTime: Date;
   channelId: string;
   channelName: string;
+  /** `@everyone` could view the channel when the session began (#1162). */
+  publicAtStart: boolean;
   /**
    * The guild the session is in, for the tracking opt-out checks at persist
    * time (#918). The tracking row itself is not guild-scoped.
@@ -427,6 +438,17 @@ export class VoiceChannelTracker {
       // event that predates the erasure. Reading it here means every handler
       // already in flight carries a pre-purge token (#916).
       const generation = this.purgeGeneration(member.id);
+      // The joined channel's name and `@everyone` visibility, read together
+      // from the same object in the same synchronous step, before any await.
+      // Reading either later could pair a private room's old name with a
+      // later public state (#1162).
+      const joined: ChannelSnapshot | undefined = newState.channel
+        ? {
+            id: newState.channel.id,
+            name: newState.channel.name,
+            isPublic: isPublicToEveryone(newState.channel),
+          }
+        : undefined;
 
       // Check if voice tracking is enabled
       const isEnabled = await this.configService.getBoolean(
@@ -475,20 +497,14 @@ export class VoiceChannelTracker {
       }
 
       // User joined a channel (including initial join)
-      if (!oldChannel && newChannel) {
+      if (!oldChannel && newChannel && joined) {
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
         );
-        await this.startTracking(
-          member,
-          newChannel.id,
-          newChannel.name,
-          generation,
-          ticket,
-        );
+        await this.startTracking(member, joined, generation, ticket);
       }
       // User switched channels
-      else if (oldChannel && newChannel) {
+      else if (oldChannel && newChannel && joined) {
         logger.info(
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
@@ -499,13 +515,7 @@ export class VoiceChannelTracker {
         // `startTracking` re-checks `generation` immediately before it
         // writes, so a purge landing anywhere in this transition — including
         // during its own config reads — cannot leave a session behind.
-        await this.startTracking(
-          member,
-          newChannel.id,
-          newChannel.name,
-          generation,
-          ticket,
-        );
+        await this.startTracking(member, joined, generation, ticket);
       }
       // User left a channel (disconnect) - handle both cases:
       // 1. oldChannel exists but newChannel is null (direct disconnect)
@@ -718,8 +728,7 @@ export class VoiceChannelTracker {
    */
   private async startTracking(
     member: GuildMember,
-    channelId: string,
-    channelName: string,
+    { id: channelId, name: channelName, isPublic }: ChannelSnapshot,
     generation: number,
     ticket: number,
   ): Promise<void> {
@@ -768,6 +777,7 @@ export class VoiceChannelTracker {
         startTime: new Date(),
         channelId,
         channelName,
+        publicAtStart: isPublic,
         guildId,
       });
 
@@ -965,6 +975,11 @@ export class VoiceChannelTracker {
         channelId: session.channelId,
         channelName: session.channelName,
         otherUsers,
+        // Public for the whole session: public at join, and still public at
+        // close when the room still exists. A room already deleted at close
+        // cannot be re-checked, so the join-time state stands (the stored
+        // name is the join-time name, which was public then). (#1162)
+        everyoneCanView: this.publicThroughout(session),
       };
       if (companionsEnabled) {
         // Close any still-open companion intervals so the final session
@@ -1142,6 +1157,16 @@ export class VoiceChannelTracker {
     if (claimed.firsts && !this.sessionFirsts.has(userId)) {
       this.sessionFirsts.set(userId, claimed.firsts);
     }
+  }
+
+  private publicThroughout(session: VoiceSession): boolean {
+    if (!session.publicAtStart) return false;
+    const channel = session.guildId
+      ? this.client.guilds?.cache
+          ?.get(session.guildId)
+          ?.channels?.cache?.get(session.channelId)
+      : undefined;
+    return channel ? isPublicToEveryone(channel) : true;
   }
 
   public async getUserStats(
