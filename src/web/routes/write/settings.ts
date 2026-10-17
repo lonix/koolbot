@@ -41,6 +41,7 @@ import {
   findSectionMasterKey,
   resetConfigToDefaults,
   findGroupRoleReuseForSetting,
+  findPowerfulRoleForSetting,
 } from "./helpers.js";
 import { TIERS_KEY } from "../../leaderboard-tiers.js";
 import {
@@ -113,6 +114,26 @@ export function createSettingsRouter(client: Client): Router {
           errorMessage: reuse,
         });
         flashRedirect(res, redirectTo, { type: "err", text: reuse }, [key]);
+        return;
+      }
+      // A role with Administrator or other powerful permissions can't be
+      // handed out automatically (#1145).
+      const powerful = await findPowerfulRoleForSetting(
+        client,
+        session.guildId,
+        key,
+        coerced.value,
+        before,
+      );
+      if (powerful) {
+        await recordAudit(session, {
+          action: "setting.set",
+          targetId: key,
+          details: { before, attempted: coerced.value },
+          result: "failure",
+          errorMessage: powerful,
+        });
+        flashRedirect(res, redirectTo, { type: "err", text: powerful }, [key]);
         return;
       }
       try {
@@ -487,7 +508,18 @@ export function createSettingsRouter(client: Client): Router {
           c.value,
           before,
         );
-        if (reuse) rejected.push({ key: c.key, reason: reuse });
+        if (reuse) {
+          rejected.push({ key: c.key, reason: reuse });
+          continue;
+        }
+        const powerful = await findPowerfulRoleForSetting(
+          client,
+          session.guildId,
+          c.key,
+          c.value,
+          before,
+        );
+        if (powerful) rejected.push({ key: c.key, reason: powerful });
       }
 
       if (rejected.length > 0) {
@@ -912,7 +944,18 @@ export function createSettingsRouter(client: Client): Router {
                 await config.get(item.key).catch(() => undefined),
               )
             : null;
-        if (reuse) failed.push({ key: item.key, reason: reuse });
+        const powerful =
+          !reuse && (item.key === "birthdays.role_id" || item.key === TIERS_KEY)
+            ? await findPowerfulRoleForSetting(
+                client,
+                session.guildId,
+                item.key,
+                item.value,
+                await config.get(item.key).catch(() => undefined),
+              )
+            : null;
+        const refusal = reuse ?? powerful;
+        if (refusal) failed.push({ key: item.key, reason: refusal });
         else afterGroupCheck.push(item);
       }
       toWrite = afterGroupCheck;

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import { PermissionFlagsBits } from "discord.js";
 import {
   MAX_TIER_TOP_N,
   parseTierConfig,
@@ -170,6 +171,51 @@ describe("storedTiersFromSnapshot (#985)", () => {
     ).toBe("1:111");
     expect(storedTiersFromSnapshot([{ key: "other", value: "x" }])).toBe(
       undefined,
+    );
+  });
+});
+
+describe("tier roles with powerful permissions (#1145)", () => {
+  const safe = { id: "r1", name: "Top", managed: false, position: 1 };
+  const admin = {
+    ...safe,
+    permissions: { bitfield: PermissionFlagsBits.Administrator },
+  };
+
+  it("flags a role carrying Administrator and names the permission", () => {
+    expect(tierRoleIssue(admin, "guild-1", 5)).toBe("privileged");
+    expect(tierRoleProblem(admin, "guild-1", 5)).toContain("Administrator");
+    expect(tierRoleProblem(admin, "guild-1", 5)).toContain(
+      "powerful permissions",
+    );
+  });
+
+  it("flags every forbidden permission, not just Administrator", () => {
+    const ban = {
+      ...safe,
+      permissions: { bitfield: PermissionFlagsBits.BanMembers },
+    };
+    expect(tierRoleIssue(ban, "guild-1", 5)).toBe("privileged");
+  });
+
+  it("accepts a role with harmless permissions or none readable", () => {
+    const harmless = {
+      ...safe,
+      permissions: { bitfield: PermissionFlagsBits.ManageMessages },
+    };
+    expect(tierRoleIssue(harmless, "guild-1", 5)).toBeNull();
+    expect(tierRoleIssue(safe, "guild-1", 5)).toBeNull();
+  });
+
+  it("tolerates an existing role when the caller allows it", () => {
+    expect(
+      tierRoleIssue(admin, "guild-1", 5, { allowPrivileged: true }),
+    ).toBeNull();
+  });
+
+  it("reports the structural issues first", () => {
+    expect(tierRoleIssue({ ...admin, managed: true }, "guild-1", 5)).toBe(
+      "managed",
     );
   });
 });

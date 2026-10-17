@@ -13,6 +13,8 @@ import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
+import { automaticGrantBlockReason } from "../utils/role-safety.js";
+import { RoleGroupService } from "./role-group-service.js";
 
 /** Discord's Unknown Role error: the role was deleted. */
 const UNKNOWN_ROLE = 10011;
@@ -121,6 +123,8 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * so overlapping holds release cleanly (#917). See `holdOutForPurge`.
    */
   private readonly heldOut = new Map<string, number>();
+  /** Role-and-reason pairs already warned about, so a bad role logs once. */
+  private readonly warnedBlockedRoles = new Set<string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -334,6 +338,12 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       };
     }
 
+    // A role with powerful permissions (or the admin group's role) is never
+    // handed out, even when it was saved before the editor checked (#1145).
+    // Members who already hold it are left to the normal rank-based revoke
+    // below, and nothing stored is changed. Warns once per role, not per member.
+    const blockReason = await this.grantBlockReason(guild, role);
+
     // A member being purged never qualifies, so this run cannot grant them
     // the role while their data is being erased (#917). Filtered before the
     // cut so the next-ranked member moves up rather than leaving a gap.
@@ -363,6 +373,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         continue;
       }
       if (!previousHolders.has(userId)) {
+        if (blockReason) continue;
         try {
           await member.roles.add(role, "Leaderboard role reward (auto-assign)");
           added.push(userId);
@@ -418,7 +429,32 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       roleName: role.name,
       added,
       removed,
+      ...(blockReason ? { skippedReason: "role-privileged" } : {}),
     };
+  }
+
+  /** Why `role` must not be granted, or null (see `automaticGrantBlockReason`). */
+  private async grantBlockReason(
+    guild: Guild,
+    role: Role,
+  ): Promise<string | null> {
+    const adminRoleIds = await RoleGroupService.getInstance()
+      .getRoleIdsWith(guild.id, "admin")
+      .catch((error: unknown) => {
+        logger.warn("Leaderboard role check: role groups unreadable", error);
+        return [] as string[];
+      });
+    const reason = automaticGrantBlockReason(role, adminRoleIds);
+    if (reason) {
+      const key = `${role.id}:${reason}`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) is not granted: it ${reason}. Choose a role without those permissions on the Leaderboard Roles page.`,
+        );
+      }
+    }
+    return reason;
   }
 
   /**

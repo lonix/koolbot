@@ -1724,7 +1724,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "birthdays.role_id": {
     label: "Temporary birthday role",
     description:
-      "Optional role granted on a member's birthday and removed automatically after the configured duration. Leave empty to skip the role.",
+      "Optional role granted on a member's birthday and removed automatically after the configured duration. Leave empty to skip the role. A role with Administrator or other powerful permissions (Manage Server, Manage Roles, Ban Members and similar) is refused, and one already saved is not granted.",
     category: "birthdays",
     type: "role",
   },

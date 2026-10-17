@@ -49,7 +49,12 @@ const mockFindDependencyIssues =
 const mockRegisterCommands = jest.fn<() => Promise<void>>();
 const mockPopulateClientCommands = jest.fn<() => Promise<void>>();
 const mockSetConfigReloadStatus = jest.fn();
-const mockGuildsFetch = jest.fn<() => Promise<{ name: string }>>();
+const mockGuildsFetch = jest.fn<() => Promise<unknown>>();
+/** The guild's roles by id, for the powerful-role check (#1145). */
+const mockRoleCache = new Map<
+  string,
+  { id: string; name: string; permissions: { bitfield: bigint } }
+>();
 const mockDigestReload = jest.fn<() => Promise<void>>();
 const mockLeaderboardReload = jest.fn<() => Promise<void>>();
 const mockBirthdayReload = jest.fn<() => Promise<void>>();
@@ -188,7 +193,11 @@ beforeEach(async () => {
   mockConfigDelete.mockResolvedValue(undefined);
   mockConfigGetAll.mockResolvedValue([]);
   mockFindDependencyIssues.mockResolvedValue([]);
-  mockGuildsFetch.mockResolvedValue({ name: "Kool Guild" });
+  mockRoleCache.clear();
+  mockGuildsFetch.mockResolvedValue({
+    name: "Kool Guild",
+    roles: { fetch: async () => undefined, cache: mockRoleCache },
+  });
   mockDigestReload.mockResolvedValue(undefined);
   mockLeaderboardReload.mockResolvedValue(undefined);
   mockBirthdayReload.mockResolvedValue(undefined);
@@ -464,6 +473,112 @@ describe("role group roles can't be reused by other features (#1023)", () => {
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("birthdays.role_id");
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("powerful roles can't be handed out automatically (#1145)", () => {
+  const POWERFUL = "999999999999999999";
+  const FREE_ROLE = "888888888888888888";
+
+  beforeEach(() => {
+    mockRoleCache.set(POWERFUL, {
+      id: POWERFUL,
+      name: "Admins",
+      permissions: { bitfield: 0x8n | 0x4n },
+    });
+    mockRoleCache.set(FREE_ROLE, {
+      id: FREE_ROLE,
+      name: "Birthday",
+      permissions: { bitfield: 0n },
+    });
+  });
+
+  it("refuses a role with Administrator as the birthday role, naming it", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: POWERFUL,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Administrator");
+    expect(flash.msg).toContain("BanMembers");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "setting.set",
+      targetId: "birthdays.role_id",
+      result: "failure",
+    });
+  });
+
+  it("allows a role without those permissions", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: FREE_ROLE,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
+  it("does not block re-saving the role the setting already held", async () => {
+    mockConfigGet.mockResolvedValue(POWERFUL);
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: POWERFUL,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalled();
+  });
+
+  it("allows clearing the birthday role without reading the guild", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: "",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockGuildsFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the guild's roles can't be read", async () => {
+    mockGuildsFetch.mockRejectedValue(new Error("Missing Access"));
+    const res = await harness.post("/settings/set", {
+      key: "birthdays.role_id",
+      value: FREE_ROLE,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Could not read");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses a powerful role in a leaderboard tier saved from Settings", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "leaderboard_roles.tiers",
+      value: `1:${FREE_ROLE},3:${POWERFUL}`,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("blocks a section save that picks a powerful role, saving nothing", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "birthdays",
+      keys: ["birthdays.role_id"],
+      "value_birthdays.role_id": POWERFUL,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("birthdays.role_id");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses a powerful role in an import for that key only", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: ["quotes.max_length: 500", `birthdays.role_id: "${POWERFUL}"`].join(
+        "\n",
+      ),
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
   });
 });
 

@@ -45,6 +45,13 @@ jest.unstable_mockModule(
   }),
 );
 
+const mockGetRoleIdsWith = jest.fn();
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: jest.fn(() => ({ getRoleIdsWith: mockGetRoleIdsWith })),
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
   DiscordLogger: { getInstance: mockDiscordLoggerGetInstance },
 }));
@@ -342,6 +349,7 @@ describe("BirthdayService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
+    mockGetRoleIdsWith.mockResolvedValue([]);
     mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
       const k = key as string;
       if (k === "birthdays.enabled") return true;
@@ -693,6 +701,178 @@ describe("BirthdayService", () => {
       expect(del).toHaveBeenCalled();
       // Withdrawn, so it is not an announcement that happened.
       expect(summary?.announced).toBe(0);
+    });
+  });
+
+  describe("a powerful birthday role is never granted (#1145)", () => {
+    const ADMIN = 0x8n;
+
+    /** Runs one sweep with two birthdays today and `roleBits` on the role. */
+    async function runWithRole(
+      roleBits: bigint,
+      roleFetch?: () => Promise<unknown>,
+    ): Promise<{
+      summary: Awaited<ReturnType<ServiceInstance["runNow"]>>;
+      rolesAdd: jest.Mock;
+      send: jest.Mock;
+      svc: ServiceInstance;
+    }> {
+      mockConfigGetBoolean.mockResolvedValue(true);
+      mockConfigGetNumber.mockResolvedValue(24);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.channel_id") return "chan-1";
+        if (k === "birthdays.role_id") return "role-1";
+        return "";
+      });
+      mockGetTimezone.mockResolvedValue("UTC");
+      mockBirthdayUpdateOne.mockResolvedValue({ matchedCount: 1 });
+      const today = new Date();
+      const rows = ["user-1", "user-2"].map((userId, i) => ({
+        _id: `row-${i}`,
+        userId,
+        guildId: "guild-1",
+        month: today.getUTCMonth() + 1,
+        day: today.getUTCDate(),
+        save: jest.fn(async () => undefined),
+      }));
+      mockBirthdayFind
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(rows as never);
+
+      const send = jest.fn(async () => ({ id: "msg", delete: jest.fn() }));
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+      };
+      channel.id = "chan-1";
+      (channel as unknown as { send: jest.Mock }).send = send;
+      const rolesAdd = jest.fn(async () => undefined);
+
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        id: "guild-1",
+        channels: { fetch: jest.fn(async () => channel) },
+        roles: {
+          fetch:
+            roleFetch ??
+            jest.fn(async () => ({
+              id: "role-1",
+              permissions: { bitfield: roleBits },
+            })),
+        },
+        members: {
+          fetch: jest.fn(async (id: string) => ({
+            displayName: id,
+            id,
+            roles: { add: rolesAdd },
+          })),
+        },
+      });
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      return { summary: await svc.runNow(), rolesAdd, send, svc };
+    }
+
+    const blockedWarnings = (): unknown[][] =>
+      mockLoggerWarn.mock.calls.filter((c) =>
+        String(c[0]).includes("is not granted"),
+      );
+
+    it("announces but grants nothing, with one warning for the role", async () => {
+      const { summary, rolesAdd, send } = await runWithRole(ADMIN);
+
+      expect(summary?.announced).toBe(2);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(rolesAdd).not.toHaveBeenCalled();
+      expect(summary?.rolesGranted).toBe(0);
+      expect(blockedWarnings()).toHaveLength(1);
+      expect(String(blockedWarnings()[0][0])).toContain("Administrator");
+    });
+
+    it("grants a role without those permissions as before", async () => {
+      const { summary, rolesAdd } = await runWithRole(0n);
+
+      expect(rolesAdd).toHaveBeenCalledTimes(2);
+      expect(summary?.rolesGranted).toBe(2);
+      expect(blockedWarnings()).toHaveLength(0);
+    });
+
+    it("refuses the admin role group's role", async () => {
+      mockGetRoleIdsWith.mockResolvedValue(["role-1"]);
+      const { rolesAdd } = await runWithRole(0n);
+
+      expect(mockGetRoleIdsWith).toHaveBeenCalledWith("guild-1", "admin");
+      expect(rolesAdd).not.toHaveBeenCalled();
+    });
+
+    it("skips the grant when the role cannot be read, and still announces", async () => {
+      const { summary, rolesAdd } = await runWithRole(
+        0n,
+        jest.fn(async () => {
+          throw new Error("rest down");
+        }),
+      );
+
+      expect(summary?.announced).toBe(2);
+      expect(rolesAdd).not.toHaveBeenCalled();
+    });
+
+    it("treats an Unknown Role rejection as a deleted role, not a failed check", async () => {
+      const { rolesAdd } = await runWithRole(
+        0n,
+        jest.fn(async () => {
+          throw new DiscordAPIError(
+            { code: 10011, message: "Unknown Role" },
+            10011,
+            404,
+            "GET",
+            "",
+            {},
+          );
+        }),
+      );
+
+      expect(rolesAdd).toHaveBeenCalledTimes(2);
+      expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+        expect.stringContaining("could not be checked"),
+        expect.anything(),
+      );
+    });
+
+    it("reads nothing about the role when no birthday is due", async () => {
+      mockConfigGetBoolean.mockResolvedValue(true);
+      mockConfigGetNumber.mockResolvedValue(24);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.channel_id") return "chan-1";
+        if (k === "birthdays.role_id") return "role-1";
+        return "";
+      });
+      mockBirthdayFind.mockResolvedValue([]);
+      const channel = Object.create(TextChannel.prototype) as TextChannel;
+      const rolesFetch = jest.fn();
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        id: "guild-1",
+        channels: { fetch: jest.fn(async () => channel) },
+        roles: { fetch: rolesFetch },
+        members: { fetch: jest.fn() },
+      });
+      await BirthdayService.getInstance(client).runNow();
+
+      expect(rolesFetch).not.toHaveBeenCalled();
+      expect(mockGetRoleIdsWith).not.toHaveBeenCalled();
+    });
+
+    it("leaves a deleted role to the existing grant failure path", async () => {
+      const { rolesAdd } = await runWithRole(
+        0n,
+        jest.fn(async () => null),
+      );
+
+      expect(rolesAdd).toHaveBeenCalledTimes(2);
+      expect(blockedWarnings()).toHaveLength(0);
     });
   });
 

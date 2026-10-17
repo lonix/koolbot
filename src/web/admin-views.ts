@@ -4315,7 +4315,7 @@ export interface LeaderboardTierView {
    */
   assignable: boolean | null;
   /** Why the role can't be assigned, when {@link assignable} is false. */
-  roleIssue?: "everyone" | "managed" | "hierarchy" | null;
+  roleIssue?: "everyone" | "managed" | "hierarchy" | "privileged" | null;
   /** Members the bot last recorded as holding the role. */
   holders: LeaderboardTierHolder[];
   /** When the bot last reconciled this tier (ISO), or null if never. */
@@ -4393,6 +4393,7 @@ const TIER_ROLE_ISSUE_LABELS = {
   everyone: "@everyone can’t be a tier role",
   managed: "managed by an integration",
   hierarchy: "above the bot’s role",
+  privileged: "has powerful permissions, so it is not granted",
 } as const;
 
 function renderTierRoleIssue(tier: LeaderboardTierView): string {

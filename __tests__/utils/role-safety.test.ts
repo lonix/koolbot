@@ -3,6 +3,7 @@ import { PermissionFlagsBits } from "discord.js";
 import {
   SELF_ASSIGN_FORBIDDEN_PERMISSIONS,
   forbiddenSelfAssignPermissions,
+  automaticGrantBlockReason,
 } from "../../src/utils/role-safety.js";
 
 const role = (...bits: bigint[]) => ({
@@ -64,5 +65,38 @@ describe("forbiddenSelfAssignPermissions (#1145)", () => {
   it("treats a role with no readable permissions as safe", () => {
     expect(forbiddenSelfAssignPermissions({})).toEqual([]);
     expect(forbiddenSelfAssignPermissions({ permissions: null })).toEqual([]);
+  });
+});
+
+describe("automaticGrantBlockReason (#1145)", () => {
+  it("allows a role with neither forbidden permissions nor the admin group", () => {
+    expect(
+      automaticGrantBlockReason(
+        { id: "1", ...role(PermissionFlagsBits.ManageMessages) },
+        ["2"],
+      ),
+    ).toBeNull();
+  });
+
+  it("names the forbidden permissions", () => {
+    expect(
+      automaticGrantBlockReason({
+        id: "1",
+        ...role(
+          PermissionFlagsBits.Administrator,
+          PermissionFlagsBits.BanMembers,
+        ),
+      }),
+    ).toBe("carries powerful permissions (BanMembers, Administrator)");
+  });
+
+  it("refuses the admin role group's role even without permissions", () => {
+    expect(automaticGrantBlockReason({ id: "2", ...role() }, ["2"])).toBe(
+      "is the role of the admin role group",
+    );
+  });
+
+  it("treats a role with unreadable permissions as safe", () => {
+    expect(automaticGrantBlockReason({ id: "1" })).toBeNull();
   });
 });

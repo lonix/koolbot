@@ -55,3 +55,26 @@ export function forbiddenSelfAssignNames(bits: bigint): string[] {
     .filter(([, flag]) => (hit & flag) === flag)
     .map(([name]) => name);
 }
+
+/**
+ * Why a feature that hands a role to members on its own (a leaderboard tier,
+ * the birthday role) must not grant `role`, or null when it may. Covers the
+ * forbidden permissions above and a role of the configured `admin` role group,
+ * which the Web UI accepts as admin by bare membership, so handing it out is a
+ * Web UI admin grant (#1145). `adminRoleIds` are the admin group's role ids.
+ * Reaction roles already refuse every group-backed role, so they keep using
+ * {@link forbiddenSelfAssignPermissions} alone.
+ */
+export function automaticGrantBlockReason(
+  role: { id: string; permissions?: { bitfield: bigint } | null },
+  adminRoleIds: readonly string[] = [],
+): string | null {
+  const dangerous = forbiddenSelfAssignPermissions(role);
+  if (dangerous.length > 0) {
+    return `carries powerful permissions (${dangerous.join(", ")})`;
+  }
+  if (adminRoleIds.includes(role.id)) {
+    return "is the role of the admin role group";
+  }
+  return null;
+}

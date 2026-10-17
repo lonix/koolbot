@@ -1160,7 +1160,9 @@ re-arms the recalculation job immediately, as on the Digest page. The **Tiers** 
 as rows — a _Top N_ number plus a role picker, with **Add tier** / **Remove** (without
 JavaScript, one spare row is rendered and clearing a row removes it). On save each
 Top N must be unique and between 1 and 1000, each tier needs its own role, and every
-role must exist, not be integration-managed, and sit below the bot's highest role;
+role must exist, not be integration-managed, sit below the bot's highest role, and not
+carry Administrator or another powerful permission (Manage Server, Manage Roles, Manage
+Channels, Manage Webhooks, Kick, Ban, Timeout or Mention @everyone; the message names them);
 the rows are then serialised back to the same `topN:roleId` string the service reads,
 so the stored format does not change. Saving the tiers unchanged writes nothing, so
 an existing config's string round-trips untouched. Stored entries the service ignores
@@ -1169,7 +1171,10 @@ and dropped by the next change. When a tier is removed or given a different role
 next recalculation takes the old role back from the members the bot recorded and drops
 that roster (a failed revoke is kept and retried), including when every tier is removed.
 If the stored config can't be read, the editor is replaced by a notice so a save can't
-overwrite the real tiers. **Current holders** lists, per tier, the members the
+overwrite the real tiers. A tier saved before this check keeps its role in the config (an
+unrelated save is not blocked), but the recalculation never grants it: it logs one warning per
+role, skips new grants for that tier (members who hold it are only revoked as they drop out),
+and the tier is flagged on the page. **Current holders** lists, per tier, the members the
 bot recorded on its last recalculation (the bot has no GuildMembers intent, so this
 roster — not a live read of the role — is the source of truth), and flags roles that
 are missing or above the bot's role. **Run now** recalculates immediately through
@@ -1289,6 +1294,13 @@ groups are defined:
 - **Quotes**: the _Roles allowed to delete quotes_ picker (`quotes.delete_roles`) offers the same
   group entries. Left empty, it means the `staff` and `admin` groups once one exists. With no such
   group the setting works as before.
+- **Birthday role and leaderboard tiers, powerful roles (#1145)**: saving a role with Administrator,
+  Manage Server, Manage Roles, Manage Channels, Manage Webhooks, Kick, Ban, Timeout or Mention
+  @everyone as the birthday role or a tier is refused, naming the permissions (on the Settings page,
+  section saves, imports and the Setup Wizard too). A role already saved is kept, not changed, and not granted: the
+  birthday run still announces but skips the role, and a tier skips new grants, each logging one
+  warning per role. The `admin` group's role is refused at grant time as well. If the guild's roles
+  can't be read, the save is refused.
 - **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
   chosen for another feature (a leaderboard tier would take it back from members, a birthday role
   would hand it out). The save is refused with a message naming the group. Choices made earlier are

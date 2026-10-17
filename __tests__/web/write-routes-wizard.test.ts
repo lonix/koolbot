@@ -87,7 +87,19 @@ const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 const { WIZARD_FEATURE_ORDER } =
   await import("../../src/web/routes/write/helpers.js");
 
-const client = { user: { id: "bot" } } as unknown as Client;
+/** The guild's roles by id, for the powerful-role check (#1145). */
+const roleCache = new Map<
+  string,
+  { id: string; name: string; permissions: { bitfield: bigint } }
+>();
+const client = {
+  user: { id: "bot" },
+  guilds: {
+    fetch: async (): Promise<unknown> => ({
+      roles: { fetch: async () => undefined, cache: roleCache },
+    }),
+  },
+} as unknown as Client;
 const session = createTestSession();
 let harness: AdminHarness;
 
@@ -101,6 +113,12 @@ function wizardState(
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  roleCache.clear();
+  roleCache.set("999999999999999999", {
+    id: "999999999999999999",
+    name: "Admins",
+    permissions: { bitfield: 0x8n },
+  });
   mockGetSession.mockReturnValue(null);
   jest
     .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
@@ -315,6 +333,19 @@ describe("POST /wizard/step/:n", () => {
     expect(recorded["birthdays.role_id"]).toBe("888888888888888888");
   });
 
+  it("drops a birthday role with Administrator and names the permission (#1145)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["birthdays"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": "999999999999999999",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Administrator",
+    );
+    const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
+    expect(recorded).not.toContain("birthdays.role_id");
+  });
+
   it("keeps the operator on the step and names the dropped fields", async () => {
     mockGetSession.mockReturnValue(wizardState(["quotes"]));
     const res = await harness.post("/wizard/step/0", {
@@ -368,6 +399,20 @@ describe("POST /wizard/apply", () => {
       action: "wizard.apply",
       result: "failure",
     });
+  });
+
+  it("applies nothing when a saved role carries Administrator (#1145)", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["birthdays"], {
+        "birthdays.enabled": true,
+        "birthdays.role_id": "999999999999999999",
+      }),
+    );
+    const res = await harness.post("/wizard/apply");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Administrator");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
   });
 
   it("applies a saved role no group backs (#1023)", async () => {
