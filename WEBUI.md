@@ -1579,7 +1579,7 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   keep posting), and the plan warns if a feed is still visible through its own overwrite in a gated category. When KoolBot
   lacks Manage Webhooks the webhook data is **unavailable**: the page says so, suggests no feed, and refuses a feed claim
   rather than guessing.
-- **Stage speakers.** A group-gated stage channel can also limit who may *request to speak*: pick the speaker roles in
+- **Stage speakers.** A group-gated stage channel can also limit who may _request to speak_: pick the speaker roles in
   Options (they are let in too); everyone else who can see it is denied `RequestToSpeak`. Stage moderators (Mute
   Members, Move Members, Manage Channels) can still invite anyone to speak: the plan says so, and KoolBot never grants
   or removes those permissions. Existing `RequestToSpeak` allows on other roles or members are kept (they may belong to
