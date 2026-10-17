@@ -491,6 +491,7 @@ export function renderAdminFixPage(props: AdminFixPageProps): string {
   const body = `
 <h1>Administrators outside the admin group</h1>
 <p class="subtitle">Review what would change in Discord. Nothing is written until you apply, and a snapshot is saved first.</p>
+<h2>Plan</h2>
 ${errors}${losing}${renderAdoptionDiff(props.plan)}${form}`;
   return renderAdminPage({
     title: "Role Groups",
