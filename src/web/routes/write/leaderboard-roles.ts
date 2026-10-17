@@ -82,6 +82,9 @@ function toArray(raw: unknown): string[] {
 /**
  * Check every tier's role against the live guild: it must exist, not be
  * @everyone or integration-managed, and sit below the bot's highest role.
+ * A role with Administrator or another powerful permission is refused too
+ * (#1145), except a role in `keep` (the tiers' current roles): an existing
+ * choice is not blocked on every unrelated save, it just stops being granted.
  * Fails closed — if the guild can't be read the save is refused rather than
  * storing roles nobody checked.
  */
@@ -89,6 +92,7 @@ async function findTierRoleProblem(
   client: Client,
   guildId: string,
   tiers: readonly LeaderboardTier[],
+  keep: readonly string[] = [],
 ): Promise<string | null> {
   if (tiers.length === 0) return null;
   let guild;
@@ -107,7 +111,9 @@ async function findTierRoleProblem(
   const botHighest = me.roles.highest.position;
   for (const tier of tiers) {
     const role = guild.roles.cache.get(tier.roleId) ?? null;
-    const problem = tierRoleProblem(role, guild.id, botHighest);
+    const problem = tierRoleProblem(role, guild.id, botHighest, {
+      allowPrivileged: keep.includes(tier.roleId),
+    });
     if (problem) return `Top ${tier.topN}: ${problem}.`;
   }
   return null;
@@ -168,6 +174,7 @@ export function createLeaderboardRolesRouter(client: Client): Router {
         client,
         session.guildId,
         rows.tiers,
+        parseTierConfig(before).tiers.map((t) => t.roleId),
       );
       if (problem) {
         await recordAudit(session, {
@@ -269,7 +276,17 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           retired.reduce((n, r) => n + r.removed.length, 0);
         const problems = [
           skipped.length > 0
-            ? `${skipped.length} tier(s) skipped: role not found`
+            ? `${skipped.length} tier(s) skipped: ${[
+                ...new Set(
+                  skipped.map((t) =>
+                    t.skippedReason === "role-privileged"
+                      ? "role has powerful permissions or is the admin role"
+                      : t.skippedReason === "role-unverified"
+                        ? "role could not be read, retry"
+                        : "role not found",
+                  ),
+                ),
+              ].join("; ")}`
             : "",
           retainedCount > 0
             ? `${retainedCount} removed-tier revoke(s) failed; retried next run`
@@ -298,7 +315,11 @@ export function createLeaderboardRolesRouter(client: Client): Router {
         const perTier = summary.tiers
           .map((t) =>
             t.skippedReason
-              ? `Top ${t.topN}: skipped (role not found)`
+              ? t.skippedReason === "role-privileged"
+                ? `Top ${t.topN} @${t.roleName}: not granted (powerful or admin role), −${t.removed.length}`
+                : t.skippedReason === "role-unverified"
+                  ? `Top ${t.topN} @${t.roleName}: not granted (role could not be read, try again), −${t.removed.length}`
+                  : `Top ${t.topN}: skipped (role not found)`
               : `Top ${t.topN} @${t.roleName}: +${t.added.length} / −${t.removed.length}`,
           )
           .concat(

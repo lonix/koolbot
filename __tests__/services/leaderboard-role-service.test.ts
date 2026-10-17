@@ -34,6 +34,13 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const mockGetRoleIdsWith = jest.fn();
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: jest.fn(() => ({ getRoleIdsWith: mockGetRoleIdsWith })),
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
   VoiceChannelTracker: {
     getInstance: mockTrackerGetInstance,
@@ -134,6 +141,7 @@ describe("LeaderboardRoleService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
+    mockGetRoleIdsWith.mockResolvedValue([]);
     mockConfigGetBoolean.mockResolvedValue(true);
     mockConfigGetString.mockImplementation(async (key: unknown) => {
       const k = key as string;
@@ -294,6 +302,145 @@ describe("LeaderboardRoleService", () => {
       // Full ranking is fetched with the "all ranked users" sentinel (0);
       // per-tier cutoffs happen in reconcileTier.
       expect(mockGetTopUsers).toHaveBeenCalledWith(0, "alltime");
+    });
+  });
+
+  describe("powerful roles are never granted (#1145)", () => {
+    const ADMIN = 0x8n;
+
+    function setup(roleBits: bigint, existingHolders: string[] = []): void {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return "2:111";
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 100 },
+        { userId: "u2", username: "u2", totalTime: 90 },
+        { userId: "u3", username: "u3", totalTime: 80 },
+      ]);
+      const guild = makeGuildWithRole({ roleId: "111", roleName: "Top 2" });
+      (
+        guild.role as unknown as { permissions: { bitfield: bigint } }
+      ).permissions = { bitfield: roleBits };
+      mockClientGuildsFetch.mockResolvedValue(guild);
+      mockAssignmentFindOne.mockResolvedValue(
+        existingHolders.length > 0 ? { userIds: existingHolders } : null,
+      );
+    }
+
+    it("grants nothing, warns once for the role and reports the skip", async () => {
+      setup(ADMIN);
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const first = await svc.runNow();
+      await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(first!.tiers[0].added).toEqual([]);
+      expect(first!.tiers[0].skippedReason).toBe("role-privileged");
+      const warnings = mockLoggerWarn.mock.calls.filter((c) =>
+        String(c[0]).includes("is not granted"),
+      );
+      // One warning for the role, not one per member or per run.
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0][0])).toContain("Administrator");
+    });
+
+    it("leaves current holders in place while they still qualify and revokes the rest", async () => {
+      setup(ADMIN, ["u1", "u3"]);
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].removed).toEqual(["u3"]);
+      expect(mockAssignmentFindOneAndUpdate).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "111" },
+        expect.objectContaining({ userIds: ["u1"] }),
+        { upsert: true },
+      );
+    });
+
+    it("reads the live role: a cached safe role that is privileged on a fresh fetch is not granted", async () => {
+      setup(0n);
+      mockGuildRolesFetch.mockImplementation(
+        async (_id: unknown, opts?: unknown) => ({
+          id: "111",
+          name: "Top 2",
+          permissions: {
+            bitfield: (opts as { force?: boolean } | undefined)?.force
+              ? ADMIN
+              : 0n,
+          },
+        }),
+      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+    });
+
+    it("refuses the grant, warning once, when the live role cannot be read", async () => {
+      setup(0n);
+      // The reconcile's own lookup succeeds; only the forced refresh fails.
+      mockGuildRolesFetch.mockImplementation(
+        async (_id: unknown, opts?: unknown) => {
+          if ((opts as { force?: boolean } | undefined)?.force) {
+            throw new Error("rest down");
+          }
+          return { id: "111", name: "Top 2", permissions: { bitfield: 0n } };
+        },
+      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+      await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-unverified");
+      const warnings = mockLoggerWarn.mock.calls.filter((c) =>
+        String(c[0]).includes("could not be verified"),
+      );
+      expect(warnings).toHaveLength(1);
+    });
+
+    it("does not grant the admin role group's role either", async () => {
+      setup(0n);
+      mockGetRoleIdsWith.mockResolvedValue(["111"]);
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockGetRoleIdsWith).toHaveBeenCalledWith("guild-1", "admin");
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+    });
+
+    it("grants nothing, and says it could not verify, when the role groups cannot be read", async () => {
+      setup(0n);
+      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-unverified");
+    });
+
+    it("still revokes members who dropped out when the role groups cannot be read", async () => {
+      setup(0n, ["u1", "u3"]);
+      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].removed).toEqual(["u3"]);
     });
   });
 

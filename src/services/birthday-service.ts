@@ -1,4 +1,4 @@
-import { Client, Guild, TextChannel } from "discord.js";
+import { Client, DiscordAPIError, Guild, TextChannel } from "discord.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { formatInTimeZone } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
@@ -20,6 +20,8 @@ import {
   isUnknownMessageError,
 } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
+import { automaticGrantBlockReason } from "../utils/role-safety.js";
+import { RoleGroupService } from "./role-group-service.js";
 
 /**
  * Birthday celebrations service (#657).
@@ -729,6 +731,18 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       summary.ranAt,
     );
 
+    // The role a birthday would hand out, checked the first time a grant is
+    // due in this run (an hourly run with no birthdays reads nothing): a role
+    // with powerful permissions (or the admin group's role) is never granted,
+    // but the announcement still goes out (#1145).
+    let roleBlock: string | null | undefined;
+    const roleBlockFor = async (): Promise<string | null> => {
+      if (roleBlock === undefined) {
+        roleBlock = await this.birthdayRoleBlock(guild, roleId);
+      }
+      return roleBlock;
+    };
+
     // 2. Announce today's birthdays (in each member's own timezone).
     const prefsService = UserNotificationPrefsService.getInstance();
     const rows = await UserBirthday.find({ guildId });
@@ -773,7 +787,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         });
         summary.announced += 1;
 
-        if (roleId) {
+        if (roleId && !(await roleBlockFor())) {
           const granted = await this.grantBirthdayRole(member, roleId);
           if (granted) {
             row.roleAssignedAt = summary.ranAt;
@@ -1331,6 +1345,67 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           error,
         ),
       );
+  }
+
+  /** Role-and-reason pairs already warned about, so a bad role logs once. */
+  private readonly warnedBlockedRoles = new Set<string>();
+
+  /**
+   * Why the configured birthday role must not be granted, or null when it may
+   * (#1145). Any member can trigger a grant by setting a birthday, so a role
+   * with Administrator or other forbidden permissions, or the admin group's
+   * role, is refused here even when it was saved before the Web UI checked.
+   * Nothing stored is changed. Warns once per role and reason, not per member.
+   * Fails closed when the role can't be read, and open (grants as before) when
+   * the role no longer exists, since the grant then fails on its own.
+   */
+  private async birthdayRoleBlock(
+    guild: Guild,
+    roleId: string,
+  ): Promise<string | null> {
+    try {
+      // Forced: the decision reads the live role, not the cache, so a role
+      // that just gained Administrator is not granted on stale permissions.
+      const role = await guild.roles
+        .fetch(roleId, { force: true })
+        .catch((error: unknown) => {
+          // A deleted role is reported as null or as Unknown Role (10011);
+          // either way there is nothing to guard and the grant fails as before.
+          if (error instanceof DiscordAPIError && error.code === 10011) {
+            return null;
+          }
+          throw error;
+        });
+      if (!role) return null;
+      // No fallback: if the admin group can't be read, the role can't be
+      // cleared, so the error reaches the catch below and the grant is
+      // refused (the announcement still goes out).
+      const adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+        guild.id,
+        "admin",
+      );
+      const reason = automaticGrantBlockReason(role, adminRoleIds);
+      if (reason) {
+        const key = `${roleId}:${reason}`;
+        if (!this.warnedBlockedRoles.has(key)) {
+          this.warnedBlockedRoles.add(key);
+          logger.warn(
+            `Birthday role ${sanitizeForLog(roleId)} is not granted: it ${reason}. Choose a role without those permissions in the Web UI.`,
+          );
+        }
+      }
+      return reason;
+    } catch (error) {
+      const key = `${roleId}:unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Birthday role ${sanitizeForLog(roleId)} could not be verified, so it is not granted until Discord answers:`,
+          error,
+        );
+      }
+      return "could not be checked";
+    }
   }
 
   private async grantBirthdayRole(

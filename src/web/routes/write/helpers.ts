@@ -9,7 +9,9 @@
  */
 
 import { RAID_CONFIG_KEYS } from "../../../services/raid-protection-service.js";
+import type { Client } from "discord.js";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { forbiddenSelfAssignPermissions } from "../../../utils/role-safety.js";
 import {
   isValidCronExpression,
   sanitizeCronExpression,
@@ -767,4 +769,45 @@ export async function findGroupRoleReuseForSetting(
   const roleIds = guardedRoleIds(key, value);
   if (roleIds.length === 0) return null;
   return findGroupRoleReuse(guildId, roleIds, guardedRoleIds(key, before));
+}
+
+/**
+ * Validator for the settings that hand a role out automatically (the birthday
+ * role and the leaderboard tiers): refuse a newly chosen role that carries
+ * Administrator or another permission from `SELF_ASSIGN_FORBIDDEN_PERMISSIONS`
+ * (#1145), naming the permissions. Returns an operator-facing message, or null
+ * when every newly chosen role is fine.
+ *
+ * Roles `before` already held are never reported, so an existing choice does
+ * not block unrelated saves; the services stop granting it instead, and stored
+ * config is never changed. A role that no longer exists is left to the
+ * existing checks. Fails closed when the guild's roles can't be read, since
+ * this guards a security decision.
+ */
+export async function findPowerfulRoleForSetting(
+  client: Client,
+  guildId: string,
+  key: string,
+  value: unknown,
+  before: unknown,
+): Promise<string | null> {
+  const keep = guardedRoleIds(key, before);
+  const fresh = guardedRoleIds(key, value).filter((id) => !keep.includes(id));
+  if (fresh.length === 0) return null;
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    await guild.roles.fetch();
+    for (const id of fresh) {
+      const role = guild.roles.cache.get(id);
+      if (!role) continue;
+      const powerful = forbiddenSelfAssignPermissions(role);
+      if (powerful.length > 0) {
+        return `@${role.name} has powerful permissions (${powerful.join(", ")}), so it can't be handed out automatically: every member who qualifies would receive them. Remove those permissions from the role or pick a different one.`;
+      }
+    }
+    return null;
+  } catch (err) {
+    logger.warn("powerful role check: guild roles unreadable", err);
+    return "Could not read the server's roles from Discord to check that role. Try again.";
+  }
 }

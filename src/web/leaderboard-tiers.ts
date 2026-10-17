@@ -9,6 +9,8 @@
  * shows exactly the tiers the service would act on.
  */
 
+import { forbiddenSelfAssignPermissions } from "../utils/role-safety.js";
+
 export interface LeaderboardTier {
   topN: number;
   roleId: string;
@@ -163,10 +165,13 @@ export interface TierRoleInfo {
   name: string;
   managed: boolean;
   position: number;
+  /** Read for the powerful-permissions check; absent counts as safe. */
+  permissions?: { bitfield: bigint } | null;
 }
 
 /** Why the bot cannot hand out a role as a tier reward. */
-export type TierRoleIssue = "missing" | "everyone" | "managed" | "hierarchy";
+export type TierRoleIssue =
+  "missing" | "everyone" | "managed" | "hierarchy" | "privileged";
 
 /**
  * Why the bot cannot hand out `role` as a tier reward, or null when nothing
@@ -174,17 +179,29 @@ export type TierRoleIssue = "missing" | "everyone" | "managed" | "hierarchy";
  * `botHighestPosition` is null when the bot's own member could not be read,
  * in which case the hierarchy check is skipped rather than guessed — callers
  * that report assignability must treat that as unknown, not as fine.
+ *
+ * A role carrying Administrator or another permission from
+ * `SELF_ASSIGN_FORBIDDEN_PERMISSIONS` is "privileged" (#1145): the grant is
+ * automatic, so it would hand those permissions to whoever ranks. A caller
+ * that must tolerate a role the tiers already held passes `allowPrivileged`.
  */
 export function tierRoleIssue(
   role: TierRoleInfo | null,
   guildId: string,
   botHighestPosition: number | null,
+  options: { allowPrivileged?: boolean } = {},
 ): TierRoleIssue | null {
   if (!role) return "missing";
   if (role.id === guildId) return "everyone";
   if (role.managed) return "managed";
   if (botHighestPosition !== null && role.position >= botHighestPosition) {
     return "hierarchy";
+  }
+  if (
+    !options.allowPrivileged &&
+    forbiddenSelfAssignPermissions(role).length > 0
+  ) {
+    return "privileged";
   }
   return null;
 }
@@ -193,6 +210,7 @@ export function tierRoleIssue(
 export function describeTierRoleIssue(
   issue: TierRoleIssue,
   roleName: string,
+  permissions: readonly string[] = [],
 ): string {
   switch (issue) {
     case "missing":
@@ -203,6 +221,8 @@ export function describeTierRoleIssue(
       return `@${roleName} is managed by an integration and cannot be assigned`;
     case "hierarchy":
       return `@${roleName} sits at or above the bot's highest role, so the bot cannot assign it`;
+    case "privileged":
+      return `@${roleName} has powerful permissions${permissions.length > 0 ? ` (${permissions.join(", ")})` : ""}, so it cannot be a tier role: every member who ranks would receive them. Remove those permissions from the role or pick a different one`;
   }
 }
 
@@ -211,7 +231,13 @@ export function tierRoleProblem(
   role: TierRoleInfo | null,
   guildId: string,
   botHighestPosition: number | null,
+  options: { allowPrivileged?: boolean } = {},
 ): string | null {
-  const issue = tierRoleIssue(role, guildId, botHighestPosition);
-  return issue ? describeTierRoleIssue(issue, role?.name ?? "") : null;
+  const issue = tierRoleIssue(role, guildId, botHighestPosition, options);
+  if (!issue) return null;
+  return describeTierRoleIssue(
+    issue,
+    role?.name ?? "",
+    role ? forbiddenSelfAssignPermissions(role) : [],
+  );
 }

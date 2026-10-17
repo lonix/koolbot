@@ -45,6 +45,7 @@ import {
   wizardApplyFailureMessage,
   coerceConfigValue,
   findGroupRoleReuseForSetting,
+  findPowerfulRoleForSetting,
   truncateFlash,
 } from "./helpers.js";
 
@@ -336,15 +337,27 @@ export function createWizardRouter(client: Client): Router {
         const coerced = coerceConfigValue(k, raw);
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.
+        const stored = coerced.ok
+          ? await ConfigService.getInstance()
+              .get(k)
+              .catch(() => undefined)
+          : undefined;
+        // Also refuse a role with Administrator or other powerful
+        // permissions (#1145).
         const reuse = coerced.ok
-          ? await findGroupRoleReuseForSetting(
+          ? ((await findGroupRoleReuseForSetting(
               session.guildId,
               k,
               coerced.value,
-              await ConfigService.getInstance()
-                .get(k)
-                .catch(() => undefined),
-            )
+              stored,
+            )) ??
+            (await findPowerfulRoleForSetting(
+              client,
+              session.guildId,
+              k,
+              coerced.value,
+              stored,
+            )))
           : null;
         if (reuse) {
           dropped.push({ key: k, reason: reuse });
@@ -423,14 +436,25 @@ export function createWizardRouter(client: Client): Router {
       // nothing if a role has become group-backed.
       for (const key of ["birthdays.role_id", "leaderboard_roles.tiers"]) {
         if (!(key in state.configuration)) continue;
-        const reuse = await findGroupRoleReuseForSetting(
-          session.guildId,
-          key,
-          state.configuration[key],
-          await ConfigService.getInstance()
-            .get(key)
-            .catch(() => undefined),
-        );
+        const before = await ConfigService.getInstance()
+          .get(key)
+          .catch(() => undefined);
+        // Also refuse a role with Administrator or other powerful
+        // permissions (#1145).
+        const reuse =
+          (await findGroupRoleReuseForSetting(
+            session.guildId,
+            key,
+            state.configuration[key],
+            before,
+          )) ??
+          (await findPowerfulRoleForSetting(
+            client,
+            session.guildId,
+            key,
+            state.configuration[key],
+            before,
+          ));
         if (reuse) {
           await recordAudit(session, {
             action: "wizard.apply",

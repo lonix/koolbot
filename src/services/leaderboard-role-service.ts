@@ -13,6 +13,8 @@ import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
+import { automaticGrantBlockReason } from "../utils/role-safety.js";
+import { RoleGroupService } from "./role-group-service.js";
 
 /** Discord's Unknown Role error: the role was deleted. */
 const UNKNOWN_ROLE = 10011;
@@ -25,9 +27,10 @@ const UNKNOWN_ROLE = 10011;
 async function fetchRoleOrNull(
   guild: Guild,
   roleId: string,
+  force = false,
 ): Promise<Role | null> {
   try {
-    return await guild.roles.fetch(roleId);
+    return await guild.roles.fetch(roleId, force ? { force: true } : undefined);
   } catch (error) {
     if (error instanceof DiscordAPIError && error.code === UNKNOWN_ROLE) {
       return null;
@@ -121,6 +124,8 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * so overlapping holds release cleanly (#917). See `holdOutForPurge`.
    */
   private readonly heldOut = new Map<string, number>();
+  /** Role-and-reason pairs already warned about, so a bad role logs once. */
+  private readonly warnedBlockedRoles = new Set<string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -334,6 +339,12 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       };
     }
 
+    // A role with powerful permissions (or the admin group's role) is never
+    // handed out, even when it was saved before the editor checked (#1145).
+    // Members who already hold it are left to the normal rank-based revoke
+    // below, and nothing stored is changed. Warns once per role, not per member.
+    const blockReason = await this.grantBlockReason(guild, role);
+
     // A member being purged never qualifies, so this run cannot grant them
     // the role while their data is being erased (#917). Filtered before the
     // cut so the next-ranked member moves up rather than leaving a gap.
@@ -363,6 +374,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         continue;
       }
       if (!previousHolders.has(userId)) {
+        if (blockReason) continue;
         try {
           await member.roles.add(role, "Leaderboard role reward (auto-assign)");
           added.push(userId);
@@ -418,7 +430,77 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       roleName: role.name,
       added,
       removed,
+      ...(blockReason ? { skippedReason: blockReason.skippedReason } : {}),
     };
+  }
+
+  /**
+   * Why `role` must not be granted, or null (see `automaticGrantBlockReason`).
+   * `skippedReason` tells a role that is unsafe ("role-privileged") from one
+   * that could not be checked ("role-unverified"), which clears on its own.
+   */
+  private async grantBlockReason(
+    guild: Guild,
+    role: Role,
+  ): Promise<{
+    reason: string;
+    skippedReason: "role-privileged" | "role-unverified";
+  } | null> {
+    // The grant decision reads the live role, not the cache: a role that just
+    // gained Administrator must not slip through on stale permissions. A
+    // deleted role is left to the caller's own lookup; any other failure
+    // refuses the grant this run.
+    let live: Role | null;
+    try {
+      live = await fetchRoleOrNull(guild, role.id, true);
+    } catch (error) {
+      const key = `${role.id}:unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) could not be verified, so it is not granted until Discord answers:`,
+          error,
+        );
+      }
+      return {
+        reason: "could not be verified",
+        skippedReason: "role-unverified",
+      };
+    }
+    if (!live) return null;
+    // No fallback: if the admin group can't be read the role can't be
+    // cleared, so no new grant is made this run (revocations continue).
+    let adminRoleIds: string[];
+    try {
+      adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+        guild.id,
+        "admin",
+      );
+    } catch (error) {
+      const key = `${role.id}:groups-unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) could not be checked against the admin role group, so it is not granted until the groups can be read:`,
+          error,
+        );
+      }
+      return {
+        reason: "could not be verified",
+        skippedReason: "role-unverified",
+      };
+    }
+    const reason = automaticGrantBlockReason(live, adminRoleIds);
+    if (reason) {
+      const key = `${role.id}:${reason}`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) is not granted: it ${reason}. Choose a role without those permissions on the Leaderboard Roles page.`,
+        );
+      }
+    }
+    return reason ? { reason, skippedReason: "role-privileged" } : null;
   }
 
   /**

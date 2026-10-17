@@ -85,14 +85,23 @@ const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
  * member's highest role sits at `botPosition`.
  */
 function makeClient(opts: {
-  roles?: Record<string, { position: number; managed?: boolean }>;
+  roles?: Record<
+    string,
+    { position: number; managed?: boolean; permissions?: bigint }
+  >;
   botPosition?: number | null;
   fetchFails?: boolean;
 }): Client {
   const cache = new Map(
     Object.entries(opts.roles ?? {}).map(([id, r]) => [
       id,
-      { id, name: `role-${id}`, position: r.position, managed: !!r.managed },
+      {
+        id,
+        name: `role-${id}`,
+        position: r.position,
+        managed: !!r.managed,
+        permissions: { bitfield: r.permissions ?? 0n },
+      },
     ]),
   );
   const me =
@@ -332,6 +341,72 @@ describe("POST /leaderboard-roles/tiers", () => {
     });
   });
 
+  it("refuses a role with Administrator and names the permission (#1145)", async () => {
+    harness = await mount(
+      makeClient({
+        roles: { "111": { position: 2, permissions: 0x8n } },
+      }),
+    );
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: "1",
+      roleId: "111",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Top 1");
+    expect(flash.msg).toContain("Administrator");
+    expect(mockSet).not.toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      details: { attempted: "1:111" },
+    });
+  });
+
+  it("does not block a save over a powerful role the tiers already held (#1145)", async () => {
+    mockGetString.mockResolvedValue("1:111");
+    harness = await mount(
+      makeClient({
+        roles: {
+          "111": { position: 3, permissions: 0x8n },
+          "222": { position: 2 },
+        },
+      }),
+    );
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: ["1", "3", ""],
+      roleId: ["111", "222", ""],
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    // Stored config is kept as is, with the new tier added.
+    expect(mockSet).toHaveBeenCalledWith(
+      "leaderboard_roles.tiers",
+      "1:111,3:222",
+      expect.any(String),
+      "leaderboard_roles",
+    );
+  });
+
+  it("refuses a newly added powerful role even next to an existing tier (#1145)", async () => {
+    mockGetString.mockResolvedValue("1:111");
+    harness = await mount(
+      makeClient({
+        roles: {
+          "111": { position: 3 },
+          "222": { position: 2, permissions: 0x4n },
+        },
+      }),
+    );
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: ["1", "3", ""],
+      roleId: ["111", "222", ""],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Top 3");
+    expect(flash.msg).toContain("BanMembers");
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
   it("rejects a role that no longer exists", async () => {
     harness = await mount(makeClient({ roles: {} }));
     const res = await harness.post("/leaderboard-roles/tiers", {
@@ -496,6 +571,31 @@ describe("POST /leaderboard-roles/run-now", () => {
     expect(flash.type).toBe("warn");
     expect(flash.msg).toContain("Top 1: skipped (role not found)");
     expect(soleAudit()).toMatchObject({ result: "failure" });
+  });
+
+  it("says a role could not be read, not that it is privileged, and audits that cause", async () => {
+    mockRunNow.mockResolvedValue({
+      ranAt: new Date(),
+      period: "alltime",
+      tiers: [
+        {
+          topN: 1,
+          roleId: "111",
+          roleName: "Top",
+          added: [],
+          removed: [],
+          skippedReason: "role-unverified",
+        },
+      ],
+    });
+    const res = await harness.post("/leaderboard-roles/run-now");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("could not be read, try again");
+    expect(flash.msg).not.toContain("powerful");
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: expect.stringContaining("retry"),
+    });
   });
 
   it("warns when nothing ran (runNow returned null)", async () => {
