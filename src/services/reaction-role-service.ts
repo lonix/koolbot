@@ -31,6 +31,7 @@ import {
   GuildTextBasedChannel,
   DiscordAPIError,
   MessageFlags,
+  SnowflakeUtil,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -64,6 +65,7 @@ import {
  * footer. The message exists before its mapping is saved, so after a crash the
  * key is how a retry or a rollback finds (and proves ownership of) it.
  */
+const PICKER_SEARCH_MAX_PAGES = 50;
 const PICKER_REF_SEPARATOR = " · ";
 const PICKER_REF_PREFIX = "ref ";
 const isMarkedPicker = (
@@ -2045,10 +2047,31 @@ export class ReactionRoleService {
       autoCreated: false,
     });
     if (existing) {
+      const ours = existing.adoptionOpKey === input.ownerKey;
+      if (!ours && input.retry) {
+        // Another owner's mapping is reused, but this step may have posted its
+        // own picker before dying. It is not recorded anywhere a rollback would
+        // look once the result is "reused", so remove it now: only if it is
+        // marked as this step's and no mapping uses it. The other owner's
+        // mapping and picker are never touched.
+        const orphan = await this.findMarkedPicker(
+          guild,
+          input.channelId,
+          input.ownerKey,
+        );
+        if (orphan && orphan.id !== existing.messageId) {
+          const used = await ReactionRoleConfig.countDocuments({
+            guildId,
+            messageId: orphan.id,
+            isArchived: false,
+          });
+          if (used === 0) await this.deleteMessageUnderLock(orphan);
+        }
+      }
       return {
         messageId: existing.messageId,
         channelId: input.channelId,
-        reused: existing.adoptionOpKey !== input.ownerKey,
+        reused: !ours,
       };
     }
     const elsewhere = await ReactionRoleConfig.findOne({
@@ -2107,15 +2130,60 @@ export class ReactionRoleService {
       `fetch picker channel ${channelId}`,
     )) as TextChannel | null;
     if (!channel?.messages) return null;
-    const recent = await api.makeDiscordApiCall(
-      () => channel.messages.fetch({ limit: 100 }),
-      `read recent messages in ${channelId}`,
-    );
     const botId = this.client.user?.id;
-    return (
-      [...recent.values()].find((m) => isMarkedPicker(m, botId, ownerKey)) ??
-      null
+    // Search back to when the step began. The snapshot id is a Mongo ObjectId,
+    // whose first four bytes are its creation time, and a picker can't be older
+    // than the snapshot, so that is a durable boundary that needs no extra
+    // record. An unreadable key has no boundary, so the page limit applies.
+    const created = /^([0-9a-f]{24}):/i.exec(ownerKey);
+    const boundary = created
+      ? parseInt(created[1].slice(0, 8), 16) * 1000 - 1000
+      : null;
+    let before: string | undefined;
+    for (let page = 0; page < PICKER_SEARCH_MAX_PAGES; page++) {
+      const batch = await api.makeDiscordApiCall(
+        () =>
+          channel.messages.fetch({
+            limit: 100,
+            ...(before ? { before } : {}),
+          }),
+        `read messages in ${channelId}`,
+      );
+      const list = [...batch.values()];
+      const hit = list.find((m) => isMarkedPicker(m, botId, ownerKey));
+      if (hit) return hit;
+      // Fewer than a full page: the history is exhausted.
+      if (list.length < 100) return null;
+      const oldest = list.reduce((a, b) =>
+        BigInt(a.id) < BigInt(b.id) ? a : b,
+      );
+      if (
+        boundary !== null &&
+        SnowflakeUtil.timestampFrom(oldest.id) < boundary
+      ) {
+        return null;
+      }
+      before = oldest.id;
+    }
+    // Not found, but not proven absent either: never report "none".
+    throw new Error(
+      `The history of the reaction-role channel is too long to search for an unsaved picker (${PICKER_SEARCH_MAX_PAGES} pages). Nothing was changed; delete any picker marked "${ownerKey}" by hand and try again.`,
     );
+  }
+
+  /**
+   * Delete a message. This is a mutation, so it is NOT run through the timed
+   * `makeDiscordApiCall` race: a timeout there returns while the request is
+   * still in flight, which would let it land after the guild lock is released.
+   * Called directly, the lock is held until the request settles (the REST
+   * client has its own timeout). Unknown Message counts as already gone.
+   */
+  private async deleteMessageUnderLock(message: Message): Promise<void> {
+    try {
+      await message.delete();
+    } catch (err) {
+      if (!this.isUnknownEntityError(err, 10008)) throw err;
+    }
   }
 
   /**
@@ -2210,21 +2278,20 @@ export class ReactionRoleService {
         });
         if (sharedBy > 0) return;
         const botId = this.client.user?.id;
-        await api.makeDiscordApiCall(
+        // Timed read, then the delete under the lock (see deleteMessageUnderLock).
+        const orphan = await api.makeDiscordApiCall(
           () =>
             orphanChannel.messages
               .fetch(input.messageId)
-              .then(async (message) => {
-                if (isMarkedPicker(message, botId, input.ownerKey)) {
-                  await message.delete();
-                }
-              })
               .catch((err: unknown) => {
-                if (this.isUnknownEntityError(err, 10008)) return undefined;
+                if (this.isUnknownEntityError(err, 10008)) return null;
                 throw err;
               }),
-          `remove orphan picker ${input.messageId}`,
+          `read orphan picker ${input.messageId}`,
         );
+        if (orphan && isMarkedPicker(orphan, botId, input.ownerKey)) {
+          await this.deleteMessageUnderLock(orphan);
+        }
         return;
       }
       const guild = await api.makeDiscordApiCall(
@@ -2250,27 +2317,34 @@ export class ReactionRoleService {
         _id: { $ne: config._id },
       });
       if (channel) {
-        await api.makeDiscordApiCall(
+        // Timed read, then the mutation under the lock: a timed-out callback
+        // keeps running after the race returns, and must not delete after the
+        // lock is released and another mapping has been added.
+        const message = await api.makeDiscordApiCall(
           () =>
-            channel.messages
-              .fetch(input.messageId)
-              .then(async (message) => {
-                if (siblings === 0) {
-                  await message.delete();
-                  return;
-                }
-                const reaction = message.reactions.cache.find(
-                  (r) => this.buildEmojiIdentifier(r) === config.emoji,
-                );
-                const botId = this.client.user?.id;
-                if (reaction && botId) await reaction.users.remove(botId);
-              })
-              .catch((err: unknown) => {
-                if (this.isUnknownEntityError(err, 10008)) return undefined;
-                throw err;
-              }),
-          `remove picker ${input.messageId}`,
+            channel.messages.fetch(input.messageId).catch((err: unknown) => {
+              if (this.isUnknownEntityError(err, 10008)) return null;
+              throw err;
+            }),
+          `read picker ${input.messageId}`,
         );
+        if (message) {
+          if (siblings === 0) {
+            await this.deleteMessageUnderLock(message);
+          } else {
+            const reaction = message.reactions.cache.find(
+              (r) => this.buildEmojiIdentifier(r) === config.emoji,
+            );
+            const botId = this.client.user?.id;
+            if (reaction && botId) {
+              try {
+                await reaction.users.remove(botId);
+              } catch (err) {
+                if (!this.isUnknownEntityError(err, 10008)) throw err;
+              }
+            }
+          }
+        }
       }
       await ReactionRoleConfig.deleteOne({ _id: config._id });
     });

@@ -12,10 +12,22 @@ import { usePerModelStubs } from "../test-utils.js";
 jest.mock("../../src/models/reaction-role-config.js");
 usePerModelStubs();
 // REST goes through CommandManager.makeDiscordApiCall; run the call directly.
+// A name matching `timeoutRe` simulates the wrapper's timeout: it returns an
+// error at once while the callback keeps running, as the real race does.
+let timeoutRe: RegExp | null = null;
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
   CommandManager: {
     getInstance: () => ({
-      makeDiscordApiCall: async (call: () => Promise<unknown>) => call(),
+      makeDiscordApiCall: async (
+        call: () => Promise<unknown>,
+        name: string,
+      ) => {
+        if (timeoutRe?.test(name)) {
+          void call();
+          throw new Error("Discord API timeout");
+        }
+        return call();
+      },
     }),
   },
 }));
@@ -166,6 +178,7 @@ function build(
 
 beforeEach(() => {
   jest.clearAllMocks();
+  timeoutRe = null;
   Model.findOne = jest.fn<() => Promise<unknown>>().mockResolvedValue(null);
   Model.deleteOne = jest.fn<() => Promise<unknown>>().mockResolvedValue({});
   Model.countDocuments = jest.fn<() => Promise<number>>().mockResolvedValue(0);
@@ -635,4 +648,156 @@ describe("pickers that exist before their mapping is saved (#1022)", () => {
     await service.unregisterGatedPairing("guild1", un());
     expect(other.delete).not.toHaveBeenCalled();
   });
+});
+
+const page = (from: number, count: number, markedAt?: number) =>
+  new Map(
+    Array.from({ length: count }, (_, i) => {
+      const id = String(from - i);
+      return [
+        id,
+        picker(
+          id,
+          markedAt === from - i
+            ? `Remove${MARK}`
+            : "Remove your reaction to lose the role",
+        ),
+      ] as const;
+    }),
+  );
+
+describe("recovery that holds up to history length, other owners and timeouts (#1022)", () => {
+  const find = (service: { findOwnedPairing: Function }, key = OWNER) =>
+    service.findOwnedPairing("guild1", {
+      roleId: "role1",
+      ownerKey: key,
+      channelId: "picker",
+    });
+
+  it("finds a marked picker on a second page of history", async () => {
+    const { service, messageFetch } = build();
+    messageFetch
+      .mockResolvedValueOnce(page(900, 100))
+      .mockResolvedValueOnce(page(800, 40, 790));
+    expect(await find(service)).toBe("790");
+    expect(messageFetch).toHaveBeenNthCalledWith(2, {
+      limit: 100,
+      before: "801",
+    });
+  });
+
+  it("a retry completes a picker found on a later page instead of posting again", async () => {
+    const { service, messageFetch, pickerChannel } = build();
+    messageFetch
+      .mockResolvedValueOnce(page(900, 100))
+      .mockResolvedValueOnce(page(800, 40, 790));
+    const bind = spyBind(service).mockResolvedValue({
+      success: true,
+      message: "ok",
+      roleId: "role1",
+      messageId: "790",
+    });
+    await service.registerGatedPairing("guild1", input({ retry: true }));
+    expect(bind).toHaveBeenCalledWith(
+      "guild1",
+      "role1",
+      "🎮",
+      expect.objectContaining({ messageId: "790" }),
+    );
+    expect(pickerChannel.send).not.toHaveBeenCalled();
+  });
+
+  it("stops at the step's start time when the key carries one", async () => {
+    const { service, messageFetch } = build();
+    // An ObjectId from 2038: every message is older than the step.
+    messageFetch.mockResolvedValue(page(900, 100));
+    expect(await find(service, "7fffffff0000000000000000:op-1")).toBeNull();
+    expect(messageFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("never reports 'none' for a search it could not finish", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(page(900, 100));
+    await expect(find(service)).rejects.toThrow(/too long to search/);
+    expect(messageFetch).toHaveBeenCalledTimes(50);
+  });
+
+  it("A crashes, B registers, A resumes: A's own unsaved picker is removed, B's mapping is untouched", async () => {
+    const { service, messageFetch } = build();
+    const mine = picker("orphanA", `Remove${MARK}`);
+    messageFetch.mockResolvedValue(new Map([["orphanA", mine]]));
+    Model.findOne.mockResolvedValueOnce({
+      messageId: "msgB",
+      adoptionOpKey: "snap-2:op-1",
+    });
+    const bind = spyBind(service);
+    const result = await service.registerGatedPairing(
+      "guild1",
+      input({ retry: true }),
+    );
+    expect(result).toEqual({
+      messageId: "msgB",
+      channelId: "picker",
+      reused: true,
+    });
+    expect(mine.delete).toHaveBeenCalledTimes(1);
+    expect(bind).not.toHaveBeenCalled();
+    expect(Model.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it("A's marked picker is kept when a mapping uses it, and without a retry nothing is searched", async () => {
+    const { service, messageFetch } = build();
+    const mine = picker("orphanA", `Remove${MARK}`);
+    messageFetch.mockResolvedValue(new Map([["orphanA", mine]]));
+    Model.findOne.mockResolvedValue({
+      messageId: "msgB",
+      adoptionOpKey: "snap-2:op-1",
+    });
+    Model.countDocuments.mockResolvedValue(1);
+    await service.registerGatedPairing("guild1", input({ retry: true }));
+    expect(mine.delete).not.toHaveBeenCalled();
+    messageFetch.mockClear();
+    await service.registerGatedPairing("guild1", input());
+    expect(messageFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([["mapped"], ["unmapped"]])(
+    "a delete that outlives its timed call keeps the guild lock, %s picker",
+    async (kind) => {
+      const { service, messageFetch } = build();
+      // Even if the timed wrapper gave up on every mutating name, the delete is
+      // not run through it, so the lock stays held until it settles.
+      timeoutRe = /^(remove|delete)/;
+      let finish!: () => void;
+      const target = picker("msg1", `Remove${MARK}`);
+      target.delete.mockImplementation(
+        () => new Promise((resolve) => (finish = () => resolve({}))),
+      );
+      messageFetch.mockResolvedValue(target);
+      Model.findOne.mockImplementation(async (q: unknown) =>
+        kind === "mapped" && (q as { adoptionOpKey?: string }).adoptionOpKey
+          ? { _id: "row1", emoji: "🎮" }
+          : null,
+      );
+      const unregistering = service.unregisterGatedPairing("guild1", {
+        roleId: "role1",
+        messageId: "msg1",
+        channelId: "picker",
+        ownerKey: OWNER,
+      });
+      for (let i = 0; i < 80; i++) await Promise.resolve();
+      expect(target.delete).toHaveBeenCalledTimes(1);
+      Model.findOne.mockClear();
+      const binding = service.bindReactionRole("guild1", "role1", "🎮", {
+        messageId: "msg1",
+      });
+      for (let i = 0; i < 80; i++) await Promise.resolve();
+      // The concurrent bind has not started: the lock is still held.
+      expect(Model.findOne).not.toHaveBeenCalled();
+      finish();
+      await unregistering;
+      await binding;
+      expect(Model.findOne).toHaveBeenCalled();
+    },
+  );
 });
