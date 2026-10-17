@@ -6,7 +6,7 @@
  * middleware lives at that single mount point, not here.
  */
 
-import { Router } from "express";
+import express, { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import {
@@ -20,6 +20,11 @@ import {
 } from "../../../models/event.js";
 import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
 import { ConfigService } from "../../../services/config-service.js";
+import {
+  COVER_MAX_BYTES,
+  removeEventCover,
+  setEventCover,
+} from "../../../services/event-cover.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -28,6 +33,7 @@ import {
   requireSessionContext,
   asyncHandler,
   firstLengthError,
+  respondSectionFlash,
 } from "./helpers.js";
 
 export function createEventsRouter(client: Client): Router {
@@ -160,6 +166,121 @@ export function createEventsRouter(client: Client): Router {
           text: `Failed to create event: ${text}`,
         });
       }
+    }),
+  );
+
+  // ============================================================
+  // Cover image (#1181)
+  // ============================================================
+
+  // The page script POSTs the file's raw bytes (not multipart, and not through
+  // the 256 KB urlencoded parser the router mounts globally) with the CSRF
+  // token in `X-CSRF-Token`. The body is parsed here, inside the router, so it
+  // only happens after the session, admin-role and CSRF checks have passed, and
+  // only for this route, with its own byte cap.
+  const coverBody = express.raw({
+    type: "application/octet-stream",
+    limit: COVER_MAX_BYTES,
+  });
+
+  router.post(
+    "/events/:id/cover",
+    (req, res, next) => {
+      coverBody(req, res, (err?: unknown) => {
+        if (!err) {
+          next();
+          return;
+        }
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 413) {
+          respondSectionFlash(
+            req,
+            res,
+            {
+              type: "err",
+              text: `The image is too large. The maximum is ${COVER_MAX_BYTES / (1024 * 1024)} MB.`,
+            },
+            "/admin/events",
+            [],
+            true,
+          );
+          return;
+        }
+        next(err);
+      });
+    },
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const service = EventService.getInstance(client);
+      const event = await service.getEvent(id);
+      const flash = (type: "ok" | "err", text: string): void =>
+        respondSectionFlash(
+          req,
+          res,
+          { type, text },
+          "/admin/events",
+          [],
+          true,
+        );
+      if (!event || event.guildId !== session.guildId) {
+        flash("err", `Event ${id} not found.`);
+        return;
+      }
+      const body: unknown = req.body;
+      const data = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
+      const result = await setEventCover(event, data);
+      await recordAudit(session, {
+        action: "event.cover-set",
+        targetId: id,
+        details: result.ok
+          ? { mime: result.mime, bytes: result.bytes, hash: result.hash }
+          : { bytes: data.length },
+        result: result.ok ? "success" : "failure",
+        errorMessage: result.ok ? null : result.error,
+      });
+      flash(
+        result.ok ? "ok" : "err",
+        result.ok
+          ? `Cover image saved${event.seriesId ? " for the whole series" : ""}. It reaches the Discord event within a minute.`
+          : `Cover image rejected: ${result.error}`,
+      );
+    }),
+  );
+
+  router.post(
+    "/events/:id/cover/remove",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const service = EventService.getInstance(client);
+      const event = await service.getEvent(id);
+      if (!event || event.guildId !== session.guildId) {
+        await recordAudit(session, {
+          action: "event.cover-remove",
+          targetId: id,
+          result: "failure",
+          errorMessage: "not found or wrong guild",
+        });
+        flashRedirect(res, "/admin/events", {
+          type: "err",
+          text: `Event ${id} not found.`,
+        });
+        return;
+      }
+      const result = await removeEventCover(event);
+      await recordAudit(session, {
+        action: "event.cover-remove",
+        targetId: id,
+        result: result.ok ? "success" : "failure",
+        errorMessage: result.ok ? null : result.error,
+      });
+      flashRedirect(res, "/admin/events", {
+        type: result.ok ? "ok" : "err",
+        text: result.ok
+          ? `Cover image removed${event.seriesId ? " for the whole series" : ""}. It is cleared on the Discord event within a minute.`
+          : `Could not remove the cover: ${result.error}`,
+      });
     }),
   );
 

@@ -140,6 +140,18 @@ export interface IEvent extends Document {
    * for every other event. Not a user id.
    */
   adoptionRef: string | null;
+  /**
+   * Content hash of the event's cover image (#1181); null when it has none.
+   * The bytes live in the `event-images` collection (`models/event-image.ts`),
+   * shared by every occurrence of a series. Never set on an adopted row.
+   */
+  coverHash: string | null;
+  /** The cover hash last sent to the native event; null when none is there.
+   * The sync sends the image only when this differs from `coverHash`. */
+  nativeCoverHash: string | null;
+  /** Failed cover uploads for the current `coverHash`; the sync stops
+   * retrying after a few so a rejected image cannot loop. */
+  nativeCoverAttempts: number;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -198,6 +210,9 @@ const EventSchema = new Schema<IEvent>(
     nativeDetached: { type: Boolean, default: false },
     nativeAdopted: { type: Boolean, default: false },
     adoptionRef: { type: String, default: null },
+    coverHash: { type: String, default: null },
+    nativeCoverHash: { type: String, default: null },
+    nativeCoverAttempts: { type: Number, default: 0 },
     createdBy: { type: String, required: true },
   },
   {

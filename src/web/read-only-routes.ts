@@ -63,6 +63,7 @@ import {
   recurrenceLabel,
   countRsvps,
 } from "../services/event-service.js";
+import { coverIneligibleReason } from "../services/event-cover.js";
 import {
   loadInterested,
   MAX_EVENTS_PER_VIEW,
@@ -1371,6 +1372,19 @@ export function createReadOnlyRouter(
             (e.state === "ended" || e.state === "cancelled") &&
             !e.nextSpawned &&
             !e.seriesCancelled,
+          cover: e.nativeAdopted
+            ? ({ kind: "adopted" } as const)
+            : coverIneligibleReason(e)
+              ? e.nativeDetached &&
+                e.recurrence === "none" &&
+                (e.state === "scheduled" || e.state === "active")
+                ? ({ kind: "detached" } as const)
+                : null
+              : ({
+                  kind: "editable",
+                  hasCover: !!e.coverHash,
+                  series: isRecurring(e),
+                } as const),
         };
       });
 
