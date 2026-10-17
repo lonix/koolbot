@@ -2,6 +2,11 @@ import type { GuildMember, PartialGuildMember } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { ConfigService } from "./config-service.js";
+import {
+  isConfiguredGuildMember,
+  type DiscordApiCall,
+  type MembershipClient,
+} from "../utils/guild-scope.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import {
   NameKind,
@@ -157,6 +162,25 @@ export class NameHistoryService {
       member.nickname ?? null,
       since,
     );
+  }
+
+  /**
+   * Record a `userUpdate` name change, but only for a member of `guildId`
+   * (#1144). The admission ticket is taken before the membership lookup (an
+   * await), so a data reset or opt-out that completes while the lookup is
+   * pending still rejects the write (#918).
+   */
+  public async recordUserUpdate(
+    client: MembershipClient,
+    guildId: string,
+    user: NameSourceUser,
+    callApi: DiscordApiCall,
+  ): Promise<void> {
+    const admission = TrackingOptOutService.getInstance().admission();
+    if (!(await isConfiguredGuildMember(client, guildId, user.id, callApi))) {
+      return;
+    }
+    await this.recordUser(guildId, user, undefined, admission);
   }
 
   /** Forget the throttle fingerprint for a member (after a data reset). */

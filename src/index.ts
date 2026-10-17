@@ -75,11 +75,7 @@ import { ModerationCaseReviewService } from "./services/moderation-case-review-s
 import { WizardService } from "./services/wizard-service.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "./utils/guild-members-intent.js";
 import { DEFAULT_ALLOWED_MENTIONS } from "./utils/allowed-mentions.js";
-import {
-  applyGuildScope,
-  isConfiguredGuildMember,
-  shouldIgnoreGuild,
-} from "./utils/guild-scope.js";
+import { applyGuildScope, shouldIgnoreGuild } from "./utils/guild-scope.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createUserWebRouter,
@@ -1437,26 +1433,12 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   recordDiscordEvent("userUpdate");
   if (!env.guildId) return;
-  if (
-    !(await isConfiguredGuildMember(
-      client,
-      env.guildId,
-      newUser.id,
-      (call, op) =>
-        CommandManager.getInstance(client).makeDiscordApiCall(
-          call,
-          op,
-          5000,
-          1,
-        ),
-    ))
-  )
-    return;
-  await NameHistoryService.getInstance().recordUser(
+  await NameHistoryService.getInstance().recordUserUpdate(
+    client,
     env.guildId,
     newUser,
-    undefined,
-    TrackingOptOutService.getInstance().admission(),
+    (call, op) =>
+      CommandManager.getInstance(client).makeDiscordApiCall(call, op, 5000, 1),
   );
 });
 

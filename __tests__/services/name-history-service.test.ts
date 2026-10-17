@@ -8,6 +8,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const mockEpoch = { value: 1 };
 const mockTrackWrite =
   jest.fn<
     (
@@ -21,7 +22,10 @@ jest.unstable_mockModule(
   "../../src/services/tracking-opt-out-service.js",
   () => ({
     TrackingOptOutService: {
-      getInstance: () => ({ trackWrite: mockTrackWrite }),
+      getInstance: () => ({
+        trackWrite: mockTrackWrite,
+        admission: () => mockEpoch.value,
+      }),
     },
   }),
 );
@@ -138,6 +142,54 @@ describe("NameHistoryService", () => {
   it("passes the admission ticket through to trackWrite", async () => {
     await NameHistoryService.getInstance().recordUser("g1", user, null, 42);
     expect(mockTrackWrite.mock.calls[0]?.[3]).toBe(42);
+  });
+
+  describe("recordUserUpdate (#1144)", () => {
+    const clientStub = {
+      guilds: { cache: { get: () => undefined } },
+    } as never;
+
+    it("takes the ticket before the membership lookup, so a reset during it rejects the write", async () => {
+      const intent = process.env.GUILD_MEMBERS_INTENT;
+      process.env.GUILD_MEMBERS_INTENT = "true";
+      mockEpoch.value = 1;
+      const client = {
+        guilds: {
+          cache: {
+            get: () => ({
+              members: { cache: { has: () => true }, fetch: jest.fn() },
+            }),
+          },
+        },
+      } as never;
+      // A data reset completes while the lookup is suspended.
+      const callApi = (async (call: () => Promise<unknown>) => {
+        mockEpoch.value = 2;
+        return call();
+      }) as never;
+      try {
+        await NameHistoryService.getInstance().recordUserUpdate(
+          client,
+          "g1",
+          user,
+          callApi,
+        );
+      } finally {
+        if (intent === undefined) delete process.env.GUILD_MEMBERS_INTENT;
+        else process.env.GUILD_MEMBERS_INTENT = intent;
+      }
+      expect(mockTrackWrite.mock.calls[0]?.[3]).toBe(1);
+    });
+
+    it("records nothing for a non-member", async () => {
+      await NameHistoryService.getInstance().recordUserUpdate(
+        clientStub,
+        "g1",
+        user,
+        (async (call: () => Promise<unknown>) => call()) as never,
+      );
+      expect(mockTrackWrite).not.toHaveBeenCalled();
+    });
   });
 
   it("re-snapshots an unchanged member after the throttle window", async () => {
