@@ -1,3 +1,4 @@
+/* global HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLElement */
 /**
  * The Groups section's page script, run for real in jsdom (#1188). The markup
  * and script come from `renderEventsPage`, so what is tested is what ships.
