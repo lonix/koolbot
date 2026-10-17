@@ -121,7 +121,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "userId",
     exportable: true,
     guildScoped: false,
-    note: "The member's voice history: totals, per-session detail, monthly/yearly rollups.",
+    note: "The member's voice history: totals, per-session detail (including the stored channel name and its public-visibility marker), monthly/yearly rollups.",
     onDelete: "hard-delete",
     subject: "self",
     deleteNote:

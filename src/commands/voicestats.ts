@@ -216,9 +216,12 @@ async function executeUser(
         const duration = session.duration
           ? formatTime(session.duration)
           : "ongoing";
-        // Hide the name of a channel the caller cannot view, or that no longer
-        // exists and so cannot be checked (#1153).
-        const channelName = visibleChannelName(interaction, session.channelId);
+        // Hide the name of a channel the caller cannot view. A room that no
+        // longer exists keeps its stored name only if it was public (#1162).
+        const channelName = visibleChannelName(interaction, session.channelId, {
+          name: session.channelName,
+          everyoneCanView: session.everyoneCanView,
+        });
         return `• ${escapeDisplayText(channelName)}: ${duration}`;
       }),
     ].join("\n");

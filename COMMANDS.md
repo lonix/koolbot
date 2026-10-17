@@ -237,8 +237,10 @@ Then reload commands.
 
 **Private channels:** if the user is in a voice channel you cannot view, the
 reply says "a voice channel" instead of naming it. `/voicestats` applies the
-same rule to its Recent Sessions list, which also shows "a voice channel" for
-rooms that have since been deleted.
+same rule to its Recent Sessions list. A room that has since been deleted is
+named only if everyone could see it (it was public) while you were in it; the
+name saved at that time is shown. Private rooms, and sessions recorded before
+this was tracked, still show "a voice channel".
 
 ---
 
