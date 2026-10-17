@@ -177,6 +177,9 @@ export class NameHistoryService {
     callApi: DiscordApiCall,
   ): Promise<void> {
     const admission = TrackingOptOutService.getInstance().admission();
+    // Bots and a disabled feature are rejected by `recordUser` anyway; skip
+    // them before the membership lookup so they cost no Discord REST call.
+    if (user.bot || !(await this.isEnabled())) return;
     if (!(await isConfiguredGuildMember(client, guildId, user.id, callApi))) {
       return;
     }

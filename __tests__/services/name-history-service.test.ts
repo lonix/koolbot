@@ -151,13 +151,17 @@ describe("NameHistoryService", () => {
 
     it("takes the ticket before the membership lookup, so a reset during it rejects the write", async () => {
       const intent = process.env.GUILD_MEMBERS_INTENT;
-      process.env.GUILD_MEMBERS_INTENT = "true";
+      // Intent off: membership is confirmed by a fresh fetch, so callApi runs.
+      delete process.env.GUILD_MEMBERS_INTENT;
       mockEpoch.value = 1;
       const client = {
         guilds: {
           cache: {
             get: () => ({
-              members: { cache: { has: () => true }, fetch: jest.fn() },
+              members: {
+                cache: { has: () => true },
+                fetch: jest.fn(async () => ({ id: "u1" })),
+              },
             }),
           },
         },
@@ -178,7 +182,39 @@ describe("NameHistoryService", () => {
         if (intent === undefined) delete process.env.GUILD_MEMBERS_INTENT;
         else process.env.GUILD_MEMBERS_INTENT = intent;
       }
+      // The reset really happened during the lookup...
+      expect(mockEpoch.value).toBe(2);
+      // ...and the write still carries the ticket taken before it.
       expect(mockTrackWrite.mock.calls[0]?.[3]).toBe(1);
+    });
+
+    it("makes no lookup for a bot or when recording is disabled", async () => {
+      const intent = process.env.GUILD_MEMBERS_INTENT;
+      delete process.env.GUILD_MEMBERS_INTENT;
+      const fetch = jest.fn(async () => ({ id: "u1" }));
+      const client = {
+        guilds: {
+          cache: {
+            get: () => ({ members: { cache: { has: () => true }, fetch } }),
+          },
+        },
+      } as never;
+      const callApi = (async (call: () => Promise<unknown>) => call()) as never;
+      try {
+        const service = NameHistoryService.getInstance();
+        await service.recordUserUpdate(
+          client,
+          "g1",
+          { ...user, bot: true },
+          callApi,
+        );
+        mockGetBoolean.mockResolvedValue(false);
+        await service.recordUserUpdate(client, "g1", user, callApi);
+      } finally {
+        if (intent !== undefined) process.env.GUILD_MEMBERS_INTENT = intent;
+      }
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mockTrackWrite).not.toHaveBeenCalled();
     });
 
     it("records nothing for a non-member", async () => {
