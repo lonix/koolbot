@@ -209,11 +209,20 @@ export class ReactionRoleService {
     const commandManager = CommandManager.getInstance(this.client);
 
     let archived = 0;
+    let skipped = 0;
     let repaired = 0;
 
     // The message-channel id is global, so its fate is decided once per guild
     // rather than re-fetched for every config in that guild.
     const messageChannels = new Map<string, MessageChannelResolution>();
+
+    // Mappings whose picker message was reported gone (10008 / null) are not
+    // archived on the spot: whether that means "deleted" or "the setting now
+    // points at a different channel than the one the pickers were posted in"
+    // cannot be told from one lookup (#1113). They are decided per guild after
+    // the loop, once we know whether *any* picker in that guild still resolves.
+    const missingMessages = new Map<string, IReactionRoleConfig[]>();
+    const liveMessages = new Map<string, number>();
 
     for (const config of configs) {
       try {
@@ -280,11 +289,7 @@ export class ReactionRoleService {
           message = await messageChannel.messages.fetch(config.messageId);
         } catch (error) {
           if (this.isUnknownEntityError(error, 10008)) {
-            await this.archiveConfig(
-              config,
-              `reaction message ${config.messageId} no longer exists`,
-            );
-            archived++;
+            this.noteMissingMessage(missingMessages, config);
             continue;
           }
           logger.warn(
@@ -294,13 +299,13 @@ export class ReactionRoleService {
           continue;
         }
         if (!message) {
-          await this.archiveConfig(
-            config,
-            `reaction message ${config.messageId} no longer exists`,
-          );
-          archived++;
+          this.noteMissingMessage(missingMessages, config);
           continue;
         }
+        liveMessages.set(
+          config.guildId,
+          (liveMessages.get(config.guildId) ?? 0) + 1,
+        );
 
         // Re-add the bot's own base reaction if it went missing.
         const hasOwnReaction = message.reactions.cache.some(
@@ -324,9 +329,41 @@ export class ReactionRoleService {
       }
     }
 
+    // A guild where no picker resolved in the configured channel looks exactly
+    // like one whose picker channel setting was changed after the pickers were
+    // posted. Archiving would orphan every still-valid picker, so leave the
+    // mappings active and flag it instead. The cost of being wrong the other
+    // way is a stale row that never fires, which is harmless and logged here.
+    for (const [guildId, missing] of missingMessages) {
+      if ((liveMessages.get(guildId) ?? 0) === 0) {
+        logger.warn(
+          `Reaction role reconciliation: none of the ${missing.length} reaction message(s) in guild ${sanitizeForLog(guildId)} were found in channel ${sanitizeForLog(messageChannelId)}. ` +
+            "Not archiving: if reactionroles.message_channel_id was changed after the pickers were posted, change it back or delete and regenerate the pickers (#1113).",
+        );
+        skipped += missing.length;
+        continue;
+      }
+      for (const config of missing) {
+        await this.archiveConfig(
+          config,
+          `reaction message ${config.messageId} no longer exists`,
+        );
+        archived++;
+      }
+    }
+
     logger.info(
-      `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${repaired} reaction(s) repaired`,
+      `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${skipped} kept (picker not found in configured channel), ${repaired} reaction(s) repaired`,
     );
+  }
+
+  private noteMissingMessage(
+    missing: Map<string, IReactionRoleConfig[]>,
+    config: IReactionRoleConfig,
+  ): void {
+    const list = missing.get(config.guildId) ?? [];
+    list.push(config);
+    missing.set(config.guildId, list);
   }
 
   /**

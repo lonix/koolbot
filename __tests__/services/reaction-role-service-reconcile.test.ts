@@ -78,6 +78,7 @@ function primeGuild(opts: {
   message?: unknown;
   roleError?: unknown;
   messageError?: unknown;
+  messageFetchImpl?: (id: string) => Promise<unknown>;
   channel?: unknown;
   channelError?: unknown;
   guildId?: string;
@@ -89,8 +90,10 @@ function primeGuild(opts: {
     roleFetch.mockResolvedValue(opts.role);
   }
 
-  const messageFetch = jest.fn<() => Promise<unknown>>();
-  if (opts.messageError !== undefined) {
+  const messageFetch = jest.fn<(id: string) => Promise<unknown>>();
+  if (opts.messageFetchImpl) {
+    messageFetch.mockImplementation(opts.messageFetchImpl);
+  } else if (opts.messageError !== undefined) {
     messageFetch.mockRejectedValue(opts.messageError);
   } else {
     messageFetch.mockResolvedValue(opts.message);
@@ -164,7 +167,49 @@ describe("ReactionRoleService.reconcileConfigs", () => {
     expect(config.save).toHaveBeenCalledTimes(1);
   });
 
-  it("archives a config whose reaction message no longer exists", async () => {
+  it("archives a config whose reaction message is gone while another picker in the guild still resolves", async () => {
+    const gone = makeConfig({ _id: "gone", messageId: "msg-gone" });
+    const live = makeConfig({ _id: "live", messageId: "msg-live" });
+    find.mockResolvedValue([gone, live]);
+    const liveMessage = makeMessage({ hasOwnReaction: true });
+    primeGuild({
+      role: { id: "role1", name: "Cool" },
+      messageFetchImpl: async (id: string) => {
+        if (id === "msg-gone") throw unknownEntityError(10008);
+        return liveMessage;
+      },
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(gone.isArchived).toBe(true);
+    expect(gone.save).toHaveBeenCalledTimes(1);
+    expect(live.isArchived).toBe(false);
+    expect(live.save).not.toHaveBeenCalled();
+  });
+
+  it("does NOT archive when no picker in the guild resolves in the configured channel (#1113)", async () => {
+    // The shape of a changed reactionroles.message_channel_id: the pickers
+    // still exist, in the old channel, but every lookup in the new one is 10008.
+    const a = makeConfig({ _id: "a", messageId: "m-a" });
+    const b = makeConfig({ _id: "b", messageId: "m-b" });
+    find.mockResolvedValue([a, b]);
+    primeGuild({
+      role: { id: "role1", name: "Cool" },
+      messageError: unknownEntityError(10008),
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(a.isArchived).toBe(false);
+    expect(a.save).not.toHaveBeenCalled();
+    expect(b.isArchived).toBe(false);
+    expect(b.save).not.toHaveBeenCalled();
+  });
+
+  it("does NOT archive a single mapping whose picker is not found (#1113)", async () => {
     const config = makeConfig();
     find.mockResolvedValue([config]);
     primeGuild({ role: { id: "role1", name: "Cool" }, message: null });
@@ -172,8 +217,41 @@ describe("ReactionRoleService.reconcileConfigs", () => {
 
     await service.reconcileConfigs();
 
-    expect(config.isArchived).toBe(true);
-    expect(config.save).toHaveBeenCalledTimes(1);
+    expect(config.isArchived).toBe(false);
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
+  it("decides each guild on its own: a sweep in one guild does not spare or doom another", async () => {
+    const a = makeConfig({ _id: "a", guildId: "g1", messageId: "m-a" });
+    const b = makeConfig({ _id: "b", guildId: "g2", messageId: "m-b" });
+    const c = makeConfig({ _id: "c", guildId: "g2", messageId: "m-c" });
+    find.mockResolvedValue([a, b, c]);
+    const liveMessage = makeMessage({ hasOwnReaction: true });
+    const role = { id: "role1", name: "Cool" };
+    const channelFor = (gone: string[]) => ({
+      isTextBased: () => true,
+      messages: {
+        fetch: async (id: string) => {
+          if (gone.includes(id)) throw unknownEntityError(10008);
+          return liveMessage;
+        },
+      },
+    });
+    guildFetch.mockImplementation((async (id: string) => ({
+      id,
+      roles: { fetch: async () => role },
+      channels: {
+        fetch: async () =>
+          id === "g1" ? channelFor(["m-a"]) : channelFor(["m-c"]),
+      },
+    })) as never);
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(a.isArchived).toBe(false); // g1: its only picker is missing
+    expect(b.isArchived).toBe(false); // g2: live
+    expect(c.isArchived).toBe(true); // g2: gone while b is live
   });
 
   it("re-adds the bot's base reaction when it went missing", async () => {
