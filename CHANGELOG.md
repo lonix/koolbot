@@ -1,5 +1,100 @@
 # Changelog
 
+## [2.1.0](https://github.com/lonix/koolbot/compare/v2.0.1...v2.1.0) (2026-10-17)
+
+
+### 🚀 Features
+
+* **adoption:** adopt existing native events as KoolBot events ([#1177](https://github.com/lonix/koolbot/issues/1177)) ([4a0f08b](https://github.com/lonix/koolbot/commit/4a0f08b38441bcd12fac7edfd86cce02201e7ca2))
+* **adoption:** bot replacement report for detected known bots ([#1115](https://github.com/lonix/koolbot/issues/1115)) ([f6d3967](https://github.com/lonix/koolbot/commit/f6d3967e2c0f76a8afad89a33e7e117f16a6519d))
+* **adoption:** check live state before restoring a snapshot ([#1139](https://github.com/lonix/koolbot/issues/1139)) ([4295f0f](https://github.com/lonix/koolbot/commit/4295f0f729dd1780c6c73476463bb9884c7e6829))
+* **adoption:** claim categories and channels ([#1096](https://github.com/lonix/koolbot/issues/1096)) ([e2a24fc](https://github.com/lonix/koolbot/commit/e2a24fcb48ad559ec7784e6e6dfa6f5aea3e7126))
+* **adoption:** keep leaderboard, reaction and birthday roles out of role groups ([#1137](https://github.com/lonix/koolbot/issues/1137)) ([2f0286c](https://github.com/lonix/koolbot/commit/2f0286ca1f853d74948619b545077eaddbdfd1d1))
+* **adoption:** keep role groups in sync with Discord ([#1098](https://github.com/lonix/koolbot/issues/1098)) ([14a30de](https://github.com/lonix/koolbot/commit/14a30de7fba297c9a9be6a23251794872bbaef01))
+* **adoption:** optional rules / TOS acceptance role ([#1100](https://github.com/lonix/koolbot/issues/1100)) ([c01bc63](https://github.com/lonix/koolbot/commit/c01bc63f7c67715123ea32830c392b3f25db328b))
+* **adoption:** plan / apply / snapshot / rollback engine for server permission changes ([#1073](https://github.com/lonix/koolbot/issues/1073)) ([f9ccecb](https://github.com/lonix/koolbot/commit/f9ccecb7e992dada24ec2c98ccf9f29cca33771a))
+* **adoption:** register role-gated categories as game roles, suggest feeds and gate stage speakers ([#1173](https://github.com/lonix/koolbot/issues/1173)) ([f1dd828](https://github.com/lonix/koolbot/commit/f1dd8280f9f26c59d6546dde39d551118f7e7c24))
+* **adoption:** show reaction roles as used in the scan, offer groups in more pickers, add webhooks to the scan ([#1170](https://github.com/lonix/koolbot/issues/1170)) ([9c2ca18](https://github.com/lonix/koolbot/commit/9c2ca183b7d1d9f91b81d05b0c6028f677a1159b))
+* **adoption:** use role groups in command permissions, quotes and role pickers ([#1118](https://github.com/lonix/koolbot/issues/1118)) ([fd9f032](https://github.com/lonix/koolbot/commit/fd9f0320c4a17efc7a08dedd4f116a70895b601e))
+* **adoption:** wizard entry point, adoption history with restore, docs and end-to-end test ([#1129](https://github.com/lonix/koolbot/issues/1129)) ([122d1f2](https://github.com/lonix/koolbot/commit/122d1f24407a0dcd048432fef6d2828e11de5dd7))
+* **commands:** choose DM or ephemeral delivery for /me and /config links ([#1080](https://github.com/lonix/koolbot/issues/1080)) ([45a8fad](https://github.com/lonix/koolbot/commit/45a8fade3b6a29ba7e0c593192535f5910952351)), closes [#1067](https://github.com/lonix/koolbot/issues/1067)
+* **events:** mirror KoolBot events to Discord scheduled events ([#1117](https://github.com/lonix/koolbot/issues/1117)) ([258f25d](https://github.com/lonix/koolbot/commit/258f25da888777b831246ea060dae8aea9542912))
+* **events:** optional cover image mirrored to the native Discord event ([#1198](https://github.com/lonix/koolbot/issues/1198)) ([b012d15](https://github.com/lonix/koolbot/commit/b012d154e40014590e1b788a21e1d86f9738b9d4))
+* **events:** support recurring events (weekly/biweekly/monthly) ([#1082](https://github.com/lonix/koolbot/issues/1082)) ([080e30c](https://github.com/lonix/koolbot/commit/080e30c0218b1cec88095ba2a94538e286c03b31))
+* **events:** use Discord native scheduled events only ([#1176](https://github.com/lonix/koolbot/issues/1176)) ([61971cd](https://github.com/lonix/koolbot/commit/61971cd6742e740a355fc8ee5d008c538e9b7dbd))
+* **moderation:** anti-raid join-rate and new-account gate ([#1111](https://github.com/lonix/koolbot/issues/1111)) ([9394d3e](https://github.com/lonix/koolbot/commit/9394d3e621dd02c2702274c4c2e79d2a8f6f36cf))
+* **moderation:** case lifecycle with review dates and outcomes ([#1072](https://github.com/lonix/koolbot/issues/1072)) ([73ccf1a](https://github.com/lonix/koolbot/commit/73ccf1a1d47b27046146b9eb7bc001b228b95eb6))
+* **notices:** list only member-facing features and make shutdown mid-refresh safe ([#1136](https://github.com/lonix/koolbot/issues/1136)) ([9cc9824](https://github.com/lonix/koolbot/commit/9cc982438f1ea7c807471550fe28cdb1275fccb0))
+* **reaction-roles:** generate grouped roles from presets or custom lists ([#1101](https://github.com/lonix/koolbot/issues/1101)) ([31f4cc8](https://github.com/lonix/koolbot/commit/31f4cc8210048beb0fd27c1199529d84b8bca16b))
+* **tickets:** member support tickets with private channels, /ticket command and admin page ([#1071](https://github.com/lonix/koolbot/issues/1071)) ([655ebae](https://github.com/lonix/koolbot/commit/655ebaecee3b322cfe5a882e17d10947e4505fec))
+* **voice:** grant room owners the native Set Voice Channel Status permission ([#1110](https://github.com/lonix/koolbot/issues/1110)) ([60eac33](https://github.com/lonix/koolbot/commit/60eac33a9dbed2f6486c202fd82c2932b756209a))
+* **voice:** keep names of finished public rooms in voicestats ([#1183](https://github.com/lonix/koolbot/issues/1183)) ([521cd0f](https://github.com/lonix/koolbot/commit/521cd0fb893f218652fd5be697f3d0e4b58641c5))
+* **web-ui:** category and channel manager for text and voice channels ([#1172](https://github.com/lonix/koolbot/issues/1172)) ([0eba996](https://github.com/lonix/koolbot/commit/0eba99697b522c08d57b5d2f6b726177cf18b1cb))
+* **welcome:** greet new members in a configured channel ([#1084](https://github.com/lonix/koolbot/issues/1084)) ([a6a808e](https://github.com/lonix/koolbot/commit/a6a808e67a3084b2270f8cfe8b8759d31f8ce484))
+
+
+### 🐛 Bug Fixes
+
+* add per-member limits and refuse dangerous roles in reaction roles ([#1159](https://github.com/lonix/koolbot/issues/1159)) ([bc1d830](https://github.com/lonix/koolbot/commit/bc1d8302c6f376f0383061bfc5987f320a73d1f4))
+* **adoption:** revalidate before deleting a group's role ([#1107](https://github.com/lonix/koolbot/issues/1107)) ([3b87051](https://github.com/lonix/koolbot/commit/3b8705199e7bdcc2e317d22b86a4033bf2a61408))
+* **adopt:** point the GuildMembers intent note at GUILD_MEMBERS_INTENT ([#1126](https://github.com/lonix/koolbot/issues/1126)) ([06273eb](https://github.com/lonix/koolbot/commit/06273eb1a5140a74d4073d011c23a95fd428a1f9))
+* **database:** remove duplicate AdoptionSnapshot guildId index ([#1104](https://github.com/lonix/koolbot/issues/1104)) ([dadaec4](https://github.com/lonix/koolbot/commit/dadaec4482c3bf01852fe5d11d9878a4b2d39ab5)), closes [#1102](https://github.com/lonix/koolbot/issues/1102)
+* **deps:** upgrade js-yaml to 5.x and use namespace import in poll-service ([#1075](https://github.com/lonix/koolbot/issues/1075)) ([3e3be2c](https://github.com/lonix/koolbot/commit/3e3be2c9b0a6d9a70be2594f4fa993af4ac44bf8))
+* **events:** set updatePipeline on aggregation-pipeline updates ([#1105](https://github.com/lonix/koolbot/issues/1105)) ([c606cec](https://github.com/lonix/koolbot/commit/c606cecf8faf0f1eecb307499d372048902c1d41)), closes [#1103](https://github.com/lonix/koolbot/issues/1103)
+* limit lobby room churn, purge dead web sessions and audit component interactions ([#1168](https://github.com/lonix/koolbot/issues/1168)) ([edd84c4](https://github.com/lonix/koolbot/commit/edd84c4779c6e8322adc73f56db742014204da42))
+* **notices:** list Name History once and refresh the features notice on settings save ([#1127](https://github.com/lonix/koolbot/issues/1127)) ([ead78c6](https://github.com/lonix/koolbot/commit/ead78c6404a383c17da49c8505fcf27500a5078c))
+* ping nobody by default and escape member names in message text ([#1169](https://github.com/lonix/koolbot/issues/1169)) ([9fc3632](https://github.com/lonix/koolbot/commit/9fc36329467e31a24aea824041c6c97d6c73120b))
+* **reactionroles:** keep mappings when no picker is found in the configured channel ([#1201](https://github.com/lonix/koolbot/issues/1201)) ([8b4e6dd](https://github.com/lonix/koolbot/commit/8b4e6dd9262337ac4806961c2eca47cc795106ad))
+* scope the bot to GUILD_ID and default to safe allowed mentions ([#1161](https://github.com/lonix/koolbot/issues/1161)) ([b91d84f](https://github.com/lonix/koolbot/commit/b91d84f3bda9e31c857556768ac7a28c11445050))
+* **security:** record names and sessions only for the configured guild ([#1182](https://github.com/lonix/koolbot/issues/1182)) ([d2b8a9b](https://github.com/lonix/koolbot/commit/d2b8a9bad9e7bff57e7d8ec38bdba730c90ef1a7))
+* **security:** refuse dangerous roles for leaderboard tiers and the birthday role ([#1186](https://github.com/lonix/koolbot/issues/1186)) ([8f94159](https://github.com/lonix/koolbot/commit/8f9415901c5b48d01f1f8b153232d07439296b21))
+* stop logging sign-in links and trim member-facing error detail ([#1157](https://github.com/lonix/koolbot/issues/1157)) ([7d1aecd](https://github.com/lonix/koolbot/commit/7d1aecd982359c856c99255be58b1f7cfcafaeec))
+* **voice:** authorise room controls against live ownership and stop name-based channel spoofing ([#1160](https://github.com/lonix/koolbot/issues/1160)) ([f1b4aea](https://github.com/lonix/koolbot/commit/f1b4aea1550cdce6f4eb5d283f6dccf917c0215c))
+* **voice:** keep quotes in lobby name during health check ([#1093](https://github.com/lonix/koolbot/issues/1093)) ([a8b9f09](https://github.com/lonix/koolbot/commit/a8b9f0938d79d0c97dd3d68d03db18a3beb9a72f))
+* **voice:** only clean up voice channels KoolBot created, behind a managed-only toggle ([#1078](https://github.com/lonix/koolbot/issues/1078)) ([eaca3a8](https://github.com/lonix/koolbot/commit/eaca3a8b81fbac55147a783b61b7dea84be4b828))
+* **voice:** persist waiting-room link across restarts ([#1092](https://github.com/lonix/koolbot/issues/1092)) ([6d5d51e](https://github.com/lonix/koolbot/commit/6d5d51e479ff3433f2125dce36800c6b4cd2561d))
+* **voice:** retry managed-channel record when the write fails ([#1091](https://github.com/lonix/koolbot/issues/1091)) ([dbe886b](https://github.com/lonix/koolbot/commit/dbe886b5dd4051753f7dba27ec7b6ca9aa1c65e9)), closes [#1088](https://github.com/lonix/koolbot/issues/1088)
+* **web-ui:** add security headers and bind CSRF tokens to the session ([#1163](https://github.com/lonix/koolbot/issues/1163)) ([d53dcd6](https://github.com/lonix/koolbot/commit/d53dcd69f92da48de353b10dfb4926c9eb097bf2))
+* **web-ui:** bound /me audit data and revalidate member sessions ([#1158](https://github.com/lonix/koolbot/issues/1158)) ([b1cfaba](https://github.com/lonix/koolbot/commit/b1cfabab6a5977c053e5e36819e141acab8dcbf8))
+* **web-ui:** hide the member Privacy section when the feature is disabled ([#1077](https://github.com/lonix/koolbot/issues/1077)) ([44557a6](https://github.com/lonix/koolbot/commit/44557a6e37ba06e060ab8439f0e4875d51991e78))
+* **web-ui:** only a two-segment &lt;category&gt;.enabled is a settings cascade master ([#1076](https://github.com/lonix/koolbot/issues/1076)) ([1cb1c63](https://github.com/lonix/koolbot/commit/1cb1c63521fbe4aa86b9dd658f0326566a35eb92))
+* **web-ui:** revoke a member's web sessions when they leave, are kicked or banned ([#1167](https://github.com/lonix/koolbot/issues/1167)) ([0f2af2a](https://github.com/lonix/koolbot/commit/0f2af2a19050db8169c27f6ded3bec320fcc95d9))
+
+
+### ♻️ Refactoring
+
+* one source of truth for the GuildMembers intent guidance ([#1135](https://github.com/lonix/koolbot/issues/1135)) ([381a78f](https://github.com/lonix/koolbot/commit/381a78f2e008f66cb7836f4fa0e389819fec2bfe)), closes [#1132](https://github.com/lonix/koolbot/issues/1132)
+* **web-ui:** declare reloadOnSave in settings metadata ([#1099](https://github.com/lonix/koolbot/issues/1099)) ([0be9763](https://github.com/lonix/koolbot/commit/0be9763eeb104c59e3c15b9f50deed73093f6b20))
+
+
+### 📚 Documentation
+
+* correct CLAUDE.md on which config writes trigger a reload ([#1114](https://github.com/lonix/koolbot/issues/1114)) ([62bdc1b](https://github.com/lonix/koolbot/commit/62bdc1b3e6c373e66d4f883ac3e085cedf572be9))
+* **security:** correct overstated claims, least-privilege invite, validate WEBUI_BASE_URL scheme ([#1166](https://github.com/lonix/koolbot/issues/1166)) ([d1c778d](https://github.com/lonix/koolbot/commit/d1c778d9d01ef646d792a402aea68a20d23865f1))
+
+
+### 🧪 Tests
+
+* add opt-in per-model mongoose stubs to the global mock ([#1116](https://github.com/lonix/koolbot/issues/1116)) ([52a2605](https://github.com/lonix/koolbot/commit/52a260581ee74dcb812c91b6f315345f0429c828))
+* **ci:** run real-MongoDB integration tests for the Mongoose 9 contracts ([#1109](https://github.com/lonix/koolbot/issues/1109)) ([34bb3f2](https://github.com/lonix/koolbot/commit/34bb3f22af694f1ea3ba29a4532012417e16f4b2))
+* migrate more suites to per-model mongoose stubs ([#1128](https://github.com/lonix/koolbot/issues/1128)) ([552dd02](https://github.com/lonix/koolbot/commit/552dd029b2405a38608c8f802fc7b31a3fb91840))
+
+
+### ⚙️ CI/CD
+
+* **deps:** guard package-lock.json against dropped libc constraints ([#1108](https://github.com/lonix/koolbot/issues/1108)) ([803bcf0](https://github.com/lonix/koolbot/commit/803bcf024e0e2c19c9a3e9ec4a9dba45d6c87ef3))
+* **docker:** gate the image push on hadolint and a pre-push Trivy scan ([#1165](https://github.com/lonix/koolbot/issues/1165)) ([7a9bab8](https://github.com/lonix/koolbot/commit/7a9bab8d45c02b9fce0da7f4d0feff46b9ddc0eb))
+* **docker:** label-triggered preview image builds for PRs ([#1095](https://github.com/lonix/koolbot/issues/1095)) ([28781c7](https://github.com/lonix/koolbot/commit/28781c71c09d6d716eda96eed7f335a028ae4e3f))
+* **docker:** post the preview pull command even though scan-image is skipped on PRs ([#1174](https://github.com/lonix/koolbot/issues/1174)) ([75d3319](https://github.com/lonix/koolbot/commit/75d33191b33eaec734e64ecf22040c559b08bf09))
+* harden container and repository hygiene ([#1156](https://github.com/lonix/koolbot/issues/1156)) ([f5aa2b0](https://github.com/lonix/koolbot/commit/f5aa2b04ececeda73fec2eeb3986abe8e261a710))
+* pin GitHub Actions to commit SHAs ([#1178](https://github.com/lonix/koolbot/issues/1178)) ([2216afa](https://github.com/lonix/koolbot/commit/2216afa0976460f024d93d0d8823ca26018b1050))
+* raise coverage floors after adoption history landed ([#1138](https://github.com/lonix/koolbot/issues/1138)) ([64d8b20](https://github.com/lonix/koolbot/commit/64d8b202ad137ec180fe3b323d0bb1d0ca97a715))
+
+
+### 🔧 Maintenance
+
+* add a maintainer note to the member join handler ([#1140](https://github.com/lonix/koolbot/issues/1140)) ([ca7dd8b](https://github.com/lonix/koolbot/commit/ca7dd8befa174b51d20b9934df5bfa8e45a7743a))
+
 ## [2.0.1](https://github.com/lonix/koolbot/compare/v2.0.0...v2.0.1) (2026-10-04)
 
 
