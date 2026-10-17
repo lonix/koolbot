@@ -143,6 +143,11 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "quotes.enabled",
   },
   {
+    href: "/admin/channels",
+    label: "Channel Manager",
+    group: "Settings",
+  },
+  {
     href: "/admin/tickets",
     label: "Tickets",
     group: "Features",
