@@ -957,6 +957,25 @@ describe("recurring event lifecycle", () => {
     );
   });
 
+  it("gives the next occurrence the series' cover hash (#1181), null when none", async () => {
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+      coverHash: "h-series",
+    }));
+    const { service } = buildService();
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0].coverHash).toBe("h-series");
+
+    created.length = 0;
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+    }));
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0].coverHash).toBeNull();
+  });
+
   it("does not spawn when another caller already created the successor", async () => {
     const { service } = buildService();
     EventMock.findById = jest.fn(async () => ({

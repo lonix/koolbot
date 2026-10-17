@@ -23,6 +23,7 @@ import {
   type RsvpStatus,
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
+import { sweepOrphanCovers } from "./event-cover.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -407,6 +408,11 @@ export class EventService extends ScheduledService {
         },
       ],
     });
+
+    // Drop the covers of finished events and series (#1181).
+    await sweepOrphanCovers(guildId).catch((error) =>
+      logger.warn("Event covers: cleanup failed:", error),
+    );
 
     const reminderMs =
       (await this.configService.getNumber("events.reminder_minutes", 30)) *
@@ -837,6 +843,9 @@ export class EventService extends ScheduledService {
           spawnedFrom: String(previous._id),
           nextSpawned: false,
           seriesCancelled: false,
+          // Each occurrence is mirrored with the series' cover (#1181); the
+          // image itself is shared, only its hash is copied.
+          coverHash: fresh.coverHash ?? null,
           createdBy: previous.createdBy,
         });
         try {
