@@ -361,6 +361,8 @@ export interface EventBaseline {
   endsAt: string | null;
   /** Discord's status number as a string; "1" is scheduled. */
   status: string;
+  /** Repeats through a Discord recurrence rule (never adopted). */
+  recurring: boolean;
 }
 
 export interface AdoptionPlan {

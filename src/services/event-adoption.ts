@@ -219,6 +219,7 @@ export function buildEventAdoptionPlan(input: {
       startsAt: info.startsAt,
       endsAt: info.endsAt,
       status: info.status,
+      recurring: info.recurring,
     });
   }
 
@@ -316,6 +317,12 @@ export async function planEventAdoption(
     guild,
     { adminUserId },
   );
+  // A failed listing is not "no events": say so instead of showing an empty list.
+  if (scan.partial.includes("scheduled events")) {
+    throw new Error(
+      "The server's scheduled events could not be read from Discord (check the bot's permissions and try again).",
+    );
+  }
   const ctx = await loadContext(guild, scan.scanned.botUserId);
   const candidates = scan.scheduledEvents
     .map((e) => classifyScheduledEvent(e, ctx))
@@ -364,6 +371,12 @@ export class DiscordEventAdoptionPort implements AdoptionEventPort {
       .select("_id")
       .lean();
     if (mine) return String(mine._id);
+    // A retry may run long after the preview: never create an event that has
+    // already started (it would be announced late and get a channel). Above
+    // this line a retry still recovers the row it wrote.
+    if (new Date(input.startsAt).getTime() <= Date.now()) {
+      throw new Error("The event has already started, so it was not adopted.");
+    }
     // Same guard as the sync's claim: a native event belongs to one row.
     if (await Event.exists({ nativeEventId: input.nativeEventId })) {
       throw new Error("That event is already a KoolBot event.");
@@ -421,6 +434,7 @@ export class DiscordEventAdoptionPort implements AdoptionEventPort {
         startsAt: e.scheduledStartAt?.toISOString() ?? null,
         endsAt: e.scheduledEndAt?.toISOString() ?? null,
         status: String(e.status),
+        recurring: !!e.recurrenceRule,
       };
     } catch (error) {
       if (

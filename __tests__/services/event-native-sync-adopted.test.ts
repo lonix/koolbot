@@ -194,7 +194,13 @@ describe("pullAdopted", () => {
   });
 
   it("keeps the schedule of a running event", async () => {
-    const { guild, map } = makeGuild([memberNative()]);
+    const past = new Date(Date.now() - 60_000);
+    const { guild, map } = makeGuild([
+      memberNative({
+        scheduledStartAt: past,
+        scheduledStartTimestamp: past.getTime(),
+      }),
+    ]);
     const event = makeEvent({ startTime: new Date(Date.now() - 60_000) });
     expect(await makeSync().pullAdopted(event, guild, map)).toBe("ok");
     expect(EventMock.updateOne).not.toHaveBeenCalled();
@@ -248,6 +254,60 @@ describe("pullAdopted", () => {
         }
       ).$set,
     ).not.toHaveProperty("reminderSent");
+  });
+
+  it("catches a postponement made just before the old start, even when the scan runs after it", async () => {
+    // The row still has the old start (30 s ago); Discord has the event
+    // scheduled again for later.
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const { guild, map } = makeGuild([
+      memberNative({
+        scheduledStartAt: later,
+        scheduledStartTimestamp: later.getTime(),
+        scheduledEndTimestamp: later.getTime() + 60 * 60 * 1000,
+      }),
+    ]);
+    const event = makeEvent({
+      startTime: new Date(Date.now() - 30_000),
+      reminderSent: true,
+    });
+    expect(await makeSync().pullAdopted(event, guild, map)).toBe("ok");
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "ev1", state: { $in: ["scheduled", "active"] } },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          startTime: later,
+          reminderSent: false,
+        }),
+      }),
+    );
+  });
+
+  it("a started row whose event is still scheduled for the past, running, completed or missing is left alone", async () => {
+    const started = (): unknown =>
+      makeEvent({ startTime: new Date(Date.now() - 30_000) });
+    for (const native of [
+      memberNative({
+        scheduledStartAt: new Date(Date.now() - 30_000),
+        scheduledStartTimestamp: Date.now() - 30_000,
+      }),
+      memberNative({ status: GuildScheduledEventStatus.Active }),
+      memberNative({ status: GuildScheduledEventStatus.Completed }),
+    ]) {
+      const g = makeGuild([native]);
+      expect(
+        await makeSync().pullAdopted(started() as never, g.guild, g.map),
+      ).toBe("ok");
+    }
+    const missing = makeGuild([]);
+    expect(
+      await makeSync().pullAdopted(
+        started() as never,
+        missing.guild,
+        missing.map,
+      ),
+    ).toBe("ok");
+    expect(EventMock.updateOne).not.toHaveBeenCalled();
   });
 
   it("never reports a running row as gone: its channel may be in use and a missing entry may just mean it ended", async () => {

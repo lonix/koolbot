@@ -274,14 +274,28 @@ export class NativeEventSync {
   ): Promise<"ok" | "gone"> {
     try {
       if (!event.nativeAdopted || !event.nativeEventId) return "ok";
-      // Only an event that has not started follows a deletion or an edit. The
-      // row's state is no guide (the temp channel makes it "active" ahead of
-      // the start, and voice events never get one), so the start time is. A
-      // running event finishes on its own end time: a missing listing entry
-      // can't tell a deleted event from one that was ended.
-      if (event.startTime.getTime() <= Date.now()) return "ok";
+      // An event that has not started follows a deletion, a cancellation and
+      // edits. The row's state is no guide (the temp channel makes it "active"
+      // ahead of the start, and voice events never get one), so the start time
+      // is. Past the start the row is only ever updated, never cancelled: a
+      // missing or finished entry can't tell a deleted event from one that
+      // ended, and the only thing worth catching is a postponement made just
+      // before the old start (a still-scheduled event with a future start).
+      const started = event.startTime.getTime() <= Date.now();
       const native = await this.fetchNative(guild, event.nativeEventId, cache);
-      if (!native || native.status === GuildScheduledEventStatus.Canceled) {
+      if (started) {
+        if (
+          !native ||
+          native.status !== GuildScheduledEventStatus.Scheduled ||
+          !native.scheduledStartAt ||
+          native.scheduledStartAt.getTime() <= Date.now()
+        ) {
+          return "ok";
+        }
+      } else if (
+        !native ||
+        native.status === GuildScheduledEventStatus.Canceled
+      ) {
         return "gone";
       }
       // A running event keeps the schedule its channel and reminder were

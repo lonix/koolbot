@@ -116,6 +116,8 @@ export interface AdoptionNativeEvent {
   endsAt: string | null;
   /** Discord's status number as a string; "1" is scheduled. */
   status: string;
+  /** Repeats through a Discord recurrence rule. */
+  recurring: boolean;
 }
 
 /**
@@ -915,6 +917,7 @@ export class ServerAdoptionService {
       if (
         !live ||
         live.status !== expected.status ||
+        live.recurring !== expected.recurring ||
         live.name !== expected.name ||
         live.description !== expected.description ||
         live.startsAt !== expected.startsAt ||

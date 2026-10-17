@@ -82,6 +82,7 @@ function harness() {
         startsAt: "2026-10-20T19:00:00.000Z",
         endsAt: "2026-10-20T21:30:00.000Z",
         status: "1",
+        recurring: false,
       },
     ],
   ]);
@@ -211,6 +212,22 @@ describe("event.adopt steps in the adoption engine (#1034)", () => {
     h.natives.delete("100");
     await expect(h.service.apply(p, opts)).rejects.toThrow(/Movie night/);
     expect(h.calls).toEqual([]);
+    expect(h.rows.size).toBe(0);
+  });
+
+  it("refuses to apply or resume once the event repeats through a Discord recurrence rule", async () => {
+    const p = plan();
+    h.natives.set("100", { ...h.natives.get("100")!, recurring: true });
+    await expect(h.service.apply(p, opts)).rejects.toThrow(/Changed since/);
+    // Resume path: the first apply fails, then a rule is added before the retry.
+    h.natives.set("100", { ...h.natives.get("100")!, recurring: false });
+    h.failAdopt.value = "database unavailable";
+    const first = await h.service.apply(p, opts);
+    h.failAdopt.value = null;
+    h.natives.set("100", { ...h.natives.get("100")!, recurring: true });
+    await expect(
+      h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId }),
+    ).rejects.toThrow(/Cannot resume/);
     expect(h.rows.size).toBe(0);
   });
 

@@ -308,6 +308,7 @@ describe("planEventAdoption", () => {
   it("scans, classifies against live KoolBot rows and permissions, and plans the chosen events", async () => {
     scanGuild.mockResolvedValue({
       scanned: { botUserId: "bot1" },
+      partial: [],
       scheduledEvents: [
         info({ id: "100" }),
         info({ id: "linked1", name: "Linked" }),
@@ -357,6 +358,7 @@ describe("planEventAdoption", () => {
     });
     scanGuild.mockResolvedValue({
       scanned: { botUserId: "bot1" },
+      partial: [],
       scheduledEvents: [info({ id: "100" })],
     });
     const guild = {
@@ -377,9 +379,21 @@ describe("planEventAdoption", () => {
     expect(filter).not.toHaveProperty("nativeDetached");
   });
 
+  it("fails the page instead of showing an empty list when the events could not be read", async () => {
+    scanGuild.mockResolvedValue({
+      scanned: { botUserId: "bot1" },
+      scheduledEvents: [],
+      partial: ["scheduled events"],
+    });
+    await expect(
+      planEventAdoption({ id: "g1" } as never, "admin", []),
+    ).rejects.toThrow(/could not be read/);
+  });
+
   it("reports a missing Manage Events permission on every member-made event", async () => {
     scanGuild.mockResolvedValue({
       scanned: { botUserId: "bot1" },
+      partial: [],
       scheduledEvents: [info()],
     });
     const guild = {
@@ -408,8 +422,26 @@ describe("DiscordEventAdoptionPort", () => {
     select: () => ({ lean: async () => value }),
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers({
+      now: NOW,
+      doNotFake: [
+        "nextTick",
+        "setImmediate",
+        "clearImmediate",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+        "queueMicrotask",
+        "performance",
+        "hrtime",
+      ],
+    });
     EventMock.findOne.mockReturnValue(lean(null));
     EventMock.exists.mockResolvedValue(null);
     EventMock.create.mockResolvedValue({ _id: "row1" });
@@ -439,6 +471,14 @@ describe("DiscordEventAdoptionPort", () => {
     EventMock.findOne.mockReturnValue(lean({ _id: "row0" }));
     expect(await port().adopt(input)).toBe("row0");
     expect(EventMock.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create an event that has started by the time a retry runs, but still recovers its own row", async () => {
+    jest.setSystemTime(new Date("2026-10-20T19:00:01Z"));
+    await expect(port().adopt(input)).rejects.toThrow(/already started/);
+    expect(EventMock.create).not.toHaveBeenCalled();
+    EventMock.findOne.mockReturnValue(lean({ _id: "row0" }));
+    expect(await port().adopt(input)).toBe("row0");
   });
 
   it("refuses an event that is already linked, including losing the race on the unique index", async () => {
@@ -480,6 +520,7 @@ describe("DiscordEventAdoptionPort", () => {
       scheduledStartAt: new Date("2026-10-20T19:00:00Z"),
       scheduledEndAt: null,
       status: 1,
+      recurrenceRule: null,
     });
     const live = await p.readNative("100");
     // Live state, not the manager cache the planning scan filled.
@@ -494,6 +535,7 @@ describe("DiscordEventAdoptionPort", () => {
       startsAt: "2026-10-20T19:00:00.000Z",
       endsAt: null,
       status: "1",
+      recurring: false,
     });
     fetch.mockRejectedValueOnce(
       Object.assign(Object.create(DiscordAPIError.prototype), { code: 10070 }),
