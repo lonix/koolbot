@@ -852,6 +852,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
 | **Channel Claims**    | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
 | **Channel Manager**   | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
+| **Adopt Events**      | (new — adopt existing Discord scheduled events as KoolBot events; plan → preview → apply)           |
 | **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
@@ -1514,6 +1515,34 @@ error), so the page says to check Discord before trying again. Only an answer Di
 value) is a definite refusal. Writes to one server also run one at a time, each from a fresh read, so two saves of
 the same page cannot overwrite each other. A request that gives up is cancelled here, so nothing queued is applied
 later. Other features keep using the shared client unchanged.
+
+**Adopt Discord events** (`/admin/adopt/events`, #1034, part of the server-adoption epic #1017; linked from the
+Scheduled events card of Server Scan) takes over native scheduled events the server already uses, so KoolBot
+announces them, reminds people and handles their voice channel. The Discord event stays the single source of truth for
+members: they keep marking Interested on it, and KoolBot has no RSVP list of its own for it. The page lists every
+scheduled event with a checkbox, and states why an event cannot be adopted instead of hiding it:
+
+- already linked to a KoolBot event (adopting twice is refused, also if two admins race);
+- not waiting to start (running, finished or cancelled; only scheduled events are adopted) or its start has passed;
+- it repeats through a Discord recurrence rule (KoolBot runs repeats itself and does not map those rules);
+- created by KoolBot itself (the Discord copy of a KoolBot event) or by another bot, which manages it;
+- a KoolBot event with the same name and start already exists (it would be announced twice);
+- the bot lacks **Manage Events**, which it needs for events members created.
+
+**Preview changes** (a GET with the choice in the query) shows the shared adoption diff: one additive step per event,
+naming the KoolBot event, the times, the link announcement and whether a temporary voice channel is made. A blocking
+error shows when `events.enabled` is off; a warning shows when `events.announcement_channel_id` is not set. **Apply
+plan** re-plans the same choice, refuses if anything changed since the preview, and runs it through the adoption engine
+as a background job (snapshot first, audited). It creates one one-off KoolBot event per Discord event, linked to it
+(`nativeEventId`, the same unique link the outbound sync uses). The Events scan then posts the link announcement within a
+minute, sends the reminder and, unless the Discord event has a voice or stage channel of its own, creates the temporary
+voice channel before the start. **Nothing writes to the Discord event**: not on apply, not while it is adopted, not on
+rollback. KoolBot follows later edits to the event's name, description, start and length (while it has not started),
+cancels its own event when the Discord one is deleted or cancelled before it starts (a running event
+finishes on its own end time), and when the KoolBot event ends or is cancelled in
+the Web UI it only lets go of the link. **Roll back** from **Adoption** removes only the KoolBot events that step
+created, with their announcement and an empty temporary channel (a channel in use makes the rollback stop and be
+retried), and leaves the Discord event untouched.
 
 **Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
 categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:

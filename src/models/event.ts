@@ -127,6 +127,19 @@ export interface IEvent extends Document {
   /** The native event was deleted in Discord by someone else; the mirror
    * respects that and does not recreate it. */
   nativeDetached: boolean;
+  /**
+   * The native scheduled event existed before KoolBot and was adopted through
+   * the server-adoption flow (#1034). It belongs to whoever made it: the sync
+   * never edits, cancels or deletes it, it only reads it (so reminders follow
+   * its schedule) and releases the link when the row ends or is cancelled.
+   */
+  nativeAdopted: boolean;
+  /**
+   * Which adoption step created this row (`<snapshot id>:<operation id>`), for
+   * an idempotent apply and a rollback that removes only what it created. Null
+   * for every other event. Not a user id.
+   */
+  adoptionRef: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -183,6 +196,8 @@ const EventSchema = new Schema<IEvent>(
     nativeCreateStartedAt: { type: Date, default: null },
     nativeCleanupOnly: { type: Boolean, default: false },
     nativeDetached: { type: Boolean, default: false },
+    nativeAdopted: { type: Boolean, default: false },
+    adoptionRef: { type: String, default: null },
     createdBy: { type: String, required: true },
   },
   {
@@ -210,6 +225,16 @@ EventSchema.index(
   {
     unique: true,
     partialFilterExpression: { nativeEventId: { $type: "string" } },
+  },
+);
+
+// One row per adoption step, so a retried apply finds the row it already wrote
+// instead of inserting a second one (#1034).
+EventSchema.index(
+  { adoptionRef: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { adoptionRef: { $type: "string" } },
   },
 );
 

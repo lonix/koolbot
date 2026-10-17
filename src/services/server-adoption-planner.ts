@@ -301,7 +301,27 @@ export interface RoleDeleteOp extends OpBase {
   approval?: DestructiveApproval;
 }
 
+/**
+ * Adopt an existing Discord native scheduled event as a KoolBot event (#1034).
+ * Additive: it creates one KoolBot event row linked to the native event and
+ * never touches the native event itself.
+ */
+export interface EventAdoptOp extends OpBase {
+  type: "event.adopt";
+  /** The Discord scheduled event's id. */
+  nativeEventId: string;
+  name: string;
+  description: string;
+  /** ISO instants as scanned. */
+  startsAt: string;
+  endsAt: string | null;
+  durationMinutes: number;
+  /** The native event happens in a Discord channel, so no temporary one is made. */
+  hasChannel: boolean;
+}
+
 export type PlanOperation =
+  | EventAdoptOp
   | RoleCreateOp
   | RoleEditOp
   | OverwriteSetOp
@@ -325,6 +345,24 @@ export interface PlanBaseline {
   roles: RoleState[];
   channels: ChannelState[];
   config: Record<string, ConfigValue | null>;
+  /**
+   * Native events an adoption plan reads, as scanned: the apply refuses when
+   * one has changed. Left out when the plan adopts none, so it does not move
+   * the id of any other plan.
+   */
+  events?: EventBaseline[];
+}
+
+export interface EventBaseline {
+  id: string;
+  name: string;
+  description: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  /** Discord's status number as a string; "1" is scheduled. */
+  status: string;
+  /** Repeats through a Discord recurrence rule (never adopted). */
+  recurring: boolean;
 }
 
 export interface AdoptionPlan {
@@ -350,6 +388,7 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "overwrite.remove": 6,
   "channel.delete": 6,
   "role.delete": 6,
+  "event.adopt": 3,
 };
 
 const { ViewChannel, Connect, Administrator, ManageRoles, ManageChannels } =

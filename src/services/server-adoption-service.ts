@@ -107,6 +107,43 @@ export interface AdoptionGateway {
   readChannel(channelId: string): Promise<ChannelState | null>;
 }
 
+/** A native scheduled event as the engine reads it back before and while adopting it. */
+export interface AdoptionNativeEvent {
+  id: string;
+  name: string;
+  description: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  /** Discord's status number as a string; "1" is scheduled. */
+  status: string;
+  /** Repeats through a Discord recurrence rule. */
+  recurring: boolean;
+}
+
+/**
+ * KoolBot events and native scheduled events, for `event.adopt` steps (#1034).
+ * Nothing on it writes to a native event.
+ */
+export interface AdoptionEventPort {
+  /** Create the KoolBot event linked to the native one; idempotent by `ref`. */
+  adopt(input: {
+    ref: string;
+    guildId: string;
+    adminId: string;
+    nativeEventId: string;
+    name: string;
+    description: string;
+    startsAt: string;
+    durationMinutes: number;
+  }): Promise<string>;
+  /** The row a step with this reference already wrote, if any. */
+  findByRef(ref: string): Promise<string | null>;
+  /** Remove the row (and its announcement and temporary channel) the step wrote. */
+  remove(ref: string): Promise<void>;
+  /** Live state of a native event; null when it is gone. */
+  readNative(nativeEventId: string): Promise<AdoptionNativeEvent | null>;
+}
+
 export interface AdoptionSnapshotRecord {
   id: string;
   planId: string;
@@ -216,6 +253,8 @@ export interface AdoptionDeps {
   reactionRoles?: AdoptionReactionRoles;
   store: AdoptionStore;
   config: AdoptionConfigWriter;
+  /** Needed only by plans with `event.adopt` steps. */
+  events?: AdoptionEventPort;
   /** Wraps a Discord REST call (timeout + backoff); default: CommandManager. */
   callApi: <T>(
     call: () => Promise<T>,
@@ -378,6 +417,9 @@ export class ServerAdoptionService {
         },
         store: new MongoAdoptionStore(),
         config: new ConfigServiceWriter(),
+        events: new (
+          await import("./event-adoption.js")
+        ).DiscordEventAdoptionPort(client, guild),
         callApi: <T>(
           call: () => Promise<T>,
           name: string,
@@ -836,11 +878,55 @@ export class ServerAdoptionService {
           channel.overwrites.map(overwriteKey).sort().join("|");
       if (!same) drifted.push(`channel "${channel.name}"`);
     }
+    drifted.push(...(await this.driftedEvents(plan.baseline.events ?? [])));
     if (drifted.length > 0) {
       throw new AdoptionPlanError(
         `Changed since the plan was made (${drifted.join(", ")}). Review and plan again.`,
       );
     }
+  }
+
+  private requireEvents(): AdoptionEventPort {
+    const events = this.deps.events;
+    if (!events) throw new Error("Event adoption is not available here.");
+    return events;
+  }
+
+  /**
+   * Native events the plan adopts must still look as they did when planned:
+   * present, still scheduled and unchanged. (Being linked to a KoolBot event by
+   * someone else in the meantime is caught when the step runs.)
+   */
+  private async driftedEvents(
+    baseline: NonNullable<AdoptionPlan["baseline"]["events"]>,
+  ): Promise<string[]> {
+    if (baseline.length === 0) return [];
+    const events = this.requireEvents();
+    const drifted: string[] = [];
+    for (const expected of baseline) {
+      const live = await this.deps
+        .callApi(
+          () => events.readNative(expected.id),
+          `read scheduled event ${expected.id}`,
+        )
+        .catch(() => undefined);
+      if (live === undefined) {
+        drifted.push(`event "${expected.name}" could not be read`);
+        continue;
+      }
+      if (
+        !live ||
+        live.status !== expected.status ||
+        live.recurring !== expected.recurring ||
+        live.name !== expected.name ||
+        live.description !== expected.description ||
+        live.startsAt !== expected.startsAt ||
+        live.endsAt !== expected.endsAt
+      ) {
+        drifted.push(`event "${expected.name}"`);
+      }
+    }
+    return drifted;
   }
 
   /**
@@ -909,6 +995,21 @@ export class ServerAdoptionService {
         if (messageId) {
           record.status = "applied";
           record.resultId = `posted:${op.pickerChannelId}:${messageId}`;
+          changed = true;
+        }
+      } else if (op.type === "event.adopt" && this.deps.events) {
+        // A crash after the row was written but before it was recorded: the
+        // row carries this step's reference, so it counts as applied and the
+        // rollback removes it.
+        const events = this.deps.events;
+        const ref = `${snapshot.id}:${op.id}`;
+        const rowId = await callApi(
+          () => events.findByRef(ref),
+          `look up event ${op.nativeEventId}`,
+        );
+        if (rowId) {
+          record.status = "applied";
+          record.resultId = rowId;
           changed = true;
         }
       } else if (op.type === "member.role.add") {
@@ -1013,6 +1114,18 @@ export class ServerAdoptionService {
         problems.push(`role ${op.roleId} no longer exists`);
       }
     }
+    const pendingEvents = new Set(
+      pending.flatMap((op) =>
+        op.type === "event.adopt" ? [op.nativeEventId] : [],
+      ),
+    );
+    problems.push(
+      ...(
+        await this.driftedEvents(
+          (plan.baseline.events ?? []).filter((e) => pendingEvents.has(e.id)),
+        )
+      ).map((d) => `${d} changed`),
+    );
     if (options.revalidate)
       problems.push(...(await options.revalidate(pending)));
     if (problems.length > 0) {
@@ -1194,6 +1307,23 @@ export class ServerAdoptionService {
         // `posted:` messages are ours to remove on rollback; `reused:` ones were
         // already there before this plan.
         return `${result.reused ? "reused" : "posted"}:${result.channelId}:${result.messageId}`;
+      }
+      case "event.adopt": {
+        const events = this.requireEvents();
+        // Idempotent by reference: a retry after a crash finds the same row.
+        // A database write, not a Discord call: it is awaited directly, never
+        // through `callApi`, whose timeout would give up on a write that is
+        // still running and let a rollback miss the row it is about to make.
+        return events.adopt({
+          ref: `${snapshot.id}:${op.id}`,
+          guildId: snapshot.guildId,
+          adminId: options.actor.discordUserId,
+          nativeEventId: op.nativeEventId,
+          name: op.name,
+          description: op.description,
+          startsAt: op.startsAt,
+          durationMinutes: op.durationMinutes,
+        });
       }
     }
   }
@@ -1588,6 +1718,16 @@ export class ServerAdoptionService {
               `remove reaction role picker for ${op.roleId}`,
             );
           }
+          break;
+        }
+        case "event.adopt": {
+          // Removes only the KoolBot row this step wrote (found by its
+          // reference), with its post and empty temporary channel. The native
+          // event is never edited, cancelled or deleted.
+          const events = this.requireEvents();
+          // Awaited directly (see `execute`): removal must not be abandoned by
+          // a timeout while it is still running.
+          await events.remove(`${snapshotId}:${op.id}`);
           break;
         }
         case "config.set": {

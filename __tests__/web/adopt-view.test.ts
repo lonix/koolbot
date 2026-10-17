@@ -296,6 +296,33 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("Community-built bot");
     expect(html).not.toContain(CATALOG_LINK);
   });
+  it("links the scheduled events to adoption, escaping their names", () => {
+    const withEvents = {
+      ...scan,
+      scheduledEvents: [
+        {
+          id: "1",
+          name: "Game <i>night</i>",
+          startsAt: "2026-11-01T18:00:00.000Z",
+          status: "1",
+          channelId: null,
+          endsAt: null,
+          description: "",
+          creatorId: null,
+          creatorIsBot: null,
+          entityType: "external" as const,
+          recurring: false,
+        },
+      ],
+    };
+    const html = renderAdoptPage({ ...common, scan: withEvents });
+    expect(html).toContain("Game &lt;i&gt;night&lt;/i&gt;");
+    expect(html).toContain('href="/admin/adopt/events"');
+    expect(renderAdoptPage({ ...common, scan })).not.toContain(
+      'href="/admin/adopt/events"',
+    );
+  });
+
   it("renders a failure notice when the scan failed", () => {
     const html = renderAdoptPage({ ...common, scan: null, error: "boom <x>" });
     expect(html).toContain("The scan failed");

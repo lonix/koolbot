@@ -169,6 +169,28 @@ function makeGuild(): { guild: any; write: jest.Mock } {
               scheduledStartAt: new Date("2026-11-01T18:00:00Z"),
               status: 1,
               channelId: "ch-afk",
+              scheduledEndAt: new Date("2026-11-01T20:00:00Z"),
+              description: "Bring snacks",
+              creatorId: "u-1",
+              creator: { bot: false },
+              entityType: 2,
+              recurrenceRule: null,
+            },
+          ],
+          [
+            "e2",
+            {
+              id: "e2",
+              name: "Weekly",
+              scheduledStartAt: new Date("2026-11-02T18:00:00Z"),
+              status: 1,
+              channelId: null,
+              scheduledEndAt: null,
+              description: null,
+              creatorId: "bot-x",
+              creator: { bot: true },
+              entityType: 3,
+              recurrenceRule: { frequency: 2 },
             },
           ],
         ]);
@@ -240,6 +262,27 @@ describe("ServerScanService (#1019)", () => {
     expect(scan.community.onboardingEnabled).toBe(true);
     expect(scan.community.onboardingRoleIds).toEqual(["r-low"]);
     expect(scan.scheduledEvents[0]!.name).toBe("Game night");
+    // What event adoption (#1034) classifies on.
+    expect(scan.scheduledEvents[0]).toEqual({
+      id: "e1",
+      name: "Game night",
+      startsAt: "2026-11-01T18:00:00.000Z",
+      endsAt: "2026-11-01T20:00:00.000Z",
+      status: "1",
+      channelId: "ch-afk",
+      description: "Bring snacks",
+      creatorId: "u-1",
+      creatorIsBot: false,
+      entityType: "voice",
+      recurring: false,
+    });
+    expect(scan.scheduledEvents[1]).toMatchObject({
+      endsAt: null,
+      description: "",
+      creatorIsBot: true,
+      entityType: "external",
+      recurring: true,
+    });
 
     expect(scan.bots.map((b) => b.userId).sort()).toEqual(["bot-1", "dyno"]);
     const dyno = scan.bots.find((b) => b.userId === "dyno")!;

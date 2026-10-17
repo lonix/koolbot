@@ -1,6 +1,7 @@
 import {
   ChannelType,
   GatewayIntentBits,
+  GuildScheduledEventEntityType,
   PermissionsBitField,
   WebhookType,
   type Client,
@@ -196,6 +197,16 @@ export interface ScheduledEventInfo {
   startsAt: string | null;
   status: string;
   channelId: string | null;
+  /** End time, when the event has one. */
+  endsAt: string | null;
+  description: string;
+  /** Who made it, and whether that account is a bot (null when unknown). */
+  creatorId: string | null;
+  creatorIsBot: boolean | null;
+  /** `voice` and `stage` events happen in a Discord channel. */
+  entityType: "stage" | "voice" | "external" | "unknown";
+  /** The event repeats through a Discord recurrence rule. */
+  recurring: boolean;
 }
 
 export interface ScanSuggestion {
@@ -1036,6 +1047,19 @@ export class ServerScanService {
         startsAt: e.scheduledStartAt?.toISOString() ?? null,
         status: String(e.status),
         channelId: e.channelId ?? null,
+        endsAt: e.scheduledEndAt?.toISOString() ?? null,
+        description: e.description ?? "",
+        creatorId: e.creatorId ?? null,
+        creatorIsBot: e.creator ? e.creator.bot : null,
+        entityType:
+          e.entityType === GuildScheduledEventEntityType.StageInstance
+            ? "stage"
+            : e.entityType === GuildScheduledEventEntityType.Voice
+              ? "voice"
+              : e.entityType === GuildScheduledEventEntityType.External
+                ? "external"
+                : "unknown",
+        recurring: !!e.recurrenceRule,
       }));
     } catch (e) {
       note("scheduled events", e);

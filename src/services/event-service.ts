@@ -457,6 +457,42 @@ export class EventService extends ScheduledService {
   ): Promise<void> {
     let changed = false;
 
+    // An adopted event follows its native event, which stays the source of
+    // truth (#1034): its edits are copied onto the row, and one deleted or
+    // cancelled in Discord cancels the row. Nothing is written to Discord.
+    if (
+      event.nativeAdopted &&
+      !windows.skipNative &&
+      (event.state === "scheduled" || event.state === "active")
+    ) {
+      const before = `${event.title}|${event.description}|${event.startTime.getTime()}`;
+      const outcome = await this.nativeSync.pullAdopted(
+        event,
+        guild,
+        windows.native,
+      );
+      if (outcome === "gone") {
+        // Before the start only. A temp channel that already has people in it
+        // is left alone this tick; the check is repeated on the next scan.
+        if (
+          event.channelId &&
+          !(await this.isChannelEmpty(guild, event.channelId))
+        ) {
+          return;
+        }
+        await this.cancelOne(event, windows.native, windows.skipNative);
+        return;
+      }
+      // The announcement shows the title, time and description in plain text:
+      // when a pull changed them, re-render it through the link-refresh path.
+      if (
+        before !==
+        `${event.title}|${event.description}|${event.startTime.getTime()}`
+      ) {
+        this.linkVerified.delete(String(event._id));
+      }
+    }
+
     // A series cancel that was interrupted (crash, failed query) leaves
     // flagged rows still open: finish it instead of running their lifecycle.
     if (
@@ -472,10 +508,11 @@ export class EventService extends ScheduledService {
       return;
     }
 
-    // A recurring occurrence whose RSVP post failed (or was never made) is
-    // retried here, since nothing else would ever repair it.
+    // A recurring occurrence whose announcement failed (or was never made) is
+    // retried here, since nothing else would ever repair it. An adopted event
+    // has no post to begin with: this is where its link announcement is made.
     if (
-      isRecurring(event) &&
+      (isRecurring(event) || event.nativeAdopted) &&
       !event.announcementMessageId &&
       (event.state === "scheduled" || event.state === "active")
     ) {
@@ -490,7 +527,10 @@ export class EventService extends ScheduledService {
     }
 
     // 2. Create the temp channel shortly before start.
-    if (shouldCreateChannel(event, now, windows.leadMs)) {
+    if (
+      shouldCreateChannel(event, now, windows.leadMs) &&
+      !this.adoptedHasOwnChannel(event, windows.native)
+    ) {
       const channel = await this.claimEventChannel(event, guild);
       if (channel) {
         if (event.state === "scheduled") event.state = "active";
@@ -573,6 +613,125 @@ export class EventService extends ScheduledService {
   // ---------------------------------------------------------------
   // Recurrence (#744)
   // ---------------------------------------------------------------
+
+  /**
+   * An adopted event that happens in a Discord channel of its own (a voice or
+   * stage event) gets no temporary channel. Also true while that is unknown (no
+   * native listing this scan), so a channel is never made by mistake; the next
+   * scan decides.
+   */
+  private adoptedHasOwnChannel(
+    event: IEvent,
+    native?: NativeCache | null,
+  ): boolean {
+    if (!event.nativeAdopted) return false;
+    return this.nativeSync.adoptedHasChannel(event, native) !== false;
+  }
+
+  /**
+   * Undo an adoption step (#1034): remove the KoolBot row the step created
+   * (found by its adoption reference, so only that row), its announcement post
+   * and its temporary channel. The native event is not touched in any way, and
+   * the row is never cancelled or ended first, which would reach the native
+   * event. Throws when the temporary channel is in use, so the rollback is
+   * retried later instead of pulling the channel from under people.
+   */
+  public async removeAdoptedEvent(adoptionRef: string): Promise<boolean> {
+    const row = await Event.findOne({ adoptionRef, nativeAdopted: true });
+    if (!row) return false;
+    // Cleanup is strict: only a confirmed absence counts as done. Any other
+    // failure propagates, and the row (the only record of the channel and the
+    // post) is kept so a retry can find them.
+    if (row.channelId) {
+      await this.removeChannelStrict(row.guildId, row.channelId);
+    }
+    if (row.announcementChannelId && row.announcementMessageId) {
+      await this.removePostStrict(
+        row.guildId,
+        row.announcementChannelId,
+        row.announcementMessageId,
+      );
+    }
+    // Delete only while the row still tracks exactly what was cleaned up. A
+    // scan or "Start now" that attached a post or channel since the read makes
+    // this a no-op; the next attempt then cleans up the new resources too. A
+    // creator that loses to the delete removes its own resource (its claim
+    // filters on the row).
+    const result = await Event.deleteOne({
+      _id: row._id,
+      adoptionRef,
+      nativeAdopted: true,
+      channelId: row.channelId ?? null,
+      announcementMessageId: row.announcementMessageId ?? null,
+    });
+    if (result?.deletedCount === 0) {
+      throw new Error(
+        "The event changed while it was being removed. Try again.",
+      );
+    }
+    this.linkVerified.delete(String(row._id));
+    return true;
+  }
+
+  /** Delete a temp channel that must be empty; absence is the only quiet outcome. */
+  private async removeChannelStrict(
+    guildId: string,
+    channelId: string,
+  ): Promise<void> {
+    const guild = await this.client.guilds.fetch(guildId);
+    let channel;
+    try {
+      channel =
+        guild.channels.cache.get(channelId) ??
+        (await guild.channels.fetch(channelId));
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return;
+      throw error;
+    }
+    if (!channel) return;
+    if (
+      channel.type === ChannelType.GuildVoice &&
+      (channel as VoiceChannel).members.size > 0
+    ) {
+      throw new Error(
+        "The event's temporary voice channel is in use. Try again once it is empty.",
+      );
+    }
+    try {
+      await channel.delete("Event adoption rolled back");
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return;
+      throw error;
+    }
+  }
+
+  /** Delete an announcement post; absence is the only quiet outcome. */
+  private async removePostStrict(
+    guildId: string,
+    channelId: string,
+    messageId: string,
+  ): Promise<void> {
+    const { channel, gone } = await this.fetchTextChannelDetailed(
+      guildId,
+      channelId,
+    );
+    if (!channel) {
+      if (gone) return;
+      throw new Error("The announcement channel could not be read.");
+    }
+    try {
+      const message = await channel.messages.fetch(messageId);
+      await message.delete();
+    } catch (error) {
+      if (
+        this.isDiscardableError(error, DISCORD_UNKNOWN_MESSAGE) ||
+        this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)
+      ) {
+        return;
+      }
+      throw error;
+    }
+  }
 
   public async isRecurrenceEnabled(): Promise<boolean> {
     return this.configService.getBoolean("events.recurrence_enabled", true);
