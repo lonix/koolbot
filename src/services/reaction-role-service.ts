@@ -2200,6 +2200,15 @@ export class ReactionRoleService {
           `fetch picker channel ${input.channelId}`,
         )) as TextChannel | null;
         if (!orphanChannel?.messages) return;
+        // The marker survives a mapping being unbound or another being added:
+        // the guard that protects a shared picker applies here as well. The
+        // lock is held, so no mapping can be added while this is decided.
+        const sharedBy = await ReactionRoleConfig.countDocuments({
+          guildId,
+          messageId: input.messageId,
+          isArchived: false,
+        });
+        if (sharedBy > 0) return;
         const botId = this.client.user?.id;
         await api.makeDiscordApiCall(
           () =>

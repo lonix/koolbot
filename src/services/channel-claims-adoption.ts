@@ -205,10 +205,16 @@ export function claimsForRevalidation(
   claims: readonly ChannelClaim[],
   pending: readonly PlanOperation[],
 ): ChannelClaim[] {
-  const registrationPending = pending.some(
-    (op) => op.type === "reactionrole.register",
+  // Only a category whose registration is still pending keeps it: one that
+  // already registered may no longer look like a pairing (the plan gated it
+  // for more roles), and planning it again would block the others' retry.
+  const pendingCategories = new Set(
+    pending.flatMap((op) =>
+      op.type === "reactionrole.register" ? [op.categoryId] : [],
+    ),
   );
-  return registrationPending
-    ? [...claims]
-    : claims.map((c) => ({ ...c, registerPairing: false }));
+  return claims.map((c) => ({
+    ...c,
+    registerPairing: !!c.registerPairing && pendingCategories.has(c.channelId),
+  }));
 }

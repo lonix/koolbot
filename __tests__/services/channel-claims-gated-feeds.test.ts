@@ -987,7 +987,10 @@ describe("review findings, round four", () => {
       },
     ];
     const registration = [
-      { type: "reactionrole.register" } as unknown as PlanOperation,
+      {
+        type: "reactionrole.register",
+        categoryId: CAT_GAME,
+      } as unknown as PlanOperation,
     ];
     const destructive = [
       { type: "overwrite.remove" } as unknown as PlanOperation,
@@ -1189,5 +1192,65 @@ describe("review findings, round five", () => {
     );
     const staff = setFor(r.plan, LEAKY, R_GROUP)!;
     expect(BigInt(staff.allow) & F.SendMessages).toBe(0n);
+  });
+
+  it("keeps a registration claim only for categories whose registration is still pending", () => {
+    // A registered, B failed: both were gated for another role by the plan.
+    const claims: ChannelClaim[] = [
+      {
+        channelId: CAT_GAME,
+        action: "gate",
+        roleIds: [R_ADMIN],
+        registerPairing: true,
+      },
+      {
+        channelId: CAT_DONE,
+        action: "gate",
+        roleIds: [R_ADMIN],
+        registerPairing: true,
+      },
+      { channelId: CAT_PLAIN, action: "leave" },
+    ];
+    const pending = [
+      { type: "reactionrole.register", categoryId: CAT_DONE },
+    ] as unknown as PlanOperation[];
+    const out = claimsForRevalidation(claims, pending);
+    expect(out.find((c) => c.channelId === CAT_GAME)!.registerPairing).toBe(
+      false,
+    );
+    expect(out.find((c) => c.channelId === CAT_DONE)!.registerPairing).toBe(
+      true,
+    );
+    expect(out.find((c) => c.channelId === CAT_PLAIN)!.registerPairing).toBe(
+      false,
+    );
+    // Planned with the recorded identity for B only, the retry has no
+    // `not-a-pairing` for either category.
+    const gated = fixture();
+    for (const id of [CAT_GAME, CAT_DONE]) {
+      gated.channels
+        .find((c) => c.id === id)!
+        .overwrites.push(ow(R_ADMIN, F.ViewChannel));
+    }
+    const scan = scanOf(gated);
+    const recorded = judgeRecordedPairings(scan, groups, [
+      { categoryId: CAT_DONE, roleId: R_VIEW },
+    ]);
+    const ctx: ClaimContext = {
+      scanned: gated,
+      groups,
+      integrationRoleIds: new Set([R_INTEG]),
+      syncedToParent: new Map(),
+      membersIntent: true,
+      suggestedPrefix: null,
+      pairings: new Map(recorded.map((p) => [p.categoryId, p])),
+      feeds: detectFeeds(scan),
+      approvedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const built = buildClaimsDesiredState(out, ctx);
+    expect(built.issues.map((i) => i.code)).not.toContain("not-a-pairing");
+    expect(built.desired.reactionRoles).toEqual([
+      { roleId: R_VIEW, categoryId: CAT_DONE, emoji: DEFAULT_PAIR_EMOJI },
+    ]);
   });
 });

@@ -604,6 +604,21 @@ describe("pickers that exist before their mapping is saved (#1022)", () => {
     ).toBeNull();
   });
 
+  it("a marked picker another mapping has since been added to is not deleted", async () => {
+    const { service, messageFetch } = build();
+    const mine = picker("orphan1", `Remove${MARK}`);
+    messageFetch.mockResolvedValue(mine);
+    Model.countDocuments.mockResolvedValue(1);
+    await service.unregisterGatedPairing("guild1", un());
+    expect(Model.countDocuments).toHaveBeenCalledWith({
+      guildId: "guild1",
+      messageId: "orphan1",
+      isArchived: false,
+    });
+    expect(mine.delete).not.toHaveBeenCalled();
+    expect(Model.deleteOne).not.toHaveBeenCalled();
+  });
+
   it("a rollback deletes an unmapped picker only when its marker is this step's", async () => {
     const { service, messageFetch } = build();
     const mine = picker("orphan1", `Remove${MARK}`);
