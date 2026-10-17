@@ -167,6 +167,23 @@ describe("runWebSignin link delivery", () => {
     expect(everythingLogged()).not.toContain("tok");
   });
 
+  it("refuses to issue a link outside the configured guild (#1144)", async () => {
+    const prev = process.env.GUILD_ID;
+    process.env.GUILD_ID = "other-guild";
+    try {
+      const { interaction, editReply, send } = build(async () => undefined);
+      await runWebSignin(interaction, opts);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      expect(editReply.mock.calls[0][0]).toEqual({
+        content: expect.stringContaining("own server"),
+      });
+    } finally {
+      if (prev === undefined) delete process.env.GUILD_ID;
+      else process.env.GUILD_ID = prev;
+    }
+  });
+
   describe("sign-in cooldown (#1147)", () => {
     it("issues one link, then refuses a second ask inside the cooldown", async () => {
       mockGetString.mockResolvedValue("dm");

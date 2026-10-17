@@ -123,6 +123,21 @@ describe("aka command", () => {
     expect(content).toContain("recording is turned off");
   });
 
+  it("does not record a user who is not a member, and says so (#1144)", async () => {
+    const i = makeInteraction();
+    (i.options as unknown as { getMember: () => null }).getMember = () => null;
+    mockGetHistory.mockResolvedValue({
+      ...empty,
+      username: [{ name: "old_bob", firstSeenAt: d, lastSeenAt: d }],
+    });
+    await execute(i);
+    expect(mockRecordUser).not.toHaveBeenCalled();
+    const { content } = (i.editReply.mock.calls[0] as [{ content: string }])[0];
+    expect(content).toContain("not a member of this server");
+    // Existing rows are still shown; nothing is deleted.
+    expect(content).toContain("old\\_bob");
+  });
+
   it("passes an admission ticket captured before deferring", async () => {
     const i = makeInteraction();
     await execute(i);

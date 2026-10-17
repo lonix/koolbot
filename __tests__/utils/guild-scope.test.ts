@@ -12,12 +12,81 @@ const {
   shouldIgnoreGuild,
   applyGuildScope,
   resetForeignGuildWarnings,
+  isConfiguredGuildMember,
 } = await import("../../src/utils/guild-scope.js");
 
 describe("guild scope (#1144)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetForeignGuildWarnings();
+    delete process.env.GUILD_MEMBERS_INTENT;
+  });
+
+  describe("isConfiguredGuildMember", () => {
+    const fetch = jest.fn<(o: unknown) => Promise<unknown>>();
+    const callApi = jest.fn(<T>(call: () => Promise<T>) => call());
+    const clientWith = (ids: string[]) => ({
+      guilds: {
+        cache: {
+          get: (id: string) =>
+            id === "g1"
+              ? {
+                  members: {
+                    cache: { has: (u: string) => ids.includes(u) },
+                    fetch,
+                  },
+                }
+              : undefined,
+        },
+      },
+    });
+    beforeEach(() => {
+      fetch.mockReset();
+      callApi.mockClear();
+    });
+
+    it("trusts the cache when the intent is on", async () => {
+      process.env.GUILD_MEMBERS_INTENT = "true";
+      const c = clientWith(["u1"]);
+      expect(await isConfiguredGuildMember(c, "g1", "u1", callApi)).toBe(true);
+      expect(await isConfiguredGuildMember(c, "g1", "u2", callApi)).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+    it("does not trust a cached former member when the intent is off", async () => {
+      fetch.mockRejectedValue(
+        Object.assign(new Error("Unknown Member"), { code: 10007 }),
+      );
+      // u1 is still in the cache (no removal event arrives) but has left.
+      expect(
+        await isConfiguredGuildMember(clientWith(["u1"]), "g1", "u1", callApi),
+      ).toBe(false);
+      expect(fetch).toHaveBeenCalledWith({ user: "u1", force: true });
+    });
+    it("accepts a member the fresh lookup confirms when the intent is off", async () => {
+      fetch.mockResolvedValue({ id: "u1" });
+      expect(
+        await isConfiguredGuildMember(clientWith([]), "g1", "u1", callApi),
+      ).toBe(true);
+    });
+    it("fails closed when the lookup errors or times out", async () => {
+      fetch.mockRejectedValue(new Error("Discord API timeout after 5000ms"));
+      expect(
+        await isConfiguredGuildMember(clientWith(["u1"]), "g1", "u1", callApi),
+      ).toBe(false);
+    });
+    it("is false when no guild is configured or the guild is unknown", async () => {
+      expect(
+        await isConfiguredGuildMember(
+          clientWith(["u1"]),
+          undefined,
+          "u1",
+          callApi,
+        ),
+      ).toBe(false);
+      expect(
+        await isConfiguredGuildMember(clientWith(["u1"]), "g9", "u1", callApi),
+      ).toBe(false);
+    });
   });
 
   describe("isForeignGuild", () => {
