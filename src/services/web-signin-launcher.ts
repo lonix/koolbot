@@ -17,6 +17,8 @@ import { ConfigService } from "./config-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import { RoleGroupService } from "./role-group-service.js";
 import type { WebSessionRole } from "../models/web-session.js";
+import { env } from "../config/env.js";
+import { isForeignGuild } from "../utils/guild-scope.js";
 import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
 
 /**
@@ -137,6 +139,17 @@ export async function runWebSignin(
     );
     await interaction.editReply({
       content: "This command must be run inside a guild.",
+    });
+    return;
+  }
+
+  // The Web UI belongs to the configured guild only (#1144).
+  if (isForeignGuild(guildId, env.guildId)) {
+    logger.info(
+      `/${commandName} rejected for user=${userId}: guild is not the configured GUILD_ID`,
+    );
+    await interaction.editReply({
+      content: "The web UI is only available in this bot's own server.",
     });
     return;
   }

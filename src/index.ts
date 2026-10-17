@@ -1428,15 +1428,17 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
 
 // Name history (#1038). `userUpdate` needs no privileged intent but only fires
 // for cached users; it carries no guild, so it is attributed to the bot's
-// configured guild (the bot is single-guild via GUILD_ID).
+// configured guild (the bot is single-guild via GUILD_ID), and only for users
+// who are members of it (#1144).
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   recordDiscordEvent("userUpdate");
   if (!env.guildId) return;
-  await NameHistoryService.getInstance().recordUser(
+  await NameHistoryService.getInstance().recordUserUpdate(
+    client,
     env.guildId,
     newUser,
-    undefined,
-    TrackingOptOutService.getInstance().admission(),
+    (call, op) =>
+      CommandManager.getInstance(client).makeDiscordApiCall(call, op, 5000, 1),
   );
 });
 

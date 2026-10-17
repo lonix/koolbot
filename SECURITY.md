@@ -157,6 +157,11 @@ or **Bot** settings in the Discord developer portal. To have the bot leave any
 server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
 (off by default).
 
+Web UI sign-in links and sessions are also pinned to `GUILD_ID`: a link or
+session for any other server is refused. Username and display name changes
+are recorded only for members of `GUILD_ID`; without `GUILD_MEMBERS_INTENT=true`
+the bot confirms membership with Discord before recording.
+
 ### Mentions
 
 The bot sets a safe client-wide `allowedMentions` default of `parse: []`, so a

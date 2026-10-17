@@ -1,6 +1,7 @@
 import logger from "./logger.js";
 import { sanitizeForLog } from "./log-sanitize.js";
 import { getErrorMessage } from "./error-guards.js";
+import { env } from "../config/env.js";
 
 /**
  * Guild scoping (#1144).
@@ -105,4 +106,65 @@ export async function applyGuildScope(
 /** Test hook: forget which guilds were already warned about. */
 export function resetForeignGuildWarnings(): void {
   warnedGuilds.clear();
+}
+
+/** The slice of a discord.js `Client` that the membership check needs. */
+export interface MembershipClient {
+  guilds: {
+    cache: {
+      get: (id: string) =>
+        | {
+            members: {
+              cache: { has: (userId: string) => boolean };
+              fetch: (options: {
+                user: string;
+                force: boolean;
+              }) => Promise<unknown>;
+            };
+          }
+        | undefined;
+    };
+  };
+}
+
+/** Runs a Discord REST call with a timeout (`CommandManager.makeDiscordApiCall`). */
+export type DiscordApiCall = <T>(
+  call: () => Promise<T>,
+  operationName: string,
+) => Promise<T>;
+
+/**
+ * Whether `userId` is a member of the configured guild, for events that carry
+ * no guild (`userUpdate`, #1144).
+ *
+ * With the GuildMembers intent on, removals are delivered and the member cache
+ * is exact, so it answers. With the intent off no removal event arrives and a
+ * cached member may have left, so a cache hit is not trusted: the member is
+ * read fresh from Discord, bounded by `callApi`. A failed or timed-out lookup
+ * counts as "not a member" (fail closed), so a stranger's name is never
+ * attributed to the guild. `userUpdate` only fires when a cached user changes
+ * their profile, so this is not a hot path.
+ */
+export async function isConfiguredGuildMember(
+  client: MembershipClient,
+  configuredGuildId: string | undefined,
+  userId: string,
+  callApi: DiscordApiCall,
+): Promise<boolean> {
+  if (!configuredGuildId) return false;
+  const guild = client.guilds.cache.get(configuredGuildId);
+  if (!guild) return false;
+  if (env.guildMembersIntent) return guild.members.cache.has(userId);
+  try {
+    await callApi(
+      () => guild.members.fetch({ user: userId, force: true }),
+      "userUpdate membership check",
+    );
+    return true;
+  } catch (error) {
+    logger.debug(
+      `userUpdate membership check for ${sanitizeForLog(userId)} treated as not a member: ${getErrorMessage(error)}`,
+    );
+    return false;
+  }
 }

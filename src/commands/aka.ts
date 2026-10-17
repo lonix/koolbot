@@ -114,9 +114,11 @@ export async function execute(
     const service = NameHistoryService.getInstance();
     const recording = await service.isEnabled();
 
-    // Opportunistic capture: the target is right here, so snapshot them now.
-    if (recording) {
-      const member = interaction.options.getMember("user");
+    // Opportunistic capture: the target is right here, so snapshot them now,
+    // but only a real member of this server (#1144). The user option accepts
+    // any Discord user; the member option is null for someone who isn't here.
+    const member = interaction.options.getMember("user");
+    if (recording && member) {
       const nickname =
         member && "nickname" in member ? (member.nickname ?? null) : undefined;
       await service.recordUser(
@@ -136,6 +138,10 @@ export async function execute(
     if (!recording) {
       notes.push(
         "Name history recording is turned off, so no new names are being saved.",
+      );
+    } else if (!member) {
+      notes.push(
+        "This user is not a member of this server, so their names were not recorded.",
       );
     } else if (!env.guildMembersIntent) {
       notes.push(

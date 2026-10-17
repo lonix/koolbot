@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
+import { isForeignGuild } from "../utils/guild-scope.js";
 import {
   WebSession,
   IWebSession,
@@ -113,6 +114,10 @@ export class WebSessionService {
   ): Promise<CreatedSession> {
     if (!discordUserId) throw new Error("discordUserId required");
     if (!guildId) throw new Error("guildId required");
+    // Sessions are pinned to the configured guild (#1144).
+    if (isForeignGuild(guildId, env.guildId)) {
+      throw new Error("Web sessions can only be issued for GUILD_ID");
+    }
 
     await this.revokeForUser(discordUserId);
 
@@ -175,6 +180,8 @@ export class WebSessionService {
         usedAt: null,
         revokedAt: null,
         expiresAt: { $gt: now },
+        // A link issued for another guild is never redeemable (#1144).
+        ...(env.guildId ? { guildId: env.guildId } : {}),
       },
       { $set: { usedAt: now, expiresAt: sessionExpiresAt } },
       { new: true },
@@ -242,6 +249,10 @@ export class WebSessionService {
     }
     if (existing.expiresAt <= now) {
       logger.info("Web session peek rejected: expired");
+      return null;
+    }
+    if (isForeignGuild(existing.guildId, env.guildId)) {
+      logger.info("Web session peek rejected: foreign_guild");
       return null;
     }
 
