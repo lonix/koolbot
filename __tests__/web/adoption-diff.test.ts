@@ -1,5 +1,10 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderAdoptionDiff } from "../../src/web/adoption-diff.js";
+import {
+  DESTRUCTIVE_CONFIRM_FIELD,
+  hasDestructiveSteps,
+  renderAdoptionDiff,
+  renderDestructiveConfirm,
+} from "../../src/web/adoption-diff.js";
 import type { AdoptionPlan } from "../../src/services/server-adoption-planner.js";
 
 const base: AdoptionPlan = {
@@ -117,5 +122,84 @@ describe("renderAdoptionDiff", () => {
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;b&gt;");
+  });
+});
+
+describe("destructive steps section (#1184)", () => {
+  const additive = {
+    id: "op-1",
+    type: "config.set",
+    class: "additive",
+    key: "k",
+    value: "v",
+    previous: null,
+    summary: "Set k",
+    targetId: "k",
+    before: null,
+    after: { value: "v" },
+  } as const;
+  const destructive = {
+    id: "op-2",
+    type: "channel.delete",
+    class: "destructive",
+    channelId: "c",
+    summary: 'Delete text "old"',
+    targetId: "c",
+    before: { name: "old" },
+    after: null,
+  } as const;
+
+  it("lists additive and destructive steps in separate tables", () => {
+    const html = renderAdoptionDiff({
+      ...base,
+      operations: [additive, destructive] as never,
+    });
+    const changes = html.indexOf("Changes (1)");
+    const section = html.indexOf("Destructive steps (1)");
+    expect(changes).toBeGreaterThan(-1);
+    expect(section).toBeGreaterThan(changes);
+    expect(html.match(/<table/g)).toHaveLength(2);
+    // The destructive row sits after the section heading, the additive one before.
+    expect(html.indexOf("Set k")).toBeLessThan(section);
+    expect(html.indexOf("Delete text")).toBeGreaterThan(section);
+    expect(html).toContain(
+      "a deleted channel or role comes back with a new ID",
+    );
+  });
+
+  it("renders no destructive section when every step is additive", () => {
+    const html = renderAdoptionDiff({
+      ...base,
+      operations: [additive] as never,
+    });
+    expect(html).not.toContain("Destructive steps");
+    expect(html.match(/<table/g)).toHaveLength(1);
+  });
+
+  it("renders only the destructive section when that is all there is", () => {
+    const html = renderAdoptionDiff({
+      ...base,
+      operations: [destructive] as never,
+    });
+    expect(html).not.toContain("Changes (");
+    expect(html).toContain("Destructive steps (1)");
+  });
+
+  it("asks for a separate confirmation only when the plan has destructive steps", () => {
+    expect(renderDestructiveConfirm({ operations: [additive] as never })).toBe(
+      "",
+    );
+    const box = renderDestructiveConfirm({
+      operations: [additive, destructive] as never,
+    });
+    expect(box).toContain(`name="${DESTRUCTIVE_CONFIRM_FIELD}"`);
+    expect(box).toContain("required");
+    expect(box).toContain("1 destructive step(s)");
+    expect(hasDestructiveSteps({ operations: [destructive] as never })).toBe(
+      true,
+    );
+    expect(hasDestructiveSteps({ operations: [additive] as never })).toBe(
+      false,
+    );
   });
 });

@@ -213,13 +213,16 @@ export async function planAdminFix(
  *
  * A role KoolBot created for the group needs no approval. Any other role is a
  * pre-existing one: its deletion is destructive and is only planned with an
- * explicit approval naming it (`approvedBy` is the admin who ticked the box).
+ * explicit approval naming it (`approvedBy` is the admin who typed the role's
+ * name). The caller fixes `approvedAt` at preview time and reuses it on apply,
+ * so the plan id the admin reviewed is the one that runs (#1184).
  */
 export async function planRoleDeletion(
   guild: Guild,
   adminUserId: string,
   group: RoleGroupView,
   approved: boolean,
+  approvedAt: string = new Date().toISOString(),
 ): Promise<{ plan: AdoptionPlan; extraErrors: PlanIssue[] }> {
   const extraErrors: PlanIssue[] = [];
   const roleId = group.roleId;
@@ -261,7 +264,7 @@ export async function planRoleDeletion(
                 kind: "role.delete",
                 targetId: roleId,
                 approvedBy: adminUserId,
-                approvedAt: new Date().toISOString(),
+                approvedAt,
               },
             ]
           : [],
@@ -284,9 +287,16 @@ export function roleDeletionRevalidator(
   adminUserId: string,
   group: RoleGroupView,
   approved: boolean,
+  approvedAt?: string,
 ): (pending: PlanOperation[]) => Promise<string[]> {
   return async (pending) => {
-    const fresh = await planRoleDeletion(guild, adminUserId, group, approved);
+    const fresh = await planRoleDeletion(
+      guild,
+      adminUserId,
+      group,
+      approved,
+      approvedAt,
+    );
     const problems = [...fresh.plan.errors, ...fresh.extraErrors].map(
       (e) => e.message,
     );

@@ -207,6 +207,29 @@ describe("planRoleDeletion", () => {
     ]);
   });
 
+  it("gives the reviewed plan id back for the same approval stamp, so apply can compare ids (#1184)", async () => {
+    const stamp = "2026-10-17T10:00:00.000Z";
+    const first = await planRoleDeletion(guild, "admin", grp(), true, stamp);
+    const again = await planRoleDeletion(guild, "admin", grp(), true, stamp);
+    expect(again.plan.id).toBe(first.plan.id);
+    const later = await planRoleDeletion(
+      guild,
+      "admin",
+      grp(),
+      true,
+      "2026-10-17T10:05:00.000Z",
+    );
+    expect(later.plan.id).not.toBe(first.plan.id);
+    // A different server state is a different plan id even with the same stamp.
+    mockScan.mockResolvedValue({
+      scanned: scanned({ koolbotCreatedIds: ["r1"] }),
+      memberCounts: new Map(),
+      botIds: null,
+    });
+    const moved = await planRoleDeletion(guild, "admin", grp(), false, stamp);
+    expect(moved.plan.id).not.toBe(first.plan.id);
+  });
+
   it("needs no approval for a role KoolBot created", async () => {
     mockScan.mockResolvedValue({
       scanned: scanned({ koolbotCreatedIds: ["r1"] }),

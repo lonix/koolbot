@@ -40,6 +40,10 @@ import {
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
+import {
+  renderAdminFixPage,
+  renderRoleDeletePage,
+} from "../../src/web/role-groups-views.js";
 import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
 import {
   renderChannelDeleteConfirmPage,
@@ -314,6 +318,157 @@ const SETTING_ROWS: SettingRow[] = [
   },
 ];
 
+/** Props for the Channel Claims page; `over` swaps in a previewed plan. */
+function claimsProps(
+  over: Partial<Parameters<typeof renderChannelClaimsPage>[0]> = {},
+): Parameters<typeof renderChannelClaimsPage>[0] {
+  return {
+    ...COMMON,
+    navFeatureStatus: {},
+    groups: [],
+    claims: [],
+    problems: [],
+    previewToken: null,
+    plan: null,
+    scan: {
+      guildName: "Guild",
+      guildId: "g",
+      scanned: {
+        botRoleIds: [],
+        botHighestRolePosition: 50,
+        roles: [
+          { id: "r1", permissions: "0", position: 3 },
+          { id: "r2", permissions: "8", position: 4 },
+        ],
+      },
+      webhooks: {
+        known: true,
+        unavailable: null,
+        list: [{ id: "w1", name: "bridge", channelId: "11", kind: "incoming" }],
+      },
+      roles: [
+        {
+          id: "r1",
+          name: "Mod",
+          position: 3,
+          managed: false,
+          isEveryone: false,
+          botId: null,
+          usedBy: [],
+        },
+        {
+          id: "r2",
+          name: "Admins",
+          position: 4,
+          managed: false,
+          isEveryone: false,
+          botId: null,
+          usedBy: [],
+        },
+      ],
+      channels: [
+        {
+          id: "10",
+          name: "Games",
+          kind: "category",
+          typeName: "GuildCategory",
+          parentId: null,
+          position: 0,
+          usedBy: [],
+          gatedByRoleIds: ["r1"],
+          syncedToParent: null,
+          overwrites: [
+            { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+            { id: "r1", type: "role", allow: ["ViewChannel"], deny: [] },
+          ],
+          flags: {},
+        },
+        {
+          id: "20",
+          name: "Staff",
+          kind: "category",
+          typeName: "GuildCategory",
+          parentId: null,
+          position: 2,
+          usedBy: [],
+          gatedByRoleIds: ["r2"],
+          syncedToParent: null,
+          overwrites: [
+            { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
+            { id: "r2", type: "role", allow: ["ViewChannel"], deny: [] },
+          ],
+          flags: {},
+        },
+        {
+          id: "11",
+          name: "news",
+          kind: "text",
+          typeName: "GuildText",
+          parentId: "10",
+          position: 1,
+          usedBy: [],
+          gatedByRoleIds: [],
+          syncedToParent: true,
+          overwrites: [],
+          flags: {},
+        },
+      ],
+      naming: { suggestedPrefix: null },
+    } as never,
+    ...over,
+  };
+}
+
+/** A previewed plan with an additive and a destructive step (#1184). */
+const CLAIMS_DESTRUCTIVE_PLAN = {
+  scan: null,
+  groups: [],
+  errors: [],
+  warnings: [],
+  claims: [],
+  plan: {
+    id: "plan-1",
+    guildId: "g",
+    plannedBy: "a",
+    operations: [
+      {
+        id: "op-1",
+        type: "overwrite.set",
+        class: "additive",
+        channelId: "11",
+        overwriteTargetId: "g",
+        overwriteTargetType: "role",
+        allow: "0",
+        deny: "1024",
+        summary: 'Edit overwrite on "news"',
+        targetId: "11",
+        before: { allow: "0", deny: "0" },
+        after: { allow: "0", deny: "1024" },
+      },
+      {
+        id: "op-2",
+        type: "overwrite.remove",
+        class: "destructive",
+        channelId: "11",
+        overwriteTargetId: "r1",
+        approval: {
+          kind: "overwrite.remove",
+          targetId: "11:r1",
+          approvedBy: "a",
+          approvedAt: "2026-10-17T10:00:00.000Z",
+        },
+        summary: 'Remove overwrite on "news"',
+        targetId: "11",
+        before: { allow: "1024", deny: "0" },
+        after: null,
+      },
+    ],
+    warnings: [],
+    errors: [],
+    baseline: { absentRoleNames: [], roles: [], channels: [], config: {} },
+  },
+} as never;
+
 /** Every authenticated admin page, rendered as a full document. */
 export function adminPages(): A11yPage[] {
   return [
@@ -356,6 +511,53 @@ export function adminPages(): A11yPage[] {
           lastAttemptAt: new Date("2026-09-24T08:00:00Z"),
           lastError: null,
         },
+      }),
+    },
+    {
+      // The destructive section and the typed-name confirmation (#1184).
+      name: "Role group deletion review",
+      html: renderRoleDeletePage({
+        ...COMMON,
+        navFeatureStatus: {},
+        groupId: "g1",
+        groupName: "Moderators",
+        plan: {
+          id: "plan-1",
+          guildId: "g",
+          plannedBy: "a",
+          operations: [
+            {
+              id: "op-1",
+              type: "role.delete",
+              class: "destructive",
+              roleId: "r1",
+              approval: {
+                kind: "role.delete",
+                targetId: "r1",
+                approvedBy: "a",
+                approvedAt: "2026-10-17T10:00:00.000Z",
+              },
+              summary: 'Delete role "Moderators"',
+              targetId: "r1",
+              before: { name: "Moderators", permissions: "8" },
+              after: null,
+            },
+          ],
+          warnings: [],
+          errors: [],
+          baseline: {
+            absentRoleNames: [],
+            roles: [],
+            channels: [],
+            config: {},
+          },
+        } as never,
+        extraErrors: [],
+        approvedAt: "2026-10-17T10:00:00.000Z",
+        reviewToken: "review-token",
+        confirmName: "Moderators",
+        roleId: "r1",
+        validForMinutes: 15,
       }),
     },
     {
@@ -458,101 +660,30 @@ export function adminPages(): A11yPage[] {
     },
     {
       name: "Channel claims",
-      html: renderChannelClaimsPage({
+      html: renderChannelClaimsPage(claimsProps()),
+    },
+    {
+      // Destructive section and its separate confirmation in the apply form.
+      name: "Channel claims with a destructive plan",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          plan: CLAIMS_DESTRUCTIVE_PLAN,
+          previewToken: "preview-token",
+        }),
+      ),
+    },
+    {
+      // Plan preview under its own heading (#1184).
+      name: "Administrators outside the admin group",
+      html: renderAdminFixPage({
         ...COMMON,
         navFeatureStatus: {},
-        groups: [],
-        claims: [],
-        problems: [],
-        previewToken: null,
-        plan: null,
-        scan: {
-          guildName: "Guild",
-          guildId: "g",
-          scanned: {
-            botRoleIds: [],
-            botHighestRolePosition: 50,
-            roles: [
-              { id: "r1", permissions: "0", position: 3 },
-              { id: "r2", permissions: "8", position: 4 },
-            ],
-          },
-          webhooks: {
-            known: true,
-            unavailable: null,
-            list: [
-              { id: "w1", name: "bridge", channelId: "11", kind: "incoming" },
-            ],
-          },
-          roles: [
-            {
-              id: "r1",
-              name: "Mod",
-              position: 3,
-              managed: false,
-              isEveryone: false,
-              botId: null,
-              usedBy: [],
-            },
-            {
-              id: "r2",
-              name: "Admins",
-              position: 4,
-              managed: false,
-              isEveryone: false,
-              botId: null,
-              usedBy: [],
-            },
-          ],
-          channels: [
-            {
-              id: "10",
-              name: "Games",
-              kind: "category",
-              typeName: "GuildCategory",
-              parentId: null,
-              position: 0,
-              usedBy: [],
-              gatedByRoleIds: ["r1"],
-              syncedToParent: null,
-              overwrites: [
-                { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
-                { id: "r1", type: "role", allow: ["ViewChannel"], deny: [] },
-              ],
-              flags: {},
-            },
-            {
-              id: "20",
-              name: "Staff",
-              kind: "category",
-              typeName: "GuildCategory",
-              parentId: null,
-              position: 2,
-              usedBy: [],
-              gatedByRoleIds: ["r2"],
-              syncedToParent: null,
-              overwrites: [
-                { id: "g", type: "role", allow: [], deny: ["ViewChannel"] },
-                { id: "r2", type: "role", allow: ["ViewChannel"], deny: [] },
-              ],
-              flags: {},
-            },
-            {
-              id: "11",
-              name: "news",
-              kind: "text",
-              typeName: "GuildText",
-              parentId: "10",
-              position: 1,
-              usedBy: [],
-              gatedByRoleIds: [],
-              syncedToParent: true,
-              overwrites: [],
-              flags: {},
-            },
-          ],
-          naming: { suggestedPrefix: null },
-        } as never,
+        plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+        extraErrors: [],
+        moveIds: ["u1"],
+        dropIds: [],
+        grant: false,
+        losing: [],
       }),
     },
     {

@@ -3,9 +3,12 @@ import type { Client } from "discord.js";
 
 const mockPlanFix = jest.fn<(...a: any[]) => Promise<any>>();
 const mockPlanRoles = jest.fn<(...a: any[]) => Promise<any>>();
+const mockPlanDelete = jest.fn<(...a: any[]) => Promise<any>>();
+const mockGetGroup = jest.fn<(...a: any[]) => Promise<any>>();
 jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
   planAdminFix: mockPlanFix,
   planRoleGroups: mockPlanRoles,
+  planRoleDeletion: mockPlanDelete,
   linkCreatedRoles: jest.fn(),
 }));
 const mockFeatureUses =
@@ -14,6 +17,7 @@ jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: {
     getInstance: () => ({
       list: jest.fn(async () => []),
+      get: mockGetGroup,
       featureRoleUses: mockFeatureUses,
     }),
   },
@@ -32,7 +36,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { loadAdminFixPreview, loadRoleGroupsPage } =
+const { loadAdminFixPreview, loadRoleDeletePreview, loadRoleGroupsPage } =
   await import("../../src/web/role-groups-page.js");
 
 const client = {
@@ -157,5 +161,90 @@ describe("loadRoleGroupsPage role options (#1023)", () => {
     mockFeatureUses.mockRejectedValue(new Error("db down"));
     const out = await loadRoleGroupsPage(client, "g", "me");
     expect(out.roleOptions.every((r) => r.usedBy?.length === 0)).toBe(true);
+  });
+});
+
+describe("loadRoleDeletePreview (#1184)", () => {
+  const STAMP = "2026-10-17T10:00:00.000Z";
+  const deletePlan = {
+    id: "p1",
+    errors: [],
+    operations: [
+      {
+        type: "role.delete",
+        class: "destructive",
+        before: { name: "Mods", permissions: "0" },
+      },
+    ],
+  };
+
+  it("plans the deletion with the caller's stamp and reads the name to confirm from the plan", async () => {
+    mockGetGroup.mockResolvedValue({
+      id: "g1",
+      name: "Moderators",
+      roleId: "r1",
+      createdByKoolbot: false,
+    });
+    mockPlanDelete.mockResolvedValue({ plan: deletePlan, extraErrors: [] });
+    const out = await loadRoleDeletePreview(client, "g", "me", "g1", STAMP);
+    expect(mockPlanDelete).toHaveBeenCalledWith(
+      expect.anything(),
+      "me",
+      expect.objectContaining({ id: "g1" }),
+      true,
+      STAMP,
+    );
+    expect(out).toMatchObject({
+      groupId: "g1",
+      groupName: "Moderators",
+      confirmName: "Mods",
+      approvedAt: STAMP,
+      roleId: "r1",
+    });
+  });
+
+  it("plans a KoolBot-created role without an approval", async () => {
+    mockGetGroup.mockResolvedValue({
+      id: "g1",
+      name: "Moderators",
+      roleId: "r1",
+      createdByKoolbot: true,
+    });
+    mockPlanDelete.mockResolvedValue({ plan: deletePlan, extraErrors: [] });
+    await loadRoleDeletePreview(client, "g", "me", "g1", STAMP);
+    expect(mockPlanDelete.mock.calls[0][3]).toBe(false);
+  });
+
+  it("offers no name to confirm when the plan has no role delete step", async () => {
+    mockGetGroup.mockResolvedValue({ id: "g1", name: "M", roleId: "r1" });
+    mockPlanDelete.mockResolvedValue({
+      plan: { id: "p", errors: [], operations: [] },
+      extraErrors: [],
+    });
+    const out = await loadRoleDeletePreview(client, "g", "me", "g1", STAMP);
+    expect(out?.confirmName).toBeNull();
+  });
+
+  it("returns null for an unknown group and plans nothing", async () => {
+    mockGetGroup.mockResolvedValue(null);
+    expect(
+      await loadRoleDeletePreview(client, "g", "me", "x", STAMP),
+    ).toBeNull();
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+  });
+
+  it("fails closed: a Discord outage throws instead of offering a plan", async () => {
+    mockGetGroup.mockResolvedValue({ id: "g1", name: "M", roleId: "r1" });
+    const down = {
+      guilds: {
+        fetch: jest.fn(async () => {
+          throw new Error("down");
+        }),
+      },
+    } as unknown as Client;
+    await expect(
+      loadRoleDeletePreview(down, "g", "me", "g1", STAMP),
+    ).rejects.toThrow("down");
+    expect(mockPlanDelete).not.toHaveBeenCalled();
   });
 });

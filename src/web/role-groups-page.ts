@@ -5,12 +5,14 @@ import { RoleGroupService } from "../services/role-group-service.js";
 import {
   linkCreatedRoles,
   planAdminFix,
+  planRoleDeletion,
   planRoleGroups,
   type GroupPlan,
 } from "../services/role-group-adoption.js";
 import { roleLockReason } from "../services/role-group-plan.js";
 import type {
   AdminFixPageProps,
+  RoleDeletePageProps,
   RoleGroupRoleOption,
   RoleGroupRow,
   RoleGroupsPageProps,
@@ -151,6 +153,52 @@ export async function loadRoleGroupsPage(
     membersUnavailable: built.membersUnavailable,
     roleNames: Object.fromEntries(scanned.roles.map((r) => [r.id, r.name])),
     globalPolicy,
+  };
+}
+
+/**
+ * Plan for deleting a group's Discord role, for the review page (#1184).
+ * `null` when the group no longer exists. Throws when Discord can't be read;
+ * the route shows that as an error and nothing is offered to apply.
+ */
+export async function loadRoleDeletePreview(
+  client: Client,
+  guildId: string,
+  adminUserId: string,
+  groupId: string,
+  approvedAt: string,
+): Promise<Pick<
+  RoleDeletePageProps,
+  | "groupId"
+  | "groupName"
+  | "plan"
+  | "extraErrors"
+  | "approvedAt"
+  | "confirmName"
+  | "roleId"
+> | null> {
+  const group = await RoleGroupService.getInstance().get(guildId, groupId);
+  if (!group) return null;
+  const guild = await client.guilds.fetch(guildId);
+  const { plan, extraErrors } = await planRoleDeletion(
+    guild,
+    adminUserId,
+    group,
+    // A role KoolBot created needs no approval; any other is approved by the
+    // typed name on the apply step.
+    !group.createdByKoolbot,
+    approvedAt,
+  );
+  const step = plan.operations.find((o) => o.type === "role.delete");
+  const name = step?.before?.["name"];
+  return {
+    groupId: group.id,
+    groupName: group.name,
+    plan,
+    extraErrors,
+    approvedAt,
+    confirmName: typeof name === "string" ? name : null,
+    roleId: group.roleId,
   };
 }
 

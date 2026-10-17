@@ -95,6 +95,12 @@ const acceptMessage = (over: Record<string, unknown> = {}) => ({
 function fakeGuild(
   memberRoleIds: Record<string, string[]>,
   extraRoles: FakeRole[] = [],
+  /** Existing overwrites per channel id, as applied by an earlier run. */
+  overwritesByChannel: Record<
+    string,
+    Array<{ id: string; type: 0 | 1; allow: bigint; deny: bigint }>
+  > = {},
+  botRoleIds: string[] = ["100"],
 ) {
   const everyone = {
     id: "g1",
@@ -129,9 +135,9 @@ function fakeGuild(
       cache: new Map(rids.map((r) => [r, {}])),
       highest: { position: 10 },
     },
-    permissions: { has: () => false },
+    permissions: { has: () => bot },
   });
-  const me = member("bot", ["100"], true);
+  const me = member("bot", botRoleIds, true);
   const members = new Map(
     Object.entries(memberRoleIds).map(([id, r]) => [id, member(id, r)]),
   );
@@ -143,7 +149,19 @@ function fakeGuild(
     parentId,
     rawPosition: 0,
     topic: null,
-    permissionOverwrites: { cache: new Map() },
+    permissionOverwrites: {
+      cache: new Map(
+        (overwritesByChannel[id] ?? []).map((o) => [
+          o.id,
+          {
+            id: o.id,
+            type: o.type,
+            allow: { bitfield: o.allow },
+            deny: { bitfield: o.deny },
+          },
+        ]),
+      ),
+    },
     isTextBased: () => true,
     messages: { fetch: () => fetchRulesMessage() },
   });
@@ -343,6 +361,50 @@ describe("planRulesGate", () => {
         (o) => o.type !== "overwrite.set" || o.afterGrants === true,
       ),
     ).toBe(true);
+  });
+
+  it("is idempotent: planning again after the plan was applied gives an empty plan (#1184)", async () => {
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+    const options = { ...gateOnly, grantExisting: true };
+
+    // Before: the configured role exists, nobody holds it, nothing is gated.
+    const before = fakeGuild({ admin: [], a: [], b: [] }, [role({})]);
+    const first = await planRulesGate(before as never, "admin", options);
+    expect(first.plan.operations.map((o) => o.type)).toEqual([
+      "member.role.add",
+      "overwrite.set",
+      "overwrite.set",
+    ]);
+
+    // After applying exactly that plan: every member holds the role and the
+    // channel has the role allow plus the @everyone deny.
+    const everyone = gateBits(undefined, "everyone");
+    const holder = gateBits(undefined, "role");
+    const after = fakeGuild(
+      { admin: ["200"], a: ["200"], b: ["200"] },
+      [role({})],
+      {
+        "22222": [
+          {
+            id: "200",
+            type: 0,
+            allow: BigInt(holder.allow),
+            deny: BigInt(holder.deny),
+          },
+          {
+            id: "g1",
+            type: 0,
+            allow: BigInt(everyone.allow),
+            deny: BigInt(everyone.deny),
+          },
+        ],
+      },
+    );
+    const second = await planRulesGate(after as never, "admin", options);
+    expect(second.extraErrors).toEqual([]);
+    expect(second.plan.errors).toEqual([]);
+    expect(second.plan.operations).toEqual([]);
+    expect(rulesPlanIsApplicable(second)).toBe(false);
   });
 
   it.each([
