@@ -14,6 +14,11 @@ function isRsvpStatus(value: string): value is RsvpStatus {
 }
 
 /**
+ * @deprecated Legacy (#1175). New events have no RSVP buttons; this only
+ * serves announcements posted before native-only events, and only while the
+ * event is still current (`setRsvp` refuses a finished event or a message that
+ * is not the event's announcement).
+ *
  * Handle a Going / Maybe / Can't RSVP button on an event announcement.
  *
  * customId format: `event_rsvp_{eventId}_{status}` — the eventId is a Mongo
@@ -42,18 +47,23 @@ export async function handleEventRsvpButton(
 
   try {
     const service = EventService.getInstance(interaction.client);
-    const event = await service.setRsvp(eventId, interaction.user.id, status);
+    const event = await service.setRsvp(
+      eventId,
+      interaction.user.id,
+      status,
+      interaction.message.id,
+    );
     if (!event) {
       await interaction.reply({
         content:
-          "❌ This event is no longer accepting RSVPs (it may have ended or been cancelled).",
+          "❌ This event is no longer accepting RSVPs here. Press Interested on the event in Discord's Events list instead.",
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     // Refresh the announcement message in place with the new live counts.
-    await interaction.update(service.buildAnnouncementPayload(event));
+    await interaction.update(service.buildLegacyRsvpPayload(event));
     await interaction.followUp({
       content: `Your RSVP: **${RSVP_LABELS[status]}**`,
       flags: MessageFlags.Ephemeral,

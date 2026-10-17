@@ -63,7 +63,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
       cancelSeries: mockCancelSeries,
       startEventNow: mockStartEventNow,
       setRsvp: mockSetRsvp,
-      buildAnnouncementPayload: mockBuildAnnouncementPayload,
+      buildLegacyRsvpPayload: mockBuildAnnouncementPayload,
     }),
   },
 }));
@@ -531,9 +531,16 @@ describe("event RSVP button handler", () => {
     "records a %s RSVP and refreshes the announcement in place",
     async (status) => {
       mockSetRsvp.mockResolvedValue({ _id: "event-1" });
-      const it_ = createMockButtonInteraction(`event_rsvp_event-1_${status}`);
+      const it_ = createMockButtonInteraction(`event_rsvp_event-1_${status}`, {
+        message: { id: "msg-1" },
+      });
       await handleEventRsvpButton(it_);
-      expect(mockSetRsvp).toHaveBeenCalledWith("event-1", "user-1", status);
+      expect(mockSetRsvp).toHaveBeenCalledWith(
+        "event-1",
+        "user-1",
+        status,
+        "msg-1",
+      );
       expect(it_.update).toHaveBeenCalledWith({ content: "refreshed" });
       expect(it_.followUp).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -545,7 +552,9 @@ describe("event RSVP button handler", () => {
 
   it("tells the member when the event no longer accepts RSVPs", async () => {
     mockSetRsvp.mockResolvedValue(null);
-    const it_ = createMockButtonInteraction("event_rsvp_event-1_going");
+    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
+      message: { id: "msg-1" },
+    });
     await handleEventRsvpButton(it_);
     expect(it_.update).not.toHaveBeenCalled();
     expect(it_.reply).toHaveBeenCalledWith(
@@ -557,7 +566,9 @@ describe("event RSVP button handler", () => {
 
   it("replies with an error when the RSVP write threw", async () => {
     mockSetRsvp.mockRejectedValue(new Error("mongo down"));
-    const it_ = createMockButtonInteraction("event_rsvp_event-1_going");
+    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
+      message: { id: "msg-1" },
+    });
     await expect(handleEventRsvpButton(it_)).resolves.toBeUndefined();
     expect(it_.reply).toHaveBeenCalledWith(
       expect.objectContaining({

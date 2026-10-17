@@ -1358,15 +1358,20 @@ before it was disabled.
 
 The **Events** page (`/admin/events`) is the Web UI surface for the event
 scheduler (`/event create`, `list`, `cancel`, `start`) — events that spin up a
-temporary voice channel shortly before they start, collect RSVPs, remind
-attendees, and clean themselves up afterward. A status card shows whether the
+temporary voice channel shortly before they start, are announced with a Discord
+event link, remind attendees, and clean themselves up afterward. A status card shows whether the
 feature, the `events.category_id` channel category, and the
 `events.announcement_channel_id` are configured (with inline warnings when a
-category or announcement channel is missing, since event channels and RSVP
-messages won't be created without them) plus the resolved event timezone. The
+category or announcement channel is missing, since event channels and
+announcements won't be created without them, or when the bot lacks Create Events) plus the resolved event timezone. The
 events table lists each event's title, start time, lifecycle state
-(*scheduled* / *active* / *ended* / *cancelled*), live RSVP tallies (✅ going ·
-🤔 maybe · 🚫 can't), channel, and id. Events that are still open get two
+(*scheduled* / *active* / *ended* / *cancelled*), an **Expected to show up** column, channel, and id. For each upcoming event
+(the next ten) that column lists who marked **Interested** on its native Discord
+event, with the count, read live from Discord when the page is opened and
+never stored; it shows a short message when the event is not on Discord's Events
+list yet or Discord cannot be read, and "N+" when more than a few hundred
+members are interested. Events posted before native-only events also show their
+old RSVP tally until they end. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — while finished events show no actions. A
 **Schedule a new event** form creates events without leaving the page. The page
@@ -1382,13 +1387,9 @@ is the form's cascade master, so turning events off from here writes only
 `events.enabled = false` and keeps the other values. If the stored config can't
 be read, the card shows a notice instead of controls pre-filled with defaults.
 
-The same card holds the **Mirror to Discord scheduled events** toggle
-(`events.native.enabled`, #1034) and the native event's location text
-(`events.native.location`). It is on by default and only applies while Events
-are enabled; switch it off to keep events inside KoolBot. When on, events created here (and cancelled or
-finished) are mirrored to the server's native Events list; the bot needs the
-Create Events or Manage Events permission, otherwise it logs one warning and
-skips mirroring.
+The same card holds the native event's location text (`events.native.location`, #1034). Every event is created in the server's native Events list (there is no
+switch any more, #1175); the bot needs the Create Events or Manage Events
+permission, and the page warns when it is missing.
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.

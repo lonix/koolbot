@@ -23,7 +23,12 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
-import { ChannelType, Client, type Guild } from "discord.js";
+import {
+  ChannelType,
+  Client,
+  PermissionFlagsBits,
+  type Guild,
+} from "discord.js";
 import mongoose from "mongoose";
 import { readSignedFlash } from "./http-flash.js";
 import logger from "../utils/logger.js";
@@ -58,6 +63,10 @@ import {
   recurrenceLabel,
   countRsvps,
 } from "../services/event-service.js";
+import {
+  loadInterested,
+  MAX_EVENTS_PER_VIEW,
+} from "../services/event-interested.js";
 import { PollService } from "../services/poll-service.js";
 import { PollSchedule } from "../models/poll-schedule.js";
 import { PollItem } from "../models/poll-item.js";
@@ -134,6 +143,7 @@ import {
   renderDatabasePage,
   renderDigestPage,
   renderEventsPage,
+  type EventExpected,
   renderLeaderboardRolesPage,
   renderNoticesPage,
   renderPermissionsPage,
@@ -246,7 +256,6 @@ export const EVENTS_SETTING_KEYS = [
   "events.channel_grace_minutes",
   "events.reminder_minutes",
   "events.recurrence_enabled",
-  "events.native.enabled",
   "events.native.location",
 ] as const;
 
@@ -1310,16 +1319,50 @@ export function createReadOnlyRouter(
         loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
       ]);
 
+      // "Expected to show up": who marked Interested on the native event, read
+      // live from Discord for the next few upcoming events. Nothing is stored.
+      const expectedById = new Map<string, EventExpected>();
+      const upcoming = events
+        .filter((e) => e.state === "scheduled" || e.state === "active")
+        .slice(0, MAX_EVENTS_PER_VIEW);
+      await Promise.all(
+        upcoming.map(async (e) => {
+          if (!e.nativeEventId) {
+            expectedById.set(String(e._id), {
+              kind: "none",
+              message: e.nativeDetached
+                ? "Deleted from Discord's Events list."
+                : "Not on Discord's Events list yet.",
+            });
+            return;
+          }
+          expectedById.set(
+            String(e._id),
+            await loadInterested(client, e.guildId, e.nativeEventId),
+          );
+        }),
+      );
+      const me = client.guilds.cache.get(common.guildId)?.members.me;
+      const nativePermissionMissing =
+        !!me &&
+        !me.permissions.has(PermissionFlagsBits.ManageEvents) &&
+        !me.permissions.has(PermissionFlagsBits.CreateEvents);
+
       const rows = events.map((e) => {
         const counts = countRsvps(e.rsvps);
+        const finished = e.state === "ended" || e.state === "cancelled";
         return {
           id: String(e._id),
           title: e.title,
           when: formatEventWhen(e),
           state: e.state,
-          going: counts.going,
-          maybe: counts.maybe,
-          cant: counts.cant,
+          // Legacy RSVPs (events made before native-only events) stay
+          // visible until the event is over.
+          legacyRsvps:
+            !finished && e.rsvps.length > 0
+              ? { going: counts.going, maybe: counts.maybe, cant: counts.cant }
+              : null,
+          expected: expectedById.get(String(e._id)) ?? null,
           channelId: e.channelId,
           recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
           occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
@@ -1337,6 +1380,7 @@ export function createReadOnlyRouter(
           enabled,
           categoryConfigured: categoryId.length > 0,
           announcementConfigured: announcementChannelId.length > 0,
+          nativePermissionMissing,
           // Resolve to a usable zone (falls back to server tz on an invalid
           // value) so the UI shows exactly what event parsing will use.
           timezone: resolveTimezone(tz),

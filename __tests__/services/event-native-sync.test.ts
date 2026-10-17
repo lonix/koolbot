@@ -826,17 +826,18 @@ describe("NativeEventSync.syncEvent", () => {
     });
   });
 
-  describe("default-on, gated by the Events feature", () => {
-    const byKey = (events: boolean, native: boolean | undefined) =>
+  describe("native-only, gated by the Events feature", () => {
+    // A stored `events.native.enabled` value (removed in #1175) must have no effect.
+    const byKey = (events: boolean, legacyNative?: boolean) =>
       config.getBoolean.mockImplementation(async (k: string, d?: boolean) =>
         k === "events.enabled"
           ? events
           : k === "events.native.enabled"
-            ? (native ?? (d as boolean))
+            ? (legacyNative ?? (d as boolean))
             : (d as boolean),
       );
 
-    it("does nothing at all when Events are off, even with the mirror toggle on", async () => {
+    it("does nothing at all when Events are off", async () => {
       byKey(false, true);
       const { guild, scheduledEvents } = makeGuild({ perms: [] });
       const sync = makeSync();
@@ -847,26 +848,26 @@ describe("NativeEventSync.syncEvent", () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
-    it("mirrors by default (toggle unset) when Events are on", async () => {
-      byKey(true, undefined); // falls back to the code default, which is true
+    it("always creates the native event when Events are on", async () => {
+      byKey(true, undefined);
       const { guild, scheduledEvents } = makeGuild();
       await makeSync().syncEvent(makeEvent(), guild);
       expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
     });
 
-    it("does nothing when the operator turned the mirror off", async () => {
+    it("ignores a leftover events.native.enabled=false value", async () => {
       byKey(true, false);
       const { guild, scheduledEvents } = makeGuild();
       await makeSync().syncEvent(makeEvent(), guild);
-      expect(scheduledEvents.create).not.toHaveBeenCalled();
+      expect(scheduledEvents.create).toHaveBeenCalledTimes(1);
     });
 
-    it("the missing-permission warning says how to switch mirroring off", async () => {
+    it("the missing-permission warning names the permission, not a removed setting", async () => {
       byKey(true, true);
       const { guild } = makeGuild({ perms: [] });
       await makeSync().syncEvent(makeEvent(), guild);
       const text = String(logger.warn.mock.calls[0][0]);
-      expect(text).toMatch(/events\.native\.enabled/);
+      expect(text).not.toMatch(/events\.native\.enabled/);
       expect(text).toMatch(/Create Events/);
     });
 

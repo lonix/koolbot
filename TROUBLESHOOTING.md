@@ -764,6 +764,23 @@ Event channels are created by the event scan shortly before the start time
 Also confirm `events.enabled` is `true` and that you reloaded commands so
 `/event` appears.
 
+### Event announcement has no event card / no Interested button
+
+Every event is also created as a Discord scheduled event, and the announcement
+carries its link. If the announcement shows only text, the bot could not create
+the native event: grant the bot's role **Create Events** (or **Manage Events**).
+The log says `Events are not being created in Discord's Events list ...` and the
+Events page shows a warning. The event is retried on the next scan (at most five
+creations per scan), and the announcement is edited to add the link once it
+exists. A native event deleted by hand in Discord is not recreated.
+
+The Events page column **Expected to show up** reads the Interested list from
+Discord when the page opens; "Could not read Interested members" means Discord
+did not answer in time or the bot cannot see the event. Reload the page.
+
+A stored `events.native.enabled` value from an earlier build is ignored and
+removed at startup; native events are always on.
+
 ### Reminders are not delivered
 
 `/remind` delivers by DM first. If DMs are closed it falls back to the
