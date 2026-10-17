@@ -24,6 +24,7 @@ import {
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
+import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -107,6 +108,9 @@ export interface CreateEventInput {
   categoryId?: string;
   /** Repeat cadence; omitted/`none` creates a one-off event (#744). */
   recurrence?: EventRecurrence;
+  /** Group setup from the event form (#1188), already validated by
+   * `validateGroupSetup`; omitted for a plain event. */
+  groups?: EventGroupSetup;
   createdBy: string;
 }
 
@@ -163,9 +167,15 @@ interface LifecycleView {
   durationMinutes: number;
   channelId: string | null;
   reminderSent: boolean;
+  /** Per-event channel lead (#1188); absent or null uses the global lead. */
+  channelLeadMinutes?: number | null;
 }
 
-/** Whether the temp channel should be created on this tick. */
+/**
+ * Whether the temp channel should be created on this tick. `leadMs` is the
+ * server-wide lead; an event with its own `channelLeadMinutes` (event groups,
+ * #1188) uses that instead.
+ */
 export function shouldCreateChannel(
   event: LifecycleView,
   now: Date,
@@ -176,7 +186,10 @@ export function shouldCreateChannel(
   const start = event.startTime.getTime();
   const end = computeEndTime(event.startTime, event.durationMinutes).getTime();
   const nowMs = now.getTime();
-  return nowMs >= start - leadMs && nowMs < end;
+  const own = event.channelLeadMinutes;
+  const effectiveLeadMs =
+    typeof own === "number" && own >= 0 ? own * MS_PER_MINUTE : leadMs;
+  return nowMs >= start - effectiveLeadMs && nowMs < end;
 }
 
 /** Whether the pre-start reminder should be posted on this tick. */
@@ -834,6 +847,10 @@ export class EventService extends ScheduledService {
           const existing: IEvent | null = await Event.findOne(key);
           if (existing) return { next: existing, created: false };
           const latest = await Event.findById(previous._id);
+          // Group setup carries over like the cover, from the freshest row so a
+          // later edit of the running event reaches the next occurrence; the
+          // memberships, captains and channel ids stay behind (#1188).
+          const groupSetup = copyGroupSetup(latest ?? previous);
           const doc = new Event({
             guildId: previous.guildId,
             title: previous.title,
@@ -854,6 +871,7 @@ export class EventService extends ScheduledService {
             // Each occurrence is mirrored with the series' cover (#1181); the
             // image itself is shared, only its hash is copied.
             coverHash: latest?.coverHash ?? null,
+            ...(groupSetup.groupsEnabled ? groupSetup : {}),
             createdBy: previous.createdBy,
           });
           try {
@@ -968,6 +986,9 @@ export class EventService extends ScheduledService {
       state: "scheduled",
       reminderSent: false,
       recurrence,
+      // Only set when the form switched groups on; a plain event leaves every
+      // group field at its schema default.
+      ...(input.groups?.groupsEnabled ? input.groups : {}),
       createdBy: input.createdBy,
     });
     if (recurrence !== "none") {

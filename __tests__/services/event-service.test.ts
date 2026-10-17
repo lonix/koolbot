@@ -153,6 +153,55 @@ describe("shouldCreateChannel", () => {
       false,
     );
   });
+
+  describe("per-event channel lead time (#1188)", () => {
+    const sixtyBefore = new Date("2026-07-04T19:00:00Z");
+    const fiveBefore = new Date("2026-07-04T19:55:00Z");
+
+    it("uses the event's own lead instead of the global one", () => {
+      const own = view({ channelLeadMinutes: 90 });
+      expect(shouldCreateChannel(own, sixtyBefore, lead)).toBe(true);
+      expect(shouldCreateChannel(view(), sixtyBefore, lead)).toBe(false);
+    });
+
+    it("can open later than the global lead", () => {
+      const own = view({ channelLeadMinutes: 5 });
+      expect(
+        shouldCreateChannel(own, new Date("2026-07-04T19:50:00Z"), lead),
+      ).toBe(false);
+      expect(shouldCreateChannel(own, fiveBefore, lead)).toBe(true);
+    });
+
+    it("0 means at the start, not the global lead", () => {
+      const own = view({ channelLeadMinutes: 0 });
+      expect(shouldCreateChannel(own, fiveBefore, lead)).toBe(false);
+      expect(
+        shouldCreateChannel(own, new Date("2026-07-04T20:00:00Z"), lead),
+      ).toBe(true);
+    });
+
+    it("null and a missing field (an old row) fall back to the global lead", () => {
+      const now = new Date("2026-07-04T19:50:00Z");
+      expect(
+        shouldCreateChannel(view({ channelLeadMinutes: null }), now, lead),
+      ).toBe(true);
+      expect(shouldCreateChannel(view(), sixtyBefore, lead)).toBe(false);
+    });
+
+    it("still sends the reminder when the channel opens before the reminder window", () => {
+      // The channel makes the event "active" earlier; the reminder does not
+      // depend on the state staying "scheduled".
+      const reminder = 30 * MIN;
+      const twentyBefore = new Date("2026-07-04T19:40:00Z");
+      expect(
+        shouldSendReminder(
+          view({ state: "active", channelLeadMinutes: 90 }),
+          twentyBefore,
+          reminder,
+        ),
+      ).toBe(true);
+    });
+  });
 });
 
 describe("shouldSendReminder", () => {
@@ -974,6 +1023,125 @@ describe("recurring event lifecycle", () => {
     }));
     await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
     expect(created[0].coverHash).toBeNull();
+  });
+
+  it("copies the group setup to the next occurrence without members (#1188)", async () => {
+    // Read from the freshest row (a later edit of the running event carries
+    // forward), keys kept, memberships / captains / channels reset.
+    const group = (
+      key: string,
+      name: string,
+      extra: Record<string, unknown> = {},
+    ): Record<string, unknown> => ({
+      key,
+      name,
+      kind: "team",
+      size: null,
+      tag: "",
+      marker: "",
+      channelId: "chan-live",
+      captainId: "u-cap",
+      memberIds: ["u1", "u2"],
+      ...extra,
+    });
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+      groupsEnabled: true,
+      presetId: "builtin:wardogs",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      channelLeadMinutes: 30,
+      captainsEnabled: true,
+      captainCustomisationEnabled: true,
+      tagsEnabled: true,
+      groups: [
+        group("g_a", "Manticore", { marker: "🟢", size: 8, tag: "MAN" }),
+        group("g_b", "Spectators", { kind: "open" }),
+      ],
+    }));
+    const { service } = buildService();
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0]).toMatchObject({
+      groupsEnabled: true,
+      presetId: "builtin:wardogs",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      channelLeadMinutes: 30,
+      captainsEnabled: true,
+      captainCustomisationEnabled: true,
+      tagsEnabled: true,
+    });
+    expect(created[0].groups).toEqual([
+      {
+        key: "g_a",
+        name: "Manticore",
+        kind: "team",
+        size: 8,
+        tag: "MAN",
+        marker: "🟢",
+        channelId: null,
+        captainId: null,
+        memberIds: [],
+      },
+      {
+        key: "g_b",
+        name: "Spectators",
+        kind: "open",
+        size: null,
+        tag: "",
+        marker: "",
+        channelId: null,
+        captainId: null,
+        memberIds: [],
+      },
+    ]);
+  });
+
+  it("gives a series without groups the exact successor it always had (#1188)", async () => {
+    const { service } = buildService();
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0].groupsEnabled).toBeUndefined();
+    expect(created[0].groups).toBeUndefined();
+    expect(created[0].channelLeadMinutes).toBeUndefined();
+  });
+
+  it("createEvent stores the group setup only when the form switched groups on (#1188)", async () => {
+    const { service } = buildService();
+    const base = {
+      guildId: "guild-1",
+      title: "Quiz",
+      description: "",
+      startTime: new Date("2026-07-10T20:00:00Z"),
+      timezone: "UTC",
+      durationMinutes: 60,
+      createdBy: "admin-1",
+    };
+    await service.createEvent(base);
+    expect(created[0].groupsEnabled).toBeUndefined();
+
+    const setup = {
+      groupsEnabled: true,
+      presetId: null,
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      channelLeadMinutes: 20,
+      groups: [],
+      captainsEnabled: false,
+      captainCustomisationEnabled: false,
+      tagsEnabled: false,
+    };
+    await service.createEvent({ ...base, groups: setup });
+    expect(created[1]).toMatchObject({
+      groupsEnabled: true,
+      channelLeadMinutes: 20,
+    });
+
+    await service.createEvent({
+      ...base,
+      groups: { ...setup, groupsEnabled: false },
+    });
+    expect(created[2].groupsEnabled).toBeUndefined();
   });
 
   it("waits for an in-flight cover change of its series and inherits the hash it left (#1181)", async () => {

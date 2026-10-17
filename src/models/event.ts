@@ -1,4 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { EVENT_GROUP_KINDS, type EventGroupKind } from "./event-group-kinds.js";
+
+export { EVENT_GROUP_KINDS, type EventGroupKind };
 
 /**
  * A scheduled server event (#708).
@@ -40,6 +43,30 @@ export const EVENT_RECURRENCES: readonly EventRecurrence[] = [
   "biweekly",
   "monthly",
 ];
+
+/**
+ * One group of an event (#1188): becomes a voice channel of its own once the
+ * channel lifecycle (#1190) creates it. The event keeps its own copy of the
+ * preset it started from, so a later preset change never alters it.
+ */
+export interface IEventGroup {
+  /** Stable id within the event; never derived from the editable name. */
+  key: string;
+  name: string;
+  kind: EventGroupKind;
+  /** Max members and the voice channel's user limit (1 to 99); null = unlimited. */
+  size: number | null;
+  /** Optional clan tag (#1194); empty = no tag. */
+  tag: string;
+  /** Optional colour or emoji marker shown in the channel name; empty = none. */
+  marker: string;
+  /** Voice channel id, filled by #1190; null until then. */
+  channelId: string | null;
+  /** Filled by #1195; null until then. A user id. */
+  captainId: string | null;
+  /** Filled by #1191; empty until then. User ids. */
+  memberIds: string[];
+}
 
 export interface IEventRsvp {
   userId: string;
@@ -152,6 +179,28 @@ export interface IEvent extends Document {
   /** Failed cover uploads for the current `coverHash`; the sync stops
    * retrying after a few so a rejected image cannot loop. */
   nativeCoverAttempts: number;
+  /**
+   * Event groups (#1188). Everything here is off by default: a row without
+   * these fields (every event made before groups) behaves exactly as before.
+   * The setup is only stored; channels, assignment and host controls come with
+   * later issues of the groups epic (#1187). Readers of a `.lean()` row must
+   * default each field (`?? false`, `?? []`), as lean reads skip schema defaults.
+   */
+  groupsEnabled: boolean;
+  /** Built-in preset the setup started from (`builtin:...`); null for Custom. */
+  presetId: string | null;
+  /** What a group is called in the UI ("Team", "Squad", "Room", "Party"). */
+  groupLabel: string;
+  /** What a group's leader is called ("Leader", "Captain", "Lead"). */
+  leaderLabel: string;
+  /** Minutes before the start that the main and group channels are created;
+   * null falls back to `events.create_lead_minutes`. */
+  channelLeadMinutes: number | null;
+  groups: IEventGroup[];
+  /** Used by later issues (#1195, #1196, #1194); stored, never read yet. */
+  captainsEnabled: boolean;
+  captainCustomisationEnabled: boolean;
+  tagsEnabled: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -166,6 +215,21 @@ const EventRsvpSchema = new Schema<IEventRsvp>(
       enum: ["going", "maybe", "cant"],
     },
     respondedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
+
+const EventGroupSchema = new Schema<IEventGroup>(
+  {
+    key: { type: String, required: true, maxlength: 32 },
+    name: { type: String, required: true, maxlength: 50 },
+    kind: { type: String, required: true, enum: EVENT_GROUP_KINDS },
+    size: { type: Number, default: null, min: 1, max: 99 },
+    tag: { type: String, default: "", maxlength: 8 },
+    marker: { type: String, default: "", maxlength: 16 },
+    channelId: { type: String, default: null },
+    captainId: { type: String, default: null },
+    memberIds: { type: [String], default: [] },
   },
   { _id: false },
 );
@@ -213,6 +277,15 @@ const EventSchema = new Schema<IEvent>(
     coverHash: { type: String, default: null },
     nativeCoverHash: { type: String, default: null },
     nativeCoverAttempts: { type: Number, default: 0 },
+    groupsEnabled: { type: Boolean, default: false },
+    presetId: { type: String, default: null },
+    groupLabel: { type: String, default: "Team", maxlength: 20 },
+    leaderLabel: { type: String, default: "Leader", maxlength: 20 },
+    channelLeadMinutes: { type: Number, default: null, min: 0, max: 1440 },
+    groups: { type: [EventGroupSchema], default: [] },
+    captainsEnabled: { type: Boolean, default: false },
+    captainCustomisationEnabled: { type: Boolean, default: false },
+    tagsEnabled: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },
   {

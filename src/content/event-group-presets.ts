@@ -1,0 +1,82 @@
+import type { EventGroupKind } from "../models/event-group-kinds.js";
+
+/**
+ * Built-in event group presets (#1188). Static content, kept in code like the
+ * other definitions here; the server-wide preset library (#1200) adds the
+ * admin's own presets on top and may switch these on or off, but never edits
+ * them. An event copies a preset's groups when it is created, so changing a
+ * preset here later never alters an event that already used it.
+ *
+ * Ids are namespaced `builtin:` so the library's own ids can never collide
+ * with them. "Custom" (any number of groups and names) is not a preset: an
+ * event made that way stores `presetId: null`.
+ */
+
+export interface EventGroupPresetGroup {
+  name: string;
+  kind: EventGroupKind;
+  /** Max members (1 to 99), null = unlimited. */
+  size: number | null;
+  /** Clan tag; empty = none. */
+  tag: string;
+  /** Colour or emoji marker shown in the channel name; empty = none. */
+  marker: string;
+}
+
+export interface EventGroupPreset {
+  id: string;
+  /** Name shown in the preset picker. */
+  label: string;
+  description: string;
+  /** What a group is called for this preset ("Team", "Squad", ...). */
+  groupLabel: string;
+  groups: readonly EventGroupPresetGroup[];
+}
+
+/** Id prefix every built-in preset carries. */
+export const BUILTIN_PRESET_PREFIX = "builtin:";
+
+function team(name: string, marker = ""): EventGroupPresetGroup {
+  return { name, kind: "team", size: null, tag: "", marker };
+}
+
+export const EVENT_GROUP_PRESETS: readonly EventGroupPreset[] = [
+  {
+    id: "builtin:red-vs-blue",
+    label: "Red vs Blue",
+    description: "Two teams.",
+    groupLabel: "Team",
+    groups: [team("Red", "🔴"), team("Blue", "🔵")],
+  },
+  {
+    id: "builtin:eve-factions",
+    label: "EVE factions",
+    description: "The four empires: Amarr, Caldari, Gallente and Minmatar.",
+    groupLabel: "Team",
+    groups: [
+      team("Amarr"),
+      team("Caldari"),
+      team("Gallente"),
+      team("Minmatar"),
+    ],
+  },
+  {
+    id: "builtin:wardogs",
+    label: "Wardogs",
+    description: "Manticore (green), Valkyra (red) and Lonestar (blue).",
+    groupLabel: "Team",
+    groups: [
+      team("Manticore", "🟢"),
+      team("Valkyra", "🔴"),
+      team("Lonestar", "🔵"),
+    ],
+  },
+];
+
+/** The built-in preset with this id, or undefined (also for Custom/null). */
+export function getEventGroupPreset(
+  id: string | null | undefined,
+): EventGroupPreset | undefined {
+  if (!id) return undefined;
+  return EVENT_GROUP_PRESETS.find((preset) => preset.id === id);
+}

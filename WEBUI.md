@@ -1396,6 +1396,28 @@ lifecycle controls — **Start now** (spin the event up immediately) and
 **Schedule a new event** form creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
 
+The **Groups** section of the schedule form (#1188) is optional and off unless
+"Use groups for this event" is ticked; a plain event is created exactly as before.
+It sets up a list of groups for the event, such as quiz teams, clan-match squads,
+breakout rooms or raid parties: a **preset** (Red vs Blue, EVE factions or Wardogs,
+or Custom), what a group and a leader are called (Team, Squad, Room, Party;
+Leader, Captain), a **channel creation time** in minutes before the start (empty
+uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: members
+belong to it; **open**: anyone can join, such as spectators; **leads**: leaders and
+host only, at most one), an optional size (1 to 99, the voice user limit), an
+optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
+an optional colour marker such as a coloured circle. Names must be unique within an
+event and the number of groups is capped by `events.groups.max_count`. With scripts
+on, choosing a preset fills in the rows, "Add a group" adds a row and mistakes are
+shown next to the fields before sending; the server checks everything again, names
+the group and field in its message, and the page puts the entered values back after
+a refused submit. The setup is only stored: the events table shows the group count,
+a recurring series copies the setup (not members) to its next occurrence, and the
+group voice channels, host panel and assignment come in later updates of the groups
+epic (#1187). An event's own channel creation time already decides when its channel
+is created. Presets are built into the bot; the server-wide preset library is a
+later update.
+
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event
 within a minute: sent when it is new or changed (never on every scan) and cleared
