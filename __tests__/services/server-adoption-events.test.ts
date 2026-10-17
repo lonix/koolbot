@@ -239,6 +239,38 @@ describe("event.adopt steps in the adoption engine (#1034)", () => {
     expect(h.rows.size).toBe(1);
   });
 
+  it("waits for a slow database write instead of giving up on it at the call timeout", async () => {
+    // A timed wrapper (as in production) that gives up after 20 ms, while the
+    // insert takes 80 ms: the write must be awaited, not raced.
+    const raced = harness();
+    raced.deps.callApi = <T>(call: () => Promise<T>): Promise<T> =>
+      Promise.race([
+        call(),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out")), 20),
+        ),
+      ]);
+    const inner = raced.deps.events!;
+    const slow = {
+      ...inner,
+      adopt: async (i: Parameters<typeof inner.adopt>[0]) => {
+        await new Promise((r) => setTimeout(r, 80));
+        return inner.adopt(i);
+      },
+      remove: async (ref: string) => {
+        await new Promise((r) => setTimeout(r, 80));
+        return inner.remove(ref);
+      },
+    };
+    raced.deps.events = slow;
+    const applied = await raced.service.apply(plan(), opts);
+    expect(applied.status).toBe("applied");
+    expect(raced.rows.size).toBe(1);
+    const rolled = await raced.service.rollback(applied.snapshotId, { actor });
+    expect(rolled.failed).toEqual([]);
+    expect(raced.rows.size).toBe(0);
+  });
+
   it("a failed step can be resumed once the problem is gone", async () => {
     h.failAdopt.value = "database unavailable";
     const p = plan();

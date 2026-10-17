@@ -1311,21 +1311,19 @@ export class ServerAdoptionService {
       case "event.adopt": {
         const events = this.requireEvents();
         // Idempotent by reference: a retry after a crash finds the same row.
-        return callApi(
-          () =>
-            events.adopt({
-              ref: `${snapshot.id}:${op.id}`,
-              guildId: snapshot.guildId,
-              adminId: options.actor.discordUserId,
-              nativeEventId: op.nativeEventId,
-              name: op.name,
-              description: op.description,
-              startsAt: op.startsAt,
-              durationMinutes: op.durationMinutes,
-            }),
-          `adopt event ${op.nativeEventId}`,
-          { once: true },
-        );
+        // A database write, not a Discord call: it is awaited directly, never
+        // through `callApi`, whose timeout would give up on a write that is
+        // still running and let a rollback miss the row it is about to make.
+        return events.adopt({
+          ref: `${snapshot.id}:${op.id}`,
+          guildId: snapshot.guildId,
+          adminId: options.actor.discordUserId,
+          nativeEventId: op.nativeEventId,
+          name: op.name,
+          description: op.description,
+          startsAt: op.startsAt,
+          durationMinutes: op.durationMinutes,
+        });
       }
     }
   }
@@ -1727,11 +1725,9 @@ export class ServerAdoptionService {
           // reference), with its post and empty temporary channel. The native
           // event is never edited, cancelled or deleted.
           const events = this.requireEvents();
-          await callApi(
-            () => events.remove(`${snapshotId}:${op.id}`),
-            `remove adopted event ${op.nativeEventId}`,
-            { once: true },
-          );
+          // Awaited directly (see `execute`): removal must not be abandoned by
+          // a timeout while it is still running.
+          await events.remove(`${snapshotId}:${op.id}`);
           break;
         }
         case "config.set": {

@@ -255,6 +255,32 @@ describe("buildEventAdoptionPlan", () => {
     ).toMatch(/Already a KoolBot event/);
   });
 
+  it("blocks two chosen events that share a name and a start, however long the names", () => {
+    const long = "x".repeat(120);
+    const a = cand(info({ id: "100" }));
+    const b = cand(info({ id: "101", creatorId: "member2" }));
+    const c = cand(info({ id: "102", name: long }));
+    const d = cand(info({ id: "103", name: long + "y" }));
+    const plan = buildEventAdoptionPlan({
+      ...base,
+      candidates: [a, b, c, d],
+      selectedIds: ["100", "101", "102", "103"],
+    });
+    expect(plan.errors.map((e) => e.code)).toEqual([
+      "duplicate-selection",
+      "duplicate-selection",
+    ]);
+    expect(plan.errors[0].message).toMatch(/Choose only one/);
+    expect(eventPlanIsApplicable({ plan } as never)).toBe(false);
+    // One of each is fine.
+    const ok = buildEventAdoptionPlan({
+      ...base,
+      candidates: [a, b],
+      selectedIds: ["100"],
+    });
+    expect(ok.errors).toEqual([]);
+  });
+
   it("blocks the plan while the Events feature is off, and warns without an announcement channel", () => {
     const plan = buildEventAdoptionPlan({
       ...base,

@@ -176,6 +176,22 @@ export function buildEventAdoptionPlan(input: {
         a.info.id.localeCompare(b.info.id),
     );
 
+  // Two chosen events with the same name and start would be announced twice
+  // (and get two temporary channels): same comparison as for existing events.
+  const seen = new Map<string, string[]>();
+  for (const c of picked) {
+    const key = `${c.info.name.slice(0, 100)}|${Date.parse(c.info.startsAt as string)}`;
+    seen.set(key, [...(seen.get(key) ?? []), c.info.name]);
+  }
+  for (const names of seen.values()) {
+    if (names.length > 1) {
+      errors.push({
+        code: "duplicate-selection",
+        message: `${names.length} chosen events are named "${names[0]}" and start at the same time. Choose only one of them.`,
+      });
+    }
+  }
+
   for (const [index, c] of picked.entries()) {
     const info = c.info;
     const startsAt = info.startsAt as string;
