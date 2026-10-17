@@ -748,6 +748,91 @@ describe("VoiceChannelTracker", () => {
     });
   });
 
+  describe("public-visibility marker (#1162)", () => {
+    const everyone = { id: "everyone-role" };
+    const roomWith = (canView: boolean) => ({
+      id: "room-1",
+      name: "Game Night",
+      members: new Map(),
+      guild: { roles: { everyone } },
+      permissionsFor: jest.fn((role: unknown) => ({
+        has: () => role === everyone && canView,
+      })),
+    });
+
+    // Join with `atJoin`, then leave while the client's guild cache holds
+    // `atClose` (null = the room is already deleted).
+    async function recordSession(
+      atJoin: ReturnType<typeof roomWith> | undefined,
+      atClose: ReturnType<typeof roomWith> | null,
+    ) {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation((key: string) =>
+        Promise.resolve(key === "voicetracking.enabled"),
+      );
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "u1", id: "u1" });
+      (mockClient as any).guilds = {
+        cache: {
+          get: () => ({
+            channels: { cache: { get: () => atClose ?? undefined } },
+          }),
+        },
+      };
+      const member = {
+        id: "u1",
+        displayName: "u1",
+        guild: {
+          id: "guild-1",
+          channels: { cache: { get: () => atJoin } },
+        },
+      } as unknown as GuildMember;
+      const channel = {
+        id: "room-1",
+        name: "Game Night",
+      } as unknown as VoiceChannel;
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      await tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel } as unknown as VoiceState,
+      );
+      await tracker.handleVoiceStateUpdate(
+        { member, channel } as unknown as VoiceState,
+        { member, channel: null } as unknown as VoiceState,
+      );
+      return (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+    }
+
+    it("marks a room public at join and still public at close", async () => {
+      const room = roomWith(true);
+      const saved = await recordSession(room, room);
+      expect(saved.everyoneCanView).toBe(true);
+      expect(room.permissionsFor).toHaveBeenCalledWith(everyone);
+    });
+
+    it("keeps the join-time state when the room is already deleted at close", async () => {
+      const saved = await recordSession(roomWith(true), null);
+      expect(saved.everyoneCanView).toBe(true);
+    });
+
+    it("marks a room private at join as not public, even if public at close", async () => {
+      const saved = await recordSession(roomWith(false), roomWith(true));
+      expect(saved.everyoneCanView).toBe(false);
+    });
+
+    it("marks a room made private during the session as not public", async () => {
+      const saved = await recordSession(roomWith(true), roomWith(false));
+      expect(saved.everyoneCanView).toBe(false);
+    });
+
+    it("fails closed when the channel cannot be inspected at join", async () => {
+      const saved = await recordSession(undefined, null);
+      expect(saved.everyoneCanView).toBe(false);
+    });
+  });
+
   describe("companion overlap & voice firsts (#570)", () => {
     // Builds a member whose guild channel cache returns a channel populated
     // with `presentIds` so startTracking can snapshot co-present users.

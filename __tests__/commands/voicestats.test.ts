@@ -312,6 +312,78 @@ describe("VoiceStats Command", () => {
       expect(content.match(/• a voice channel: 1h 0m/g)).toHaveLength(2);
     });
 
+    // #1162: a finished room keeps its stored name only if it was public.
+    describe("names of finished rooms (#1162)", () => {
+      const emptyGuild = { channels: { cache: new Map() } };
+      const run = async (
+        session: Record<string, unknown>,
+        guild: unknown = emptyGuild,
+      ): Promise<string> => {
+        mockGetUserStats.mockResolvedValue({
+          userId: "user-1",
+          username: "alice",
+          totalTime: 3600,
+          lastSeen: new Date(base),
+          sessions: [
+            {
+              ...sessions[0],
+              channelId: "gone",
+              channelName: "Game Night",
+              ...session,
+            },
+          ],
+        });
+        const interaction = {
+          ...makeUserInteraction(),
+          guild,
+        } as unknown as MockInteraction;
+        await execute(interaction);
+        return interaction.editReply.mock.calls[0][0] as string;
+      };
+
+      it("shows the stored name of a deleted room marked public", async () => {
+        const content = await run({ everyoneCanView: true });
+        expect(content).toContain("• Game Night: 1h 0m");
+      });
+
+      it("hides a deleted room marked private", async () => {
+        const content = await run({ everyoneCanView: false });
+        expect(content).not.toContain("Game Night");
+        expect(content).toContain("• a voice channel: 1h 0m");
+      });
+
+      it("hides a deleted room with no marker (older data)", async () => {
+        const content = await run({});
+        expect(content).not.toContain("Game Night");
+        expect(content).toContain("• a voice channel: 1h 0m");
+      });
+
+      it("hides a public-marked room when the guild is not cached", async () => {
+        const content = await run({ everyoneCanView: true }, null);
+        expect(content).not.toContain("Game Night");
+        expect(content).toContain("• a voice channel: 1h 0m");
+      });
+
+      it("still hides a live room the caller cannot view, whatever the marker says", async () => {
+        const guild = {
+          channels: {
+            cache: new Map([
+              [
+                "gone",
+                {
+                  name: "Staff Room",
+                  permissionsFor: () => ({ has: () => false }),
+                },
+              ],
+            ]),
+          },
+        };
+        const content = await run({ everyoneCanView: true }, guild);
+        expect(content).not.toContain("Game Night");
+        expect(content).not.toContain("Staff Room");
+      });
+    });
+
     it("orders by startTime even when the stored array is not chronological", async () => {
       // Shuffle the stored order to prove ordering comes from startTime,
       // not from array position.

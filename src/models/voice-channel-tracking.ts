@@ -23,6 +23,12 @@ export interface IVoiceChannelTracking extends Document {
     // only when `voicetracking.companions.enabled` is true. (#570)
     wasFirst?: boolean;
     joinedExisting?: string[];
+    // Whether `@everyone` could view the channel for this whole session (true
+    // only if it could at join and, when the channel still existed, at close).
+    // Lets `/voicestats` name a finished or deleted room only when it was
+    // public. Absent on sessions recorded before this field existed, which
+    // are treated as not public. (#1162)
+    everyoneCanView?: boolean;
   }>;
   excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
   // Cleanup-related fields for future use
@@ -64,6 +70,8 @@ const VoiceChannelTrackingSchema = new Schema({
       },
       wasFirst: { type: Boolean },
       joinedExisting: { type: [String], default: undefined },
+      // No default: older sessions must stay unmarked so they fail closed.
+      everyoneCanView: { type: Boolean },
     },
   ],
   excludedChannels: { type: [String], default: [] },
