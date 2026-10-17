@@ -312,6 +312,30 @@ describe("update", () => {
     expect(ImageMock.findOne).not.toHaveBeenCalled();
   });
 
+  it("adopts the stored image's hash when the row named another, so it is not re-sent every scan", async () => {
+    ImageMock.findOne.mockResolvedValue({
+      hash: "h-new",
+      mime: "image/png",
+      data: DATA,
+    });
+    const { guild, scheduledEvents } = makeGuild([makeNative()]);
+    const event = makeEvent({ nativeEventId: "n1", coverHash: "h-old" });
+    const sync = makeSync();
+    await sync.syncEvent(event, guild);
+    await sync.syncEvent(event, guild);
+    expect(coverEdits(scheduledEvents.edit)).toHaveLength(1);
+    expect(
+      EventMock.updateOne.mock.calls.some(
+        (c) =>
+          JSON.stringify(c[0]) ===
+            JSON.stringify({ _id: "ev1", coverHash: "h-old" }) &&
+          JSON.stringify(c[1]) ===
+            JSON.stringify({ $set: { coverHash: "h-new" } }),
+      ),
+    ).toBe(true);
+    expect((event as unknown as { coverHash: string }).coverHash).toBe("h-new");
+  });
+
   it("skips quietly when the named image is not stored", async () => {
     ImageMock.findOne.mockResolvedValue(null);
     const { guild, scheduledEvents } = makeGuild([makeNative()]);

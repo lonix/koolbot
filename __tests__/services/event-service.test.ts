@@ -976,6 +976,36 @@ describe("recurring event lifecycle", () => {
     expect(created[0].coverHash).toBeNull();
   });
 
+  it("waits for an in-flight cover change of its series and inherits the hash it left (#1181)", async () => {
+    const { withCoverLock } = await import("../../src/services/event-cover.js");
+    let hash: string | null = null;
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+      coverHash: hash,
+    }));
+    const { service } = buildService();
+    let release: () => void = () => undefined;
+    const held = withCoverLock(
+      "guild-1",
+      "occ-0",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const spawning = (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      NOW,
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    // The cover change is still running: nothing was inserted yet.
+    expect(created).toHaveLength(0);
+    // It publishes its hash, then lets go.
+    hash = "h-new";
+    release();
+    await held;
+    await spawning;
+    expect(created[0].coverHash).toBe("h-new");
+  });
+
   it("does not spawn when another caller already created the successor", async () => {
     const { service } = buildService();
     EventMock.findById = jest.fn(async () => ({

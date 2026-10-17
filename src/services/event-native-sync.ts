@@ -778,6 +778,16 @@ export class NativeEventSync {
       { _id: event._id },
       { $set: { nativeCoverHash: sentHash, nativeCoverAttempts: 0 } },
     );
+    if (sentHash && sentHash !== wanted) {
+      // The stored image is not the one the row named (it was replaced
+      // meanwhile). What was sent is what the series has now: adopt its hash
+      // so the next scan sees "in sync" instead of re-sending every time.
+      await Event.updateOne(
+        { _id: event._id, coverHash: wanted },
+        { $set: { coverHash: sentHash } },
+      );
+      event.coverHash = sentHash;
+    }
     event.nativeCoverHash = sentHash;
     event.nativeCoverAttempts = 0;
   }

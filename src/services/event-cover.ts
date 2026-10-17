@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Event, type IEvent } from "../models/event.js";
 import { EventImage, type IEventImage } from "../models/event-image.js";
 import logger from "../utils/logger.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 
 /**
  * Optional cover image of a KoolBot event, mirrored to the native Discord
@@ -27,6 +28,23 @@ export const COVER_MAX_BYTES = 2 * 1024 * 1024;
 /** The sync gives up on a cover after this many failed sends (until the image
  * changes), so a rejected image cannot retry forever. */
 export const MAX_COVER_ATTEMPTS = 3;
+
+const coverLock = createKeyedLock();
+
+/**
+ * Run `work` once every earlier cover mutation for the same event or series
+ * has finished. Set, remove, the orphan sweep and the spawn of a successor
+ * occurrence all go through it, so the image document and the row hashes are
+ * always changed together. In-process only: the bot is one process (the web
+ * UI and the scan run in it), and the writes stay atomic on their own.
+ */
+export function withCoverLock<T>(
+  guildId: string,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  return coverLock.run(`${guildId}:${key}`, work);
+}
 
 export type CoverMime = "image/png" | "image/jpeg" | "image/gif";
 
@@ -166,20 +184,25 @@ export async function setEventCover(
   if (reason) return { ok: false, error: reason };
   const checked = validateCoverImage(data);
   if (!checked.ok) return checked;
-  await EventImage.findOneAndUpdate(
-    { guildId: event.guildId, key: coverKeyFor(event) },
-    {
-      $set: {
-        mime: checked.mime,
-        data,
-        hash: checked.hash,
-        bytes: data.length,
+  // Both writes under one lock: a concurrent set or remove for the same key
+  // can neither interleave its image write between ours and our row update,
+  // nor delete the image we just stored.
+  await withCoverLock(event.guildId, coverKeyFor(event), async () => {
+    await EventImage.findOneAndUpdate(
+      { guildId: event.guildId, key: coverKeyFor(event) },
+      {
+        $set: {
+          mime: checked.mime,
+          data,
+          hash: checked.hash,
+          bytes: data.length,
+        },
       },
-    },
-    { upsert: true },
-  );
-  await Event.updateMany(coverRowsFilter(event), {
-    $set: { coverHash: checked.hash, nativeCoverAttempts: 0 },
+      { upsert: true },
+    );
+    await Event.updateMany(coverRowsFilter(event), {
+      $set: { coverHash: checked.hash, nativeCoverAttempts: 0 },
+    });
   });
   return {
     ok: true,
@@ -199,12 +222,14 @@ export async function removeEventCover(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const reason = coverIneligibleReason(event);
   if (reason) return { ok: false, error: reason };
-  await Event.updateMany(coverRowsFilter(event), {
-    $set: { coverHash: null, nativeCoverAttempts: 0 },
-  });
-  await EventImage.deleteOne({
-    guildId: event.guildId,
-    key: coverKeyFor(event),
+  await withCoverLock(event.guildId, coverKeyFor(event), async () => {
+    await Event.updateMany(coverRowsFilter(event), {
+      $set: { coverHash: null, nativeCoverAttempts: 0 },
+    });
+    await EventImage.deleteOne({
+      guildId: event.guildId,
+      key: coverKeyFor(event),
+    });
   });
   return { ok: true };
 }
@@ -242,30 +267,35 @@ export async function sweepOrphanCovers(guildId: string): Promise<number> {
   const images = await EventImage.find({ guildId }).select("key").lean();
   let removed = 0;
   for (const { key } of images as Array<{ key: string }>) {
-    const live = await Event.exists({
-      guildId,
-      $and: [
-        { $or: [{ _id: key }, { seriesId: key }] },
-        {
-          $or: [
-            { state: { $in: ["scheduled", "active"] } },
-            {
-              state: { $in: ["ended", "cancelled"] },
-              recurrence: { $ne: "none" },
-              nextSpawned: false,
-              seriesCancelled: { $ne: true },
-            },
-          ],
-        },
-      ],
+    // Liveness is checked inside the lock, so a series that was just revived
+    // by a spawn or an upload is not swept on a stale answer.
+    const gone = await withCoverLock(guildId, key, async () => {
+      const live = await Event.exists({
+        guildId,
+        $and: [
+          { $or: [{ _id: key }, { seriesId: key }] },
+          {
+            $or: [
+              { state: { $in: ["scheduled", "active"] } },
+              {
+                state: { $in: ["ended", "cancelled"] },
+                recurrence: { $ne: "none" },
+                nextSpawned: false,
+                seriesCancelled: { $ne: true },
+              },
+            ],
+          },
+        ],
+      });
+      if (live) return false;
+      await Event.updateMany(
+        { guildId, $or: [{ _id: key }, { seriesId: key }] },
+        { $set: { coverHash: null } },
+      );
+      await EventImage.deleteOne({ guildId, key });
+      return true;
     });
-    if (live) continue;
-    await Event.updateMany(
-      { guildId, $or: [{ _id: key }, { seriesId: key }] },
-      { $set: { coverHash: null } },
-    );
-    await EventImage.deleteOne({ guildId, key });
-    removed += 1;
+    if (gone) removed += 1;
   }
   if (removed > 0) {
     logger.info(`Event covers: removed ${removed} image(s) of finished events`);
