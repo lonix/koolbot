@@ -2510,6 +2510,7 @@ describe("renderReactionRolesPage", () => {
       ],
     });
     expect(some).toContain("does not move existing pickers");
+    expect(some).toContain("before</em> changing");
   });
 
   it("shows the empty state for active and archived", () => {

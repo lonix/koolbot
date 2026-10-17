@@ -1282,10 +1282,10 @@ and the bot logs one warning per role. The binding stays listed on the page so y
 
 **Changing `reactionroles.message_channel_id` is not supported once pickers exist (#1113).** A mapping does not
 remember which channel its picker was posted in, so existing pickers stay in the old channel and every lookup
-uses the new one. To protect them, startup reconciliation does not archive a guild's mappings when none of its
-pickers can be found in the configured channel: it keeps them active and logs a warning. Either change the
-setting back, or delete the pickers and regenerate them in the new channel. Pickers that are individually
-deleted in a guild where others still resolve are archived as before.
+uses the new one. Startup reconciliation does not archive a guild's mappings only while **none** of its pickers can
+be found in the configured channel: it keeps them active and logs a warning. As soon as any picker in the guild
+resolves there (for example one created after the switch), mappings whose picker is not found are archived.
+Delete the old pickers and mappings **before** switching channels, or switch back before cleaning up.
 
 ### How it works
 
