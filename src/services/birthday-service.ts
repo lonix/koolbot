@@ -1377,12 +1377,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           throw error;
         });
       if (!role) return null;
-      const adminRoleIds = await RoleGroupService.getInstance()
-        .getRoleIdsWith(guild.id, "admin")
-        .catch((error: unknown) => {
-          logger.warn("Birthday role check: role groups unreadable", error);
-          return [] as string[];
-        });
+      // No fallback: if the admin group can't be read, the role can't be
+      // cleared, so the error reaches the catch below and the grant is
+      // refused (the announcement still goes out).
+      const adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+        guild.id,
+        "admin",
+      );
       const reason = automaticGrantBlockReason(role, adminRoleIds);
       if (reason) {
         const key = `${roleId}:${reason}`;

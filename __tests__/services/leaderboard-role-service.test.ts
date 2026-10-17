@@ -402,7 +402,7 @@ describe("LeaderboardRoleService", () => {
       await svc.runNow();
 
       expect(mockRolesAdd).not.toHaveBeenCalled();
-      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+      expect(result!.tiers[0].skippedReason).toBe("role-unverified");
       const warnings = mockLoggerWarn.mock.calls.filter((c) =>
         String(c[0]).includes("could not be verified"),
       );
@@ -421,15 +421,26 @@ describe("LeaderboardRoleService", () => {
       expect(result!.tiers[0].skippedReason).toBe("role-privileged");
     });
 
-    it("still grants a safe role when the role groups cannot be read", async () => {
+    it("grants nothing, and says it could not verify, when the role groups cannot be read", async () => {
       setup(0n);
       mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
       const svc: ServiceInstance =
         LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
 
-      expect(result!.tiers[0].added).toEqual(["u1", "u2"]);
-      expect(result!.tiers[0].skippedReason).toBeUndefined();
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].skippedReason).toBe("role-unverified");
+    });
+
+    it("still revokes members who dropped out when the role groups cannot be read", async () => {
+      setup(0n, ["u1", "u3"]);
+      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(result!.tiers[0].removed).toEqual(["u3"]);
     });
   });
 

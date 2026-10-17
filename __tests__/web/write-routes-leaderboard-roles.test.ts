@@ -573,6 +573,31 @@ describe("POST /leaderboard-roles/run-now", () => {
     expect(soleAudit()).toMatchObject({ result: "failure" });
   });
 
+  it("says a role could not be read, not that it is privileged, and audits that cause", async () => {
+    mockRunNow.mockResolvedValue({
+      ranAt: new Date(),
+      period: "alltime",
+      tiers: [
+        {
+          topN: 1,
+          roleId: "111",
+          roleName: "Top",
+          added: [],
+          removed: [],
+          skippedReason: "role-unverified",
+        },
+      ],
+    });
+    const res = await harness.post("/leaderboard-roles/run-now");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("could not be read, try again");
+    expect(flash.msg).not.toContain("powerful");
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: expect.stringContaining("retry"),
+    });
+  });
+
   it("warns when nothing ran (runNow returned null)", async () => {
     mockRunNow.mockResolvedValue(null);
     const res = await harness.post("/leaderboard-roles/run-now");

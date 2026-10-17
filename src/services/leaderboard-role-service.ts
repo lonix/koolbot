@@ -430,15 +430,22 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       roleName: role.name,
       added,
       removed,
-      ...(blockReason ? { skippedReason: "role-privileged" } : {}),
+      ...(blockReason ? { skippedReason: blockReason.skippedReason } : {}),
     };
   }
 
-  /** Why `role` must not be granted, or null (see `automaticGrantBlockReason`). */
+  /**
+   * Why `role` must not be granted, or null (see `automaticGrantBlockReason`).
+   * `skippedReason` tells a role that is unsafe ("role-privileged") from one
+   * that could not be checked ("role-unverified"), which clears on its own.
+   */
   private async grantBlockReason(
     guild: Guild,
     role: Role,
-  ): Promise<string | null> {
+  ): Promise<{
+    reason: string;
+    skippedReason: "role-privileged" | "role-unverified";
+  } | null> {
     // The grant decision reads the live role, not the cache: a role that just
     // gained Administrator must not slip through on stale permissions. A
     // deleted role is left to the caller's own lookup; any other failure
@@ -455,15 +462,34 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
           error,
         );
       }
-      return "could not be verified";
+      return {
+        reason: "could not be verified",
+        skippedReason: "role-unverified",
+      };
     }
     if (!live) return null;
-    const adminRoleIds = await RoleGroupService.getInstance()
-      .getRoleIdsWith(guild.id, "admin")
-      .catch((error: unknown) => {
-        logger.warn("Leaderboard role check: role groups unreadable", error);
-        return [] as string[];
-      });
+    // No fallback: if the admin group can't be read the role can't be
+    // cleared, so no new grant is made this run (revocations continue).
+    let adminRoleIds: string[];
+    try {
+      adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+        guild.id,
+        "admin",
+      );
+    } catch (error) {
+      const key = `${role.id}:groups-unverified`;
+      if (!this.warnedBlockedRoles.has(key)) {
+        this.warnedBlockedRoles.add(key);
+        logger.warn(
+          `Leaderboard role ${role.name} (${role.id}) could not be checked against the admin role group, so it is not granted until the groups can be read:`,
+          error,
+        );
+      }
+      return {
+        reason: "could not be verified",
+        skippedReason: "role-unverified",
+      };
+    }
     const reason = automaticGrantBlockReason(live, adminRoleIds);
     if (reason) {
       const key = `${role.id}:${reason}`;
@@ -474,7 +500,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         );
       }
     }
-    return reason;
+    return reason ? { reason, skippedReason: "role-privileged" } : null;
   }
 
   /**

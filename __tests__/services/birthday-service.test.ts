@@ -831,6 +831,19 @@ describe("BirthdayService", () => {
       expect(unverified()).toHaveLength(1);
     });
 
+    it("refuses the grant, but still announces, when the admin group cannot be read", async () => {
+      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      const { summary, rolesAdd } = await runWithRole(0n);
+
+      expect(summary?.announced).toBe(2);
+      expect(rolesAdd).not.toHaveBeenCalled();
+      expect(
+        mockLoggerWarn.mock.calls.filter((c) =>
+          String(c[0]).includes("could not be verified"),
+        ),
+      ).toHaveLength(1);
+    });
+
     it("skips the grant when the role cannot be read, and still announces", async () => {
       const { summary, rolesAdd } = await runWithRole(
         0n,

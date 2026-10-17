@@ -276,7 +276,17 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           retired.reduce((n, r) => n + r.removed.length, 0);
         const problems = [
           skipped.length > 0
-            ? `${skipped.length} tier(s) skipped: role not found or not grantable (powerful permissions or admin role)`
+            ? `${skipped.length} tier(s) skipped: ${[
+                ...new Set(
+                  skipped.map((t) =>
+                    t.skippedReason === "role-privileged"
+                      ? "role has powerful permissions or is the admin role"
+                      : t.skippedReason === "role-unverified"
+                        ? "role could not be read, retry"
+                        : "role not found",
+                  ),
+                ),
+              ].join("; ")}`
             : "",
           retainedCount > 0
             ? `${retainedCount} removed-tier revoke(s) failed; retried next run`
@@ -307,7 +317,9 @@ export function createLeaderboardRolesRouter(client: Client): Router {
             t.skippedReason
               ? t.skippedReason === "role-privileged"
                 ? `Top ${t.topN} @${t.roleName}: not granted (powerful or admin role), −${t.removed.length}`
-                : `Top ${t.topN}: skipped (role not found)`
+                : t.skippedReason === "role-unverified"
+                  ? `Top ${t.topN} @${t.roleName}: not granted (role could not be read, try again), −${t.removed.length}`
+                  : `Top ${t.topN}: skipped (role not found)`
               : `Top ${t.topN} @${t.roleName}: +${t.added.length} / −${t.removed.length}`,
           )
           .concat(
