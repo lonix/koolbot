@@ -1366,7 +1366,7 @@ feature, the `events.category_id` channel category, and the
 category or announcement channel is missing, since event channels and
 announcements won't be created without them, or when the bot lacks Create Events) plus the resolved event timezone. The
 events table lists each event's title, start time, lifecycle state
-(*scheduled* / *active* / *ended* / *cancelled*), an **Expected to show up** column, channel, and id. For each upcoming event
+(_scheduled_ / _active_ / _ended_ / _cancelled_), an **Expected to show up** column, channel, and id. For each upcoming event
 (the next ten) that column lists who marked **Interested** on its native Discord
 event, with the count, read live from Discord when the page is opened and
 never stored; it shows a short message when the event is not on Discord's Events
