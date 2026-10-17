@@ -131,6 +131,9 @@ function coverRowsFilter(
   };
 }
 
+export const COVER_DETACHED_REASON =
+  "This event was deleted from Discord's Events list and is no longer mirrored, so a cover would never be shown.";
+
 /**
  * Why this event cannot take a cover, or null when it can. An adopted event
  * keeps the cover it has in Discord: KoolBot never writes to it. A finished
@@ -143,6 +146,7 @@ export function coverIneligibleReason(
     | "state"
     | "nativeAdopted"
     | "nativeCleanupOnly"
+    | "nativeDetached"
     | "recurrence"
     | "nextSpawned"
     | "seriesCancelled"
@@ -153,6 +157,11 @@ export function coverIneligibleReason(
   }
   if (event.nativeCleanupOnly) {
     return "This entry is only kept until its Discord event is closed.";
+  }
+  if (event.nativeDetached && event.recurrence === "none") {
+    // The sync skips a detached row for good, so a cover could never arrive.
+    // A recurring series stays eligible: its future occurrences get one.
+    return COVER_DETACHED_REASON;
   }
   const finished = event.state === "ended" || event.state === "cancelled";
   const awaitingSuccessor =
@@ -223,9 +232,18 @@ export async function removeEventCover(
   const reason = coverIneligibleReason(event);
   if (reason) return { ok: false, error: reason };
   await withCoverLock(event.guildId, coverKeyFor(event), async () => {
-    await Event.updateMany(coverRowsFilter(event), {
-      $set: { coverHash: null, nativeCoverAttempts: 0 },
-    });
+    // A row with failed (possibly landed) sends keeps one pending attempt, so
+    // the sync still sends a single `image: null` for it; others reset to 0.
+    await Event.updateMany(coverRowsFilter(event), [
+      {
+        $set: {
+          coverHash: null,
+          nativeCoverAttempts: {
+            $cond: [{ $gt: ["$nativeCoverAttempts", 0] }, 1, 0],
+          },
+        },
+      },
+    ]);
     await EventImage.deleteOne({
       guildId: event.guildId,
       key: coverKeyFor(event),

@@ -2032,6 +2032,7 @@ export interface EventRow {
   cover?:
     | { kind: "editable"; hasCover: boolean; series: boolean }
     | { kind: "adopted" }
+    | { kind: "detached" }
     | null;
 }
 
@@ -2405,6 +2406,9 @@ function renderCoverCell(
   if (!c) return '<span class="muted">—</span>';
   if (c.kind === "adopted") {
     return '<span class="muted">Managed in Discord. This event was adopted, so KoolBot keeps its existing cover and never changes it.</span>';
+  }
+  if (c.kind === "detached") {
+    return '<span class="muted">Not available. This event was deleted from Discord\'s Events list and is no longer mirrored, so a cover would never be shown.</span>';
   }
   const id = escapeHtml(e.id);
   const scope = c.series

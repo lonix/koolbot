@@ -116,6 +116,16 @@ describe("coverIneligibleReason", () => {
     ).toContain("managed in Discord");
   });
 
+  it("refuses a detached one-off (its native event was deleted), but not a recurring series", () => {
+    const detached = { ...(base as object), nativeDetached: true };
+    expect(coverIneligibleReason(detached as never)).toContain(
+      "deleted from Discord",
+    );
+    expect(
+      coverIneligibleReason({ ...detached, recurrence: "weekly" } as never),
+    ).toBeNull();
+  });
+
   it("refuses finished events, but not an occurrence awaiting its successor", () => {
     const ended = { ...(base as object), state: "ended" };
     expect(coverIneligibleReason(ended as never)).toContain("finished");

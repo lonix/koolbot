@@ -61,6 +61,15 @@ describe("renderEventsPage cover image column (#1181)", () => {
     expect(html).not.toContain("/cover");
   });
 
+  it("explains that a detached event cannot take a cover", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      rows: [row({ cover: { kind: "detached" } })],
+    } as never);
+    expect(html).toContain("deleted from Discord");
+    expect(html).not.toContain('/admin/events/e1/cover"');
+  });
+
   it("shows nothing for a finished event and escapes titles", () => {
     const html = renderEventsPage({
       ...COMMON,

@@ -1375,7 +1375,11 @@ export function createReadOnlyRouter(
           cover: e.nativeAdopted
             ? ({ kind: "adopted" } as const)
             : coverIneligibleReason(e)
-              ? null
+              ? e.nativeDetached &&
+                e.recurrence === "none" &&
+                (e.state === "scheduled" || e.state === "active")
+                ? ({ kind: "detached" } as const)
+                : null
               : ({
                   kind: "editable",
                   hasCover: !!e.coverHash,

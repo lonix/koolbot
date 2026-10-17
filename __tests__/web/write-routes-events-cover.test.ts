@@ -218,6 +218,18 @@ describe("POST /events/:id/cover", () => {
     expect(eventUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("refuses a detached one-off but accepts a detached recurring series", async () => {
+    mockGetEvent.mockResolvedValue(row({ nativeDetached: true }));
+    const refused = await upload(PNG);
+    expect(refused.json.type).toBe("err");
+    expect(refused.json.text).toContain("deleted from Discord");
+    expect(imageUpsert).not.toHaveBeenCalled();
+    mockGetEvent.mockResolvedValue(
+      row({ nativeDetached: true, recurrence: "weekly", seriesId: "s1" }),
+    );
+    expect((await upload(PNG)).json.type).toBe("ok");
+  });
+
   it("refuses a finished event and an event of another guild", async () => {
     mockGetEvent.mockResolvedValue(row({ state: "ended" }));
     expect((await upload(PNG)).json.type).toBe("err");
@@ -250,7 +262,17 @@ describe("POST /events/:id/cover/remove", () => {
     expect(flash.type).toBe("ok");
     expect(eventUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ _id: "ev1" }),
-      { $set: { coverHash: null, nativeCoverAttempts: 0 } },
+      [
+        {
+          $set: {
+            coverHash: null,
+            // Rows with failed sends keep one attempt so a clear is still sent.
+            nativeCoverAttempts: {
+              $cond: [{ $gt: ["$nativeCoverAttempts", 0] }, 1, 0],
+            },
+          },
+        },
+      ],
     );
     expect(imageDelete).toHaveBeenCalledWith({
       guildId: "guild-1",

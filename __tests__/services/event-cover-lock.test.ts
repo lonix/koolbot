@@ -25,7 +25,11 @@ const deleteOne = jest.fn(async () => {
   return {};
 });
 const updateMany = jest.fn(async (...a: unknown[]) => {
-  const hash = (a[1] as { $set: { coverHash: string | null } }).$set.coverHash;
+  // A set passes `{ $set }`; a remove passes an aggregation pipeline.
+  const update = a[1] as
+    | { $set: { coverHash: string | null } }
+    | Array<{ $set: { coverHash: string | null } }>;
+  const hash = (Array.isArray(update) ? update[0] : update).$set.coverHash;
   log.push(`rows:start:${hash ? "set" : "null"}`);
   await sleep(15);
   log.push(`rows:end:${hash ? "set" : "null"}`);

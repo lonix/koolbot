@@ -312,28 +312,33 @@ describe("update", () => {
     expect(ImageMock.findOne).not.toHaveBeenCalled();
   });
 
-  it("adopts the stored image's hash when the row named another, so it is not re-sent every scan", async () => {
-    ImageMock.findOne.mockResolvedValue({
-      hash: "h-new",
-      mime: "image/png",
-      data: DATA,
-    });
+  it("still clears once after a removal when an earlier send was unconfirmed (timed out, may have landed)", async () => {
     const { guild, scheduledEvents } = makeGuild([makeNative()]);
-    const event = makeEvent({ nativeEventId: "n1", coverHash: "h-old" });
+    // Removed after failed sends: no hash wanted, none recorded, one attempt kept.
+    const event = makeEvent({
+      nativeEventId: "n1",
+      coverHash: null,
+      nativeCoverHash: null,
+      nativeCoverAttempts: 1,
+    });
     const sync = makeSync();
     await sync.syncEvent(event, guild);
+    const edits = coverEdits(scheduledEvents.edit);
+    expect(edits).toHaveLength(1);
+    expect(edits[0].image).toBeNull();
+    expect(ImageMock.findOne).not.toHaveBeenCalled();
+    // Confirmed now: the attempt count is reset, so it is not sent again.
     await sync.syncEvent(event, guild);
     expect(coverEdits(scheduledEvents.edit)).toHaveLength(1);
-    expect(
-      EventMock.updateOne.mock.calls.some(
-        (c) =>
-          JSON.stringify(c[0]) ===
-            JSON.stringify({ _id: "ev1", coverHash: "h-old" }) &&
-          JSON.stringify(c[1]) ===
-            JSON.stringify({ $set: { coverHash: "h-new" } }),
-      ),
-    ).toBe(true);
-    expect((event as unknown as { coverHash: string }).coverHash).toBe("h-new");
+  });
+
+  it("a row with no cover and no failed sends makes no clear call", async () => {
+    const { guild, scheduledEvents } = makeGuild([makeNative()]);
+    await makeSync().syncEvent(
+      makeEvent({ nativeEventId: "n1", nativeCoverAttempts: 0 }),
+      guild,
+    );
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
   });
 
   it("skips quietly when the named image is not stored", async () => {

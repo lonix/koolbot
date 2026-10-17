@@ -1393,6 +1393,9 @@ the CSRF token in a header (it needs JavaScript; there is no multipart parser).
 A failed send to Discord is logged and retried a few times, never blocking the rest
 of the sync. Events adopted from an existing Discord event (Adopt Events) show no
 control: they keep the cover they have in Discord and KoolBot never changes it.
+A one-off event whose Discord event was deleted by someone is no longer mirrored,
+so it shows a note instead of a control; a recurring series stays editable for its
+future occurrences.
 Events scheduled without a cover behave exactly as before.
 
 Its **Settings** card (#975) edits every `events.*` key in place: the enable

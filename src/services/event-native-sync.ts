@@ -733,7 +733,12 @@ export class NativeEventSync {
   ): Promise<void> {
     const wanted = event.coverHash ?? null;
     const synced = event.nativeCoverHash ?? null;
-    if (wanted === synced) return;
+    // A failed send may still have landed in Discord (the call times out
+    // without cancelling the request), and the row cannot tell. Removing the
+    // cover keeps a non-zero attempt count (see `removeEventCover`), which
+    // asks for one `image: null` even though nothing is recorded as sent.
+    const unconfirmed = wanted === null && (event.nativeCoverAttempts ?? 0) > 0;
+    if (wanted === synced && !unconfirmed) return;
     if ((event.nativeCoverAttempts ?? 0) >= MAX_COVER_ATTEMPTS) return;
 
     let image: string | null = null;
@@ -778,16 +783,6 @@ export class NativeEventSync {
       { _id: event._id },
       { $set: { nativeCoverHash: sentHash, nativeCoverAttempts: 0 } },
     );
-    if (sentHash && sentHash !== wanted) {
-      // The stored image is not the one the row named (it was replaced
-      // meanwhile). What was sent is what the series has now: adopt its hash
-      // so the next scan sees "in sync" instead of re-sending every time.
-      await Event.updateOne(
-        { _id: event._id, coverHash: wanted },
-        { $set: { coverHash: sentHash } },
-      );
-      event.coverHash = sentHash;
-    }
     event.nativeCoverHash = sentHash;
     event.nativeCoverAttempts = 0;
   }
