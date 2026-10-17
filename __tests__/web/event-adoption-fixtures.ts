@@ -38,7 +38,7 @@ export function planned(
     botUserId: "bot1",
     canManageEvents: true,
     linkedNativeIds: new Set<string>(),
-    openUnlinked: [],
+    openEvents: [],
     now: NOW,
   };
   const candidates = infos.map((i) => classifyScheduledEvent(i, ctx));

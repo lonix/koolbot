@@ -1,4 +1,11 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import { DiscordAPIError, PermissionFlagsBits } from "discord.js";
 
 const config = {
@@ -79,7 +86,7 @@ function ctx(over: Partial<Ctx> = {}): Ctx {
     botUserId: "bot1",
     canManageEvents: true,
     linkedNativeIds: new Set(),
-    openUnlinked: [],
+    openEvents: [],
     now: NOW,
     ...over,
   };
@@ -122,7 +129,7 @@ describe("classifyScheduledEvent", () => {
       "same name and start as an open KoolBot event",
       info(),
       ctx({
-        openUnlinked: [
+        openEvents: [
           { title: "Movie night", startTime: new Date("2026-10-20T19:00:00Z") },
         ],
       }),
@@ -265,8 +272,27 @@ describe("buildEventAdoptionPlan", () => {
 });
 
 describe("planEventAdoption", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   beforeEach(() => {
     jest.clearAllMocks();
+    // Only the clock is frozen: the fixtures' start times are relative to NOW.
+    jest.useFakeTimers({
+      now: NOW,
+      doNotFake: [
+        "nextTick",
+        "setImmediate",
+        "clearImmediate",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+        "queueMicrotask",
+        "performance",
+        "hrtime",
+      ],
+    });
     config.getBoolean.mockResolvedValue(true);
     config.getString.mockResolvedValue("chan-1");
     EventMock.distinct.mockResolvedValue(["linked1"]);
@@ -313,6 +339,42 @@ describe("planEventAdoption", () => {
     expect(reasons["100"]).toBeNull();
     expect(reasons["linked1"]).toMatch(/Already a KoolBot event/);
     expect(reasons["300"]).toMatch(/announce the event twice/);
+  });
+
+  it("compares against every open KoolBot event, including ones already linked to another native event", async () => {
+    // A KoolBot row mirrored by native event "linked1" has the same name and
+    // start as member event "100": adopting 100 would announce it twice.
+    EventMock.find.mockReturnValue({
+      select: () => ({
+        lean: async () => [
+          {
+            title: "Movie night",
+            startTime: new Date("2026-10-20T19:00:00Z"),
+            nativeEventId: "linked1",
+          },
+        ],
+      }),
+    });
+    scanGuild.mockResolvedValue({
+      scanned: { botUserId: "bot1" },
+      scheduledEvents: [info({ id: "100" })],
+    });
+    const guild = {
+      id: "g1",
+      members: {
+        me: {
+          permissions: {
+            has: (p: bigint) => p === PermissionFlagsBits.ManageEvents,
+          },
+        },
+      },
+    } as never;
+    const out = await planEventAdoption(guild, "admin", ["100"]);
+    expect(out.candidates[0].reason).toMatch(/announce the event twice/);
+    expect(out.plan.operations).toEqual([]);
+    const filter = EventMock.find.mock.calls[0][0] as Record<string, unknown>;
+    expect(filter).not.toHaveProperty("nativeEventId");
+    expect(filter).not.toHaveProperty("nativeDetached");
   });
 
   it("reports a missing Manage Events permission on every member-made event", async () => {
@@ -406,7 +468,7 @@ describe("DiscordEventAdoptionPort", () => {
   });
 
   it("reads a native event, null when Discord says it is gone, and rethrows other failures", async () => {
-    const fetch = jest.fn<(id: string) => Promise<unknown>>();
+    const fetch = jest.fn<(opts: unknown) => Promise<unknown>>();
     const p = new DiscordEventAdoptionPort(
       {} as never,
       { scheduledEvents: { fetch } } as never,
@@ -419,7 +481,13 @@ describe("DiscordEventAdoptionPort", () => {
       scheduledEndAt: null,
       status: 1,
     });
-    expect(await p.readNative("100")).toEqual({
+    const live = await p.readNative("100");
+    // Live state, not the manager cache the planning scan filled.
+    expect(fetch).toHaveBeenCalledWith({
+      guildScheduledEvent: "100",
+      force: true,
+    });
+    expect(live).toEqual({
       id: "100",
       name: "Movie night",
       description: "",

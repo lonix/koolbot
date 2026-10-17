@@ -465,14 +465,31 @@ export class EventService extends ScheduledService {
       !windows.skipNative &&
       (event.state === "scheduled" || event.state === "active")
     ) {
+      const before = `${event.title}|${event.description}|${event.startTime.getTime()}`;
       const outcome = await this.nativeSync.pullAdopted(
         event,
         guild,
         windows.native,
       );
       if (outcome === "gone") {
+        // Before the start only. A temp channel that already has people in it
+        // is left alone this tick; the check is repeated on the next scan.
+        if (
+          event.channelId &&
+          !(await this.isChannelEmpty(guild, event.channelId))
+        ) {
+          return;
+        }
         await this.cancelOne(event, windows.native, windows.skipNative);
         return;
+      }
+      // The announcement shows the title, time and description in plain text:
+      // when a pull changed them, re-render it through the link-refresh path.
+      if (
+        before !==
+        `${event.title}|${event.description}|${event.startTime.getTime()}`
+      ) {
+        this.linkVerified.delete(String(event._id));
       }
     }
 
@@ -622,30 +639,98 @@ export class EventService extends ScheduledService {
   public async removeAdoptedEvent(adoptionRef: string): Promise<boolean> {
     const row = await Event.findOne({ adoptionRef, nativeAdopted: true });
     if (!row) return false;
+    // Cleanup is strict: only a confirmed absence counts as done. Any other
+    // failure propagates, and the row (the only record of the channel and the
+    // post) is kept so a retry can find them.
     if (row.channelId) {
-      const guild = await this.client.guilds
-        .fetch(row.guildId)
-        .catch(() => null);
-      if (guild) {
-        const empty = await this.isChannelEmpty(guild, row.channelId);
-        if (!empty) {
-          throw new Error(
-            "The event's temporary voice channel is in use. Try again once it is empty.",
-          );
-        }
-        await this.deleteEventChannel(guild, row.channelId);
-      }
+      await this.removeChannelStrict(row.guildId, row.channelId);
     }
     if (row.announcementChannelId && row.announcementMessageId) {
-      await this.deleteAnnouncementPost(
+      await this.removePostStrict(
         row.guildId,
         row.announcementChannelId,
         row.announcementMessageId,
       );
     }
-    await Event.deleteOne({ _id: row._id, adoptionRef, nativeAdopted: true });
+    // Delete only while the row still tracks exactly what was cleaned up. A
+    // scan or "Start now" that attached a post or channel since the read makes
+    // this a no-op; the next attempt then cleans up the new resources too. A
+    // creator that loses to the delete removes its own resource (its claim
+    // filters on the row).
+    const result = await Event.deleteOne({
+      _id: row._id,
+      adoptionRef,
+      nativeAdopted: true,
+      channelId: row.channelId ?? null,
+      announcementMessageId: row.announcementMessageId ?? null,
+    });
+    if (result?.deletedCount === 0) {
+      throw new Error(
+        "The event changed while it was being removed. Try again.",
+      );
+    }
     this.linkVerified.delete(String(row._id));
     return true;
+  }
+
+  /** Delete a temp channel that must be empty; absence is the only quiet outcome. */
+  private async removeChannelStrict(
+    guildId: string,
+    channelId: string,
+  ): Promise<void> {
+    const guild = await this.client.guilds.fetch(guildId);
+    let channel;
+    try {
+      channel =
+        guild.channels.cache.get(channelId) ??
+        (await guild.channels.fetch(channelId));
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return;
+      throw error;
+    }
+    if (!channel) return;
+    if (
+      channel.type === ChannelType.GuildVoice &&
+      (channel as VoiceChannel).members.size > 0
+    ) {
+      throw new Error(
+        "The event's temporary voice channel is in use. Try again once it is empty.",
+      );
+    }
+    try {
+      await channel.delete("Event adoption rolled back");
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return;
+      throw error;
+    }
+  }
+
+  /** Delete an announcement post; absence is the only quiet outcome. */
+  private async removePostStrict(
+    guildId: string,
+    channelId: string,
+    messageId: string,
+  ): Promise<void> {
+    const { channel, gone } = await this.fetchTextChannelDetailed(
+      guildId,
+      channelId,
+    );
+    if (!channel) {
+      if (gone) return;
+      throw new Error("The announcement channel could not be read.");
+    }
+    try {
+      const message = await channel.messages.fetch(messageId);
+      await message.delete();
+    } catch (error) {
+      if (
+        this.isDiscardableError(error, DISCORD_UNKNOWN_MESSAGE) ||
+        this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)
+      ) {
+        return;
+      }
+      throw error;
+    }
   }
 
   public async isRecurrenceEnabled(): Promise<boolean> {

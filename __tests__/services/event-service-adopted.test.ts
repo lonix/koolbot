@@ -1,4 +1,5 @@
 import { describe, it, expect, jest } from "@jest/globals";
+import { ChannelType, DiscordAPIError } from "discord.js";
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -156,6 +157,44 @@ describe("adopted native events in the event scan (#1034)", () => {
     expect(posted.ensureAnnouncement).not.toHaveBeenCalled();
   });
 
+  it("leaves a pre-start row alone while its temp channel has people in it, then cancels", async () => {
+    const service = svc();
+    service.nativeSync.pullAdopted.mockResolvedValue("gone");
+    service.isChannelEmpty = jest.fn(async () => false);
+    const event = adopted({ channelId: "temp", state: "active" });
+    await service.processEvent(event, {}, NOW, windows);
+    expect(service.cancelOne).not.toHaveBeenCalled();
+    service.isChannelEmpty = jest.fn(async () => true);
+    await service.processEvent(event, {}, NOW, windows);
+    expect(service.cancelOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-renders the announcement when a pull changes the title, time or description", async () => {
+    const service = svc();
+    const event = adopted({
+      announcementMessageId: "m1",
+      announcementChannelId: "c1",
+    });
+    // No temp channel here, so the only refresh is the link-verified one.
+    service.nativeSync.adoptedHasChannel.mockReturnValue(true);
+    const linkVerified = (
+      service as unknown as { linkVerified: Map<string, string> }
+    ).linkVerified;
+    const scan = (): Promise<void> =>
+      service.processEvent(event, {}, NOW, windows);
+    await scan();
+    await scan();
+    // Verified once: no further edits while nothing changes.
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+    service.nativeSync.pullAdopted.mockImplementationOnce(async () => {
+      event.title = "Renamed";
+      return "ok";
+    });
+    await scan();
+    expect(linkVerified.has("ev-1")).toBe(true);
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(2);
+  });
+
   it("skips the adopted-event read while the native listing failed", async () => {
     const service = svc();
     await service.processEvent(adopted(), {}, NOW, {
@@ -172,9 +211,8 @@ describe("EventService.removeAdoptedEvent (#1034)", () => {
   type Priv = {
     nativeSync: { syncEvent: jest.Mock };
     cancelOne: jest.Mock;
-    isChannelEmpty: jest.Mock;
-    deleteEventChannel: jest.Mock;
-    deleteAnnouncementPost: jest.Mock;
+    removeChannelStrict: jest.Mock;
+    removePostStrict: jest.Mock;
     removeAdoptedEvent: (ref: string) => Promise<boolean>;
   };
 
@@ -198,15 +236,14 @@ describe("EventService.removeAdoptedEvent (#1034)", () => {
     } as never) as unknown as Priv;
     service.nativeSync = { syncEvent: jest.fn(async () => undefined) };
     service.cancelOne = jest.fn(async () => undefined);
-    service.isChannelEmpty = jest.fn(async () => true);
-    service.deleteEventChannel = jest.fn(async () => undefined);
-    service.deleteAnnouncementPost = jest.fn(async () => undefined);
+    service.removeChannelStrict = jest.fn(async () => undefined);
+    service.removePostStrict = jest.fn(async () => undefined);
     Statics.findOne.mockReset().mockResolvedValue(found);
-    Statics.deleteOne.mockReset().mockResolvedValue({});
+    Statics.deleteOne.mockReset().mockResolvedValue({ deletedCount: 1 });
     return service;
   }
 
-  it("deletes only the row it created, with its post and empty channel, and never cancels", async () => {
+  it("deletes only the row it created, with its post and channel, and never cancels", async () => {
     const found = row({
       channelId: "temp",
       announcementChannelId: "c1",
@@ -218,16 +255,19 @@ describe("EventService.removeAdoptedEvent (#1034)", () => {
       adoptionRef: "snap-1:op-1",
       nativeAdopted: true,
     });
-    expect(service.deleteEventChannel).toHaveBeenCalled();
-    expect(service.deleteAnnouncementPost).toHaveBeenCalledWith(
+    expect(service.removeChannelStrict).toHaveBeenCalledWith("guild-1", "temp");
+    expect(service.removePostStrict).toHaveBeenCalledWith(
       "guild-1",
       "c1",
       "m1",
     );
+    // The row goes only while it still tracks what was just cleaned up.
     expect(Statics.deleteOne).toHaveBeenCalledWith({
       _id: "ev-1",
       adoptionRef: "snap-1:op-1",
       nativeAdopted: true,
+      channelId: "temp",
+      announcementMessageId: "m1",
     });
     // Cancelling would reach the member's Discord event; it must not run.
     expect(service.cancelOne).not.toHaveBeenCalled();
@@ -241,13 +281,156 @@ describe("EventService.removeAdoptedEvent (#1034)", () => {
     expect(Statics.deleteOne).not.toHaveBeenCalled();
   });
 
-  it("refuses while the temporary channel is in use, and deletes nothing", async () => {
-    const service = setup(row({ channelId: "temp" }));
-    service.isChannelEmpty = jest.fn(async () => false);
+  it("keeps the row when cleanup fails, so a retry can still find the channel and post", async () => {
+    const service = setup(
+      row({
+        channelId: "temp",
+        announcementChannelId: "c1",
+        announcementMessageId: "m1",
+      }),
+    );
+    service.removeChannelStrict.mockRejectedValue(new Error("in use"));
     await expect(service.removeAdoptedEvent("snap-1:op-1")).rejects.toThrow(
       /in use/,
     );
-    expect(service.deleteEventChannel).not.toHaveBeenCalled();
     expect(Statics.deleteOne).not.toHaveBeenCalled();
+    service.removeChannelStrict.mockResolvedValue(undefined);
+    service.removePostStrict.mockRejectedValue(new Error("Missing Access"));
+    await expect(service.removeAdoptedEvent("snap-1:op-1")).rejects.toThrow(
+      /Missing Access/,
+    );
+    expect(Statics.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it("asks for a retry when the row picked up a channel or post after it was read", async () => {
+    const service = setup(row());
+    Statics.deleteOne.mockResolvedValue({ deletedCount: 0 });
+    await expect(service.removeAdoptedEvent("snap-1:op-1")).rejects.toThrow(
+      /changed while/,
+    );
+  });
+});
+
+describe("strict rollback cleanup (#1034)", () => {
+  type Priv = {
+    removeChannelStrict: (g: string, c: string) => Promise<void>;
+    removePostStrict: (g: string, c: string, m: string) => Promise<void>;
+    fetchTextChannelDetailed: jest.Mock;
+  };
+  const unknown = (code: number) =>
+    Object.assign(Object.create(DiscordAPIError.prototype), { code });
+
+  function svc(client: unknown): Priv {
+    EventService.reset();
+    return EventService.getInstance(client as never) as unknown as Priv;
+  }
+  function guildWith(channel: unknown, fetchError?: unknown) {
+    return {
+      guilds: {
+        fetch: jest.fn(async () => ({
+          channels: {
+            cache: new Map(),
+            fetch: jest.fn(async () => {
+              if (fetchError) throw fetchError;
+              return channel;
+            }),
+          },
+        })),
+      },
+    };
+  }
+
+  it("deletes an empty voice channel, treats an unknown channel as done, and fails on anything else", async () => {
+    const del = jest.fn(async () => undefined);
+    const voice = {
+      type: ChannelType.GuildVoice,
+      members: new Map(),
+      delete: del,
+    };
+    await svc(guildWith(voice)).removeChannelStrict("g", "c");
+    expect(del).toHaveBeenCalled();
+    await expect(
+      svc(guildWith(null, unknown(10003))).removeChannelStrict("g", "c"),
+    ).resolves.toBeUndefined();
+    await expect(
+      svc(guildWith(null, new Error("outage"))).removeChannelStrict("g", "c"),
+    ).rejects.toThrow("outage");
+    await expect(
+      svc({
+        guilds: {
+          fetch: jest.fn(async () => {
+            throw new Error("no guild");
+          }),
+        },
+      }).removeChannelStrict("g", "c"),
+    ).rejects.toThrow("no guild");
+    const busy = {
+      type: ChannelType.GuildVoice,
+      members: new Map([["u", {}]]),
+      delete: jest.fn(),
+    };
+    await expect(
+      svc(guildWith(busy)).removeChannelStrict("g", "c"),
+    ).rejects.toThrow(/in use/);
+    expect(busy.delete).not.toHaveBeenCalled();
+    const denied = {
+      type: ChannelType.GuildVoice,
+      members: new Map(),
+      delete: jest.fn(async () => {
+        throw unknown(50013);
+      }),
+    };
+    await expect(
+      svc(guildWith(denied)).removeChannelStrict("g", "c"),
+    ).rejects.toBeDefined();
+  });
+
+  it("deletes the post, treats a missing message or channel as done, and fails on anything else", async () => {
+    const service = svc({});
+    const del = jest.fn(async () => undefined);
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: { messages: { fetch: jest.fn(async () => ({ delete: del })) } },
+      gone: false,
+    }));
+    await service.removePostStrict("g", "c", "m");
+    expect(del).toHaveBeenCalled();
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: null,
+      gone: true,
+    }));
+    await expect(
+      service.removePostStrict("g", "c", "m"),
+    ).resolves.toBeUndefined();
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: null,
+      gone: false,
+    }));
+    await expect(service.removePostStrict("g", "c", "m")).rejects.toThrow(
+      /could not be read/,
+    );
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: {
+        messages: {
+          fetch: jest.fn(async () => {
+            throw unknown(10008);
+          }),
+        },
+      },
+      gone: false,
+    }));
+    await expect(
+      service.removePostStrict("g", "c", "m"),
+    ).resolves.toBeUndefined();
+    service.fetchTextChannelDetailed = jest.fn(async () => ({
+      channel: {
+        messages: {
+          fetch: jest.fn(async () => {
+            throw unknown(50013);
+          }),
+        },
+      },
+      gone: false,
+    }));
+    await expect(service.removePostStrict("g", "c", "m")).rejects.toBeDefined();
   });
 });

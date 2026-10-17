@@ -166,7 +166,7 @@ describe("pullAdopted", () => {
     const event = makeEvent() as unknown as Record<string, unknown>;
     expect(await makeSync().pullAdopted(event as never, guild, map)).toBe("ok");
     expect(EventMock.updateOne).toHaveBeenCalledWith(
-      { _id: "ev1", state: "scheduled" },
+      { _id: "ev1", state: { $in: ["scheduled", "active"] } },
       {
         $set: {
           title: "Movie night (members)",
@@ -195,9 +195,59 @@ describe("pullAdopted", () => {
 
   it("keeps the schedule of a running event", async () => {
     const { guild, map } = makeGuild([memberNative()]);
-    const event = makeEvent({ state: "active" });
+    const event = makeEvent({ startTime: new Date(Date.now() - 60_000) });
     expect(await makeSync().pullAdopted(event, guild, map)).toBe("ok");
     expect(EventMock.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("an event whose temp channel is already up (state active) but has not started still follows its native event", async () => {
+    const gone = makeGuild([]);
+    const row = makeEvent({ state: "active", channelId: "temp" });
+    expect(await makeSync().pullAdopted(row, gone.guild, gone.map)).toBe(
+      "gone",
+    );
+    const { guild, map } = makeGuild([memberNative()]);
+    const event = makeEvent({ state: "active", reminderSent: true });
+    await makeSync().pullAdopted(event, guild, map);
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "ev1", state: { $in: ["scheduled", "active"] } },
+      expect.objectContaining({
+        $set: expect.objectContaining({ startTime: START }),
+      }),
+    );
+  });
+
+  it("a postponed start makes the reminder due again; a plain edit does not", async () => {
+    const { guild, map } = makeGuild([memberNative()]);
+    const moved = makeEvent({ reminderSent: true }) as unknown as Record<
+      string,
+      unknown
+    >;
+    await makeSync().pullAdopted(moved as never, guild, map);
+    expect(
+      (
+        EventMock.updateOne.mock.calls[0][1] as {
+          $set: Record<string, unknown>;
+        }
+      ).$set.reminderSent,
+    ).toBe(false);
+    expect(moved.reminderSent).toBe(false);
+    EventMock.updateOne.mockClear();
+    const edited = makeEvent({
+      reminderSent: true,
+      startTime: START,
+      title: "Old title",
+      durationMinutes: 91,
+      description: "Popcorn",
+    });
+    await makeSync().pullAdopted(edited, guild, map);
+    expect(
+      (
+        EventMock.updateOne.mock.calls[0][1] as {
+          $set: Record<string, unknown>;
+        }
+      ).$set,
+    ).not.toHaveProperty("reminderSent");
   });
 
   it("never reports a running row as gone: its channel may be in use and a missing entry may just mean it ended", async () => {
@@ -208,7 +258,10 @@ describe("pullAdopted", () => {
     for (const g of [deleted, completed]) {
       expect(
         await makeSync().pullAdopted(
-          makeEvent({ state: "active" }),
+          makeEvent({
+            state: "active",
+            startTime: new Date(Date.now() - 60_000),
+          }),
           g.guild,
           g.map,
         ),
@@ -216,7 +269,10 @@ describe("pullAdopted", () => {
     }
     expect(
       await makeSync().pullAdopted(
-        makeEvent({ state: "active" }),
+        makeEvent({
+          state: "active",
+          startTime: new Date(Date.now() - 60_000),
+        }),
         deleted.guild,
       ),
     ).toBe("ok");

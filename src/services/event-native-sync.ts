@@ -274,10 +274,12 @@ export class NativeEventSync {
   ): Promise<"ok" | "gone"> {
     try {
       if (!event.nativeAdopted || !event.nativeEventId) return "ok";
-      // Only a row still waiting to start follows a deletion. A running one
-      // finishes on its own end time: a missing listing entry can't tell a
-      // deleted event from one that was ended, and its channel may be in use.
-      if (event.state !== "scheduled") return "ok";
+      // Only an event that has not started follows a deletion or an edit. The
+      // row's state is no guide (the temp channel makes it "active" ahead of
+      // the start, and voice events never get one), so the start time is. A
+      // running event finishes on its own end time: a missing listing entry
+      // can't tell a deleted event from one that was ended.
+      if (event.startTime.getTime() <= Date.now()) return "ok";
       const native = await this.fetchNative(guild, event.nativeEventId, cache);
       if (!native || native.status === GuildScheduledEventStatus.Canceled) {
         return "gone";
@@ -285,7 +287,6 @@ export class NativeEventSync {
       // A running event keeps the schedule its channel and reminder were
       // based on; only a waiting one follows edits.
       if (
-        event.state !== "scheduled" ||
         native.status !== GuildScheduledEventStatus.Scheduled ||
         !native.scheduledStartAt
       ) {
@@ -310,11 +311,16 @@ export class NativeEventSync {
         next.startTime.getTime() !== event.startTime.getTime() ||
         next.durationMinutes !== event.durationMinutes
       ) {
+        // A moved start means the reminder is due again for the new time.
+        const moved =
+          next.startTime.getTime() !== event.startTime.getTime() &&
+          event.reminderSent;
+        const set = moved ? { ...next, reminderSent: false } : next;
         await Event.updateOne(
-          { _id: event._id, state: "scheduled" },
-          { $set: next },
+          { _id: event._id, state: { $in: ["scheduled", "active"] } },
+          { $set: set },
         );
-        Object.assign(event, next);
+        Object.assign(event, set);
       }
       return "ok";
     } catch (error) {

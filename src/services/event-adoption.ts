@@ -54,8 +54,8 @@ export interface EventAdoptionContext {
   canManageEvents: boolean;
   /** Native event ids a KoolBot event is already linked to. */
   linkedNativeIds: ReadonlySet<string>;
-  /** Open KoolBot events that have no native event yet (the sync will make one). */
-  openUnlinked: ReadonlyArray<{ title: string; startTime: Date }>;
+  /** Every open KoolBot event, linked or not (a second one would be announced twice). */
+  openEvents: ReadonlyArray<{ title: string; startTime: Date }>;
   now: Date;
 }
 
@@ -104,7 +104,7 @@ export function classifyScheduledEvent(
   if (info.creatorIsBot === true) {
     return skip("Created by another bot, which manages it.");
   }
-  const sameStart = ctx.openUnlinked.some(
+  const sameStart = ctx.openEvents.some(
     (e) =>
       e.title === info.name.slice(0, 100) && e.startTime.getTime() === starts,
   );
@@ -289,8 +289,6 @@ async function loadContext(
   const open = await Event.find({
     guildId: guild.id,
     state: { $in: ["scheduled", "active"] },
-    nativeEventId: null,
-    nativeDetached: { $ne: true },
   })
     .select("title startTime")
     .lean();
@@ -299,7 +297,7 @@ async function loadContext(
     botUserId,
     canManageEvents: !!me?.permissions.has(PermissionFlagsBits.ManageEvents),
     linkedNativeIds: new Set(linked),
-    openUnlinked: open.map((e) => ({
+    openEvents: open.map((e) => ({
       title: e.title,
       startTime: e.startTime,
     })),
@@ -410,7 +408,12 @@ export class DiscordEventAdoptionPort implements AdoptionEventPort {
     nativeEventId: string,
   ): Promise<AdoptionNativeEvent | null> {
     try {
-      const e = await this.guild.scheduledEvents.fetch(nativeEventId);
+      // `force` skips the manager cache the planning scan filled: drift checks
+      // and resumes must see live Discord state.
+      const e = await this.guild.scheduledEvents.fetch({
+        guildScheduledEvent: nativeEventId,
+        force: true,
+      });
       return {
         id: e.id,
         name: e.name,

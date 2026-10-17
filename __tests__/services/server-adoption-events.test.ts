@@ -54,7 +54,7 @@ function plan(ids: string[] = ["100"], infos: Info[] = [info()]) {
     botUserId: "bot1",
     canManageEvents: true,
     linkedNativeIds: new Set<string>(),
-    openUnlinked: [],
+    openEvents: [],
     now: new Date("2026-10-17T12:00:00Z"),
   };
   return buildEventAdoptionPlan({
