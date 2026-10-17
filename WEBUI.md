@@ -1407,7 +1407,10 @@ belong to it; **open**: anyone can join, such as spectators; **leads**: leaders 
 host only, at most one), an optional size (1 to 99, the voice user limit), an
 optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
 an optional colour marker such as a coloured circle. Names must be unique within an
-event and the number of groups is capped by `events.groups.max_count`. With scripts
+event and the number of groups is capped by `events.groups.max_count`; a preset with
+more groups than the cap is greyed out in the picker and refused by the server
+(choose Custom or raise the cap). While "Use groups" is off, the section's number
+fields are not checked by the browser and the server ignores them. With scripts
 on, choosing a preset fills in the rows, "Add a group" adds a row and mistakes are
 shown next to the fields before sending; the server checks everything again, names
 the group and field in its message, and the page puts the entered values back after

@@ -80,7 +80,7 @@ describe("renderEventsPage Groups section (#1188)", () => {
     expect(html).toContain("koolbot-event-form-draft");
     // Typing in a row ticks "use groups", so rows are never silently dropped.
     expect(html).toContain(
-      "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true})",
+      "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()})",
     );
   });
 

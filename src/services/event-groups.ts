@@ -237,6 +237,13 @@ export function validateGroupSetup(
     }
   }
   const preset = getEventGroupPreset(presetId);
+  // A preset bigger than the cap is refused, never saved as a truncated copy
+  // under its own id.
+  if (preset && preset.groups.length > maxCount) {
+    errors.push(
+      `Preset "${preset.label}" needs ${preset.groups.length} groups but the limit is ${maxCount} (events.groups.max_count). Choose Custom or raise the limit.`,
+    );
+  }
 
   const groupLabel = checkLabel(
     "Group label",

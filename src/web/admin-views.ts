@@ -2505,7 +2505,13 @@ function renderGroupsSection(limits: {
         marker: g.marker,
       })),
     );
-    return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}" data-groups="${escapeHtml(groups)}">${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}</option>`;
+    // A preset bigger than the cap cannot be applied whole, so it is not offered
+    // (the server refuses it too).
+    const tooBig = preset.groups.length > limits.maxCount;
+    const note = tooBig
+      ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
+      : "";
+    return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}" data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
   }).join("");
   const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1)),
@@ -2564,10 +2570,19 @@ const EVENT_GROUPS_SCRIPT =
   "function addRow(){var n=rows().length;if(n>=max)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);sync();return true}" +
+  "box.appendChild(d.firstElementChild);sync();validity();return true}" +
   "function sync(){if(add)add.hidden=rows().length>=max}" +
   "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
   "sync();" +
+  // While groups are off the section's number fields leave native validation
+  // (the server ignores them then); ticking the box restores min, max and step.
+  "function validity(){var on=form.elements['groups_enabled'].checked;" +
+  "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
+  "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
+  "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
+  "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
+  "form.elements['groups_enabled'].addEventListener('change',validity);" +
+  "validity();" +
   "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
   "form.elements['group_'+i+'_name'].value=g.name||'';" +
   "form.elements['group_'+i+'_kind'].value=g.kind||'team';" +
@@ -2575,15 +2590,16 @@ const EVENT_GROUPS_SCRIPT =
   "form.elements['group_'+i+'_tag'].value=g.tag||'';" +
   "form.elements['group_'+i+'_marker'].value=g.marker||''}" +
   // Typing in a group row switches groups on, so rows are never silently dropped.
-  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true});" +
+  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()});" +
   "if(preset)preset.addEventListener('change',function(){" +
   "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
   "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
+  "if(g.length>max){preset.value='';return}" +
   "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
   "var n=Math.max(rows().length,g.length);" +
   "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
-  "form.elements['groups_enabled'].checked=true});" +
-  "function check(){var errs=[],seen={},leads=0,filled=0;" +
+  "form.elements['groups_enabled'].checked=true;validity()});" +
+  "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
   "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
   "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
   "if(!name&&!size&&!tag&&!mk)return;filled++;" +
