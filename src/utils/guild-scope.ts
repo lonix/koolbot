@@ -2,7 +2,6 @@ import logger from "./logger.js";
 import { sanitizeForLog } from "./log-sanitize.js";
 import { getErrorMessage } from "./error-guards.js";
 import { env } from "../config/env.js";
-import { GUILD_MEMBERS_INTENT_HOWTO } from "./guild-members-intent.js";
 
 /**
  * Guild scoping (#1144).
@@ -113,44 +112,59 @@ export function resetForeignGuildWarnings(): void {
 export interface MembershipClient {
   guilds: {
     cache: {
-      get: (
-        id: string,
-      ) =>
-        | { members: { cache: { has: (userId: string) => boolean } } }
+      get: (id: string) =>
+        | {
+            members: {
+              cache: { has: (userId: string) => boolean };
+              fetch: (options: {
+                user: string;
+                force: boolean;
+              }) => Promise<unknown>;
+            };
+          }
         | undefined;
     };
   };
 }
 
-let warnedMissingIntent = false;
+/** Runs a Discord REST call with a timeout (`CommandManager.makeDiscordApiCall`). */
+export type DiscordApiCall = <T>(
+  call: () => Promise<T>,
+  operationName: string,
+) => Promise<T>;
 
 /**
  * Whether `userId` is a member of the configured guild, for events that carry
- * no guild (`userUpdate`, #1144). Answers from the guild's member cache: with
- * the GuildMembers intent on it holds every member, so a miss means "not a
- * member". With the intent off the cache only holds members the bot has seen,
- * so a miss can be a real member; the event is then skipped, with one warning
- * naming the fix, rather than attributing a stranger's name to the guild.
+ * no guild (`userUpdate`, #1144).
+ *
+ * With the GuildMembers intent on, removals are delivered and the member cache
+ * is exact, so it answers. With the intent off no removal event arrives and a
+ * cached member may have left, so a cache hit is not trusted: the member is
+ * read fresh from Discord, bounded by `callApi`. A failed or timed-out lookup
+ * counts as "not a member" (fail closed), so a stranger's name is never
+ * attributed to the guild. `userUpdate` only fires when a cached user changes
+ * their profile, so this is not a hot path.
  */
-export function isConfiguredGuildMember(
+export async function isConfiguredGuildMember(
   client: MembershipClient,
   configuredGuildId: string | undefined,
   userId: string,
-): boolean {
+  callApi: DiscordApiCall,
+): Promise<boolean> {
   if (!configuredGuildId) return false;
   const guild = client.guilds.cache.get(configuredGuildId);
-  if (guild?.members.cache.has(userId)) return true;
-  if (!env.guildMembersIntent && !warnedMissingIntent) {
-    warnedMissingIntent = true;
-    logger.warn(
-      "Username and display name changes are only recorded for members the bot has already seen, because it is not requesting the Server Members Intent. " +
-        GUILD_MEMBERS_INTENT_HOWTO,
+  if (!guild) return false;
+  if (env.guildMembersIntent) return guild.members.cache.has(userId);
+  try {
+    await callApi(
+      () => guild.members.fetch({ user: userId, force: true }),
+      "userUpdate membership check",
     );
+    return true;
+  } catch (error) {
+    logger.debug(
+      `userUpdate membership check for ${sanitizeForLog(userId)} treated as not a member: ${getErrorMessage(error)}`,
+    );
+    return false;
   }
-  return false;
-}
-
-/** Test hook: forget that the missing-intent warning was logged. */
-export function resetMembershipWarning(): void {
-  warnedMissingIntent = false;
 }

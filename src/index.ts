@@ -1437,7 +1437,21 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   recordDiscordEvent("userUpdate");
   if (!env.guildId) return;
-  if (!isConfiguredGuildMember(client, env.guildId, newUser.id)) return;
+  if (
+    !(await isConfiguredGuildMember(
+      client,
+      env.guildId,
+      newUser.id,
+      (call, op) =>
+        CommandManager.getInstance(client).makeDiscordApiCall(
+          call,
+          op,
+          5000,
+          1,
+        ),
+    ))
+  )
+    return;
   await NameHistoryService.getInstance().recordUser(
     env.guildId,
     newUser,

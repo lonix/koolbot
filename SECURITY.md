@@ -160,7 +160,7 @@ server other than `GUILD_ID`, enable `core.guild_scope.leave_other_guilds`
 Web UI sign-in links and sessions are also pinned to `GUILD_ID`: a link or
 session for any other server is refused. Username and display name changes
 are recorded only for members of `GUILD_ID`; without `GUILD_MEMBERS_INTENT=true`
-the bot can only recognise members it has already seen.
+the bot confirms membership with Discord before recording.
 
 ### Mentions
 
