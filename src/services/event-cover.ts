@@ -209,9 +209,29 @@ export async function setEventCover(
       },
       { upsert: true },
     );
-    await Event.updateMany(coverRowsFilter(event), {
-      $set: { coverHash: checked.hash, nativeCoverAttempts: 0 },
-    });
+    // A row whose earlier send failed (it may still have landed, so what
+    // Discord shows is unknown) forgets what it last sent, so the next scan
+    // sends this image even if it equals the recorded hash. Mongoose 9
+    // rejects an array update unless `updatePipeline` is set (#1103).
+    await Event.updateMany(
+      coverRowsFilter(event),
+      [
+        {
+          $set: {
+            coverHash: { $literal: checked.hash },
+            nativeCoverHash: {
+              $cond: [
+                { $gt: ["$nativeCoverAttempts", 0] },
+                null,
+                "$nativeCoverHash",
+              ],
+            },
+            nativeCoverAttempts: 0,
+          },
+        },
+      ],
+      { updatePipeline: true },
+    );
   });
   return {
     ok: true,
@@ -234,16 +254,21 @@ export async function removeEventCover(
   await withCoverLock(event.guildId, coverKeyFor(event), async () => {
     // A row with failed (possibly landed) sends keeps one pending attempt, so
     // the sync still sends a single `image: null` for it; others reset to 0.
-    await Event.updateMany(coverRowsFilter(event), [
-      {
-        $set: {
-          coverHash: null,
-          nativeCoverAttempts: {
-            $cond: [{ $gt: ["$nativeCoverAttempts", 0] }, 1, 0],
+    // (Mongoose 9 rejects an array update unless `updatePipeline` is set, #1103.)
+    await Event.updateMany(
+      coverRowsFilter(event),
+      [
+        {
+          $set: {
+            coverHash: null,
+            nativeCoverAttempts: {
+              $cond: [{ $gt: ["$nativeCoverAttempts", 0] }, 1, 0],
+            },
           },
         },
-      },
-    ]);
+      ],
+      { updatePipeline: true },
+    );
     await EventImage.deleteOne({
       guildId: event.guildId,
       key: coverKeyFor(event),

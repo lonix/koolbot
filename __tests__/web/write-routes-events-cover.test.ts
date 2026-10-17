@@ -155,7 +155,24 @@ describe("POST /events/:id/cover", () => {
     expect(set.bytes).toBe(PNG.length);
     expect(eventUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ _id: "ev1", nativeAdopted: { $ne: true } }),
-      { $set: { coverHash: set.hash, nativeCoverAttempts: 0 } },
+      [
+        {
+          $set: {
+            coverHash: { $literal: set.hash },
+            // A row with failed sends forgets what it last sent.
+            nativeCoverHash: {
+              $cond: [
+                { $gt: ["$nativeCoverAttempts", 0] },
+                null,
+                "$nativeCoverHash",
+              ],
+            },
+            nativeCoverAttempts: 0,
+          },
+        },
+      ],
+      // Mongoose 9 rejects a pipeline update without this option (#1103).
+      { updatePipeline: true },
     );
     expect(mockRecordAudit).toHaveBeenCalledWith(
       session,
@@ -273,6 +290,7 @@ describe("POST /events/:id/cover/remove", () => {
           },
         },
       ],
+      { updatePipeline: true },
     );
     expect(imageDelete).toHaveBeenCalledWith({
       guildId: "guild-1",
