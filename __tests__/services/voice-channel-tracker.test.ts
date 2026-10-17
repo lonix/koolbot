@@ -788,10 +788,10 @@ describe("VoiceChannelTracker", () => {
           channels: { cache: { get: () => atJoin } },
         },
       } as unknown as GuildMember;
-      const channel = {
+      const channel = (atJoin ?? {
         id: "room-1",
         name: "Game Night",
-      } as unknown as VoiceChannel;
+      }) as unknown as VoiceChannel;
       (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
       await tracker.handleVoiceStateUpdate(
         { member, channel: null } as unknown as VoiceState,
@@ -829,6 +829,56 @@ describe("VoiceChannelTracker", () => {
 
     it("fails closed when the channel cannot be inspected at join", async () => {
       const saved = await recordSession(undefined, null);
+      expect(saved.everyoneCanView).toBe(false);
+    });
+
+    it("pairs the name and marker from one snapshot when the room changes during startup", async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      let release!: (v: boolean) => void;
+      let suspended = false;
+      mockConfigService.getBoolean.mockImplementation((key: string) => {
+        if (key !== "voicetracking.enabled") return Promise.resolve(false);
+        if (suspended) return Promise.resolve(true);
+        suspended = true;
+        return new Promise<boolean>((r) => (release = r));
+      });
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "u1", id: "u1" });
+      const room = { ...roomWith(false), name: "Secret Plans" };
+      (mockClient as any).guilds = {
+        cache: {
+          get: () => ({
+            channels: { cache: { get: () => room } },
+          }),
+        },
+      };
+      const member = {
+        id: "u1",
+        displayName: "u1",
+        guild: { id: "guild-1", channels: { cache: { get: () => room } } },
+      } as unknown as GuildMember;
+      const channel = room as unknown as VoiceChannel;
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+
+      const joining = tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel } as unknown as VoiceState,
+      );
+      // Startup is suspended: rename the private room and make it public.
+      room.name = "Public Hangout";
+      room.permissionsFor = jest.fn(() => ({ has: () => true })) as any;
+      release(true);
+      await joining;
+      await tracker.handleVoiceStateUpdate(
+        { member, channel } as unknown as VoiceState,
+        { member, channel: null } as unknown as VoiceState,
+      );
+
+      const saved = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      // Never the private name with a public marker.
+      expect(saved.channelName).toBe("Secret Plans");
       expect(saved.everyoneCanView).toBe(false);
     });
   });
