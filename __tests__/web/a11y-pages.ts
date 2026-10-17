@@ -554,6 +554,7 @@ export function adminPages(): A11yPage[] {
         } as never,
         extraErrors: [],
         approvedAt: "2026-10-17T10:00:00.000Z",
+        reviewToken: "review-token",
         confirmName: "Moderators",
         roleId: "r1",
         validForMinutes: 15,

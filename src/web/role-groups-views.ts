@@ -242,6 +242,8 @@ export interface RoleDeletePageProps {
   extraErrors: PlanIssue[];
   /** Fixed at preview time and sent back on apply, so the plan id matches. */
   approvedAt: string;
+  /** Server-issued MAC over session, group, plan id and stamp; null = none can be issued. */
+  reviewToken: string | null;
   /** Name to type to confirm; null when the plan has no role delete step. */
   confirmName: string | null;
   /** The role id the delete step targets. */
@@ -264,9 +266,10 @@ export function renderRoleDeletePage(props: RoleDeletePageProps): string {
   const applicable =
     props.plan.errors.length === 0 &&
     props.extraErrors.length === 0 &&
-    props.confirmName !== null;
+    props.confirmName !== null &&
+    props.reviewToken !== null;
   const form = applicable
-    ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><input type="hidden" name="approvedAt" value="${escapeHtml(props.approvedAt)}">
+    ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><input type="hidden" name="approvedAt" value="${escapeHtml(props.approvedAt)}"><input type="hidden" name="reviewToken" value="${escapeHtml(props.reviewToken ?? "")}">
 <p>I understand that deleting <strong>@${escapeHtml(props.confirmName ?? "")}</strong> removes it from every member who holds it. A rollback can recreate a role with the same settings, but not its role ID or its member assignments, so anything that referred to the old ID stays disconnected.</p>
 <label>Type the role name to confirm <input type="text" name="confirmName" required autocomplete="off" placeholder="${escapeHtml(props.confirmName ?? "")}"></label>
 <button type="submit" class="btn btn-danger">Delete role and group</button> <a class="btn" href="/admin/role-groups">Cancel</a>

@@ -92,6 +92,7 @@ jest.unstable_mockModule(
 const { createRoleGroupsRouter, permissionsFromNames } =
   await import("../../src/web/routes/write/role-groups.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { signRoleDeleteReview } = await import("../../src/web/review-token.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const session = createTestSession();
@@ -431,16 +432,30 @@ describe("POST /role-groups/:id/delete-role/apply (#1184)", () => {
     ],
     ...over,
   });
-  const body = (over: Record<string, string> = {}) => ({
-    planId: "p1",
-    approvedAt: stamp(),
-    confirmName: "Helpers",
-    ...over,
-  });
+  const body = (over: Record<string, string> = {}) => {
+    const f = {
+      planId: "p1",
+      approvedAt: stamp(),
+      confirmName: "Helpers",
+      ...over,
+    };
+    return {
+      reviewToken:
+        signRoleDeleteReview(session.sessionId, "g1", f.planId, f.approvedAt) ??
+        "",
+      ...f,
+    };
+  };
 
+  const ORIGINAL_SECRET = process.env.WEBUI_SESSION_SECRET;
   beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = "test-secret-for-role-delete-review-01";
     mockPlanDelete.mockResolvedValue({ plan: deletePlan(), extraErrors: [] });
     mockStartApply.mockReturnValue({ id: JOB });
+  });
+  afterEach(() => {
+    if (ORIGINAL_SECRET === undefined) delete process.env.WEBUI_SESSION_SECRET;
+    else process.env.WEBUI_SESSION_SECRET = ORIGINAL_SECRET;
   });
 
   it("deletes the role through the engine once the plan id and typed name match, then removes the group", async () => {
@@ -477,6 +492,54 @@ describe("POST /role-groups/:id/delete-role/apply (#1184)", () => {
         result: "success",
       }),
     );
+  });
+
+  it("refuses a refreshed timestamp on an expired review of a KoolBot-created role (no approval in the plan)", async () => {
+    svc.get.mockResolvedValue(group({ createdByKoolbot: true }));
+    await mount();
+    // What the page issued 20 minutes ago.
+    const old = body({ approvedAt: stamp(-20 * 60_000) });
+    // The same form with only the timestamp moved to now.
+    const res = await harness.post("/role-groups/g1/delete-role/apply", {
+      ...old,
+      approvedAt: stamp(),
+    });
+    expect(flashOf(res).type).toBe("warn");
+    expect(flashOf(res).msg).toContain("can't be verified");
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+    expect(mockStartApply).not.toHaveBeenCalled();
+    expect(svc.remove).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing, tampered or foreign review token without planning", async () => {
+    await mount();
+    const good = body();
+    const forged = [
+      "",
+      `${good.reviewToken}x`,
+      // Issued for another group, session or plan.
+      signRoleDeleteReview(session.sessionId, "g2", "p1", good.approvedAt)!,
+      signRoleDeleteReview("other-session", "g1", "p1", good.approvedAt)!,
+      signRoleDeleteReview(session.sessionId, "g1", "p2", good.approvedAt)!,
+    ];
+    for (const reviewToken of forged) {
+      const res = await harness.post("/role-groups/g1/delete-role/apply", {
+        ...good,
+        reviewToken,
+      });
+      expect(flashOf(res).msg).toContain("can't be verified");
+    }
+    expect(mockPlanDelete).not.toHaveBeenCalled();
+    expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no session secret is configured", async () => {
+    await mount();
+    const form = body();
+    delete process.env.WEBUI_SESSION_SECRET;
+    const res = await harness.post("/role-groups/g1/delete-role/apply", form);
+    expect(flashOf(res).msg).toContain("can't be verified");
+    expect(mockStartApply).not.toHaveBeenCalled();
   });
 
   it("refuses when the typed name does not match, deleting nothing", async () => {

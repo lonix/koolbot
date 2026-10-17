@@ -31,6 +31,7 @@ import {
 } from "../../../services/role-group-plan.js";
 import { recordAudit } from "../../audit.js";
 import { ROLE_DELETE_REVIEW_MINUTES } from "../../role-groups-views.js";
+import { verifyRoleDeleteReview } from "../../review-token.js";
 import {
   asyncHandler,
   flashRedirect,
@@ -425,6 +426,20 @@ export function createRoleGroupsRouter(client: Client): Router {
       const planId = getString(req, "planId");
       const approvedAt = getString(req, "approvedAt");
       const typedName = getString(req, "confirmName").trim();
+      const reviewToken = getString(req, "reviewToken");
+      const sessionId = session.sessionId;
+      // The stamp is only trusted if the server issued it for this session,
+      // group and plan: a role KoolBot created has no approval in its plan, so
+      // the plan id alone would not notice a refreshed timestamp.
+      if (
+        !verifyRoleDeleteReview(reviewToken, sessionId, id, planId, approvedAt)
+      ) {
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "That review can't be verified. Open the review again and confirm.",
+        });
+        return;
+      }
       const stamp = Date.parse(approvedAt);
       const age = Date.now() - stamp;
       if (

@@ -6,6 +6,7 @@
  */
 
 import { COMPONENT_AUDIT_LABELS } from "../utils/component-audit.js";
+import { signRoleDeleteReview } from "./review-token.js";
 import {
   ADOPTION_SCAN_PAGE,
   createAdoptionScanLimiter,
@@ -2411,6 +2412,12 @@ export function createReadOnlyRouter(
         renderRoleDeletePage({
           ...common,
           ...data,
+          reviewToken: signRoleDeleteReview(
+            session.sessionId,
+            data.groupId,
+            data.plan.id,
+            data.approvedAt,
+          ),
           validForMinutes: ROLE_DELETE_REVIEW_MINUTES,
         }),
       );

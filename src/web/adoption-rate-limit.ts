@@ -33,6 +33,16 @@ export function createAdoptionScanLimiter(): RequestHandler {
   });
 }
 
+/** Lower-case, collapse repeated slashes and drop trailing ones. */
+function normalisePath(raw: string): string {
+  return (
+    raw
+      .toLowerCase()
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/, "") || "/"
+  );
+}
+
 function underPrefix(path: string): boolean {
   return WRITE_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 }
@@ -51,7 +61,9 @@ export function createAdoptionLimitsRouter(): Router {
   const scanLimiter = createAdoptionScanLimiter();
   const router = Router();
   router.use((req: Request, res: Response, next: NextFunction): void => {
-    const path = req.path.replace(/\/+$/, "") || "/";
+    // Express matches routes case-insensitively and ignores a trailing slash,
+    // so compare the same way: /ADOPT/Claims/ reaches the same handler.
+    const path = normalisePath(req.path);
     if (req.method === "GET" || req.method === "HEAD") {
       if (WRITE_ROUTER_SCAN_PAGES.has(path)) {
         scanLimiter(req, res, next);

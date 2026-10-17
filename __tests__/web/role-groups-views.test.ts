@@ -540,6 +540,7 @@ describe("renderRoleDeletePage (#1184)", () => {
     plan: deletePlan(),
     extraErrors: [],
     approvedAt: "2026-10-17T10:00:00.000Z",
+    reviewToken: "review-token" as string | null,
     confirmName: "Mods <b>" as string | null,
     roleId: "r1",
     validForMinutes: 15,
@@ -573,6 +574,16 @@ describe("renderRoleDeletePage (#1184)", () => {
     expect(blocked).not.toContain("delete-role/apply");
     expect(renderRoleDeletePage(p({ confirmName: null }))).not.toContain(
       "delete-role/apply",
+    );
+    // No token can be issued (no session secret): nothing to apply.
+    expect(renderRoleDeletePage(p({ reviewToken: null }))).not.toContain(
+      "delete-role/apply",
+    );
+  });
+
+  it("sends the server-issued review token back with the form", () => {
+    expect(renderRoleDeletePage(p())).toContain(
+      'name="reviewToken" value="review-token"',
     );
   });
 });

@@ -1233,7 +1233,9 @@ every feature keeps its current behaviour.
   at `/admin/role-groups/<id>/delete-role` with the shared adoption diff, where the delete is listed
   in its own **Destructive steps** section. To apply it you type the role's name. The approval text
   says that the role's ID and its member assignments can't be restored by a rollback. The apply
-  checks that the plan is the one you reviewed (the review stays valid for 15 minutes) and is refused
+  checks that the plan is the one you reviewed, and that the review is one this server issued for your
+  session, this group and this plan (a keyed MAC over those and the review time, using
+  `WEBUI_SESSION_SECRET`, so the time can't be edited); the review stays valid for 15 minutes. It is refused
   while a feature such as Leaderboard Roles or Reaction Roles still uses the role. A role KoolBot
   created needs no separate approval, but still the typed name.
 

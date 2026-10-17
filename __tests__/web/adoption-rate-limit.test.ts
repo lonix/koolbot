@@ -87,6 +87,31 @@ describe("adoption write limiter", () => {
     expect((await burst(base, "GET", "/adopt/history", 40)).at(-1)).toBe(204);
   });
 
+  it("counts mixed-case, doubled-slash and trailing-slash spellings in the same bucket", async () => {
+    // Express matches routes case-insensitively, so these reach the handlers.
+    const base = await start();
+    const spellings = [
+      "/ADOPT/claims/apply",
+      "/Adopt/Claims/Apply/",
+      "/adopt//claims/apply",
+      "/Role-Groups/apply",
+      "/RULES/apply",
+    ];
+    for (let i = 0; i < 30; i += 1) {
+      await fetch(`${base}${spellings[i % spellings.length]}`, {
+        method: "POST",
+      });
+    }
+    for (const path of spellings) {
+      expect((await fetch(`${base}${path}`, { method: "POST" })).status).toBe(
+        429,
+      );
+    }
+    expect(
+      (await fetch(`${base}/adopt/claims/apply`, { method: "POST" })).status,
+    ).toBe(429);
+  });
+
   it("does not let a look-alike path prefix into the bucket", async () => {
     const base = await start();
     const codes = await burst(base, "POST", "/adopted-things", 40);
@@ -104,6 +129,19 @@ describe("adoption scan limiter", () => {
       expect(codes[15]).toBe(429);
     },
   );
+
+  it("throttles mixed-case spellings of the scan pages in the same bucket", async () => {
+    const base = await start();
+    const spellings = ["/adopt/claims", "/ADOPT/Claims", "/Adopt/CLAIMS/"];
+    for (let i = 0; i < 15; i += 1) {
+      await fetch(`${base}${spellings[i % spellings.length]}`);
+    }
+    for (const path of [...spellings, "/adopt/events"]) {
+      const status = (await fetch(`${base}${path}`)).status;
+      // /adopt/events has its own page but shares the scan bucket.
+      expect(status).toBe(429);
+    }
+  });
 
   it("is mounted in front of GET /admin/adopt on the read-only router", async () => {
     const router = createReadOnlyRouter(
