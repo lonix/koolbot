@@ -54,6 +54,7 @@ import {
 import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
 import { randomBytes } from "node:crypto";
+import { ConfigService } from "../../services/config-service.js";
 import { TrackingOptOutService } from "../../services/tracking-opt-out-service.js";
 import {
   assignMember,
@@ -81,6 +82,14 @@ export type HostRequest = AuthenticatedRequest & {
   hostEvent: IEvent;
   /** The session, read once by the gate. */
   hostSession: WebSessionContext;
+  /**
+   * The member-reset admission ticket (`TrackingOptOutService.admission()`),
+   * taken synchronously at the start of the gate, BEFORE its asynchronous
+   * event lookup. A write that adds a member passes it on, so a reset of that
+   * member that completes while the request waits in the gate still refuses
+   * the add.
+   */
+  hostAdmission: number;
 };
 
 /**
@@ -306,6 +315,26 @@ function createAssignmentSection(client: Client): HostSectionRenderer {
   };
 }
 
+const EVENTS_OFF =
+  "Events are turned off, so nobody can be added to a group. Turn on events.enabled first.";
+
+/**
+ * The Events master switch (CLAUDE.md: a feature gates on its `*.enabled`
+ * key). Fails closed: a failed read counts as off. Adding people is gated;
+ * unassigning and the lock stay available.
+ */
+async function eventsEnabled(): Promise<boolean> {
+  try {
+    return await ConfigService.getInstance().getBoolean(
+      "events.enabled",
+      false,
+    );
+  } catch (err) {
+    logger.warn("Could not read events.enabled for a host action:", err);
+    return false;
+  }
+}
+
 /** Assign, unassign, randomise and lock (#1191), each one audited change. */
 function registerAssignmentActions(router: Router, client: Client): void {
   const assignTo = async (
@@ -365,29 +394,26 @@ function registerAssignmentActions(router: Router, client: Client): void {
   // Each write action takes its reset-admission ticket as its very first
   // step, before any await, so a member data reset that engages while the
   // action waits (the voice read, the event lock) refuses the add.
-  hostAction(router, "assign", "/assign", ({ req, event }) => {
-    const admission = TrackingOptOutService.getInstance().admission();
+  hostAction(router, "assign", "/assign", async ({ req, event }) => {
+    const admission = req.hostAdmission;
+    if (!(await eventsEnabled())) return { ok: false, message: EVENTS_OFF };
     const group = bodyString(req, "group");
     if (group.length === 0 || group.length > 32) {
-      return Promise.resolve({
+      return {
         ok: false,
         message: "Choose a group to put the person in.",
-      });
+      };
     }
     return assignTo(event, bodyString(req, "userId"), group, admission);
   });
 
   hostAction(router, "unassign", "/unassign", ({ req, event }) =>
-    assignTo(
-      event,
-      bodyString(req, "userId"),
-      null,
-      TrackingOptOutService.getInstance().admission(),
-    ),
+    assignTo(event, bodyString(req, "userId"), null, req.hostAdmission),
   );
 
   hostAction(router, "randomise", "/randomise", async ({ req, event }) => {
-    const admission = TrackingOptOutService.getInstance().admission();
+    const admission = req.hostAdmission;
+    if (!(await eventsEnabled())) return { ok: false, message: EVENTS_OFF };
     const rawMode = bodyString(req, "mode");
     if (rawMode !== "unassigned" && rawMode !== "everyone") {
       return { ok: false, message: "Choose who to randomise." };
@@ -510,6 +536,7 @@ export function createHostEventsRouter(client: Client): Router {
     // Take the session in one synchronous step, before the first await, and
     // use this copy from here on.
     const session = (req as AuthenticatedRequest).webSession;
+    const admission = TrackingOptOutService.getInstance().admission();
     const rawId = req.params.id;
     const id = typeof rawId === "string" ? rawId : "";
     const deny = async (reason: string): Promise<void> => {
@@ -541,6 +568,7 @@ export function createHostEventsRouter(client: Client): Router {
         const h = req as HostRequest;
         h.hostEvent = event;
         h.hostSession = session;
+        h.hostAdmission = admission;
         next();
       })
       .catch((err: unknown) => {

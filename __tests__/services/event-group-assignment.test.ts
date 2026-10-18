@@ -22,6 +22,19 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: EventMock,
 }));
 
+let eventsEnabled: boolean | "throw" = true;
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: {
+    getInstance: () => ({
+      getBoolean: async (key: string) => {
+        if (key !== "events.enabled") throw new Error(`unexpected key ${key}`);
+        if (eventsEnabled === "throw") throw new Error("config unreadable");
+        return eventsEnabled;
+      },
+    }),
+  },
+}));
+
 const optedOut = new Set<string>();
 let staleTicket = false;
 jest.unstable_mockModule(
@@ -117,6 +130,7 @@ beforeEach(() => {
   staleTicket = false;
   fake.failUpdatesFor = null;
   fake.delayFor = null;
+  eventsEnabled = true;
 });
 
 describe("assignMember", () => {
@@ -622,6 +636,26 @@ describe("handleGroupSelfJoin", () => {
     ]);
     expect(members("b")).toEqual(["u1"]);
     expect(members("a")).toEqual([]);
+  });
+
+  it("records no membership at all while Events is switched off, or when the switch cannot be read", async () => {
+    seed({
+      groups: [
+        group("a", { channelId: "ch-a" }),
+        group("b", { channelId: "ch-b", memberIds: ["u1"] }),
+      ],
+    });
+    eventsEnabled = false;
+    expect(await join("u2", "ch-a")).toBe("disabled");
+    expect(await join("u1", "ch-a")).toBe("disabled");
+    eventsEnabled = "throw";
+    expect(await join("u2", "ch-a")).toBe("disabled");
+    expect(updates).toEqual([]);
+    expect(members("a")).toEqual([]);
+    expect(members("b")).toEqual(["u1"]);
+    // Switched back on, joins are recorded again.
+    eventsEnabled = true;
+    expect(await join("u2", "ch-a")).toBe("recorded");
   });
 
   it("loses cleanly to a host assignment that fills the group first", async () => {

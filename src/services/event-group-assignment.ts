@@ -34,6 +34,7 @@ import { Event, type IEvent } from "../models/event.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
+import { ConfigService } from "./config-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import {
   groupKeyOf,
@@ -441,6 +442,7 @@ export type SelfJoinOutcome =
   | "locked"
   | "full"
   | "not-team"
+  | "disabled"
   | "blocked";
 
 /**
@@ -480,6 +482,20 @@ async function selfJoinOnce(opts: {
   admission: number;
 }): Promise<SelfJoinOutcome> {
   const { guildId, userId, channelId, admission } = opts;
+  // The Events master switch (CLAUDE.md). With Events off the scan stops but
+  // open rows stay, so without this a join to a stored group channel would
+  // still add or move members. Fails closed: an unreadable key counts as off.
+  // Checked inside the member's queue, so join order is kept.
+  let enabled = false;
+  try {
+    enabled = await ConfigService.getInstance().getBoolean(
+      "events.enabled",
+      false,
+    );
+  } catch (err) {
+    logger.warn("Could not read events.enabled for a group self-join:", err);
+  }
+  if (!enabled) return "disabled";
   // Hot path (every channel change in the guild): one indexed lookup, which
   // finds nothing for any channel that is not a group channel of an open event.
   const candidate = (await Event.findOne({

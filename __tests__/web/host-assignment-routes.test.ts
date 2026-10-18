@@ -52,6 +52,8 @@ const { PermissionsService } =
 const { EventService } = await import("../../src/services/event-service.js");
 const { ConfigService } = await import("../../src/services/config-service.js");
 const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+const { TrackingOptOutService } =
+  await import("../../src/services/tracking-opt-out-service.js");
 
 const SECRET = "test-secret-for-host-assignment-routes";
 const GUILD = "guild-1";
@@ -128,6 +130,7 @@ let voice: Map<
   Array<{ id: string; name: string; bot?: boolean }>
 > = new Map();
 let guildInCache = true;
+let eventsEnabled: boolean = true;
 let server: Server;
 let base = "";
 
@@ -237,6 +240,7 @@ beforeEach(() => {
   events = { [EVENT_ID]: makeEvent() };
   auditRows = [];
   guildInCache = true;
+  eventsEnabled = true;
   voice = new Map([
     [
       "ch-main",
@@ -282,7 +286,8 @@ beforeEach(() => {
     getEvent: async (id: string) => events[id] ?? null,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async () => false,
+    getBoolean: async (key: string) =>
+      key === "events.enabled" ? eventsEnabled : false,
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
   } as never);
@@ -464,6 +469,66 @@ describe("assign", () => {
     const r = await post("assign", { userId: BEN, group: "g_logi" });
     expect(flashOf(r.location).type).toBe("err");
     expect(assignMember).not.toHaveBeenCalled();
+  });
+});
+
+describe("the Events master switch", () => {
+  it("refuses assign and randomise while events.enabled is off, but still unassigns and locks", async () => {
+    eventsEnabled = false;
+    const assign = await post("assign", { userId: BEN, group: "g_logi" });
+    expect(flashOf(assign.location).type).toBe("err");
+    expect(flashOf(assign.location).msg).toContain("Events are turned off");
+    const rand = await post("randomise", { mode: "everyone" });
+    expect(flashOf(rand.location).type).toBe("err");
+    expect(assignMember).not.toHaveBeenCalled();
+    expect(randomiseMembers).not.toHaveBeenCalled();
+    await post("unassign", { userId: AWAY });
+    expect(assignMember).toHaveBeenCalledTimes(1);
+    await post("lock", { locked: "1" });
+    expect(setGroupsLocked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the reset admission ticket", () => {
+  /** Hold the gate's event lookup open across a complete member reset. */
+  async function postAcrossReset(
+    action: string,
+    body: Json,
+  ): Promise<{ before: number; after: number }> {
+    const tracking = TrackingOptOutService.getInstance();
+    let release: (e: Json) => void = () => undefined;
+    const held = new Promise<Json>((r) => (release = r));
+    (EventService.getInstance as jest.Mock).mockReturnValue({
+      getEvent: async () => held,
+    });
+    const before = tracking.admission();
+    const pending = post(action, body);
+    await new Promise((r) => setTimeout(r, 20));
+    // The member's reset runs to completion while the request waits in the gate.
+    await tracking.withTrackingPaused(BEN, GUILD, async () => undefined);
+    const after = tracking.admission();
+    release(events[EVENT_ID]);
+    await pending;
+    return { before, after };
+  }
+
+  it("is taken before the gate's event lookup, for assign", async () => {
+    const { before, after } = await postAcrossReset("assign", {
+      userId: BEN,
+      group: "g_logi",
+    });
+    expect(after).toBeGreaterThan(before);
+    const arg = assignMember.mock.calls[0][0] as Json;
+    expect(arg.admission).toBe(before);
+  });
+
+  it("is taken before the gate's event lookup, for randomise", async () => {
+    const { before, after } = await postAcrossReset("randomise", {
+      mode: "everyone",
+    });
+    expect(after).toBeGreaterThan(before);
+    const arg = randomiseMembers.mock.calls[0][0] as Json;
+    expect(arg.admission).toBe(before);
   });
 });
 

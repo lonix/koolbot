@@ -1,4 +1,5 @@
-import { it, expect, beforeAll, beforeEach } from "@jest/globals";
+import { it, expect, beforeAll, beforeEach, jest } from "@jest/globals";
+import { ConfigService } from "../../src/services/config-service.js";
 import { describeWithMongo, useRealMongo } from "./mongo-harness.js";
 import { Event } from "../../src/models/event.js";
 import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
@@ -46,6 +47,11 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
 
   beforeEach(async () => {
     await Event.deleteMany({});
+    // Self-join is gated on the Events master switch; the config store is not
+    // what these tests are about, so the key is read as on.
+    jest
+      .spyOn(ConfigService.getInstance(), "getBoolean")
+      .mockImplementation(async (key: string) => key === "events.enabled");
   });
 
   const GUILD = "guild-1";
