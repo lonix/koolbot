@@ -127,12 +127,13 @@ const removeRsvp = jest.fn<
     rendersFailed: number;
   }>
 >();
-const removeMemberFromEvents = jest.fn<
-  (
-    guildId: string,
-    userId: string,
-  ) => Promise<{ matched: number; removed: number; failed: number }>
->();
+const removeMemberFromEvents =
+  jest.fn<
+    (
+      guildId: string,
+      userId: string,
+    ) => Promise<{ matched: number; removed: number; failed: number }>
+  >();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -223,12 +224,15 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   },
 }));
 
-jest.unstable_mockModule("../../src/services/event-group-assignment.js", () => ({
-  removeMemberFromEvents: async (guildId: string, userId: string) => {
-    CALLS.push("event.removeMemberFromEvents");
-    return removeMemberFromEvents(guildId, userId);
-  },
-}));
+jest.unstable_mockModule(
+  "../../src/services/event-group-assignment.js",
+  () => ({
+    removeMemberFromEvents: async (guildId: string, userId: string) => {
+      CALLS.push("event.removeMemberFromEvents");
+      return removeMemberFromEvents(guildId, userId);
+    },
+  }),
+);
 
 jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
   QuoteChannelManager: {

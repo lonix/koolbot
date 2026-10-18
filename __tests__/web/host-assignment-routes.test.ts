@@ -34,9 +34,9 @@ jest.unstable_mockModule(
     assignMember: (o: Json) => assignMember(o),
     randomiseMembers: (o: Json) => randomiseMembers(o),
     setGroupsLocked: (o: Json) => setGroupsLocked(o),
-  // Imported by modules on the same import path; not used by these routes.
-  removeMemberFromEvents: async () => ({ matched: 0, removed: 0, failed: 0 }),
-  handleGroupSelfJoin: async () => "no-event",
+    // Imported by modules on the same import path; not used by these routes.
+    removeMemberFromEvents: async () => ({ matched: 0, removed: 0, failed: 0 }),
+    handleGroupSelfJoin: async () => "no-event",
   }),
 );
 
@@ -63,7 +63,6 @@ const PANEL = `/me/events/${EVENT_ID}/host`;
 // Discord-like ids (the forms only accept digits).
 const ANA = "111111111111111111";
 const BEN = "222222222222222222";
-const CAL = "333333333333333333";
 const BOT = "999999999999999999";
 const AWAY = "444444444444444444";
 
@@ -309,7 +308,9 @@ describe("the assignment section", () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
     expect(r.text).toContain('id="host-assignment"');
-    expect(r.text).not.toContain("let them pick one, or randomise. Not available yet");
+    expect(r.text).not.toContain(
+      "let them pick one, or randomise. Not available yet",
+    );
     // Heli has Ana: 1 of 2. Logi has no size: just a count.
     expect(r.text).toContain('Heli</strong> <span class="mono">1/2</span>');
     expect(r.text).toContain('Logi</strong> <span class="mono">0</span>');

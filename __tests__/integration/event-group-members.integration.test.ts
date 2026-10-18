@@ -77,20 +77,37 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
   it("assigns, moves and unassigns without touching the other fields of the groups", async () => {
     const { id } = await makeEvent();
     expect(
-      await assignMember({ guildId: GUILD, eventId: id, userId: "u1", groupKey: "g_a" }),
+      await assignMember({
+        guildId: GUILD,
+        eventId: id,
+        userId: "u1",
+        groupKey: "g_a",
+      }),
     ).toMatchObject({ ok: true, changed: true });
     expect(await members(id, "g_a")).toEqual(["u1"]);
 
-    await assignMember({ guildId: GUILD, eventId: id, userId: "u1", groupKey: "g_b" });
+    await assignMember({
+      guildId: GUILD,
+      eventId: id,
+      userId: "u1",
+      groupKey: "g_b",
+    });
     expect(await members(id, "g_a")).toEqual([]);
     expect(await members(id, "g_b")).toEqual(["u1"]);
 
-    await assignMember({ guildId: GUILD, eventId: id, userId: "u1", groupKey: null });
+    await assignMember({
+      guildId: GUILD,
+      eventId: id,
+      userId: "u1",
+      groupKey: null,
+    });
     expect(await members(id, "g_b")).toEqual([]);
 
     // Names, sizes, channels and captains of every group are as they were.
     const row = await stored(id);
-    expect(row.groups.map((g) => [g.key, g.name, g.size, g.channelId, g.captainId])).toEqual([
+    expect(
+      row.groups.map((g) => [g.key, g.name, g.size, g.channelId, g.captainId]),
+    ).toEqual([
       ["g_a", "Heli", 3, "ch-a", "cap-1"],
       ["g_b", "Logi", null, "ch-b", null],
       ["g_o", "Spectators", null, "ch-o", null],
@@ -101,7 +118,12 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
     const { id } = await makeEvent();
     const results = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>
-        assignMember({ guildId: GUILD, eventId: id, userId: `u${i}`, groupKey: "g_a" }),
+        assignMember({
+          guildId: GUILD,
+          eventId: id,
+          userId: `u${i}`,
+          groupKey: "g_a",
+        }),
       ),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(3);
@@ -121,13 +143,20 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
       ),
     );
     const row = await stored(id);
-    expect(row.groups.filter((g) => g.memberIds.includes("same"))).toHaveLength(1);
+    expect(row.groups.filter((g) => g.memberIds.includes("same"))).toHaveLength(
+      1,
+    );
   });
 
   it("refuses a finished event and writes nothing", async () => {
     const { id } = await makeEvent({ state: "ended" });
     expect(
-      await assignMember({ guildId: GUILD, eventId: id, userId: "u1", groupKey: "g_a" }),
+      await assignMember({
+        guildId: GUILD,
+        eventId: id,
+        userId: "u1",
+        groupKey: "g_a",
+      }),
     ).toMatchObject({ ok: false, code: "closed" });
     expect(await members(id, "g_a")).toEqual([]);
   });
@@ -161,7 +190,12 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
     const { id } = await makeEvent();
     const ticket = TrackingOptOutService.getInstance().admission();
     const join = (userId: string, channelId: string) =>
-      handleGroupSelfJoin({ guildId: GUILD, userId, channelId, admission: ticket });
+      handleGroupSelfJoin({
+        guildId: GUILD,
+        userId,
+        channelId,
+        admission: ticket,
+      });
 
     expect(await join("u1", "ch-a")).toBe("recorded");
     expect(await join("u1", "ch-b")).toBe("recorded");
@@ -209,7 +243,9 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
       guildId: "guild-2",
       groups: [{ key: "g_a", name: "A", kind: "team", memberIds: ["me"] }],
     });
-    expect(await removeMemberFromEvents(GUILD, "me")).toMatchObject({ matched: 0 });
+    expect(await removeMemberFromEvents(GUILD, "me")).toMatchObject({
+      matched: 0,
+    });
     expect(await members(other.id, "g_a")).toEqual(["me"]);
   });
 });
