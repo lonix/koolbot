@@ -41,6 +41,7 @@ type Row = {
   channelId: string | null;
   createdBy: string;
   seriesCancelled?: boolean;
+  endedAt?: Date | null;
   groupsEnabled: boolean;
   groups: Group[];
 };
@@ -373,6 +374,22 @@ describe("EventGroupChannels.reconcile", () => {
       "chan-2",
       "chan-3",
     ]);
+  });
+
+  it("an unreadable event is a failure in the report and creates nothing", async () => {
+    store.set("evt1", makeRow());
+    const { service, guild, rest } = makeEnv({ perms: ALL_PERMS });
+    findById.mockImplementationOnce(() => ({
+      lean: async () => {
+        throw new Error("db down");
+      },
+    }));
+    const report = await service.reconcile({ _id: "evt1" }, guild);
+    expect(report.created).toBe(0);
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.reason).toContain("could not be read");
+    expect(rest.post).not.toHaveBeenCalled();
+    expect(service.getReport("evt1")?.failures).toHaveLength(1);
   });
 
   it("gives the host View, Connect and Move Members as a Member overwrite on every group channel", async () => {
@@ -803,7 +820,49 @@ describe("EventGroupChannels.cleanup", () => {
     expect(env.channels.size).toBe(0);
   });
 
-  it("waits for the grace period after a scheduled end, like the main channel", async () => {
+  it("removes the empty group channels of an event ended through the teardown at once (#1193), even before its scheduled end", async () => {
+    // Ended by hand at 20:30; the scheduled end (22:00) and its grace are far off.
+    store.set(
+      "evt1",
+      recordedRow({
+        state: "ended",
+        endedAt: new Date("2026-07-04T20:30:00Z"),
+      }),
+    );
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env, ["chan-3"]);
+    const report = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      new Date("2026-07-04T20:31:00Z"),
+    );
+    expect(report.removed).toBe(2);
+    // The occupied one stays and is retried by the scan, still without grace.
+    expect(report.occupied).toBe(1);
+    (env.channels.get("chan-3") as FakeChannel).members.size = 0;
+    const again = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      new Date("2026-07-04T20:32:00Z"),
+    );
+    expect(again.removed).toBe(1);
+  });
+
+  it("an event that is still open is untouched even when it carries a stale endedAt", async () => {
+    store.set(
+      "evt1",
+      recordedRow({
+        state: "active",
+        endedAt: new Date("2026-07-04T20:30:00Z"),
+      }),
+    );
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env);
+    await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
+    expect(env.rest.delete).not.toHaveBeenCalled();
+  });
+
+  it("waits for the grace period after a scheduled end, like the main channel (a row ended before endedAt existed)", async () => {
     store.set("evt1", recordedRow({ state: "ended" }));
     const env = makeEnv({ perms: ALL_PERMS });
     seed(env);
@@ -815,6 +874,33 @@ describe("EventGroupChannels.cleanup", () => {
       NOW_AFTER_GRACE,
     );
     expect(report.removed).toBe(3);
+  });
+
+  it("an unreadable event is a failure in the report, not an empty successful pass, and nothing is deleted", async () => {
+    store.set("evt1", recordedRow({ state: "cancelled" }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env);
+    findById.mockImplementationOnce(() => ({
+      lean: async () => {
+        throw new Error("db down");
+      },
+    }));
+    const report = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(report.removed).toBe(0);
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.reason).toContain("could not be read");
+    expect(env.rest.delete).not.toHaveBeenCalled();
+    // A missing event is not a failure: there is simply nothing to do.
+    const missing = await env.service.cleanup(
+      { _id: "gone" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(missing.failures).toEqual([]);
   });
 
   it("does nothing for an event that is still open, whatever the caller believes", async () => {

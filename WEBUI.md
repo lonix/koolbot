@@ -1401,7 +1401,8 @@ list yet or Discord cannot be read, and "N+" when more than a few hundred
 members are interested. Events posted before native-only events also show their
 old RSVP tally until they end. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
-**Cancel** (a confirm-guarded stop) — while finished events show no lifecycle
+**Cancel** (a confirm-guarded stop) — and a running (`active`) event also gets
+**End now** (#1193, below), while finished events show no lifecycle
 actions. Every row has a **Host panel** link (see below). A
 **Schedule a new event** form creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
@@ -1478,9 +1479,12 @@ limit. The event's host (its creator) gets View, Connect and Move Members on the
 channel and on every group channel, on top of whatever the category already grants (the
 category's own permissions are copied, so a private category stays private). The channel
 of a `leads` group is created restricted (see **Leaders-only channel** below). The channels
-go when the event does: right away on cancel, and after `events.channel_grace_minutes` once
-it has ended, the same moment the main channel is eligible. A channel with someone in it is
-never removed; it is left and tried again on the next scan. Only channels the bot recorded on
+go when the event does: right away on cancel, and as soon as they are empty once it has ended
+(through **End event now** or the scheduled end, both of which record when the event ended, see
+"End the event" below); the main channel keeps `events.channel_grace_minutes` after that end. An
+event that was ended before the end was recorded (an older row) keeps the old rule: the group
+channels wait for the grace period after the scheduled end, like the main channel. A channel with
+someone in it is never removed; it is left and tried again on the next scan. Only channels the bot recorded on
 a group are ever deleted, and each is read from Discord just before. After a restart the
 scan makes the record and the server agree: a group whose channel was deleted is created
 again while the event is open, and channels recorded for a finished or cancelled event are
@@ -1540,9 +1544,9 @@ under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
 event's groups. Scheduled and active events also show a section for each control:
-**Assign people**, **Move people** and, when the event has leaders switched on, **Leaders**
-(below) work today; ending the event and live settings are added by later updates, and
-until then each says it is not available yet. Ended and cancelled events
+**Assign people**, **Move people**, **End the event** and, when the event has leaders
+switched on, **Leaders** (below) work today; live settings are added by a later update, and
+until then it says it is not available yet. Ended and cancelled events
 show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.
@@ -1720,17 +1724,19 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   pulling a leader into another team's channel does not record them in that team, and
   they stay leader of the group they are assigned to.
 - **The leaders-only channel follows leader changes (#1199):** every leader change (host
-  set or clear, the unassign step, a reset) is announced to a hook (`onLeaderChange`)
-  after it is written, and the leaders-only channel listens (see **Leaders-only channel**
-  below). The hook names the id that was stored as leader before the change,
+  set or clear, the unassign step, a reset, the end of the event) is announced to a hook
+  (`onLeaderChange`) after it is written, and the leaders-only channel listens (see
+  **Leaders-only channel** below; a pass ignores an event that is not open). The hook
+  names the id that was stored as leader before the change,
   even a member who left the group an instant earlier and whose cleanup had not run, so a
   replacement made in between still reports who lost the role. After a randomise or other
   burst of unassigns the clearing step runs as one pass, not once per person.
 - **Not shown in the event post.** Leaders appear on the host panel only.
 - **Member data:** a leader's id is the member's own data: their export lists the event and
   the group they lead (never other leaders), and resetting their data on `/me/privacy`
-  clears it in every event, finished ones too. Leaders are not cleared when an event ends or
-  is cancelled: a leader stays on a finished event as history until that member resets.
+  clears it in every event, finished ones too. Ending the event (**End the event**, below, and
+  the scheduled end) clears every leader of that event; a cancelled event, and an event that
+  ended before the end cleared leaders, keep theirs until that member resets.
 - **Audit:** `event.host.set-leader` (with the group and the person's id),
   `event.host.leader-label` and `event.host.pull-leaders` (counts and the destination
   word, no names). The step that ends a role after an unassign is not audited on its own;
@@ -1826,6 +1832,112 @@ see but not join. It is made with the other group channels (#1190) and removed w
 - **Moves.** Send to groups never targets it; Return to main includes it unless you tick
   the box to leave people in open and leaders-only channels; Pull leaders only aims at it
   by default; Move one person accepts only the host or a leader for it.
+
+**End the event** (#1193) ends a running event now. It is the **End the event** section of
+the host panel (shown for every open event; the form only for an `active` one, a scheduled
+event says it can be ended once it has started) and an **End now** control on every
+`active` row of the Events table (admin only). Both are one small form with a required tick
+box, "I want to end this event now", that the server checks again: a post without it changes
+nothing, so the confirmation holds without scripts. An event with group channels also offers
+"Move everyone in the group channels back to the main channel first", ticked by default. With it
+ticked, a manual end moves people first; unticked, it ends the event without moving anyone, and
+a group channel that still holds someone is left (never deleted while occupied) and goes within a
+minute of the last person leaving.
+Only an `active` event can be ended: a scheduled one (not started) and a cancelled one are
+refused with a message, and an event that has already ended answers "already ended" and
+changes nothing (pressed twice, or by two people, or while the scheduled end runs: exactly
+one of them runs the teardown). The action follows `events.enabled`: while events are off, or
+the switch cannot be read, it is refused. Ending an event adopted from Discord ends the row
+only; the Discord event is never changed by KoolBot.
+
+Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in this order:
+
+1. **Mark ended.** One atomic update, only if the event is still in an allowed state (manual:
+   `active`; scheduled: `scheduled` or `active`, and the start and duration the scan decided
+   from unchanged), records `ended` and the end time (`endedAt`: the moment of the press, or the
+   scheduled end). If this cannot be saved nothing else happens. This comes first, unlike the
+   order the issue lists, because it is what makes the teardown run once, because from then on
+   host actions, assignment and self-join refuse the event (so nothing re-assigns or re-moves
+   people while the later steps run), and because the group channel cleanup and the mover are
+   written for an event that is already ended.
+2. The announcement post is refreshed (it no longer shows a running event).
+3. **Pull back** (manual end, when ticked, only for an event with group channels): everyone
+   connected to a group, open or leader-only channel goes to the main channel with the
+   **Move people** helper, the host included (someone left in a channel that is about to go
+   would be stranded as much as anyone). At most 60 people per run, 500 ms apart, only people
+   connected to voice; the rest, and anything Discord did not confirm, are listed in the result.
+   Without **Move Members**, or while another move runs, nobody is moved and the result says so;
+   the group channels then stay until empty. The pull-back is not retried by the scan.
+4. **End-of-event hooks.** A list that features register work on; it is empty today (temporary
+   clan tags will restore nicknames here). A hook that fails or takes over a minute is reported
+   and the teardown goes on. Hooks run once, after the event is already saved as ended.
+5. **Group channels** are removed now, empty ones only (each is read from Discord just before);
+   one with people in it stays and the scan tries again every minute. The **main channel**
+   stays for `events.channel_grace_minutes` after the end (counted from `endedAt`, so an event
+   ended early gives people the full grace period from the press, not from the scheduled
+   end) and the scan removes it once it is empty, as before.
+6. **Per-user data:** group leaders (`captainId`) are cleared by `clearLeadersOnEnd` in the
+   leaders module: under the same per-event lock as every membership change, from a fresh read
+   of an event that reads `ended`, with one conditional update that matches each group's stored
+   leader (the shape of the unassign step). Each cleared leader is announced to
+   `onLeaderChange` with source `ended` and the stored id as `fromUserId`, so the leaders-only
+   channel (#1199) can take their access away; a cancel does not clear leaders. Assignments
+   (`memberIds`) stay as history until the member resets their data (owner decision, see the
+   member data export). Nothing here adds or changes anyone's group.
+7. **Discord event:** a manual end closes it the way the scheduled end does (an unstarted one
+   is deleted, a running one is completed; an adopted one is only let go of). The scheduled end
+   leaves this to the scan's own sync right after the teardown. If the server cannot be reached,
+   or the Discord event (or a create that timed out and is still being looked for) is still
+   linked afterwards, the result says so and the scan tries again. The confirmation text says
+   which of the two applies: "the Discord event is closed", or for an adopted event "KoolBot
+   stops tracking the Discord event; the Discord event is left as it is" (host panel and Events
+   table alike).
+
+Every step after the first is attempted whatever an earlier one did (a group channel pass that
+cannot read the event is reported as a failure, not as an empty success). A step that fails is
+logged and listed, never thrown: the host sees one message (at most 500 characters) that puts
+what needs attention first. Empty group channels, the main channel and the Discord event are
+retried by the scan; the pull-back and the hooks are not. One audit entry per press
+(`event.host.end` on the host panel, `event.end-now` on the Events table) records the outcome
+(`ended`, `ended-with-problems`, `already-ended`, `not-running`, `not-found`, `refused`), the
+number of steps that needed attention and counts such as people moved, never names. Who ended
+the event is only in the audit log; the event row keeps no user id for it.
+
+The scheduled end differs from a manual one in four ways. It **waits while anyone is in a voice
+channel of the event**: the main channel and every group channel (bots do not count). The
+event then stays live, nothing is deleted or moved, and the next scan asks again, so an event
+ends on its schedule only once its channels are empty; the wait is logged once, not every scan.
+Occupancy is decided from the stored event, not from the scan's older copy: the channel ids
+are read from it now, every channel is read from Discord first (a forced read, then the
+gateway's voice cache, like the channel cleanup uses), and only then are all the member lists
+looked at together, so someone moving between channels is not missed. The ids it looked at go
+into the end's own claim, which refuses a change (a group channel recorded since), and the next
+scan checks again. An event or a channel that cannot be read counts as occupied. Only the host's manual **End event now** may end an event with people
+present. The scheduled end also never pulls people back, it does not close the Discord event inside the
+teardown (the scan does, next), and it only acts on the event as the scan read it, so a cancel
+or an edited schedule made meanwhile is not overwritten.
+A scan that loaded an event just before a manual end skips it instead of acting on its older
+copy: for at least five minutes after the end landed, and for as long as any scan that started
+before it landed (including one that started while the end was still being saved) is still
+running, so the hold does not rely on a timeout. A cancel takes the same hold. If saving the end or the cancel fails (the database is
+unreachable), the hold is not kept forever: it becomes a finite one (the write may have landed),
+so once it is over a scan carries on with the event as usual. An announcement edit that is
+skipped because of such a hold counts as NOT refreshed: a member's RSVP removal keeps the RSVP
+for a retry and reports the failure, and the link refresh tries again. The scan's step from
+scheduled to active is a conditional write, so a cancel that landed first is never turned back
+into active. Event ids taken
+from a request are normalised to lower-case hex once, so an upper-case id cannot key a second,
+unseen set of holds, and it does not touch the event at all while a teardown is running
+(so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
+open copy never edits the announcement post once an end has begun. A cancel is saved first and
+only if the event is still in the state it was decided from, so a cancel decided on an older copy
+(an adopted event reported gone in Discord, say) can neither turn an ended event into a cancelled
+one nor delete its channel. A cancel keeps the event's main channel id on the record until Discord
+confirms the channel is gone (deleted, or already missing), and takes the id from the row as it is
+at the claim; if the delete fails or the bot restarts, the scan finishes it within a minute. Cancelling reports whether it really cancelled: an event that has
+ended, or is being ended, answers "could not be cancelled: it is ended" (admin page, `/event
+cancel`), is not counted by a series cancel and spawns no successor. A recurring event's next occurrence is created by the next scan,
+as after a scheduled end.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

@@ -41,9 +41,11 @@
  * ## Hook for the leads channel (#1199)
  *
  * `onLeaderChange(listener)` fires once per leader change after the write
- * landed (host set or clear, the unassign cleanup, a member data reset).
+ * landed (host set or clear, the unassign cleanup, a member data reset, and the
+ * end of the event: source `ended`, one change per group that had a leader).
  * The leads channel (#1199, `installLeadsChannelSync` in `event-leads-sync.ts`)
- * updates its overwrites from it. A listener that throws is logged and ignored. `resolveLeadsChannel`
+ * updates its overwrites from it (a pass ignores an event that is not open).
+ * A listener that throws is logged and ignored. `resolveLeadsChannel`
  * is the one place that says which channel "Pull leaders only" aims at by
  * default.
  */
@@ -68,7 +70,7 @@ const OPEN_STATES = ["scheduled", "active"] as const;
 // The hook for #1199
 // ---------------------------------------------------------------------
 
-export type LeaderChangeSource = "host" | "unassigned" | "purge";
+export type LeaderChangeSource = "host" | "unassigned" | "purge" | "ended";
 
 /** One group's leader changing. */
 export interface LeaderChange {
@@ -367,6 +369,56 @@ export async function clearOrphanedLeaders(
       })),
     );
     return orphans.length;
+  });
+}
+
+/**
+ * Clear every leader of an event that has ended (the shared end teardown,
+ * #1193): leaders are not needed once the event is over. Same shape as
+ * `clearOrphanedLeaders`: inside the group lock, from a fresh read, each clear
+ * conditional on that group still holding that same stored id. It acts only on
+ * an event that reads `ended` (never on a running or cancelled one) and fires
+ * `onLeaderChange` with source `ended` and the STORED id as `fromUserId`, so the
+ * leads-only channel (#1199) can take the access away. Assignments are not
+ * touched. Returns how many leaders were cleared.
+ */
+export async function clearLeadersOnEnd(
+  guildId: string,
+  eventId: string,
+): Promise<number> {
+  return withGroupLock(guildId, eventId, async () => {
+    const row = (await Event.findOne({ _id: eventId, guildId })
+      .select("state groups")
+      .lean()) as Pick<IEvent, "state" | "groups"> | null;
+    if (!row || row.state !== "ended") return 0;
+    const held = (row.groups ?? []).filter((g) => !!g.captainId);
+    if (held.length === 0) return 0;
+    const $set: Record<string, null> = {};
+    const arrayFilters: Array<Record<string, string>> = [];
+    held.forEach((g, i) => {
+      $set[`groups.$[g${i}].captainId`] = null;
+      arrayFilters.push({
+        [`g${i}.key`]: g.key,
+        [`g${i}.captainId`]: g.captainId as string,
+      });
+    });
+    const result = await Event.updateOne(
+      { _id: eventId, guildId, state: "ended" },
+      { $set },
+      { arrayFilters },
+    );
+    if ((result?.modifiedCount ?? 0) !== 1) return 0;
+    emitLeaderChanges(
+      held.map((g) => ({
+        eventId,
+        guildId,
+        groupKey: g.key,
+        fromUserId: g.captainId as string,
+        toUserId: null,
+        source: "ended" as const,
+      })),
+    );
+    return held.length;
   });
 }
 

@@ -1400,6 +1400,10 @@ export function createReadOnlyRouter(
             !e.nextSpawned &&
             !e.seriesCancelled,
           groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
+          hasGroupChannels:
+            e.groupsEnabled === true &&
+            (e.groups ?? []).some((g) => !!g.channelId),
+          nativeAdopted: e.nativeAdopted === true,
           cover: e.nativeAdopted
             ? ({ kind: "adopted" } as const)
             : coverIneligibleReason(e)

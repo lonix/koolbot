@@ -36,6 +36,10 @@ const Statics = Event as unknown as {
 };
 Statics.findOne = jest.fn();
 Statics.deleteOne = jest.fn();
+// The scan's `scheduled` to `active` step is a conditional write (#1193).
+(Statics as unknown as { updateOne: jest.Mock }).updateOne = jest.fn(
+  async () => ({ matchedCount: 1 }),
+);
 
 const { EventService } = await import("../../src/services/event-service.js");
 

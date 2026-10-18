@@ -758,11 +758,11 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "captainId",
     exportable: true,
     guildScoped: true,
-    note: "Nested `groups[].captainId`: which group of each event the host made the member the leader of. The export carries the event and the member's own group, never other members.",
+    note: "Nested `groups[].captainId`: which group of each event the host made the member the leader of. The export carries the event and the member's own group, never other members. The shared end-of-event teardown (#1193) clears it as soon as the event ends, so a finished event holds none (older finished events may still).",
     onDelete: "pull-member",
     subject: "self",
     deleteNote:
-      "Shared event row: clear `captainId` in every group of every event where it is the member's id, finished events included, and leave the event and the other members standing. The leader slot is otherwise kept on a finished event; nothing ages it out.",
+      "Shared event row: clear `captainId` in every group of every event where it is the member's id, finished events included, and leave the event and the other members standing. The leader slot is cleared when an event ends through the teardown; on an event that ended before that, or was cancelled, it is kept until this reset.",
   },
 ];
 

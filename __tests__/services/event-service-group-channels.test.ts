@@ -178,8 +178,13 @@ describe("a plain event is exactly as before (#1190)", () => {
     expect(service.groupChannels.reconcile).not.toHaveBeenCalled();
     expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
     expect(guild.channels.fetch).not.toHaveBeenCalled();
-    expect(EventMock.updateOne).not.toHaveBeenCalled();
-    // The one write is the main channel's own claim.
+    // The only update is the conditional `scheduled` to `active` step (#1193).
+    expect(EventMock.updateOne).toHaveBeenCalledTimes(1);
+    expect(EventMock.updateOne.mock.calls[0]?.[0]).toEqual({
+      _id: "evt1",
+      state: "scheduled",
+    });
+    // The one other write is the main channel's own claim.
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
   });
 

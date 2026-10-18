@@ -50,6 +50,8 @@ const {
   shouldSendReminder,
   shouldEndEvent,
   shouldCleanupChannel,
+  effectiveEndTime,
+  canonicalEventId,
   formatEventWhen,
   computeOccurrenceStart,
   isRecurring,
@@ -261,6 +263,66 @@ describe("shouldCleanupChannel", () => {
     expect(
       shouldCleanupChannel(view({ state: "ended" }), now, grace, true),
     ).toBe(false);
+  });
+  it("counts the grace period from endedAt when the event was ended early (#1193)", () => {
+    const early = view({
+      state: "ended",
+      channelId: "c1",
+      endedAt: new Date("2026-07-04T20:30:00Z"),
+    });
+    // 10 minutes after the early end: still inside the grace period.
+    expect(
+      shouldCleanupChannel(
+        early,
+        new Date("2026-07-04T20:40:00Z"),
+        grace,
+        true,
+      ),
+    ).toBe(false);
+    // 20 minutes after it: due, although the scheduled end is 1h40 away.
+    expect(
+      shouldCleanupChannel(
+        early,
+        new Date("2026-07-04T20:50:00Z"),
+        grace,
+        true,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("canonicalEventId", () => {
+  it("lower-cases a 24-digit hex id and refuses anything else", () => {
+    expect(canonicalEventId("65A00000000000000000000A")).toBe(
+      "65a00000000000000000000a",
+    );
+    expect(canonicalEventId("65a00000000000000000000a")).toBe(
+      "65a00000000000000000000a",
+    );
+    for (const bad of [
+      "",
+      "abc",
+      "g".repeat(24),
+      "a".repeat(25),
+      "abcdefghijkl",
+    ]) {
+      expect(canonicalEventId(bad)).toBeNull();
+    }
+  });
+});
+
+describe("effectiveEndTime", () => {
+  it("is endedAt when recorded, else start plus duration", () => {
+    const endedAt = new Date("2026-07-04T20:30:00Z");
+    expect(effectiveEndTime(view({ endedAt })).toISOString()).toBe(
+      endedAt.toISOString(),
+    );
+    expect(effectiveEndTime(view({ endedAt: null })).toISOString()).toBe(
+      "2026-07-04T22:00:00.000Z",
+    );
+    expect(effectiveEndTime(view()).toISOString()).toBe(
+      "2026-07-04T22:00:00.000Z",
+    );
   });
 });
 
@@ -692,6 +754,8 @@ describe("claimEventChannel (start-now path)", () => {
       if (opts.claimError) throw opts.claimError;
       return opts.findOneAndUpdate;
     });
+    // The conditional scheduled-to-active step (#1193).
+    EventMock.updateOne = jest.fn(async () => ({ matchedCount: 1 }));
 
     const createdChannel = { id: opts.createdChannelId };
     const createChannel = jest.fn(async () => createdChannel);
@@ -725,7 +789,12 @@ describe("claimEventChannel (start-now path)", () => {
     expect(createChannel).toHaveBeenCalledTimes(1);
     expect(result?.channelId).toBe("chan-win");
     expect(result?.state).toBe("active");
-    expect(event.save).toHaveBeenCalledTimes(1);
+    // The state step is a conditional write; the copy is not saved for it.
+    expect(event.save).not.toHaveBeenCalled();
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "evt-1", state: "scheduled" },
+      { $set: { state: "active" } },
+    );
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         _id: "evt-1",
@@ -1854,6 +1923,13 @@ describe("recurring event lifecycle", () => {
     (
       service as unknown as { updateAnnouncement: jest.Mock }
     ).updateAnnouncement = jest.fn(async () => true);
+    // The scheduled end reads the stored event to check its channels (none).
+    const stored = { channelId: null, groupsEnabled: false, groups: [] };
+    const previousFindById = EventMock.findById;
+    EventMock.findById = jest.fn(() => ({
+      lean: async () => stored,
+      then: (ok: (v: unknown) => unknown) => Promise.resolve(stored).then(ok),
+    }));
     await (
       service as unknown as {
         processEvent: (...a: unknown[]) => Promise<void>;
@@ -1863,6 +1939,7 @@ describe("recurring event lifecycle", () => {
       leadMs: 0,
       graceMs: 0,
     });
+    EventMock.findById = previousFindById;
     expect(occurrence.state).toBe("ended");
     expect(created).toHaveLength(1);
     expect(created[0].occurrenceIndex).toBe(1);
@@ -1968,7 +2045,11 @@ describe("recurring event lifecycle", () => {
     ).updateAnnouncement = jest.fn(async () => true);
     await service.cancelEvent("occ-0", "guild-1");
     expect(created).toHaveLength(0);
-    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+    // The only write through the claim is the cancel itself.
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(EventMock.findOneAndUpdate.mock.calls[0]?.[1]).toEqual({
+      $set: { state: "cancelled" },
+    });
   });
 
   it("cancelSeries blocks spawning, then cancels every open occurrence", async () => {

@@ -75,6 +75,7 @@ import {
 } from "../../src/web/host-panel-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import { renderMovesSection } from "../../src/web/host-moves-view.js";
+import { renderEndSection } from "../../src/web/event-end-view.js";
 import {
   renderLeadersSection,
   type LeadersViewData,
@@ -1003,6 +1004,36 @@ export function adminPages(): A11yPage[] {
         ],
         groupLimits: { defaultCount: 3, maxCount: 8 },
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Events (running events with End now)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [
+          {
+            id: "e1",
+            title: "Quiz night",
+            when: "2026-02-01 20:00",
+            state: "active",
+            channelId: "c1",
+            groupCount: 2,
+            hasGroupChannels: true,
+          },
+          {
+            id: "e2",
+            title: "Game night",
+            when: "2026-02-02 20:00",
+            state: "active",
+            channelId: "c2",
+          },
+        ],
+        groupLimits: { defaultCount: 2, maxCount: 8 },
       }),
     },
     {
@@ -2164,6 +2195,42 @@ export function userPages(): A11yPage[] {
               groupLabel: "Team",
               destinations: [],
               people: [],
+            }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (end the event, running group event)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true, state: "active" }),
+          controls: {
+            end: renderEndSection({
+              state: "active",
+              actionPath: "/me/events/65a000000000000000000001/host/end",
+              csrfToken: "token",
+              offerPullBack: true,
+            }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (end the event, running plain event)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ state: "active" }),
+          controls: {
+            end: renderEndSection({
+              state: "active",
+              actionPath: "/me/events/65a000000000000000000001/host/end",
+              csrfToken: "token",
+              offerPullBack: false,
             }),
           },
         }),
