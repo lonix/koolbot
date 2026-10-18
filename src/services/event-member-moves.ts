@@ -62,6 +62,7 @@ import {
 } from "../web/channel-write-rest.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { FLASH_MAX } from "../web/http-flash.js";
 import { ConfigService } from "./config-service.js";
 import {
   eventVoiceChannelIds,
@@ -195,6 +196,14 @@ let defaultDepsForTests: MoverDeps | undefined;
 /** Tests of callers (the host routes): stand in for Discord for every run. */
 export function setMoverDepsForTests(deps: MoverDeps | undefined): void {
   defaultDepsForTests = deps;
+}
+
+/** Thrown inside a move attempt when the destination filled up meanwhile. */
+class DestinationFullError extends Error {
+  constructor() {
+    super("The destination channel is full");
+    this.name = "DestinationFullError";
+  }
 }
 
 /** Thrown inside a move attempt when the live voice state no longer allows it. */
@@ -361,6 +370,11 @@ class Mover {
   private restClient: REST | null;
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
+  /** People Discord confirmed moving, by destination (the gateway may lag). */
+  private readonly confirmedTo = new Map<string, string>();
+  /** People whose move was not confirmed: reserved a place at the destination
+   * but never assumed to have left their source. */
+  private readonly unconfirmedTo = new Map<string, string>();
 
   constructor(
     private readonly client: Client,
@@ -402,10 +416,11 @@ class Mover {
     }
 
     // Destinations are read from Discord, not the cache, before anyone is
-    // moved into them. Occupancy is counted from here on as people arrive.
+    // moved into them. Their size is the channel's user limit; who is in them
+    // is read live (`occupancy`) each time it matters.
     const destinations = new Map<
       string,
-      { limit: number; occupants: number } | { error: string }
+      { limit: number } | { error: string }
     >();
     let rateLimited = false;
     for (const id of new Set(queue.map((w) => w.toChannelId))) {
@@ -424,10 +439,7 @@ class Mover {
           continue;
         }
         const voice = channel as VoiceChannel;
-        destinations.set(id, {
-          limit: voice.userLimit ?? 0,
-          occupants: voice.members.size,
-        });
+        destinations.set(id, { limit: voice.userLimit ?? 0 });
       } catch (error) {
         if (error instanceof RateLimitError) rateLimited = true;
         destinations.set(id, { error: describeWriteFailure(error) });
@@ -470,6 +482,12 @@ class Mover {
       }
       if (cachedChannel === toChannelId) {
         skip(userId, "already-there");
+        continue;
+      }
+      // A destination that is full right now costs no request either, so a
+      // run whose first people all aim at full groups still reaches the rest.
+      if (this.isFull(toChannelId, dest.limit)) {
+        skip(userId, "group-full");
         continue;
       }
       if (attempted >= MAX_MOVES_PER_RUN) {
@@ -515,7 +533,8 @@ class Mover {
         skip(userId, "already-there");
         continue;
       }
-      if (dest.limit > 0 && dest.occupants >= dest.limit) {
+      // Live again: a join or a departure during the read above counts.
+      if (this.isFull(toChannelId, dest.limit)) {
         skip(userId, "group-full");
         continue;
       }
@@ -535,6 +554,11 @@ class Mover {
             if (!live || !this.eventChannels.has(live)) {
               throw new MovedAwayError(!!live);
             }
+            // And the destination's size, in the same tick as the request:
+            // someone may have joined while this move waited its turn.
+            if (this.isFull(toChannelId, dest.limit)) {
+              throw new DestinationFullError();
+            }
             return this.rest().patch(
               Routes.guildMember(this.guild.id, userId),
               {
@@ -550,10 +574,12 @@ class Mover {
           false,
         );
         report.moved.push(userId);
-        dest.occupants += 1;
-        this.leave(destinations, sourceId);
+        this.confirmedTo.set(userId, toChannelId);
       } catch (error) {
-        if (error instanceof MovedAwayError) {
+        if (error instanceof DestinationFullError) {
+          unmarkHostMove(this.guild.id, userId, toChannelId);
+          skip(userId, "group-full");
+        } else if (error instanceof MovedAwayError) {
           unmarkHostMove(this.guild.id, userId, toChannelId);
           skip(userId, error.connected ? "elsewhere" : "not-connected");
         } else if (error instanceof RateLimitError) {
@@ -571,10 +597,11 @@ class Mover {
           }
         } else {
           // Timeout or a lost answer: it may have landed, so the mark stays
-          // and the destination counts the person as arrived.
+          // and the destination keeps a place for the person. They are NOT
+          // assumed to have left their source: that stays counted until the
+          // gateway shows otherwise.
           report.unconfirmed.push(userId);
-          dest.occupants += 1;
-          this.leave(destinations, sourceId);
+          this.unconfirmedTo.set(userId, toChannelId);
           logger.warn(
             `Event move of ${sanitizeForLog(userId)} not confirmed: ${sanitizeForLog(describeWriteFailure(error))}`,
           );
@@ -584,16 +611,31 @@ class Mover {
     return report;
   }
 
-  /** A person who left `channelId` frees a place there. */
-  private leave(
-    destinations: Map<
-      string,
-      { limit: number; occupants: number } | { error: string }
-    >,
-    channelId: string,
-  ): void {
-    const d = destinations.get(channelId);
-    if (d && !("error" in d) && d.occupants > 0) d.occupants -= 1;
+  /**
+   * Who is in `channelId` now: the gateway's live members, plus the people this
+   * run moved there (confirmed or not) that the gateway has not shown yet, and
+   * minus the people Discord confirmed moving out of it that the gateway still
+   * shows. A person whose move was not confirmed keeps counting at their
+   * source. Counted by id, so nobody is counted twice.
+   */
+  private occupancy(channelId: string): number {
+    const ids = new Set<string>();
+    const channel = this.guild.channels.cache.get(channelId);
+    if (channel?.isVoiceBased()) {
+      for (const id of channel.members.keys()) ids.add(id);
+    }
+    for (const [userId, to] of this.confirmedTo) {
+      if (to === channelId) ids.add(userId);
+      else ids.delete(userId);
+    }
+    for (const [userId, to] of this.unconfirmedTo) {
+      if (to === channelId) ids.add(userId);
+    }
+    return ids.size;
+  }
+
+  private isFull(channelId: string, limit: number): boolean {
+    return limit > 0 && this.occupancy(channelId) >= limit;
   }
 
   /** The bot can move out of `from` and connect to `to` (cache; Discord has the last word). */
@@ -711,12 +753,23 @@ export function planMoveOne(
   return [{ userId, toChannelId: channelId }];
 }
 
-/** The text of a finished run, for the host's flash. */
+/**
+ * The text of a finished run, for the host's flash. The flash is cut at
+ * `FLASH_MAX` characters, so what matters most comes first and the optional
+ * names last, each piece added only while it fits:
+ *
+ * 1. the number moved, the warning about moves Discord did not confirm (with
+ *    "check Discord before trying again"), the skip counts by reason and the
+ *    caller's `extra` sentences: always whole;
+ * 2. then names, unconfirmed people first, trimmed ("and N more") or left out
+ *    to stay inside the budget.
+ */
 export function describeMoveReport(
   report: MoveReport,
   nameOf: (userId: string) => string,
+  extra: readonly string[] = [],
+  budget: number = FLASH_MAX,
 ): string {
-  const parts: string[] = [`Moved ${report.moved.length}.`];
   const byReason = new Map<MoveSkipReason, MoveSkip[]>();
   for (const s of report.skipped) {
     const list = byReason.get(s.reason) ?? [];
@@ -725,26 +778,49 @@ export function describeMoveReport(
   }
   const quiet = byReason.get("already-there")?.length ?? 0;
   const loud = report.skipped.length - quiet;
+  const core: string[] = [`Moved ${report.moved.length}.`];
+  if (report.unconfirmed.length > 0) {
+    core.push(
+      `Discord did not confirm ${report.unconfirmed.length}, who may or may not have moved: check Discord before trying again.`,
+    );
+  }
   if (loud > 0) {
     const reasons = [...byReason.entries()]
       .filter(([reason]) => reason !== "already-there")
       .map(([reason, list]) => {
-        const who = names(list.map((s) => nameOf(s.userId)));
         const detail = list.find((s) => s.detail)?.detail;
-        return `${list.length} ${MOVE_SKIP_LABEL[reason]}${detail ? ` (${detail})` : ""} (${who})`;
+        return `${list.length} ${MOVE_SKIP_LABEL[reason]}${detail ? ` (${detail})` : ""}`;
       });
-    parts.push(`Skipped ${loud}: ${reasons.join("; ")}.`);
+    core.push(`Skipped ${loud}: ${reasons.join("; ")}.`);
   }
-  if (quiet > 0) parts.push(`${quiet} already in the right channel.`);
+  if (quiet > 0) core.push(`${quiet} already in the right channel.`);
+  core.push(...extra);
+
+  let text = core.join(" ");
+  const groups: Array<[string, string[]]> = [];
   if (report.unconfirmed.length > 0) {
-    parts.push(
-      `Discord did not confirm ${report.unconfirmed.length}, who may or may not have moved: ${names(report.unconfirmed.map(nameOf))}. Check Discord before trying again.`,
-    );
+    groups.push(["Not confirmed", report.unconfirmed.map(nameOf)]);
   }
-  return parts.join(" ");
+  for (const [reason, list] of byReason) {
+    if (reason === "already-there") continue;
+    groups.push([
+      MOVE_SKIP_LABEL[reason].replace(/^./, (c) => c.toUpperCase()),
+      list.map((s) => nameOf(s.userId)),
+    ]);
+  }
+  for (const [label, who] of groups) {
+    for (const limit of [10, 5, 2, 1]) {
+      const piece = ` ${label}: ${names(who, limit)}.`;
+      if (text.length + piece.length <= budget) {
+        text += piece;
+        break;
+      }
+    }
+  }
+  return text;
 }
 
-function names(list: string[], limit = 10): string {
+function names(list: string[], limit: number): string {
   if (list.length <= limit) return list.join(", ");
   return `${list.slice(0, limit).join(", ")} and ${list.length - limit} more`;
 }

@@ -601,13 +601,14 @@ function moveResult(
   for (const s of report.skipped) {
     skippedBy[s.reason] = (skippedBy[s.reason] ?? 0) + 1;
   }
-  const text = describeMoveReport(report, (id) =>
-    cachedMemberName(client, event.guildId, id),
-  );
   const nothingToDo = outcome.considered === 0;
   const message = nothingToDo
     ? ["Nobody needed to be moved.", ...extra].join(" ")
-    : [text, ...extra].join(" ");
+    : describeMoveReport(
+        report,
+        (id) => cachedMemberName(client, event.guildId, id),
+        extra,
+      );
   const anyDone = report.moved.length + report.unconfirmed.length > 0;
   const onlyQuiet =
     report.skipped.length > 0 &&

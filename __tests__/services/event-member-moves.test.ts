@@ -433,7 +433,9 @@ describe("send to groups", () => {
     const text = describeMoveReport(out.report, (id) => `N-${id}`);
     expect(text).toContain("Moved 2.");
     expect(text).toContain("Skipped 2");
-    expect(text).toContain("may or may not have moved: N-u6");
+    expect(text).toContain("did not confirm 1, who may or may not have moved");
+    expect(text).toContain("check Discord before trying again");
+    expect(text).toContain("Not confirmed: N-u6.");
   });
 
   it("stops at a rate limit and lists the rest as not attempted", async () => {
@@ -584,6 +586,254 @@ describe("send to groups", () => {
     if (out.status !== "done") throw new Error("expected done");
     expect(reasons(out.report).u3).toBe("missing-permission");
     expect(w.patch).not.toHaveBeenCalled();
+  });
+});
+
+describe("capacity is read live (review of #1221)", () => {
+  const bravoFirst = (a: string[], b: string[], size = 1): void => {
+    const base = makeRow();
+    store.set(
+      EV,
+      makeRow({
+        groups: [
+          { ...base.groups[1], memberIds: b },
+          { ...base.groups[0], size, memberIds: a },
+          base.groups[2],
+          base.groups[3],
+        ],
+      }),
+    );
+  };
+
+  it("a join during the voice-state read fills the destination: nobody is moved into a full group", async () => {
+    const w = makeWorld({ limits: { [CH_A]: 2 } });
+    w.place("u7", CH_A);
+    w.place("u1", MAIN);
+    w.place("u2", MAIN);
+    w.guild.voiceStates.fetch.mockImplementationOnce(async () => {
+      w.place("stranger", CH_A); // a normal join, not a move
+      return { channelId: MAIN };
+    });
+    const calls: string[] = [];
+    w.deps.call = (async (
+      fn: (s: AbortSignal) => Promise<unknown>,
+      name: string,
+    ) => {
+      calls.push(name);
+      return fn(new AbortController().signal);
+    }) as never;
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual([]);
+    expect(reasons(out.report)).toMatchObject({
+      u1: "group-full",
+      u2: "group-full",
+    });
+    expect(w.patch).not.toHaveBeenCalled();
+    // Refused before any move was asked of Discord (and so before a mark).
+    expect(calls).not.toContain("move event member");
+  });
+
+  it("a join between the last check and the write is caught in the same tick as the write", async () => {
+    const w = makeWorld({ limits: { [CH_A]: 2 } });
+    w.place("u7", CH_A);
+    w.place("u1", MAIN);
+    w.deps.call = (async (
+      fn: (s: AbortSignal) => Promise<unknown>,
+      name: string,
+    ) => {
+      if (name === "move event member") w.place("stranger", CH_A);
+      return fn(new AbortController().signal);
+    }) as never;
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(reasons(out.report).u1).toBe("group-full");
+    expect(w.patch).not.toHaveBeenCalled();
+    // The refused move left no mark behind.
+    expect(consumeHostMove(GUILD, "u1", CH_A)).toBe(false);
+  });
+
+  it("a departure during the run frees a place that was full at the start", async () => {
+    bravoFirst(["u1"], ["p"]);
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("u7", CH_A);
+    w.place("p", MAIN);
+    w.place("u1", MAIN);
+    w.guild.voiceStates.fetch.mockImplementationOnce(async () => {
+      w.place("u7", MAIN); // leaves Alpha on their own
+      return { channelId: MAIN };
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved.sort()).toEqual(["p", "u1"]);
+    expect(w.where("u1")).toBe(CH_A);
+  });
+
+  it("an unconfirmed move out of a full group does not free its place", async () => {
+    bravoFirst(["u2"], ["p"]);
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("p", CH_A);
+    w.place("u2", MAIN);
+    w.patchBehaviour.set("p", new Error("Discord API timeout after 30000ms"));
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.unconfirmed).toEqual(["p"]);
+    expect(reasons(out.report).u2).toBe("group-full");
+    expect(w.where("u2")).toBe(MAIN);
+  });
+
+  it("a confirmed move frees the source even before the gateway shows it", async () => {
+    bravoFirst(["u2"], ["p"]);
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("p", CH_A);
+    w.place("u2", MAIN);
+    // Discord says yes; the gateway has not caught up (p still shows in Alpha).
+    w.patch.mockImplementationOnce(async () => ({}));
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved.sort()).toEqual(["p", "u2"]);
+  });
+
+  it("an unconfirmed move into a group keeps a place for the person", async () => {
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "a"
+            ? { ...g, size: 1, memberIds: ["u1", "u2"] }
+            : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("u1", MAIN);
+    w.place("u2", MAIN);
+    w.patchBehaviour.set("u1", new Error("Discord API timeout after 30000ms"));
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.unconfirmed).toEqual(["u1"]);
+    expect(reasons(out.report).u2).toBe("group-full");
+  });
+
+  it("people aimed at a full group do not use up the per-run budget of the rest", async () => {
+    const stuck = Array.from(
+      { length: MAX_MOVES_PER_RUN + 1 },
+      (_, i) => `f${i}`,
+    );
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "a"
+            ? { ...g, size: 1, memberIds: stuck }
+            : g.key === "b"
+              ? { ...g, memberIds: ["z1"] }
+              : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("u7", CH_A);
+    for (const id of [...stuck, "z1"]) w.place(id, MAIN);
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["z1"]);
+    expect(
+      out.report.skipped.filter((x) => x.reason === "group-full"),
+    ).toHaveLength(stuck.length);
+    expect(out.report.skipped.some((x) => x.reason === "over-limit")).toBe(
+      false,
+    );
+    // Nobody aimed at the full group cost a voice-state read.
+    expect(w.guild.voiceStates.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("marks of two moves of one member (review of #1221)", () => {
+  it("a later move of the member to another channel does not drop the mark of an unconfirmed earlier one", async () => {
+    const w = makeWorld();
+    w.place("u3", MAIN);
+    w.patchBehaviour.set("u3", new Error("Discord API timeout after 30000ms"));
+    const first = await run(
+      w,
+      ({ event }) => planMoveOne(event, "u3", "b"),
+      [],
+    );
+    if (first.status !== "done") throw new Error("expected done");
+    expect(first.report.unconfirmed).toEqual(["u3"]);
+    // Another press moves the same member somewhere else; this one lands.
+    w.patchBehaviour.delete("u3");
+    const second = await run(
+      w,
+      ({ event }) => planMoveOne(event, "u3", "a"),
+      [],
+    );
+    if (second.status !== "done") throw new Error("expected done");
+    expect(second.report.moved).toEqual(["u3"]);
+    // The delayed join of the first move still counts as the host's.
+    expect(consumeHostMove(GUILD, "u3", CH_B)).toBe(true);
+    expect(consumeHostMove(GUILD, "u3", CH_A)).toBe(true);
+  });
+});
+
+describe("the flash keeps what matters inside its limit (review of #1221)", () => {
+  it("puts the counts and the unconfirmed warning before the names and stays within the budget", () => {
+    const reasonsAll = [
+      "not-connected",
+      "elsewhere",
+      "group-full",
+      "missing-permission",
+      "error",
+      "over-limit",
+      "rate-limited",
+      "host",
+    ] as const;
+    const skipped = reasonsAll.flatMap((reason, r) =>
+      Array.from({ length: 12 }, (_, i) => ({
+        userId: `${reason}-${r}-${i}`,
+        reason,
+      })),
+    );
+    const text = describeMoveReport(
+      {
+        moved: ["a", "b", "c", "d", "e"],
+        skipped,
+        unconfirmed: ["slow-1", "slow-2", "slow-3"],
+      },
+      (id) => `Very Long Display Name ${id}`,
+      [
+        "2 assigned people are in a group without a channel yet and were not moved.",
+      ],
+    );
+    expect(text.length).toBeLessThanOrEqual(500);
+    expect(text.startsWith("Moved 5. Discord did not confirm 3")).toBe(true);
+    expect(text).toContain("check Discord before trying again");
+    for (const label of [
+      "not connected to voice",
+      "group full",
+      "missing permission",
+    ]) {
+      expect(text).toContain(`12 ${label}`);
+    }
+    expect(text).toContain(
+      "2 assigned people are in a group without a channel yet",
+    );
+  });
+
+  it("adds names while they fit, unconfirmed people first", () => {
+    const text = describeMoveReport(
+      {
+        moved: [],
+        skipped: [{ userId: "x1", reason: "not-connected" }],
+        unconfirmed: ["slow-1"],
+      },
+      (id) => id,
+    );
+    expect(text).toContain("Not confirmed: slow-1.");
+    expect(text).toContain("Not connected to voice: x1.");
+    expect(text.indexOf("Not confirmed")).toBeLessThan(
+      text.indexOf("Not connected to voice:"),
+    );
   });
 });
 

@@ -32,6 +32,25 @@ describe("host-move marks", () => {
     );
   });
 
+  it("keeps independent marks per destination, each expiring on its own", () => {
+    markHostMove("g", "u", "cA", 0);
+    markHostMove("g", "u", "cB", 1000);
+    // Consuming or clearing B leaves A's protection alone.
+    expect(consumeHostMove("g", "u", "cB", 1001)).toBe(true);
+    markHostMove("g", "u", "cB", 1002);
+    unmarkHostMove("g", "u", "cB");
+    expect(consumeHostMove("g", "u", "cA", 1003)).toBe(true);
+    // A expires without taking B with it.
+    markHostMove("g", "u", "cA", 0);
+    markHostMove("g", "u", "cB", HOST_MOVE_MARK_TTL_MS);
+    expect(consumeHostMove("g", "u", "cA", HOST_MOVE_MARK_TTL_MS + 1)).toBe(
+      false,
+    );
+    expect(consumeHostMove("g", "u", "cB", HOST_MOVE_MARK_TTL_MS + 1)).toBe(
+      true,
+    );
+  });
+
   it("unmark removes only the mark for that channel", () => {
     markHostMove("g", "u", "c1", 0);
     unmarkHostMove("g", "u", "c2");

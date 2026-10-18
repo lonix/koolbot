@@ -29,7 +29,9 @@
  * `handleGroupSelfJoin` consumes the mark synchronously, before it queues
  * anything, and ignores that one join. A mark matches only its own target
  * channel, is used once, and expires: a later join by the member records as
- * usual. A move that Discord clearly refused clears its mark. A move whose
+ * usual. Marks are kept per (guild, member, target channel): a second move of
+ * the same member to another channel never replaces the mark of an earlier,
+ * unconfirmed one. A move that Discord clearly refused clears its mark. A move whose
  * outcome is unknown (timeout) keeps it, because the move may have landed.
  * The marks are in memory: after a restart in the middle of a batch the
  * remaining joins are treated as the members' own.
@@ -41,11 +43,12 @@
  */
 export const HOST_MOVE_MARK_TTL_MS = 90_000;
 
-const marks = new Map<string, { channelId: string; until: number }>();
+/** One mark per (guild, member, target channel), each expiring on its own. */
+const marks = new Map<string, number>();
 const busy = new Set<string>();
 
-function markKey(guildId: string, userId: string): string {
-  return `${guildId}:${userId}`;
+function markKey(guildId: string, userId: string, channelId: string): string {
+  return `${guildId}:${userId}:${channelId}`;
 }
 
 /** Mark a host move that is about to be asked of Discord. */
@@ -55,13 +58,10 @@ export function markHostMove(
   channelId: string,
   now: number = Date.now(),
 ): void {
-  for (const [key, mark] of marks) {
-    if (mark.until <= now) marks.delete(key);
+  for (const [key, until] of marks) {
+    if (until <= now) marks.delete(key);
   }
-  marks.set(markKey(guildId, userId), {
-    channelId,
-    until: now + HOST_MOVE_MARK_TTL_MS,
-  });
+  marks.set(markKey(guildId, userId, channelId), now + HOST_MOVE_MARK_TTL_MS);
 }
 
 /** Drop a mark whose move Discord refused. Only the mark for that channel. */
@@ -70,8 +70,7 @@ export function unmarkHostMove(
   userId: string,
   channelId: string,
 ): void {
-  const key = markKey(guildId, userId);
-  if (marks.get(key)?.channelId === channelId) marks.delete(key);
+  marks.delete(markKey(guildId, userId, channelId));
 }
 
 /**
@@ -84,16 +83,11 @@ export function consumeHostMove(
   channelId: string,
   now: number = Date.now(),
 ): boolean {
-  const key = markKey(guildId, userId);
-  const mark = marks.get(key);
-  if (!mark) return false;
-  if (mark.until <= now) {
-    marks.delete(key);
-    return false;
-  }
-  if (mark.channelId !== channelId) return false;
+  const key = markKey(guildId, userId, channelId);
+  const until = marks.get(key);
+  if (until === undefined) return false;
   marks.delete(key);
-  return true;
+  return until > now;
 }
 
 export type MoveLockResult<T> = { busy: true } | { busy: false; value: T };
