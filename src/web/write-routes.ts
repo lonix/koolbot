@@ -15,6 +15,7 @@
 import { Router, type RequestHandler } from "express";
 import { Client } from "discord.js";
 import { requireCsrf } from "./csrf.js";
+import { createAdoptionLimitsRouter } from "./adoption-rate-limit.js";
 import { requireAdminRoleMiddleware } from "./session.js";
 import { createSettingsRouter } from "./routes/write/settings.js";
 import { createPermissionsRouter } from "./routes/write/permissions.js";
@@ -54,6 +55,9 @@ export function createWriteRouter(
   // their own writes (when #482/#484 add them) live on `/me/*`.
   router.use(requireAdminRoleMiddleware());
   router.use(requireCsrf);
+
+  // Adoption writes and the pages that scan the server are throttled (#1184).
+  router.use(createAdoptionLimitsRouter());
 
   router.use(createSettingsRouter(client));
   router.use(createPermissionsRouter(client));

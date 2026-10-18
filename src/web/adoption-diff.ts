@@ -62,23 +62,62 @@ function renderRow(op: PlanOperation): string {
 </tr>`;
 }
 
+function renderTable(ops: PlanOperation[], caption: string): string {
+  return `<table class="adoption-diff">
+  <caption class="visually-hidden">${escapeHtml(caption)}</caption>
+  <thead><tr><th>#</th><th>Kind</th><th>Change</th><th>Before</th><th>After</th></tr></thead>
+  <tbody>${ops.map(renderRow).join("")}</tbody>
+</table>`;
+}
+
+/** Name of the form field that carries the separate destructive confirmation. */
+export const DESTRUCTIVE_CONFIRM_FIELD = "confirmDestructive";
+
+/** True when the plan has at least one destructive step. */
+export function hasDestructiveSteps(
+  plan: Pick<AdoptionPlan, "operations">,
+): boolean {
+  return plan.operations.some((o) => o.class === "destructive");
+}
+
+/**
+ * Plan preview: blockers, warnings, the additive changes, then the destructive
+ * steps in a section of their own (#1184). The page's apply form asks for a
+ * separate confirmation of that section (`renderDestructiveConfirm`).
+ */
 export function renderAdoptionDiff(plan: AdoptionPlan): string {
   const header = `<p class="muted">Plan <span class="mono">${escapeHtml(plan.id)}</span> · ${plan.operations.length} operation(s)</p>`;
   const blockers = renderIssues("Blocking errors", "blockers", plan.errors);
   const warnings = renderIssues("Warnings", "warnings", plan.warnings);
-  const destructiveCount = plan.operations.filter(
-    (o) => o.class === "destructive",
-  ).length;
-  const note =
-    destructiveCount > 0
-      ? `<p class="muted">${destructiveCount} destructive step(s) run last, only if everything before them succeeds. Messages, pins, threads, webhooks and IDs can't be restored by a rollback, and deleting a role removes it from every member who holds it; those assignments are not restored either.</p>`
+  if (plan.operations.length === 0) {
+    return `<section class="adoption-plan">${header}${blockers}${warnings}<p class="muted">Nothing to change: the server already matches.</p></section>`;
+  }
+  const additive = plan.operations.filter((o) => o.class !== "destructive");
+  const destructive = plan.operations.filter((o) => o.class === "destructive");
+  const changes =
+    additive.length > 0
+      ? `<div class="adoption-changes"><h3>Changes (${additive.length})</h3>${renderTable(additive, "Changes")}</div>`
       : "";
-  const body =
-    plan.operations.length === 0
-      ? `<p class="muted">Nothing to change: the server already matches.</p>`
-      : `<table class="adoption-diff">
-  <thead><tr><th>#</th><th>Kind</th><th>Change</th><th>Before</th><th>After</th></tr></thead>
-  <tbody>${plan.operations.map(renderRow).join("")}</tbody>
-</table>`;
-  return `<section class="adoption-plan">${header}${blockers}${warnings}${note}${body}</section>`;
+  const destructiveSection =
+    destructive.length > 0
+      ? `<div class="card adoption-destructive-section" role="group" aria-labelledby="adoption-destructive-title">
+  <h3 id="adoption-destructive-title">Destructive steps (${destructive.length})</h3>
+  <p class="muted">These run last, only if everything above succeeds. Messages, pins, threads, webhooks and IDs can't be restored by a rollback: a deleted channel or role comes back with a new ID. Deleting a role also removes it from every member who holds it, and those assignments are not restored.</p>
+  ${renderTable(destructive, "Destructive steps")}
+</div>`
+      : "";
+  return `<section class="adoption-plan">${header}${blockers}${warnings}${changes}${destructiveSection}</section>`;
+}
+
+/**
+ * The separate confirmation for a plan's destructive steps: a required tick
+ * box, rendered only when the plan has any. The apply route must check it with
+ * `destructiveConfirmed`; the browser `required` is only a convenience.
+ */
+export function renderDestructiveConfirm(
+  plan: Pick<AdoptionPlan, "operations">,
+): string {
+  const count = plan.operations.filter((o) => o.class === "destructive").length;
+  if (count === 0) return "";
+  return `<label class="check"><input type="checkbox" name="${DESTRUCTIVE_CONFIRM_FIELD}" value="1" required> I have read the ${count} destructive step(s) above. I understand that what they delete or replace can't be restored by a rollback.</label>`;
 }

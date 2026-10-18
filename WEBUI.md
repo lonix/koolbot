@@ -1228,10 +1228,16 @@ every feature keeps its current behaviour.
 - **Bots.** When a `bot` group exists, bots not yet holding its role are listed in the plan and
   added to the shared role on apply; their own managed roles are untouched. Listing bots needs the
   Server Members intent; without it the page says so and plans no bot grants.
-- **Deleting a group** unlinks it by default and keeps the Discord role. A role KoolBot created
-  can be deleted along with the group; deleting a role that already existed is a separate,
-  explicit approval (the form shows its member count), and is refused while a feature such as
-  Leaderboard Roles or Reaction Roles still uses the role.
+- **Deleting a group** unlinks it by default and keeps the Discord role. Deleting the role too (#1184)
+  goes through the standard flow: **Review deleting the group and its Discord role** opens a preview
+  at `/admin/role-groups/<id>/delete-role` with the shared adoption diff, where the delete is listed
+  in its own **Destructive steps** section. To apply it you type the role's name. The approval text
+  says that the role's ID and its member assignments can't be restored by a rollback. The apply
+  checks that the plan is the one you reviewed, and that the review is one this server issued for your
+  session, this group and this plan (a keyed MAC over those and the review time, using
+  `WEBUI_SESSION_SECRET`, so the time can't be edited); the review stays valid for 15 minutes. It is refused
+  while a feature such as Leaderboard Roles or Reaction Roles still uses the role. A role KoolBot
+  created needs no separate approval, but still the typed name.
 
 - **Staying in sync with Discord (#1021).** People can still rename, re-permission, move or delete
   a group's role in Discord. KoolBot notices (role edit and delete events, plus a periodic
@@ -1697,6 +1703,16 @@ and can roll it back. Only `@everyone`, the bot and the roles you chose are writ
 other roles and members stay as they are, and unrelated bits on a changed overwrite are preserved. The planner
 refuses (as errors, not warnings) any step that would remove your own access, lock the bot out of a channel a
 feature needs, or touch another bot's overwrite. Planning an adopted server again gives an empty plan.
+
+**Destructive steps and rate limits** (#1184). Every adoption preview lists additive changes first and puts
+destructive steps (deleting a role or channel, removing an overwrite) in a section of their own, with the
+warning that IDs, messages and member assignments can't be restored. When a plan has any, its apply form
+carries a separate required confirmation (Channel Claims), or asks you to type the role's name (deleting a
+group's role); the server checks it again on apply. Adoption writes (everything under `/admin/adopt`,
+`/admin/role-groups` and `/admin/rules` that isn't a plain page read) share a limit of 30 requests a minute
+per client IP, and the pages that scan the server (`/admin/adopt`, `/admin/adopt/claims`, `/admin/adopt/events`)
+a limit of 15 a minute. Over the limit the answer is HTTP 429 with a `Retry-After` header. Like the sign-in
+limits it is in memory and per IP, so set `WEBUI_TRUST_PROXY` correctly behind a reverse proxy.
 
 **Adopting an existing server, step by step** (#1025, the guided flow of the server-adoption epic #1017). Adoption lets
 KoolBot take over roles, categories and channels that already exist, instead of creating new ones. It is

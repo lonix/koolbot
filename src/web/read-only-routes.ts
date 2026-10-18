@@ -6,10 +6,21 @@
  */
 
 import { COMPONENT_AUDIT_LABELS } from "../utils/component-audit.js";
-import { loadAdminFixPreview, loadRoleGroupsPage } from "./role-groups-page.js";
+import { signRoleDeleteReview } from "./review-token.js";
+import {
+  ADOPTION_SCAN_PAGE,
+  createAdoptionScanLimiter,
+} from "./adoption-rate-limit.js";
+import {
+  loadAdminFixPreview,
+  loadRoleDeletePreview,
+  loadRoleGroupsPage,
+} from "./role-groups-page.js";
 import {
   renderAdminFixPage,
+  renderRoleDeletePage,
   renderRoleGroupsPage,
+  ROLE_DELETE_REVIEW_MINUTES,
 } from "./role-groups-views.js";
 import {
   loadRulesPage,
@@ -1035,7 +1046,8 @@ export function createReadOnlyRouter(
   // ---------- Server scan (#1019) ----------
   // Read-only: GET only, no forms, no Discord writes.
   router.get(
-    "/adopt",
+    ADOPTION_SCAN_PAGE,
+    createAdoptionScanLimiter(),
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const sampled = req.query.sample === "1";
@@ -2385,6 +2397,41 @@ export function createReadOnlyRouter(
         req.query.grant === "1",
       );
       res.type("text/html").send(renderAdminFixPage({ ...common, ...data }));
+    }),
+  );
+
+  // Review of deleting a group's Discord role too (#1184); applied by POST
+  // after the role name is typed.
+  router.get(
+    "/role-groups/:id/delete-role",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const data = await loadRoleDeletePreview(
+        client,
+        common.guildId,
+        session.discordUserId,
+        String(req.params.id),
+        new Date().toISOString(),
+      );
+      if (!data) {
+        res.redirect(303, "/admin/role-groups");
+        return;
+      }
+      res.type("text/html").send(
+        renderRoleDeletePage({
+          ...common,
+          ...data,
+          reviewToken: signRoleDeleteReview(
+            session.sessionId,
+            data.groupId,
+            data.plan.id,
+            data.approvedAt,
+          ),
+          validForMinutes: ROLE_DELETE_REVIEW_MINUTES,
+        }),
+      );
     }),
   );
 
