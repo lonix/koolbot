@@ -1824,7 +1824,11 @@ copy: for at least five minutes after the end landed, and for as long as any sca
 before it landed (including one that started while the end was still being saved) is still
 running, so the hold does not rely on a timeout. A cancel takes the same hold. If saving the end or the cancel fails (the database is
 unreachable), the hold is not kept forever: it becomes a finite one (the write may have landed),
-so once it is over a scan carries on with the event as usual. Event ids taken
+so once it is over a scan carries on with the event as usual. An announcement edit that is
+skipped because of such a hold counts as NOT refreshed: a member's RSVP removal keeps the RSVP
+for a retry and reports the failure, and the link refresh tries again. The scan's step from
+scheduled to active is a conditional write, so a cancel that landed first is never turned back
+into active. Event ids taken
 from a request are normalised to lower-case hex once, so an upper-case id cannot key a second,
 unseen set of holds, and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
