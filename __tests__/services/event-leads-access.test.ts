@@ -240,10 +240,11 @@ describe("planLeadsSync", () => {
       adminGrantRoleIds: new Set(["mods"]),
     });
     const ops = planLeadsSync(degraded, c);
-    // Nothing is written for @everyone, and the admin role gets no View.
-    expect(ops.some((o) => o.kind === "put" && o.spec.id === GUILD)).toBe(
-      false,
-    );
+    // The category's deny is copied onto @everyone (never a View allow), and
+    // the admin role gets no View.
+    expect(
+      ops.find((o) => o.kind === "put" && o.spec.id === GUILD),
+    ).toMatchObject({ spec: { allow: 0n, deny: C | V } });
     expect(
       ops.find((o) => o.kind === "put" && o.spec.id === "mods"),
     ).toMatchObject({ spec: { allow: C | S } });
@@ -256,9 +257,62 @@ describe("planLeadsSync", () => {
       {
         kind: "put",
         revoke: false,
-        spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C },
+        spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C | V },
       },
     ]);
+  });
+
+  it("enforces a category that became private: the deny is copied and a View allow removed", () => {
+    // The channel was made in a public category; the category now hides
+    // channels from @everyone. The channel's own copy still allows View.
+    const c = ctx({
+      leaderIds: ["l1", "l2"],
+      categoryOverwrites: [role(GUILD, 0n, V)],
+    });
+    const ops = planLeadsSync(right(), c);
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C | V },
+      },
+    ]);
+    // Once written there is nothing left to do.
+    const done = right().map((o) =>
+      o.id === GUILD ? { ...o, allow: 0n, deny: C | V } : o,
+    );
+    expect(planLeadsSync(done, c)).toEqual([]);
+    // An unreadable category enforces nothing.
+    expect(
+      planLeadsSync(
+        right(),
+        ctx({ leaderIds: ["l1", "l2"], categoryUnknown: true }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("enforces a category View deny on an admin group's role too, and copies none it does not have", () => {
+    const base = ctx({
+      leaderIds: ["l1", "l2"],
+      adminRoleIds: new Set(["mods"]),
+      adminGrantRoleIds: new Set(["mods"]),
+    });
+    const withMods = [...right(), role("mods", V | C | S, 0n)];
+    const ops = planLeadsSync(withMods, {
+      ...base,
+      categoryOverwrites: [role("mods", 0n, V)],
+    });
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: "mods", type: OverwriteType.Role, allow: C | S, deny: V },
+      },
+    ]);
+    // The category says nothing about this role: no deny is invented.
+    expect(
+      planLeadsSync(withMods, { ...base, categoryOverwrites: [] }),
+    ).toEqual([]);
   });
 
   it("does not grant a deny the category has on the admin role itself, nor View without knowing the category", () => {
@@ -270,7 +324,9 @@ describe("planLeadsSync", () => {
         adminGrantRoleIds: new Set(["mods"]),
       }),
     );
-    expect(denied).toMatchObject([{ spec: { id: "mods", allow: V | S } }]);
+    expect(denied).toMatchObject([
+      { spec: { id: "mods", allow: V | S, deny: C } },
+    ]);
     const unknown = planLeadsSync(
       right().map((o) => (o.id === GUILD ? { ...o, allow: 0n, deny: C } : o)),
       ctx({

@@ -1320,6 +1320,28 @@ describe("the events category (private)", () => {
     ],
   };
 
+  it("a category that became private is enforced on an existing channel", async () => {
+    seed();
+    const w = makeWorld(privateCategory);
+    w.seedRight();
+    // The channel was made in a public category: @everyone has View allowed.
+    expect(w.overwritesOf().find((o) => o.id === GUILD)?.allow).toBe(V);
+    w.guild.channels.cache.set(
+      CATEGORY,
+      (await w.guild.channels.fetch(CATEGORY)) as never,
+    );
+    const event = store.get(EV) as never;
+    // Not verified, and the cache check schedules the repair even once held.
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+    expect((await w.sync()).status).toBe("ok");
+    const everyone = w.overwritesOf().find((o) => o.id === GUILD);
+    expect(everyone?.allow).toBe(0n);
+    expect(everyone && everyone.deny & V).toBe(V);
+    expect(everyone && everyone.deny & C).toBe(C);
+    expect((await w.sync()).wrote).toBe(0);
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+  });
+
   it("is not exposed by the View repair, and is verified", async () => {
     seed();
     const w = makeWorld(privateCategory);
@@ -1327,8 +1349,10 @@ describe("the events category (private)", () => {
     degrade(w);
     const out = await w.sync();
     expect(out.status).toBe("ok");
-    expect(w.puts.some((p) => p.id === GUILD)).toBe(false);
-    expect(w.overwritesOf().find((o) => o.id === GUILD)?.allow ?? 0n).toBe(0n);
+    // The category's deny is copied onto the channel; View is never allowed.
+    const everyone = w.overwritesOf().find((o) => o.id === GUILD);
+    expect(everyone?.allow ?? 0n).toBe(0n);
+    expect(everyone && everyone.deny & V).toBe(V);
     // The cache check agrees once the category is cached.
     w.guild.channels.cache.set(
       CATEGORY,

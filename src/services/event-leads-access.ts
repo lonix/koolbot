@@ -143,9 +143,17 @@ function restrictEveryone(
   current: OverwriteSpec | undefined,
   everyoneId: string,
   viewBlocked = false,
+  enforceViewDeny = false,
 ): OverwriteSpec {
-  const deny = (current?.deny ?? 0n) | CONNECT;
+  let deny = (current?.deny ?? 0n) | CONNECT;
   let allow = (current?.allow ?? 0n) & ~CONNECT;
+  // The category hides channels from @everyone: this channel has its own copy
+  // of the overwrites, so a later change of the category is enforced here, and
+  // a View allow that contradicts it goes.
+  if (enforceViewDeny) {
+    deny |= VIEW;
+    allow &= ~VIEW;
+  }
   if ((deny & VIEW) === 0n && !viewBlocked) allow |= VIEW;
   return { id: everyoneId, type: OverwriteType.Role, allow, deny };
 }
@@ -162,16 +170,17 @@ function adminRoleGrant(
   everyoneDeniesView: boolean,
   categoryDeny = 0n,
 ): OverwriteSpec | null {
+  // What the category denies this role is copied onto the entry (the channel
+  // has its own copy of the overwrites) and wins over any allow; nothing is
+  // denied that neither the entry nor the category denies already.
+  const deny =
+    (current?.deny ?? 0n) | (categoryDeny & (VIEW | CONNECT | SPEAK));
   const bits = (everyoneDeniesView ? 0n : VIEW) | CONNECT | SPEAK;
-  const effective = bits & ~((current?.deny ?? 0n) | categoryDeny);
-  if (effective === 0n) return null;
-  if (current && (current.allow & effective) === effective) return null;
-  return {
-    id,
-    type: OverwriteType.Role,
-    allow: (current?.allow ?? 0n) | effective,
-    deny: current?.deny ?? 0n,
-  };
+  const effective = bits & ~deny;
+  const allow = ((current?.allow ?? 0n) & ~deny) | effective;
+  if (current && current.allow === allow && current.deny === deny) return null;
+  if (!current && allow === 0n && deny === 0n) return null;
+  return { id, type: OverwriteType.Role, allow, deny };
 }
 
 function widen(
@@ -309,17 +318,26 @@ export function planLeadsSync(
   const viewBlocked =
     ctx.categoryUnknown === true ||
     ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
+  const categoryDeniesView = ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
   // (A deny of Connect with no View allowed or denied is repaired too: the
   // channel was made without the rule, as creation would have, unless View is
-  // blocked.)
+  // blocked. And a category that denies View to @everyone is enforced: the
+  // deny is copied and a contradicting allow removed.)
   if (
     !everyone ||
     (everyone.deny & CONNECT) === 0n ||
-    (((everyone.allow | everyone.deny) & VIEW) === 0n && !viewBlocked)
+    (((everyone.allow | everyone.deny) & VIEW) === 0n && !viewBlocked) ||
+    (categoryDeniesView &&
+      ((everyone.deny & VIEW) === 0n || (everyone.allow & VIEW) !== 0n))
   ) {
     ops.push({
       kind: "put",
-      spec: restrictEveryone(everyone, ctx.everyoneId, viewBlocked),
+      spec: restrictEveryone(
+        everyone,
+        ctx.everyoneId,
+        viewBlocked,
+        categoryDeniesView,
+      ),
       revoke: false,
     });
   }
