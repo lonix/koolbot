@@ -1814,7 +1814,13 @@ see but not join. It is made with the other group channels (#1190) and removed w
   channel keeps what it had, except that a View allow goes while the category hides the
   channel from @everyone and an admin group's role is given View only while @everyone's View
   is not denied. The host and the leaders keep the View that goes with their access, and the
-  bot its own. This holds the same way when the channel is created, in a pass and in the
+  bot its own. A category's View deny for a single member is copied onto the channel's
+  entry for that member the same way (for anyone but the host, the bot and the leaders,
+  who keep their View). Writes go out restrictive first: whatever takes access away (a
+  role's allow removed, a deny added, the @everyone restriction) is sent before anything
+  that gives access (a new admin group's role), and an entry that does both is split into
+  a restrictive write and a granting write, so a refused grant cannot leave a former admin
+  role with access. This holds the same way when the channel is created, in a pass and in the
   scan's check. While the category cannot be
   read grants no View, enforces nothing and leaves the channel
   unverified with a note in the Groups section). Each scan also reads the admin groups'

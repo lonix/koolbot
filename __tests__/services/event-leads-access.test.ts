@@ -253,10 +253,11 @@ describe("planLeadsSync", () => {
       right().filter((o) => o.id !== GUILD),
       ctx({ leaderIds: ["l1", "l2"], categoryOverwrites: privateCat }),
     );
+    // (A deny only: it restricts, so it is sent in the restrictive phase.)
     expect(missing).toEqual([
       {
         kind: "put",
-        revoke: false,
+        revoke: true,
         spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C | V },
       },
     ]);
@@ -273,7 +274,7 @@ describe("planLeadsSync", () => {
     expect(ops).toEqual([
       {
         kind: "put",
-        revoke: false,
+        revoke: true,
         spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C | V },
       },
     ]);
@@ -370,7 +371,9 @@ describe("planLeadsSync", () => {
         adminGrantRoleIds: new Set(["mods"]),
       }),
     );
+    // A new entry that both denies and allows: the deny first, then the entry.
     expect(denied).toMatchObject([
+      { spec: { id: "mods", allow: 0n, deny: C } },
       { spec: { id: "mods", allow: V | S, deny: C } },
     ]);
     const unknown = planLeadsSync(
@@ -643,7 +646,7 @@ describe("a role's View follows the category's entry for that role", () => {
     expect(missing).toEqual([
       {
         kind: "put",
-        revoke: false,
+        revoke: true,
         spec: { id: "muted", type: OverwriteType.Role, allow: 0n, deny: V },
       },
     ]);
@@ -808,6 +811,118 @@ describe("a role's View follows the category's entry for that role", () => {
       });
     }
   }
+
+  // The member row: a person who is not the host, the bot or a leader.
+  for (const c of cats) {
+    for (const h of chans) {
+      it(`other member (category ${c}, channel ${h}): the category's View deny is copied, no View allow is kept`, () => {
+        const catEntry = (id: string): OverwriteSpec[] =>
+          c === "allow"
+            ? [member(id, V, 0n)]
+            : c === "deny"
+              ? [member(id, 0n, V)]
+              : [];
+        const own = (id: string): OverwriteSpec[] =>
+          h === "allow"
+            ? [member(id, V | C, 0n)]
+            : h === "deny"
+              ? [member(id, 0n, V)]
+              : [];
+        const c0 = ctx({
+          leaderIds: [],
+          categoryOverwrites: catEntry("who"),
+        });
+        const start = [...channel(), ...own("who")];
+        const out = applyPlan(start, planLeadsSync(start, c0));
+        const v = viewOf(out, "who", OverwriteType.Member);
+        const entry = out.find((x) => x.id === "who");
+        expect(v.allow).toBe(false);
+        expect(v.deny).toBe(c === "deny" || h === "deny");
+        expect((entry?.allow ?? 0n) & (V | C | S)).toBe(0n);
+        expect(planLeadsSync(out, c0)).toEqual([]);
+        // Creation agrees.
+        const built = buildLeadsOverwrites(catEntry("who"), c0);
+        expect(viewOf(built, "who", OverwriteType.Member).allow).toBe(false);
+        expect(viewOf(built, "who", OverwriteType.Member).deny).toBe(
+          c === "deny",
+        );
+      });
+    }
+  }
+
+  it("an existing channel with no member entry gets the category's member View deny, and the host, bot and leaders keep their View", () => {
+    const c0 = ctx({
+      leaderIds: ["l1"],
+      categoryOverwrites: [
+        member("who", 0n, V),
+        member(HOST, 0n, V),
+        member("l1", 0n, V),
+      ],
+    });
+    const ops = planLeadsSync(
+      buildLeadsOverwrites([], ctx({ leaderIds: ["l1"] })),
+      c0,
+    );
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: true,
+        spec: { id: "who", type: OverwriteType.Member, allow: 0n, deny: V },
+      },
+    ]);
+  });
+
+  it("sends every restrictive write before any grant, and splits an entry that does both", () => {
+    // Admin group role A was dropped (it still holds the bot's allow) and B is
+    // new: A's access goes first, so a refused grant on B cannot leave A in.
+    const c0 = ctx({
+      leaderIds: [],
+      adminRoleIds: new Set(["b"]),
+      adminGrantRoleIds: new Set(["b"]),
+    });
+    const start = [...channel(), role("a", V | C | S, 0n)];
+    const ops = planLeadsSync(start, c0);
+    const ids = ops.map((o) => (o.kind === "put" ? o.spec.id : o.id));
+    expect(ids).toEqual(["a", "b"]);
+    expect(ops[0]).toMatchObject({ revoke: true });
+    expect(ops[1]).toMatchObject({ revoke: false });
+
+    // One entry that removes Connect and adds View: the restrictive half first.
+    const both = planLeadsSync(
+      [...channel(), role("x", C, 0n)],
+      ctx({ leaderIds: [], categoryOverwrites: [role("x", V, 0n)] }),
+    );
+    expect(both).toEqual([
+      { kind: "delete", id: "x", type: OverwriteType.Role, revoke: true },
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: "x", type: OverwriteType.Role, allow: V, deny: 0n },
+      },
+    ]);
+    // With an allow that stays: the restrictive write keeps it.
+    const keeps = planLeadsSync(
+      [...channel(), role("y", V, 0n)],
+      ctx({
+        leaderIds: [],
+        adminRoleIds: new Set(["y"]),
+        adminGrantRoleIds: new Set(["y"]),
+        categoryOverwrites: [role("y", 0n, C)],
+      }),
+    );
+    expect(keeps).toEqual([
+      {
+        kind: "put",
+        revoke: true,
+        spec: { id: "y", type: OverwriteType.Role, allow: V, deny: C },
+      },
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: "y", type: OverwriteType.Role, allow: V | S, deny: C },
+      },
+    ]);
+  });
 
   it("@everyone: the category's deny wins, otherwise View is allowed unless the channel denies it", () => {
     for (const c of cats) {

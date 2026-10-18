@@ -1700,6 +1700,31 @@ describe("a failed read of the event never drops an owed move", () => {
   });
 });
 
+describe("restrictive writes go first", () => {
+  it("a refused grant on a new admin group's role still leaves the old admin role without access", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["b"] });
+    w.seedRight();
+    // The old admin group's role "a" still holds what the bot gave it.
+    w.channels
+      .get("ch-leads")
+      ?.permissionOverwrites.cache.set(`${OverwriteType.Role}:a`, {
+        id: "a",
+        type: OverwriteType.Role,
+        allow: { bitfield: V | C | S },
+        deny: { bitfield: 0n },
+      });
+    w.hooks.put = (_channel: string, id: string): void => {
+      if (id === "b") throw apiError(50013);
+    };
+    const out = await w.sync();
+    expect(out.status).toBe("failed");
+    // A's Connect and Speak are gone although B's grant was refused.
+    expect(w.overwritesOf().find((o) => o.id === "a")?.allow).toBe(V);
+    expect(w.overwritesOf().find((o) => o.id === "b")).toBeUndefined();
+  });
+});
+
 describe("tracking appointments per group", () => {
   it("ending an orphaned role in one group does not erase an appointment in another", async () => {
     seed({
@@ -2314,9 +2339,10 @@ describe("writing", () => {
     );
     const started = Date.now();
     const out = await paced.syncLeads(EV, w.guild as never);
-    // @everyone, host, bot, two leaders: five writes, four pauses.
-    expect(out.wrote).toBe(5);
-    expect(w.rest.put).toHaveBeenCalledTimes(5);
+    // @everyone (its deny first, then the whole entry), host, bot, two
+    // leaders: six writes, five pauses.
+    expect(out.wrote).toBe(6);
+    expect(w.rest.put).toHaveBeenCalledTimes(6);
     expect(Date.now() - started).toBeGreaterThanOrEqual(100);
   });
 });

@@ -305,27 +305,44 @@ export function planLeadsSync(
   const desired = desiredMembers(ctx);
   const byKey = new Map(current.map((o) => [keyOf(o), o]));
 
-  // 1. Members who must not have the access any more.
-  for (const o of current) {
-    if (o.type !== OverwriteType.Member || desired.has(o.id)) continue;
-    if ((o.allow & LEADS_LEADER_PERMISSIONS) === 0n) continue;
-    const allow = o.allow & ~LEADS_LEADER_PERMISSIONS;
-    if (allow === 0n && o.deny === 0n) {
-      ops.push({ kind: "delete", id: o.id, type: o.type, revoke: true });
-    } else {
-      ops.push({
-        kind: "put",
-        spec: { id: o.id, type: o.type, allow, deny: o.deny },
-        revoke: true,
-      });
-    }
-  }
-
   // What the category itself denies counts as denied here: the channel's own
   // entries may have lost it, and it is never lifted (nor View granted over it).
   const category = new Map(
     (ctx.categoryOverwrites ?? []).map((o) => [keyOf(o), o]),
   );
+
+  // 1. Members who must not have the access any more, and the category's View
+  // deny for any member (the same rule as for roles: copied onto the channel's
+  // own entry). The host, the bot and the current leaders are the exception:
+  // they keep what their access needs.
+  const memberIds = new Set<string>();
+  for (const o of [...current, ...category.values()]) {
+    if (o.type === OverwriteType.Member) memberIds.add(o.id);
+  }
+  for (const id of memberIds) {
+    if (desired.has(id)) continue;
+    const key = keyOf({ type: OverwriteType.Member, id });
+    const own = byKey.get(key);
+    const deny = (own?.deny ?? 0n) | ((category.get(key)?.deny ?? 0n) & VIEW);
+    const allow = (own?.allow ?? 0n) & ~LEADS_LEADER_PERMISSIONS;
+    if (allow === 0n && deny === 0n) {
+      if (own && (own.allow !== 0n || own.deny !== 0n)) {
+        ops.push({
+          kind: "delete",
+          id,
+          type: OverwriteType.Member,
+          revoke: true,
+        });
+      }
+      continue;
+    }
+    if (own && own.allow === allow && own.deny === deny) continue;
+    ops.push({
+      kind: "put",
+      spec: { id, type: OverwriteType.Member, allow, deny },
+      revoke: true,
+    });
+  }
   const categoryEveryone = category.get(
     keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
   );
@@ -415,7 +432,62 @@ export function planLeadsSync(
     if (o && (o.allow & bits) === bits && (o.deny & bits) === 0n) continue;
     ops.push({ kind: "put", spec: widen(o, id, bits), revoke: false });
   }
-  return ops;
+  return restrictiveFirst(ops, byKey);
+}
+
+/**
+ * Order every write restrictive-first. A pass stops at its first failed write,
+ * so whatever takes access away (a role's allow removed, a deny added, the
+ * @everyone restriction) must go out before anything that gives access (a new
+ * admin group's role): otherwise a refusal or a rate limit on the grant would
+ * leave a former admin role able to join. An entry that does both (removes
+ * Connect and adds View, say) is split into a restrictive write (what stays of
+ * its allow, plus every deny) and a granting write (the full entry).
+ */
+function restrictiveFirst(
+  ops: readonly LeadsOp[],
+  byKey: ReadonlyMap<string, OverwriteSpec>,
+): LeadsOp[] {
+  const first: LeadsOp[] = [];
+  const second: LeadsOp[] = [];
+  for (const op of ops) {
+    if (op.kind === "delete") {
+      first.push(op);
+      continue;
+    }
+    const own = byKey.get(keyOf(op.spec));
+    const ownAllow = own?.allow ?? 0n;
+    const ownDeny = own?.deny ?? 0n;
+    const restricts =
+      (ownAllow & ~op.spec.allow) !== 0n || (op.spec.deny & ~ownDeny) !== 0n;
+    const grants =
+      (op.spec.allow & ~ownAllow) !== 0n || (ownDeny & ~op.spec.deny) !== 0n;
+    if (!grants) {
+      first.push({ ...op, revoke: true });
+    } else if (!restricts) {
+      second.push({ ...op, revoke: false });
+    } else {
+      const mid: OverwriteSpec = {
+        ...op.spec,
+        allow: ownAllow & op.spec.allow,
+        deny: ownDeny | op.spec.deny,
+      };
+      if (mid.allow === 0n && mid.deny === 0n) {
+        if (own) {
+          first.push({
+            kind: "delete",
+            id: op.spec.id,
+            type: op.spec.type,
+            revoke: true,
+          });
+        }
+      } else {
+        first.push({ kind: "put", spec: mid, revoke: true });
+      }
+      second.push({ kind: "put", spec: op.spec, revoke: false });
+    }
+  }
+  return [...first, ...second];
 }
 
 /** The user ids a plan takes access from. */
