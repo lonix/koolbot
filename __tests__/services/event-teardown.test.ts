@@ -191,11 +191,13 @@ function make(over: DepOverrides = {}): {
   begin: jest.Mock;
   abort: jest.Mock;
   claimed: jest.Mock;
+  finished: jest.Mock;
 } {
   let holds = 0;
   const begin = jest.fn(() => ++holds);
   const abort = jest.fn();
   const claimed = jest.fn();
+  const finished = jest.fn();
   const teardown = new EventTeardown({
     client,
     updateAnnouncement: async () => {
@@ -220,11 +222,11 @@ function make(over: DepOverrides = {}): {
     getGraceMinutes: async () => 15,
     beginEnding: begin,
     abortEnding: abort,
-    finishEnding: jest.fn(),
+    finishEnding: finished,
     claimCompleted: claimed,
     settleMs: 0,
   });
-  return { teardown, begin, abort, claimed };
+  return { teardown, begin, abort, claimed, finished };
 }
 
 const NOW = new Date("2030-01-01T20:00:00Z");
@@ -482,6 +484,28 @@ describe("the claim", () => {
     expect(outcome.status).toBe("failed");
     expect(calls).toEqual([]);
     expect(moveEventMembers).not.toHaveBeenCalled();
+  });
+
+  it("every exit gives the hold back: finishEnding runs after a won, a lost and a failed claim; only a lost one aborts", async () => {
+    // Won.
+    const won = make();
+    await won.teardown.run(manual());
+    expect(won.finished).toHaveBeenCalledWith(ID, 1);
+    expect(won.abort).not.toHaveBeenCalled();
+    // Lost (already ended).
+    const lost = make();
+    await lost.teardown.run(manual());
+    expect(lost.abort).toHaveBeenCalledWith(ID, 1);
+    expect(lost.finished).toHaveBeenCalledWith(ID, 1);
+    // Failed: the write may have reached the database, so it is NOT aborted
+    // (dropped); finishEnding settles the pending hold into a finite one.
+    rows.set(ID, row());
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    const failed = make();
+    expect((await failed.teardown.run(manual())).status).toBe("failed");
+    expect(failed.abort).not.toHaveBeenCalled();
+    expect(failed.claimed).not.toHaveBeenCalled();
+    expect(failed.finished).toHaveBeenCalledWith(ID, 1);
   });
 
   it("a failed read after a refused claim is 'failed', not a guess", async () => {

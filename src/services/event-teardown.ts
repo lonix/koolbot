@@ -109,8 +109,11 @@ export interface TeardownDeps {
   /** The claim was not won: give up this caller's own hold, and only that one. */
   abortEnding(eventId: string, hold: number): void;
   /**
-   * The teardown that won the claim has finished (whatever happened): the event
-   * is no longer "in progress". The recently-ended hold stays until it expires.
+   * This caller's work is over, whatever happened (a won claim, a lost one, a
+   * failed one, a throw): the event is no longer "in progress", and a hold that
+   * is still pending (the claim neither landed nor was lost) is settled into a
+   * finite one, because a failed write may have reached the database. The
+   * recently-ended hold stays until it expires.
    */
   finishEnding(eventId: string, hold: number): void;
   /**
@@ -187,16 +190,21 @@ export class EventTeardown {
     // Taken synchronously, before the first await, and undone below when the
     // claim is not won: the scan skips an event that is being ended.
     const hold = this.deps.beginEnding(eventId);
-    const claimed = await this.claim(input);
-    if (!("doc" in claimed)) {
-      // Only this caller's hold: the caller that won the claim (and may be
-      // minutes into a pull-back) keeps its own.
-      this.deps.abortEnding(eventId, hold);
-      return claimed;
-    }
-
-    this.deps.claimCompleted(eventId, hold);
+    // Whatever happens below (a lost claim, a claim that fails, a step that
+    // throws), `finishEnding` runs: it gives back the in-progress mark and
+    // settles a hold that is still pending (see EventService: no path leaves a
+    // hold that never expires).
     try {
+      const claimed = await this.claim(input);
+      if (!("doc" in claimed)) {
+        // A LOST claim: nothing of ours happened, so only this caller's hold
+        // goes; the caller that won (and may be minutes into a pull-back) keeps
+        // its own. A FAILED claim may have reached the database, so its hold is
+        // not dropped: `finishEnding` below turns it into a finite one.
+        if (claimed.status !== "failed") this.deps.abortEnding(eventId, hold);
+        return claimed;
+      }
+      this.deps.claimCompleted(eventId, hold);
       return await this.afterClaim(input, claimed.doc);
     } finally {
       this.deps.finishEnding(eventId, hold);

@@ -407,6 +407,14 @@ export class EventService extends ScheduledService {
    *    await that precedes an outward write, and again right before the
    *    outward write itself where the write is preceded by its own fetches
    *    (reminder send, announcement send and edit).
+   * 7. NO PATH LEAVES A HOLD THAT NEVER EXPIRES. `beginEnding` is paired, at
+   *    every call site (`EventTeardown.run`, `cancelOne`), with a `finally`
+   *    that calls `finishEnding`. From begin, a claim that lands calls
+   *    `claimCompleted` (finite hold); a claim that is LOST calls `abortEnding`
+   *    (hold removed); a claim that FAILS or work that THROWS reaches
+   *    `finishEnding` with the hold still pending, which settles it to a finite
+   *    hold stamped now (a failed write may have landed, so protection for
+   *    older scans stays, but only until they are done and the time is up).
    * 6. Holds and marks are keyed by the canonical event id (24 lower-case hex,
    *    `String(doc._id)`); a caller that takes an id from outside normalises it
    *    first (`canonicalEventId`).
@@ -613,11 +621,23 @@ export class EventService extends ScheduledService {
     this.finishEnding(eventId, hold);
   }
 
-  /** This caller's teardown is over; the recently-ended hold stays. */
+  /**
+   * This caller's work is over, whatever happened. The in-progress mark goes,
+   * and a hold that is still pending (its claim neither landed nor was lost: it
+   * failed, or the work threw) is settled into a finite, scan-aware one: the
+   * write may have reached the database, so protection is not dropped, and it
+   * must not stay forever either. The recently-ended hold of a landed claim
+   * stays until it expires.
+   */
   private finishEnding(eventId: string, hold: number): void {
     const running = this.endsInProgress.get(eventId);
     running?.delete(hold);
     if (running && running.size === 0) this.endsInProgress.delete(eventId);
+    const entry = this.endingEvents.get(eventId)?.get(hold);
+    if (entry && entry.clock === Number.POSITIVE_INFINITY) {
+      entry.clock = ++this.scanClock;
+      entry.until = Date.now() + EventService.ENDING_HOLD_MS;
+    }
   }
 
   /**

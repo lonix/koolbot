@@ -1788,3 +1788,107 @@ describe("a cancel holds the event like an end", () => {
     expect(service.postReminder).not.toHaveBeenCalled();
   });
 });
+
+describe("a claim that fails leaves no hold that never expires", () => {
+  type Svc = {
+    isBeingEnded: (id: string) => boolean;
+    endingEvents: Map<string, Map<number, { clock: number; until: number }>>;
+    endsInProgress: Map<string, unknown>;
+  };
+
+  /** After a failed claim: nothing pending, nothing in progress, a finite hold
+   * that ends with time, and a later scan processes the still-open event. */
+  async function expectSettled(
+    service: Awaited<ReturnType<typeof setup>>["service"],
+    guild: Awaited<ReturnType<typeof setup>>["guild"],
+  ): Promise<void> {
+    const svc = service as unknown as Svc;
+    for (const entry of svc.endingEvents.get(ID)?.values() ?? []) {
+      expect(Number.isFinite(entry.clock)).toBe(true);
+      expect(Number.isFinite(entry.until)).toBe(true);
+    }
+    expect(svc.endsInProgress.has(ID)).toBe(false);
+    // The write may have landed, so it is held for a while...
+    expect(svc.isBeingEnded(ID)).toBe(true);
+    // ...but only for a while.
+    const realNow = Date.now;
+    jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+    try {
+      expect(svc.isBeingEnded(ID)).toBe(false);
+      await service.processEvent(
+        row({ reminderSent: false, announcementMessageId: "m1" }),
+        guild,
+        new Date("2026-07-04T19:50:00Z"),
+        { ...WINDOWS, reminderMs: 30 * MIN },
+      );
+    } finally {
+      jest.restoreAllMocks();
+    }
+    expect(service.postReminder).toHaveBeenCalledTimes(1);
+  }
+
+  it("End event now", async () => {
+    const { service, guild } = setup();
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("failed");
+    expect(store.get(ID)?.state).toBe("active");
+    await expectSettled(service, guild);
+  });
+
+  it("the scheduled end", async () => {
+    const { service, guild } = setup();
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+    await expectSettled(service, guild);
+  });
+
+  it("a cancel (cancelOne)", async () => {
+    const { service, guild } = setup();
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    await expect(service.cancelOne(row({ state: "active" }))).rejects.toThrow(
+      "db down",
+    );
+    await expectSettled(service, guild);
+  });
+
+  it("a cancel through cancelSeries and cancelEvent", async () => {
+    const { service, guild } = setup();
+    const svc = service as unknown as {
+      cancelSeries: (id: string, g: string) => Promise<unknown>;
+      cancelEvent: (id: string, g: string) => Promise<unknown>;
+    };
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    await expect(svc.cancelSeries(ID, "guild-1")).rejects.toThrow("db down");
+    await expectSettled(service, guild);
+
+    const again = setup();
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    await expect(
+      (
+        again.service as unknown as {
+          cancelEvent: (id: string, g: string) => Promise<unknown>;
+        }
+      ).cancelEvent(ID, "guild-1"),
+    ).rejects.toThrow("db down");
+    await expectSettled(again.service, again.guild);
+    void svc.cancelEvent;
+  });
+
+  it("the scheduled end that failed is done by a later scan once the hold is over", async () => {
+    const { service, guild } = setup();
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+    const realNow = Date.now;
+    jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+    try {
+      await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    } finally {
+      jest.restoreAllMocks();
+    }
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+});
