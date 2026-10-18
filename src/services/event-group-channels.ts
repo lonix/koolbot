@@ -373,9 +373,12 @@ export class EventGroupChannels {
   private readonly holds = new Map<string, { until: number; reason: string }>();
   /** Warnings already logged, so a standing problem is not logged every scan. */
   private readonly warned = new Set<string>();
-  /** Events whose last position write went through, so a read that still finds
-   * the order wrong is not answered with another write (see `orderLocked`). */
-  private readonly orderWritten = new Set<string>();
+  /** Per event: the position write that last went through. A fresh read that
+   * still wants exactly that write means Discord did not take it, and sending
+   * it again would repeat the request every scan (see `orderLocked`). Cleared
+   * as soon as the order is seen right, so a later, different problem is
+   * written, never mistaken for this one. */
+  private readonly orderWritten = new Map<string, string>();
   private restClient: REST | null;
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
@@ -473,7 +476,10 @@ export class EventGroupChannels {
   ): boolean {
     const hold = this.holds.get(`${String(event._id)}:${ORDER_HOLD}`);
     if (hold && Date.now() < hold.until) return false;
-    return this.cacheOrderWrong(event, guild);
+    const wrong = this.cacheOrderWrong(event, guild);
+    // Seen right: whatever was written before did take effect.
+    if (!wrong) this.orderWritten.delete(String(event._id));
+    return wrong;
   }
 
   private cacheOrderWrong(
@@ -736,9 +742,12 @@ export class EventGroupChannels {
         this.holds.delete(holdKey);
         return;
       }
-      if (this.orderWritten.has(eventId)) {
-        // Written last time and still not what Discord reports: writing again
-        // would only repeat the request every scan. Say so and wait.
+      const wanted = JSON.stringify(plan.moves);
+      if (this.orderWritten.get(eventId) === wanted) {
+        // The very write that went through last time is wanted again: Discord
+        // did not take it, and writing it again would only repeat the request
+        // every scan. Say so and wait. (A different plan is a new situation
+        // and is written.)
         this.orderWritten.delete(eventId);
         const reason =
           "The channel order was written but Discord still reports a different order. It is tried again later; move the group channels by hand if it persists.";
@@ -751,12 +760,14 @@ export class EventGroupChannels {
       }
       const perms = botPermissionsIn(guild, category);
       if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
-        this.warnOnce(
-          row,
-          "order-manage-channels",
-          "The bot lacks Manage Channels in the events category, so the group channels were not put in order.",
-          report.warnings,
-        );
+        const reason =
+          "The bot lacks Manage Channels in the events category, so the group channels were not put in order. Grant it to the bot's role.";
+        this.warnOnce(row, "order-manage-channels", reason, report.warnings);
+        // Until someone grants it, do not read the whole server every scan.
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
         return;
       }
 
@@ -790,7 +801,7 @@ export class EventGroupChannels {
         );
         return;
       }
-      this.orderWritten.add(eventId);
+      this.orderWritten.set(eventId, wanted);
       this.holds.delete(holdKey);
       logger.info(
         `Put the group channels of event ${sanitizeForLog(eventId)} in order (${plan.moves.length} position(s) written)`,

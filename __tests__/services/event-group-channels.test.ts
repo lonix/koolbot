@@ -1377,6 +1377,16 @@ describe("EventGroupChannels ordering", () => {
       const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
       expect(env.rest.patch).not.toHaveBeenCalled();
       expect(report.warnings.join()).toMatch(/Manage Channels/);
+
+      // Held: the next scan neither starts a pass nor reads the whole server,
+      // and a pass that runs for another reason shows the reason again.
+      expect(looksWrong(env)).toBe(false);
+      env.fetch.mockClear();
+      const again = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.fetch).not.toHaveBeenCalledWith();
+      expect(again.failures.map((f) => f.reason).join()).toMatch(
+        /Manage Channels/,
+      );
     });
 
     it("does not move a group channel out of another category into the main channel's, and says so", async () => {
@@ -1532,6 +1542,64 @@ describe("EventGroupChannels ordering", () => {
         /still reports a different order/,
       );
       expect(looksWrong(env)).toBe(false);
+    });
+
+    it("writes again for a different problem after a successful write (a channel deleted and created again later)", async () => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).toHaveBeenCalledTimes(1);
+      // The write took effect and the gateway updated the cache. No scan has
+      // looked in between (so nothing cleared the stored write).
+      syncCache(env);
+      // Later someone deletes the second group channel; it is created again at
+      // the bottom, and the order is wrong in a new way.
+      env.channels.delete("chan-2");
+      env.cache.delete("chan-2");
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(report.created).toBe(1);
+      expect(report.failures).toEqual([]);
+      expect(env.rest.patch).toHaveBeenCalledTimes(2);
+      expect(orderOf(env)).toEqual([
+        "main-1",
+        "chan-1",
+        "chan-4",
+        "chan-3",
+        "f1",
+      ]);
+    });
+
+    it("writes the same plan again once the order was seen right in between", async () => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      await env.service.reconcile({ _id: "evt1" }, env.guild);
+      const firstBody = patches(env)[0];
+      syncCache(env);
+      expect(looksWrong(env)).toBe(false); // seen right
+      // Someone puts everything back exactly as it was at the start.
+      for (const [id, pos] of [
+        ["chan-1", 101],
+        ["chan-2", 102],
+        ["chan-3", 103],
+        ["f1", 1],
+      ] as const) {
+        const channel = (env.channels.get(id) ?? env.fixed.get(id)) as {
+          rawPosition: number;
+        };
+        channel.rawPosition = pos;
+      }
+      syncCache(env);
+      expect(looksWrong(env)).toBe(true);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(report.failures).toEqual([]);
+      expect(env.rest.patch).toHaveBeenCalledTimes(2);
+      expect(patches(env)[1]).toEqual(firstBody);
     });
   });
 

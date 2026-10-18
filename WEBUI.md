@@ -1496,9 +1496,9 @@ of the main channel's category are not in that order, writes the new positions w
 request, after the same short pause the creates use. Only the event's own channels are placed. Another channel is
 sent in that request only when it has to move down to make room, and then keeps its place relative
 to the other channels. Voice and stage channels are ordered among themselves (text channels are
-never touched). A group channel someone moved into another category is left there and the host
-panel says so. Nothing is written, and the host panel says why, when the server or one of the
-recorded channels cannot be read, or when the bot lacks Manage Channels in the category. The scan
+never touched). When a pass runs, a group channel found in another category is left there and the
+host panel says so (that alone does not start a pass). Nothing is written, and the host panel says why, when the server or one of the
+recorded channels cannot be read, or when the bot lacks Manage Channels in the category (it looks again after five minutes). The scan
 also compares the order in the bot's own cache every minute (no Discord call) and starts a pass
 when a group channel has been moved out of place, so a channel someone drags away is put back
 within a minute or two; that also means a deliberate manual move of a group channel is undone.
