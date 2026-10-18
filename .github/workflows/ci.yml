@@ -120,7 +120,8 @@ jobs:
         if: failure() && matrix.experimental
         env:
           NODE_VERSION: ${{ matrix.node }}
-        run: echo "::warning title=Node ${NODE_VERSION} failed::This leg is allowed to fail (see #1208), but the failure is real. Check the Run tests step."
+        run: |
+          echo "::warning title=Node ${NODE_VERSION} failed::This leg is allowed to fail (see #1208), but the failure is real. Check the Run tests step."
 
       # Jest's coverageThreshold only catches coverage falling; this catches the
       # floors falling behind actual coverage and going stale (#848). Also writes
