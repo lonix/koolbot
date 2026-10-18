@@ -193,8 +193,10 @@ beforeEach(() => {
     isAdministrator: async () => true,
     checkCommandPermission: async () => true,
   } as never);
+  groupReport = null;
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => events[id] ?? null,
+    getGroupChannelReport: () => groupReport,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async () => false,
@@ -285,7 +287,44 @@ describe("host panel access", () => {
   });
 });
 
+let groupReport: {
+  warnings: string[];
+  failures: Array<{ key: string; name: string; reason: string }>;
+} | null = null;
+
 describe("host panel page", () => {
+  it("shows what the last group channel pass could not do, escaped (#1190)", async () => {
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      groups: [
+        {
+          key: "g_1",
+          name: "Reds",
+          kind: "team",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    groupReport = {
+      warnings: ["The bot lacks Manage Channels <here>"],
+      failures: [{ key: "g_1", name: "Reds", reason: "Discord refused: full" }],
+    };
+    const r = await call(url(PANEL));
+    expect(r.text).toContain("Some group channels could not be set up");
+    expect(r.text).toContain("The bot lacks Manage Channels &lt;here&gt;");
+    expect(r.text).toContain("Reds: Discord refused: full");
+    expect(r.text).not.toContain("<here>");
+    // Nothing is shown when the pass had nothing to report.
+    groupReport = null;
+    const clean = await call(url(PANEL));
+    expect(clean.text).not.toContain("could not be set up");
+  });
+
   it("shows groups and the control sections of a scheduled event", async () => {
     events[EVENT_ID] = makeEvent({
       groupsEnabled: true,

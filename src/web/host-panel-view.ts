@@ -82,6 +82,9 @@ export interface HostPanelEvent {
   /** Minutes before the start that channels are created; null = server default. */
   channelLeadMinutes: number | null;
   groups: HostPanelGroup[];
+  /** What the last group-channel pass could not do (#1190): warnings and
+   * per-group failures, as plain text. Absent or empty when all is well. */
+  groupNotices?: string[];
   adopted: boolean;
 }
 
@@ -151,9 +154,13 @@ function renderGroups(e: HostPanelEvent): string {
     e.channelLeadMinutes === null
       ? "the server default"
       : `${escapeHtml(e.channelLeadMinutes)} minutes before the start`;
+  const notices = (e.groupNotices ?? []).length
+    ? `<div class="notice warn" role="status"><p>Some group channels could not be set up:</p><ul>${(e.groupNotices ?? []).map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`
+    : "";
   return `<section class="card" id="host-groups" aria-labelledby="host-groups-h">
 <h2 id="host-groups-h">Groups</h2>
 <p class="muted">Set up when the event was created. Channels are created ${lead}.</p>
+${notices}
 <table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table>
 </section>`;
 }

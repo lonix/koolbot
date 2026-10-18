@@ -1441,8 +1441,8 @@ a group are ever deleted, and each is read from Discord just before. After a res
 scan makes the record and the server agree: a group whose channel was deleted is created
 again while the event is open, and channels recorded for a finished or cancelled event are
 removed. Every pass collects what it could not do (a full category, a rate limit, a missing
-permission) instead of stopping: the bot logs one warning per problem and the last result
-is kept for the host panel. Without **Manage Channels** the group channels are skipped and
+permission) instead of stopping: the bot logs a standing problem once, and the last result is
+shown as a warning in the Groups section of the host panel. Without **Manage Channels** the group channels are skipped and
 the event runs with its main channel only; without **Manage Roles** or **Move Members** the
 channels are created without the host's extra access. A create Discord refuses (a full
 category, say) or rate limits is not repeated for a few minutes, so it cannot fire every scan.
