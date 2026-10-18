@@ -1231,13 +1231,16 @@ export class EventService extends ScheduledService {
     // created or since a restart, overwrites that differ from who leads, a
     // stranger in it, or a move still owed. Judged from the cache only; the
     // pass reads Discord and the event fresh before it writes anything. An
-    // event past its end is left to the teardown (an end that was deferred
-    // leaves the in-memory state open).
+    // event that is still open keeps being looked after past its scheduled end:
+    // that end is deferred while people are in its channels (#1193), and the
+    // admin roles and owed moves must not wait for them to leave. One this scan
+    // just ended, and any ended or cancelled one, is left alone (and the pass
+    // itself ignores an event that is not open).
     if (
       event.groupsEnabled === true &&
       !event.nativeAdopted &&
+      !teardownRan &&
       (event.state === "scheduled" || event.state === "active") &&
-      !shouldEndEvent(event, now) &&
       (await this.leadsAdminsChanged(event, guild))
     ) {
       await this.syncLeadsAccess(event.guildId, String(event._id));

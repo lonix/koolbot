@@ -1524,7 +1524,10 @@ export class EventGroupChannels {
       });
 
     try {
-      const row = await this.readFresh(eventId, emptyReport());
+      // A failed read is NOT "no event": it throws to the catch below, which
+      // keeps the people owed a move, clears the verification and holds a retry.
+      // Only a missing or ineligible event is skipped.
+      const row = (await Event.findById(eventId).lean()) as EventRow | null;
       if (
         !row ||
         row.guildId !== guild.id ||

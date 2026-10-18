@@ -87,6 +87,9 @@ export async function syncLeadsAccess(opts: {
       logger.warn(
         `Could not read server ${sanitizeForLog(guildId)} to update the leaders-only channel of event ${sanitizeForLog(eventId)}`,
       );
+      // The pass never started: the people it was told about are kept for the
+      // scan's retry, not dropped with it.
+      channels.queueEviction(eventId, opts.takeRevoked?.() ?? []);
       return;
     }
     const result = await channels.syncLeads(eventId, guild, {
@@ -116,6 +119,33 @@ export async function syncLeadsAccess(opts: {
  * later try may fix is remembered, with a hold, and shown on the host panel.
  */
 export async function evictFromLeads(opts: {
+  client: Client;
+  channels: LeadsOps;
+  guildId: string;
+  eventId: string;
+  revoked: readonly string[];
+}): Promise<void> {
+  try {
+    await evictFromLeadsOnce(opts);
+  } catch (error) {
+    // Owed moves are only forgotten after a definitive outcome (done, refused
+    // for good, the event gone). Anything that cannot be told (a failed read
+    // of the event, a server missing from the cache) keeps them for a retry.
+    logger.error(
+      `Moving people out of the leaders-only channel of event ${sanitizeForLog(opts.eventId)} failed:`,
+      error,
+    );
+    opts.channels.queueEviction(opts.eventId, opts.revoked);
+    opts.channels.holdEviction(opts.eventId, EVICT_RETRY_MS);
+    opts.channels.setLeadsProblem(opts.eventId, EVICT_PROBLEM, {
+      name: EVICT_PROBLEM_NAME,
+      reason:
+        "People who should not be in the leaders-only channel could not be moved out because the event could not be read. It is tried again later.",
+    });
+  }
+}
+
+async function evictFromLeadsOnce(opts: {
   client: Client;
   channels: LeadsOps;
   guildId: string;
@@ -173,7 +203,9 @@ export async function evictFromLeads(opts: {
   const row = (await Event.findById(eventId).lean()) as unknown as
     (MoveEventRow & { guildId: string }) | null;
   const guild = client.guilds?.cache?.get(guildId);
-  if (!row || !guild) return;
+  // A deleted event owes nothing; an unreadable server is retried.
+  if (!row) return;
+  if (!guild) throw new Error("the server is not in the cache");
   const early = plan({
     event: row,
     guild,

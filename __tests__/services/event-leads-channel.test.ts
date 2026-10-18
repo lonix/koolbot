@@ -1557,6 +1557,149 @@ describe("verification after an incomplete pass", () => {
   });
 });
 
+describe("a failed read of the event never drops an owed move", () => {
+  /** Make the event query reject for the calls listed (1-based), else answer. */
+  const failReads = (which: number[]): (() => void) => {
+    const original = Event.findById;
+    let n = 0;
+    Event.findById = ((id: string) => ({
+      lean: async () => {
+        n += 1;
+        if (which.includes(n)) throw new Error("db down");
+        return JSON.parse(JSON.stringify(store.get(id) ?? null));
+      },
+    })) as never;
+    return () => {
+      Event.findById = original;
+    };
+  };
+  const later = async (fn: () => Promise<void>): Promise<void> => {
+    jest.useFakeTimers({
+      now: Date.now() + 6 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      await fn();
+    } finally {
+      jest.useRealTimers();
+    }
+  };
+
+  it("the pass's own read failing keeps the people it was told about, and a retry moves them", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    // L1 lost the role earlier and their overwrite is already gone: only the
+    // memory of who lost access can get them out (the cache still says they
+    // can connect).
+    setCaptain("a", null);
+    await w.sync();
+    expect(has(w, L1)).toBe(false);
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    const restore = failReads([1]);
+    try {
+      await w.run(() => [L1]);
+    } finally {
+      restore();
+    }
+    expect(w.where(L1)).toBe("ch-leads");
+    const event = store.get(EV) as never;
+    expect(w.gc.getReport(EV)?.failures.map((f) => f.key)).toContain("#leads");
+    await later(async () => {
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      await w.run();
+    });
+    expect(w.where(L1)).toBe("ch-a");
+  });
+
+  it("the read after a successful pass failing keeps the owed moves too", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    await w.sync();
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    setCaptain("a", null);
+    // Call 1 is the pass's read (answers); call 2 is the eviction's.
+    const restore = failReads([2]);
+    try {
+      await w.run(() => [L1]);
+    } finally {
+      restore();
+    }
+    expect(has(w, L1)).toBe(false);
+    expect(w.where(L1)).toBe("ch-leads");
+    const event = store.get(EV) as never;
+    await later(async () => {
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      await w.run();
+    });
+    expect(w.where(L1)).toBe("ch-a");
+  });
+
+  it("the mover's own read failing is a refusal that is retried, not 'no event'", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    await w.sync();
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    setCaptain("a", null);
+    // Calls: pass (1), eviction pre-check (2) answer; the mover's (3) fails.
+    const restore = failReads([3]);
+    try {
+      await w.run(() => [L1]);
+    } finally {
+      restore();
+    }
+    expect(w.where(L1)).toBe("ch-leads");
+    const event = store.get(EV) as never;
+    await later(async () => {
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      await w.run();
+    });
+    expect(w.where(L1)).toBe("ch-a");
+  });
+
+  it("an event that is gone owes nothing", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    setCaptain("a", null);
+    await w.sync();
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    const row = JSON.parse(JSON.stringify(store.get(EV)));
+    store.delete(EV);
+    await w.run(() => [L1]);
+    // The event is back (a different run of the scan): nothing was kept for L1.
+    store.set(EV, row);
+    await w.run();
+    expect(w.where(L1)).toBe("ch-leads");
+  });
+
+  it("the server not being readable keeps what the pass was told about", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    setCaptain("a", null);
+    await w.sync();
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    w.client.guilds.fetch.mockImplementationOnce(async () => {
+      throw new Error("gateway down");
+    });
+    await w.run(() => [L1]);
+    expect(w.where(L1)).toBe("ch-leads");
+    // Nothing else knows about L1 (no overwrite, the cache says they can
+    // connect): the next pass moves them because the id was kept.
+    await w.run();
+    expect(w.where(L1)).toBe("ch-a");
+  });
+});
+
 describe("tracking appointments per group", () => {
   it("ending an orphaned role in one group does not erase an appointment in another", async () => {
     seed({

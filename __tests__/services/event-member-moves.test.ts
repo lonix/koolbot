@@ -1670,10 +1670,17 @@ describe("gates", () => {
     expect((await run(w, plan)).status).toBe("refused");
     store.get(EV)!.groupsEnabled = true;
     findFails = true;
-    expect((await run(w, plan)).status).toBe("refused");
+    // An unreadable event is not a missing one: a caller owing moves retries.
+    expect(await run(w, plan)).toMatchObject({
+      status: "refused",
+      code: "unreadable",
+    });
     findFails = false;
     store.set(EV, makeRow({ guildId: "other-guild" }));
-    expect((await run(w, plan)).status).toBe("refused");
+    expect(await run(w, plan)).toMatchObject({
+      status: "refused",
+      code: "no-event",
+    });
     expect(w.patch).not.toHaveBeenCalled();
   });
 

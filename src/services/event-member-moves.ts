@@ -421,7 +421,12 @@ async function runLocked(opts: {
       `Event ${sanitizeForLog(eventId)}: could not read the event for a move:`,
       error,
     );
-    return refuse("no-event");
+    // Not "no-event": the event may well exist, so a caller that owes moves
+    // must be able to tell this from a deleted one and try again.
+    return refuse(
+      "unreadable",
+      "The event could not be read, so nobody was moved.",
+    );
   }
   if (!row || row.guildId !== guildId) return refuse("no-event");
   const states = opts.allowFinished

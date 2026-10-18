@@ -1792,7 +1792,11 @@ see but not join. It is made with the other group channels (#1190) and removed w
   server-wide) and
   is skipped while a **Move people** run is going and tried again later. A person who
   could not be moved is remembered and tried again about five minutes later, and the host
-  panel says how many are still in the channel.
+  panel says how many are still in the channel. Such a person is forgotten only after a
+  definitive outcome (moved, refused for good, or the event no longer exists): a failed
+  read of the event, or a server the bot cannot read at that moment, keeps them for the
+  retry. The scan keeps looking after an open event past its scheduled end (that end
+  waits while people are in its channels), until the event is ended.
 - **After a restart, and every minute** the scan asks whether the channel needs a pass
   (cache only): it has never been verified since it was created or since the restart, its
   overwrites differ from who should have access, someone who cannot connect is sitting

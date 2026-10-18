@@ -385,6 +385,31 @@ describe("group channels in the scan", () => {
         NOW,
         WINDOWS,
       );
+      await service.processEvent(open({ state: "ended" }), guild, NOW, WINDOWS);
+      await service.processEvent(
+        open({ state: "cancelled" }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      expect(sync).not.toHaveBeenCalled();
+    });
+
+    it("keeps looking after an open event past its scheduled end, whose end is deferred while people are in its channels", async () => {
+      const { service, guild } = setup();
+      guild.channels.cache.set("c1", {});
+      guild.channels.cache.set("c2", {});
+      const sync = jest.fn(async () => undefined);
+      (service as unknown as { syncLeadsAccess: unknown }).syncLeadsAccess =
+        sync;
+      (
+        service.groupChannels as unknown as { leadsAdminRoles: unknown }
+      ).leadsAdminRoles = jest.fn(async () => ({
+        roleIds: new Set(),
+        known: true,
+      }));
+      // Past its deadline and still `active`: the end is deferred (here the
+      // occupancy of its channels cannot be established, which defers it too).
       await service.processEvent(
         open({
           durationMinutes: 5,
@@ -394,8 +419,7 @@ describe("group channels in the scan", () => {
         NOW,
         WINDOWS,
       );
-      await service.processEvent(open({ state: "ended" }), guild, NOW, WINDOWS);
-      expect(sync).not.toHaveBeenCalled();
+      expect(sync).toHaveBeenCalledTimes(1);
     });
   });
 
