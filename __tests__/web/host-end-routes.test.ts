@@ -54,10 +54,20 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
       order.push("claim");
       return JSON.parse(JSON.stringify(row));
     },
-    updateOne: async () => {
+    updateOne: async (filter: Json) => {
       order.push("captains");
-      return { modifiedCount: 0 };
+      const row = events[filter._id as string];
+      for (const g of (row?.groups as Json[]) ?? []) g.captainId = null;
+      return { modifiedCount: 1 };
     },
+    findOne: (filter: Json) => ({
+      select: () => ({
+        lean: async () => {
+          const row = events[filter._id as string];
+          return row ? JSON.parse(JSON.stringify(row)) : null;
+        },
+      }),
+    }),
   },
 }));
 
@@ -131,7 +141,11 @@ function makeEvent(over: Json = {}): Json {
     nativeEventId: "native-1",
     announcementMessageId: null,
     groups: [
-      team("g_heli", "Heli", { channelId: CH_HELI, memberIds: [ANA] }),
+      team("g_heli", "Heli", {
+        channelId: CH_HELI,
+        memberIds: [ANA],
+        captainId: ANA,
+      }),
       team("g_logi", "Logi", { channelId: CH_LOGI, memberIds: [CAL] }),
     ],
     ...over,

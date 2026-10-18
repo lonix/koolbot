@@ -51,6 +51,15 @@ const EventMock = {
     },
   })),
   updateOne: jest.fn(async () => ({ modifiedCount: 0 })),
+  // The leaders module reads the row (state and groups) inside the group lock.
+  findOne: jest.fn((filter: { _id: string }) => ({
+    select: () => ({
+      lean: async () => {
+        const row = rows.get(filter._id);
+        return row ? { ...row } : null;
+      },
+    }),
+  })),
 };
 jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: EventMock,
@@ -84,6 +93,8 @@ const { EventTeardown, summariseEnd } =
 const hooks = await import("../../src/services/event-end-hooks.js");
 const { withGroupLock } =
   await import("../../src/services/event-group-assignment.js");
+const { onLeaderChange, clearLeadersOnEnd } =
+  await import("../../src/services/event-group-leaders.js");
 
 const GUILD = "guild-1";
 const ID = "evt1";
@@ -100,8 +111,22 @@ function row(over: Row = {}): Row {
     channelId: "c-main",
     groupsEnabled: true,
     groups: [
-      { key: "g_a", name: "Red", kind: "team", channelId: "c-red" },
-      { key: "g_b", name: "Blue", kind: "team", channelId: "c-blue" },
+      {
+        key: "g_a",
+        name: "Red",
+        kind: "team",
+        channelId: "c-red",
+        captainId: "cap-1",
+        memberIds: ["cap-1"],
+      },
+      {
+        key: "g_b",
+        name: "Blue",
+        kind: "team",
+        channelId: "c-blue",
+        captainId: null,
+        memberIds: [],
+      },
     ],
     nativeEventId: "n0",
     nativeCreateStartedAt: null,
@@ -746,20 +771,89 @@ describe("partial failure never aborts the rest", () => {
 });
 
 describe("leaders are cleared under the group lock, only on an ended row", () => {
-  it("one conditional update of every group's captainId, filtered on state ended", async () => {
+  it("one conditional update that matches each group's stored leader, only on an ended row", async () => {
     const { teardown } = make();
     await teardown.run(manual());
-    const [filter, update] = EventMock.updateOne.mock.calls[0] as unknown as [
-      Row,
-      Row,
-    ];
-    expect(filter).toMatchObject({
-      _id: ID,
-      guildId: GUILD,
-      state: "ended",
-      "groups.captainId": { $type: "string" },
+    const [filter, update, options] = EventMock.updateOne.mock
+      .calls[0] as unknown as [Row, Row, Row];
+    expect(filter).toEqual({ _id: ID, guildId: GUILD, state: "ended" });
+    expect(update).toEqual({ $set: { "groups.$[g0].captainId": null } });
+    expect(options).toEqual({
+      arrayFilters: [{ "g0.key": "g_a", "g0.captainId": "cap-1" }],
     });
-    expect(update).toEqual({ $set: { "groups.$[].captainId": null } });
+  });
+
+  it("tells the leads channel (#1199): onLeaderChange fires with source ended and the stored id", async () => {
+    const changes: unknown[] = [];
+    const off = onLeaderChange((c) => {
+      changes.push(c);
+    });
+    try {
+      const { teardown } = make();
+      await teardown.run(manual());
+    } finally {
+      off();
+    }
+    expect(changes).toEqual([
+      {
+        eventId: ID,
+        guildId: GUILD,
+        groupKey: "g_a",
+        fromUserId: "cap-1",
+        toUserId: null,
+        source: "ended",
+      },
+    ]);
+  });
+
+  it("clears nothing, and says nothing, when no group has a leader", async () => {
+    rows.set(
+      ID,
+      row({
+        groups: [{ key: "g_a", name: "Red", kind: "team", channelId: "c-red" }],
+      }),
+    );
+    const changes: unknown[] = [];
+    const off = onLeaderChange((c) => {
+      changes.push(c);
+    });
+    try {
+      await make().teardown.run(manual());
+    } finally {
+      off();
+    }
+    expect(EventMock.updateOne).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
+
+  it("never clears the leaders of an event that does not read ended", async () => {
+    const changes: unknown[] = [];
+    const off = onLeaderChange((c) => {
+      changes.push(c);
+    });
+    try {
+      await clearLeadersOnEnd(GUILD, ID);
+    } finally {
+      off();
+    }
+    // The row in the store is still active here (no teardown ran).
+    expect(EventMock.updateOne).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
+
+  it("a write that matched nothing (the leader changed meanwhile) announces nothing", async () => {
+    rows.set(ID, row({ state: "ended" }));
+    EventMock.updateOne.mockResolvedValueOnce({ modifiedCount: 0 });
+    const changes: unknown[] = [];
+    const off = onLeaderChange((c) => {
+      changes.push(c);
+    });
+    try {
+      expect(await clearLeadersOnEnd(GUILD, ID)).toBe(0);
+    } finally {
+      off();
+    }
+    expect(changes).toEqual([]);
   });
 
   it("waits for a membership change that holds the group lock", async () => {

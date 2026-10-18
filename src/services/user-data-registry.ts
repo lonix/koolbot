@@ -738,8 +738,8 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
   // a reader, and erased by a reset. Be exact about when: a finished event is
   // never deleted automatically, so memberships stay on it (as event history)
   // until the member resets their data; only deleting the event row itself
-  // takes them with it. `captainId` is still unwritten: #1195 owes the same
-  // treatment (exportable with a reader, and a purge) in the same change.
+  // takes them with it. `captainId` (#1195, group leaders) gets the same
+  // treatment: exportable with a reader, and cleared by a reset.
   {
     source: "src/models/event.ts",
     collection: "event-group-member",
@@ -756,13 +756,13 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     source: "src/models/event.ts",
     collection: "event-group-captain",
     field: "captainId",
-    exportable: false,
+    exportable: true,
     guildScoped: true,
-    note: "Which member leads an event group. No group leaders are recorded yet; when they are, the shared end-of-event teardown (#1193) already clears them as soon as the event ends (`groups.$[].captainId` set to null), so a finished event holds none.",
-    onDelete: "retain",
+    note: "Nested `groups[].captainId`: which group of each event the host made the member the leader of. The export carries the event and the member's own group, never other members. The shared end-of-event teardown (#1193) clears it as soon as the event ends, so a finished event holds none (older finished events may still).",
+    onDelete: "pull-member",
     subject: "self",
     deleteNote:
-      "No group leaders are recorded yet, so there is nothing to remove.",
+      "Shared event row: clear `captainId` in every group of every event where it is the member's id, finished events included, and leave the event and the other members standing. The leader slot is cleared when an event ends through the teardown; on an event that ended before that, or was cancelled, it is kept until this reset.",
   },
 ];
 

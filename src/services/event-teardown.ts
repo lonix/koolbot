@@ -50,7 +50,7 @@ import {
   type MoveReport,
   type MoveSkipReason,
 } from "./event-member-moves.js";
-import { withGroupLock } from "./event-group-assignment.js";
+import { clearLeadersOnEnd } from "./event-group-leaders.js";
 import { runEventEndHooks, type EventEndTrigger } from "./event-end-hooks.js";
 import type { GroupChannelReport } from "./event-group-channels.js";
 import { FLASH_MAX, truncateFlash } from "../web/http-flash.js";
@@ -500,26 +500,17 @@ export class EventTeardown {
 
   /**
    * Group leaders (`captainId`) are not needed once the event is over, so they
-   * are cleared. Assignments (`memberIds`) are NOT: they stay as history until
-   * the member resets their data (owner decision, see the registry entry
+   * are cleared through the leaders module (`clearLeadersOnEnd`: the group
+   * lock, a fresh read of the ended row, a conditional update per group, and an
+   * `onLeaderChange` event with source `ended` for the leads-only channel).
+   * Assignments (`memberIds`) are NOT: they stay as history until the member
+   * resets their data (owner decision, see the registry entry
    * `event-group-member`). Nothing here adds or changes a member's group, so no
    * member-reset admission ticket is involved.
    */
   private async captains(event: IEvent): Promise<TeardownStep | null> {
     try {
-      const result = await withGroupLock(event.guildId, String(event._id), () =>
-        Event.updateOne(
-          {
-            _id: event._id,
-            guildId: event.guildId,
-            state: "ended",
-            "groups.captainId": { $type: "string" },
-          },
-          { $set: { "groups.$[].captainId": null } },
-        ),
-      );
-      const cleared =
-        (result as { modifiedCount?: number } | undefined)?.modifiedCount ?? 0;
+      const cleared = await clearLeadersOnEnd(event.guildId, String(event._id));
       return cleared > 0
         ? {
             id: "captains",

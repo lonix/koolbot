@@ -276,6 +276,7 @@ describe("UserDataExportService", () => {
     expect(ALL_FILTERS.event).toEqual([
       { guildId: GUILD, "rsvps.userId": USER },
       { guildId: GUILD, "groups.memberIds": USER },
+      { guildId: GUILD, "groups.captainId": USER },
     ]);
   });
 
@@ -538,6 +539,49 @@ describe("UserDataExportService", () => {
       "organiser-9",
       "Logi",
     ]) {
+      expect(raw).not.toContain(leaked);
+    }
+  });
+
+  it("returns the group the member leads (#1195), never the other leaders or members", async () => {
+    DATA.event = [
+      {
+        title: "Clan match",
+        startTime: "2026-03-01T18:00:00.000Z",
+        timezone: "UTC",
+        state: "ended",
+        leaderLabel: "Captain",
+        createdBy: "organiser-9",
+        groups: [
+          {
+            name: "Heli",
+            kind: "team",
+            memberIds: ["other-member-7", USER],
+            captainId: USER,
+          },
+          {
+            name: "Logi",
+            kind: "team",
+            memberIds: ["other-member-8"],
+            captainId: "other-member-8",
+          },
+        ],
+      },
+    ];
+
+    const { payload, raw } = await runExport();
+
+    expect(payload.data["event-group-captain"]).toEqual([
+      {
+        title: "Clan match",
+        startTime: "2026-03-01T18:00:00.000Z",
+        timezone: "UTC",
+        state: "ended",
+        leaderLabel: "Captain",
+        yourLeaderOf: [{ name: "Heli", kind: "team" }],
+      },
+    ]);
+    for (const leaked of ["other-member-7", "other-member-8", "organiser-9"]) {
       expect(raw).not.toContain(leaked);
     }
   });

@@ -1417,7 +1417,9 @@ uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: mem
 belong to it; **open**: anyone can join, such as spectators; **leads**: leaders and
 host only, at most one), an optional size (1 to 99, the voice user limit), an
 optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
-an optional colour marker such as a coloured circle. Names must be unique within an
+an optional colour marker such as a coloured circle. A separate tick box, **Group
+leaders**, switches on one leader per team group for this event (off by default; see
+**Leaders** below). Names must be unique within an
 event and the number of groups is capped by `events.groups.max_count`; a preset with
 more groups than the cap is greyed out in the picker and refused by the server
 (choose Custom or raise the cap). While "Use groups" is off, the section's number
@@ -1448,8 +1450,9 @@ server preset** opens the editor prefilled with an event's groups (names, kinds,
 sizes, tags, markers, labels and lead time; never members, captains or channels);
 the event is not changed. Choosing a preset fills in its labels and channel
 creation time with scripts on; without scripts only the group and leader labels
-fall back to the preset's. The tag and leader switches an event may get later
-(#1194, #1195) are not part of a preset yet. Everything on these pages is admin-only and audited
+fall back to the preset's. The tag switch an event may get later (#1194) is not part of a preset yet,
+and neither is the leaders switch (#1195): there is no default for leaders, so a
+preset never turns them on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
 (`event-preset.create`, `.update`, `.delete`, `.toggle`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
@@ -1541,8 +1544,9 @@ under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
 event's groups. Scheduled and active events also show a section for each control:
-**Assign people**, **Move people** and **End the event** (below) work today; live
-settings are added by a later update, and until then it says it is not available yet. Ended and cancelled events
+**Assign people**, **Move people**, **End the event** and, when the event has leaders
+switched on, **Leaders** (below) work today; live settings are added by a later update, and
+until then it says it is not available yet. Ended and cancelled events
 show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.
@@ -1580,6 +1584,9 @@ when it has no size.
   seed that is written to the audit row, so a result can be reproduced.
 - **Limits:** a person is in at most one group; a group holds at most its size, or 99
   without one; an event holds at most 500 assigned people.
+- **Leaders:** when the event has leaders switched on, a person who leads the group they
+  are in shows a badge with the event's leader label. Taking a leader out of their group,
+  or moving them to another group, ends their role (see **Leaders** below).
 - **Kept:** an assignment is kept when someone leaves voice, until they are
   unassigned. Assignments stay on a finished event as history. A member's data
   export lists their own group of each event, and resetting their data on
@@ -1670,6 +1677,68 @@ event is scheduled or active.
 - **Audit:** each press is one audit entry with counts (moved, skipped by reason,
   not confirmed), no names. Move one person also records the person's id.
 
+**Leaders** (#1195) is a section of the host panel, and a column of the Groups card, only while
+the event has groups and **Group leaders** was ticked on the schedule form. With it off
+nothing about leaders shows, and setting a leader, renaming the label and pulling leaders
+refuse. (An event cannot switch leaders on or off after it is created until live settings (#1197)
+land. A repeating event's next occurrence keeps the switch, never the leaders.) It
+also needs `events.enabled`: setting a leader and pulling leaders refuse while it is off.
+
+- **Set the leader:** each team group has a picker of the people assigned to it, with a
+  "no leader" choice. The leader must be a member of that group, so assign people first
+  (they do not have to be connected). There is at most one leader per team group; an open or
+  leaders-only group has none; choosing someone else replaces the leader in one change. The
+  check is repeated inside the same per-event lock as every membership change, against the
+  event as it is at that moment, and again in the database write itself, so a person who
+  was unassigned a moment earlier is refused ("a leader must be a member of the group").
+  A member whose data reset is running is refused, like adding them to a group.
+- **What leaders are called:** the event's leader label (Leader by default, from the form or
+  a preset) is used on the page. **Rename** changes it for this event only (up to 20
+  characters, empty goes back to "Leader").
+- **Unassigning ends the role.** A leader stops being leader when they leave their group:
+  the host unassigns them or moves them to another group, a randomise deals them elsewhere
+  or nowhere, they join another group's channel, or they reset their data. This is a step
+  that runs right after the membership change and decides from the event as it is then,
+  under the same lock: a person who was put back into the group before it ran stays
+  leader. If that step ever fails, the stored id is still ignored: a leader who is not a
+  member of the group is not shown as a leader and is never pulled.
+- **Pull leaders only:** moves every connected leader to one channel, for a briefing.
+  Everyone else stays where they are. **To:** the default is the leaders-only channel
+  when the event has a `leads` group with a channel (until the leads-only channel work,
+  #1199, that is an ordinary group channel anyone can join), otherwise the main channel,
+  otherwise the channel you are in; or choose the main channel, **the channel I am in**
+  (the event channel you are connected to now), or any group's channel. The destination is
+  posted as a word or a group key, never a channel id. It is the same mover as **Move
+  people**, so everything there applies: it needs **Move Members** and `events.enabled`,
+  checks the person's real voice state first, moves one person at a time through the
+  rate-limited path, moves at most 60 per run, never replays a timed-out move, skips and
+  lists a leader who is not connected, is in a channel outside the event, or is in a full
+  destination, and reports the result in one message. The event's creator and you are never
+  moved, even as a leader. A pull and a **Move people** run share one lock: a second press
+  answers "already in progress". The plan is made from the event as it is when the run
+  starts: someone unassigned before that is not moved, and someone unassigned while the
+  run is waiting on Discord is still moved once (the move is not a group change, so they
+  are not put back).
+- **Moving changes no group or leader.** A pull marks each move like any other move, so
+  pulling a leader into another team's channel does not record them in that team, and
+  they stay leader of the group they are assigned to.
+- **For the leaders-only channel (#1199):** every leader change (host set or clear, the
+  unassign step, a reset, the end of the event) is announced to a hook (`onLeaderChange`) after it is written;
+  nothing listens yet. The hook names the id that was stored as leader before the change,
+  even a member who left the group an instant earlier and whose cleanup had not run, so a
+  replacement made in between still reports who lost the role. After a randomise or other
+  burst of unassigns the clearing step runs as one pass, not once per person.
+- **Not shown in the event post.** Leaders appear on the host panel only.
+- **Member data:** a leader's id is the member's own data: their export lists the event and
+  the group they lead (never other leaders), and resetting their data on `/me/privacy`
+  clears it in every event, finished ones too. Ending the event (**End the event**, below, and
+  the scheduled end) clears every leader of that event; a cancelled event, and an event that
+  ended before the end cleared leaders, keep theirs until that member resets.
+- **Audit:** `event.host.set-leader` (with the group and the person's id),
+  `event.host.leader-label` and `event.host.pull-leaders` (counts and the destination
+  word, no names). The step that ends a role after an unassign is not audited on its own;
+  it follows an audited unassign, an audited randomise, an unaudited self-join or a reset.
+
 **End the event** (#1193) ends a running event now. It is the **End the event** section of
 the host panel (shown for every open event; the form only for an `active` one, a scheduled
 event says it can be ended once it has started) and an **End now** control on every
@@ -1710,9 +1779,14 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    stays for `events.channel_grace_minutes` after the end (counted from `endedAt`, so an event
    ended early gives people the full grace period from the press, not from the scheduled
    end) and the scan removes it once it is empty, as before.
-6. **Per-user data:** group leaders (`captainId`) are cleared. Assignments (`memberIds`) stay
-   as history until the member resets their data (owner decision, see the member data
-   export). Nothing here adds or changes anyone's group.
+6. **Per-user data:** group leaders (`captainId`) are cleared by `clearLeadersOnEnd` in the
+   leaders module: under the same per-event lock as every membership change, from a fresh read
+   of an event that reads `ended`, with one conditional update that matches each group's stored
+   leader (the shape of the unassign step). Each cleared leader is announced to
+   `onLeaderChange` with source `ended` and the stored id as `fromUserId`, so the leaders-only
+   channel (#1199) can take their access away; a cancel does not clear leaders. Assignments
+   (`memberIds`) stay as history until the member resets their data (owner decision, see the
+   member data export). Nothing here adds or changes anyone's group.
 7. **Discord event:** a manual end closes it the way the scheduled end does (an unstarted one
    is deleted, a running one is completed; an adopted one is only let go of). The scheduled end
    leaves this to the scan's own sync right after the teardown. If the server cannot be reached,

@@ -37,9 +37,9 @@ jest.unstable_mockModule(
     // Imported by modules on the same import path; not used by these routes.
     removeMemberFromEvents: async () => ({ matched: 0, removed: 0, failed: 0 }),
     handleGroupSelfJoin: async () => "no-event",
-    // Imported by the shared end-of-event teardown; not used by these routes.
-    withGroupLock: async (...args: unknown[]) =>
-      (args[2] as () => Promise<unknown>)(),
+    withGroupLock: (_g: string, _e: string, work: () => Promise<unknown>) =>
+      work(),
+    onGroupAssignmentChange: () => () => undefined,
   }),
 );
 

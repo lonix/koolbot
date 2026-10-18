@@ -68,6 +68,7 @@ import {
 } from "./services/rules-service.js";
 import { EventService } from "./services/event-service.js";
 import { handleGroupSelfJoin } from "./services/event-group-assignment.js";
+import { installLeaderCleanup } from "./services/event-group-leaders.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
@@ -691,6 +692,9 @@ try {
   rewindNudgeService = RewindNudgeService.getInstance(client);
   birthdayService = BirthdayService.getInstance(client);
   eventService = EventService.getInstance(client);
+  // Group leaders (#1195): unassigning a member clears their leader role, for
+  // every source of assignment changes (Web UI, self-join, member data reset).
+  installLeaderCleanup();
   lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);

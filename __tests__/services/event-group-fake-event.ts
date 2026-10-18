@@ -15,6 +15,9 @@ export interface Doc {
   state: string;
   groupsEnabled: boolean;
   groupsLocked: boolean;
+  /** Leaders (#1195); a missing field reads as off. */
+  captainsEnabled?: boolean;
+  leaderLabel?: string;
   groups: Group[];
 }
 
@@ -27,6 +30,8 @@ export const fake = {
   failUpdatesFor: null as string | null,
   /** Extra event-loop turns a findOne with this filter takes (to force reordering). */
   delayFor: null as ((filter: Record<string, unknown>) => number) | null,
+  /** Awaited by `findById().lean()` before it reads the store (a delayed fresh read). */
+  gateFindById: null as Promise<void> | null,
 };
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -51,6 +56,20 @@ function matches(doc: Doc, filter: Record<string, unknown>): boolean {
       if (!doc.groups.some((g) => g.memberIds.includes(v as string))) {
         return false;
       }
+    } else if (k === "groups.captainId") {
+      if (!doc.groups.some((g) => g.captainId === v)) return false;
+    } else if (k === "captainsEnabled") {
+      if ((doc.captainsEnabled ?? false) !== v) return false;
+    } else if (k === "groups") {
+      const em = (v as { $elemMatch: Record<string, unknown> }).$elemMatch;
+      const ok = doc.groups.some((g) =>
+        Object.entries(em).every(([ek, ev]) =>
+          ek === "memberIds"
+            ? g.memberIds.includes(ev as string)
+            : (g as unknown as Record<string, unknown>)[ek] === ev,
+        ),
+      );
+      if (!ok) return false;
     } else {
       throw new Error(`unsupported filter ${k}`);
     }
@@ -59,6 +78,14 @@ function matches(doc: Doc, filter: Record<string, unknown>): boolean {
 }
 
 export const EventMock = {
+  findById: (id: string) => ({
+    lean: async () => {
+      await tick();
+      if (fake.gateFindById) await fake.gateFindById;
+      const doc = store.get(id);
+      return doc ? clone(doc) : null;
+    },
+  }),
   findOne: (filter: Record<string, unknown>) => {
     const query = {
       select: () => query,
@@ -102,6 +129,31 @@ export const EventMock = {
     }
     let modified = 0;
     for (const [path, value] of Object.entries(update.$set ?? {})) {
+      const c = /^groups\.\$\[(g\d*)\]\.captainId$/.exec(path);
+      if (c) {
+        // Every condition of the array filter must hold for the element.
+        const conds = options?.arrayFilters?.find((f) =>
+          Object.keys(f).every((fk) => fk.startsWith(`${c[1]}.`)),
+        );
+        for (const g of doc.groups) {
+          const holds = Object.entries(conds ?? {}).every(
+            ([fk, fv]) =>
+              (g as unknown as Record<string, unknown>)[
+                fk.slice(c[1].length + 1)
+              ] === fv,
+          );
+          if (conds && holds && g.captainId !== (value as string | null)) {
+            g.captainId = value as string | null;
+            modified = 1;
+          }
+        }
+        continue;
+      }
+      if (path === "leaderLabel") {
+        if (doc.leaderLabel !== value) modified = 1;
+        doc.leaderLabel = value as string;
+        continue;
+      }
       const m = /^groups\.\$\[(g\d+)\]\.memberIds$/.exec(path);
       if (m) {
         const filterKey = options?.arrayFilters?.find(

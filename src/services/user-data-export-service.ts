@@ -366,6 +366,36 @@ const READERS: Record<string, CollectionReader> = {
     };
   },
 
+  // Shared aggregate: an event row names the leader of every group. The member
+  // gets the event and the name of the group they lead, never the others.
+  "event-group-captain": async ({ userId, guildId, maxItems }) => {
+    const rows = await Event.find({ guildId, "groups.captainId": userId })
+      .sort({ startTime: -1 })
+      .limit(maxItems + 1)
+      .lean();
+    const { rows: kept, truncated } = capped(rows, maxItems);
+    return {
+      value: kept.map((row) => {
+        const groups = (Array.isArray(row.groups) ? row.groups : []) as Array<{
+          name: string;
+          kind: string;
+          captainId?: string | null;
+        }>;
+        return {
+          title: row.title,
+          startTime: row.startTime,
+          timezone: row.timezone,
+          state: row.state,
+          leaderLabel: row.leaderLabel,
+          yourLeaderOf: groups
+            .filter((g) => g.captainId === userId)
+            .map((g) => ({ name: g.name, kind: g.kind })),
+        };
+      }),
+      truncated,
+    };
+  },
+
   // Shared aggregate: the row lists every current holder of the reward role.
   // The member learns which roles list them, not who else is on them.
   "leaderboard-role-assignment": async ({ userId, guildId, maxItems }) => {
