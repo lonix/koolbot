@@ -36,6 +36,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import {
+  groupKeyOf,
   planAssign,
   planRandomise,
   seededRandom,
@@ -123,6 +124,8 @@ export type AssignmentFailure =
   | "no-teams"
   | "locked"
   | "member-reset"
+  | "not-connected"
+  | "no-voice-state"
   | "write-failed";
 
 /** Host-facing wording of each refusal. */
@@ -136,6 +139,10 @@ export const ASSIGNMENT_FAILURE_MESSAGE: Record<AssignmentFailure, string> = {
   "event-full": "This event has reached its limit of assigned people.",
   "no-teams": "This event has no team groups to put people into.",
   locked: "Groups are locked.",
+  "not-connected":
+    "That person is not connected to this event's voice channels.",
+  "no-voice-state":
+    "The bot could not read who is in the voice channels, so nobody was assigned.",
   "member-reset":
     "That member's data is being reset, so nobody was added. Try again in a moment.",
   "write-failed":
@@ -234,6 +241,15 @@ export async function assignMember(opts: {
    * refused.
    */
   admission: number;
+  /**
+   * Whether the member is connected to the event's voice channels right now:
+   * true, false, or null when the voice state cannot be read. Asked inside the
+   * event lock, only when this change would ADD a member who is in no group
+   * (moving or removing someone already placed never needs it), so whether it
+   * is an add or a move is decided from the fresh row, not from a copy the
+   * caller read earlier. Null refuses the add (fail closed).
+   */
+  isConnected: () => boolean | null;
 }): Promise<AssignResult> {
   const { guildId, eventId, userId, groupKey } = opts;
   const run = (): Promise<AssignResult> =>
@@ -255,12 +271,19 @@ async function assignLocked(opts: {
   userId: string;
   groupKey: string | null;
   source?: AssignmentSource;
+  isConnected: () => boolean | null;
 }): Promise<AssignResult> {
   const { guildId, eventId, userId, groupKey } = opts;
   {
     const row = await readRow(guildId, eventId);
     const bad = rowFailure(row);
     if (bad || !row) return fail(bad ?? "not-found");
+    if (groupKey !== null && groupKeyOf(row.groups, userId) === null) {
+      // An add (not a move): the person must be connected now.
+      const connected = opts.isConnected();
+      if (connected === null) return fail("no-voice-state");
+      if (!connected) return fail("not-connected");
+    }
     const plan = planAssign(row.groups, userId, groupKey);
     if (!plan.ok)
       return fail(plan.reason === "no-teams" ? "no-teams" : plan.reason);

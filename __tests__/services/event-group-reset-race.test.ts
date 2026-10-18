@@ -93,6 +93,7 @@ describe("host assignment against a member reset", () => {
       userId: ME,
       groupKey: "a",
       admission: ticket,
+      isConnected: () => true,
     });
     expect(result).toMatchObject({ ok: false, code: "member-reset" });
     release();
@@ -110,6 +111,7 @@ describe("host assignment against a member reset", () => {
       userId: ME,
       groupKey: "a",
       admission: ticket,
+      isConnected: () => true,
     });
     expect(result).toMatchObject({ ok: false, code: "member-reset" });
     expect(holders(ME)).toEqual([]);
@@ -127,6 +129,7 @@ describe("host assignment against a member reset", () => {
       userId: ME,
       groupKey: "a",
       admission: tracking().admission(),
+      isConnected: () => true,
     });
     const resetting = reset(ME);
     const [added] = await Promise.all([adding, resetting]);
@@ -145,6 +148,7 @@ describe("host assignment against a member reset", () => {
       userId: ME,
       groupKey: "b",
       admission: tracking().admission(),
+      isConnected: () => true,
     });
     await Promise.all([adding, reset(ME)]);
     expect(holders(ME)).toEqual([]);
@@ -201,6 +205,7 @@ describe("host assignment against a member reset", () => {
       userId: ME,
       groupKey: "a",
       admission: tracking().admission(),
+      isConnected: () => true,
     });
     expect(result).toMatchObject({ ok: true, changed: true });
   });
@@ -214,6 +219,7 @@ describe("host assignment against a member reset", () => {
         userId: ME,
         groupKey: "a",
         admission: tracking().admission(),
+        isConnected: () => true,
       }),
     ).toMatchObject({ ok: true, changed: true });
     expect(holders(ME)).toEqual(["a"]);

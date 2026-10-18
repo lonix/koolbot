@@ -66,8 +66,10 @@ const {
 
 type AssignOpts = Parameters<typeof assignMemberReal>[0];
 type RandomiseOpts = Parameters<typeof randomiseMembersReal>[0];
-const assignMember = (o: Omit<AssignOpts, "admission">) =>
-  assignMemberReal({ admission: 1, ...o });
+const assignMember = (
+  o: Omit<AssignOpts, "admission" | "isConnected"> &
+    Partial<Pick<AssignOpts, "isConnected">>,
+) => assignMemberReal({ admission: 1, isConnected: () => true, ...o });
 const randomiseMembers = (o: Omit<RandomiseOpts, "admission">) =>
   randomiseMembersReal({ admission: 1, ...o });
 
@@ -171,6 +173,73 @@ describe("assignMember", () => {
     expect(result.ok ? "" : result.message).toBe("That group is full.");
     expect(updates).toEqual([]);
     expect(members("a")).toEqual(["u1"]);
+  });
+
+  it("checks presence only for a real add, decided from the fresh row inside the lock", async () => {
+    seed({
+      groups: [group("a", { memberIds: ["away"] }), group("b")],
+    });
+    // The member is offline. A host's unassign wins the lock first; the move
+    // that was prepared while they were still placed must now be an add and
+    // be refused, not slip through on the stale "already in a group".
+    const [unassign, move] = await Promise.all([
+      assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "away",
+        groupKey: null,
+      }),
+      assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "away",
+        groupKey: "b",
+        isConnected: () => false,
+      }),
+    ]);
+    expect(unassign).toMatchObject({ ok: true, changed: true });
+    expect(move).toMatchObject({ ok: false, code: "not-connected" });
+    expect(members("a")).toEqual([]);
+    expect(members("b")).toEqual([]);
+  });
+
+  it("moves an offline member who is still placed without asking about presence", async () => {
+    seed({ groups: [group("a", { memberIds: ["away"] }), group("b")] });
+    const asked = jest.fn(() => false);
+    expect(
+      await assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "away",
+        groupKey: "b",
+        isConnected: asked,
+      }),
+    ).toMatchObject({ ok: true, changed: true });
+    expect(asked).not.toHaveBeenCalled();
+    expect(members("b")).toEqual(["away"]);
+  });
+
+  it("refuses an add when the voice state cannot be read or the person is not connected", async () => {
+    seed();
+    expect(
+      await assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "u1",
+        groupKey: "b",
+        isConnected: () => null,
+      }),
+    ).toMatchObject({ ok: false, code: "no-voice-state" });
+    expect(
+      await assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "u1",
+        groupKey: "b",
+        isConnected: () => false,
+      }),
+    ).toMatchObject({ ok: false, code: "not-connected" });
+    expect(members("b")).toEqual([]);
   });
 
   it("refuses non-team groups, unknown groups and finished events", async () => {

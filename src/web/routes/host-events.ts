@@ -317,28 +317,19 @@ function registerAssignmentActions(router: Router, client: Client): void {
     if (!USER_ID_RE.test(userId)) {
       return { ok: false, message: "Pick a person from the list." };
     }
-    if (groupKey !== null) {
-      // Adding someone needs the live voice state (fail closed without it). A
-      // person already in a group can always be moved.
-      const already = groupKeyOf(event.groups ?? [], userId) !== null;
-      if (!already) {
-        const presence = readEventPresence(client, event);
-        if (!presence.ok) return { ok: false, message: NO_VOICE_STATE };
-        if (!presence.members.some((m) => m.id === userId)) {
-          return {
-            ok: false,
-            message:
-              "That person is not connected to this event's voice channels.",
-          };
-        }
-      }
-    }
     const result = await assignMember({
       guildId: event.guildId,
       eventId: String(event._id),
       userId,
       groupKey,
       admission,
+      // Asked by the service, inside the event lock, only for a real add.
+      isConnected: () => {
+        const presence = readEventPresence(client, event);
+        return presence.ok
+          ? presence.members.some((m) => m.id === userId)
+          : null;
+      },
     });
     if (!result.ok) {
       return {

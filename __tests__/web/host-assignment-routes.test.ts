@@ -389,6 +389,7 @@ describe("assign", () => {
       userId: BEN,
       groupKey: "g_logi",
       admission: expect.any(Number),
+      isConnected: expect.any(Function),
     });
     expect(flashOf(r.location)).toMatchObject({ type: "ok" });
     expect(flashOf(r.location).msg).toContain("is now in Logi");
@@ -410,35 +411,34 @@ describe("assign", () => {
     expect(assignMember).not.toHaveBeenCalled();
   });
 
-  it("refuses a person who is not connected, a malformed id and a missing group", async () => {
-    const away = await post("assign", { userId: AWAY, group: "g_logi" });
-    expect(flashOf(away.location)).toMatchObject({ type: "err" });
-    expect(flashOf(away.location).msg).toContain("not connected");
+  it("refuses a malformed id and a missing group before asking the service", async () => {
     const bad = await post("assign", { userId: "not-an-id", group: "g_logi" });
     expect(flashOf(bad.location).type).toBe("err");
     const none = await post("assign", { userId: BEN, group: "" });
     expect(flashOf(none.location).type).toBe("err");
     expect(assignMember).not.toHaveBeenCalled();
     // Refusals are audited as failures too.
-    expect(auditRows.filter((a) => a.result === "failure")).toHaveLength(3);
+    expect(auditRows.filter((a) => a.result === "failure")).toHaveLength(2);
   });
 
-  it("fails closed when the voice state cannot be read", async () => {
+  it("hands the service a live presence check: connected, not connected, unreadable", async () => {
+    await post("assign", { userId: BEN, group: "g_logi" });
+    const check = (assignMember.mock.calls[0][0] as Json).isConnected as () =>
+      boolean | null;
+    expect(check()).toBe(true);
+    // Read when asked, not when the click arrived.
+    voice.set("ch-main", []);
+    expect(check()).toBe(false);
     guildInCache = false;
-    const r = await post("assign", { userId: BEN, group: "g_logi" });
-    expect(flashOf(r.location).type).toBe("err");
-    expect(assignMember).not.toHaveBeenCalled();
+    expect(check()).toBeNull();
   });
 
-  it("lets a person who already has a group be moved after they left voice", async () => {
-    events[EVENT_ID] = makeEvent({
-      groups: [
-        team("g_heli", "Heli", { memberIds: [AWAY] }),
-        team("g_logi", "Logi"),
-      ],
-    });
+  it("does not decide add versus move itself: an offline person is passed through", async () => {
     await post("assign", { userId: AWAY, group: "g_logi" });
     expect(assignMember).toHaveBeenCalledTimes(1);
+    const check = (assignMember.mock.calls[0][0] as Json).isConnected as () =>
+      boolean | null;
+    expect(check()).toBe(false);
   });
 
   it("shows the service's refusal, such as a full group, to the host", async () => {
@@ -482,6 +482,7 @@ describe("unassign", () => {
       userId: AWAY,
       groupKey: null,
       admission: expect.any(Number),
+      isConnected: expect.any(Function),
     });
     expect(flashOf(r.location).type).toBe("ok");
     expect(auditRows.some((a) => a.action === "event.host.unassign")).toBe(
