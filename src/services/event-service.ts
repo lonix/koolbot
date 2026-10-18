@@ -374,6 +374,8 @@ export class EventService extends ScheduledService {
    * otherwise delete the main channel before the pull-back has used it.
    */
   private readonly endsInProgress = new Map<string, Set<number>>();
+  /** Events whose scheduled end was deferred (people in a voice channel), so the deferral is logged once. */
+  private readonly endDeferred = new Set<string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -414,6 +416,69 @@ export class EventService extends ScheduledService {
       abortEnding: (id, hold): void => this.abortEnding(id, hold),
       finishEnding: (id, hold): void => this.finishEnding(id, hold),
     });
+  }
+
+  /**
+   * A SCHEDULED end never ends an event while anyone is in one of its voice
+   * channels: the main channel (the end removes it after the grace period) or
+   * any group channel. Bots do not count. The event stays live and the next
+   * scan asks again: nothing is deleted and nobody is moved. Only the host's
+   * manual "End event now" may end it with people present. Fails closed: a
+   * channel that cannot be read counts as occupied.
+   *
+   * Occupancy is the gateway's voice cache of each channel after a forced read
+   * of the channel (Discord has no call that lists a channel's members; the
+   * per-person raw voice-state read of the mover needs the people first). That
+   * is the same count the channel cleanup uses to keep a channel with someone
+   * in it. The deferral is logged once per event.
+   */
+  private async deferScheduledEnd(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<boolean> {
+    const id = String(event._id);
+    const occupied = await this.eventChannelsOccupied(event, guild);
+    if (!occupied) {
+      this.endDeferred.delete(id);
+      return false;
+    }
+    if (!this.endDeferred.has(id)) {
+      this.endDeferred.add(id);
+      logger.info(
+        `Event ${sanitizeForLog(id)}: its scheduled end is deferred while someone is in one of its voice channels; checked again every scan`,
+      );
+    }
+    return true;
+  }
+
+  private async eventChannelsOccupied(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<boolean> {
+    const ids: string[] = [];
+    if (event.channelId) ids.push(event.channelId);
+    if (event.groupsEnabled === true) {
+      for (const group of event.groups ?? []) {
+        if (group.channelId) ids.push(group.channelId);
+      }
+    }
+    for (const channelId of ids) {
+      try {
+        const channel = await guild.channels.fetch(channelId, { force: true });
+        if (!channel) continue;
+        // Not a voice channel of this server: nobody is in it.
+        if (channel.type !== ChannelType.GuildVoice) continue;
+        for (const member of (channel as VoiceChannel).members.values()) {
+          if (!member.user?.bot) return true;
+        }
+      } catch (error) {
+        // Gone (10003): nobody can be in it. Anything else: cannot tell, so
+        // occupied.
+        if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) continue;
+        return true;
+      }
+    }
+    return false;
   }
 
   /** The scan leaves an event alone for this long after an end began. */
@@ -819,7 +884,12 @@ export class EventService extends ScheduledService {
     // cancel or an edited schedule is not overwritten; the group channels go
     // there too, and this scan's own native sync below closes the Discord event.
     let teardownRan = false;
-    if (shouldEndEvent(event, now)) {
+    if (
+      shouldEndEvent(event, now) &&
+      !(await this.deferScheduledEnd(event, guild))
+    ) {
+      // The occupancy read is an await: an end that began meanwhile wins.
+      if (this.mustSkipScan(event)) return;
       const outcome = await this.teardown.run({
         eventId: String(event._id),
         guildId: event.guildId,

@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { ChannelType, TextChannel } from "discord.js";
+import { ChannelType, DiscordAPIError, TextChannel } from "discord.js";
 
 // How EventService runs the shared teardown (#1193): the scheduled end
 // (`processEvent`) and "End event now" (`endEventNow`) both go through the one
@@ -998,6 +998,32 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     expect(series?.event.state).toBe("ended");
   });
 
+  it("a series cancel counts only the occurrences it really cancelled", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    (EventMock as unknown as { updateMany: jest.Mock }).updateMany = jest.fn(
+      async () => ({}),
+    );
+    const other = "65a000000000000000000002";
+    const series = { recurrence: "weekly", seriesId: "s1" };
+    // Two open occurrences; the second ended (or is not stored) before its claim.
+    store.set(ID, stored({ state: "active", ...series }));
+    EventMock.find = jest.fn(async () => [
+      row({ state: "active", ...series }),
+      row({ _id: other, state: "active", ...series }),
+    ]);
+    const svc = service as unknown as {
+      cancelSeries: (
+        id: string,
+        g: string,
+      ) => Promise<{ event: { state: string }; cancelled: number } | null>;
+      getEvent: (id: string) => Promise<unknown>;
+    };
+    svc.getEvent = jest.fn(async () => row({ state: "active", ...series }));
+    const result = await svc.cancelSeries(ID, "guild-1");
+    expect(result?.cancelled).toBe(1);
+  });
+
   it("a cancel of an open event still saves, deletes the channel and syncs", async () => {
     const { service } = setup();
     statefulUpdateOne();
@@ -1065,5 +1091,179 @@ describe("the start reminder after an end began", () => {
       { ...WINDOWS, reminderMs: 30 * MIN },
     );
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a scheduled end with people in a voice channel of the event", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+  const groups = [
+    { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
+    { key: "g_b", name: "B", kind: "team", channelId: "c2", memberIds: [] },
+  ];
+  const groupRow = (): Row => row({ groupsEnabled: true, groups });
+
+  function voice(size: number, bots = 0): Record<string, unknown> {
+    const members = new Map<string, unknown>();
+    for (let i = 0; i < size; i++) {
+      members.set(`u${i}`, { id: `u${i}`, user: { bot: false } });
+    }
+    for (let i = 0; i < bots; i++) {
+      members.set(`b${i}`, { id: `b${i}`, user: { bot: true } });
+    }
+    return { type: ChannelType.GuildVoice, members };
+  }
+
+  function channels(
+    guild: { channels: { fetch: unknown } },
+    byId: Record<string, unknown>,
+  ): jest.Mock {
+    const fetch = jest.fn(async (id: string) => {
+      const v = byId[id];
+      if (v instanceof Error) throw v;
+      return v ?? null;
+    });
+    guild.channels.fetch = fetch;
+    return fetch;
+  }
+
+  async function deferredLogs(): Promise<number> {
+    const logger = (await import("../../src/utils/logger.js")).default as {
+      info: jest.Mock;
+    };
+    return logger.info.mock.calls.filter((c) =>
+      String(c[0]).includes("scheduled end is deferred"),
+    ).length;
+  }
+
+  it("is deferred: the event stays live, nothing is claimed, deleted or moved", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    const fetch = channels(guild, { c1: voice(0), c2: voice(2) });
+    const run = jest.spyOn(service.teardown, "run");
+    const event = groupRow();
+    await service.processEvent(event, guild, AFTER_END, WINDOWS);
+    expect(run).not.toHaveBeenCalled();
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(store.get(ID)?.state).toBe("active");
+    expect(event.state).toBe("active");
+    expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    // Read from Discord with force, not believed from the cache.
+    expect(fetch).toHaveBeenCalledWith("c1", { force: true });
+  });
+
+  it("is checked again next scan and ends once the channels are empty", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    const byId: Record<string, unknown> = { c1: voice(1), c2: voice(0) };
+    channels(guild, byId);
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+    byId.c1 = voice(0);
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+
+  it("is logged once, not every scan", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    channels(guild, { c1: voice(3), c2: voice(0) });
+    const before = await deferredLogs();
+    for (let i = 0; i < 3; i++) {
+      await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    }
+    expect((await deferredLogs()) - before).toBe(1);
+  });
+
+  it("people in the main channel block it too: the end removes that channel", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    channels(guild, { "main-1": voice(2), c1: voice(0), c2: voice(0) });
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("an event without groups is deferred while someone is in its channel", async () => {
+    const { service, guild } = setup();
+    const fetch = channels(guild, { "main-1": voice(1) });
+    await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    expect(fetch).toHaveBeenCalledWith("main-1", { force: true });
+    expect(store.get(ID)?.state).toBe("active");
+  });
+
+  it("bots do not count", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    channels(guild, { "main-1": voice(0, 2), c1: voice(0, 1), c2: voice(0) });
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+
+  it("fails closed: a group channel that cannot be read counts as occupied", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    channels(guild, { c1: voice(0), c2: new Error("socket hang up") });
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+  });
+
+  it("a group channel that is gone (10003) cannot hold anyone", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    const gone = new DiscordAPIError(
+      { code: 10003, message: "Unknown Channel" },
+      10003,
+      404,
+      "GET",
+      "/",
+      {},
+    );
+    channels(guild, { c1: gone, c2: voice(0) });
+    await service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+
+  it("an event with nobody in its channel ends on schedule as before", async () => {
+    const { service, guild } = setup();
+    channels(guild, { "main-1": voice(0) });
+    await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+
+  it("an end that began during the occupancy read wins: the scan does not end it again", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    let release!: () => void;
+    guild.channels.fetch = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(voice(0));
+        }),
+    );
+    const run = jest.spyOn(service.teardown, "run");
+    const scan = service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
+    await nap();
+    guild.channels.fetch = jest.fn(async () => voice(4));
+    // The host ends it by hand, people present.
+    const manual = await service.endEventNow(ID, "guild-1", {
+      pullBack: false,
+    });
+    expect(manual.status).toBe("ended");
+    release();
+    await scan;
+    // Only the manual end ran the teardown.
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("the host's manual end may end it with people present", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    channels(guild, { c1: voice(3), c2: voice(3) });
+    const outcome = await service.endEventNow(ID, "guild-1", {
+      pullBack: false,
+    });
+    expect(outcome.status).toBe("ended");
+    expect(store.get(ID)?.state).toBe("ended");
   });
 });
