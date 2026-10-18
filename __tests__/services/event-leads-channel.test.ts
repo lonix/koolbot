@@ -1557,6 +1557,60 @@ describe("verification after an incomplete pass", () => {
   });
 });
 
+describe("tracking appointments per group", () => {
+  it("ending an orphaned role in one group does not erase an appointment in another", async () => {
+    seed({
+      groups: [
+        // A failed cleanup left L1 named leader of a group they are not in.
+        group("a", { channelId: "ch-a", memberIds: [L2], captainId: L1 }),
+        group("b", { channelId: "ch-b", memberIds: [L1, U3] }),
+        group("l", { kind: "leads", channelId: "ch-leads" }),
+      ],
+    });
+    const w = makeWorld();
+    w.seedRight();
+    uninstallSync = installLeadsChannelSync(
+      async () => undefined,
+      (change) => w.gc.trackLeaderChange(change.eventId, change),
+    );
+    w.place(L1, "ch-leads");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    w.client.rest.get.mockImplementationOnce(async () => {
+      await gate;
+      return { channel_id: "ch-leads" };
+    });
+    const evicting = evictFromLeads({
+      client: w.client as never,
+      channels: w.gc,
+      guildId: GUILD,
+      eventId: EV,
+      revoked: [L1],
+    });
+    await settle();
+    // While the move waits: L1 is appointed in b, then the orphaned role in a
+    // is cleared (the hook names L1 as the id that was stored there).
+    await setGroupLeader({
+      guildId: GUILD,
+      eventId: EV,
+      groupKey: "b",
+      userId: L1,
+      admission: 1,
+    });
+    await setGroupLeader({
+      guildId: GUILD,
+      eventId: EV,
+      groupKey: "a",
+      userId: null,
+      admission: 1,
+    });
+    release();
+    await evicting;
+    expect(w.moves).toEqual([]);
+    expect(w.where(L1)).toBe("ch-leads");
+  });
+});
+
 describe("plan-time snapshots at dispatch", () => {
   it("uses the admin roles as they are when the move is sent, not when it was planned", async () => {
     seed();

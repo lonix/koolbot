@@ -451,7 +451,10 @@ export class EventGroupChannels {
    * hook reported them (checked synchronously when a move out of the leads
    * channel is about to be sent, because a reappointment can land while the
    * move waits on Discord; a later change that ends the role removes them). */
-  private readonly leadersNow = new Map<string, Map<string, number>>();
+  private readonly leadersNow = new Map<
+    string,
+    Map<string, Map<string, number>>
+  >();
   /** Counts leader changes in this process, to say "since the plan was made". */
   private leaderSeq = 0;
   /** Per server: the admin group roles last read (the cache-only trigger uses it). */
@@ -1386,12 +1389,28 @@ export class EventGroupChannels {
    */
   public trackLeaderChange(
     eventId: string,
-    change: { fromUserId: string | null; toUserId: string | null },
+    change: {
+      groupKey: string;
+      fromUserId: string | null;
+      toUserId: string | null;
+    },
   ): void {
-    const map = this.leadersNow.get(eventId) ?? new Map<string, number>();
+    // Per person and per group: ending a role in one group must not erase an
+    // appointment in another.
+    const map =
+      this.leadersNow.get(eventId) ?? new Map<string, Map<string, number>>();
     this.leaderSeq += 1;
-    if (change.fromUserId) map.delete(change.fromUserId);
-    if (change.toUserId) map.set(change.toUserId, this.leaderSeq);
+    const drop = (userId: string): void => {
+      const groups = map.get(userId);
+      groups?.delete(change.groupKey);
+      if (groups && groups.size === 0) map.delete(userId);
+    };
+    if (change.fromUserId) drop(change.fromUserId);
+    if (change.toUserId) {
+      const groups = map.get(change.toUserId) ?? new Map<string, number>();
+      groups.set(change.groupKey, this.leaderSeq);
+      map.set(change.toUserId, groups);
+    }
     if (map.size > 0) this.leadersNow.set(eventId, map);
     else this.leadersNow.delete(eventId);
   }
@@ -1412,7 +1431,11 @@ export class EventGroupChannels {
     userId: string,
     stamp: number,
   ): boolean {
-    return (this.leadersNow.get(eventId)?.get(userId) ?? 0) > stamp;
+    for (const seq of this.leadersNow.get(eventId)?.get(userId)?.values() ??
+      []) {
+      if (seq > stamp) return true;
+    }
+    return false;
   }
 
   /** Remember people who still have to be moved out of the leads channel. */

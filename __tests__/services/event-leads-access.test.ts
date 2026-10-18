@@ -291,6 +291,48 @@ describe("planLeadsSync", () => {
     ).toEqual([]);
   });
 
+  it("removes the View the bot gave an admin or other role once the category hides channels, unless the category grants it", () => {
+    const base = ctx({
+      leaderIds: ["l1", "l2"],
+      adminRoleIds: new Set(["mods", "vip"]),
+      adminGrantRoleIds: new Set(["mods", "vip"]),
+    });
+    const current = [
+      ...right(),
+      role("mods", V | C | S, 0n),
+      role("vip", V | C | S, 0n),
+      role("fan", V, 0n),
+      role("granted", V, 0n),
+    ];
+    const privateCat = [
+      role(GUILD, 0n, V),
+      role("granted", V, 0n),
+      role("vip", V, 0n),
+    ];
+    const ops = planLeadsSync(
+      // @everyone already carries the deny (written earlier).
+      current.map((o) =>
+        o.id === GUILD ? { ...o, allow: 0n, deny: C | V } : o,
+      ),
+      { ...base, categoryOverwrites: privateCat },
+    );
+    const byId = Object.fromEntries(
+      ops.flatMap((o) => (o.kind === "put" ? [[o.spec.id, o.spec]] : [])),
+    );
+    // The admin role loses the channel-level View (the category gives it none)
+    // but keeps Connect and Speak; another role loses it too; a role the
+    // category grants View keeps it.
+    expect(byId.mods).toMatchObject({ allow: C | S });
+    expect(byId.fan).toMatchObject({ allow: 0n });
+    expect(byId.granted).toBeUndefined();
+    // An admin role the category itself grants View keeps it.
+    expect(byId.vip).toBeUndefined();
+    // With a public category nothing changes.
+    expect(planLeadsSync(current, { ...base, categoryOverwrites: [] })).toEqual(
+      [],
+    );
+  });
+
   it("enforces a category View deny on an admin group's role too, and copies none it does not have", () => {
     const base = ctx({
       leaderIds: ["l1", "l2"],

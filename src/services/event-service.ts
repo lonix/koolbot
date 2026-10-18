@@ -397,6 +397,7 @@ export class EventService extends ScheduledService {
   /** Note a leader change synchronously (see `EventGroupChannels.trackLeaderChange`). */
   public trackLeaderChange(change: {
     eventId: string;
+    groupKey: string;
     fromUserId: string | null;
     toUserId: string | null;
   }): void {

@@ -169,6 +169,8 @@ function adminRoleGrant(
   id: string,
   everyoneDeniesView: boolean,
   categoryDeny = 0n,
+  categoryAllow = 0n,
+  categoryDeniesView = false,
 ): OverwriteSpec | null {
   // What the category denies this role is copied onto the entry (the channel
   // has its own copy of the overwrites) and wins over any allow; nothing is
@@ -177,7 +179,15 @@ function adminRoleGrant(
     (current?.deny ?? 0n) | (categoryDeny & (VIEW | CONNECT | SPEAK));
   const bits = (everyoneDeniesView ? 0n : VIEW) | CONNECT | SPEAK;
   const effective = bits & ~deny;
-  const allow = ((current?.allow ?? 0n) & ~deny) | effective;
+  // A View allow the bot gave earlier stays only where the category itself
+  // grants this role View: with @everyone's View denied by the category, a
+  // channel-level allow would show the channel to people who cannot see the
+  // category.
+  const obsoleteView =
+    categoryDeniesView && (categoryAllow & VIEW) === 0n ? VIEW : 0n;
+  const allow =
+    ((current?.allow ?? 0n) & ~deny & ~obsoleteView) |
+    (effective & ~obsoleteView);
   if (current && current.allow === allow && current.deny === deny) return null;
   if (!current && allow === 0n && deny === 0n) return null;
   return { id, type: OverwriteType.Role, allow, deny };
@@ -243,6 +253,9 @@ export function buildLeadsOverwrites(
         specs.get(key),
         id,
         (restricted.deny & VIEW) !== 0n,
+        0n,
+        specs.get(key)?.allow ?? 0n,
+        (restricted.deny & VIEW) !== 0n,
       );
       if (grant) specs.set(key, grant);
     }
@@ -284,29 +297,6 @@ export function planLeadsSync(
     }
   }
 
-  // 2. The roles that would defeat the @everyone deny (an allow on a role
-  // applies after it), on every pass: whether an earlier clean-up ran cannot
-  // be told from the channel, so it is simply never left undone. Admin roles
-  // are exempt; while the admin groups are unknown nothing is touched.
-  for (const o of current) {
-    if (
-      o.type !== OverwriteType.Role ||
-      o.id === ctx.everyoneId ||
-      isAdminRole(ctx, o.id) ||
-      (o.allow & OPEN_BITS) === 0n
-    ) {
-      continue;
-    }
-    ops.push({
-      kind: "put",
-      spec: { ...o, allow: o.allow & ~OPEN_BITS },
-      revoke: true,
-    });
-  }
-  // ... and @everyone itself.
-  const everyone = byKey.get(
-    keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
-  );
   // What the category itself denies counts as denied here: the channel's own
   // entries may have lost it, and it is never lifted (nor View granted over it).
   const category = new Map(
@@ -319,6 +309,38 @@ export function planLeadsSync(
     ctx.categoryUnknown === true ||
     ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
   const categoryDeniesView = ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
+
+  // 2. The roles that would defeat the @everyone deny (an allow on a role
+  // applies after it), on every pass: whether an earlier clean-up ran cannot
+  // be told from the channel, so it is simply never left undone. Admin roles
+  // are exempt; while the admin groups are unknown nothing is touched. Where
+  // the category hides channels from @everyone, a role's View allow goes too
+  // unless the category itself grants that role View.
+  for (const o of current) {
+    if (
+      o.type !== OverwriteType.Role ||
+      o.id === ctx.everyoneId ||
+      isAdminRole(ctx, o.id)
+    ) {
+      continue;
+    }
+    const catRole = category.get(keyOf(o));
+    const strip =
+      OPEN_BITS |
+      (categoryDeniesView && ((catRole?.allow ?? 0n) & VIEW) === 0n
+        ? VIEW
+        : 0n);
+    if ((o.allow & strip) === 0n) continue;
+    ops.push({
+      kind: "put",
+      spec: { ...o, allow: o.allow & ~strip },
+      revoke: true,
+    });
+  }
+  // ... and @everyone itself.
+  const everyone = byKey.get(
+    keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
+  );
   // (A deny of Connect with no View allowed or denied is repaired too: the
   // channel was made without the rule, as creation would have, unless View is
   // blocked. And a category that denies View to @everyone is enforced: the
@@ -359,6 +381,8 @@ export function planLeadsSync(
         id,
         everyoneDeniesView,
         inherited?.deny ?? 0n,
+        inherited?.allow ?? 0n,
+        categoryDeniesView,
       );
       if (grant) ops.push({ kind: "put", spec: grant, revoke: false });
     }

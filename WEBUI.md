@@ -1797,7 +1797,10 @@ see but not join. It is made with the other group channels (#1190) and removed w
   never grants View, to @everyone or to an admin group's role, over a deny the category
   has, enforces that deny (it is copied onto the channel's own @everyone entry, or the
   admin group's role entry, and a View allow that contradicts it is removed, which is what
-  makes a category that became private hide the channel), and while the category cannot be
+  makes a category that became private hide the channel; the same pass also takes a
+  channel-level View allow off every other role, admin group roles included, unless the
+  category itself grants that role View; the host and the leaders keep the View that goes
+  with their access, and the bot its own), and while the category cannot be
   read grants no View, enforces nothing and leaves the channel
   unverified with a note in the Groups section). Each scan also reads the admin groups'
   roles again, so a role that became or stopped being an admin group's role gets its allow
