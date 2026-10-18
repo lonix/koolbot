@@ -42,8 +42,8 @@
  *
  * `onLeaderChange(listener)` fires once per leader change after the write
  * landed (host set or clear, the unassign cleanup, a member data reset).
- * Nothing subscribes yet; #1199 will update the leads channel's overwrites
- * from it. A listener that throws is logged and ignored. `resolveLeadsChannel`
+ * The leads channel (#1199, `installLeadsChannelSync` in `event-leads-sync.ts`)
+ * updates its overwrites from it. A listener that throws is logged and ignored. `resolveLeadsChannel`
  * is the one place that says which channel "Pull leaders only" aims at by
  * default.
  */
@@ -90,10 +90,10 @@ type LeaderListener = (change: LeaderChange) => void | Promise<void>;
 const leaderListeners = new Set<LeaderListener>();
 
 /**
- * Subscribe to leader changes (#1199 updates the leads-only channel's access
- * from this). Fired after the write, once per group whose leader changed.
- * Nothing subscribes yet. A listener that throws is logged and ignored: it can
- * never undo or fail the change. Returns the unsubscribe function.
+ * Subscribe to leader changes (the leads-only channel's access, #1199, follows
+ * from this). Fired after the write, once per group whose leader changed. A
+ * listener that throws is logged and ignored: it can never undo or fail the
+ * change. Returns the unsubscribe function.
  */
 export function onLeaderChange(listener: LeaderListener): () => void {
   leaderListeners.add(listener);

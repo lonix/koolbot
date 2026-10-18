@@ -226,9 +226,15 @@ function makeWorld(
     }>;
     /** Permissions the bot lacks. */
     botLacks?: bigint[];
+    /** Roles of KoolBot's admin groups; "fail" when they cannot be read. */
+    adminRoles?: string[] | "fail";
   } = {},
 ) {
   const lacks = new Set<bigint>(opts.botLacks ?? []);
+  const memberRoles = new Map<string, string[]>();
+  /** People the gateway's permission cache still shows as able to connect
+   * (an overwrite change it has not delivered yet). */
+  const lagging = new Set<string>();
   const inChannel = new Map<string, string>();
   const channels = new Map<string, ReturnType<typeof voiceChannel>>();
   const puts: Array<{ channel: string; id: string; body: unknown }> = [];
@@ -270,7 +276,7 @@ function makeWorld(
       },
       permissionsFor: (member: { id: string }) => ({
         has: (bit: bigint): boolean => {
-          if (member.id === ADMIN) return true;
+          if (member.id === ADMIN || lagging.has(member.id)) return true;
           const o = ow.get(`${OverwriteType.Member}:${member.id}`);
           return !!o && (o.allow.bitfield & bit) === bit;
         },
@@ -313,6 +319,9 @@ function makeWorld(
         get: (id: string) => ({
           id,
           permissions: { has: (bit: bigint) => id === ADMIN && !!bit },
+          roles: {
+            cache: new Map((memberRoles.get(id) ?? []).map((r) => [r, {}])),
+          },
         }),
       },
     },
@@ -442,6 +451,10 @@ function makeWorld(
       getPrefix: async () => "E",
       getGraceMs: async () => 0,
       isEnabled: async () => eventsEnabled,
+      getAdminRoleIds: async () => {
+        if (opts.adminRoles === "fail") throw new Error("database down");
+        return opts.adminRoles ?? [];
+      },
     },
     { rest: rest as never, call: call as never, paceMs: 0 },
   );
@@ -501,6 +514,8 @@ function makeWorld(
     gates,
     hooks,
     lacks,
+    lagging,
+    memberRoles,
     overwritesOf,
     seedRight,
     place: (user: string, channel: string) => inChannel.set(user, channel),
@@ -609,6 +624,35 @@ describe("creating the leads channel", () => {
     );
   });
 
+  it("leaves the role of a KoolBot admin group alone, so the Web UI's admins are never denied", async () => {
+    seed({ groups: [group("l", { kind: "leads", channelId: null })] });
+    const w = makeWorld({
+      adminRoles: ["mods"],
+      categoryOverwrites: [
+        { id: "mods", type: OverwriteType.Role, allow: V | C | S, deny: 0n },
+        { id: "verified", type: OverwriteType.Role, allow: V | C, deny: 0n },
+      ],
+    });
+    await w.reconcile();
+    expect(entry(w, "mods")).toEqual({ allow: V | C | S, deny: 0n });
+    expect(entry(w, "verified")).toEqual({ allow: V, deny: 0n });
+  });
+
+  it("touches no role at all when the admin groups cannot be read", async () => {
+    seed({ groups: [group("l", { kind: "leads", channelId: null })] });
+    const w = makeWorld({
+      adminRoles: "fail",
+      categoryOverwrites: [
+        { id: "verified", type: OverwriteType.Role, allow: V | C, deny: 0n },
+      ],
+    });
+    await w.reconcile();
+    // Nobody is denied on a guess; @everyone is still restricted.
+    expect(entry(w, "verified")).toEqual({ allow: V | C, deny: 0n });
+    const everyone = entry(w, GUILD);
+    expect(everyone && everyone.deny & C).toBe(C);
+  });
+
   it("creates an ordinary group channel without any of that", async () => {
     seed({
       groups: [group("a", { channelId: null, memberIds: [L1], captainId: L1 })],
@@ -670,7 +714,7 @@ describe("creating the leads channel", () => {
     expect(w.posts).toHaveLength(1);
     expect(w.posts[0].body.permission_overwrites).toBeUndefined();
     expect(w.gc.getReport(EV)?.warnings.join("\n")).toMatch(
-      /WITHOUT the leaders-only restriction.*Discord refused/,
+      /WITHOUT the leaders-only restriction.*Discord refused the channel's permissions/,
     );
   });
 });
@@ -766,6 +810,25 @@ describe("following leader changes", () => {
     expect(w.moves).toEqual([]);
   });
 
+  it("does not move a holder of a KoolBot admin group's role, and moves nobody while the admin groups are unknown", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["mods"] });
+    w.seedRight();
+    w.place(STRANGER, "ch-leads");
+    w.place(U3, "ch-leads");
+    w.memberRoles.set(STRANGER, ["mods"]);
+    await w.run(() => [STRANGER, U3]);
+    // The admin stays; the other one is moved to their team's channel.
+    expect(w.where(STRANGER)).toBe("ch-leads");
+    expect(w.where(U3)).toBe("ch-b");
+
+    const unknown = makeWorld({ adminRoles: "fail" });
+    unknown.seedRight();
+    unknown.place(U3, "ch-leads");
+    await unknown.run(() => [U3]);
+    expect(unknown.moves).toEqual([]);
+  });
+
   it("does not move anyone out at all when the access change itself failed", async () => {
     seed();
     const w = makeWorld();
@@ -793,6 +856,9 @@ describe("following leader changes", () => {
     // Verified once, as the scan would have done.
     await w.sync();
     w.place(L1, "ch-leads");
+    // The permission cache has not caught up: only the memory of who lost
+    // access (not the cache's "cannot connect") can get them out later.
+    w.lagging.add(L1);
     setCaptain("a", null);
     let release: () => void = () => undefined;
     const busy = withEventMoveLock(
@@ -819,6 +885,40 @@ describe("following leader changes", () => {
     }
     await w.run();
     expect(w.where(L1)).toBe("ch-a");
+  });
+
+  it("a pass that fails half way still owes the move to the people it was told about", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    await w.sync();
+    w.place(L1, "ch-leads");
+    w.lagging.add(L1);
+    // L1 loses the role and L2 gains it: the delete lands, then Discord
+    // rate limits the grant, so the pass fails after taking the access away.
+    setCaptain("a", L2);
+    w.hooks.put = () => {
+      throw rateLimit();
+    };
+    await w.run(() => [L1]);
+    expect(has(w, L1)).toBe(false);
+    expect(w.where(L1)).toBe("ch-leads");
+    w.hooks.put = null;
+    jest.useFakeTimers({
+      now: Date.now() + 3 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      // Nothing is left to write for L1, but they are still owed a move.
+      expect(
+        w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+      ).toBe(true);
+      await w.run();
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(w.where(L1)).toBe("ch-a");
+    expect(allowOf(w, L2)).toBe(LEADS_LEADER_PERMISSIONS);
   });
 
   it("ignores the change it was told about: a leader set and cleared again leaves the channel right", async () => {
@@ -949,6 +1049,10 @@ describe("with the real leader writer and hook", () => {
       userId: U3,
       admission: 1,
     });
+    // Everything the later changes trigger has had every chance to run: only
+    // the per-event lock keeps it behind the parked write.
+    await settle();
+    expect(w.puts).toEqual([]);
     w.gates.put = null;
     release();
     await settle();
@@ -960,6 +1064,11 @@ describe("with the real leader writer and hook", () => {
         .sort(),
     ).toEqual([BOT, HOST, L2, U3].sort());
     expect(has(w, L1)).toBe(false);
+    // Exactly what was needed: L1 in, then L1 out and L2 and U3 in. A second
+    // pass that planned from the state before the first write landed would
+    // have sent L2 and U3 without removing L1.
+    expect(w.deletes.map((d) => d.id)).toEqual([L1]);
+    expect(w.puts.map((p) => p.id).sort()).toEqual([L1, L2, U3].sort());
   });
 
   it("coalesces changes that arrive while a pass is queued and keeps every stored from-id", async () => {
@@ -1061,6 +1170,8 @@ describe("a channel recreated while a leader change is in flight", () => {
     });
     const w = makeWorld();
     w.seedRight();
+    // Verified once, as an earlier scan would have done.
+    expect((await w.sync()).status).toBe("ok");
     setCaptain("a", L2);
     let release: () => void = () => undefined;
     w.gates.put = new Promise<void>((r) => (release = r));
@@ -1083,6 +1194,10 @@ describe("a channel recreated while a leader change is in flight", () => {
     expect(w.stored().groups.find((g) => g.key === "l")?.channelId).toBe(
       "new-1",
     );
+    // A replacement has not been verified: the scan asks for a pass.
+    expect(
+      w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+    ).toBe(true);
     w.puts.length = 0;
     expect((await w.sync()).wrote).toBe(0);
     expect(w.puts).toEqual([]);
@@ -1110,6 +1225,10 @@ describe("failing closed", () => {
         ?.failures.map((f) => f.reason)
         .join("\n"),
     ).toMatch(/could not be read, so its access was not changed/);
+    // A standing problem is not read again on every scan.
+    expect(
+      w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+    ).toBe(false);
     // It heals on the next successful pass.
     w.hooks.fetchError.clear();
     await w.sync();
@@ -1322,6 +1441,34 @@ describe("writing", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("writes the same plan again once the channel was seen right in between (a hand edit undoes it)", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    setCaptain("a", null);
+    expect((await w.sync()).status).toBe("ok");
+    expect(w.deletes.map((d) => d.id)).toEqual([L1]);
+    // The scan sees the channel right: that write took effect.
+    expect(
+      w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+    ).toBe(false);
+    // Later someone gives L1 access again by hand, exactly as it was.
+    w.channels
+      .get("ch-leads")
+      ?.permissionOverwrites.cache.set(`${OverwriteType.Member}:${L1}`, {
+        id: L1,
+        type: OverwriteType.Member,
+        allow: { bitfield: LEADS_LEADER_PERMISSIONS },
+        deny: { bitfield: 0n },
+      });
+    const again = await w.sync();
+    // Written again, not mistaken for a write Discord ignored.
+    expect(again.status).toBe("ok");
+    expect(w.deletes.map((d) => d.id)).toEqual([L1, L1]);
+    expect(has(w, L1)).toBe(false);
   });
 
   it("stops at a rate limit, reports what was not applied and holds off", async () => {

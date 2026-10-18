@@ -363,6 +363,16 @@ export class EventService extends ScheduledService {
         )) * MS_PER_MINUTE,
       isEnabled: (): Promise<boolean> =>
         this.configService.getBoolean("events.enabled", false),
+      // The Web UI's admins (who may act as host) hold the role of an admin
+      // group; the leaders-only channel never denies or moves them (#1199).
+      // Loaded on demand: only an event with a leads channel gets here.
+      getAdminRoleIds: async (guildId: string): Promise<string[]> => {
+        const { RoleGroupService } = await import("./role-group-service.js");
+        const { adminGroupRoleIds } = await import("./role-group-adoption.js");
+        return adminGroupRoleIds(
+          await RoleGroupService.getInstance().list(guildId),
+        );
+      },
     });
   }
 
@@ -698,12 +708,12 @@ export class EventService extends ScheduledService {
     // 2c. The leaders-only channel's access (#1199): never verified since it was
     // created or since a restart, overwrites that differ from who leads, a
     // stranger in it, or a move still owed. Judged from the cache only; the
-    // pass reads Discord and the event fresh before it writes anything.
+    // pass reads Discord and the event fresh before it writes anything. An
+    // event that is over was marked ended above, so the state check is enough.
     if (
       event.groupsEnabled === true &&
       !event.nativeAdopted &&
       (event.state === "scheduled" || event.state === "active") &&
-      !shouldEndEvent(event, now) &&
       this.groupChannels.leadsNeedsAttention(event, guild)
     ) {
       await this.syncLeadsAccess(event.guildId, String(event._id));

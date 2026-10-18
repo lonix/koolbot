@@ -15,14 +15,17 @@
  *   decoration: with @everyone denied Connect, a bot that only has Connect
  *   from its server role could not connect, so it could not move anyone in.
  * - **Admins** are never denied. Nothing here adds a deny bit for anyone but
- *   @everyone, and a role with Administrator is left exactly as it is (it
- *   bypasses overwrites anyway).
+ *   @everyone, and an admin role is left exactly as it is: a role holding
+ *   Administrator (it bypasses overwrites anyway) and the role of a KoolBot
+ *   admin group (the Web UI's admins, who may act as host).
  * - **Roles that would defeat the deny.** Discord applies a role's allow after
  *   @everyone's deny, so a role overwrite copied from the category that allows
  *   Connect would let every holder in. When the restriction is first applied
  *   (a new channel, or an existing channel whose @everyone entry does not yet
  *   deny Connect) the Connect and Speak ALLOW bits are removed from every role
- *   entry other than an Administrator role. Only allow bits are removed; the
+ *   entry other than an admin role (Administrator, or the role of a KoolBot
+ *   admin group; when those cannot be read no role is touched). Only allow
+ *   bits are removed; the
  *   role then simply has no say and falls under the @everyone deny. Later
  *   syncs leave role entries alone, so a role an admin adds by hand stays.
  * - **Other members.** A member overwrite for anyone who is not the host, the
@@ -86,8 +89,16 @@ export interface LeadsAccessContext {
   botId: string | null;
   /** The current leaders (`effectiveLeaders`), by user id. */
   leaderIds: readonly string[];
-  /** Roles holding Administrator: their entries are left as they are. */
+  /**
+   * Admin roles, whose entries are left as they are: roles holding
+   * Administrator and the roles of KoolBot's admin groups (the Web UI admins).
+   */
   adminRoleIds?: ReadonlySet<string>;
+  /**
+   * The admin roles could not be established: no role entry is touched (an
+   * admin must never be denied by a guess).
+   */
+  allRolesExempt?: boolean;
 }
 
 const keyOf = (o: { type: OverwriteType; id: string }): string =>
@@ -117,17 +128,21 @@ function restrictEveryone(
   return { id: everyoneId, type: OverwriteType.Role, allow, deny };
 }
 
-function widen(current: OverwriteSpec | undefined, id: string, bits: bigint) {
+function widen(
+  current: OverwriteSpec | undefined,
+  id: string,
+  bits: bigint,
+): OverwriteSpec {
   return {
     id,
     type: OverwriteType.Member,
     allow: (current?.allow ?? 0n) | bits,
     deny: (current?.deny ?? 0n) & ~bits,
-  } satisfies OverwriteSpec;
+  };
 }
 
 const isAdminRole = (ctx: LeadsAccessContext, id: string): boolean =>
-  ctx.adminRoleIds?.has(id) === true;
+  ctx.allRolesExempt === true || ctx.adminRoleIds?.has(id) === true;
 
 /**
  * The overwrites for a new leads channel: the category's own first (sending

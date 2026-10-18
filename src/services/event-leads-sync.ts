@@ -61,6 +61,7 @@ type LeadsOps = Pick<
   EventGroupChannels,
   | "syncLeads"
   | "leadsProbe"
+  | "leadsAdminRoles"
   | "queueEviction"
   | "holdEviction"
   | "setLeadsProblem"
@@ -121,10 +122,15 @@ export async function evictFromLeads(opts: {
 }): Promise<void> {
   const { client, channels, guildId, eventId } = opts;
   const revoked = new Set(opts.revoked);
+  // Read before the plan (which runs inside the mover's lock and must not
+  // wait on the database): the admins who are never moved.
+  const admins = await channels.leadsAdminRoles(guildId);
   const plan = (ctx: MovePlanContext): MovePlan => {
     const leadsId = resolveLeadsChannel(ctx.event);
     // Without a channel to read permissions from, nobody is judged a stranger.
-    const probe = leadsId ? channels.leadsProbe(ctx.guild, leadsId) : null;
+    const probe = leadsId
+      ? channels.leadsProbe(ctx.guild, leadsId, admins)
+      : null;
     return planLeadsEviction(ctx.event, ctx.presence, {
       revoked,
       isAdmin: probe?.isAdmin ?? ((): boolean => true),

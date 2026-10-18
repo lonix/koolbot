@@ -365,6 +365,17 @@ export interface GroupChannelDeps {
    * count as on.
    */
   isEnabled?: () => Promise<boolean>;
+  /**
+   * The ids of the roles of KoolBot's admin groups in a server (the Web UI's
+   * admins). The leads channel never denies or moves their holders. May throw.
+   */
+  getAdminRoleIds?: (guildId: string) => Promise<string[]>;
+}
+
+/** The admin roles for the leads channel, and whether they could be established. */
+export interface LeadsAdmins {
+  roleIds: ReadonlySet<string>;
+  known: boolean;
 }
 
 /** What one `syncLeads` pass did, for the caller that moves people out. */
@@ -427,6 +438,8 @@ export class EventGroupChannels {
   private readonly leadsWritten = new Map<string, string>();
   /** Per event: people still to be moved out of the leads channel. */
   private readonly leadsEvict = new Map<string, Set<string>>();
+  /** Per server: the admin group roles last read (the cache-only trigger uses it). */
+  private readonly adminRolesSeen = new Map<string, Set<string>>();
   /** Per event: problems with the leads channel the host panel shows (kept apart
    * from the per-pass reports, like the notices). */
   private readonly leadsProblems = new Map<
@@ -677,7 +690,12 @@ export class EventGroupChannels {
       // sync that the change queues behind this pass.
       const leads =
         group.kind === "leads"
-          ? this.leadsOverwritesFor(row, guild, placement.category, report)
+          ? await this.leadsOverwritesFor(
+              row,
+              guild,
+              placement.category,
+              report,
+            )
           : null;
       const outcome = await this.createOne(
         row,
@@ -1127,12 +1145,42 @@ export class EventGroupChannels {
   // The leads channel (#1199)
   // -------------------------------------------------------------
 
-  private leadsContext(row: EventRow, guild: Guild): LeadsAccessContext {
+  /**
+   * The roles that count as admins for the leads channel: KoolBot's admin
+   * groups (the Web UI's admins, who may act as host), read from the database,
+   * and, where the caller knows the guild, the roles holding Administrator.
+   * When the groups cannot be read the last answer is used; if there never was
+   * one, `known` is false and nothing is denied or moved on a guess.
+   */
+  public async leadsAdminRoles(guildId: string): Promise<LeadsAdmins> {
+    if (!this.deps.getAdminRoleIds) return { roleIds: new Set(), known: true };
+    try {
+      const ids = new Set(await this.deps.getAdminRoleIds(guildId));
+      this.adminRolesSeen.set(guildId, ids);
+      return { roleIds: ids, known: true };
+    } catch (error) {
+      logger.warn(
+        `Could not read the admin groups of server ${sanitizeForLog(guildId)} for the leaders-only channel:`,
+        error,
+      );
+      const seen = this.adminRolesSeen.get(guildId);
+      return { roleIds: seen ?? new Set(), known: !!seen };
+    }
+  }
+
+  private leadsContext(
+    row: EventRow,
+    guild: Guild,
+    admins: LeadsAdmins = {
+      roleIds: this.adminRolesSeen.get(guild.id) ?? new Set(),
+      known: true,
+    },
+  ): LeadsAccessContext {
     const hostId = SNOWFLAKE.test(row.createdBy ?? "")
       ? (row.createdBy as string)
       : null;
     const me = this.client.user?.id;
-    const adminRoleIds = new Set<string>();
+    const adminRoleIds = new Set<string>(admins.roleIds);
     for (const role of guild.roles?.cache?.values() ?? []) {
       if (role.permissions?.has(PermissionFlagsBits.Administrator)) {
         adminRoleIds.add(role.id);
@@ -1144,6 +1192,7 @@ export class EventGroupChannels {
       botId: me && SNOWFLAKE.test(me) ? me : null,
       leaderIds: leadsLeaderIds(row).filter((id) => SNOWFLAKE.test(id)),
       adminRoleIds,
+      allRolesExempt: !admins.known,
     };
   }
 
@@ -1153,13 +1202,17 @@ export class EventGroupChannels {
    * issue asks, and the host panel says so). The bot must itself hold every
    * permission it grants, or Discord refuses (50013) the whole create.
    */
-  private leadsOverwritesFor(
+  private async leadsOverwritesFor(
     row: EventRow,
     guild: Guild,
     category: CategoryChannel,
     report: GroupChannelReport,
-  ): { overwrites: OverwriteSpec[] | null; reason: string | null } {
-    const ctx = this.leadsContext(row, guild);
+  ): Promise<{ overwrites: OverwriteSpec[] | null; reason: string | null }> {
+    const ctx = this.leadsContext(
+      row,
+      guild,
+      await this.leadsAdminRoles(guild.id),
+    );
     const unrestricted = (
       reason: string,
     ): { overwrites: null; reason: string } => {
@@ -1223,6 +1276,9 @@ export class EventGroupChannels {
     if (!channel) return false;
     const ctx = this.leadsContext(event as EventRow, guild);
     if (planLeadsSync(overwriteSpecsOf(channel), ctx).length > 0) return true;
+    // Seen right: whatever was written before did take effect, so the same
+    // write may legitimately be wanted again later (see `syncLeadsLocked`).
+    this.leadsWritten.delete(id);
     if (evictHeld) return false;
     const probe = this.leadsProbe(guild, leadsId);
     const keep = new Set<string>(ctx.leaderIds);
@@ -1244,6 +1300,10 @@ export class EventGroupChannels {
   public leadsProbe(
     guild: Guild,
     channelId: string,
+    admins: LeadsAdmins = {
+      roleIds: this.adminRolesSeen.get(guild.id) ?? new Set(),
+      known: true,
+    },
   ): {
     isAdmin: (userId: string) => boolean;
     canConnect: (userId: string) => boolean | null;
@@ -1251,15 +1311,22 @@ export class EventGroupChannels {
     const channel = guild.channels.cache.get(channelId) as
       VoiceChannel | undefined;
     return {
-      isAdmin: (userId) => {
-        if (userId === guild.ownerId) return true;
+      // An admin is the server's owner, a holder of Administrator, or a holder
+      // of the role of a KoolBot admin group. Anyone the cache cannot place,
+      // and everyone while the admin groups are unknown, counts as one.
+      isAdmin: (userId: string): boolean => {
+        if (userId === guild.ownerId || !admins.known) return true;
         const member = guild.members?.cache?.get(userId);
         if (!member) return true;
-        return (
-          member.permissions?.has(PermissionFlagsBits.Administrator) === true
-        );
+        if (member.permissions?.has(PermissionFlagsBits.Administrator)) {
+          return true;
+        }
+        for (const roleId of member.roles?.cache?.keys() ?? []) {
+          if (admins.roleIds.has(roleId)) return true;
+        }
+        return false;
       },
-      canConnect: (userId) => {
+      canConnect: (userId: string): boolean | null => {
         const member = guild.members?.cache?.get(userId);
         if (!channel || !member) return null;
         try {
@@ -1378,10 +1445,17 @@ export class EventGroupChannels {
         // The next group pass makes a new, restricted one.
         return result("skipped", leadsId, [], 0);
       }
+      // A standing problem is not tried again on every scan.
+      const holdFor = (reason: string): void => {
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
+      };
       if (state.status === "error") {
-        problem(
-          `The leaders-only channel could not be read, so its access was not changed: ${describeWriteFailure(state.error)}`,
-        );
+        const reason = `The leaders-only channel could not be read, so its access was not changed: ${describeWriteFailure(state.error)}`;
+        problem(reason);
+        holdFor(reason);
         return failed(leadsId);
       }
       const channel = state.channel;
@@ -1389,9 +1463,10 @@ export class EventGroupChannels {
         channel.type !== ChannelType.GuildVoice ||
         channel.guildId !== guild.id
       ) {
-        problem(
-          "The recorded leaders-only channel is not a voice channel of this server, so its access was not changed.",
-        );
+        const reason =
+          "The recorded leaders-only channel is not a voice channel of this server, so its access was not changed.";
+        problem(reason);
+        holdFor(reason);
         return failed(leadsId);
       }
       const perms = botPermissionsIn(guild, channel);
@@ -1407,7 +1482,11 @@ export class EventGroupChannels {
         return failed(leadsId);
       }
 
-      const ctx = this.leadsContext(row, guild);
+      const ctx = this.leadsContext(
+        row,
+        guild,
+        await this.leadsAdminRoles(guild.id),
+      );
       let ops = planLeadsSync(overwriteSpecsOf(channel), ctx);
       // With events off nothing is given, only taken away from members.
       if (!enabled) ops = ops.filter(isMemberRevoke);
@@ -1492,9 +1571,13 @@ export class EventGroupChannels {
         `Event ${sanitizeForLog(eventId)}: updating the leaders-only channel access failed:`,
         error,
       );
-      problem(
-        "Updating the leaders-only channel's access failed unexpectedly. See the log.",
-      );
+      const reason =
+        "Updating the leaders-only channel's access failed unexpectedly. See the log.";
+      problem(reason);
+      this.holds.set(holdKey, {
+        until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+        reason,
+      });
       return failed(null);
     }
   }
