@@ -755,6 +755,9 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // A cancel keeps the channel id until Discord confirms the delete; the
+        // scan finishes one a restart or an error left behind.
+        { state: "cancelled", channelId: { $ne: null } },
         // Finished or cancelled events whose native scheduled event still
         // needs closing (#1034); the link is released once that succeeds.
         {
@@ -986,6 +989,16 @@ export class EventService extends ScheduledService {
         // copy is stale or the write failed; the next scan decides again.
         return;
       }
+    }
+
+    // 4a. A cancelled event's channel goes at once (the cancel's own delete did
+    // not finish, or was cut short by a restart).
+    if (
+      event.channelId &&
+      event.state === "cancelled" &&
+      !this.mustSkipScan(event)
+    ) {
+      await this.releaseCancelledChannel(event, guild, event.channelId);
     }
 
     // 4. Sweep the empty channel after the grace period.
@@ -1563,21 +1576,30 @@ export class EventService extends ScheduledService {
     nativeCache?: NativeCache | null,
     skipNative = false,
   ): Promise<boolean> {
-    const channelId = event.channelId;
-    const saved = await Event.updateOne(
+    // `new: false`: the document as it was AT the claim. The channel to delete
+    // is read from it, not from the caller's copy, which may be older (a channel
+    // recorded by Start now or the scan after that copy was read). The stored
+    // `channelId` is kept: it is the only record of the channel until Discord
+    // confirms it is gone, so a restart in between leaves it for the scan.
+    const claimed = (await Event.findOneAndUpdate(
       { _id: event._id, state: { $in: ["scheduled", "active"] } },
-      { $set: { state: "cancelled", channelId: null } },
-    );
-    if ((saved as { matchedCount?: number } | undefined)?.matchedCount === 0) {
+      { $set: { state: "cancelled" } },
+      { new: false },
+    )) as { channelId?: string | null } | null | undefined;
+    if (claimed === null) {
       logger.info(
         `Event ${sanitizeForLog(String(event._id))} is no longer open; not cancelled`,
       );
       return false;
     }
+    const channelId =
+      claimed && claimed.channelId !== undefined
+        ? claimed.channelId
+        : event.channelId;
     event.state = "cancelled";
-    event.channelId = null;
-    // Both are written; the save below carries only the other fields (a caller
-    // may have set `seriesCancelled`) and must not write them again.
+    event.channelId = channelId ?? null;
+    // The claim wrote the state; the save below carries only the other fields
+    // (a caller may have set `seriesCancelled`) and must not write it again.
     const doc = event as unknown as { $ignore?: (path: string) => void };
     doc.$ignore?.("state");
     doc.$ignore?.("channelId");
@@ -1585,7 +1607,7 @@ export class EventService extends ScheduledService {
       const guild = await this.client.guilds
         .fetch(event.guildId)
         .catch(() => null);
-      if (guild) await this.deleteEventChannel(guild, channelId);
+      if (guild) await this.releaseCancelledChannel(event, guild, channelId);
     }
     await event.save();
     // Group channels (#1190) are removed once the cancel is saved: the cleanup
@@ -2444,6 +2466,52 @@ export class EventService extends ScheduledService {
     } catch (error) {
       logger.error("Error creating event channel:", error);
       return null;
+    }
+  }
+
+  /**
+   * Delete a cancelled event's main channel and, only once Discord confirmed it
+   * is gone (deleted, or 10003), clear the stored reference (conditional on it
+   * still being that id). Any other failure keeps the id, so the scan retries.
+   * Cancel deletes at once, with no grace period.
+   */
+  private async releaseCancelledChannel(
+    event: IEvent,
+    guild: Guild,
+    channelId: string,
+  ): Promise<void> {
+    if (!(await this.deleteChannelConfirmed(guild, channelId))) return;
+    try {
+      await Event.updateOne(
+        { _id: event._id, channelId },
+        { $set: { channelId: null } },
+      );
+    } catch (error) {
+      logger.error("Could not clear a cancelled event's channel id:", error);
+      return;
+    }
+    event.channelId = null;
+    (event as unknown as { $ignore?: (p: string) => void }).$ignore?.(
+      "channelId",
+    );
+  }
+
+  /** True when the channel was deleted or Discord says it does not exist. */
+  private async deleteChannelConfirmed(
+    guild: Guild,
+    channelId: string,
+    reason = "Event cancelled",
+  ): Promise<boolean> {
+    try {
+      const channel =
+        guild.channels.cache.get(channelId) ??
+        (await guild.channels.fetch(channelId));
+      if (channel) await channel.delete(reason);
+      return true;
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return true;
+      logger.error("Error deleting event channel:", error);
+      return false;
     }
   }
 

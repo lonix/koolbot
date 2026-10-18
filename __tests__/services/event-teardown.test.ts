@@ -23,12 +23,18 @@ function matches(row: Row, filter: Record<string, unknown>): boolean {
       for (const clause of v as Array<Record<string, unknown>>) {
         if (!matches(row, clause)) return false;
       }
+    } else if (k === "$or") {
+      if (!(v as Array<Record<string, unknown>>).some((c) => matches(row, c))) {
+        return false;
+      }
     } else if (k === "groups") {
       const groups = (row.groups as Row[]) ?? [];
       const g = v as {
+        $exists?: boolean;
         $size?: number;
         $elemMatch?: { key: string; channelId: string | null };
       };
+      if (g.$exists === false && row.groups !== undefined) return false;
       if (g.$size !== undefined && groups.length !== g.$size) return false;
       if (
         g.$elemMatch &&
@@ -356,6 +362,38 @@ describe("the claim", () => {
     expect(outcome).toEqual({ status: "changed" });
     expect(rows.get(ID)?.state).toBe("active");
     expect(calls).toEqual([]);
+  });
+
+  it("a stored event with no groups field at all can be ended when no groups were expected", async () => {
+    const legacy = row({ groupsEnabled: undefined, channelId: null });
+    delete legacy.groups;
+    rows.set(ID, legacy);
+    const { teardown } = make();
+    const outcome = await teardown.run(
+      scheduled({ expectChannels: { main: null, groups: [] } }),
+    );
+    expect(outcome.status).toBe("ended");
+    const filter = (
+      EventMock.findOneAndUpdate.mock.calls[0] as unknown as [Row]
+    )[0];
+    expect(filter.$and).toEqual([
+      {
+        $or: [{ groups: { $exists: false } }, { groups: { $size: 0 } }],
+      },
+    ]);
+  });
+
+  it("a group the check never saw is still refused for a stored event with no groups field", async () => {
+    const legacy = row({ groupsEnabled: undefined, channelId: null });
+    delete legacy.groups;
+    rows.set(ID, legacy);
+    const { teardown } = make();
+    const outcome = await teardown.run(
+      scheduled({
+        expectChannels: { main: null, groups: [{ key: "g", channelId: null }] },
+      }),
+    );
+    expect(outcome).toEqual({ status: "changed" });
   });
 
   it("a schedule edited since the scan read it is 'changed', and nothing else runs", async () => {

@@ -261,6 +261,44 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
     expect((await stored(id)).state).toBe("ended");
   });
 
+  it("a stored event with no groups field at all (made before groups existed) can still be ended on schedule", async () => {
+    // Written straight to the collection: the model would fill in `groups: []`,
+    // which hides that `$size: 0` does not match a missing field.
+    const inserted = await Event.collection.insertOne({
+      guildId: GUILD,
+      title: "Old event",
+      startTime: START,
+      durationMinutes: 120,
+      createdBy: "host",
+      state: "active",
+      // no channelId, no groups, no groupsEnabled
+    });
+    const id = String(inserted.insertedId);
+    const raw = await Event.collection.findOne({ _id: inserted.insertedId });
+    expect(raw && "groups" in raw).toBe(false);
+    const scheduledInput = (groupsExpected: number): never =>
+      input(id, {
+        trigger: "scheduled",
+        fromStates: ["scheduled", "active"],
+        endedAt: END,
+        expectTimes: { startTime: START, durationMinutes: 120 },
+        expectChannels: {
+          main: null,
+          groups: Array.from({ length: groupsExpected }, (_v, i) => ({
+            key: `g_${i}`,
+            channelId: null,
+          })),
+        },
+      });
+    const t = teardown();
+    // A group the check never saw is still refused.
+    expect(await t.run(scheduledInput(1))).toEqual({ status: "changed" });
+    expect((await stored(id)).state).toBe("active");
+    // No groups expected, none stored (absent): the end goes through.
+    expect((await t.run(scheduledInput(0))).status).toBe("ended");
+    expect((await stored(id)).state).toBe("ended");
+  });
+
   it("an event of another server is not found and not ended", async () => {
     const id = await makeEvent();
     const outcome = await teardown().run(input(id, { guildId: "guild-2" }));

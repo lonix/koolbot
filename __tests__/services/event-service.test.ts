@@ -2017,7 +2017,11 @@ describe("recurring event lifecycle", () => {
     ).updateAnnouncement = jest.fn(async () => true);
     await service.cancelEvent("occ-0", "guild-1");
     expect(created).toHaveLength(0);
-    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+    // The only write through the claim is the cancel itself.
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(EventMock.findOneAndUpdate.mock.calls[0]?.[1]).toEqual({
+      $set: { state: "cancelled" },
+    });
   });
 
   it("cancelSeries blocks spawning, then cancels every open occurrence", async () => {

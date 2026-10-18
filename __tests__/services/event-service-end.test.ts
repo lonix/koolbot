@@ -161,10 +161,28 @@ beforeEach(() => {
     async (
       filter: Record<string, unknown>,
       update: { $set: Row },
+      options?: { new?: boolean },
     ): Promise<Row | null> => {
       if (claimDelay) await claimDelay;
       const r = store.get(filter._id as string);
-      if (!r || r.guildId !== filter.guildId) return null;
+      if (!r) return null;
+      if (filter.guildId !== undefined && r.guildId !== filter.guildId) {
+        return null;
+      }
+      const states = (filter.state as { $in: string[] }).$in;
+      if (!states.includes(r.state as string)) return null;
+      if (
+        filter.startTime &&
+        +(r.startTime as Date) !== +(filter.startTime as Date)
+      ) {
+        return null;
+      }
+      if (
+        filter.durationMinutes !== undefined &&
+        r.durationMinutes !== filter.durationMinutes
+      ) {
+        return null;
+      }
       // The scheduled end's channel expectation (the occupancy check's ids).
       if (
         filter.channelId !== undefined &&
@@ -172,40 +190,34 @@ beforeEach(() => {
       ) {
         return null;
       }
-      for (const clause of (filter.$and as Array<{ groups: Row }>) ?? []) {
-        const groups = (r.groups as Array<Row>) ?? [];
-        const g = clause.groups as {
-          $size?: number;
-          $elemMatch?: { key: string; channelId: string | null };
+      const groups = r.groups as Array<Row> | undefined;
+      for (const clause of (filter.$and as Array<Row>) ?? []) {
+        const one = (c: Row): boolean => {
+          const g = c.groups as {
+            $size?: number;
+            $exists?: boolean;
+            $elemMatch?: { key: string; channelId: string | null };
+          };
+          if (g.$exists === false) return groups === undefined;
+          if (g.$size !== undefined) {
+            return Array.isArray(groups) && groups.length === g.$size;
+          }
+          if (g.$elemMatch) {
+            return (groups ?? []).some(
+              (x) =>
+                x.key === g.$elemMatch?.key &&
+                ((x.channelId as string | null) ?? null) ===
+                  g.$elemMatch?.channelId,
+            );
+          }
+          return true;
         };
-        if (g.$size !== undefined && groups.length !== g.$size) return null;
-        if (
-          g.$elemMatch &&
-          !groups.some(
-            (x) =>
-              x.key === g.$elemMatch?.key &&
-              ((x.channelId as string | null) ?? null) ===
-                g.$elemMatch?.channelId,
-          )
-        ) {
-          return null;
-        }
+        const ok = clause.$or ? (clause.$or as Row[]).some(one) : one(clause);
+        if (!ok) return null;
       }
-      const states = (filter.state as { $in: string[] }).$in;
-      if (!states.includes(r.state as string)) return null;
-      if (
-        filter.startTime &&
-        +(r.startTime as Date) !== +(filter.startTime as Date)
-      )
-        return null;
-      if (
-        filter.durationMinutes !== undefined &&
-        r.durationMinutes !== filter.durationMinutes
-      ) {
-        return null;
-      }
+      const before = { ...r };
       Object.assign(r, update.$set);
-      return { ...r };
+      return options?.new === false ? before : { ...r };
     },
   );
   EventMock.findById = jest.fn((id: string) => {
@@ -1052,15 +1064,117 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
   });
 
   it("a cancel of an open event still saves, deletes the channel and syncs", async () => {
-    const { service } = setup();
+    const { service, guild } = setup();
     statefulUpdateOne();
+    const del = jest.fn(async () => undefined);
+    guild.channels.cache.set("main-1", { delete: del });
     const event = row({ state: "active" });
     await service.cancelOne(event);
     expect(store.get(ID)?.state).toBe("cancelled");
+    expect(del).toHaveBeenCalledTimes(1);
+    // The reference is cleared only after the delete was confirmed.
     expect(store.get(ID)?.channelId).toBeNull();
-    expect(service.deleteEventChannel).toHaveBeenCalledTimes(1);
     expect(event.save).toHaveBeenCalledTimes(1);
     expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("the channel id stays recorded until Discord confirms the delete (a restart or error in between loses nothing)", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    const del = jest
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValue(undefined);
+    guild.channels.cache.set("main-1", { delete: del });
+    await service.cancelOne(row({ state: "active" }));
+    // Claimed, but the delete failed: the record still points at the channel.
+    expect(store.get(ID)?.state).toBe("cancelled");
+    expect(store.get(ID)?.channelId).toBe("main-1");
+    // The next scan, on the stored cancelled row, finishes the job.
+    await service.processEvent(
+      row({ state: "cancelled", channelId: "main-1" }),
+      guild,
+      AFTER_END,
+      WINDOWS,
+    );
+    expect(del).toHaveBeenCalledTimes(2);
+    expect(store.get(ID)?.channelId).toBeNull();
+  });
+
+  it("the scan's query also loads cancelled events that still record a channel", async () => {
+    const { service } = setup();
+    (service as unknown as { runOnce: () => Promise<void> }).runOnce;
+    configMock.getString.mockImplementation(async (k: string, d?: unknown) =>
+      k === "GUILD_ID" ? "guild-1" : d,
+    );
+    try {
+      await (service as unknown as { runOnce: () => Promise<void> }).runOnce();
+      const query = EventMock.find.mock.calls[0]?.[0] as {
+        $or: Array<Record<string, unknown>>;
+      };
+      expect(query.$or).toContainEqual({
+        state: "cancelled",
+        channelId: { $ne: null },
+      });
+    } finally {
+      configMock.getString.mockImplementation(
+        async (_k: string, d?: unknown) => d,
+      );
+    }
+  });
+
+  it("a channel that Discord says is gone (10003) counts as deleted", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    const gone = new DiscordAPIError(
+      { code: 10003, message: "Unknown Channel" },
+      10003,
+      404,
+      "DELETE",
+      "/",
+      {},
+    );
+    guild.channels.cache.set("main-1", {
+      delete: jest.fn(async () => {
+        throw gone;
+      }),
+    });
+    await service.cancelOne(row({ state: "active" }));
+    expect(store.get(ID)?.channelId).toBeNull();
+  });
+
+  it("deletes the channel recorded at the claim, not the one the caller's older copy knew", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    const del = jest.fn(async () => undefined);
+    guild.channels.cache.set("main-1", { delete: del });
+    // The cancel read the event before Start now recorded its main channel.
+    const older = row({ state: "scheduled", channelId: null });
+    store.set(ID, stored({ state: "active", channelId: "main-1" }));
+    await service.cancelOne(older);
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(store.get(ID)?.channelId).toBeNull();
+    expect(store.get(ID)?.state).toBe("cancelled");
+  });
+
+  it("a scan leaves a cancelled event's channel alone while an end or teardown holds it", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    const del = jest.fn(async () => undefined);
+    guild.channels.cache.set("main-1", { delete: del });
+    const svc = service as unknown as {
+      beginEnding: (id: string) => number;
+    };
+    svc.beginEnding(ID);
+    store.set(ID, stored({ state: "cancelled", channelId: "main-1" }));
+    // An older copy that still reads open is skipped before it gets there.
+    await service.processEvent(
+      row({ state: "active", channelId: "main-1" }),
+      guild,
+      AFTER_END,
+      WINDOWS,
+    );
+    expect(del).not.toHaveBeenCalled();
   });
 });
 

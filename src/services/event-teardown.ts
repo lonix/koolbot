@@ -282,8 +282,15 @@ export class EventTeardown {
     if (input.expectChannels) {
       // A null matches a stored null or a missing field.
       filter.channelId = input.expectChannels.main;
+      const count = input.expectChannels.groups.length;
       filter.$and = [
-        { groups: { $size: input.expectChannels.groups.length } },
+        // `$size: 0` does not match a row that has no `groups` field at all (an
+        // event made before groups existed); that row has no groups either.
+        count === 0
+          ? {
+              $or: [{ groups: { $exists: false } }, { groups: { $size: 0 } }],
+            }
+          : { groups: { $size: count } },
         ...input.expectChannels.groups.map((g) => ({
           groups: { $elemMatch: { key: g.key, channelId: g.channelId } },
         })),
