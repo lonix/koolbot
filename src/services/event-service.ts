@@ -394,19 +394,25 @@ export class EventService extends ScheduledService {
     });
     this.teardown = new EventTeardown({
       client,
-      updateAnnouncement: (event) => this.updateAnnouncement(event),
-      syncNative: (event, guild) => this.nativeSync.syncEvent(event, guild),
-      cleanupGroupChannels: async (event, guild, now) => {
+      updateAnnouncement: (event): Promise<boolean> =>
+        this.updateAnnouncement(event),
+      syncNative: (event, guild): Promise<void> =>
+        this.nativeSync.syncEvent(event, guild),
+      cleanupGroupChannels: async (
+        event,
+        guild,
+        now,
+      ): Promise<GroupChannelReport> => {
         const report = await this.groupChannels.cleanup(event, guild, now);
         await this.logGroupReport(event, report);
         return report;
       },
-      logLifecycle: (event) => this.logLifecycle(event),
-      getGraceMinutes: () =>
+      logLifecycle: (event): Promise<void> => this.logLifecycle(event),
+      getGraceMinutes: (): Promise<number> =>
         this.configService.getNumber("events.channel_grace_minutes", 15),
-      beginEnding: (id) => this.beginEnding(id),
-      abortEnding: (id, hold) => this.abortEnding(id, hold),
-      finishEnding: (id, hold) => this.finishEnding(id, hold),
+      beginEnding: (id): number => this.beginEnding(id),
+      abortEnding: (id, hold): void => this.abortEnding(id, hold),
+      finishEnding: (id, hold): void => this.finishEnding(id, hold),
     });
   }
 

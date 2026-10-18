@@ -1715,9 +1715,12 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    export). Nothing here adds or changes anyone's group.
 7. **Discord event:** a manual end closes it the way the scheduled end does (an unstarted one
    is deleted, a running one is completed; an adopted one is only let go of). The scheduled end
-   leaves this to the scan's own sync right after the teardown.
+   leaves this to the scan's own sync right after the teardown. If the server cannot be reached,
+   or the Discord event (or a create that timed out and is still being looked for) is still
+   linked afterwards, the result says so and the scan tries again.
 
-Every step after the first is attempted whatever an earlier one did. A step that fails is
+Every step after the first is attempted whatever an earlier one did (a group channel pass that
+cannot read the event is reported as a failure, not as an empty success). A step that fails is
 logged and listed, never thrown: the host sees one message (at most 500 characters) that puts
 what needs attention first. Empty group channels, the main channel and the Discord event are
 retried by the scan; the pull-back and the hooks are not. One audit entry per press
@@ -1730,7 +1733,9 @@ The scheduled end differs from a manual one in three ways: it never pulls people
 not close the Discord event inside the teardown (the scan does, next), and it only acts on the
 event as the scan read it, so a cancel or an edited schedule made meanwhile is not overwritten.
 A scan that loaded an event just before a manual end skips it for the next few minutes instead
-of acting on its older copy. A recurring event's next occurrence is created by the next scan,
+of acting on its older copy, and it does not touch the event at all while a teardown is running
+(so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
+open copy never edits the announcement post once an end has begun. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
