@@ -30,6 +30,7 @@ import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Event } from "../models/event.js";
+import { eventChannelProtectionFilter } from "./event-group-channels.js";
 import {
   ManagedVoiceChannel,
   ManagedVoiceMigration,
@@ -725,10 +726,10 @@ export class VoiceChannelManager {
       return null;
     }
     try {
-      const rows = (await Event.find(
-        { guildId, "groups.channelId": { $type: "string" } },
-        { channelId: 1, "groups.channelId": 1 },
-      ).lean()) as Array<{
+      const rows = (await Event.find(eventChannelProtectionFilter(guildId), {
+        channelId: 1,
+        "groups.channelId": 1,
+      }).lean()) as Array<{
         channelId?: string | null;
         groups?: Array<{ channelId?: string | null }>;
       }>;

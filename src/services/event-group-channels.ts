@@ -70,6 +70,31 @@ export const HOST_CHANNEL_PERMISSIONS =
   PermissionFlagsBits.MoveMembers;
 
 const SNOWFLAKE = /^\d{16,20}$/;
+
+/** Thrown inside a delete attempt when someone has joined the channel. */
+class ChannelOccupiedError extends Error {
+  constructor() {
+    super("Group channel is occupied");
+    this.name = "ChannelOccupiedError";
+  }
+}
+
+/**
+ * Which event rows own channels the voice sweeps must leave alone: any row with
+ * a recorded group channel, and any group event with a recorded main channel,
+ * even before its first group channel exists (or when every create failed).
+ */
+export function eventChannelProtectionFilter(
+  guildId: string,
+): Record<string, unknown> {
+  return {
+    guildId,
+    $or: [
+      { "groups.channelId": { $type: "string" } },
+      { groupsEnabled: true, channelId: { $type: "string" } },
+    ],
+  };
+}
 const CHANNEL_NAME_MAX = 100;
 
 /** The group fields this module reads (a lean row has no defaults). */
@@ -214,6 +239,9 @@ export interface GroupChannelOptions {
 export class EventGroupChannels {
   private readonly lock = createKeyedLock();
   private readonly reports = new Map<string, GroupChannelReport>();
+  /** Standing notices about an event (the main channel's refused host access),
+   * kept apart from the per-pass reports so a pass cannot replace them. */
+  private readonly notices = new Map<string, Set<string>>();
   /** `event:group` -> when a failed create may be tried again, and why it failed. */
   private readonly holds = new Map<string, { until: number; reason: string }>();
   /** Warnings already logged, so a standing problem is not logged every scan. */
@@ -234,7 +262,22 @@ export class EventGroupChannels {
 
   /** The last report for an event, for the host panel (#1189). */
   public getReport(eventId: string): GroupChannelReport | null {
-    return this.reports.get(eventId) ?? null;
+    const base = this.reports.get(eventId) ?? null;
+    const extra = [...(this.notices.get(eventId) ?? [])];
+    if (!base && extra.length === 0) return null;
+    const report = base ?? emptyReport();
+    return {
+      ...report,
+      warnings: [...new Set([...extra, ...report.warnings])],
+    };
+  }
+
+  /** Keep a notice about an event for the host panel until its channels are gone. */
+  public addNotice(event: { _id: unknown }, text: string): void {
+    const id = String(event._id);
+    const set = this.notices.get(id) ?? new Set<string>();
+    set.add(text);
+    this.notices.set(id, set);
   }
 
   /**
@@ -592,10 +635,16 @@ export class EventGroupChannels {
       return report;
     }
 
+    // Stored before any channel is processed, so a failed read or delete shows
+    // on the host panel instead of an old creation report.
+    this.reports.set(eventId, report);
     let wrote = false;
     let rateLimited = false;
     for (const group of recorded) {
       const channelId = group.channelId as string;
+      // Pace first, then read: nothing sits between the occupancy check and
+      // the delete but the request itself.
+      if (wrote && this.paceMs > 0) await sleep(this.paceMs);
       const state = await this.readChannel(guild, channelId);
       if (state.status === "gone") {
         await this.clearRecorded(eventId, group.key, channelId);
@@ -634,20 +683,35 @@ export class EventGroupChannels {
         });
         continue;
       }
-      if (wrote && this.paceMs > 0) await sleep(this.paceMs);
       wrote = true;
       try {
         await this.call(
-          (signal) =>
-            this.rest().delete(Routes.channel(channelId), {
+          (signal) => {
+            // Checked again on every attempt (a timeout retry runs this
+            // again): a member may have joined since the read above.
+            const live = guild.channels.cache.get(channelId) as
+              VoiceChannel | undefined;
+            if (
+              live?.type === ChannelType.GuildVoice &&
+              live.members.size > 0
+            ) {
+              throw new ChannelOccupiedError();
+            }
+            return this.rest().delete(Routes.channel(channelId), {
               reason: "Event ended",
               signal,
-            }),
+            });
+          },
           "delete event group channel",
           // Deleting twice is harmless (the second answer is 10003).
           true,
         );
       } catch (error) {
+        if (error instanceof ChannelOccupiedError) {
+          // Someone joined: keep the channel and its record for the next scan.
+          report.occupied += 1;
+          continue;
+        }
         if (!(
           error instanceof DiscordAPIError &&
           error.code === DISCORD_UNKNOWN_CHANNEL
@@ -680,6 +744,7 @@ export class EventGroupChannels {
 
   private forget(eventId: string): void {
     this.reports.delete(eventId);
+    this.notices.delete(eventId);
     for (const key of [...this.holds.keys()]) {
       if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }

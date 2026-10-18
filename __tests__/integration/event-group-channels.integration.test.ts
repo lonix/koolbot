@@ -2,7 +2,10 @@ import { it, expect, beforeAll, beforeEach, jest } from "@jest/globals";
 import { ChannelType, DiscordAPIError, type Guild } from "discord.js";
 import { describeWithMongo, useRealMongo } from "./mongo-harness.js";
 import { Event } from "../../src/models/event.js";
-import { EventGroupChannels } from "../../src/services/event-group-channels.js";
+import {
+  EventGroupChannels,
+  eventChannelProtectionFilter,
+} from "../../src/services/event-group-channels.js";
 
 /**
  * The group channel lifecycle (#1190) records and clears channel ids with
@@ -177,6 +180,25 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
     expect(
       await Event.countDocuments({ "groups.channelId": { $type: "string" } }),
     ).toBe(0);
+  });
+
+  it("the voice sweeps' protection filter finds a group event's main channel before any group channel exists, and no plain event", async () => {
+    const groupEvent = await makeEvent(); // main channel recorded, no group ids
+    await Event.create({
+      guildId: GUILD,
+      title: "Plain",
+      startTime: new Date(),
+      state: "active",
+      channelId: "plain-main",
+      createdBy: "222222222222222222",
+    });
+    const rows = await Event.find(eventChannelProtectionFilter(GUILD)).lean();
+    expect(rows.map((r) => String(r._id))).toEqual([groupEvent]);
+
+    const { service, guild } = env();
+    await service.reconcile({ _id: groupEvent }, guild);
+    const after = await Event.find(eventChannelProtectionFilter(GUILD)).lean();
+    expect(after.map((r) => String(r._id))).toEqual([groupEvent]);
   });
 
   it("a lean read of an old row without group fields is safe for the readers", async () => {

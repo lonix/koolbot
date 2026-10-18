@@ -126,7 +126,11 @@ interface FakeChannel {
 }
 
 function makeEnv(
-  opts: { perms?: bigint[] | null; categoryOverwrites?: unknown[] } = {},
+  opts: {
+    perms?: bigint[] | null;
+    categoryOverwrites?: unknown[];
+    paceMs?: number;
+  } = {},
 ) {
   const channels = new Map<string, FakeChannel>();
   const fetchErrors = new Map<string, unknown>();
@@ -195,7 +199,7 @@ function makeEnv(
       getPrefix: async () => "📅",
       getGraceMs: async () => 15 * MIN,
     },
-    { rest: rest as never, call: call as never, paceMs: 0 },
+    { rest: rest as never, call: call as never, paceMs: opts.paceMs ?? 0 },
   );
   return {
     service,
@@ -723,6 +727,129 @@ describe("EventGroupChannels.cleanup", () => {
     expect(report.removed).toBe(0);
     expect(report.failures).toHaveLength(1);
     expect(store.get("evt1")?.groups[0].channelId).toBe("chan-1");
+  });
+
+  it("does not delete a channel someone joined after it was read, keeps its record and counts it as occupied", async () => {
+    store.set("evt1", recordedRow({ state: "cancelled" }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env);
+    // The read (fetch) saw chan-2 empty; the live voice state says otherwise.
+    env.cache.set("chan-2", {
+      type: ChannelType.GuildVoice,
+      members: { size: 1 },
+    });
+    const report = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(report.occupied).toBe(1);
+    expect(report.removed).toBe(2);
+    expect(env.rest.delete).not.toHaveBeenCalledWith(
+      "/channels/chan-2",
+      expect.anything(),
+    );
+    expect(env.channels.has("chan-2")).toBe(true);
+    expect(store.get("evt1")?.groups[1].channelId).toBe("chan-2");
+  });
+
+  it("checks occupancy again on a timeout retry of the same delete", async () => {
+    store.set(
+      "evt1",
+      recordedRow({ state: "cancelled", groups: [recordedRow().groups[0]] }),
+    );
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env);
+    // First attempt times out; before the retry a member joins.
+    let attempts = 0;
+    env.call.mockImplementation((async (
+      fn: (s: AbortSignal) => Promise<unknown>,
+    ) => {
+      for (;;) {
+        attempts += 1;
+        try {
+          return await fn(new AbortController().signal);
+        } catch (error) {
+          if (attempts > 1 || !/timeout/.test(String(error))) throw error;
+        }
+      }
+    }) as never);
+    env.rest.delete.mockImplementationOnce(async () => {
+      env.cache.set("chan-1", {
+        type: ChannelType.GuildVoice,
+        members: { size: 1 },
+      });
+      throw new Error("Discord API timeout after 30000ms");
+    });
+    const report = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(env.rest.delete).toHaveBeenCalledTimes(1);
+    expect(report.occupied).toBe(1);
+    expect(report.removed).toBe(0);
+    expect(store.get("evt1")?.groups[0].channelId).toBe("chan-1");
+  });
+
+  it("waits out the pacing before it reads the next channel, so the check and the delete are not a pause apart", async () => {
+    store.set("evt1", recordedRow({ state: "cancelled" }));
+    const env = makeEnv({ perms: ALL_PERMS, paceMs: 30 });
+    seed(env);
+    const times: Record<string, number> = {};
+    env.rest.delete.mockImplementation(async (route: string) => {
+      const id = route.split("/").pop() as string;
+      times[`delete-${id}`] = Date.now();
+      env.channels.delete(id);
+    });
+    const realFetch = env.fetch.getMockImplementation() as (
+      id: string,
+      o?: unknown,
+    ) => Promise<unknown>;
+    env.fetch.mockImplementation(async (id: string, o?: unknown) => {
+      times[`fetch-${id}`] ??= Date.now();
+      return realFetch(id, o);
+    });
+    await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
+    expect(
+      times["fetch-chan-2"] - times["delete-chan-1"],
+    ).toBeGreaterThanOrEqual(25);
+    expect(
+      times["fetch-chan-3"] - times["delete-chan-2"],
+    ).toBeGreaterThanOrEqual(25);
+  });
+
+  it("stores the cleanup report, so a failed delete shows instead of an old creation report", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(env.service.getReport("evt1")?.created).toBe(3);
+    (store.get("evt1") as Row).state = "cancelled";
+    env.fetchErrors.set("chan-1", new Error("socket hang up"));
+    await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
+    const shown = env.service.getReport("evt1");
+    expect(shown?.created).toBe(0);
+    expect(shown?.failures.map((f) => f.key)).toEqual(["g_a"]);
+    // Once everything is gone the report is dropped.
+    env.fetchErrors.clear();
+    await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
+    expect(env.service.getReport("evt1")).toBeNull();
+  });
+
+  it("keeps a notice added for an event across the group passes, and drops it when the channels are gone", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    env.service.addNotice({ _id: "evt1" }, "main channel without host access");
+    expect(env.service.getReport("evt1")?.warnings).toEqual([
+      "main channel without host access",
+    ]);
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    const shown = env.service.getReport("evt1");
+    expect(shown?.created).toBe(3);
+    expect(shown?.warnings).toContain("main channel without host access");
+    (store.get("evt1") as Row).state = "cancelled";
+    await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
+    expect(env.service.getReport("evt1")).toBeNull();
   });
 
   it("does nothing for an event without recorded channels", async () => {

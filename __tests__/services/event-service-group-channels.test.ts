@@ -224,6 +224,23 @@ describe("group channels in the scan", () => {
     expect(service.groupChannels.reconcile).toHaveBeenCalledTimes(1);
   });
 
+  it("runs the slow group pass only after the scan has saved its own changes (a cancel during the pass cannot be overwritten)", async () => {
+    const { service, guild } = setup();
+    const order: string[] = [];
+    const event = groupRow({
+      save: jest.fn(async () => {
+        order.push("save");
+      }),
+    });
+    service.groupChannels.reconcile = jest.fn(async () => {
+      order.push("reconcile");
+      return emptyReport();
+    });
+    await service.processEvent(event, guild, NOW, WINDOWS);
+    expect(guild.channels.create).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["save", "reconcile"]);
+  });
+
   it("uses the event's own lead time for the group channels too (not the global one)", async () => {
     const { service, guild } = setup();
     // 40 minutes before the start; the global lead is 15, the event's is 60.
@@ -440,6 +457,40 @@ describe("the main channel of a group event", () => {
     expect(guild.channels.create.mock.calls[1][0]).not.toHaveProperty(
       "permissionOverwrites",
     );
+  });
+
+  it("explains a refused host access on the main channel on the host panel, and keeps it", async () => {
+    const { service } = setup();
+    const guild = guildWithHostPower();
+    guild.channels.create
+      .mockImplementationOnce(async () => {
+        throw new DiscordAPIError(
+          { code: 50013, message: "x" },
+          50013,
+          403,
+          "POST",
+          "/",
+          {},
+        );
+      })
+      .mockImplementation(async () => ({ id: "main-1" }));
+    const event = groupRow();
+    await service.createEventChannel(event, guild);
+    const svc = service as unknown as {
+      getGroupChannelReport: (id: string) => { warnings: string[] } | null;
+    };
+    const shown = svc.getGroupChannelReport("evt1");
+    expect(shown?.warnings.join(" ")).toContain("main voice channel");
+    // A plain event records nothing.
+    const { service: plain } = setup();
+    await plain.createEventChannel(row(), guildWithHostPower());
+    expect(
+      (
+        plain as unknown as {
+          getGroupChannelReport: (id: string) => unknown;
+        }
+      ).getGroupChannelReport("evt1"),
+    ).toBeNull();
   });
 
   it("any other create failure still returns null as before", async () => {

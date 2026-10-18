@@ -30,6 +30,7 @@ import {
   ManagedVoiceMigration,
 } from "../../src/models/managed-voice-channel.js";
 import { mockModel, usePerModelStubs } from "../test-utils.js";
+import { eventChannelProtectionFilter } from "../../src/services/event-group-channels.js";
 
 // Three collections behave differently here: give each model its own stub.
 usePerModelStubs();
@@ -484,6 +485,24 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
         expect(group.delete).not.toHaveBeenCalled();
       }
+    });
+
+    it("asks for group events' main channels too, not only rows with a recorded group channel", async () => {
+      addChannel("lobby-id", "Lobby");
+      const main = addChannel("ev-main", "Game night");
+      // A group event whose group creates have not happened (or all failed).
+      eventRows = [{ channelId: "ev-main", groups: [] }];
+      await manager.cleanupEmptyChannels();
+      const find = mockModel("Event").find as jest.Mock;
+      expect(find.mock.calls[0][0]).toEqual(
+        eventChannelProtectionFilter(GUILD_ID),
+      );
+      expect(find.mock.calls[0][0]).toMatchObject({
+        $or: expect.arrayContaining([
+          { groupsEnabled: true, channelId: { $type: "string" } },
+        ]),
+      });
+      expect(main.delete).not.toHaveBeenCalled();
     });
 
     it("deletes nothing when the event channels cannot be listed (fails closed)", async () => {

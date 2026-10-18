@@ -637,17 +637,6 @@ export class EventService extends ScheduledService {
       }
     }
 
-    // 2b. Group channels (#1190): created next to the main channel, and made
-    // again after a restart or a deletion. Only a group event with a main
-    // channel gets here, and only while something is missing: a plain event
-    // makes no call at all.
-    if (this.needsGroupReconcile(event, guild, now)) {
-      await this.logGroupReport(
-        event,
-        await this.groupChannels.reconcile(event, guild),
-      );
-    }
-
     // 3. Mark ended once past the end time.
     if (shouldEndEvent(event, now)) {
       event.state = "ended";
@@ -668,6 +657,19 @@ export class EventService extends ScheduledService {
     if (changed) {
       await event.save();
       await this.logLifecycle(event);
+    }
+
+    // 2b. Group channels (#1190): created next to the main channel, and made
+    // again after a restart or a deletion. Only a group event with a main
+    // channel gets here, and only while something is missing: a plain event
+    // makes no call at all. This runs after the scan's own save on purpose: the
+    // pass is slow (paced writes), and a cancel that lands meanwhile must not be
+    // overwritten by this scan saving its older copy of the event afterwards.
+    if (this.needsGroupReconcile(event, guild, now)) {
+      await this.logGroupReport(
+        event,
+        await this.groupChannels.reconcile(event, guild),
+      );
     }
 
     // 4b. Group channels of a finished event go with the main channel (#1190),
@@ -1985,9 +1987,15 @@ export class EventService extends ScheduledService {
     try {
       // A group event's host (#1190) also gets access to the main channel. A
       // plain event keeps the exact call it always had.
+      const notices: string[] = [];
       const overwrites =
         event.groupsEnabled === true
-          ? this.groupChannels.hostOverwritesFor(event, guild, category, [])
+          ? this.groupChannels.hostOverwritesFor(
+              event,
+              guild,
+              category,
+              notices,
+            )
           : null;
       let channel: VoiceChannel;
       try {
@@ -2010,12 +2018,17 @@ export class EventService extends ScheduledService {
         logger.warn(
           `Discord refused the host's access on the main channel of event ${sanitizeForLog(String(event._id))}; creating it without`,
         );
+        notices.push(
+          "Discord refused the host's access on the main voice channel, so it was created without it.",
+        );
         channel = await guild.channels.create({
           name,
           type: ChannelType.GuildVoice,
           parent: category,
         });
       }
+      // Kept for the host panel; a later group pass cannot replace them.
+      for (const notice of notices) this.groupChannels.addNotice(event, notice);
       logger.info(
         `Created event channel ${sanitizeForLog(name)} for event ${sanitizeForLog(String(event._id))}`,
       );
