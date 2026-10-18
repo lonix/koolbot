@@ -1815,8 +1815,8 @@ are read from it now, every channel is read from Discord first (a forced read, t
 gateway's voice cache, like the channel cleanup uses), and only then are all the member lists
 looked at together, so someone moving between channels is not missed. The ids it looked at go
 into the end's own claim, which refuses a change (a group channel recorded since), and the next
-scan checks again. An event or a channel that cannot be read counts as occupied. Only the host's manual **End event now** may end an event with people present. The
-scheduled end also never pulls people back, it does not close the Discord event inside the
+scan checks again. An event or a channel that cannot be read counts as occupied. Only the host's manual **End event now** may end an event with people
+present. The scheduled end also never pulls people back, it does not close the Discord event inside the
 teardown (the scan does, next), and it only acts on the event as the scan read it, so a cancel
 or an edited schedule made meanwhile is not overwritten.
 A scan that loaded an event just before a manual end skips it instead of acting on its older
