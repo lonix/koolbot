@@ -22,12 +22,11 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
   isDebugMode: jest.fn(() => false),
 }));
+const mockApi = jest.fn(async (fn: () => Promise<unknown>, _label: string) =>
+  fn(),
+);
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
-  CommandManager: {
-    getInstance: () => ({
-      makeDiscordApiCall: async (fn: () => Promise<unknown>) => fn(),
-    }),
-  },
+  CommandManager: { getInstance: () => ({ makeDiscordApiCall: mockApi }) },
 }));
 jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => {
   class ReactionRoleConfig {
@@ -357,6 +356,17 @@ describe("reconcileConfigs with a remembered picker channel", () => {
     expect(ids.filter((id) => id === CONFIGURED)).toHaveLength(1);
   });
 
+  it("fetches picker channels through the shared Discord API wrapper", async () => {
+    const guild = fakeGuild([fakeChannel(OLD, [fakeMessage("m1")])]);
+    Model.find.mockResolvedValue([row({ messageChannelId: OLD })]);
+
+    await makeService(guild).reconcileConfigs();
+
+    expect(mockApi.mock.calls.map((c) => c[1])).toContain(
+      `fetch picker channel ${OLD}`,
+    );
+  });
+
   it("gives a sibling on the same message the channel its row remembers", async () => {
     const withChannel = row({
       _id: "a",
@@ -425,6 +435,31 @@ describe("handleChannelDelete with a remembered picker channel", () => {
         { categoryId: CONFIGURED },
       ],
     });
+  });
+
+  it("also archives unstamped rows that share a deleted picker with a stamped one", async () => {
+    // A legacy picker topped up after #1207: one row stamped, one not. Only the
+    // stamped row matches the channel; the picker is gone for both.
+    const stamped = row({
+      _id: "stamped",
+      messageId: "shared",
+      messageChannelId: OLD,
+    });
+    const sibling = row({ _id: "sibling", messageId: "shared", roleId: "r2" });
+    Model.find.mockResolvedValueOnce([stamped]);
+    Model.find.mockResolvedValueOnce([stamped, sibling]);
+
+    await makeService(fakeGuild([])).handleChannelDelete(deleted(OLD));
+
+    expect(Model.find).toHaveBeenLastCalledWith({
+      guildId: "g1",
+      isArchived: false,
+      messageId: { $in: ["shared"] },
+    });
+    expect(stamped.isArchived).toBe(true);
+    expect(sibling.isArchived).toBe(true);
+    expect(sibling.save).toHaveBeenCalledTimes(1);
+    expect(stamped.save).toHaveBeenCalledTimes(1);
   });
 
   it("archives the matched mappings", async () => {

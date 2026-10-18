@@ -424,9 +424,16 @@ export class ReactionRoleService {
 
     let resolution: MessageChannelResolution;
     try {
-      const channel = await guild.channels.fetch(messageChannelId, {
-        force: true,
-      });
+      // One forced REST call per picker channel per pass, through the shared
+      // timeout + rate-limit wrapper. It rethrows a DiscordAPIError unchanged,
+      // so a confirmed 10003 below is still recognised; a timeout or a 429
+      // that outlasts the retries surfaces as `unavailable` (nothing archived).
+      const channel = await CommandManager.getInstance(
+        this.client,
+      ).makeDiscordApiCall(
+        () => guild.channels.fetch(messageChannelId, { force: true }),
+        `fetch picker channel ${messageChannelId}`,
+      );
       if (!channel) {
         resolution = { status: "deleted" };
       } else if (!channel.isTextBased()) {
@@ -618,12 +625,39 @@ export class ReactionRoleService {
         ],
       };
 
-      const configs = await ReactionRoleConfig.find(filter);
+      const matched = await ReactionRoleConfig.find(filter);
+
+      // Rows on one message share its picker. A legacy picker that was topped up
+      // or bound to after #1207 carries a mix of stamped and unstamped rows, and
+      // only the stamped ones match above. The picker is gone for all of them, so
+      // archive their unstamped siblings too (otherwise half a group stays active
+      // on a dead message).
+      const deadMessageIds = [
+        ...new Set(
+          matched
+            .filter((c) => c.messageChannelId === channel.id)
+            .map((c) => c.messageId),
+        ),
+      ];
+      let configs = matched;
+      if (deadMessageIds.length > 0) {
+        const seen = new Set(matched.map((c) => String(c._id)));
+        const siblings = await ReactionRoleConfig.find({
+          guildId: channel.guild.id,
+          isArchived: false,
+          messageId: { $in: deadMessageIds },
+        });
+        configs = [
+          ...matched,
+          ...siblings.filter((c) => !seen.has(String(c._id))),
+        ];
+      }
 
       for (const config of configs) {
         const pickerWasDeleted =
           config.messageChannelId === channel.id ||
-          (!config.messageChannelId && messageChannelId === channel.id);
+          (!config.messageChannelId && messageChannelId === channel.id) ||
+          deadMessageIds.includes(config.messageId);
         await this.archiveConfig(
           config,
           pickerWasDeleted

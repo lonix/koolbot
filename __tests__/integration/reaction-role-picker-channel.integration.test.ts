@@ -136,6 +136,26 @@ describeWithMongo(
         expect(await archivedMessageIds()).toEqual(["in-old"]);
       });
 
+      it("archives an unstamped row that shares a deleted picker with a stamped one", async () => {
+        // A picker from before the field, topped up afterwards: mixed rows.
+        await insertRaw({ messageId: "shared", roleId: "r1", emoji: "1️⃣" });
+        await insertRaw({
+          messageId: "shared",
+          roleId: "r2",
+          emoji: "2️⃣",
+          messageChannelId: OLD,
+        });
+        await insertRaw({
+          messageId: "other",
+          roleId: "r3",
+          emoji: "3️⃣",
+          messageChannelId: NEW,
+        });
+        await serviceWithConfigured(NEW).handleChannelDelete(deleted(OLD));
+        const rows = await ReactionRoleConfig.find({ isArchived: true }).lean();
+        expect(rows.map((r) => r.roleId).sort()).toEqual(["r1", "r2"]);
+      });
+
       it("archives the configured channel's own mappings and the older rows that follow the setting", async () => {
         await seed();
         await serviceWithConfigured(NEW).handleChannelDelete(deleted(NEW));
