@@ -76,6 +76,10 @@ import {
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import {
+  renderLeadersSection,
+  type LeadersViewData,
+} from "../../src/web/host-leaders-view.js";
+import {
   renderConsent,
   renderErrorPage,
   renderInvalidLink,
@@ -1833,6 +1837,37 @@ export function adminPages(): A11yPage[] {
 }
 
 /** A host-panel event (#1189); `groupsEnabled` adds two groups. */
+function leadersView(blocker: string | null): LeadersViewData {
+  return {
+    csrfToken: "token",
+    actionPath: (name) => `/me/events/65a000000000000000000001/host/${name}`,
+    leaderLabel: "Captain",
+    groupLabel: "Team",
+    blocker,
+    defaultWhere:
+      "the main channel (the event has no leaders-only channel yet).",
+    destinations: [
+      { value: "default", label: "Default" },
+      { value: "main", label: "Main channel" },
+      { value: "here", label: "The channel I am in" },
+      { value: "g_a", label: "Reds" },
+    ],
+    groups: [
+      {
+        key: "g_a",
+        name: "Reds",
+        marker: "🔴",
+        leaderId: "111111111111111111",
+        members: [
+          { id: "111111111111111111", name: "Ana" },
+          { id: "222222222222222222", name: "Ben" },
+        ],
+      },
+      { key: "g_b", name: "Blues", marker: "", leaderId: null, members: [] },
+    ],
+  };
+}
+
 function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
   const groupsEnabled = over.groupsEnabled === true;
   return {
@@ -2130,6 +2165,41 @@ export function userPages(): A11yPage[] {
               destinations: [],
               people: [],
             }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (leaders, with a leader and a group without members)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: {
+            ...hostEvent({ groupsEnabled: true }),
+            captainsEnabled: true,
+            leaderLabel: "Captain",
+          },
+          controls: { leaders: renderLeadersSection(leadersView(null)) },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (leaders, pulling switched off)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: {
+            ...hostEvent({ groupsEnabled: true }),
+            captainsEnabled: true,
+          },
+          controls: {
+            leaders: renderLeadersSection(
+              leadersView(
+                "The bot lacks the Move Members permission, so nobody was moved. Grant it to the bot's role.",
+              ),
+            ),
           },
         }),
       ),

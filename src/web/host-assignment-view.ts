@@ -28,6 +28,11 @@ export interface AssignmentPersonView {
   connected: boolean;
   /** Key of the team group the person is in, or null. */
   groupKey: string | null;
+  /**
+   * Set (to the event's leader label) when the person leads the group they are
+   * in (#1195); only given while leaders are switched on for the event.
+   */
+  leaderLabel?: string | null;
 }
 
 export interface AssignmentViewData {
@@ -125,7 +130,7 @@ function renderRow(d: AssignmentViewData, p: AssignmentPersonView): string {
   return (
     `<tr><td>${escapeHtml(p.name)}</td>` +
     `<td>${p.connected ? "In a voice channel" : '<span class="muted">Not connected</span>'}</td>` +
-    `<td>${current ? escapeHtml(groupLabelText(current)) : '<span class="muted">Unassigned</span>'}</td>` +
+    `<td>${current ? escapeHtml(groupLabelText(current)) : '<span class="muted">Unassigned</span>'}${p.leaderLabel ? ` <span class="tag tag-info">${escapeHtml(p.leaderLabel)}</span>` : ""}</td>` +
     `<td>${assign}</td><td>${unassign}</td></tr>`
   );
 }

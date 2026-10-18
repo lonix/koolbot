@@ -11,7 +11,8 @@ import { escapeHtml } from "./html.js";
 import { hostControlsAvailable } from "./host-panel-shared.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 
-export type HostSectionId = "assignment" | "moves" | "end" | "settings";
+export type HostSectionId =
+  "assignment" | "moves" | "leaders" | "end" | "settings";
 
 export interface HostSectionDef {
   id: HostSectionId;
@@ -20,11 +21,14 @@ export interface HostSectionDef {
   placeholder: string;
   /** Only meaningful when the event has groups. */
   needsGroups: boolean;
+  /** Only shown while the event has leaders switched on (#1195). */
+  needsLeaders?: boolean;
 }
 
 /**
  * The control sections, in page order. Anchors are `#host-<id>`. Owners:
- * `assignment` #1191, `moves` #1192, `end` #1193, `settings` #1197.
+ * `assignment` #1191, `moves` #1192, `leaders` #1195, `end` #1193,
+ * `settings` #1197.
  */
 export const HOST_SECTIONS: readonly HostSectionDef[] = [
   {
@@ -39,6 +43,13 @@ export const HOST_SECTIONS: readonly HostSectionDef[] = [
     placeholder:
       "Send people to their groups, bring them back, or move one person.",
     needsGroups: true,
+  },
+  {
+    id: "leaders",
+    title: "Leaders",
+    placeholder: "Pick a leader for each group and pull just the leaders.",
+    needsGroups: true,
+    needsLeaders: true,
   },
   {
     id: "end",
@@ -62,6 +73,8 @@ export interface HostPanelGroup {
   tag: string;
   hasChannel: boolean;
   memberCount: number;
+  /** Display name of the group's leader (#1195); null = none. Only given while leaders are on. */
+  leaderName?: string | null;
   /** "2/2" for a sized group, "5" for an unsized one (#1191). */
   fill: string;
 }
@@ -81,6 +94,8 @@ export interface HostPanelEvent {
   groupsEnabled: boolean;
   groupLabel: string;
   leaderLabel: string;
+  /** Leaders switched on for this event (#1195). */
+  captainsEnabled?: boolean;
   /** Minutes before the start that channels are created; null = server default. */
   channelLeadMinutes: number | null;
   groups: HostPanelGroup[];
@@ -149,7 +164,11 @@ function renderGroups(e: HostPanelEvent): string {
         `<td>${g.size === null ? '<span class="muted">No limit</span>' : escapeHtml(g.size)}</td>` +
         `<td>${g.tag ? escapeHtml(g.tag) : '<span class="muted">None</span>'}</td>` +
         `<td>${g.hasChannel ? "Created" : '<span class="muted">Not created yet</span>'}</td>` +
-        `<td>${g.kind === "team" ? `<span class="mono">${escapeHtml(g.fill)}</span>` : '<span class="muted">n/a</span>'}</td></tr>`,
+        `<td>${g.kind === "team" ? `<span class="mono">${escapeHtml(g.fill)}</span>` : '<span class="muted">n/a</span>'}</td>` +
+        (e.captainsEnabled
+          ? `<td>${g.kind === "team" ? (g.leaderName ? escapeHtml(g.leaderName) : '<span class="muted">None</span>') : '<span class="muted">n/a</span>'}</td>`
+          : "") +
+        `</tr>`,
     )
     .join("");
   const lead =
@@ -163,7 +182,7 @@ function renderGroups(e: HostPanelEvent): string {
 <h2 id="host-groups-h">Groups</h2>
 <p class="muted">Set up when the event was created. Channels are created ${lead}.</p>
 ${notices}
-<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table>
+<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>
 </section>`;
 }
 
@@ -175,6 +194,7 @@ function renderControls(
     return `<div class="notice info" role="note">This event is ${escapeHtml(e.state)}, so this page is a read-only summary.</div>`;
   }
   return HOST_SECTIONS.filter((s) => !s.needsGroups || e.groupsEnabled)
+    .filter((s) => !s.needsLeaders || e.captainsEnabled === true)
     .map((s) => {
       const html = controls[s.id];
       const inner =

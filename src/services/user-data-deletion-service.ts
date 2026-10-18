@@ -63,6 +63,7 @@ import { Client } from "discord.js";
 import { BirthdayService } from "./birthday-service.js";
 import { EventService } from "./event-service.js";
 import { removeMemberFromEvents } from "./event-group-assignment.js";
+import { removeLeaderFromEvents } from "./event-group-leaders.js";
 import { LeaderboardRoleService } from "./leaderboard-role-service.js";
 import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
@@ -369,6 +370,28 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  // The leader slot of a group (#1195) on the same event rows: clear it where
+  // it is the member's id. Same per-event lock; does not rely on the unassign
+  // cleanup, which a leader who is no longer a member never triggers.
+  "event-group-captain": {
+    actions: ["pull-member"],
+    run: async ({ userId, guildId }, emit) => {
+      const { matched, removed, failed } = await removeLeaderFromEvents(
+        guildId,
+        userId,
+      );
+      emit({
+        action: "pull-member",
+        matched,
+        removed,
+        error:
+          failed > 0
+            ? `${failed} event(s) could not be updated and may still name this member as a group leader`
+            : undefined,
+      });
+    },
+  },
+
   // ---------------------------------------------------------------
   // Inert collections
   // ---------------------------------------------------------------
@@ -626,6 +649,10 @@ export const PURGE_ORDER: readonly string[] = [
   // Group memberships on the same event rows (no Discord side effect today;
   // #1194 listens to the change it fires to restore a tagged nickname).
   "event-group-member",
+  // Group leaders on the same rows (#1195). After the memberships: the unassign
+  // cleanup (a listener on the change the membership purge fires) may already
+  // have cleared it, which makes this step a no-op, never a conflict.
+  "event-group-captain",
   // Then everything inert.
   "voice-channel-tracking",
   "message-activity-tracking",
