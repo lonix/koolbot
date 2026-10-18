@@ -1932,8 +1932,14 @@ export class EventService extends ScheduledService {
     if (!event.channelId) return false;
     if (event.state !== "scheduled" && event.state !== "active") return false;
     if (shouldEndEvent(event, now)) return false;
-    return (event.groups ?? []).some(
-      (group) => !group.channelId || !guild.channels.cache.has(group.channelId),
+    return (
+      (event.groups ?? []).some(
+        (group) =>
+          !group.channelId || !guild.channels.cache.has(group.channelId),
+      ) ||
+      // Cache only: out-of-place group channels (#1214) start a pass that reads
+      // Discord fresh before it writes anything.
+      this.groupChannels.orderLooksWrong(event, guild)
     );
   }
 

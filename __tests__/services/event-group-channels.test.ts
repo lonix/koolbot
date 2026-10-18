@@ -1,4 +1,11 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import {
   ChannelType,
   DiscordAPIError,
@@ -124,6 +131,8 @@ interface FakeChannel {
   type: ChannelType;
   guildId: string;
   members: { size: number };
+  parentId?: string;
+  rawPosition?: number;
 }
 
 function makeEnv(
@@ -131,6 +140,8 @@ function makeEnv(
     perms?: bigint[] | null;
     categoryOverwrites?: unknown[];
     paceMs?: number;
+    /** Foreign voice channels in the event's category (id, raw position). */
+    foreign?: Array<{ id: string; rawPosition: number }>;
   } = {},
 ) {
   const channels = new Map<string, FakeChannel>();
@@ -161,11 +172,28 @@ function makeEnv(
         guildId: GUILD,
         parentId: CATEGORY,
         members: { size: 0 },
+        rawPosition: 0,
       },
     ],
     [CATEGORY, category],
     [OTHER_CATEGORY, otherCategory],
+    ...(opts.foreign ?? []).map(
+      (f) =>
+        [
+          f.id,
+          {
+            id: f.id,
+            type: ChannelType.GuildVoice,
+            guildId: GUILD,
+            parentId: CATEGORY,
+            members: { size: 0 },
+            rawPosition: f.rawPosition,
+          },
+        ] as [string, unknown],
+    ),
   ]);
+  // Discord appends a new channel to the bottom of its category.
+  let nextPosition = 100;
   const guild = {
     id: GUILD,
     members: {
@@ -181,7 +209,12 @@ function makeEnv(
     channels: {
       cache,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      fetch: jest.fn(async (id: string, _o?: unknown) => {
+      fetch: jest.fn(async (id?: string, _o?: unknown) => {
+        if (id === undefined) {
+          // The whole server, read fresh (what the ordering step uses).
+          if (fetchErrors.has("*")) throw fetchErrors.get("*");
+          return new Map<string, unknown>([...fixed, ...channels]);
+        }
         if (fetchErrors.has(id)) throw fetchErrors.get(id);
         if (fixed.has(id)) return fixed.get(id);
         const channel = channels.get(id);
@@ -193,17 +226,33 @@ function makeEnv(
   let seq = 0;
   const rest = {
     post: jest.fn(
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async (_route: string, _o: { body: Record<string, unknown> }) => {
         seq += 1;
+        nextPosition += 1;
         const id = `chan-${seq}`;
         channels.set(id, {
           id,
           type: ChannelType.GuildVoice,
           guildId: GUILD,
           members: { size: 0 },
+          parentId: String(_o.body.parent_id),
+          rawPosition: nextPosition,
         });
         return { id };
+      },
+    ),
+    patch: jest.fn(
+      async (
+        _route: string,
+        o: { body: Array<{ id: string; position: number }> },
+      ) => {
+        for (const move of o.body) {
+          const target = (channels.get(move.id) ?? fixed.get(move.id)) as
+            FakeChannel | undefined;
+          if (!target) throw apiError(10003);
+          target.rawPosition = move.position;
+        }
+        return undefined;
       },
     ),
     delete: jest.fn(async (route: string) => {
@@ -978,5 +1027,644 @@ describe("EventGroupChannels.cleanup", () => {
     await env.service.cleanup({ _id: "evt1" }, env.guild, NOW_AFTER_GRACE);
     expect(env.fetch).not.toHaveBeenCalled();
     expect(env.rest.delete).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------
+// Order (#1214)
+// ---------------------------------------------------------------------
+
+const { planGroupOrder } =
+  await import("../../src/services/event-group-channels.js");
+
+function vc(id: string, rawPosition: number, parentId: string | null = "cat") {
+  return { id, parentId, type: ChannelType.GuildVoice, rawPosition };
+}
+
+function rateLimit(waitMs = 60_000): RateLimitError {
+  return new RateLimitError({
+    timeToReset: waitMs,
+    limit: 1,
+    method: "PATCH",
+    hash: "h",
+    url: "/",
+    route: "/",
+    majorParameter: "",
+    global: false,
+    retryAfter: waitMs,
+    sublimitTimeout: 0,
+  } as never);
+}
+
+type Env = ReturnType<typeof makeEnv>;
+
+/** The ids of the voice channels of the event's category, top to bottom. */
+function orderOf(env: Env): string[] {
+  const all = [...env.fixed.values(), ...env.channels.values()] as Array<{
+    id: string;
+    parentId?: string;
+    rawPosition?: number;
+    type: ChannelType;
+  }>;
+  return all
+    .filter((c) => c.parentId === CATEGORY && c.type === ChannelType.GuildVoice)
+    .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
+    .map((c) => c.id);
+}
+
+/** Copy what Discord reports into the gateway cache (what events would do). */
+function syncCache(env: Env): void {
+  for (const [id, channel] of [...env.fixed, ...env.channels]) {
+    env.cache.set(id, channel);
+  }
+}
+
+function patches(env: Env): unknown[] {
+  return env.rest.patch.mock.calls.map((c) => c[1].body);
+}
+
+/** What the scan asks before it starts a pass (cache only). */
+function looksWrong(env: Env): boolean {
+  const row = store.get("evt1") as Row;
+  return env.service.orderLooksWrong(
+    { _id: "evt1", channelId: "main-1", groups: row.groups },
+    env.guild,
+  );
+}
+
+/** A voice channel that is already recorded and cached in the test's server. */
+function seedChannel(
+  env: Env,
+  id: string,
+  rawPosition: number,
+  parentId: string = CATEGORY,
+): void {
+  env.channels.set(id, {
+    id,
+    type: ChannelType.GuildVoice,
+    guildId: GUILD,
+    members: { size: 0 },
+    parentId,
+    rawPosition,
+  });
+  env.cache.set(id, env.channels.get(id));
+}
+
+const T0 = 1_800_000_000_000;
+
+describe("planGroupOrder", () => {
+  it("is in order when the groups follow the main channel, even with gaps in the numbers", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a", "b"],
+      [vc("x", 0), vc("m", 5), vc("a", 9), vc("b", 30), vc("y", 31)],
+    );
+    expect(plan).toEqual({ inOrder: true, moves: [] });
+  });
+
+  it("moves only the groups and what has to shift, and keeps foreign channels in their relative order", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a", "b"],
+      [
+        vc("x", 0),
+        vc("m", 1),
+        vc("f1", 2),
+        vc("f2", 3),
+        vc("a", 4),
+        vc("y", 5),
+        vc("b", 6),
+      ],
+    );
+    // main (1) keeps its number, a and b take 2 and 3, f1 and f2 shift to 4
+    // and 5, y (5) moves to 6; x above the main channel is not sent.
+    expect(plan.inOrder).toBe(false);
+    expect(plan.moves).toEqual([
+      { id: "a", position: 2 },
+      { id: "b", position: 3 },
+      { id: "f1", position: 4 },
+      { id: "f2", position: 5 },
+      { id: "y", position: 6 },
+    ]);
+  });
+
+  it("does not send a foreign channel that already sits far enough down", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a"],
+      [vc("m", 0), vc("f", 7), vc("a", 9)],
+    );
+    expect(plan.moves).toEqual([{ id: "a", position: 1 }]);
+  });
+
+  it("treats a tie between the main channel and a group as out of order", () => {
+    const plan = planGroupOrder("m", ["a"], [vc("m", 3), vc("a", 3)]);
+    expect(plan.inOrder).toBe(false);
+    expect(plan.moves).toEqual([{ id: "a", position: 4 }]);
+  });
+
+  it("puts a group that was above the main channel below it", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a", "b"],
+      [vc("b", 0), vc("m", 1), vc("a", 2)],
+    );
+    // a already has the number right below the main channel; only b moves.
+    expect(plan.moves).toEqual([{ id: "b", position: 3 }]);
+  });
+});
+
+describe("EventGroupChannels ordering", () => {
+  it("leaves the groups where they are when they already sit below the main channel", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(report.created).toBe(3);
+    expect(report.failures).toEqual([]);
+    expect(env.rest.patch).not.toHaveBeenCalled();
+    expect(orderOf(env)).toEqual(["main-1", "chan-1", "chan-2", "chan-3"]);
+  });
+
+  it("writes one bulk position update after creates that landed below foreign channels, leaving the groups directly below the main channel in group order", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({
+      perms: ALL_PERMS,
+      foreign: [
+        { id: "f1", rawPosition: 1 },
+        { id: "f2", rawPosition: 2 },
+      ],
+    });
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(report.failures).toEqual([]);
+    expect(env.rest.post).toHaveBeenCalledTimes(3);
+    expect(env.rest.patch).toHaveBeenCalledTimes(1);
+    expect(env.rest.patch.mock.calls[0][0]).toBe(`/guilds/${GUILD}/channels`);
+    expect(patches(env)[0]).toEqual([
+      { id: "chan-1", position: 1 },
+      { id: "chan-2", position: 2 },
+      { id: "chan-3", position: 3 },
+      { id: "f1", position: 4 },
+      { id: "f2", position: 5 },
+    ]);
+    expect(orderOf(env)).toEqual([
+      "main-1",
+      "chan-1",
+      "chan-2",
+      "chan-3",
+      "f1",
+      "f2",
+    ]);
+  });
+
+  it("moves a recreated group channel back into its place", async () => {
+    store.set(
+      "evt1",
+      makeRow({
+        groups: [
+          { key: "g_a", name: "Alpha", size: 5, marker: "", channelId: "A" },
+          { key: "g_b", name: "Bravo", size: null, marker: "", channelId: "B" },
+          { key: "g_c", name: "Charlie", size: 3, marker: "", channelId: "C" },
+        ],
+      }),
+    );
+    const env = makeEnv({
+      perms: ALL_PERMS,
+      foreign: [{ id: "f", rawPosition: 3 }],
+    });
+    seedChannel(env, "A", 1);
+    seedChannel(env, "B", 2);
+    // "C" was deleted by someone: Discord says 10003, so it is created again,
+    // at the bottom of the category.
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(report.created).toBe(1);
+    expect(patches(env)).toEqual([
+      [
+        { id: "chan-1", position: 3 },
+        { id: "f", position: 4 },
+      ],
+    ]);
+    expect(orderOf(env)).toEqual(["main-1", "A", "B", "chan-1", "f"]);
+  });
+
+  it("makes no write and no whole-server read when the cache shows the order right and nothing was created", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    syncCache(env);
+    env.fetch.mockClear();
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(report).toMatchObject({ created: 0, failures: [] });
+    expect(env.fetch).not.toHaveBeenCalled();
+    expect(env.rest.post).toHaveBeenCalledTimes(3);
+    expect(env.rest.patch).not.toHaveBeenCalled();
+  });
+
+  it("repairs a group channel someone dragged away: the cache says wrong, a fresh read confirms, one write", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    // Someone drags the second group channel to the top.
+    (env.channels.get("chan-2") as { rawPosition: number }).rawPosition = -1;
+    syncCache(env);
+    expect(looksWrong(env)).toBe(true);
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(report.created).toBe(0);
+    expect(env.rest.patch).toHaveBeenCalledTimes(1);
+    expect(orderOf(env)).toEqual(["main-1", "chan-1", "chan-2", "chan-3"]);
+  });
+
+  it("does not write when the cache looks wrong but the fresh read says the order is right", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({ perms: ALL_PERMS });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    syncCache(env);
+    // A stale cache entry: the channel is already back in place in Discord.
+    env.cache.set("chan-2", {
+      ...(env.channels.get("chan-2") as object),
+      rawPosition: -1,
+    });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(env.fetch).toHaveBeenCalledWith();
+    expect(env.rest.patch).not.toHaveBeenCalled();
+  });
+
+  describe("fails closed", () => {
+    function setup(): Env {
+      store.set("evt1", makeRow());
+      return makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+    }
+
+    it("writes nothing and reports when the channels cannot be read", async () => {
+      const env = setup();
+      env.fetchErrors.set("*", new Error("network down"));
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.created).toBe(3);
+      expect(report.failures).toHaveLength(1);
+      expect(report.failures[0].name).toBe("Group channel order");
+      expect(report.failures[0].reason).toMatch(/could not be read/);
+    });
+
+    it("writes nothing when the category is not in the listing", async () => {
+      const env = setup();
+      env.fetch.mockImplementation((async (id?: string) => {
+        if (id === undefined) {
+          const all = new Map<string, unknown>([...env.fixed, ...env.channels]);
+          all.delete(CATEGORY);
+          return all;
+        }
+        return env.fixed.get(id) ?? env.channels.get(id);
+      }) as never);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.failures.map((f) => f.reason).join()).toMatch(/category/);
+    });
+
+    it("writes nothing when a recorded group channel is missing from the listing", async () => {
+      const env = setup();
+      env.fetch.mockImplementation((async (id?: string) => {
+        if (id === undefined) {
+          const all = new Map<string, unknown>([...env.fixed, ...env.channels]);
+          all.delete("chan-2");
+          return all;
+        }
+        return env.fixed.get(id) ?? env.channels.get(id);
+      }) as never);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.failures.map((f) => f.reason).join()).toMatch(/Bravo/);
+    });
+
+    it("writes nothing when the main channel is not in the listing as a channel in a category", async () => {
+      const env = setup();
+      env.fetch.mockImplementation((async (id?: string) => {
+        if (id === undefined) {
+          const all = new Map<string, unknown>([...env.fixed, ...env.channels]);
+          all.set("main-1", {
+            ...(env.fixed.get("main-1") as object),
+            parentId: null,
+          });
+          return all;
+        }
+        return env.fixed.get(id) ?? env.channels.get(id);
+      }) as never);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.failures.map((f) => f.reason).join()).toMatch(
+        /main voice channel/,
+      );
+    });
+
+    it("writes nothing without Manage Channels, and says so", async () => {
+      // Channels already exist and are out of order; the bot cannot manage them.
+      store.set(
+        "evt1",
+        makeRow({
+          groups: [
+            { key: "g_a", name: "Alpha", size: 5, marker: "", channelId: "A" },
+          ],
+        }),
+      );
+      const env = makeEnv({
+        perms: [],
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      seedChannel(env, "A", 50);
+      syncCache(env);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.warnings.join()).toMatch(/Manage Channels/);
+    });
+
+    it("does not move a group channel out of another category into the main channel's, and says so", async () => {
+      store.set(
+        "evt1",
+        makeRow({
+          groups: [
+            { key: "g_a", name: "Alpha", size: 5, marker: "", channelId: "A" },
+            {
+              key: "g_b",
+              name: "Bravo",
+              size: null,
+              marker: "",
+              channelId: "B",
+            },
+          ],
+        }),
+      );
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f", rawPosition: 1 }],
+      });
+      seedChannel(env, "A", 0, OTHER_CATEGORY);
+      seedChannel(env, "B", 9);
+      syncCache(env);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(patches(env)).toEqual([
+        [
+          { id: "B", position: 1 },
+          { id: "f", position: 2 },
+        ],
+      ]);
+      expect(report.warnings.join()).toMatch(/Alpha.*left where it is/);
+    });
+  });
+
+  describe("rate limits, timeouts and the hold", () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("reports a rate-limited write without aborting, holds the retry, and writes on a later pass after a fresh read", async () => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      env.rest.patch.mockImplementationOnce(async () => {
+        throw rateLimit(90_000);
+      });
+      const now = jest.spyOn(Date, "now").mockReturnValue(T0);
+      const first = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(first.created).toBe(3);
+      expect(first.failures).toHaveLength(1);
+      expect(first.failures[0].reason).toMatch(/limiting/);
+      expect(orderOf(env)).toEqual([
+        "main-1",
+        "f1",
+        "chan-1",
+        "chan-2",
+        "chan-3",
+      ]);
+
+      // Inside the wait the scan does not start a pass, and a pass that runs
+      // for another reason reports the hold without a read or a write.
+      syncCache(env);
+      now.mockReturnValue(T0 + 30_000);
+      expect(looksWrong(env)).toBe(false);
+      env.fetch.mockClear();
+      env.rest.patch.mockClear();
+      const held = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(held.failures[0].reason).toMatch(/limiting/);
+      expect(env.fetch).not.toHaveBeenCalledWith();
+      expect(env.rest.patch).not.toHaveBeenCalled();
+
+      // After the wait: read again, then write.
+      now.mockReturnValue(T0 + 91_000);
+      expect(looksWrong(env)).toBe(true);
+      const later = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(later.failures).toEqual([]);
+      expect(env.fetch).toHaveBeenCalledWith();
+      expect(env.rest.patch).toHaveBeenCalledTimes(1);
+      expect(orderOf(env)).toEqual([
+        "main-1",
+        "chan-1",
+        "chan-2",
+        "chan-3",
+        "f1",
+      ]);
+    });
+
+    it.each([
+      ["a refused write", apiError(50013), REFUSED_CREATE_BACKOFF_MS],
+      ["a timed-out write", new Error("timeout"), 10 * MIN],
+    ])(
+      "holds %s for the same time as a failed create",
+      async (_n, error, ms) => {
+        store.set("evt1", makeRow());
+        const env = makeEnv({
+          perms: ALL_PERMS,
+          foreign: [{ id: "f1", rawPosition: 1 }],
+        });
+        env.rest.patch.mockImplementationOnce(async () => {
+          throw error;
+        });
+        const now = jest.spyOn(Date, "now").mockReturnValue(T0);
+        const first = await env.service.reconcile({ _id: "evt1" }, env.guild);
+        expect(first.failures).toHaveLength(1);
+        syncCache(env);
+        now.mockReturnValue(T0 + ms - 1000);
+        expect(looksWrong(env)).toBe(false);
+        now.mockReturnValue(T0 + ms + 1000);
+        expect(looksWrong(env)).toBe(true);
+      },
+    );
+
+    it("does not write after a rate-limited create, and reports it", async () => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      // The first create goes through, the second is rate limited.
+      const post = env.rest.post.getMockImplementation() as never as (
+        ...a: unknown[]
+      ) => Promise<unknown>;
+      env.rest.post.mockImplementationOnce(post as never);
+      env.rest.post.mockImplementationOnce(async () => {
+        throw rateLimit();
+      });
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(report.created).toBe(1);
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(report.failures.map((f) => f.reason).join()).toMatch(
+        /Not attempted: Discord is rate limiting/,
+      );
+    });
+
+    it("stops writing when a written order is still reported wrong (no request every scan)", async () => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({
+        perms: ALL_PERMS,
+        foreign: [{ id: "f1", rawPosition: 1 }],
+      });
+      // Discord accepts the write but the order does not change.
+      env.rest.patch.mockImplementation(async () => undefined);
+      await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).toHaveBeenCalledTimes(1);
+      syncCache(env);
+      const second = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.patch).toHaveBeenCalledTimes(1);
+      expect(second.failures[0].reason).toMatch(
+        /still reports a different order/,
+      );
+      expect(looksWrong(env)).toBe(false);
+    });
+  });
+
+  it("decides from a fresh read: an event cancelled during the pass is not ordered", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({
+      perms: ALL_PERMS,
+      foreign: [{ id: "f1", rawPosition: 1 }],
+    });
+    const original = findById.getMockImplementation() as (id: string) => {
+      lean: () => Promise<object>;
+    };
+    // The pass's own read sees an open event; the ordering step's read, after
+    // the creates, finds it cancelled.
+    let reads = 0;
+    findById.mockImplementation(((id: string) => {
+      reads += 1;
+      const base = original(id);
+      return reads === 1
+        ? base
+        : {
+            lean: async () => ({ ...(await base.lean()), state: "cancelled" }),
+          };
+    }) as never);
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    findById.mockImplementation(original as never);
+    expect(env.rest.patch).not.toHaveBeenCalled();
+    expect(env.fetch).not.toHaveBeenCalledWith();
+  });
+
+  it("writes the order only after the pace when the pass already wrote", async () => {
+    store.set("evt1", makeRow());
+    const env = makeEnv({
+      perms: ALL_PERMS,
+      paceMs: 40,
+      foreign: [{ id: "f1", rawPosition: 1 }],
+    });
+    let lastPost = 0;
+    let patchedAt = 0;
+    const post = env.rest.post.getMockImplementation() as never as (
+      ...a: unknown[]
+    ) => Promise<unknown>;
+    env.rest.post.mockImplementation((async (...a: unknown[]) => {
+      lastPost = Date.now();
+      return post(...a);
+    }) as never);
+    env.rest.patch.mockImplementationOnce(async () => {
+      patchedAt = Date.now();
+      return undefined;
+    });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(patchedAt - lastPost).toBeGreaterThanOrEqual(35);
+  });
+
+  it("makes no extra Discord call for events without groups", async () => {
+    for (const row of [
+      makeRow({ groups: [] }),
+      makeRow({ groupsEnabled: false }),
+      makeRow({ state: "ended" }),
+    ]) {
+      store.set("evt1", row);
+      const env = makeEnv({ perms: ALL_PERMS });
+      await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.fetch).not.toHaveBeenCalled();
+      expect(env.rest.post).not.toHaveBeenCalled();
+      expect(env.rest.patch).not.toHaveBeenCalled();
+      expect(env.call).not.toHaveBeenCalled();
+      expect(looksWrong(env)).toBe(false);
+    }
+  });
+
+  describe("orderLooksWrong reads the cache only", () => {
+    const groups = [{ channelId: "a" }, { channelId: "b" }];
+    const e = { _id: "e", channelId: "m", groups };
+    function guildWith(entries: Array<Record<string, unknown>>): {
+      guild: never;
+      fetch: jest.Mock;
+    } {
+      const fetch = jest.fn();
+      return {
+        guild: {
+          channels: {
+            cache: new Map(entries.map((c) => [c.id as string, c])),
+            fetch,
+          },
+        } as never,
+        fetch,
+      };
+    }
+
+    it("is true for a group channel above the main channel, with no Discord call", () => {
+      const { guild, fetch } = guildWith([vc("m", 1), vc("a", 0), vc("b", 2)]);
+      expect(makeEnv().service.orderLooksWrong(e, guild)).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("is false when it cannot tell: main, a group channel or a position is not cached", () => {
+      const service = makeEnv().service;
+      expect(service.orderLooksWrong(e, guildWith([vc("a", 0)]).guild)).toBe(
+        false,
+      );
+      expect(
+        service.orderLooksWrong(e, guildWith([vc("m", 1), vc("a", 0)]).guild),
+      ).toBe(false);
+      const noPosition = {
+        id: "b",
+        parentId: "cat",
+        type: ChannelType.GuildVoice,
+      };
+      expect(
+        service.orderLooksWrong(
+          e,
+          guildWith([vc("m", 1), vc("a", 0), noPosition]).guild,
+        ),
+      ).toBe(false);
+      expect(service.orderLooksWrong(e, guildWith([]).guild)).toBe(false);
+    });
+
+    it("ignores text channels and other categories", () => {
+      const text = {
+        id: "t",
+        parentId: "cat",
+        type: ChannelType.GuildText,
+        rawPosition: 2,
+      };
+      const { guild } = guildWith([
+        vc("m", 1),
+        vc("a", 2),
+        vc("b", 3),
+        text,
+        vc("o", 2, "other"),
+      ]);
+      expect(makeEnv().service.orderLooksWrong(e, guild)).toBe(false);
+    });
   });
 });
