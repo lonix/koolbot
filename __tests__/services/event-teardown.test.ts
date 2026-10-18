@@ -19,7 +19,31 @@ const calls: string[] = [];
 
 function matches(row: Row, filter: Record<string, unknown>): boolean {
   for (const [k, v] of Object.entries(filter)) {
-    if (k === "_id") {
+    if (k === "$and") {
+      for (const clause of v as Array<Record<string, unknown>>) {
+        if (!matches(row, clause)) return false;
+      }
+    } else if (k === "groups") {
+      const groups = (row.groups as Row[]) ?? [];
+      const g = v as {
+        $size?: number;
+        $elemMatch?: { key: string; channelId: string | null };
+      };
+      if (g.$size !== undefined && groups.length !== g.$size) return false;
+      if (
+        g.$elemMatch &&
+        !groups.some(
+          (x) =>
+            x.key === g.$elemMatch?.key &&
+            ((x.channelId as string | null) ?? null) ===
+              g.$elemMatch?.channelId,
+        )
+      ) {
+        return false;
+      }
+    } else if (k === "channelId") {
+      if (((row.channelId as string | null) ?? null) !== v) return false;
+    } else if (k === "_id") {
       if (row._id !== v) return false;
     } else if (v && typeof v === "object" && "$in" in (v as object)) {
       if (!((v as { $in: unknown[] }).$in as unknown[]).includes(row[k])) {
@@ -279,6 +303,59 @@ describe("the claim", () => {
     expect(filter.state).toEqual({ $in: ["scheduled", "active"] });
     expect(filter.startTime).toEqual(START);
     expect(filter.durationMinutes).toBe(120);
+  });
+
+  it("the scheduled end also requires the channels its occupancy check looked at", async () => {
+    const { teardown } = make();
+    const expectChannels = {
+      main: "c-main",
+      groups: [
+        { key: "g_a", channelId: "c-red" },
+        { key: "g_b", channelId: "c-blue" },
+      ],
+    };
+    await teardown.run(scheduled({ expectChannels }));
+    const [filter] = EventMock.findOneAndUpdate.mock.calls[0] as unknown as [
+      Row,
+    ];
+    expect(filter.channelId).toBe("c-main");
+    expect(filter.$and).toEqual([
+      { groups: { $size: 2 } },
+      { groups: { $elemMatch: { key: "g_a", channelId: "c-red" } } },
+      { groups: { $elemMatch: { key: "g_b", channelId: "c-blue" } } },
+    ]);
+    expect(rows.get(ID)?.state).toBe("ended");
+  });
+
+  it.each([
+    ["the main channel changed", { main: "other" }],
+    [
+      "a group's channel changed",
+      {
+        groups: [
+          { key: "g_a", channelId: "c-new" },
+          { key: "g_b", channelId: "c-blue" },
+        ],
+      },
+    ],
+    [
+      "a group was added since",
+      { groups: [{ key: "g_a", channelId: "c-red" }] },
+    ],
+  ])("is 'changed', and nothing runs, when %s", async (_name, change) => {
+    const expectChannels = {
+      main: "c-main",
+      groups: [
+        { key: "g_a", channelId: "c-red" },
+        { key: "g_b", channelId: "c-blue" },
+      ],
+      ...change,
+    };
+    const { teardown } = make();
+    const outcome = await teardown.run(scheduled({ expectChannels }));
+    expect(outcome).toEqual({ status: "changed" });
+    expect(rows.get(ID)?.state).toBe("active");
+    expect(calls).toEqual([]);
   });
 
   it("a schedule edited since the scan read it is 'changed', and nothing else runs", async () => {

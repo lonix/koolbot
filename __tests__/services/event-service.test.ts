@@ -1895,6 +1895,13 @@ describe("recurring event lifecycle", () => {
     (
       service as unknown as { updateAnnouncement: jest.Mock }
     ).updateAnnouncement = jest.fn(async () => true);
+    // The scheduled end reads the stored event to check its channels (none).
+    const stored = { channelId: null, groupsEnabled: false, groups: [] };
+    const previousFindById = EventMock.findById;
+    EventMock.findById = jest.fn(() => ({
+      lean: async () => stored,
+      then: (ok: (v: unknown) => unknown) => Promise.resolve(stored).then(ok),
+    }));
     await (
       service as unknown as {
         processEvent: (...a: unknown[]) => Promise<void>;
@@ -1904,6 +1911,7 @@ describe("recurring event lifecycle", () => {
       leadMs: 0,
       graceMs: 0,
     });
+    EventMock.findById = previousFindById;
     expect(occurrence.state).toBe("ended");
     expect(created).toHaveLength(1);
     expect(created[0].occurrenceIndex).toBe(1);

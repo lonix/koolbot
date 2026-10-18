@@ -29,7 +29,11 @@ import {
   EventGroupChannels,
   type GroupChannelReport,
 } from "./event-group-channels.js";
-import { EventTeardown, type EndEventOutcome } from "./event-teardown.js";
+import {
+  EventTeardown,
+  type EndEventOutcome,
+  type ExpectChannels,
+} from "./event-teardown.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -365,8 +369,19 @@ export class EventService extends ScheduledService {
    * native event as live). In memory: the bot is one process, and a scan after
    * a restart loads fresh rows.
    */
-  private readonly endingEvents = new Map<string, Map<number, number>>();
-  private endingHoldCounter = 0;
+  private readonly endingEvents = new Map<
+    string,
+    Map<number, { until: number; clock: number }>
+  >();
+  /**
+   * One clock for scans and holds. A scan takes a tick when it starts (it loads
+   * every event then), a hold takes one when it begins. A hold is not released
+   * by its time alone: while a scan that started BEFORE it is still running,
+   * that scan may hold an open copy of the event, so the hold stays (otherwise a
+   * slow scan could outlive a fixed timeout and act on its older copy).
+   */
+  private scanClock = 0;
+  private readonly activeScans = new Set<number>();
   /**
    * Events whose teardown is running right now (id to the callers' holds),
    * given back when it finishes. Unlike `endingEvents` this also stops the scan
@@ -421,64 +436,95 @@ export class EventService extends ScheduledService {
   /**
    * A SCHEDULED end never ends an event while anyone is in one of its voice
    * channels: the main channel (the end removes it after the grace period) or
-   * any group channel. Bots do not count. The event stays live and the next
-   * scan asks again: nothing is deleted and nobody is moved. Only the host's
-   * manual "End event now" may end it with people present. Fails closed: a
-   * channel that cannot be read counts as occupied.
+   * any group channel. Bots do not count. The event then stays live and the
+   * next scan asks again: nothing is deleted and nobody is moved. Only the
+   * host's manual "End event now" may end it with people present.
    *
-   * Occupancy is the gateway's voice cache of each channel after a forced read
-   * of the channel (Discord has no call that lists a channel's members; the
-   * per-person raw voice-state read of the mover needs the people first). That
-   * is the same count the channel cleanup uses to keep a channel with someone
-   * in it. The deferral is logged once per event.
+   * It decides from NOW, not from the scan's copy: the channel ids are read
+   * from the stored event (a group pass may have recorded one since the scan
+   * loaded it), every channel is read from Discord first (forced), and only then
+   * are all the live member lists looked at together, with nothing awaited
+   * between that look and the decision, so someone moving from a checked
+   * channel into another is not missed. The ids it looked at go into the end's
+   * claim (`expectChannels`), which refuses a change. Fails closed: an event
+   * that cannot be read, or a channel that cannot be read, counts as occupied;
+   * a channel that is gone (10003) cannot hold anyone.
+   *
+   * Occupancy is the gateway's voice cache of each channel after the forced
+   * read (Discord has no call that lists a channel's members; the per-person raw
+   * voice-state read of the mover needs the people first), the same count the
+   * channel cleanup uses. The deferral is logged once per event.
    */
-  private async deferScheduledEnd(
+  private async checkScheduledEnd(
     event: IEvent,
     guild: Guild,
-  ): Promise<boolean> {
+  ): Promise<
+    { defer: true } | { defer: false; expectChannels: ExpectChannels }
+  > {
     const id = String(event._id);
-    const occupied = await this.eventChannelsOccupied(event, guild);
-    if (!occupied) {
-      this.endDeferred.delete(id);
-      return false;
-    }
-    if (!this.endDeferred.has(id)) {
-      this.endDeferred.add(id);
-      logger.info(
-        `Event ${sanitizeForLog(id)}: its scheduled end is deferred while someone is in one of its voice channels; checked again every scan`,
-      );
-    }
-    return true;
-  }
-
-  private async eventChannelsOccupied(
-    event: IEvent,
-    guild: Guild,
-  ): Promise<boolean> {
-    const ids: string[] = [];
-    if (event.channelId) ids.push(event.channelId);
-    if (event.groupsEnabled === true) {
-      for (const group of event.groups ?? []) {
-        if (group.channelId) ids.push(group.channelId);
+    const defer = (): { defer: true } => {
+      if (!this.endDeferred.has(id)) {
+        this.endDeferred.add(id);
+        logger.info(
+          `Event ${sanitizeForLog(id)}: its scheduled end is deferred while someone is in one of its voice channels (or that cannot be checked); checked again every scan`,
+        );
       }
+      return { defer: true };
+    };
+
+    let row: {
+      channelId?: string | null;
+      groupsEnabled?: boolean;
+      groups?: Array<{ key: string; channelId?: string | null }>;
+    } | null;
+    try {
+      row = (await Event.findById(event._id).lean()) as typeof row;
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(id)}: could not read the event to check its channels:`,
+        error,
+      );
+      row = null;
     }
+    if (!row) return defer();
+    const main = row.channelId ?? null;
+    const groups =
+      row.groupsEnabled === true
+        ? (row.groups ?? []).map((g) => ({
+            key: g.key,
+            channelId: g.channelId ?? null,
+          }))
+        : [];
+    const ids = [main, ...groups.map((g) => g.channelId)].filter(
+      (cid): cid is string => !!cid,
+    );
+
+    // Every read first...
+    const seen: Array<{ channel: unknown; unreadable: boolean }> = [];
     for (const channelId of ids) {
       try {
-        const channel = await guild.channels.fetch(channelId, { force: true });
-        if (!channel) continue;
-        // Not a voice channel of this server: nobody is in it.
-        if (channel.type !== ChannelType.GuildVoice) continue;
-        for (const member of (channel as VoiceChannel).members.values()) {
-          if (!member.user?.bot) return true;
-        }
+        seen.push({
+          channel: await guild.channels.fetch(channelId, { force: true }),
+          unreadable: false,
+        });
       } catch (error) {
-        // Gone (10003): nobody can be in it. Anything else: cannot tell, so
-        // occupied.
         if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) continue;
-        return true;
+        seen.push({ channel: null, unreadable: true });
       }
     }
-    return false;
+    // ...then one look at all of them, synchronously.
+    const occupied = seen.some((s) => {
+      if (s.unreadable) return true;
+      const channel = s.channel as VoiceChannel | null;
+      if (!channel || channel.type !== ChannelType.GuildVoice) return false;
+      for (const member of channel.members.values()) {
+        if (!member.user?.bot) return true;
+      }
+      return false;
+    });
+    if (occupied) return defer();
+    this.endDeferred.delete(id);
+    return { defer: false, expectChannels: { main, groups } };
   }
 
   /** The scan leaves an event alone for this long after an end began. */
@@ -492,9 +538,11 @@ export class EventService extends ScheduledService {
   private beginEnding(eventId: string): number {
     const now = Date.now();
     for (const id of [...this.endingEvents.keys()]) this.pruneHolds(id, now);
-    const hold = ++this.endingHoldCounter;
-    const holds = this.endingEvents.get(eventId) ?? new Map<number, number>();
-    holds.set(hold, now + EventService.ENDING_HOLD_MS);
+    const hold = ++this.scanClock;
+    const holds =
+      this.endingEvents.get(eventId) ??
+      new Map<number, { until: number; clock: number }>();
+    holds.set(hold, { until: now + EventService.ENDING_HOLD_MS, clock: hold });
     this.endingEvents.set(eventId, holds);
     const running = this.endsInProgress.get(eventId) ?? new Set<number>();
     running.add(hold);
@@ -534,8 +582,9 @@ export class EventService extends ScheduledService {
   private pruneHolds(eventId: string, now: number): void {
     const holds = this.endingEvents.get(eventId);
     if (!holds) return;
-    for (const [hold, until] of holds) {
-      if (until <= now) holds.delete(hold);
+    for (const [hold, { until, clock }] of holds) {
+      const olderScanRunning = [...this.activeScans].some((id) => id < clock);
+      if (until <= now && !olderScanRunning) holds.delete(hold);
     }
     if (holds.size === 0) this.endingEvents.delete(eventId);
   }
@@ -677,6 +726,16 @@ export class EventService extends ScheduledService {
   // ---------------------------------------------------------------
 
   protected async runOnce(): Promise<void> {
+    const scanId = ++this.scanClock;
+    this.activeScans.add(scanId);
+    try {
+      await this.scanOnce();
+    } finally {
+      this.activeScans.delete(scanId);
+    }
+  }
+
+  private async scanOnce(): Promise<void> {
     const guildId = await this.configService.getString("GUILD_ID", "");
     if (!guildId) {
       logger.error("Event scan aborted: GUILD_ID not configured");
@@ -884,11 +943,11 @@ export class EventService extends ScheduledService {
     // cancel or an edited schedule is not overwritten; the group channels go
     // there too, and this scan's own native sync below closes the Discord event.
     let teardownRan = false;
-    if (
-      shouldEndEvent(event, now) &&
-      !(await this.deferScheduledEnd(event, guild))
-    ) {
-      // The occupancy read is an await: an end that began meanwhile wins.
+    const endCheck = shouldEndEvent(event, now)
+      ? await this.checkScheduledEnd(event, guild)
+      : null;
+    if (endCheck && !endCheck.defer) {
+      // The occupancy reads are awaits: an end that began meanwhile wins.
       if (this.mustSkipScan(event)) return;
       const outcome = await this.teardown.run({
         eventId: String(event._id),
@@ -902,6 +961,7 @@ export class EventService extends ScheduledService {
           startTime: event.startTime,
           durationMinutes: event.durationMinutes,
         },
+        expectChannels: endCheck.expectChannels,
         guild,
         event,
         syncNative: false,

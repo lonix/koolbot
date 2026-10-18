@@ -117,6 +117,11 @@ export interface TeardownDeps {
   settleMs?: number;
 }
 
+export interface ExpectChannels {
+  main: string | null;
+  groups: Array<{ key: string; channelId: string | null }>;
+}
+
 export interface TeardownInput {
   eventId: string;
   guildId: string;
@@ -130,6 +135,14 @@ export interface TeardownInput {
   fromStates: readonly string[];
   /** Scheduled end: the claim also requires the times the scan decided from. */
   expectTimes?: { startTime: Date; durationMinutes: number };
+  /**
+   * Scheduled end: the voice channels the occupancy check looked at (the main
+   * channel and each group's channel, as stored when it was read). The claim
+   * also requires them unchanged, so a channel recorded since (a group pass) is
+   * never ended over unchecked: the claim then says `changed` and the next scan
+   * checks again.
+   */
+  expectChannels?: ExpectChannels;
   guild: Guild | null;
   /**
    * The scheduled end passes the scan's own copy of the row, which is synced
@@ -265,6 +278,16 @@ export class EventTeardown {
     if (input.expectTimes) {
       filter.startTime = input.expectTimes.startTime;
       filter.durationMinutes = input.expectTimes.durationMinutes;
+    }
+    if (input.expectChannels) {
+      // A null matches a stored null or a missing field.
+      filter.channelId = input.expectChannels.main;
+      filter.$and = [
+        { groups: { $size: input.expectChannels.groups.length } },
+        ...input.expectChannels.groups.map((g) => ({
+          groups: { $elemMatch: { key: g.key, channelId: g.channelId } },
+        })),
+      ];
     }
     try {
       const doc = await Event.findOneAndUpdate(

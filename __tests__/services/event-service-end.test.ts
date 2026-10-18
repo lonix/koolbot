@@ -165,6 +165,32 @@ beforeEach(() => {
       if (claimDelay) await claimDelay;
       const r = store.get(filter._id as string);
       if (!r || r.guildId !== filter.guildId) return null;
+      // The scheduled end's channel expectation (the occupancy check's ids).
+      if (
+        filter.channelId !== undefined &&
+        (r.channelId ?? null) !== filter.channelId
+      ) {
+        return null;
+      }
+      for (const clause of (filter.$and as Array<{ groups: Row }>) ?? []) {
+        const groups = (r.groups as Array<Row>) ?? [];
+        const g = clause.groups as {
+          $size?: number;
+          $elemMatch?: { key: string; channelId: string | null };
+        };
+        if (g.$size !== undefined && groups.length !== g.$size) return null;
+        if (
+          g.$elemMatch &&
+          !groups.some(
+            (x) =>
+              x.key === g.$elemMatch?.key &&
+              ((x.channelId as string | null) ?? null) ===
+                g.$elemMatch?.channelId,
+          )
+        ) {
+          return null;
+        }
+      }
       const states = (filter.state as { $in: string[] }).$in;
       if (!states.includes(r.state as string)) return null;
       if (
@@ -244,7 +270,8 @@ describe("the scheduled end runs the shared teardown", () => {
     expect(service.groupChannels.reconcile).not.toHaveBeenCalled();
     expect(EventMock.updateOne).not.toHaveBeenCalled();
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(EventMock.findById).not.toHaveBeenCalled();
+    // The one extra read is the occupancy check's fresh look at the channels.
+    expect(EventMock.findById).toHaveBeenCalledTimes(1);
   });
 
   it("a group event: the group channels go in the teardown, and the scan does not run its own pass again", async () => {
@@ -1267,5 +1294,201 @@ describe("a scheduled end with people in a voice channel of the event", () => {
     });
     expect(outcome.status).toBe("ended");
     expect(store.get(ID)?.state).toBe("ended");
+  });
+});
+
+describe("the occupancy check decides from now, not from the scan's copy", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+  const voice = (humans: string[] = []): Record<string, unknown> => ({
+    type: ChannelType.GuildVoice,
+    members: new Map(
+      humans.map((id) => [id, { id, user: { bot: false } }] as const),
+    ),
+  });
+
+  it("a group channel recorded after the scan loaded the event, with someone in it, defers the end", async () => {
+    const { service, guild } = setup();
+    // The scan's copy has no channel for the group; the stored row has one.
+    const recorded = [
+      { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
+    ];
+    store.set(ID, stored({ groupsEnabled: true, groups: recorded }));
+    guild.channels.fetch = jest.fn(async (id: string) =>
+      id === "c1" ? voice(["u1"]) : voice(),
+    );
+    const copy = row({
+      groupsEnabled: true,
+      groups: [
+        {
+          key: "g_a",
+          name: "A",
+          kind: "team",
+          channelId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    await service.processEvent(copy, guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+    expect(guild.channels.fetch).toHaveBeenCalledWith("c1", { force: true });
+  });
+
+  it("a channel recorded between the occupancy check and the claim stops the claim (the next scan checks it)", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ groupsEnabled: true, groups: [] }));
+    // The check reads the main channel (empty); while that read is pending a
+    // group pass records a new group channel.
+    let release!: () => void;
+    guild.channels.fetch = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(voice());
+        }),
+    );
+    const event = row({ groupsEnabled: true, groups: [] });
+    const scan = service.processEvent(event, guild, AFTER_END, WINDOWS);
+    await nap();
+    store.set(
+      ID,
+      stored({
+        groupsEnabled: true,
+        groups: [
+          {
+            key: "g_a",
+            name: "A",
+            kind: "team",
+            channelId: "c9",
+            memberIds: [],
+          },
+        ],
+      }),
+    );
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("active");
+    expect(event.state).toBe("active");
+    expect(event.save).not.toHaveBeenCalled();
+  });
+
+  it("someone moving into a channel that was already checked is not missed", async () => {
+    const { service, guild } = setup();
+    const groups = [
+      { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
+    ];
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    const main = voice();
+    const group = voice();
+    let release!: () => void;
+    guild.channels.fetch = jest.fn((id: string) => {
+      if (id === "main-1") return Promise.resolve(main);
+      // The group channel's read is the later, slow one.
+      return new Promise((resolve) => {
+        release = () => resolve(group);
+      });
+    });
+    const scan = service.processEvent(
+      row({ groupsEnabled: true, groups }),
+      guild,
+      AFTER_END,
+      WINDOWS,
+    );
+    await nap();
+    // The main channel was already read (empty); now someone joins it.
+    (main.members as Map<string, unknown>).set("u1", {
+      id: "u1",
+      user: { bot: false },
+    });
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("active");
+  });
+
+  it("an unreadable stored event defers (fails closed)", async () => {
+    const { service, guild } = setup();
+    EventMock.findById = jest.fn(() => ({
+      lean: async () => {
+        throw new Error("db down");
+      },
+    }));
+    await service.processEvent(row(), guild, AFTER_END, WINDOWS);
+    expect(store.get(ID)?.state).toBe("active");
+  });
+});
+
+describe("the hold does not depend on a timeout while an older scan runs", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  it("an old scan resumed after the hold would have expired still leaves the ended event alone", async () => {
+    const { service, guild } = setup();
+    configMock.getString.mockImplementation(async (k: string, d?: unknown) =>
+      k === "GUILD_ID" ? "guild-1" : d,
+    );
+    try {
+      // The scan loads an open adopted event (reminder window) and stalls on
+      // the read of its Discord event.
+      let release!: () => void;
+      service.nativeSync.pullAdopted = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve("ok");
+          }),
+      );
+      const open = row({
+        nativeAdopted: true,
+        announcementMessageId: "m1",
+        reminderSent: false,
+        startTime: new Date(Date.now() + 10 * MIN),
+      });
+      store.set(
+        ID,
+        stored({
+          nativeAdopted: true,
+          startTime: new Date(Date.now() + 10 * MIN),
+        }),
+      );
+      EventMock.find = jest.fn(async () => [open]);
+      const scan = (
+        service as unknown as { runOnce: () => Promise<void> }
+      ).runOnce();
+      await nap();
+      expect(service.nativeSync.pullAdopted).toHaveBeenCalledTimes(1);
+
+      // The host ends it by hand; much later than the hold's time the old scan
+      // resumes.
+      expect(
+        (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+      ).toBe("ended");
+      const realNow = Date.now;
+      jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+      try {
+        release();
+        await scan;
+      } finally {
+        jest.restoreAllMocks();
+      }
+      // The older copy still read as open, and did nothing: no reminder.
+      expect(service.postReminder).not.toHaveBeenCalled();
+    } finally {
+      configMock.getString.mockImplementation(
+        async (_k: string, d?: unknown) => d,
+      );
+    }
+  });
+
+  it("once no older scan is running the hold expires by time as before", async () => {
+    const { service } = setup();
+    const svc = service as unknown as {
+      beginEnding: (id: string) => number;
+      isBeingEnded: (id: string) => boolean;
+    };
+    svc.beginEnding(ID);
+    expect(svc.isBeingEnded(ID)).toBe(true);
+    const realNow = Date.now;
+    jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+    try {
+      expect(svc.isBeingEnded(ID)).toBe(false);
+    } finally {
+      jest.restoreAllMocks();
+    }
   });
 });
