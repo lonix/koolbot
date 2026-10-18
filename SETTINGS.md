@@ -859,7 +859,9 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   stored with the event (each group has a name, a kind of team, open or leads, an optional size of 1 to 99, an optional
   tag of up to 8 characters and an optional colour marker) and a recurring series copies it to the next occurrence
   without members. An event can also set its own **channel creation time**; empty uses `events.create_lead_minutes`, and
-  a set value moves when the event's channel is created. Voice channels for the groups themselves are not created yet.
+  a set value moves when the event's channel is created, and the same time applies to the group channels. At that time
+  each group also gets a voice channel next to the event's channel (its size is the user limit, the host gets View,
+  Connect and Move Members on every event channel), and they are removed together with the event's channel.
   `events.groups.default_count` and `events.groups.max_count` only shape the form and cap the number of groups.
 - **Discord scheduled events** (#1034, #1175): every KoolBot event is also created as a native guild scheduled event, and
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it

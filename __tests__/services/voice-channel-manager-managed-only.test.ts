@@ -426,6 +426,93 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     });
   });
 
+  // The event service owns the channels of event groups (#1190); no sweep here
+  // may delete them, whatever their name looks like, and with the list of them
+  // unreadable nothing is deleted.
+  describe("event group channels (#1190)", () => {
+    let eventRows: Array<{
+      channelId: string | null;
+      groups: Array<{ channelId: string | null }>;
+    }>;
+
+    beforeEach(() => {
+      settings["events.enabled"] = true;
+      eventRows = [];
+      mockModel("Event").find = jest.fn<any>().mockImplementation(() => ({
+        lean: async () => eventRows,
+      }));
+    });
+
+    it("periodic cleanup leaves event channels alone in both modes, even with a managed-looking name", async () => {
+      for (const managedOnly of [false, true]) {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        eventRows = [
+          {
+            channelId: "ev-main",
+            groups: [{ channelId: "ev-group" }, { channelId: "ev-plain" }],
+          },
+        ];
+        addChannel("lobby-id", "Lobby");
+        const group = addChannel("ev-group", "🎮 Alpha");
+        const main = addChannel("ev-main", "🎮 Game night");
+        // A name the sweep does not recognise as its own: only the event list
+        // keeps it.
+        const plainName = addChannel("ev-plain", "📅 Bravo");
+        trackAsManaged("ev-group");
+        const stray = addChannel(`stray-${managedOnly}`, "Permanent Room");
+
+        await manager.cleanupEmptyChannels();
+
+        expect(group.delete).not.toHaveBeenCalled();
+        expect(main.delete).not.toHaveBeenCalled();
+        expect(plainName.delete).not.toHaveBeenCalled();
+        if (!managedOnly) expect(stray.delete).toHaveBeenCalled();
+      }
+    });
+
+    it("startup sweeps leave event channels alone in both modes", async () => {
+      for (const managedOnly of [false, true]) {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        eventRows = [{ channelId: null, groups: [{ channelId: "ev-group" }] }];
+        addChannel("lobby-id", "Lobby");
+        const group = addChannel("ev-group", "🎮 Alpha");
+        trackAsManaged("ev-group");
+
+        await manager.initialize(GUILD_ID);
+
+        expect(group.delete).not.toHaveBeenCalled();
+      }
+    });
+
+    it("deletes nothing when the event channels cannot be listed (fails closed)", async () => {
+      addChannel("lobby-id", "Lobby");
+      const foreign = addChannel("foreign-id", "Permanent Room");
+      mockModel("Event").find = jest.fn<any>().mockImplementation(() => ({
+        lean: async () => {
+          throw new Error("mongo down");
+        },
+      }));
+
+      expect(await manager.cleanupEmptyChannels()).toBe(false);
+      await manager.initialize(GUILD_ID);
+
+      expect(foreign.delete).not.toHaveBeenCalled();
+    });
+
+    it("does not read events at all while the events feature is off", async () => {
+      settings["events.enabled"] = false;
+      addChannel("lobby-id", "Lobby");
+      const foreign = addChannel("foreign-id", "Permanent Room");
+
+      expect(await manager.cleanupEmptyChannels()).toBe(true);
+
+      expect(foreign.delete).toHaveBeenCalled();
+      expect(mockModel("Event").find).not.toHaveBeenCalled();
+    });
+  });
+
   describe("tracking KoolBot-created channels by ID", () => {
     it("records channels it creates, regardless of the toggle", async () => {
       const created: any = await manager.createDynamicChannel(guild, "user-1");

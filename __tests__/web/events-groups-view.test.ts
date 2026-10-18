@@ -84,10 +84,10 @@ describe("renderEventsPage Groups section (#1188)", () => {
     );
   });
 
-  it("states honestly that group channels are not created yet", () => {
-    expect(render()).toContain(
-      "Voice channels for the groups are not created yet",
-    );
+  it("tells the organiser that each group gets a voice channel", () => {
+    const html = render();
+    expect(html).toContain("Each group gets its own voice channel");
+    expect(html).not.toContain("not created yet");
   });
 
   it("shows the group count next to the title of an event with groups only", () => {

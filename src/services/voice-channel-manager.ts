@@ -29,6 +29,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
+import { Event } from "../models/event.js";
 import {
   ManagedVoiceChannel,
   ManagedVoiceMigration,
@@ -704,6 +705,47 @@ export class VoiceChannelManager {
     );
   }
 
+  /**
+   * Channels of event groups (#1190) and the main channel of their events. The
+   * event service owns and removes them, so no sweep here may touch them, in
+   * either mode and whatever their name looks like. Returns null when the set
+   * is needed but cannot be read: the caller must then delete nothing.
+   * With events off there are none to protect.
+   */
+  private async loadEventChannelIds(
+    guildId: string,
+  ): Promise<Set<string> | null> {
+    if (!(await configService.getBoolean("events.enabled", false))) {
+      return new Set();
+    }
+    if (!this.isDbReady()) {
+      logger.warn(
+        "Database not ready; skipping voice channel cleanup so event channels are not swept",
+      );
+      return null;
+    }
+    try {
+      const rows = (await Event.find(
+        { guildId, "groups.channelId": { $type: "string" } },
+        { channelId: 1, "groups.channelId": 1 },
+      ).lean()) as Array<{
+        channelId?: string | null;
+        groups?: Array<{ channelId?: string | null }>;
+      }>;
+      const ids = new Set<string>();
+      for (const row of rows) {
+        if (row.channelId) ids.add(row.channelId);
+        for (const group of row.groups ?? []) {
+          if (group.channelId) ids.add(group.channelId);
+        }
+      }
+      return ids;
+    } catch (error) {
+      logger.error("Error loading event channel ids:", error);
+      return null;
+    }
+  }
+
   /** Is this channel in the set of channels KoolBot created (managed-only)? */
   private async isTrackedManagedChannel(
     guild: Guild,
@@ -781,6 +823,7 @@ export class VoiceChannelManager {
     lobbyId: string | null,
     lobbyName: string,
     offlineLobbyName: string,
+    eventChannelIds: ReadonlySet<string>,
   ): Promise<void> {
     const managedIds = await this.loadManagedChannelIds(guild, category);
     if (!managedIds) return;
@@ -789,6 +832,7 @@ export class VoiceChannelManager {
       if (
         channel.type !== ChannelType.GuildVoice ||
         !managedIds.has(channel.id) ||
+        eventChannelIds.has(channel.id) ||
         channel.members.size !== 0 ||
         this.isLiveWaitingRoom(guild, channel.id) ||
         channel.id === lobbyId ||
@@ -1561,19 +1605,24 @@ export class VoiceChannelManager {
       // (#1085). If that is not possible, skip the sweeps; periodic cleanup
       // retries the restore.
       const linksRestored = await this.ensureWaitingRoomLinks(guild);
-      if (managedOnly && linksRestored) {
+      // Event channels are the event service's to remove (#1190). When they
+      // cannot be listed, neither sweep runs.
+      const eventChannelIds = await this.loadEventChannelIds(guild.id);
+      if (managedOnly && linksRestored && eventChannelIds) {
         await this.sweepManagedOnlyAtStartup(
           guild,
           category,
           lobbyChannelId,
           lobbyChannelName,
           offlineLobbyName,
+          eventChannelIds,
         );
       }
-      for (const channel of managedOnly || !linksRestored
+      for (const channel of managedOnly || !linksRestored || !eventChannelIds
         ? []
         : category.children.cache.values()) {
         if (
+          !(eventChannelIds?.has(channel.id) ?? true) &&
           channel.type === ChannelType.GuildVoice &&
           channel.members.size === 0 &&
           !this.isLiveWaitingRoom(guild, channel.id) &&
@@ -3304,6 +3353,11 @@ export class VoiceChannelManager {
       // Never delete before the waiting-room links are known (#1085).
       if (!(await this.ensureWaitingRoomLinks(guild))) return false;
 
+      // Event channels belong to the event service (#1190); with no list of
+      // them, delete nothing.
+      const eventChannelIds = await this.loadEventChannelIds(guild.id);
+      if (!eventChannelIds) return false;
+
       // Get all channels in the category
       const allChannels = category.children.cache.filter(
         (channel): channel is VoiceChannel =>
@@ -3376,6 +3430,8 @@ export class VoiceChannelManager {
       // managed-only mode: unmanaged channels are never touched there.
       for (const channel of managedOnly ? [] : allChannels.values()) {
         try {
+          if (eventChannelIds.has(channel.id)) continue;
+
           // Skip if it's a managed channel (by name pattern or owned channel ID)
           if (
             managedChannelNames.has(channel.name) ||
@@ -3428,6 +3484,7 @@ export class VoiceChannelManager {
             (channel.name !== lobbyChannelName &&
               channel.name !== offlineLobbyName)) &&
           !this.waitingRoomToMain.has(channel.id) &&
+          !eventChannelIds.has(channel.id) &&
           channel.members.size === 0,
       );
 

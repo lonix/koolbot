@@ -2519,7 +2519,7 @@ function renderGroupsSection(limits: {
   ).join("\n      ");
   return `<fieldset data-groups-section>
       <legend>Groups (optional)</legend>
-      <p class="muted">Split the event into groups, such as teams, squads or breakout rooms. The setup is saved with the event. Voice channels for the groups are not created yet; that comes in a later update. Leave this off for a plain event.</p>
+      <p class="muted">Split the event into groups, such as teams, squads or breakout rooms. Each group gets its own voice channel next to the event's channel, created at the channel creation time and removed when the event is over. Leave this off for a plain event.</p>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.enabled}" value="1"> Use groups for this event</label>
       <label>Preset
         <select name="${GROUP_FORM_FIELDS.preset}">

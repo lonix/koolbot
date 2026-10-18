@@ -1421,12 +1421,33 @@ fields are not checked by the browser and the server ignores them. With scripts
 on, choosing a preset fills in the rows, "Add a group" adds a row and mistakes are
 shown next to the fields before sending; the server checks everything again, names
 the group and field in its message, and the page puts the entered values back after
-a refused submit. The setup is only stored: the events table shows the group count,
-a recurring series copies the setup (not members) to its next occurrence, and the
-group voice channels and assignment come in later updates of the groups
-epic (#1187). An event's own channel creation time already decides when its channel
-is created. Presets are built into the bot; the server-wide preset library is a
-later update.
+a refused submit. The events table shows the group count, and a recurring series
+copies the setup (not members) to its next occurrence. Presets are built into the
+bot; the server-wide preset library is a later update.
+
+**Group voice channels** (#1190). At the event's channel creation time (its own, else
+`events.create_lead_minutes`; "Start now" at once) the bot creates the main channel and
+then one voice channel per group in the same category, in the group order, named
+`<prefix> <colour marker> <group name>` (at most 100 characters; the prefix is
+`events.channel_prefix`). A group's size is the channel's user limit; no size means no
+limit. The event's host (its creator) gets View, Connect and Move Members on the main
+channel and on every group channel, on top of whatever the category already grants (the
+category's own permissions are copied, so a private category stays private). A `leads`
+group is created like any other until the leads-only command channel exists. The channels
+go when the event does: right away on cancel, and after `events.channel_grace_minutes` once
+it has ended, the same moment the main channel is eligible. A channel with someone in it is
+never removed; it is left and tried again on the next scan. Only channels the bot recorded on
+a group are ever deleted, and each is read from Discord just before. After a restart the
+scan makes the record and the server agree: a group whose channel was deleted is created
+again while the event is open, and channels recorded for a finished or cancelled event are
+removed. Every pass collects what it could not do (a full category, a rate limit, a missing
+permission) instead of stopping: the bot logs one warning per problem and the last result
+is kept for the host panel. Without **Manage Channels** the group channels are skipped and
+the event runs with its main channel only; without **Manage Roles** or **Move Members** the
+channels are created without the host's extra access. A create that times out may still have
+gone through: it is not repeated for ten minutes, and if Discord did make it, the unrecorded
+extra channel is not deleted by the bot (it only deletes channels it recorded), so remove it
+by hand. Events without groups are created and cleaned up exactly as before.
 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
