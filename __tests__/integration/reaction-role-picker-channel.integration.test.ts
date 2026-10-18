@@ -156,6 +156,20 @@ describeWithMongo(
         expect(rows.map((r) => r.roleId).sort()).toEqual(["r1", "r2"]);
       });
 
+      it("keeps an unstamped row whose picker a stamped sibling places in another channel", async () => {
+        // Legacy picker in OLD that was bound to later; the setting moved to NEW.
+        await insertRaw({ messageId: "shared", roleId: "r1", emoji: "1️⃣" });
+        await insertRaw({
+          messageId: "shared",
+          roleId: "r2",
+          emoji: "2️⃣",
+          messageChannelId: OLD,
+        });
+        await insertRaw({ messageId: "plain", roleId: "r3", emoji: "3️⃣" });
+        await serviceWithConfigured(NEW).handleChannelDelete(deleted(NEW));
+        expect(await archivedMessageIds()).toEqual(["plain"]);
+      });
+
       it("archives the configured channel's own mappings and the older rows that follow the setting", async () => {
         await seed();
         await serviceWithConfigured(NEW).handleChannelDelete(deleted(NEW));

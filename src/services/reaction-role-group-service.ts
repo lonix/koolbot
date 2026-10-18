@@ -216,9 +216,16 @@ export class ReactionRoleGroupService {
       // so changing the setting afterwards does not strand it. Only a legacy
       // group (no stored channel) falls back to the configured channel; a fresh
       // group is posted to the configured channel.
-      const storedChannelId =
-        existingRows.find((r) => r.messageChannelId)?.messageChannelId ?? "";
-      const channelId = storedChannelId || configuredChannelId;
+      const anchorMessageId = existingRows[0]?.messageId;
+      const picker = anchorMessageId
+        ? await rrService.pickerChannelForMessage(
+            guildId,
+            anchorMessageId,
+            existingRows,
+          )
+        : { channelId: configuredChannelId, remembered: false };
+      const storedChannelId = picker.remembered ? picker.channelId : "";
+      const channelId = picker.channelId;
       if (!channelId) {
         return fail(
           "Reaction role message channel not configured. Set reactionroles.message_channel_id",

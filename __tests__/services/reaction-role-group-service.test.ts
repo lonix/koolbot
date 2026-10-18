@@ -27,11 +27,20 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: { getInstance: () => ({ getString: mockGetString }) },
 }));
+const mockPickerChannel =
+  jest.fn<
+    (
+      guildId: string,
+      messageId: string,
+      known: Array<{ messageChannelId?: string }>,
+    ) => Promise<{ channelId: string; remembered: boolean }>
+  >();
 jest.unstable_mockModule("../../src/services/reaction-role-service.js", () => ({
   ReactionRoleService: {
     getInstance: () => ({
       normalizeEmoji: (e: string) => e,
       validateRoleAssignable: mockValidate,
+      pickerChannelForMessage: mockPickerChannel,
     }),
   },
 }));
@@ -119,6 +128,19 @@ beforeEach(() => {
         ? "#336699"
         : d,
   );
+  // Default resolver: a stored channel on a known row, else the configured one.
+  mockPickerChannel.mockImplementation(async (_g, _m, known) => {
+    const own = known.find((r) => r.messageChannelId)?.messageChannelId;
+    return own
+      ? { channelId: own, remembered: true }
+      : {
+          channelId: await mockGetString(
+            "reactionroles.message_channel_id",
+            "",
+          ),
+          remembered: false,
+        };
+  });
   model.find.mockResolvedValue([]);
   model.insertMany.mockResolvedValue([]);
   model.updateMany.mockResolvedValue({});
@@ -867,6 +889,25 @@ describe("ReactionRoleGroupService.provisionGroup picker channel (#1207)", () =>
     const docs = insertedDocs();
     expect(docs).toHaveLength(1);
     expect(docs[0].messageChannelId).toBe("old-chan");
+  });
+
+  it("finds a stamped sibling outside the group's rows (bound to the picker without a groupKey)", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["old-chan"]);
+    const legacy: Record<string, unknown> = { ...storedRow };
+    delete legacy.messageChannelId;
+    model.find.mockResolvedValue([legacy]);
+    // The shared resolver finds the stamped sibling on the anchor's message id.
+    mockPickerChannel.mockResolvedValue({
+      channelId: "old-chan",
+      remembered: true,
+    });
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(mockPickerChannel).toHaveBeenCalledWith("g1", "m1", [legacy]);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("old-chan");
+    expect(insertedDocs()[0].messageChannelId).toBe("old-chan");
   });
 
   it("tops up a remembered picker even when no channel is configured", async () => {

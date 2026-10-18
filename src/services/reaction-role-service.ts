@@ -477,41 +477,52 @@ export class ReactionRoleService {
   }
 
   /**
-   * The channel a picker message lives in (#1207): the channel stored on any of
-   * the given rows (rows on one message share it), otherwise the configured
-   * `reactionroles.message_channel_id`, which is where every legacy row (one
-   * created before the channel was stored) has always been looked up. Returns
-   * "" when neither is known.
+   * The one resolver for "which channel is this picker in" (#1207). Rows on one
+   * message share its channel, so it is the channel stored on any of `known`
+   * rows, else on ANY active or archived row on the same message (a legacy
+   * picker that later gained a stamped row through bind has no groupKey or
+   * groupId on it, so group-scoped queries miss it), else the configured
+   * `reactionroles.message_channel_id`, which is where every legacy row has
+   * always been looked up. `remembered` says a stored channel was found. The
+   * returned id is "" when nothing is known.
    */
-  private pickerChannelOf(
-    rows: Array<{ messageChannelId?: string | null }>,
-    configured: string,
-  ): string {
-    return rows.find((r) => r.messageChannelId)?.messageChannelId || configured;
+  public async pickerChannelForMessage(
+    guildId: string,
+    messageId: string,
+    known: Array<{ messageChannelId?: string | null }> = [],
+  ): Promise<{ channelId: string; remembered: boolean }> {
+    const own = known.find((r) => r.messageChannelId)?.messageChannelId;
+    if (own) {
+      return { channelId: own, remembered: true };
+    }
+    const sibling = await ReactionRoleConfig.findOne({
+      guildId,
+      messageId,
+      messageChannelId: { $exists: true, $ne: "" },
+    });
+    if (sibling?.messageChannelId) {
+      return { channelId: sibling.messageChannelId, remembered: true };
+    }
+    return {
+      channelId: await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      ),
+      remembered: false,
+    };
   }
 
-  /** {@link pickerChannelOf} for one mapping, reading the configured channel. */
+  /** {@link pickerChannelForMessage} for one mapping. */
   private async pickerChannelFor(
     config: Pick<IReactionRoleConfig, "guildId" | "messageId"> & {
       messageChannelId?: string | null;
     },
   ): Promise<string> {
-    if (config.messageChannelId) {
-      return config.messageChannelId;
-    }
-    // A sibling on the same message may carry the channel the picker is in.
-    const sibling = await ReactionRoleConfig.findOne({
-      guildId: config.guildId,
-      messageId: config.messageId,
-      messageChannelId: { $exists: true, $ne: "" },
-    });
-    return this.pickerChannelOf(
-      sibling ? [sibling] : [],
-      await this.configService.getString(
-        "reactionroles.message_channel_id",
-        "",
-      ),
-    );
+    return (
+      await this.pickerChannelForMessage(config.guildId, config.messageId, [
+        config,
+      ])
+    ).channelId;
   }
 
   /**
@@ -625,7 +636,44 @@ export class ReactionRoleService {
         ],
       };
 
-      const matched = await ReactionRoleConfig.find(filter);
+      let matched = await ReactionRoleConfig.find(filter);
+
+      // An unstamped row matched only because the deleted channel is the
+      // configured one still lives where a stamped sibling on its message says
+      // (a legacy picker bound to before the setting moved): keep it unless the
+      // row owns the deleted channel/category itself.
+      if (messageChannelId === channel.id) {
+        const ownsDeleted = (c: { channelId?: string; categoryId?: string }) =>
+          c.channelId === channel.id || c.categoryId === channel.id;
+        const legacyMessageIds = [
+          ...new Set(
+            matched
+              .filter((c) => !c.messageChannelId && !ownsDeleted(c))
+              .map((c) => c.messageId),
+          ),
+        ];
+        if (legacyMessageIds.length > 0) {
+          const stamped = await ReactionRoleConfig.find({
+            guildId: channel.guild.id,
+            isArchived: false,
+            messageId: { $in: legacyMessageIds },
+            messageChannelId: { $exists: true, $ne: "" },
+          });
+          const elsewhere = new Set(
+            stamped
+              .filter(
+                (c) => c.messageChannelId && c.messageChannelId !== channel.id,
+              )
+              .map((c) => c.messageId),
+          );
+          matched = matched.filter(
+            (c) =>
+              c.messageChannelId ||
+              ownsDeleted(c) ||
+              !elsewhere.has(c.messageId),
+          );
+        }
+      }
 
       // Rows on one message share its picker. A legacy picker that was topped up
       // or bound to after #1207 carries a mix of stamped and unstamped rows, and
@@ -2973,13 +3021,9 @@ export class ReactionRoleService {
       try {
         // The picker is in the channel the group's rows remember (#1207); only
         // a legacy group falls back to the configured channel.
-        const messageChannelId = this.pickerChannelOf(
-          configs,
-          await this.configService.getString(
-            "reactionroles.message_channel_id",
-            "",
-          ),
-        );
+        const messageChannelId = (
+          await this.pickerChannelForMessage(guildId, first.messageId, configs)
+        ).channelId;
         if (messageChannelId) {
           const messageChannel = (await guild.channels.fetch(
             messageChannelId,

@@ -462,6 +462,34 @@ describe("handleChannelDelete with a remembered picker channel", () => {
     expect(stamped.save).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps an unstamped row whose picker a stamped sibling places in another channel", async () => {
+    // Legacy picker in OLD that gained a stamped row; the setting moved to CONFIGURED
+    // and CONFIGURED is deleted. The picker and its sibling are alive in OLD.
+    const unstamped = row({ _id: "u", messageId: "shared" });
+    const ownsDeleted = row({
+      _id: "own",
+      messageId: "mine",
+      channelId: CONFIGURED,
+    });
+    const plain = row({ _id: "plain", messageId: "plain", roleId: "r3" });
+    Model.find.mockResolvedValueOnce([unstamped, ownsDeleted, plain]);
+    Model.find.mockResolvedValueOnce([
+      row({ _id: "s", messageId: "shared", messageChannelId: OLD }),
+    ]);
+
+    await makeService(fakeGuild([])).handleChannelDelete(deleted(CONFIGURED));
+
+    expect(Model.find).toHaveBeenLastCalledWith({
+      guildId: "g1",
+      isArchived: false,
+      messageId: { $in: ["shared", "plain"] },
+      messageChannelId: { $exists: true, $ne: "" },
+    });
+    expect(unstamped.isArchived).toBe(false);
+    expect(ownsDeleted.isArchived).toBe(true);
+    expect(plain.isArchived).toBe(true);
+  });
+
   it("archives the matched mappings", async () => {
     const stored = row({ messageChannelId: OLD });
     const legacy = row({ _id: "legacy", roleId: "role2" });
@@ -512,6 +540,21 @@ describe("deleting a picker uses its own channel", () => {
         autoCreated: true,
       }),
     ]);
+
+    await makeService(guild).deleteReactionRoleGroup("g1", "g");
+
+    expect(picker.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("deleteReactionRoleGroup finds a stamped sibling outside the group on the same message", async () => {
+    const picker = fakeMessage("m1");
+    const guild = fakeGuild([fakeChannel(OLD, [picker])]);
+    Model.find.mockResolvedValue([
+      row({ groupId: "g", autoCreated: true }),
+      row({ _id: "b", roleId: "role2", groupId: "g", autoCreated: true }),
+    ]);
+    // Bound onto the picker later: no groupId, so the group query misses it.
+    Model.findOne.mockResolvedValue(row({ _id: "sib", messageChannelId: OLD }));
 
     await makeService(guild).deleteReactionRoleGroup("g1", "g");
 
