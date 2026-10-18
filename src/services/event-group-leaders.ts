@@ -74,7 +74,11 @@ export interface LeaderChange {
   eventId: string;
   guildId: string;
   groupKey: string;
-  /** The leader before, or null. */
+  /**
+   * The id stored as the group's leader before the change, or null. It can be a
+   * member who left the group an instant ago and whose own cleanup has not run
+   * (it is then reported once, here, and the cleanup finds nothing left).
+   */
   fromUserId: string | null;
   /** The leader now, or null. */
   toUserId: string | null;
@@ -297,9 +301,12 @@ async function setLeaderLocked(opts: {
   if (userId !== null && !(group.memberIds ?? []).includes(userId)) {
     return fail("not-member");
   }
-  // What the stored value means: only a real leader counts as "before".
-  const before = effectiveLeaders([group])[0]?.userId ?? null;
+  // The hook reports the STORED id as "from", not the effective leader: a
+  // leader who was just unassigned and not yet cleared (their cleanup is queued
+  // behind this write) must still be named as losing the role, or the
+  // leads channel (#1199) would never hear about them.
   const stored = group.captainId ?? null;
+  const before = stored;
   if (stored === userId) {
     return { ok: true, changed: false, fromUserId: before, toUserId: userId };
   }
@@ -359,8 +366,11 @@ export async function clearOrphanedLeaders(
   guildId: string,
   eventId: string,
   source: LeaderChangeSource = "unassigned",
+  onStart?: () => void,
 ): Promise<number> {
   return withGroupLock(guildId, eventId, async () => {
+    // From here on a request for another pass must queue its own.
+    onStart?.();
     const row = (await Event.findOne({ _id: eventId, guildId })
       .select("groups")
       .lean()) as Pick<IEvent, "groups"> | null;
@@ -399,6 +409,8 @@ export async function clearOrphanedLeaders(
 }
 
 let unsubscribeCleanup: (() => void) | null = null;
+/** Events with a cleanup pass queued that has not started its read yet. */
+const pendingCleanups = new Set<string>();
 
 /**
  * Start clearing a leader whenever their group membership ends (see the module
@@ -411,8 +423,22 @@ export function installLeaderCleanup(): () => void {
   const off = onGroupAssignmentChange((change) => {
     // Only a member leaving a group can orphan a leader.
     if (change.fromKey === null) return;
-    return clearOrphanedLeaders(change.guildId, change.eventId).then(
-      () => undefined,
+    // Coalesce: a randomise fires one change per person, but one pass that
+    // has not yet read the event sees all of them (its read is after every
+    // change already written). A pass that is running has cleared its flag,
+    // so a later change queues exactly one more.
+    const key = `${change.guildId}:${change.eventId}`;
+    if (pendingCleanups.has(key)) return;
+    pendingCleanups.add(key);
+    return clearOrphanedLeaders(
+      change.guildId,
+      change.eventId,
+      "unassigned",
+      () => pendingCleanups.delete(key),
+    ).then(
+      () => {
+        pendingCleanups.delete(key);
+      },
       (err: unknown) => {
         logger.error(
           `Could not clear the leader of event ${sanitizeForLog(change.eventId)} after ${sanitizeForLog(change.userId)} left a group:`,
@@ -461,10 +487,13 @@ export async function removeLeaderFromEvents(
         const row = (await Event.findOne({ _id: eventId, guildId })
           .select("groups")
           .lean()) as Pick<IEvent, "groups"> | null;
-        if (!row) return false;
+        // Gone, or already cleared (by the unassign cleanup that the membership
+        // purge started): the data is gone, which is what the reset owes.
+        if (!row) return true;
         const keys = (row.groups ?? [])
           .filter((g) => g.captainId === userId)
           .map((g) => g.key);
+        if (keys.length === 0) return true;
         const result = await Event.updateOne(
           { _id: eventId, guildId, "groups.captainId": userId },
           { $set: { "groups.$[g].captainId": null } },

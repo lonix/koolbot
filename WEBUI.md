@@ -1720,7 +1720,10 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   they stay leader of the group they are assigned to.
 - **For the leaders-only channel (#1199):** every leader change (host set or clear, the
   unassign step, a reset) is announced to a hook (`onLeaderChange`) after it is written;
-  nothing listens yet.
+  nothing listens yet. The hook names the id that was stored as leader before the change,
+  even a member who left the group an instant earlier and whose cleanup had not run, so a
+  replacement made in between still reports who lost the role. After a randomise or other
+  burst of unassigns the clearing step runs as one pass, not once per person.
 - **Not shown in the event post.** Leaders appear on the host panel only.
 - **Member data:** a leader's id is the member's own data: their export lists the event and
   the group they lead (never other leaders), and resetting their data on `/me/privacy`

@@ -587,10 +587,13 @@ export async function removeMemberFromEvents(
         const row = (await Event.findOne({ _id: eventId, guildId })
           .select("groups")
           .lean()) as Pick<IEvent, "groups"> | null;
-        if (!row) return false;
+        // Gone, or the member is already out (a concurrent reset or change):
+        // the data is gone, which is what the reset owes.
+        if (!row) return true;
         const fromKeys = row.groups
           .filter((g) => (g.memberIds ?? []).includes(userId))
           .map((g) => g.key);
+        if (fromKeys.length === 0) return true;
         const result = await Event.updateOne(
           { _id: eventId, guildId, "groups.memberIds": userId },
           { $pull: { "groups.$[].memberIds": userId } },

@@ -626,6 +626,175 @@ describe("the hook for the leads channel (#1199)", () => {
   });
 });
 
+describe("review findings on #1222", () => {
+  it("the hook names the unassigned leader as 'from' when a replacement ran before their cleanup", async () => {
+    seed();
+    await set("a", "ana");
+    const seen: Array<Record<string, unknown>> = [];
+    const off = onLeaderChange((c) => {
+      seen.push({ ...c });
+    });
+    // The unassign takes the lock first; the replacement is already queued
+    // behind it, so it runs BEFORE the cleanup the unassign queued.
+    const unassign = assignMember({
+      guildId: GUILD,
+      eventId: EV,
+      userId: "ana",
+      groupKey: null,
+    });
+    const replace = set("a", "ben");
+    await Promise.all([unassign, replace]);
+    await settle();
+    off();
+    expect(captainOf("a")).toBe("ben");
+    expect(seen).toEqual([
+      expect.objectContaining({
+        groupKey: "a",
+        fromUserId: "ana",
+        toUserId: "ben",
+      }),
+    ]);
+  });
+
+  it("a randomise of many people costs a few cleanup reads, not one per person, and leaves no orphan", async () => {
+    const many = Array.from({ length: 24 }, (_, i) => `p${i}`);
+    seed({
+      groups: [
+        group("a", { memberIds: [...many], captainId: "p0" }),
+        group("b", { memberIds: [] }),
+      ],
+    });
+    const realFindOne = EventMock.findOne;
+    let reads = 0;
+    EventMock.findOne = ((filter: Record<string, unknown>) => {
+      reads++;
+      return realFindOne(filter);
+    }) as typeof EventMock.findOne;
+    try {
+      for (const seedValue of [1, 2, 3]) {
+        reads = 0;
+        store.get(EV)!.groups[0].memberIds = [...many];
+        store.get(EV)!.groups[1].memberIds = [];
+        store.get(EV)!.groups[0].captainId = "p0";
+        await randomiseMembersReal({
+          guildId: GUILD,
+          eventId: EV,
+          candidateIds: many,
+          mode: "everyone",
+          seed: seedValue,
+          admission: 1,
+        });
+        await settle();
+        // The randomise's own read plus a couple of passes.
+        expect(reads).toBeLessThanOrEqual(4);
+        const inA = store.get(EV)!.groups[0].memberIds.includes("p0");
+        expect(captainOf("a")).toBe(inA ? "p0" : null);
+      }
+    } finally {
+      EventMock.findOne = realFindOne;
+    }
+  });
+
+  it("a change that arrives while a cleanup pass is running gets another pass", async () => {
+    seed();
+    await set("a", "ana");
+    await set("b", "cal");
+    // Two unassigns back to back: the second lands after the first pass has
+    // started its read, so it must queue one more.
+    await assignMember({
+      guildId: GUILD,
+      eventId: EV,
+      userId: "ana",
+      groupKey: null,
+    });
+    await assignMember({
+      guildId: GUILD,
+      eventId: EV,
+      userId: "cal",
+      groupKey: null,
+    });
+    await settle();
+    expect(captainOf("a")).toBeNull();
+    expect(captainOf("b")).toBeNull();
+  });
+
+  it("a reset counts an event the unassign cleanup already cleared as done", async () => {
+    seed();
+    await set("a", "ana");
+    // The membership purge fires the cleanup, which queues on the lock ahead
+    // of the leader step's own turn; the leader step then finds it cleared.
+    const [members, leader] = await Promise.all([
+      removeMemberFromEvents(GUILD, "ana"),
+      removeLeaderFromEvents(GUILD, "ana"),
+    ]);
+    await settle();
+    expect(members.removed).toBe(members.matched);
+    expect(leader.removed).toBe(leader.matched);
+    expect(leader.failed).toBe(0);
+    expect(captainOf("a")).toBeNull();
+  });
+
+  it("a reset counts an event cleared between its search and its locked read as done", async () => {
+    seed({ groups: [group("a", { memberIds: ["ana"], captainId: "ana" })] });
+    const realFind = EventMock.find;
+    EventMock.find = ((filter: Record<string, unknown>) => {
+      const q = realFind(filter);
+      return {
+        select: () => ({
+          lean: async () => {
+            const rows = await q.lean();
+            // The cleanup lands after the search found the event.
+            store.get(EV)!.groups[0].captainId = null;
+            return rows;
+          },
+        }),
+      };
+    }) as typeof EventMock.find;
+    try {
+      expect(await removeLeaderFromEvents(GUILD, "ana")).toEqual({
+        matched: 1,
+        removed: 1,
+        failed: 0,
+      });
+    } finally {
+      EventMock.find = realFind;
+    }
+  });
+
+  it("two resets of the same member both count as done", async () => {
+    seed();
+    const [one, two] = await Promise.all([
+      removeMemberFromEvents(GUILD, "ana"),
+      removeMemberFromEvents(GUILD, "ana"),
+    ]);
+    expect(one.removed).toBe(one.matched);
+    expect(two.removed).toBe(two.matched);
+  });
+
+  it("a reset whose event vanished counts it as done", async () => {
+    seed({ groups: [group("a", { memberIds: ["ana"], captainId: "ana" })] });
+    const realFindOne = EventMock.findOne;
+    EventMock.findOne = ((filter: Record<string, unknown>) => {
+      const q = realFindOne(filter);
+      return {
+        select: () => ({
+          lean: async () => {
+            store.clear();
+            return null;
+          },
+        }),
+        lean: q.lean,
+      };
+    }) as typeof EventMock.findOne;
+    try {
+      const r = await removeLeaderFromEvents(GUILD, "ana");
+      expect(r).toEqual({ matched: 1, removed: 1, failed: 0 });
+    } finally {
+      EventMock.findOne = realFindOne;
+    }
+  });
+});
+
 describe("removeLeaderFromEvents (member data reset)", () => {
   it("clears the member in every event of the guild, finished ones and orphaned ids included", async () => {
     seed({ groups: [group("a", { memberIds: ["ana"], captainId: "ana" })] });
