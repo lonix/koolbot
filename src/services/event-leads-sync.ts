@@ -26,7 +26,7 @@ import type { Client } from "discord.js";
 import { Event } from "../models/event.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
-import { onLeaderChange } from "./event-group-leaders.js";
+import { onLeaderChange, type LeaderChange } from "./event-group-leaders.js";
 import { readEventPresence } from "./event-group-presence.js";
 import type { EventGroupChannels } from "./event-group-channels.js";
 import { resolveLeadsChannel } from "./event-leader-roles.js";
@@ -62,6 +62,7 @@ type LeadsOps = Pick<
   | "syncLeads"
   | "leadsProbe"
   | "leadsAdminRoles"
+  | "isTrackedLeader"
   | "queueEviction"
   | "holdEviction"
   | "setLeadsProblem"
@@ -131,11 +132,19 @@ export async function evictFromLeads(opts: {
     const probe = leadsId
       ? channels.leadsProbe(ctx.guild, leadsId, admins)
       : null;
-    return planLeadsEviction(ctx.event, ctx.presence, {
+    const wishes = planLeadsEviction(ctx.event, ctx.presence, {
       revoked,
       isAdmin: probe?.isAdmin ?? ((): boolean => true),
       canConnect: probe?.canConnect ?? ((): null => null),
     });
+    if (!Array.isArray(wishes)) return wishes;
+    // A leader reappointed while the run waits on Discord (leader changes use
+    // another lock) must not be moved by this plan: asked again right before
+    // each request.
+    return wishes.map((w) => ({
+      ...w,
+      skipIf: (): boolean => channels.isTrackedLeader(eventId, w.userId),
+    }));
   };
   const clearProblem = (): void =>
     channels.setLeadsProblem(eventId, EVICT_PROBLEM, null);
@@ -235,9 +244,12 @@ export function installLeadsChannelSync(
     eventId: string,
     takeRevoked: () => readonly string[],
   ) => Promise<void>,
+  /** Called synchronously with every change, before anything is awaited. */
+  track?: (change: LeaderChange) => void,
 ): () => void {
   if (unsubscribe) return unsubscribe;
   const off = onLeaderChange((change) => {
+    track?.(change);
     const key = `${change.guildId}:${change.eventId}`;
     if (change.fromUserId) {
       const set = pendingRevoked.get(key) ?? new Set<string>();

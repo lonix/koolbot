@@ -104,6 +104,7 @@ export type MoveSkipReason =
   | "not-connected"
   | "elsewhere"
   | "moved-on"
+  | "withdrawn"
   | "already-there"
   | "group-full"
   | "missing-permission"
@@ -116,6 +117,7 @@ export const MOVE_SKIP_LABEL: Record<MoveSkipReason, string> = {
   "not-connected": "not connected to voice",
   elsewhere: "in a channel that is not part of the event",
   "moved-on": "no longer in the channel they were to be moved out of",
+  withdrawn: "no longer to be moved",
   "already-there": "already in the right channel",
   "group-full": "group full",
   "missing-permission": "missing permission",
@@ -136,6 +138,13 @@ export interface MoveWish {
    * it without touching a person who has walked somewhere else meanwhile.
    */
   fromChannelId?: string;
+  /**
+   * Asked synchronously just before the request is sent (and again when the
+   * request leaves the write client's queue): true withdraws the wish. For a
+   * decision the plan made that something has since overtaken, such as a
+   * person who was reappointed leader while the run waited on Discord.
+   */
+  skipIf?: () => boolean;
 }
 
 export interface MoveSkip {
@@ -269,6 +278,14 @@ class MovedOnError extends Error {
       "The member is no longer in the channel they were to be moved out of",
     );
     this.name = "MovedOnError";
+  }
+}
+
+/** Thrown when the wish was withdrawn between the plan and the request. */
+class WithdrawnError extends Error {
+  constructor() {
+    super("The move was withdrawn");
+    this.name = "WithdrawnError";
   }
 }
 
@@ -573,9 +590,13 @@ class Mover {
     let attempted = 0;
     let touched = false;
     for (const wish of queue) {
-      const { userId, toChannelId, fromChannelId } = wish;
+      const { userId, toChannelId, fromChannelId, skipIf } = wish;
       if (rateLimited) {
         skip(userId, "rate-limited");
+        continue;
+      }
+      if (skipIf?.()) {
+        skip(userId, "withdrawn");
         continue;
       }
       const dest = destinations.get(toChannelId);
@@ -704,6 +725,7 @@ class Mover {
       // actually goes out, so a rate-limit wait in the client's queue cannot
       // leave a stale decision behind.
       const assertMovable = (): string => {
+        if (skipIf?.()) throw new WithdrawnError();
         const live = this.guild.voiceStates.cache.get(userId)?.channelId;
         if (!live || !this.eventChannels.has(live)) {
           throw new MovedAwayError(!!live);
@@ -754,6 +776,9 @@ class Mover {
         } else if (error instanceof DestinationFullError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "group-full");
+        } else if (error instanceof WithdrawnError) {
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
+          skip(userId, "withdrawn");
         } else if (error instanceof MovedOnError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "moved-on");

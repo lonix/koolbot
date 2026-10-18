@@ -193,32 +193,94 @@ describe("planLeadsSync", () => {
     expect(ops[0]).toMatchObject({ kind: "put", spec: { id: GUILD } });
   });
 
-  it("strips role allows only the first time the restriction is applied", () => {
-    const open = [
-      role("verified", V | C, 0n),
-      member(HOST, LEADS_HOST_PERMISSIONS),
-    ];
-    const first = planLeadsSync(open, ctx({ leaderIds: [] }));
-    expect(
-      first.some(
-        (o) =>
-          o.kind === "put" &&
-          o.spec.id === "verified" &&
-          (o.spec.allow & C) === 0n,
-      ),
-    ).toBe(true);
-    // Once @everyone denies Connect, a role an admin added by hand stays.
-    const restricted = [
+  it("strips role allows on every pass, also when @everyone already denies Connect", () => {
+    // A pre-existing or degraded channel can have the deny together with a
+    // normal role's allow: the deny does not prove the clean-up ran.
+    const current = [
       ...right().filter(
         (o) => o.type === OverwriteType.Member || o.id === GUILD,
       ),
-      role("handmade", V | C, 0n),
+      role("verified", V | C | S, 0n),
     ];
+    const ops = planLeadsSync(current, ctx({ leaderIds: ["l1", "l2"] }));
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: true,
+        spec: { id: "verified", type: OverwriteType.Role, allow: V, deny: 0n },
+      },
+    ]);
+  });
+
+  it("touches no role when the admin groups are unknown", () => {
+    const current = [...right(), role("verified", V | C, 0n)];
     expect(
-      planLeadsSync(restricted, ctx({ leaderIds: ["l1", "l2"] })).some(
-        (o) => o.kind === "put" && o.spec.id === "handmade",
+      planLeadsSync(
+        current,
+        ctx({ leaderIds: ["l1", "l2"], allRolesExempt: true }),
       ),
-    ).toBe(false);
+    ).toEqual([]);
+  });
+
+  it("gives the role of an admin group an explicit allow, at creation and on a pass", () => {
+    const c = ctx({
+      leaderIds: [],
+      adminRoleIds: new Set(["mods"]),
+      adminGrantRoleIds: new Set(["mods"]),
+    });
+    const built = buildLeadsOverwrites([], c);
+    expect(find(built, OverwriteType.Role, "mods")).toMatchObject({
+      allow: V | C | S,
+      deny: 0n,
+    });
+    const ops = planLeadsSync(
+      buildLeadsOverwrites([], ctx({ leaderIds: [] })),
+      c,
+    );
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: {
+          id: "mods",
+          type: OverwriteType.Role,
+          allow: V | C | S,
+          deny: 0n,
+        },
+      },
+    ]);
+    // Once it has it, nothing is written.
+    expect(planLeadsSync(built, c)).toEqual([]);
+  });
+
+  it("never lifts a category deny when granting an admin group's role", () => {
+    const c = ctx({
+      leaderIds: [],
+      adminRoleIds: new Set(["mods"]),
+      adminGrantRoleIds: new Set(["mods"]),
+    });
+    // The category hides channels from @everyone: no View grant, so the
+    // channel stays hidden to those who cannot see it already.
+    const priv = buildLeadsOverwrites([role(GUILD, 0n, V)], c);
+    expect(find(priv, OverwriteType.Role, "mods")?.allow).toBe(C | S);
+    // An explicit deny on the admin role itself stays.
+    const denied = buildLeadsOverwrites([role("mods", 0n, C)], c);
+    expect(find(denied, OverwriteType.Role, "mods")).toMatchObject({
+      allow: V | S,
+      deny: C,
+    });
+    expect(planLeadsSync(denied, c)).toEqual([]);
+  });
+
+  it("grants nothing to admin groups while they are unknown", () => {
+    const c = ctx({
+      leaderIds: [],
+      adminGrantRoleIds: new Set(["mods"]),
+      allRolesExempt: true,
+    });
+    expect(
+      find(buildLeadsOverwrites([], c), OverwriteType.Role, "mods"),
+    ).toBeUndefined();
   });
 
   it("never touches a pure deny entry or an Administrator role", () => {

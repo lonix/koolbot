@@ -1749,12 +1749,18 @@ see but not join. It is made with the other group channels (#1190) and removed w
   could not connect to move anyone). Admins keep access through their roles: nothing
   adds a deny for anyone but @everyone, and an admin role (one with the Administrator
   permission, or the role of a KoolBot admin group, which is who the Web UI treats as
-  admins) is left exactly as it is. The category's own overwrites are copied first. When the
-  restriction is first applied, the Connect and Speak **allow** of every other role
-  copied from the category is removed (no role at all while the admin groups cannot be
-  read, so nobody is denied on a guess), because Discord applies a role's allow after
-  @everyone's deny and the role's holders would otherwise walk in; only allow bits are
-  removed, never a deny added. A role you add by hand later is left alone.
+  admins) is not stripped. The category's own overwrites are copied first. On every pass
+  (a new channel, an existing one, after a restart) the Connect and Speak **allow** of every
+  other role is removed, because Discord applies a role's allow after @everyone's deny and
+  the role's holders would otherwise walk in; only allow bits are removed, never a deny
+  added. That includes a role you add to the channel by hand: to let a role in, make it an
+  admin group's role. The role of each KoolBot admin group gets an explicit allow
+  (View, Connect and Speak), because its holders may get Connect only from their server
+  permissions, which the @everyone deny overrides; a deny the category already has (View
+  for @everyone, or any deny on that role) is never lifted, and View is not added while
+  @everyone's View is denied. While the admin groups cannot be read nothing is stripped
+  or granted on a guess, the channel is not marked verified, the Groups section says so, and
+  the next pass after a few minutes does it.
 - **Leaders** here are the event's current leaders (a team group's leader who is also
   a member of it, only while the event's leaders switch is on), read from the event as it
   is when the channel is written, never from the change that asked for it.
@@ -1786,9 +1792,7 @@ see but not join. It is made with the other group channels (#1190) and removed w
   stale member overwrite (a leader who is no longer one, a member whose data was reset, an
   entry added by hand), adds a missing one and restores @everyone's Connect deny. A write
   Discord did not take is not repeated every minute: the bot waits and says so. A
-  later pass leaves a member entry that only denies, and every role other than
-  @everyone, as they are (the one-time role clean-up above only runs while @everyone
-  does not yet deny Connect).
+  pass leaves a member entry that only denies, and any deny, as it is.
 - **Without the permissions.** Creating the restricted channel needs **Manage Channels**
   (as for every group channel) and **Manage Roles** plus the permissions it grants (View
   Channel, Connect, Speak and Move Members) in the events category. If any is missing, or

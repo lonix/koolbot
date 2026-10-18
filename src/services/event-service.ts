@@ -376,6 +376,15 @@ export class EventService extends ScheduledService {
     });
   }
 
+  /** Note a leader change synchronously (see `EventGroupChannels.trackLeaderChange`). */
+  public trackLeaderChange(change: {
+    eventId: string;
+    fromUserId: string | null;
+    toUserId: string | null;
+  }): void {
+    this.groupChannels.trackLeaderChange(change.eventId, change);
+  }
+
   /**
    * Make the leaders-only channel of an event match who leads it now, and move
    * out whoever lost access (#1199). Called by the leader-change subscription

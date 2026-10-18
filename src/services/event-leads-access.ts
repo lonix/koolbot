@@ -20,14 +20,16 @@
  *   admin group (the Web UI's admins, who may act as host).
  * - **Roles that would defeat the deny.** Discord applies a role's allow after
  *   @everyone's deny, so a role overwrite copied from the category that allows
- *   Connect would let every holder in. When the restriction is first applied
- *   (a new channel, or an existing channel whose @everyone entry does not yet
- *   deny Connect) the Connect and Speak ALLOW bits are removed from every role
+ *   Connect would let every holder in. On every pass
+ *   (creation and each later sync: an earlier clean-up cannot be told from the
+ *   channel) the Connect and Speak ALLOW bits are removed from every role
  *   entry other than an admin role (Administrator, or the role of a KoolBot
  *   admin group; when those cannot be read no role is touched). Only allow
- *   bits are removed; the
- *   role then simply has no say and falls under the @everyone deny. Later
- *   syncs leave role entries alone, so a role an admin adds by hand stays.
+ *   bits are removed; the role then has no say and falls under the @everyone
+ *   deny. The role of each KoolBot admin group is given an explicit View,
+ *   Connect and Speak allow instead (their holders may have Connect only from
+ *   server permissions, which the deny overrides), never lifting a deny the
+ *   category already has.
  * - **Other members.** A member overwrite for anyone who is not the host, the
  *   bot or a current leader loses the View, Connect and Speak allow bits the
  *   bot would have granted (a leader who lost the role, a member data reset,
@@ -99,6 +101,13 @@ export interface LeadsAccessContext {
    * admin must never be denied by a guess).
    */
   allRolesExempt?: boolean;
+  /**
+   * The roles of KoolBot's admin groups: they get an explicit allow (View,
+   * Connect, Speak) because the @everyone deny would otherwise lock out admins
+   * whose Connect comes only from their server permissions. Empty while the
+   * admin groups are unknown (nothing is guessed).
+   */
+  adminGrantRoleIds?: ReadonlySet<string>;
 }
 
 const keyOf = (o: { type: OverwriteType; id: string }): string =>
@@ -126,6 +135,29 @@ function restrictEveryone(
   let allow = (current?.allow ?? 0n) & ~CONNECT;
   if ((deny & VIEW) === 0n) allow |= VIEW;
   return { id: everyoneId, type: OverwriteType.Role, allow, deny };
+}
+
+/**
+ * The explicit allow an admin group's role needs, or null when it has it. An
+ * explicit deny already on the entry is never lifted (the bits it denies are
+ * left out), and View is only added when @everyone's View is not denied (a
+ * private category stays private).
+ */
+function adminRoleGrant(
+  current: OverwriteSpec | undefined,
+  id: string,
+  everyoneDeniesView: boolean,
+): OverwriteSpec | null {
+  const bits = (everyoneDeniesView ? 0n : VIEW) | CONNECT | SPEAK;
+  const effective = bits & ~(current?.deny ?? 0n);
+  if (effective === 0n) return null;
+  if (current && (current.allow & effective) === effective) return null;
+  return {
+    id,
+    type: OverwriteType.Role,
+    allow: (current?.allow ?? 0n) | effective,
+    deny: current?.deny ?? 0n,
+  };
 }
 
 function widen(
@@ -158,10 +190,8 @@ export function buildLeadsOverwrites(
   const desired = desiredMembers(ctx);
 
   const everyoneKey = keyOf({ type: OverwriteType.Role, id: ctx.everyoneId });
-  specs.set(
-    everyoneKey,
-    restrictEveryone(specs.get(everyoneKey), ctx.everyoneId),
-  );
+  const restricted = restrictEveryone(specs.get(everyoneKey), ctx.everyoneId);
+  specs.set(everyoneKey, restricted);
 
   for (const [key, spec] of specs) {
     if (
@@ -178,6 +208,17 @@ export function buildLeadsOverwrites(
   for (const [id, bits] of desired) {
     const key = keyOf({ type: OverwriteType.Member, id });
     specs.set(key, widen(specs.get(key), id, bits));
+  }
+  if (ctx.allRolesExempt !== true) {
+    for (const id of ctx.adminGrantRoleIds ?? []) {
+      const key = keyOf({ type: OverwriteType.Role, id });
+      const grant = adminRoleGrant(
+        specs.get(key),
+        id,
+        (restricted.deny & VIEW) !== 0n,
+      );
+      if (grant) specs.set(key, grant);
+    }
   }
   return [...specs.values()];
 }
@@ -216,26 +257,30 @@ export function planLeadsSync(
     }
   }
 
-  // 2. @everyone, and (only the first time) the roles that would defeat it.
+  // 2. The roles that would defeat the @everyone deny (an allow on a role
+  // applies after it), on every pass: whether an earlier clean-up ran cannot
+  // be told from the channel, so it is simply never left undone. Admin roles
+  // are exempt; while the admin groups are unknown nothing is touched.
+  for (const o of current) {
+    if (
+      o.type !== OverwriteType.Role ||
+      o.id === ctx.everyoneId ||
+      isAdminRole(ctx, o.id) ||
+      (o.allow & OPEN_BITS) === 0n
+    ) {
+      continue;
+    }
+    ops.push({
+      kind: "put",
+      spec: { ...o, allow: o.allow & ~OPEN_BITS },
+      revoke: true,
+    });
+  }
+  // ... and @everyone itself.
   const everyone = byKey.get(
     keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
   );
   if (!everyone || (everyone.deny & CONNECT) === 0n) {
-    for (const o of current) {
-      if (
-        o.type !== OverwriteType.Role ||
-        o.id === ctx.everyoneId ||
-        isAdminRole(ctx, o.id) ||
-        (o.allow & OPEN_BITS) === 0n
-      ) {
-        continue;
-      }
-      ops.push({
-        kind: "put",
-        spec: { ...o, allow: o.allow & ~OPEN_BITS },
-        revoke: true,
-      });
-    }
     ops.push({
       kind: "put",
       spec: restrictEveryone(everyone, ctx.everyoneId),
@@ -248,6 +293,17 @@ export function planLeadsSync(
     const o = byKey.get(keyOf({ type: OverwriteType.Member, id }));
     if (o && (o.allow & bits) === bits && (o.deny & bits) === 0n) continue;
     ops.push({ kind: "put", spec: widen(o, id, bits), revoke: false });
+  }
+  if (ctx.allRolesExempt !== true) {
+    const everyoneDeniesView = ((everyone?.deny ?? 0n) & VIEW) !== 0n;
+    for (const id of ctx.adminGrantRoleIds ?? []) {
+      const grant = adminRoleGrant(
+        byKey.get(keyOf({ type: OverwriteType.Role, id })),
+        id,
+        everyoneDeniesView,
+      );
+      if (grant) ops.push({ kind: "put", spec: grant, revoke: false });
+    }
   }
   return ops;
 }

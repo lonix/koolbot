@@ -390,6 +390,12 @@ export interface LeadsSyncResult {
 }
 
 const LEADS_HOLD = "#leads";
+/** Start of the warning a leads channel created without its restriction leaves in the pass report. */
+const LEADS_UNRESTRICTED_WARNING =
+  "The leaders-only channel is created WITHOUT its restriction, so anyone who can see it can join:";
+/** Shown (and the channel left unverified) while the admin groups cannot be read. */
+const ADMIN_GROUPS_UNKNOWN =
+  "The admin groups could not be read, so the leaders-only channel's roles were not checked and the admins' access was not granted. It is tried again later.";
 const LEADS_EVICT_HOLD = "#leads-evict";
 /** Key of the standing warning about the leads channel's access (per channel id). */
 const ACCESS_WARNING_SUFFIX = "#access";
@@ -438,6 +444,11 @@ export class EventGroupChannels {
   private readonly leadsWritten = new Map<string, string>();
   /** Per event: people still to be moved out of the leads channel. */
   private readonly leadsEvict = new Map<string, Set<string>>();
+  /** Per event: people a leader change in this process made leaders, as the
+   * hook reported them (checked synchronously when a move out of the leads
+   * channel is about to be sent, because a reappointment can land while the
+   * move waits on Discord; a later change that ends the role removes them). */
+  private readonly leadersNow = new Map<string, Set<string>>();
   /** Per server: the admin group roles last read (the cache-only trigger uses it). */
   private readonly adminRolesSeen = new Map<string, Set<string>>();
   /** Per event: problems with the leads channel the host panel shows (kept apart
@@ -1193,6 +1204,8 @@ export class EventGroupChannels {
       leaderIds: leadsLeaderIds(row).filter((id) => SNOWFLAKE.test(id)),
       adminRoleIds,
       allRolesExempt: !admins.known,
+      // Admin groups get an explicit allow, never on a guess.
+      adminGrantRoleIds: admins.known ? new Set(admins.roleIds) : new Set(),
     };
   }
 
@@ -1219,7 +1232,7 @@ export class EventGroupChannels {
       this.warnOnce(
         row,
         "leads-unrestricted",
-        `The leaders-only channel is created WITHOUT its restriction, so anyone who can see it can join: ${reason}.`,
+        `${LEADS_UNRESTRICTED_WARNING} ${reason}.`,
         report.warnings,
       );
       return { overwrites: null, reason };
@@ -1339,6 +1352,26 @@ export class EventGroupChannels {
         }
       },
     };
+  }
+
+  /**
+   * Note a leader change as the hook reports it, synchronously: who just
+   * became a leader must not be moved out by a plan made before that.
+   */
+  public trackLeaderChange(
+    eventId: string,
+    change: { fromUserId: string | null; toUserId: string | null },
+  ): void {
+    const set = this.leadersNow.get(eventId) ?? new Set<string>();
+    if (change.fromUserId) set.delete(change.fromUserId);
+    if (change.toUserId) set.add(change.toUserId);
+    if (set.size > 0) this.leadersNow.set(eventId, set);
+    else this.leadersNow.delete(eventId);
+  }
+
+  /** Was this person made a leader since this process started (and not removed since)? */
+  public isTrackedLeader(eventId: string, userId: string): boolean {
+    return this.leadersNow.get(eventId)?.has(userId) === true;
   }
 
   /** Remember people who still have to be moved out of the leads channel. */
@@ -1495,13 +1528,26 @@ export class EventGroupChannels {
       if (ops.length === 0) {
         this.leadsWritten.delete(eventId);
         this.holds.delete(holdKey);
-        if (enabled) {
+        if (enabled && ctx.allRolesExempt) {
+          // The roles could not be cleaned up or granted without knowing the
+          // admin groups: not verified, and tried again when they can be read.
+          holdFor(ADMIN_GROUPS_UNKNOWN);
+          problem(ADMIN_GROUPS_UNKNOWN);
+        } else if (enabled) {
           // Seen right, from Discord itself.
           this.leadsChecked.add(eventId);
           this.setLeadsProblem(eventId, LEADS_HOLD, null);
           this.channelWarnings
             .get(eventId)
             ?.delete(`${leadsId}${ACCESS_WARNING_SUFFIX}`);
+          // The "created without its restriction" warning of the pass that
+          // created the channel is stored in that pass's report: drop it too.
+          const stored = this.reports.get(eventId);
+          if (stored) {
+            stored.warnings = stored.warnings.filter(
+              (w) => !w.startsWith(LEADS_UNRESTRICTED_WARNING),
+            );
+          }
         }
         return result("ok", leadsId, [...revoked], 0);
       }
@@ -1561,6 +1607,10 @@ export class EventGroupChannels {
       this.leadsWritten.set(eventId, planKey);
       this.holds.delete(holdKey);
       this.setLeadsProblem(eventId, LEADS_HOLD, null);
+      if (ctx.allRolesExempt) {
+        holdFor(ADMIN_GROUPS_UNKNOWN);
+        problem(ADMIN_GROUPS_UNKNOWN);
+      }
       logger.info(
         `Updated the leaders-only channel access of event ${sanitizeForLog(eventId)} (${ops.length} overwrite(s) written)`,
       );
@@ -1770,6 +1820,7 @@ export class EventGroupChannels {
     this.leadsWritten.delete(eventId);
     this.leadsEvict.delete(eventId);
     this.leadsProblems.delete(eventId);
+    this.leadersNow.delete(eventId);
     for (const key of [...this.holds.keys()]) {
       if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }

@@ -699,8 +699,10 @@ try {
   // Leads-only channel (#1199): a leader change updates who may join it, for
   // every source of a change (host panel, unassign cleanup, member data reset).
   const events = eventService;
-  installLeadsChannelSync((guildId, eventId, takeRevoked) =>
-    events.syncLeadsAccess(guildId, eventId, takeRevoked),
+  installLeadsChannelSync(
+    (guildId, eventId, takeRevoked) =>
+      events.syncLeadsAccess(guildId, eventId, takeRevoked),
+    (change) => events.trackLeaderChange(change),
   );
   lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);

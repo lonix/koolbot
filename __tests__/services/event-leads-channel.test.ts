@@ -232,6 +232,8 @@ function makeWorld(
 ) {
   const lacks = new Set<bigint>(opts.botLacks ?? []);
   const memberRoles = new Map<string, string[]>();
+  /** What the admin groups answer; the test may change it. */
+  const admin = { roles: (opts.adminRoles ?? []) as string[] | "fail" };
   /** People the gateway's permission cache still shows as able to connect
    * (an overwrite change it has not delivered yet). */
   const lagging = new Set<string>();
@@ -452,8 +454,8 @@ function makeWorld(
       getGraceMs: async () => 0,
       isEnabled: async () => eventsEnabled,
       getAdminRoleIds: async () => {
-        if (opts.adminRoles === "fail") throw new Error("database down");
-        return opts.adminRoles ?? [];
+        if (admin.roles === "fail") throw new Error("database down");
+        return admin.roles;
       },
     },
     { rest: rest as never, call: call as never, paceMs: 0 },
@@ -516,6 +518,7 @@ function makeWorld(
     lacks,
     lagging,
     memberRoles,
+    admin,
     overwritesOf,
     seedRight,
     place: (user: string, channel: string) => inChannel.set(user, channel),
@@ -689,10 +692,12 @@ describe("creating the leads channel", () => {
     const everyone = w.overwritesOf("new-1").find((o) => o.id === GUILD);
     expect(everyone && everyone.deny & C).toBe(C);
     expect(has(w, L1, "new-1")).toBe(true);
-    expect(
-      (await w.sync()).status === "ok" &&
-        (w.gc.getReport(EV)?.warnings.join("\n") ?? ""),
-    ).not.toMatch(/WITHOUT the leaders-only restriction/);
+    // The pass that wrote is verified by the next one; only then is the
+    // restriction known to be in place, and the host panel stops saying it is
+    // not (the warning of the creating pass and the channel's own).
+    expect((await w.sync()).status).toBe("ok");
+    const left = (w.gc.getReport(EV)?.warnings ?? []).join("\n");
+    expect(left).not.toMatch(/WITHOUT/);
   });
 
   it("names the permissions the bot lacks to grant the access, not only Manage Roles", async () => {
@@ -1157,6 +1162,134 @@ describe("with the real leader writer and hook", () => {
     });
     await settle();
     expect(n).toBe(2);
+  });
+});
+
+describe("roles and admin groups", () => {
+  const roleEntry = (w: World, id: string, channel = "ch-leads") =>
+    w.overwritesOf(channel).find((o) => o.id === id);
+
+  it("removes an inherited role allow from an existing channel whose @everyone deny is already in place", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    w.channels
+      .get("ch-leads")
+      ?.permissionOverwrites.cache.set(`${OverwriteType.Role}:verified`, {
+        id: "verified",
+        type: OverwriteType.Role,
+        allow: { bitfield: V | C | S },
+        deny: { bitfield: 0n },
+      });
+    expect((await w.sync()).status).toBe("ok");
+    expect(roleEntry(w, "verified")?.allow).toBe(V);
+    // And it is verified only now.
+    expect((await w.sync()).wrote).toBe(0);
+  });
+
+  it("gives the role of an admin group an explicit allow on an existing channel", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["mods"] });
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    expect(roleEntry(w, "mods")?.allow).toBe(V | C | S);
+    expect((await w.sync()).wrote).toBe(0);
+  });
+
+  it("stays unverified while the admin groups cannot be read, and finishes the clean-up once they can", async () => {
+    seed({ groups: [group("l", { kind: "leads", channelId: null })] });
+    const w = makeWorld({
+      adminRoles: "fail",
+      categoryOverwrites: [
+        { id: "verified", type: OverwriteType.Role, allow: V | C, deny: 0n },
+      ],
+    });
+    await w.reconcile();
+    // Created with the copied role allow intact: nothing is guessed.
+    const post = w.posts[0].body.permission_overwrites as Array<{
+      id: string;
+      allow: string;
+    }>;
+    expect(BigInt(post.find((o) => o.id === "verified")?.allow ?? 0)).toBe(
+      V | C,
+    );
+    const first = await w.sync();
+    expect(first.status).toBe("ok");
+    expect(
+      w.gc
+        .getReport(EV)
+        ?.failures.map((f) => f.reason)
+        .join("\n"),
+    ).toMatch(/admin groups could not be read/);
+    const event = store.get(EV) as never;
+    // Held back for a while, and not marked verified.
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    w.admin.roles = ["mods"];
+    jest.useFakeTimers({
+      now: Date.now() + 6 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      expect((await w.sync()).status).toBe("ok");
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(
+      roleEntry(w, "new-1".replace("new-1", "verified"), "new-1")?.allow,
+    ).toBe(V);
+    expect(roleEntry(w, "mods", "new-1")?.allow).toBe(V | C | S);
+    expect((await w.sync()).wrote).toBe(0);
+    expect(
+      (w.gc.getReport(EV)?.failures ?? []).filter((f) => f.key === "#leads"),
+    ).toEqual([]);
+  });
+});
+
+describe("a leader reappointed while a move out is pending", () => {
+  it("is not moved by the plan that was made before", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    uninstallSync = installLeadsChannelSync(
+      (g, e, t) =>
+        syncLeadsAccess({
+          client: w.client as never,
+          channels: w.gc,
+          guildId: g,
+          eventId: e,
+          takeRevoked: t,
+        }),
+      (change) => w.gc.trackLeaderChange(change.eventId, change),
+    );
+    w.place(L1, "ch-leads");
+    // L1 loses the role (the change is written by hand here, as the hook's
+    // consumer already ran for it): the pass removes access and plans a move.
+    setCaptain("a", null);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    w.client.rest.get.mockImplementationOnce(async () => {
+      await gate;
+      return { channel_id: "ch-leads" };
+    });
+    const pass = w.run(() => [L1]);
+    await settle();
+    // The move is parked on reading L1's voice state. L1 is made leader again
+    // (real writer and hook; another lock than the channel's).
+    await setGroupLeader({
+      guildId: GUILD,
+      eventId: EV,
+      groupKey: "a",
+      userId: L1,
+      admission: 1,
+    });
+    release();
+    await pass;
+    await settle();
+    expect(w.moves).toEqual([]);
+    expect(w.where(L1)).toBe("ch-leads");
+    // The hook's own pass gave the access back.
+    expect(allowOf(w, L1)).toBe(LEADS_LEADER_PERMISSIONS);
   });
 });
 
