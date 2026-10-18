@@ -225,6 +225,8 @@ export class TrackingOptOutService {
   ): Promise<{ admitted: string[]; value: T | undefined }> {
     const admitted: string[] = [];
     const keys: string[] = [];
+    // No ticket means no proof that no reset engaged meanwhile: admit nobody.
+    if (typeof since !== "number") return { admitted, value: undefined };
     for (const id of new Set(userIds)) {
       const key = TrackingOptOutService.key(id, guildId);
       if (this.paused.has(key)) continue;

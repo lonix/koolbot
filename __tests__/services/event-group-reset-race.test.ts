@@ -210,6 +210,19 @@ describe("host assignment against a member reset", () => {
     expect(result).toMatchObject({ ok: true, changed: true });
   });
 
+  it("fails closed when a caller passes no admission ticket", async () => {
+    seed();
+    const result = await assignMember({
+      guildId: GUILD,
+      eventId: EV,
+      userId: ME,
+      groupKey: "a",
+      isConnected: () => true,
+    } as unknown as Parameters<typeof assignMember>[0]);
+    expect(result).toMatchObject({ ok: false, code: "member-reset" });
+    expect(holders(ME)).toEqual([]);
+  });
+
   it("still lets a host assign a member no reset has touched", async () => {
     seed();
     expect(

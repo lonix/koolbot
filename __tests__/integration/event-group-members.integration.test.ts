@@ -3,9 +3,9 @@ import { describeWithMongo, useRealMongo } from "./mongo-harness.js";
 import { Event } from "../../src/models/event.js";
 import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 import {
-  assignMember,
+  assignMember as assignMemberReal,
   handleGroupSelfJoin,
-  randomiseMembers,
+  randomiseMembers as randomiseMembersReal,
   removeMemberFromEvents,
   setGroupsLocked,
 } from "../../src/services/event-group-assignment.js";
@@ -17,6 +17,25 @@ import {
  * what they do to the other fields of the same array; these run the real
  * service against a real server and read the stored documents back.
  */
+type AssignOpts = Parameters<typeof assignMemberReal>[0];
+type RandomiseOpts = Parameters<typeof randomiseMembersReal>[0];
+// The service refuses a missing ticket or presence check on purpose (it fails
+// closed), so these helpers pass explicit ones: a real ticket, and "connected".
+const assignMember = (
+  o: Omit<AssignOpts, "admission" | "isConnected"> &
+    Partial<Pick<AssignOpts, "isConnected">>,
+) =>
+  assignMemberReal({
+    admission: TrackingOptOutService.getInstance().admission(),
+    isConnected: () => true,
+    ...o,
+  });
+const randomiseMembers = (o: Omit<RandomiseOpts, "admission">) =>
+  randomiseMembersReal({
+    admission: TrackingOptOutService.getInstance().admission(),
+    ...o,
+  });
+
 describeWithMongo("event group members against a real MongoDB (#1191)", () => {
   useRealMongo();
 
@@ -112,6 +131,24 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
       ["g_b", "Logi", null, "ch-b", null],
       ["g_o", "Spectators", null, "ch-o", null],
     ]);
+  });
+
+  it("refuses an add for someone not connected or with an unreadable voice state, and writes nothing", async () => {
+    const { id } = await makeEvent();
+    for (const answer of [false, null]) {
+      const result = await assignMember({
+        guildId: GUILD,
+        eventId: id,
+        userId: "u1",
+        groupKey: "g_a",
+        isConnected: () => answer,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        code: answer === null ? "no-voice-state" : "not-connected",
+      });
+    }
+    expect(await members(id, "g_a")).toEqual([]);
   });
 
   it("keeps a group within its size when many assignments arrive at once", async () => {
