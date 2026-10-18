@@ -24,6 +24,20 @@ import { compareIds } from "../web/channel-manager.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import {
+  LEADS_REQUIRED_BOT_PERMISSIONS,
+  buildLeadsOverwrites,
+  describePlan,
+  leadsLeaderIds,
+  planLeadsSync,
+  revokedUserIds,
+  type LeadsAccessContext,
+  type LeadsOp,
+  type OverwriteSpec,
+} from "./event-leads-access.js";
+import { resolveLeadsChannel } from "./event-leader-roles.js";
+
+export type { OverwriteSpec } from "./event-leads-access.js";
 
 /**
  * Voice channels of event groups (#1190): one per group, next to the event's
@@ -55,6 +69,14 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  *   it has to shift to make room. A failure holds the ordering back for the
  *   same durations as a failed create and is retried by a later pass, which
  *   reads again before it writes.
+ * - The leads channel (#1199) is created with the overwrites of
+ *   `event-leads-access.ts` (the category's own, then @everyone denied Connect,
+ *   the host, the leaders and the bot allowed), and `syncLeads` keeps them
+ *   right under the same lock: it decides from a fresh row and a force-read
+ *   channel, never from the change that triggered it, writes one overwrite per
+ *   request (revokes first), paced, and writes nothing when the channel cannot
+ *   be read. A channel that could not be restricted is created without the
+ *   restriction and the host panel says so until it is.
  */
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
@@ -116,9 +138,12 @@ const CHANNEL_NAME_MAX = 100;
 interface GroupRow {
   key: string;
   name: string;
+  kind?: string;
   size?: number | null;
   marker?: string;
   channelId?: string | null;
+  memberIds?: string[];
+  captainId?: string | null;
 }
 
 interface EventRow {
@@ -132,6 +157,7 @@ interface EventRow {
   createdBy?: string;
   seriesCancelled?: boolean;
   groupsEnabled?: boolean;
+  captainsEnabled?: boolean;
   groups?: GroupRow[];
 }
 
@@ -153,13 +179,6 @@ export interface GroupChannelReport {
 
 export function emptyReport(): GroupChannelReport {
   return { created: 0, removed: 0, occupied: 0, failures: [], warnings: [] };
-}
-
-export interface OverwriteSpec {
-  id: string;
-  type: OverwriteType;
-  allow: bigint;
-  deny: bigint;
 }
 
 /**
@@ -318,7 +337,7 @@ function orderChannelOf(channel: unknown): OrderChannel | null {
 /** What can be said about the bot's permissions in a category, or null if unknown. */
 function botPermissionsIn(
   guild: Guild,
-  category: CategoryChannel,
+  category: GuildBasedChannel,
 ): Readonly<PermissionsBitField> | null {
   const me = guild.members?.me;
   if (!me) return null;
@@ -340,7 +359,29 @@ export interface GroupChannelDeps {
   getPrefix: () => Promise<string>;
   /** `events.channel_grace_minutes`, in milliseconds. */
   getGraceMs: () => Promise<number>;
+  /**
+   * `events.enabled`, read inside the lock before the leads channel's access is
+   * widened. An error counts as off (fails closed). Without it (tests) events
+   * count as on.
+   */
+  isEnabled?: () => Promise<boolean>;
 }
+
+/** What one `syncLeads` pass did, for the caller that moves people out. */
+export interface LeadsSyncResult {
+  status: "skipped" | "ok" | "failed";
+  /** People to move out of the leads channel if they are in it. */
+  evict: string[];
+  /** The leads channel the pass looked at, when it did. */
+  leadsChannelId: string | null;
+  /** Overwrite requests sent. */
+  wrote: number;
+}
+
+const LEADS_HOLD = "#leads";
+const LEADS_EVICT_HOLD = "#leads-evict";
+/** Key of the standing warning about the leads channel's access (per channel id). */
+const ACCESS_WARNING_SUFFIX = "#access";
 
 interface Placement {
   category: CategoryChannel;
@@ -377,6 +418,21 @@ export class EventGroupChannels {
    * as soon as the order is seen right, so a later, different problem is
    * written, never mistaken for this one. */
   private readonly orderWritten = new Map<string, string>();
+  /** Per event: the leads access pass that last verified the channel (cleared
+   * when the channel is replaced). Until it is set, the scan runs one. */
+  private readonly leadsChecked = new Set<string>();
+  /** Per event: the plan last written to the leads channel. A fresh read that
+   * wants exactly that plan again means Discord did not take it (see
+   * `syncLeadsLocked`). Cleared as soon as the channel is seen right. */
+  private readonly leadsWritten = new Map<string, string>();
+  /** Per event: people still to be moved out of the leads channel. */
+  private readonly leadsEvict = new Map<string, Set<string>>();
+  /** Per event: problems with the leads channel the host panel shows (kept apart
+   * from the per-pass reports, like the notices). */
+  private readonly leadsProblems = new Map<
+    string,
+    Map<string, GroupChannelFailure>
+  >();
   private restClient: REST | null;
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
@@ -398,12 +454,27 @@ export class EventGroupChannels {
       ...(this.notices.get(eventId) ?? []),
       ...(this.channelWarnings.get(eventId)?.values() ?? []),
     ];
-    if (!base && extra.length === 0) return null;
+    const problems = [...(this.leadsProblems.get(eventId)?.values() ?? [])];
+    if (!base && extra.length === 0 && problems.length === 0) return null;
     const report = base ?? emptyReport();
     return {
       ...report,
+      failures: [...report.failures, ...problems],
       warnings: [...new Set([...extra, ...report.warnings])],
     };
+  }
+
+  /** Set (or with null, clear) a standing problem with the leads channel. */
+  public setLeadsProblem(
+    eventId: string,
+    key: string,
+    problem: { name: string; reason: string } | null,
+  ): void {
+    const forEvent = this.leadsProblems.get(eventId) ?? new Map();
+    if (problem) forEvent.set(key, { key, ...problem });
+    else forEvent.delete(key);
+    if (forEvent.size === 0) this.leadsProblems.delete(eventId);
+    else this.leadsProblems.set(eventId, forEvent);
   }
 
   /** Keep a notice about an event for the host panel until its channels are gone. */
@@ -601,15 +672,23 @@ export class EventGroupChannels {
       if (wrote && this.paceMs > 0) await sleep(this.paceMs);
       wrote = true;
       const name = groupChannelName(placement.prefix, group);
+      // The leads channel is created restricted (#1199), from the leaders of
+      // THIS pass's fresh row; a leader set after that read is applied by the
+      // sync that the change queues behind this pass.
+      const leads =
+        group.kind === "leads"
+          ? this.leadsOverwritesFor(row, guild, placement.category, report)
+          : null;
       const outcome = await this.createOne(
         row,
         guild,
         placement.category,
         group,
         name,
-        placement.overwrites,
-        placement.noAccessReason,
+        leads ? leads.overwrites : placement.overwrites,
+        leads ? leads.reason : placement.noAccessReason,
         report,
+        leads !== null,
       );
       if (outcome.kind === "rate-limited") rateLimited = true;
       if (outcome.hold) {
@@ -881,6 +960,7 @@ export class EventGroupChannels {
     overwrites: OverwriteSpec[] | null,
     noAccessReason: string | null,
     report: GroupChannelReport,
+    isLeads = false,
   ): Promise<{
     kind: "ok" | "failed" | "rate-limited" | "unconfirmed";
     /** Set when this group must not be tried again straight away. */
@@ -931,11 +1011,15 @@ export class EventGroupChannels {
         ) {
           this.warnOnce(
             row,
-            "overwrite-refused",
-            "Discord refused the host's channel access, so the group channels were created without it.",
+            isLeads ? "leads-overwrite-refused" : "overwrite-refused",
+            isLeads
+              ? "Discord refused the leaders-only channel's permissions, so it was created WITHOUT the restriction."
+              : "Discord refused the host's channel access, so the group channels were created without it.",
             [],
           );
-          lacksAccess = "Discord refused the host's access";
+          lacksAccess = isLeads
+            ? "Discord refused the channel's permissions"
+            : "Discord refused the host's access";
           created = await post(false);
         } else {
           throw error;
@@ -1013,13 +1097,23 @@ export class EventGroupChannels {
       return { kind: "failed" };
     }
     report.created += 1;
+    if (isLeads) {
+      // A new channel (a replacement included) has not been verified yet, and
+      // an older write belongs to the channel that is gone.
+      this.leadsChecked.delete(eventId);
+      this.leadsWritten.delete(eventId);
+      this.leadsEvict.delete(eventId);
+      this.holds.delete(`${eventId}:${LEADS_HOLD}`);
+    }
     if (lacksAccess) {
       // Tied to this channel, so it outlives the pass that created it and goes
       // when the channel is removed or replaced.
       const forEvent = this.channelWarnings.get(eventId) ?? new Map();
       forEvent.set(
-        created.id,
-        `${group.name}: created without the host's access (${lacksAccess}).`,
+        isLeads ? `${created.id}${ACCESS_WARNING_SUFFIX}` : created.id,
+        isLeads
+          ? `${group.name}: created WITHOUT the leaders-only restriction, so anyone who can see it can join (${lacksAccess}). It is restricted as soon as the bot has the permissions.`
+          : `${group.name}: created without the host's access (${lacksAccess}).`,
       );
       this.channelWarnings.set(eventId, forEvent);
     }
@@ -1027,6 +1121,410 @@ export class EventGroupChannels {
       `Created group channel ${sanitizeForLog(name)} for event ${sanitizeForLog(eventId)}`,
     );
     return { kind: "ok" };
+  }
+
+  // -------------------------------------------------------------
+  // The leads channel (#1199)
+  // -------------------------------------------------------------
+
+  private leadsContext(row: EventRow, guild: Guild): LeadsAccessContext {
+    const hostId = SNOWFLAKE.test(row.createdBy ?? "")
+      ? (row.createdBy as string)
+      : null;
+    const me = this.client.user?.id;
+    const adminRoleIds = new Set<string>();
+    for (const role of guild.roles?.cache?.values() ?? []) {
+      if (role.permissions?.has(PermissionFlagsBits.Administrator)) {
+        adminRoleIds.add(role.id);
+      }
+    }
+    return {
+      everyoneId: guild.id,
+      hostId,
+      botId: me && SNOWFLAKE.test(me) ? me : null,
+      leaderIds: leadsLeaderIds(row).filter((id) => SNOWFLAKE.test(id)),
+      adminRoleIds,
+    };
+  }
+
+  /**
+   * The overwrites for a new leads channel, or null with the reason when the
+   * restriction cannot be sent (the channel is then created without it, as the
+   * issue asks, and the host panel says so). The bot must itself hold every
+   * permission it grants, or Discord refuses (50013) the whole create.
+   */
+  private leadsOverwritesFor(
+    row: EventRow,
+    guild: Guild,
+    category: CategoryChannel,
+    report: GroupChannelReport,
+  ): { overwrites: OverwriteSpec[] | null; reason: string | null } {
+    const ctx = this.leadsContext(row, guild);
+    const unrestricted = (
+      reason: string,
+    ): { overwrites: null; reason: string } => {
+      this.warnOnce(
+        row,
+        "leads-unrestricted",
+        `The leaders-only channel is created WITHOUT its restriction, so anyone who can see it can join: ${reason}.`,
+        report.warnings,
+      );
+      return { overwrites: null, reason };
+    };
+    if (!ctx.hostId)
+      return unrestricted("the event's host is not a Discord user");
+    if (!ctx.botId) return unrestricted("the bot's own id is not known");
+    const perms = botPermissionsIn(guild, category);
+    if (perms) {
+      const missing = missingLeadsPermissions(perms);
+      if (missing.length > 0) {
+        return unrestricted(
+          `the bot lacks ${missing.join(", ")} in the events category`,
+        );
+      }
+    }
+    return {
+      overwrites: buildLeadsOverwrites(overwriteSpecsOf(category), ctx),
+      reason: null,
+    };
+  }
+
+  /**
+   * Does the gateway cache say the leads channel needs a pass (the scan's
+   * trigger)? True when the channel has never been verified since it was
+   * created or since a restart, when its cached overwrites differ from what
+   * the rules want, when someone who cannot connect sits in it, or when a
+   * person still has to be moved out. Cache only, never the basis of a write:
+   * the pass reads Discord fresh. False while a hold from a failure is active,
+   * and when the channel is not in the cache (the group pass handles that).
+   */
+  public leadsNeedsAttention(
+    event: {
+      _id: unknown;
+      createdBy?: string;
+      captainsEnabled?: boolean;
+      groups?: GroupRow[];
+    },
+    guild: Guild,
+  ): boolean {
+    const id = String(event._id);
+    const leadsId = resolveLeadsChannel(event);
+    if (!leadsId) return false;
+    const now = Date.now();
+    // A failed pass holds everything (the failure will repeat until fixed).
+    const hold = this.holds.get(`${id}:${LEADS_HOLD}`);
+    if (hold && now < hold.until) return false;
+    const evictHold = this.holds.get(`${id}:${LEADS_EVICT_HOLD}`);
+    const evictHeld = !!evictHold && now < evictHold.until;
+    if ((this.leadsEvict.get(id)?.size ?? 0) > 0 && !evictHeld) return true;
+    if (!this.leadsChecked.has(id)) return true;
+    const channel = guild.channels.cache.get(leadsId) as
+      VoiceChannel | undefined;
+    if (!channel) return false;
+    const ctx = this.leadsContext(event as EventRow, guild);
+    if (planLeadsSync(overwriteSpecsOf(channel), ctx).length > 0) return true;
+    if (evictHeld) return false;
+    const probe = this.leadsProbe(guild, leadsId);
+    const keep = new Set<string>(ctx.leaderIds);
+    if (ctx.hostId) keep.add(ctx.hostId);
+    for (const member of channel.members?.values() ?? []) {
+      if (member.user?.bot || keep.has(member.id)) continue;
+      if (!probe.isAdmin(member.id) && probe.canConnect(member.id) === false) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * What the gateway cache says about people in the leads channel: whether the
+   * member holds Administrator (or owns the server), and whether they may
+   * connect. Both answer "do not touch" when the cache cannot tell.
+   */
+  public leadsProbe(
+    guild: Guild,
+    channelId: string,
+  ): {
+    isAdmin: (userId: string) => boolean;
+    canConnect: (userId: string) => boolean | null;
+  } {
+    const channel = guild.channels.cache.get(channelId) as
+      VoiceChannel | undefined;
+    return {
+      isAdmin: (userId) => {
+        if (userId === guild.ownerId) return true;
+        const member = guild.members?.cache?.get(userId);
+        if (!member) return true;
+        return (
+          member.permissions?.has(PermissionFlagsBits.Administrator) === true
+        );
+      },
+      canConnect: (userId) => {
+        const member = guild.members?.cache?.get(userId);
+        if (!channel || !member) return null;
+        try {
+          return (
+            channel.permissionsFor(member)?.has(PermissionFlagsBits.Connect) ??
+            null
+          );
+        } catch {
+          return null;
+        }
+      },
+    };
+  }
+
+  /** Remember people who still have to be moved out of the leads channel. */
+  public queueEviction(eventId: string, userIds: Iterable<string>): void {
+    const set = this.leadsEvict.get(eventId) ?? new Set<string>();
+    for (const id of userIds) set.add(id);
+    if (set.size > 0) this.leadsEvict.set(eventId, set);
+  }
+
+  /** Do not try to move people out of the leads channel again for `ms`. */
+  public holdEviction(eventId: string, ms: number): void {
+    this.holds.set(`${eventId}:${LEADS_EVICT_HOLD}`, {
+      until: Date.now() + ms,
+      reason: "Moving people out of the leaders-only channel is held back.",
+    });
+  }
+
+  /**
+   * Make the leads channel's access match the event right now: one pass under
+   * the per-event lock that reads the event and the channel fresh, plans from
+   * those and from nothing else, and sends the difference, one overwrite per
+   * request, revokes first, paced.
+   *
+   * Not driven by the change that triggered it: whoever the row names as host
+   * and leaders when the pass reads is who gets access, so a pass that runs
+   * after a replacement leader was queued, or after the channel was made again,
+   * is simply right. `takeRevoked` runs first thing inside the lock: people the
+   * caller knows lost access (the hook's stored "from" ids) are moved out even
+   * when the overwrite is already gone.
+   *
+   * Fails closed: nothing is written when the event, the channel or the bot's
+   * permission to change overwrites cannot be established, and the reason is
+   * shown on the host panel. While `events.enabled` is off only access is taken
+   * away, never given. Never throws.
+   */
+  public syncLeads(
+    eventId: string,
+    guild: Guild,
+    opts: { takeRevoked?: () => readonly string[] } = {},
+  ): Promise<LeadsSyncResult> {
+    return this.lock.run(eventId, () =>
+      this.syncLeadsLocked(eventId, guild, opts),
+    );
+  }
+
+  private async syncLeadsLocked(
+    eventId: string,
+    guild: Guild,
+    opts: { takeRevoked?: () => readonly string[] },
+  ): Promise<LeadsSyncResult> {
+    // Everything queued before this point is covered by this pass; whatever
+    // arrives later queues its own.
+    const revoked = new Set<string>([
+      ...(opts.takeRevoked?.() ?? []),
+      ...(this.leadsEvict.get(eventId) ?? []),
+    ]);
+    this.leadsEvict.delete(eventId);
+    const result = (
+      status: LeadsSyncResult["status"],
+      leadsChannelId: string | null,
+      evict: string[],
+      wrote: number,
+    ): LeadsSyncResult => ({ status, evict, leadsChannelId, wrote });
+    // A pass that could not finish keeps the people for the next one.
+    const failed = (
+      leadsChannelId: string | null,
+      wrote = 0,
+    ): LeadsSyncResult => {
+      this.queueEviction(eventId, revoked);
+      return result("failed", leadsChannelId, [], wrote);
+    };
+    const holdKey = `${eventId}:${LEADS_HOLD}`;
+    const problem = (reason: string): void =>
+      this.setLeadsProblem(eventId, LEADS_HOLD, {
+        name: LEADS_PROBLEM_NAME,
+        reason,
+      });
+
+    try {
+      const row = await this.readFresh(eventId);
+      if (
+        !row ||
+        row.guildId !== guild.id ||
+        row.groupsEnabled !== true ||
+        !(row.state === "scheduled" || row.state === "active") ||
+        row.seriesCancelled === true
+      ) {
+        return result("skipped", null, [], 0);
+      }
+      const leadsId = resolveLeadsChannel(row);
+      if (!leadsId) return result("skipped", null, [], 0);
+
+      let enabled = true;
+      if (this.deps.isEnabled) {
+        try {
+          enabled = await this.deps.isEnabled();
+        } catch {
+          enabled = false;
+        }
+      }
+
+      const state = await this.readChannel(guild, leadsId);
+      if (state.status === "gone") {
+        // The next group pass makes a new, restricted one.
+        return result("skipped", leadsId, [], 0);
+      }
+      if (state.status === "error") {
+        problem(
+          `The leaders-only channel could not be read, so its access was not changed: ${describeWriteFailure(state.error)}`,
+        );
+        return failed(leadsId);
+      }
+      const channel = state.channel;
+      if (
+        channel.type !== ChannelType.GuildVoice ||
+        channel.guildId !== guild.id
+      ) {
+        problem(
+          "The recorded leaders-only channel is not a voice channel of this server, so its access was not changed.",
+        );
+        return failed(leadsId);
+      }
+      const perms = botPermissionsIn(guild, channel);
+      if (perms && !perms.has(PermissionFlagsBits.ManageRoles)) {
+        const reason =
+          "The bot lacks Manage Roles on the leaders-only channel, so it cannot change who may join it. Grant it to the bot's role.";
+        this.warnOnce(row, "leads-manage-roles", reason, []);
+        problem(reason);
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
+        return failed(leadsId);
+      }
+
+      const ctx = this.leadsContext(row, guild);
+      let ops = planLeadsSync(overwriteSpecsOf(channel), ctx);
+      // With events off nothing is given, only taken away from members.
+      if (!enabled) ops = ops.filter(isMemberRevoke);
+      const planKey = describePlan(ops);
+
+      if (ops.length === 0) {
+        this.leadsWritten.delete(eventId);
+        this.holds.delete(holdKey);
+        if (enabled) {
+          // Seen right, from Discord itself.
+          this.leadsChecked.add(eventId);
+          this.setLeadsProblem(eventId, LEADS_HOLD, null);
+          this.channelWarnings
+            .get(eventId)
+            ?.delete(`${leadsId}${ACCESS_WARNING_SUFFIX}`);
+        }
+        return result("ok", leadsId, [...revoked], 0);
+      }
+      if (this.leadsWritten.get(eventId) === planKey) {
+        // The very write that went through last time is wanted again: Discord
+        // did not take it, and writing it again would only repeat the request
+        // every scan. Say so and wait; a different plan is a new situation.
+        this.leadsWritten.delete(eventId);
+        const reason =
+          "The leaders-only channel's access was written but Discord still reports different permissions. It is tried again later; check the channel's permissions by hand if it persists.";
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
+        problem(reason);
+        return failed(leadsId);
+      }
+
+      let wrote = 0;
+      for (const op of ops) {
+        if (wrote > 0 && this.paceMs > 0) await sleep(this.paceMs);
+        wrote += 1;
+        try {
+          await this.writeLeadsOp(leadsId, op);
+        } catch (error) {
+          if (
+            error instanceof DiscordAPIError &&
+            error.code === DISCORD_UNKNOWN_CHANNEL
+          ) {
+            // Deleted while this ran: nothing is left to restrict, and the
+            // group pass makes a restricted replacement.
+            return result("skipped", leadsId, [], wrote);
+          }
+          const reason = describeWriteFailure(error);
+          let waitMs = UNCONFIRMED_CREATE_BACKOFF_MS;
+          if (error instanceof RateLimitError) {
+            waitMs = Math.max(
+              MIN_RATE_LIMIT_BACKOFF_MS,
+              rateLimitWaitMs(error),
+            );
+          } else if (error instanceof DiscordAPIError) {
+            waitMs = REFUSED_CREATE_BACKOFF_MS;
+          }
+          this.holds.set(holdKey, {
+            until: Date.now() + waitMs,
+            reason: `${reason} Tried again later.`,
+          });
+          problem(
+            `The leaders-only channel's access was only partly changed: ${reason}`,
+          );
+          logger.warn(
+            `Event ${sanitizeForLog(eventId)}: leaders-only channel access not fully applied: ${sanitizeForLog(reason)}`,
+          );
+          return failed(leadsId, wrote);
+        }
+      }
+      this.leadsWritten.set(eventId, planKey);
+      this.holds.delete(holdKey);
+      this.setLeadsProblem(eventId, LEADS_HOLD, null);
+      logger.info(
+        `Updated the leaders-only channel access of event ${sanitizeForLog(eventId)} (${ops.length} overwrite(s) written)`,
+      );
+      for (const id of revokedUserIds(ops)) revoked.add(id);
+      return result("ok", leadsId, [...revoked], wrote);
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(eventId)}: updating the leaders-only channel access failed:`,
+        error,
+      );
+      problem(
+        "Updating the leaders-only channel's access failed unexpectedly. See the log.",
+      );
+      return failed(null);
+    }
+  }
+
+  private writeLeadsOp(channelId: string, op: LeadsOp): Promise<unknown> {
+    const route =
+      op.kind === "put"
+        ? Routes.channelPermission(channelId, op.spec.id)
+        : Routes.channelPermission(channelId, op.id);
+    return this.call(
+      (signal) =>
+        op.kind === "put"
+          ? this.rest().put(route, {
+              body: {
+                allow: op.spec.allow.toString(),
+                deny: op.spec.deny.toString(),
+                type: op.spec.type,
+              },
+              reason: "Event leaders-only channel access",
+              signal,
+            })
+          : this.rest().delete(route, {
+              reason: "Event leaders-only channel access",
+              signal,
+            }),
+      "set leaders-only channel access",
+      // Setting or removing one overwrite twice leaves the same result, and
+      // nothing else writes this channel's overwrites while the lock is held.
+      true,
+    );
   }
 
   // -------------------------------------------------------------
@@ -1185,6 +1683,10 @@ export class EventGroupChannels {
     this.notices.delete(eventId);
     this.channelWarnings.delete(eventId);
     this.orderWritten.delete(eventId);
+    this.leadsChecked.delete(eventId);
+    this.leadsWritten.delete(eventId);
+    this.leadsEvict.delete(eventId);
+    this.leadsProblems.delete(eventId);
     for (const key of [...this.holds.keys()]) {
       if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }
@@ -1251,6 +1753,9 @@ export class EventGroupChannels {
     channelId: string,
   ): Promise<void> {
     this.channelWarnings.get(eventId)?.delete(channelId);
+    this.channelWarnings
+      .get(eventId)
+      ?.delete(`${channelId}${ACCESS_WARNING_SUFFIX}`);
     try {
       await Event.updateOne(
         {
@@ -1315,6 +1820,63 @@ export class EventGroupChannels {
       retryOnTimeout,
     );
   }
+}
+
+/** The name the host panel shows for a leads channel access problem. */
+const LEADS_PROBLEM_NAME = "Leaders-only channel access";
+
+const LEADS_PERMISSION_NAMES: Array<[string, bigint]> = [
+  ["View Channel", PermissionFlagsBits.ViewChannel],
+  ["Connect", PermissionFlagsBits.Connect],
+  ["Speak", PermissionFlagsBits.Speak],
+  ["Move Members", PermissionFlagsBits.MoveMembers],
+  ["Manage Roles", PermissionFlagsBits.ManageRoles],
+];
+
+/** The permissions the bot needs in the category to grant the leads access, that it lacks. */
+function missingLeadsPermissions(
+  perms: Readonly<PermissionsBitField>,
+): string[] {
+  const names: string[] = [];
+  for (const [name, bit] of LEADS_PERMISSION_NAMES) {
+    if ((LEADS_REQUIRED_BOT_PERMISSIONS & bit) !== 0n && !perms.has(bit)) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+/** A channel's overwrites as plain values (its cache, which a fresh fetch refreshes). */
+function overwriteSpecsOf(channel: {
+  permissionOverwrites?: {
+    cache: Map<string, unknown> | { values(): Iterable<unknown> };
+  };
+}): OverwriteSpec[] {
+  const specs: OverwriteSpec[] = [];
+  const cache = channel.permissionOverwrites?.cache;
+  if (!cache) return specs;
+  for (const raw of cache.values()) {
+    const o = raw as {
+      id: string;
+      type: OverwriteType;
+      allow: { bitfield: bigint };
+      deny: { bitfield: bigint };
+    };
+    specs.push({
+      id: o.id,
+      type: o.type,
+      allow: o.allow.bitfield,
+      deny: o.deny.bitfield,
+    });
+  }
+  return specs;
+}
+
+/** An op that takes access away from a member (the only kind written with events off). */
+function isMemberRevoke(op: LeadsOp): boolean {
+  if (!op.revoke) return false;
+  const type = op.kind === "put" ? op.spec.type : op.type;
+  return type === OverwriteType.Member;
 }
 
 function sleep(ms: number): Promise<void> {

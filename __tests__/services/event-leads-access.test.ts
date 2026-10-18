@@ -1,0 +1,366 @@
+import { describe, it, expect } from "@jest/globals";
+import { OverwriteType, PermissionFlagsBits } from "discord.js";
+import {
+  LEADS_BOT_PERMISSIONS,
+  LEADS_HOST_PERMISSIONS,
+  LEADS_LEADER_PERMISSIONS,
+  buildLeadsOverwrites,
+  desiredMembers,
+  leadsLeaderIds,
+  planLeadsEviction,
+  planLeadsSync,
+  revokedUserIds,
+  type LeadsAccessContext,
+  type OverwriteSpec,
+} from "../../src/services/event-leads-access.js";
+
+const V = PermissionFlagsBits.ViewChannel;
+const C = PermissionFlagsBits.Connect;
+const S = PermissionFlagsBits.Speak;
+const M = PermissionFlagsBits.MoveMembers;
+
+const GUILD = "g1";
+const HOST = "host";
+const BOT = "bot";
+
+const ctx = (over: Partial<LeadsAccessContext> = {}): LeadsAccessContext => ({
+  everyoneId: GUILD,
+  hostId: HOST,
+  botId: BOT,
+  leaderIds: ["l1"],
+  adminRoleIds: new Set(),
+  ...over,
+});
+const role = (id: string, allow = 0n, deny = 0n): OverwriteSpec => ({
+  id,
+  type: OverwriteType.Role,
+  allow,
+  deny,
+});
+const member = (id: string, allow = 0n, deny = 0n): OverwriteSpec => ({
+  id,
+  type: OverwriteType.Member,
+  allow,
+  deny,
+});
+const find = (specs: OverwriteSpec[], type: OverwriteType, id: string) =>
+  specs.find((s) => s.type === type && s.id === id);
+
+describe("buildLeadsOverwrites", () => {
+  it("denies Connect to @everyone, keeps View, and gives the host, leaders and bot their bits", () => {
+    const out = buildLeadsOverwrites([], ctx());
+    const everyone = find(out, OverwriteType.Role, GUILD);
+    expect(everyone?.deny & C).toBe(C);
+    expect(everyone?.allow & V).toBe(V);
+    expect(everyone?.allow & C).toBe(0n);
+    expect(find(out, OverwriteType.Member, HOST)).toMatchObject({
+      allow: LEADS_HOST_PERMISSIONS,
+      deny: 0n,
+    });
+    expect(find(out, OverwriteType.Member, "l1")).toMatchObject({
+      allow: LEADS_LEADER_PERMISSIONS,
+      deny: 0n,
+    });
+    expect(find(out, OverwriteType.Member, BOT)).toMatchObject({
+      allow: LEADS_BOT_PERMISSIONS,
+      deny: 0n,
+    });
+    // The bot's entry is what lets it connect to move people in.
+    expect((LEADS_BOT_PERMISSIONS & (C | M | V)) === (C | M | V)).toBe(true);
+  });
+
+  it("copies the category's overwrites first (a private category stays private)", () => {
+    const out = buildLeadsOverwrites(
+      [role(GUILD, 0n, V), role("staff", V, 0n), member("x", 0n, S)],
+      ctx(),
+    );
+    // The category hides the channel from @everyone: that is never lifted.
+    const everyone = find(out, OverwriteType.Role, GUILD);
+    expect(everyone?.deny & V).toBe(V);
+    expect(everyone?.allow & V).toBe(0n);
+    expect(everyone?.deny & C).toBe(C);
+    expect(find(out, OverwriteType.Role, "staff")?.allow).toBe(V);
+    expect(find(out, OverwriteType.Member, "x")).toMatchObject({ deny: S });
+  });
+
+  it("removes Connect and Speak from the allow of copied roles, adding no deny", () => {
+    const out = buildLeadsOverwrites(
+      [role("verified", V | C | S, 0n), role("admins", V | C, 0n)],
+      ctx({ adminRoleIds: new Set(["admins"]) }),
+    );
+    // A role allow would defeat @everyone's deny (roles apply after it).
+    expect(find(out, OverwriteType.Role, "verified")).toMatchObject({
+      allow: V,
+      deny: 0n,
+    });
+    // An Administrator role is left exactly as it is.
+    expect(find(out, OverwriteType.Role, "admins")).toMatchObject({
+      allow: V | C,
+      deny: 0n,
+    });
+  });
+
+  it("never adds a deny for anyone but @everyone", () => {
+    const out = buildLeadsOverwrites(
+      [role("r", C, 0n), member("m", C | V, 0n)],
+      ctx(),
+    );
+    for (const o of out) {
+      if (o.type === OverwriteType.Role && o.id === GUILD) continue;
+      expect(o.deny & (C | S)).toBe(0n);
+    }
+  });
+
+  it("strips the granted bits from a copied member entry that is not the host, bot or a leader, and drops it when empty", () => {
+    const out = buildLeadsOverwrites(
+      [member("old", V | C | S, 0n), member("keepdeny", C, S)],
+      ctx(),
+    );
+    expect(find(out, OverwriteType.Member, "old")).toBeUndefined();
+    expect(find(out, OverwriteType.Member, "keepdeny")).toMatchObject({
+      allow: 0n,
+      deny: S,
+    });
+  });
+
+  it("widens the host's own entry from the category instead of replacing it", () => {
+    const out = buildLeadsOverwrites([member(HOST, 0n, C | S)], ctx());
+    const host = find(out, OverwriteType.Member, HOST);
+    expect(host?.allow).toBe(LEADS_HOST_PERMISSIONS);
+    expect(host?.deny & (C | S)).toBe(0n);
+  });
+
+  it("leaves out a host that is not a Discord user and a bot that is unknown", () => {
+    const out = buildLeadsOverwrites([], ctx({ hostId: null, botId: null }));
+    expect(
+      out.filter((o) => o.type === OverwriteType.Member).map((o) => o.id),
+    ).toEqual(["l1"]);
+  });
+});
+
+describe("planLeadsSync", () => {
+  const right = (): OverwriteSpec[] =>
+    buildLeadsOverwrites([], ctx({ leaderIds: ["l1", "l2"] }));
+
+  it("is empty for a channel that is already right", () => {
+    expect(planLeadsSync(right(), ctx({ leaderIds: ["l1", "l2"] }))).toEqual(
+      [],
+    );
+  });
+
+  it("grants a new leader with one put, and nothing else", () => {
+    const ops = planLeadsSync(right(), ctx({ leaderIds: ["l1", "l2", "l3"] }));
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({
+      kind: "put",
+      revoke: false,
+      spec: {
+        id: "l3",
+        type: OverwriteType.Member,
+        allow: LEADS_LEADER_PERMISSIONS,
+      },
+    });
+  });
+
+  it("deletes the entry of a leader who lost the role, revokes first", () => {
+    const ops = planLeadsSync(right(), ctx({ leaderIds: ["l3"] }));
+    expect(ops.map((o) => [o.kind, o.revoke])).toEqual([
+      ["delete", true],
+      ["delete", true],
+      ["put", false],
+    ]);
+    expect(revokedUserIds(ops).sort()).toEqual(["l1", "l2"]);
+  });
+
+  it("rewrites instead of deleting when the entry holds something else", () => {
+    const current = [...right(), member("old", V | C | S, M)];
+    const ops = planLeadsSync(current, ctx({ leaderIds: ["l1", "l2"] }));
+    expect(ops).toEqual([
+      {
+        kind: "put",
+        revoke: true,
+        spec: { id: "old", type: OverwriteType.Member, allow: 0n, deny: M },
+      },
+    ]);
+  });
+
+  it("restores a Connect deny that someone removed from @everyone", () => {
+    const current = right().map((o) =>
+      o.id === GUILD ? { ...o, deny: 0n } : o,
+    );
+    const ops = planLeadsSync(current, ctx({ leaderIds: ["l1", "l2"] }));
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({ kind: "put", spec: { id: GUILD } });
+  });
+
+  it("strips role allows only the first time the restriction is applied", () => {
+    const open = [
+      role("verified", V | C, 0n),
+      member(HOST, LEADS_HOST_PERMISSIONS),
+    ];
+    const first = planLeadsSync(open, ctx({ leaderIds: [] }));
+    expect(
+      first.some(
+        (o) =>
+          o.kind === "put" &&
+          o.spec.id === "verified" &&
+          (o.spec.allow & C) === 0n,
+      ),
+    ).toBe(true);
+    // Once @everyone denies Connect, a role an admin added by hand stays.
+    const restricted = [
+      ...right().filter(
+        (o) => o.type === OverwriteType.Member || o.id === GUILD,
+      ),
+      role("handmade", V | C, 0n),
+    ];
+    expect(
+      planLeadsSync(restricted, ctx({ leaderIds: ["l1", "l2"] })).some(
+        (o) => o.kind === "put" && o.spec.id === "handmade",
+      ),
+    ).toBe(false);
+  });
+
+  it("never touches a pure deny entry or an Administrator role", () => {
+    const current = [
+      ...right(),
+      member("muted", 0n, C),
+      role("admins", V | C, 0n),
+    ];
+    expect(
+      planLeadsSync(
+        current,
+        ctx({ leaderIds: ["l1", "l2"], adminRoleIds: new Set(["admins"]) }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("re-grants a member whose bits were denied by hand", () => {
+    const current = right().map((o) =>
+      o.id === "l1" ? { ...o, allow: 0n, deny: C } : o,
+    );
+    const ops = planLeadsSync(current, ctx({ leaderIds: ["l1", "l2"] }));
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({
+      kind: "put",
+      spec: { id: "l1", allow: LEADS_LEADER_PERMISSIONS, deny: 0n },
+    });
+  });
+});
+
+describe("leadsLeaderIds and desiredMembers", () => {
+  const groups = [
+    { key: "a", kind: "team", memberIds: ["u1", "u2"], captainId: "u1" },
+    { key: "b", kind: "team", memberIds: ["u3"], captainId: "u9" },
+  ];
+  it("counts only effective leaders, and none while leaders are off", () => {
+    expect(leadsLeaderIds({ captainsEnabled: true, groups })).toEqual(["u1"]);
+    expect(leadsLeaderIds({ captainsEnabled: false, groups })).toEqual([]);
+    expect(leadsLeaderIds({ groups })).toEqual([]);
+  });
+  it("merges the bits when one id plays two roles", () => {
+    const want = desiredMembers(ctx({ leaderIds: [HOST] }));
+    expect(want.get(HOST)).toBe(
+      LEADS_HOST_PERMISSIONS | LEADS_LEADER_PERMISSIONS,
+    );
+  });
+});
+
+describe("planLeadsEviction", () => {
+  const event = {
+    channelId: "main",
+    createdBy: HOST,
+    captainsEnabled: true,
+    groups: [
+      {
+        key: "a",
+        kind: "team",
+        channelId: "chA",
+        memberIds: ["u1", "u2"],
+        captainId: "u1",
+      },
+      {
+        key: "b",
+        kind: "team",
+        channelId: null,
+        memberIds: ["u3"],
+        captainId: null,
+      },
+      { key: "l", kind: "leads", channelId: "leads", memberIds: [] },
+    ],
+  };
+  const presence = (...rows: Array<[string, string]>) => ({
+    ok: true,
+    members: rows.map(([id, channelId]) => ({ id, channelId })),
+  });
+  const probe = {
+    isAdmin: (id: string) => id === "admin",
+    canConnect: () => null as boolean | null,
+  };
+
+  it("sends a revoked person to their team's channel, else to main, pinned to the leads channel", () => {
+    const plan = planLeadsEviction(
+      event,
+      presence(["u2", "leads"], ["u3", "leads"], ["u7", "leads"]),
+      { ...probe, revoked: new Set(["u2", "u3", "u7"]) },
+    );
+    expect(plan).toEqual([
+      { userId: "u2", toChannelId: "chA", fromChannelId: "leads" },
+      { userId: "u3", toChannelId: "main", fromChannelId: "leads" },
+      { userId: "u7", toChannelId: "main", fromChannelId: "leads" },
+    ]);
+  });
+
+  it("never moves the host, a current leader, an administrator or someone elsewhere", () => {
+    const plan = planLeadsEviction(
+      event,
+      presence(
+        [HOST, "leads"],
+        ["u1", "leads"],
+        ["admin", "leads"],
+        ["u2", "main"],
+      ),
+      { ...probe, revoked: new Set([HOST, "u1", "admin", "u2"]) },
+    );
+    expect(plan).toEqual([]);
+  });
+
+  it("moves someone the cache says cannot connect, but not someone who still can or is unknown", () => {
+    const plan = planLeadsEviction(
+      event,
+      presence(["u2", "leads"], ["u3", "leads"], ["u7", "leads"]),
+      {
+        revoked: new Set(),
+        isAdmin: () => false,
+        canConnect: (id) => (id === "u2" ? false : id === "u3" ? true : null),
+      },
+    );
+    expect(plan).toEqual([
+      { userId: "u2", toChannelId: "chA", fromChannelId: "leads" },
+    ]);
+  });
+
+  it("treats a leader as a stranger when leaders are switched off", () => {
+    const plan = planLeadsEviction(
+      { ...event, captainsEnabled: false },
+      presence(["u1", "leads"]),
+      { ...probe, revoked: new Set(["u1"]) },
+    );
+    expect(plan).toEqual([
+      { userId: "u1", toChannelId: "chA", fromChannelId: "leads" },
+    ]);
+  });
+
+  it("refuses when who is connected could not be read", () => {
+    expect(
+      planLeadsEviction(
+        event,
+        { ok: false, members: [] },
+        {
+          ...probe,
+          revoked: new Set(["u2"]),
+        },
+      ),
+    ).toHaveProperty("refuse");
+  });
+});

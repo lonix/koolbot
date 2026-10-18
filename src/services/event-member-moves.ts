@@ -56,6 +56,7 @@ import {
   type VoiceChannel,
 } from "discord.js";
 import { Event, type IEvent } from "../models/event.js";
+import { leadsLeaderIds } from "./event-leads-access.js";
 
 // A lean row has the fields the presence helpers read, without Mongoose typing.
 type PresenceRow = Pick<IEvent, "guildId" | "channelId" | "groups">;
@@ -102,6 +103,7 @@ const OPEN_STATES = ["scheduled", "active"];
 export type MoveSkipReason =
   | "not-connected"
   | "elsewhere"
+  | "moved-on"
   | "already-there"
   | "group-full"
   | "missing-permission"
@@ -113,6 +115,7 @@ export type MoveSkipReason =
 export const MOVE_SKIP_LABEL: Record<MoveSkipReason, string> = {
   "not-connected": "not connected to voice",
   elsewhere: "in a channel that is not part of the event",
+  "moved-on": "no longer in the channel they were to be moved out of",
   "already-there": "already in the right channel",
   "group-full": "group full",
   "missing-permission": "missing permission",
@@ -126,6 +129,13 @@ export interface MoveWish {
   userId: string;
   /** One of the event's channels (main or a group's). */
   toChannelId: string;
+  /**
+   * Only move the person if they are in THIS channel (checked from the cache
+   * before any request, from Discord's own answer, and again in the same tick
+   * as the request). Used by the leads channel (#1199) to move someone out of
+   * it without touching a person who has walked somewhere else meanwhile.
+   */
+  fromChannelId?: string;
 }
 
 export interface MoveSkip {
@@ -249,6 +259,16 @@ class MovedAwayError extends Error {
   constructor(readonly connected: boolean) {
     super("The member is no longer in an event channel");
     this.name = "MovedAwayError";
+  }
+}
+
+/** Thrown when the member is not in the channel a wish said to move them out of. */
+class MovedOnError extends Error {
+  constructor() {
+    super(
+      "The member is no longer in the channel they were to be moved out of",
+    );
+    this.name = "MovedOnError";
   }
 }
 
@@ -553,7 +573,7 @@ class Mover {
     let attempted = 0;
     let touched = false;
     for (const wish of queue) {
-      const { userId, toChannelId } = wish;
+      const { userId, toChannelId, fromChannelId } = wish;
       if (rateLimited) {
         skip(userId, "rate-limited");
         continue;
@@ -582,6 +602,10 @@ class Mover {
       }
       if (!this.eventChannels.has(cachedChannel)) {
         skip(userId, "elsewhere");
+        continue;
+      }
+      if (fromChannelId && cachedChannel !== fromChannelId) {
+        skip(userId, "moved-on");
         continue;
       }
       if (cachedChannel === toChannelId) {
@@ -647,6 +671,10 @@ class Mover {
         skip(userId, "elsewhere");
         continue;
       }
+      if (fromChannelId && sourceId !== fromChannelId) {
+        skip(userId, "moved-on");
+        continue;
+      }
       if (sourceId === toChannelId) {
         skip(userId, "already-there");
         continue;
@@ -679,6 +707,9 @@ class Mover {
         const live = this.guild.voiceStates.cache.get(userId)?.channelId;
         if (!live || !this.eventChannels.has(live)) {
           throw new MovedAwayError(!!live);
+        }
+        if (fromChannelId && live !== fromChannelId) {
+          throw new MovedOnError();
         }
         if (live === toChannelId) throw new AlreadyThereError();
         if (this.isFull(toChannelId, dest.limit)) {
@@ -723,6 +754,9 @@ class Mover {
         } else if (error instanceof DestinationFullError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "group-full");
+        } else if (error instanceof MovedOnError) {
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
+          skip(userId, "moved-on");
         } else if (error instanceof MovedAwayError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, error.connected ? "elsewhere" : "not-connected");
@@ -914,17 +948,30 @@ export function planMoveOne(
   destination: string,
 ): MovePlan {
   let channelId: string | null | undefined;
+  let kind: string | undefined;
   if (destination === "main") {
     channelId = event.channelId;
   } else {
-    channelId = (event.groups ?? []).find(
-      (g) => g.key === destination,
-    )?.channelId;
+    const group = (event.groups ?? []).find((g) => g.key === destination);
+    channelId = group?.channelId;
+    kind = group?.kind;
   }
   if (!channelId) {
     return {
       refuse:
         "That channel does not exist (yet), so nobody was moved. Pick another destination.",
+    };
+  }
+  // The leads channel is for the host and the leaders (#1199): putting anyone
+  // else there would only be undone by the channel's own upkeep.
+  if (
+    kind === "leads" &&
+    userId !== event.createdBy &&
+    !leadsLeaderIds(event).includes(userId)
+  ) {
+    return {
+      refuse:
+        "Only the host and the leaders can be moved into the leaders-only channel, so nobody was moved.",
     };
   }
   return [{ userId, toChannelId: channelId }];

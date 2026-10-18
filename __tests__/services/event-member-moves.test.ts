@@ -30,8 +30,10 @@ type Group = {
   size: number | null;
   channelId: string | null;
   memberIds: string[];
+  captainId?: string | null;
 };
 type Row = {
+  captainsEnabled?: boolean;
   _id: string;
   guildId: string;
   state: string;
@@ -1447,6 +1449,112 @@ describe("move one person", () => {
     const out = await run(w, ({ event }) => planMoveOne(event, HOST, "b"), []);
     if (out.status !== "done") throw new Error("expected done");
     expect(out.report.moved).toEqual([HOST]);
+  });
+});
+
+describe("the leads channel (#1199)", () => {
+  it("only the host and a current leader can be moved into it", async () => {
+    store.set(
+      EV,
+      makeRow({
+        captainsEnabled: true,
+        groups: makeRow().groups.map((g) =>
+          g.key === "a" ? { ...g, captainId: "u1" } : g,
+        ),
+      } as Partial<Row>),
+    );
+    const w = makeWorld();
+    w.place("u1", MAIN);
+    w.place("u2", MAIN);
+    w.place(HOST, MAIN);
+    let out = await run(w, ({ event }) => planMoveOne(event, "u2", "l"), []);
+    expect(out.status).toBe("refused");
+    expect(w.where("u2")).toBe(MAIN);
+    out = await run(w, ({ event }) => planMoveOne(event, "u1", "l"), []);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(w.where("u1")).toBe(CH_LEADS);
+    out = await run(w, ({ event }) => planMoveOne(event, HOST, "l"), []);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(w.where(HOST)).toBe(CH_LEADS);
+  });
+
+  it("a leader is not a leader for this once leaders are switched off", async () => {
+    store.set(
+      EV,
+      makeRow({
+        captainsEnabled: false,
+        groups: makeRow().groups.map((g) =>
+          g.key === "a" ? { ...g, captainId: "u1" } : g,
+        ),
+      } as Partial<Row>),
+    );
+    const w = makeWorld();
+    w.place("u1", MAIN);
+    const out = await run(w, ({ event }) => planMoveOne(event, "u1", "l"), []);
+    expect(out.status).toBe("refused");
+  });
+
+  it("send to groups never targets the leads or open channel", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_LEADS);
+    w.place("u3", CH_OPEN);
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(
+      w.patch.mock.calls
+        .map((c) => (c[1] as { body: { channel_id: string } }).body.channel_id)
+        .sort(),
+    ).toEqual([CH_A, CH_B]);
+  });
+
+  describe("a wish pinned to the channel the person must move out of", () => {
+    const wish = (userId: string) => () => [
+      { userId, toChannelId: MAIN, fromChannelId: CH_LEADS },
+    ];
+
+    it("moves someone who is in it", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(out.report.moved).toEqual(["u1"]);
+    });
+
+    it("skips someone the gateway shows elsewhere, with no request at all", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_B);
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.readVoice).not.toHaveBeenCalled();
+      expect(w.patch).not.toHaveBeenCalled();
+    });
+
+    it("skips someone Discord's own answer shows elsewhere", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      w.readVoice.mockImplementationOnce(async () => ({ channelId: CH_B }));
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.patch).not.toHaveBeenCalled();
+    });
+
+    it("skips someone who walked away between the read and the request", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      w.readVoice.mockImplementationOnce(async () => {
+        // The read says they are in the leads channel; by the time the
+        // request is made the gateway shows them in the main channel.
+        w.place("u1", MAIN);
+        return { channelId: CH_LEADS };
+      });
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.patch).not.toHaveBeenCalled();
+      expect(w.where("u1")).toBe(MAIN);
+    });
   });
 });
 
