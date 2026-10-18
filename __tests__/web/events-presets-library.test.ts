@@ -158,6 +158,20 @@ describe("the event form's preset picker (#1200)", () => {
     expect(field(dom, "groups_enabled").checked).toBe(true);
   });
 
+  it("a library preset that uses the server default clears a lead time an earlier preset filled", () => {
+    const serverDefault: EventGroupPreset = {
+      ...libraryPreset,
+      id: "lib:aaaaaaaaaaaaaaaaaaaaaaaa",
+      label: "Default lead",
+      channelLeadMinutes: null,
+    };
+    const dom = boot(page([libraryPreset, serverDefault]));
+    choose(dom, LIB_ID);
+    expect(field(dom, "groups_lead_minutes").value).toBe("30");
+    choose(dom, serverDefault.id);
+    expect(field(dom, "groups_lead_minutes").value).toBe("");
+  });
+
   it("a built-in leaves the leader label and lead time alone", () => {
     const dom = boot(page(undefined));
     field(dom, "groups_leader_label").value = "Captain";
@@ -308,6 +322,33 @@ describe("the presets admin page (#1200)", () => {
       (doc.querySelector('[name="preset_id"]') as HTMLInputElement).value,
     ).toBe(LIB_ID);
     expect(html).toContain("could not be read");
+  });
+
+  it("shows every stored row even when the cap was lowered below it, with a warning", () => {
+    const values: Record<string, string> = { preset_name: "Big" };
+    for (let i = 0; i < 4; i++) values[`group_${i}_name`] = `G${i}`;
+    const html = adminPage({
+      maxCount: 2,
+      values,
+      editing: { id: LIB_ID, label: "Big" },
+    });
+    const doc = new JSDOM(html).window.document;
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(4);
+    expect(
+      (doc.querySelector('[name="group_3_name"]') as HTMLInputElement).value,
+    ).toBe("G3");
+    expect(html).toContain("has 4 groups but the limit is 2");
+  });
+
+  it("with the library unreadable, an edit shows no editor, so nothing can be created as a duplicate", () => {
+    const html = adminPage({
+      editUnavailable: true,
+      state: "library-unreadable",
+    });
+    const doc = new JSDOM(html).window.document;
+    expect(doc.querySelector("form[data-preset-form]")).toBeNull();
+    expect(doc.querySelector('[name="preset_name"]')).toBeNull();
+    expect(html).toContain("cannot be loaded right now");
   });
 
   it("Add a group clones a row, up to the cap", () => {

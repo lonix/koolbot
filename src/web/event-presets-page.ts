@@ -55,6 +55,12 @@ export interface EventPresetsPageProps {
   defaultCount: number;
   /** The library preset being edited; null = adding a new one. */
   editing: { id: string; label: string } | null;
+  /**
+   * An edit was requested for this preset id but its data could not be read
+   * (the library is unreadable): the editor is replaced by a notice, so a blank
+   * form cannot create a duplicate of the preset.
+   */
+  editUnavailable?: boolean;
   /** Prefill for the editor, keyed by form field name. */
   values: Record<string, string>;
   /** Why the editor is prefilled ("Copy of ..."), or null. */
@@ -67,6 +73,7 @@ export interface EventPresetsPageData {
   maxCount: number;
   defaultCount: number;
   editing: { id: string; label: string } | null;
+  editUnavailable: boolean;
   values: Record<string, string>;
   prefillNote: string | null;
 }
@@ -94,6 +101,7 @@ export async function loadEventPresetsPage(
   };
 
   let editing: EventPresetsPageData["editing"] = null;
+  let editUnavailable = false;
   let values: Record<string, string> = {};
   let prefillNote: string | null = null;
 
@@ -105,6 +113,13 @@ export async function loadEventPresetsPage(
     if (entry && entry.source === "library") {
       editing = { id: entry.id, label: entry.label };
       values = presetToFormValues(entry);
+    } else if (catalog.state !== "ok") {
+      // The library could not be read, so the preset cannot be shown. Do not
+      // fall back to a blank add form: saving it would create a new preset.
+      editUnavailable = true;
+    } else {
+      prefillNote =
+        "That preset no longer exists. You can add a new one instead.";
     }
   } else if (fromId) {
     const entry = catalog.entries.find((e) => e.id === fromId);
@@ -127,6 +142,7 @@ export async function loadEventPresetsPage(
     maxCount: limits.maxCount,
     defaultCount: limits.defaultCount,
     editing,
+    editUnavailable,
     values,
     prefillNote,
   };
@@ -208,7 +224,10 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
 
   // Rows to render: the prefilled groups, else the configured default count.
   const prefilled: Array<Record<string, string>> = [];
-  for (let i = 0; i < props.maxCount; i++) {
+  // Every stored row is shown, even beyond the cap: the validator refuses an
+  // oversized setup until groups are removed on purpose, so a lowered
+  // events.groups.max_count never silently drops groups from a saved preset.
+  for (let i = 0; i < 100; i++) {
     if (v[`group_${i}_name`] === undefined) break;
     prefilled.push({
       name: v[`group_${i}_name`] ?? "",
@@ -223,22 +242,13 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     renderGroupRow(String(i), String(i + 1), prefilled[i]),
   ).join("\n      ");
 
-  const heading = props.editing
-    ? `Edit "${escapeHtml(props.editing.label)}"`
-    : "Add a preset";
-  const body = `
-<h1>Group presets</h1>
-<p class="subtitle">Presets fill in the groups of an event in one click. Built-in presets can be switched off but not edited; add your own below. Changing, switching off or deleting a preset never changes events that already used it: each event keeps its own copy of its groups. <a href="/admin/events">Back to Events</a>.</p>
-${renderFlash(props.flash)}
-${notice ? `<div class="notice warn" role="status">${escapeHtml(notice)}</div>` : ""}
-<div class="card">
-  <h2>Presets</h2>
-  ${table}
-  <p class="muted">Turning a preset off hides it from the event form. The "Custom" choice is always available. Your presets: ${libraryCount} of ${MAX_LIBRARY_PRESETS}.</p>
-</div>
-<div class="card" id="editor">
-  <h2>${heading}</h2>
-  ${props.prefillNote ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
+  const oversize =
+    prefilled.length > props.maxCount
+      ? `<div class="notice warn" role="status">This setup has ${prefilled.length} groups but the limit is ${props.maxCount} (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you.</div>`
+      : "";
+  const editorHtml = props.editUnavailable
+    ? '<div class="notice err" role="status">This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.</div>'
+    : `${oversize}
   <form method="POST" action="/admin/events/presets/save" class="stack" data-preset-form>
     ${csrfInput}
     ${props.editing ? `<input type="hidden" name="${PRESET_FORM_FIELDS.id}" value="${escapeHtml(props.editing.id)}">` : ""}
@@ -265,7 +275,25 @@ ${notice ? `<div class="notice warn" role="status">${escapeHtml(notice)}</div>` 
     <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>), at most one of kind Leads. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : "Add preset"}</button>
     ${props.editing ? '<a class="btn" href="/admin/events/presets">Cancel</a>' : ""}
-  </form>
+  </form>`;
+
+  const heading = props.editing
+    ? `Edit "${escapeHtml(props.editing.label)}"`
+    : "Add a preset";
+  const body = `
+<h1>Group presets</h1>
+<p class="subtitle">Presets fill in the groups of an event in one click. Built-in presets can be switched off but not edited; add your own below. Changing, switching off or deleting a preset never changes events that already used it: each event keeps its own copy of its groups. <a href="/admin/events">Back to Events</a>.</p>
+${renderFlash(props.flash)}
+${notice ? `<div class="notice warn" role="status">${escapeHtml(notice)}</div>` : ""}
+<div class="card">
+  <h2>Presets</h2>
+  ${table}
+  <p class="muted">Turning a preset off hides it from the event form. The "Custom" choice is always available. Your presets: ${libraryCount} of ${MAX_LIBRARY_PRESETS}.</p>
+</div>
+<div class="card" id="editor">
+  <h2>${heading}</h2>
+  ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
+  ${editorHtml}
 </div>
 ${scriptTag(EVENT_PRESETS_SCRIPT)}
 `;

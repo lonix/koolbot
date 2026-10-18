@@ -2534,14 +2534,18 @@ function renderGroupsSection(
         ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
         : "";
       // Library presets may carry a leader label and a lead time; the script
-      // fills those fields only when the attribute is there.
+      // fills those fields only when the attribute is there. An explicit null
+      // (a library preset that uses the server default) is an empty attribute,
+      // which clears the field; a built-in has none and leaves it alone.
       const extra =
         (preset.leaderLabel
           ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
           : "") +
         (typeof preset.channelLeadMinutes === "number"
           ? ` data-lead="${preset.channelLeadMinutes}"`
-          : "");
+          : preset.channelLeadMinutes === null
+            ? ' data-lead=""'
+            : "");
       return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
     })
     .join("");

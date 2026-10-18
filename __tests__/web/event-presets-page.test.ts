@@ -24,6 +24,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
 }));
 
 const LIB_ID = "lib:0123456789abcdef01234567";
+let mockState: "ok" | "library-unreadable" = "ok";
 const mockCatalog = {
   entries: [
     {
@@ -50,7 +51,9 @@ const mockCatalog = {
       groups: [{ name: "Assault", kind: "team", size: 8, tag: "", marker: "" }],
     },
   ],
-  state: "ok" as const,
+  get state(): "ok" | "library-unreadable" {
+    return mockState;
+  },
 };
 const actualService =
   await import("../../src/services/event-group-preset-service.js");
@@ -69,6 +72,7 @@ const client = {} as Client;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockState = "ok";
 });
 
 describe("loadEventPresetsPage", () => {
@@ -91,6 +95,24 @@ describe("loadEventPresetsPage", () => {
       group_0_name: "Assault",
       group_0_size: "8",
     });
+  });
+
+  it("edit= while the library is unreadable keeps the request as unavailable instead of a blank add form", async () => {
+    mockState = "library-unreadable";
+    const page = await loadEventPresetsPage(client, "g1", {
+      edit: "lib:ffffffffffffffffffffffff",
+    });
+    expect(page.editUnavailable).toBe(true);
+    expect(page.editing).toBeNull();
+    expect(page.values).toEqual({});
+  });
+
+  it("edit= of a deleted preset says so instead of silently adding", async () => {
+    const page = await loadEventPresetsPage(client, "g1", {
+      edit: "lib:ffffffffffffffffffffffff",
+    });
+    expect(page.editUnavailable).toBe(false);
+    expect(page.prefillNote).toContain("no longer exists");
   });
 
   it("edit= of a built-in or an unknown id prefills nothing", async () => {

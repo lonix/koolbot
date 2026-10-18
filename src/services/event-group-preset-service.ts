@@ -21,6 +21,7 @@ import {
   type PresetResolver,
 } from "./event-groups.js";
 import logger from "../utils/logger.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 
 /**
  * The server-wide event group preset library (#1200).
@@ -409,7 +410,23 @@ function toDoc(data: PresetData): Record<string, unknown> {
   };
 }
 
-export async function createLibraryPreset(
+/**
+ * Serialises the count-then-insert of a create per server, so two saves at
+ * 49 presets cannot both pass the 50 limit. The bot is one process, so this is
+ * enough; the unique name index still guards names in storage.
+ */
+const createLock = createKeyedLock();
+
+export function createLibraryPreset(
+  guildId: string,
+  data: PresetData,
+): Promise<WriteResult<{ id: string }>> {
+  return createLock.run(guildId, () =>
+    createLibraryPresetLocked(guildId, data),
+  );
+}
+
+async function createLibraryPresetLocked(
   guildId: string,
   data: PresetData,
 ): Promise<WriteResult<{ id: string }>> {

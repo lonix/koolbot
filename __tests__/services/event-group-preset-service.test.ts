@@ -357,6 +357,25 @@ describe("writes", () => {
     });
   });
 
+  it("two concurrent creates at one below the cap give one success", async () => {
+    let stored = svc.MAX_LIBRARY_PRESETS - 1;
+    mockCount.mockImplementation(async () => stored);
+    mockCreate.mockImplementation(async () => {
+      // A real insert takes a round trip; the count of a second create that is
+      // not serialised would land inside this window.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      stored++;
+      return { _id: OID };
+    });
+    const [a, b] = await Promise.all([
+      svc.createLibraryPreset("g1", data),
+      svc.createLibraryPreset("g1", { ...data, name: "Other" }),
+    ]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+    expect(stored).toBe(svc.MAX_LIBRARY_PRESETS);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses beyond the cap without writing", async () => {
     mockCount.mockResolvedValue(svc.MAX_LIBRARY_PRESETS);
     const r = await svc.createLibraryPreset("g1", data);

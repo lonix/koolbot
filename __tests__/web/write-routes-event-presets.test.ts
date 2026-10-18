@@ -20,6 +20,7 @@ import {
   type AdminHarness,
 } from "./admin-harness.js";
 
+let configuredMax = 4;
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockCreate = jest.fn<(g: string, d: unknown) => Promise<unknown>>();
 const mockUpdate =
@@ -38,7 +39,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       getNumber: async (key: string, fallback: number) =>
-        key === "events.groups.max_count" ? 4 : fallback,
+        key === "events.groups.max_count" ? configuredMax : fallback,
       getString: async () => "",
       getBoolean: async () => true,
       registerReloadCallback: jest.fn(),
@@ -69,6 +70,7 @@ let harness: AdminHarness;
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  configuredMax = 4;
   mockCreate.mockResolvedValue({ ok: true, id: `lib:${OID}` });
   mockUpdate.mockResolvedValue({ ok: true });
   mockDelete.mockResolvedValue({ ok: true });
@@ -297,5 +299,49 @@ describe("access", () => {
     );
     expect(res.status).toBe(403);
     expect(mockToggle).not.toHaveBeenCalled();
+  });
+});
+
+describe("a lowered events.groups.max_count (#1200)", () => {
+  it("never drops stored groups: the editor shows them all and a description-only save is refused", async () => {
+    const { JSDOM } = await import("jsdom");
+    const { renderEventPresetsPage } =
+      await import("../../src/web/event-presets-page.js");
+    const stored: Record<string, string> = {
+      preset_name: "Big",
+      preset_description: "old",
+    };
+    for (let i = 0; i < 4; i++) stored[`group_${i}_name`] = `G${i}`;
+    configuredMax = 2;
+    const html = renderEventPresetsPage({
+      csrfToken: "t",
+      remainingMs: 1,
+      entries: [],
+      state: "ok",
+      maxCount: 2,
+      defaultCount: 2,
+      editing: { id: `lib:${OID}`, label: "Big" },
+      values: stored,
+      prefillNote: null,
+    });
+    const doc = new JSDOM(html).window.document;
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(4);
+    // What the browser would post: every field of the rendered form, with only
+    // the description changed.
+    const form = doc.querySelector("form[data-preset-form]");
+    const body: Record<string, string> = {};
+    for (const [k, v] of new (
+      doc.defaultView as unknown as {
+        FormData: new (f: never) => Iterable<[string, unknown]>;
+      }
+    ).FormData(form as never)) {
+      if (typeof v === "string") body[k] = v;
+    }
+    delete body._csrf;
+    body.preset_description = "new";
+    const flash = await post("/events/presets/save", body);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("at most 2 groups");
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });
