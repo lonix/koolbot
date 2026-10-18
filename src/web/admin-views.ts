@@ -3094,6 +3094,12 @@ export interface ReactionRoleRow {
   channelName: string;
   messageId: string;
   /**
+   * Name of the channel the picker message was posted in, remembered with the
+   * mapping (#1207). Null for older rows that lack it: those pickers are looked
+   * up in the configured `reactionroles.message_channel_id`.
+   */
+  pickerChannelName?: string | null;
+  /**
    * Whether the bot auto-created the role + category + channel for this
    * mapping. Bound mappings (issue #813) point at a pre-existing role and set
    * this false. Optional/undefined is treated as `true` for legacy rows.
@@ -3172,7 +3178,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 <td>${typeTag}</td>
 <td>${escapeHtml(rr.categoryName)}</td>
 <td>${channelCell}</td>
-<td class="mono">${escapedMessageId}</td>
+<td class="mono">${escapedMessageId}${rr.pickerChannelName ? `<div class="muted">in #${escapeHtml(rr.pickerChannelName)}</div>` : ""}</td>
 <td>${modeCell}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
@@ -3211,6 +3217,11 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const archivedRows = props.archived
     .map((rr) => reactionRoleRow(rr, csrfInput))
     .join("");
+  // Active mappings without a remembered picker channel still follow the
+  // setting (#1207); only they need the delete-before-changing warning.
+  const olderPickers = props.active.filter(
+    (rr) => !rr.pickerChannelName,
+  ).length;
   const channelLine = props.configChannel
     ? `<dt>Message channel</dt><dd>#${escapeHtml(props.configChannel.name)} <span class="muted mono">${escapeHtml(props.configChannel.id)}</span></dd>`
     : `<dt>Message channel</dt><dd class="muted">unset — set <code>reactionroles.message_channel_id</code> before creating reaction roles.</dd>`;
@@ -3246,7 +3257,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
     <dt>Archived mappings</dt><dd>${props.archived.length}</dd>
   </dl>
 </div>
-${props.active.length > 0 ? `<div class="notice warn" role="note"><strong>Changing the message channel does not move existing pickers.</strong> They stay in the channel they were posted in. Startup only spares a guild's mappings while <em>no</em> picker in that guild is found in the configured channel; once one is (for example a picker created after the switch), mappings whose picker is not found there are archived. Delete the old pickers and mappings <em>before</em> changing <code>reactionroles.message_channel_id</code>, or change it back before cleaning up.</div>` : ""}
+${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPickers} active ${olderPickers === 1 ? "mapping was" : "mappings were"} created before pickers remembered their channel.</strong> ${olderPickers === 1 ? "Its picker is" : "Their pickers are"} still looked up in the channel set by <code>reactionroles.message_channel_id</code>, and changing that setting does not move ${olderPickers === 1 ? "it" : "them"}. Delete ${olderPickers === 1 ? "that picker and mapping" : "those pickers and mappings"} <em>before</em> changing the channel, or change it back before cleaning up. Startup keeps such mappings while none of them is found in the configured channel, and archives the ones that are missing once another is. Pickers created from now on remember their channel (shown under the message ID) and are not affected by later changes to the setting.</div>` : ""}
 ${settingsCard}
 <div class="card">
   <h2>Active</h2>

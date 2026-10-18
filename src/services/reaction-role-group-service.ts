@@ -201,10 +201,31 @@ export class ReactionRoleGroupService {
 
     try {
       const configService = ConfigService.getInstance();
-      const channelId = await configService.getString(
+      const configuredChannelId = await configService.getString(
         "reactionroles.message_channel_id",
         "",
       );
+      // Live rows make this a top-up of the existing picker; none means a
+      // fresh group (archived rows of earlier pickers are ignored).
+      const existingRows = await ReactionRoleConfig.find({
+        guildId,
+        groupKey,
+        isArchived: false,
+      });
+      // A top-up looks the picker up in the channel its rows remember (#1207),
+      // so changing the setting afterwards does not strand it. Only a legacy
+      // group (no stored channel) falls back to the configured channel; a fresh
+      // group is posted to the configured channel.
+      const anchorMessageId = existingRows[0]?.messageId;
+      const picker = anchorMessageId
+        ? await rrService.pickerChannelForMessage(
+            guildId,
+            anchorMessageId,
+            existingRows,
+          )
+        : { channelId: configuredChannelId, remembered: false };
+      const storedChannelId = picker.remembered ? picker.channelId : "";
+      const channelId = picker.channelId;
       if (!channelId) {
         return fail(
           "Reaction role message channel not configured. Set reactionroles.message_channel_id",
@@ -214,19 +235,14 @@ export class ReactionRoleGroupService {
         () => this.client.guilds.fetch(guildId),
         "fetch guild",
       );
-      // Live rows make this a top-up of the existing picker; none means a
-      // fresh group (archived rows of earlier pickers are ignored).
-      const existingRows = await ReactionRoleConfig.find({
-        guildId,
-        groupKey,
-        isArchived: false,
-      });
       const anchorId = existingRows[0]?.messageId;
-      // Unknown Message (10008) or Unknown Channel (10003) on a top-up most
-      // likely means the reaction-role channel setting was changed after the
-      // group was generated (the picker is looked up in the configured
-      // channel, as startup reconciliation does), or the picker was deleted.
-      const pickerNotFound = `The picker message for **${name}** wasn't found in the configured reaction-role channel. If you changed the reaction-role channel setting since creating this group, change it back, or delete the group on the Reaction Roles page and generate it again; the same applies if the picker was deleted. Nothing was changed.`;
+      // Unknown Message (10008) or Unknown Channel (10003) on a top-up means
+      // the picker is gone. For a group that remembers its channel that is a
+      // real deletion; for a legacy group it may also mean the reaction-role
+      // channel setting was changed after the group was generated.
+      const pickerNotFound = storedChannelId
+        ? `The picker message for **${name}** wasn't found in <#${storedChannelId}>, the channel it was posted in. It was probably deleted. Delete the group on the Reaction Roles page and generate it again. Nothing was changed.`
+        : `The picker message for **${name}** wasn't found in the configured reaction-role channel. If you changed the reaction-role channel setting since creating this group, change it back, or delete the group on the Reaction Roles page and generate it again; the same applies if the picker was deleted. Nothing was changed.`;
       // Only a confirmed Unknown Channel (10003) means "not found"; transient
       // failures propagate instead of being reported as a config error.
       const channel = (await this.api(
@@ -474,6 +490,8 @@ export class ReactionRoleGroupService {
         ...todo.map((t) => ({
           guildId,
           messageId: target.id,
+          // Where the picker actually is (the anchor's channel on a top-up).
+          messageChannelId: channelId,
           roleId: t.role!.id,
           emoji: t.emoji,
           roleName: t.role!.name,

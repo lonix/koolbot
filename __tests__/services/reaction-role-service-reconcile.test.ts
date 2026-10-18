@@ -445,7 +445,11 @@ describe("ReactionRoleService stale-config cleanup handlers", () => {
     expect(find).toHaveBeenCalledWith({
       guildId: "g1",
       isArchived: false,
-      $or: [{ channelId: "chan1" }, { categoryId: "chan1" }],
+      $or: [
+        { messageChannelId: "chan1" },
+        { channelId: "chan1" },
+        { categoryId: "chan1" },
+      ],
     });
     expect(config.isArchived).toBe(true);
     expect(config.save).toHaveBeenCalledTimes(1);
@@ -465,11 +469,18 @@ describe("ReactionRoleService stale-config cleanup handlers", () => {
       guild: { id: "g1" },
     } as never);
 
-    // Unconditional guild-wide query — no `channelId` predicate to skip
-    // mappings that never had one.
+    // A legacy row (no stored channel) lives in the configured channel, so the
+    // query matches an absent `messageChannelId`, and carries no `channelId`
+    // predicate that would skip mappings that never had one (#1207).
     expect(find).toHaveBeenCalledWith({
       guildId: "g1",
       isArchived: false,
+      $or: [
+        { messageChannelId: "msgchan1" },
+        { messageChannelId: { $in: [null, ""] } },
+        { channelId: "msgchan1" },
+        { categoryId: "msgchan1" },
+      ],
     });
     expect(bindOnly.isArchived).toBe(true);
     expect(bindOnly.save).toHaveBeenCalledTimes(1);

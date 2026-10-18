@@ -36,6 +36,16 @@ export interface IReactionRoleConfig extends Document {
   guildId: string;
   messageId: string;
   /**
+   * The channel the picker message (`messageId`) was posted in (#1207).
+   * Optional: rows created before this field existed lack it and fall back to
+   * the channel configured by `reactionroles.message_channel_id`, exactly as
+   * before. Every lifecycle path resolves `messageChannelId || configured`, so
+   * changing the setting later never strands a picker that already has it. This
+   * is a channel id, not a member id. Never set it to a channel the message
+   * was not actually found in or posted to.
+   */
+  messageChannelId?: string;
+  /**
    * The private text channel created for an auto-created reaction role.
    * Optional: mappings that bind to an existing role (or opt out of the
    * private category/channel) have no owned channel.
@@ -91,6 +101,11 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       type: String,
       required: true,
       index: true,
+    },
+    // No default on purpose: an absent field is what marks a legacy row (#1207).
+    messageChannelId: {
+      type: String,
+      required: false,
     },
     channelId: {
       type: String,

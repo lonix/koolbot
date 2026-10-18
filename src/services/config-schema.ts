@@ -2074,7 +2074,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "reactionroles.message_channel_id": {
     label: "Reaction-role message channel",
     description:
-      "Channel ID where reaction-role messages are posted. Pickers do not move when this changes: existing ones stay in the old channel. Startup only spares a guild's mappings while NO picker in that guild is found in this channel; as soon as one is (for example a picker created after the switch), mappings whose picker is not found here are archived. Delete the old pickers and mappings BEFORE switching channels, or switch back before cleaning up.",
+      "Channel ID where NEW reaction-role messages are posted. Each mapping remembers the channel its picker was posted in, so changing this never moves or breaks existing pickers: they keep working in their own channel. Only older mappings, created before pickers remembered their channel, are still looked up here; for those, delete the picker and mapping BEFORE switching channels, or switch back before cleaning up (startup keeps them while none of them is found in this channel, and archives the missing ones once another is).",
     category: "reactionroles",
     type: "channel",
   },
