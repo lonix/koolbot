@@ -1421,9 +1421,45 @@ fields are not checked by the browser and the server ignores them. With scripts
 on, choosing a preset fills in the rows, "Add a group" adds a row and mistakes are
 shown next to the fields before sending; the server checks everything again, names
 the group and field in its message, and the page puts the entered values back after
-a refused submit. The events table shows the group count, and a recurring series
-copies the setup (not members) to its next occurrence. Presets are built into the
-bot; the server-wide preset library is a later update.
+a refused submit. The events table shows the group count, and a recurring
+series copies the setup (not members) to its next occurrence. The preset picker
+lists the presets that are switched on for the server (see the next section),
+plus Custom, which is always available.
+
+**Group presets** (`/admin/events/presets`, #1200; linked from the Groups section
+and the Events page) is the server-wide preset library. It lists the built-in
+presets and the server's own, each with an on/off switch: **any** preset,
+built-in or your own, can be switched off for the whole server, and the event
+form then no longer offers it. Built-ins stay in code and cannot be edited, but
+**Duplicate** copies one into the editor as a new preset of your own. Your own
+presets can be added, edited, duplicated and deleted. A preset has a name (at
+most 50 characters, unique ignoring case, and not the name of a built-in), an
+optional description, what a group and a leader are called, an optional channel
+creation time and the groups (name, kind, size, tag, marker). Every preset goes
+through the same validator as the event form, so the library cannot hold a
+setup the form would refuse; it is checked against `events.groups.max_count`,
+and a library preset bigger than the cap is greyed out in the picker like a
+built-in one. A server can keep up to 50 presets. On the Events table, **Save as
+server preset** opens the editor prefilled with an event's groups (names, kinds,
+sizes, tags, markers, labels and lead time; never members, captains or channels);
+the event is not changed. Choosing a preset fills in its labels and channel
+creation time with scripts on; without scripts only the group and leader labels
+fall back to the preset's. The tag and leader switches an event may get later
+(#1194, #1195) are not part of a preset yet. Everything on these pages is admin-only and audited
+(`event-preset.create`, `.update`, `.delete`, `.toggle`).
+
+An event keeps its own copy of its groups, and the preset's id is only a
+reference: editing, renaming, switching off or deleting a preset never changes an
+event that already used it, or the next occurrence of a recurring series.
+Presets are identified as `builtin:<name>` (built-ins) and `lib:<id>` (the
+server's own, an id that never changes when the preset is renamed or edited). A
+submit naming a preset that is switched off or deleted is refused with a clear
+message, never silently accepted. If the library cannot be read (database
+trouble), the form fails closed: when the switches cannot be read no preset is
+offered, when only the server's own presets cannot be read just the built-ins
+that are on are, with a notice either way; Custom always works. A server that
+never opens the page has every built-in on. Presets hold no member data, so they
+are not part of the member data export.
 
 **Group voice channels** (#1190). At the event's channel creation time (its own, else
 `events.create_lead_minutes`; "Start now" at once) the bot creates the main channel and

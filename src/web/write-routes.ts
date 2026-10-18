@@ -22,6 +22,7 @@ import { createPermissionsRouter } from "./routes/write/permissions.js";
 import { createWizardRouter } from "./routes/write/wizard.js";
 import { createAnnouncementsRouter } from "./routes/write/announcements.js";
 import { createEventsRouter } from "./routes/write/events.js";
+import { createEventPresetsRouter } from "./routes/write/event-presets.js";
 import { createPollsRouter } from "./routes/write/polls.js";
 import { createReactionRolesRouter } from "./routes/write/reaction-roles.js";
 import { createNoticesRouter } from "./routes/write/notices.js";
@@ -64,6 +65,7 @@ export function createWriteRouter(
   router.use(createWizardRouter(client));
   router.use(createAnnouncementsRouter(client));
   router.use(createEventsRouter(client));
+  router.use(createEventPresetsRouter());
   router.use(createPollsRouter(client));
   router.use(createReactionRolesRouter(client));
   router.use(createNoticesRouter(client));
