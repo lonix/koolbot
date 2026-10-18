@@ -1745,7 +1745,10 @@ event says it can be ended once it has started) and an **End now** control on ev
 `active` row of the Events table (admin only). Both are one small form with a required tick
 box, "I want to end this event now", that the server checks again: a post without it changes
 nothing, so the confirmation holds without scripts. An event with group channels also offers
-"Move everyone in the group channels back to the main channel first", ticked by default.
+"Move everyone in the group channels back to the main channel first", ticked by default. With it
+ticked, a manual end moves people first; unticked, it ends the event without moving anyone, and
+a group channel that still holds someone is left (never deleted while occupied) and goes within a
+minute of the last person leaving.
 Only an `active` event can be ended: a scheduled one (not started) and a cancelled one are
 refused with a message, and an event that has already ended answers "already ended" and
 changes nothing (pressed twice, or by two people, or while the scheduled end runs: exactly
@@ -1803,16 +1806,25 @@ retried by the scan; the pull-back and the hooks are not. One audit entry per pr
 number of steps that needed attention and counts such as people moved, never names. Who ended
 the event is only in the audit log; the event row keeps no user id for it.
 
-The scheduled end differs from a manual one in three ways: it never pulls people back, it does
-not close the Discord event inside the teardown (the scan does, next), and it only acts on the
-event as the scan read it, so a cancel or an edited schedule made meanwhile is not overwritten.
+The scheduled end differs from a manual one in four ways. It **waits while anyone is in a voice
+channel of the event**: the main channel and every group channel (bots do not count). The
+event then stays live, nothing is deleted or moved, and the next scan asks again, so an event
+ends on its schedule only once its channels are empty; the wait is logged once, not every scan.
+Occupancy is read from Discord for each channel (a forced read of the channel, then the
+gateway's voice cache, like the channel cleanup uses); a channel that cannot be read counts as
+occupied. Only the host's manual **End event now** may end an event with people present. The
+scheduled end also never pulls people back, it does not close the Discord event inside the
+teardown (the scan does, next), and it only acts on the event as the scan read it, so a cancel
+or an edited schedule made meanwhile is not overwritten.
 A scan that loaded an event just before a manual end skips it for the next few minutes instead
 of acting on its older copy, and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
 open copy never edits the announcement post once an end has begun. A cancel is saved first and
 only if the event is still in the state it was decided from, so a cancel decided on an older copy
 (an adopted event reported gone in Discord, say) can neither turn an ended event into a cancelled
-one nor delete its channel. A recurring event's next occurrence is created by the next scan,
+one nor delete its channel. Cancelling reports whether it really cancelled: an event that has
+ended, or is being ended, answers "could not be cancelled: it is ended" (admin page, `/event
+cancel`), is not counted by a series cancel and spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover

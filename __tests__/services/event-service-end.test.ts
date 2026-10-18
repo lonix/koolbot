@@ -1234,18 +1234,20 @@ describe("a scheduled end with people in a voice channel of the event", () => {
   it("an end that began during the occupancy read wins: the scan does not end it again", async () => {
     const { service, guild } = setup();
     store.set(ID, stored({ groupsEnabled: true, groups }));
+    // The scan's first read stalls; every later read finds the channels empty.
     let release!: () => void;
-    guild.channels.fetch = jest.fn(
-      () =>
-        new Promise((resolve) => {
-          release = () => resolve(voice(0));
-        }),
-    );
+    let first = true;
+    guild.channels.fetch = jest.fn(() => {
+      if (!first) return Promise.resolve(voice(0));
+      first = false;
+      return new Promise((resolve) => {
+        release = () => resolve(voice(0));
+      });
+    });
     const run = jest.spyOn(service.teardown, "run");
     const scan = service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
     await nap();
-    guild.channels.fetch = jest.fn(async () => voice(4));
-    // The host ends it by hand, people present.
+    // The host ends it by hand meanwhile.
     const manual = await service.endEventNow(ID, "guild-1", {
       pullBack: false,
     });
