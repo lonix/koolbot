@@ -23,6 +23,15 @@ import {
   ROLE_DELETE_REVIEW_MINUTES,
 } from "./role-groups-views.js";
 import {
+  loadEventPresetsPage,
+  renderEventPresetsPage,
+} from "./event-presets-page.js";
+import {
+  catalogNotice,
+  enabledPresets,
+  loadPresetCatalog,
+} from "../services/event-group-preset-service.js";
+import {
   loadRulesPage,
   parseRulesOptions,
   renderRulesPage,
@@ -1407,6 +1416,10 @@ export function createReadOnlyRouter(
         };
       });
 
+      // The picker's presets: enabled built-ins plus enabled library presets
+      // (#1200). Never throws; an unreadable library fails closed and says so.
+      const presetCatalog = await loadPresetCatalog(common.guildId);
+
       res.type("text/html").send(
         renderEventsPage({
           ...common,
@@ -1426,6 +1439,28 @@ export function createReadOnlyRouter(
             defaultCount: groupDefaultCount,
             maxCount: groupMaxCount,
           },
+          groupPresets: enabledPresets(presetCatalog),
+          groupPresetsNotice: catalogNotice(presetCatalog.state),
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // Group preset library (#1200): the admin page for the server-wide presets.
+  router.get(
+    "/events/presets",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const data = await loadEventPresetsPage(
+        client,
+        common.guildId,
+        req.query as Record<string, unknown>,
+      );
+      res.type("text/html").send(
+        renderEventPresetsPage({
+          ...common,
+          ...data,
           flash: readFlash(req),
         }),
       );
