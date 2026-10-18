@@ -1593,10 +1593,13 @@ event is scheduled or active.
   reason (not connected, in another channel, group full, missing permission,
   error). A move Discord did not answer in time is listed separately as "may or may
   not have moved": check Discord before trying again. A rate limit stops the run
-  and lists the rest as not attempted. One run asks Discord to move at most 60
+  and lists the rest as not attempted. One run reads the voice state of, and moves, at most 60
   people, so the page does not wait for minutes; the rest are listed as not
-  attempted and you press the button again.
-- **Pacing and safety:** each person is checked against Discord's own voice state and
+  attempted and you press the button again. People the bot already sees in the
+  right channel, not connected, or in a channel outside the event are skipped
+  without a request and do not count towards the 60, so the second press gets past
+  the people the first one moved.
+- **Pacing and safety:** each person who still has to move is checked against Discord's own voice state and
   moved one at a time, about half a second apart, through the bot's rate-limited
   request path. A move is never repeated after a timeout. Every destination is
   read from Discord before anyone is moved into it, and the person's channel is

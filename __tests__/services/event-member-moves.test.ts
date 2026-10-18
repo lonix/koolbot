@@ -484,6 +484,38 @@ describe("send to groups", () => {
     ).toHaveLength(3);
   });
 
+  it("a second run gets past the people the first run moved (the cap counts only real moves)", async () => {
+    const ids = Array.from(
+      { length: MAX_MOVES_PER_RUN + 3 },
+      (_, i) => `m${i}`,
+    );
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "b" ? { ...g, memberIds: ids } : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld();
+    for (const id of ids) w.place(id, MAIN);
+    const first = await run(w, ({ event }) => planSendToGroups(event));
+    if (first.status !== "done") throw new Error("expected done");
+    expect(first.report.moved).toHaveLength(MAX_MOVES_PER_RUN);
+    w.patch.mockClear();
+    w.guild.voiceStates.fetch.mockClear();
+    const second = await run(w, ({ event }) => planSendToGroups(event));
+    if (second.status !== "done") throw new Error("expected done");
+    expect(second.report.moved).toEqual(ids.slice(MAX_MOVES_PER_RUN));
+    expect(
+      second.report.skipped.filter((s) => s.reason === "already-there"),
+    ).toHaveLength(MAX_MOVES_PER_RUN);
+    // People already in place cost no request at all.
+    expect(w.guild.voiceStates.fetch).toHaveBeenCalledTimes(3);
+    expect(w.patch).toHaveBeenCalledTimes(3);
+    ids.forEach((id) => expect(w.where(id)).toBe(CH_B));
+  });
+
   it("skips a person who left the event's channels between the read and the write", async () => {
     const w = makeWorld();
     w.place("u3", MAIN);
@@ -707,6 +739,31 @@ describe("gates", () => {
     store.set(EV, makeRow({ guildId: "other-guild" }));
     expect((await run(w, plan)).status).toBe("refused");
     expect(w.patch).not.toHaveBeenCalled();
+  });
+
+  it("moves for an ended event only when the caller opts in (#1193)", async () => {
+    const w = makeWorld();
+    w.place("u3", CH_B);
+    store.get(EV)!.state = "ended";
+    const base = {
+      client: w.client as never,
+      guildId: GUILD,
+      eventId: EV,
+      plan: ({ event }: { event: Parameters<typeof planMoveOne>[0] }) =>
+        planMoveOne(event, "u3", "main"),
+      deps: w.deps,
+    };
+    expect((await moveEventMembers(base)).status).toBe("refused");
+    expect(w.patch).not.toHaveBeenCalled();
+    expect(
+      (await moveEventMembers({ ...base, allowFinished: true })).status,
+    ).toBe("done");
+    expect(w.where("u3")).toBe(MAIN);
+    store.get(EV)!.state = "scheduled";
+    store.get(EV)!.groupsEnabled = false;
+    expect(
+      (await moveEventMembers({ ...base, allowFinished: true })).status,
+    ).toBe("refused");
   });
 
   it("refuses without Move Members, and when the bot's own membership is unknown", async () => {

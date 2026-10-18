@@ -77,9 +77,11 @@ import {
 /** Pause between two people, so a big batch stays under Discord's limits. */
 export const MOVE_PACE_MS = 500;
 /**
- * The most people one run asks Discord to move. A run holds the web request
- * open until it ends, so it is bounded; the rest are listed as not attempted
- * and the host runs the action again.
+ * The most people one run reads from Discord and moves. A run holds the web
+ * request open until it ends, so it is bounded; the rest are listed as not
+ * attempted and the host runs the action again. People the gateway already
+ * shows in place, not connected or elsewhere cost no request and are not
+ * counted, so a second run gets past the people the first run moved.
  */
 export const MAX_MOVES_PER_RUN = 60;
 
@@ -269,6 +271,12 @@ export function moveEventMembers(opts: {
   plan: (ctx: MovePlanContext) => MovePlan;
   /** People never moved by this run (the host, the acting user). */
   excludeUserIds?: readonly string[];
+  /**
+   * Also run for an `ended` or `cancelled` event. Off by default: the host
+   * actions only act on a running event. "End event now" (#1193) saves the
+   * end state first and then has to empty the group channels, so it opts in.
+   */
+  allowFinished?: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   // Everything taken from the caller happens here, synchronously.
@@ -276,7 +284,15 @@ export function moveEventMembers(opts: {
   const deps = opts.deps ?? defaultDepsForTests;
   const exclude = new Set(opts.excludeUserIds ?? []);
   return withEventMoveLock(eventId, () =>
-    runLocked({ client, guildId, eventId, plan, exclude, deps }),
+    runLocked({
+      client,
+      guildId,
+      eventId,
+      plan,
+      exclude,
+      allowFinished: opts.allowFinished === true,
+      deps,
+    }),
   ).then((result) => (result.busy ? { status: "busy" } : result.value));
 }
 
@@ -286,6 +302,7 @@ async function runLocked(opts: {
   eventId: string;
   plan: (ctx: MovePlanContext) => MovePlan;
   exclude: Set<string>;
+  allowFinished: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   const { client, guildId, eventId, exclude } = opts;
@@ -309,7 +326,10 @@ async function runLocked(opts: {
     return refuse("no-event");
   }
   if (!row || row.guildId !== guildId) return refuse("no-event");
-  if (!OPEN_STATES.includes(row.state)) return refuse("not-open");
+  const states = opts.allowFinished
+    ? [...OPEN_STATES, "ended", "cancelled"]
+    : OPEN_STATES;
+  if (!states.includes(row.state)) return refuse("not-open");
   if (row.groupsEnabled !== true || (row.groups ?? []).length === 0) {
     return refuse("no-groups");
   }
@@ -422,10 +442,6 @@ class Mover {
         skip(userId, "rate-limited");
         continue;
       }
-      if (attempted >= MAX_MOVES_PER_RUN) {
-        skip(userId, "over-limit");
-        continue;
-      }
       const dest = destinations.get(toChannelId);
       if (!dest || "error" in dest) {
         skip(
@@ -435,6 +451,29 @@ class Mover {
             ? `the destination could not be checked (${dest.error})`
             : "the destination could not be checked",
         );
+        continue;
+      }
+      // The gateway's own state settles the obvious cases before any request
+      // is made, and these skips do not count against the per-run cap: a
+      // second run over a long list must get past the people the first run
+      // already moved. (Only a decision NOT to move is taken from the cache;
+      // every move is decided from Discord's answer below.)
+      const cachedChannel =
+        this.guild.voiceStates.cache.get(userId)?.channelId ?? null;
+      if (!cachedChannel) {
+        skip(userId, "not-connected");
+        continue;
+      }
+      if (!this.eventChannels.has(cachedChannel)) {
+        skip(userId, "elsewhere");
+        continue;
+      }
+      if (cachedChannel === toChannelId) {
+        skip(userId, "already-there");
+        continue;
+      }
+      if (attempted >= MAX_MOVES_PER_RUN) {
+        skip(userId, "over-limit");
         continue;
       }
       attempted += 1;
