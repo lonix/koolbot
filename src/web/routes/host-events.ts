@@ -70,6 +70,21 @@ import {
   type RandomiseMode,
 } from "../../services/event-group-plan.js";
 import {
+  describeMoveReport,
+  moveEventMembers,
+  moveMembersBlocker,
+  planMoveOne,
+  planReturnToMain,
+  planSendToGroups,
+  type MoveOutcome,
+  type MoveSkipReason,
+} from "../../services/event-member-moves.js";
+import {
+  renderMovesSection,
+  type MoveDestinationView,
+  type MovePersonView,
+} from "../host-moves-view.js";
+import {
   groupFill,
   renderAssignmentSection,
   type AssignmentGroupView,
@@ -488,6 +503,211 @@ function registerAssignmentActions(router: Router, client: Client): void {
   });
 }
 
+/** Voice channel facts from the gateway cache, for labels and fill. */
+function channelFacts(
+  client: Client,
+  guildId: string,
+  channelId: string,
+): { occupants: number; limit: number } {
+  const channel = client.guilds?.cache
+    ?.get(guildId)
+    ?.channels?.cache?.get(channelId);
+  if (!channel || !channel.isVoiceBased()) return { occupants: 0, limit: 0 };
+  return {
+    occupants: channel.members?.size ?? 0,
+    limit: (channel as { userLimit?: number }).userLimit ?? 0,
+  };
+}
+
+/** The "Move people" section (#1192). */
+function createMovesSection(client: Client): HostSectionRenderer {
+  return (ctx) => {
+    const { event } = ctx;
+    if (event.groupsEnabled !== true) return undefined;
+    const guild = client.guilds?.cache?.get(event.guildId);
+    const presence = readEventPresence(client, event);
+    let blocker = moveMembersBlocker(guild);
+    if (!blocker && !presence.ok) {
+      blocker =
+        "The bot could not read who is in the voice channels, so moving people is switched off.";
+    }
+    const groups = event.groups ?? [];
+    const labelOf = new Map<string, string>();
+    const destinations: MoveDestinationView[] = [];
+    if (event.channelId) {
+      labelOf.set(event.channelId, "Main channel");
+      destinations.push({
+        value: "main",
+        label: "Main channel",
+        ...channelFacts(client, event.guildId, event.channelId),
+      });
+    }
+    for (const g of groups) {
+      if (!g.channelId) continue;
+      const label = `${g.marker ? `${g.marker} ` : ""}${g.name}`;
+      labelOf.set(g.channelId, label);
+      destinations.push({
+        value: g.key,
+        label,
+        ...channelFacts(client, event.guildId, g.channelId),
+      });
+    }
+    const people: MovePersonView[] = presence.members.map((m) => ({
+      id: m.id,
+      name: m.name,
+      where: labelOf.get(m.channelId) ?? "an event channel",
+    }));
+    const teams = groups.filter((g) => g.kind === "team");
+    return renderMovesSection({
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      blocker,
+      sendableGroups: teams.filter((g) => !!g.channelId).length,
+      waitingForChannel: teams
+        .filter((g) => !g.channelId)
+        .reduce((n, g) => n + (g.memberIds ?? []).length, 0),
+      hasMain: !!event.channelId,
+      destinations,
+      people,
+      groupLabel: event.groupLabel || "Group",
+    });
+  };
+}
+
+const MOVE_BUSY =
+  "A move is already in progress for this event. Wait for it to finish, then try again.";
+
+/** Turn a mover outcome into the host's result and its audit details. */
+function moveResult(
+  client: Client,
+  event: IEvent,
+  action: string,
+  outcome: MoveOutcome,
+  extra: string[] = [],
+): HostActionResult {
+  if (outcome.status === "busy") {
+    return { ok: false, message: MOVE_BUSY, errorMessage: "busy" };
+  }
+  if (outcome.status === "refused") {
+    return {
+      ok: false,
+      message: outcome.message,
+      details: { action },
+      errorMessage: outcome.code,
+    };
+  }
+  const { report } = outcome;
+  const skippedBy: Partial<Record<MoveSkipReason, number>> = {};
+  for (const s of report.skipped) {
+    skippedBy[s.reason] = (skippedBy[s.reason] ?? 0) + 1;
+  }
+  const text = describeMoveReport(report, (id) =>
+    cachedMemberName(client, event.guildId, id),
+  );
+  const nothingToDo = outcome.considered === 0;
+  const message = nothingToDo
+    ? ["Nobody needed to be moved.", ...extra].join(" ")
+    : [text, ...extra].join(" ");
+  const anyDone = report.moved.length + report.unconfirmed.length > 0;
+  const onlyQuiet =
+    report.skipped.length > 0 &&
+    report.skipped.every((s) => s.reason === "already-there");
+  return {
+    ok: nothingToDo || anyDone || onlyQuiet,
+    message,
+    // Counts only: no names, no ids.
+    details: {
+      action,
+      considered: outcome.considered,
+      moved: report.moved.length,
+      unconfirmed: report.unconfirmed.length,
+      skipped: skippedBy,
+    },
+    errorMessage: "nobody was moved",
+  };
+}
+
+/** Send to groups, return to main and move one person (#1192). */
+function registerMoveActions(router: Router, client: Client): void {
+  // People never moved by a bulk run: the event's host and whoever is acting.
+  const hostIds = (event: IEvent, actingId: string): string[] =>
+    [event.createdBy, actingId].filter((id): id is string => !!id);
+
+  hostAction(
+    router,
+    "send-to-groups",
+    "/send-to-groups",
+    async ({ event, session }) => {
+      let waiting = 0;
+      const outcome = await moveEventMembers({
+        client,
+        guildId: event.guildId,
+        eventId: String(event._id),
+        excludeUserIds: hostIds(event, session.discordUserId),
+        plan: ({ event: fresh }) => {
+          for (const g of fresh.groups ?? []) {
+            if (g.kind === "team" && !g.channelId) {
+              waiting += (g.memberIds ?? []).length;
+            }
+          }
+          return planSendToGroups(fresh);
+        },
+      });
+      return moveResult(
+        client,
+        event,
+        "send-to-groups",
+        outcome,
+        waiting > 0
+          ? [
+              `${waiting} assigned ${waiting === 1 ? "person is" : "people are"} in a group without a channel yet and ${waiting === 1 ? "was" : "were"} not moved.`,
+            ]
+          : [],
+      );
+    },
+  );
+
+  hostAction(
+    router,
+    "return-to-main",
+    "/return-to-main",
+    async ({ req, event, session }) => {
+      const leaveSpecial = bodyString(req, "skipSpecial") === "1";
+      const outcome = await moveEventMembers({
+        client,
+        guildId: event.guildId,
+        eventId: String(event._id),
+        excludeUserIds: hostIds(event, session.discordUserId),
+        plan: ({ event: fresh, presence }) =>
+          planReturnToMain(fresh, presence, leaveSpecial),
+      });
+      return moveResult(client, event, "return-to-main", outcome);
+    },
+  );
+
+  hostAction(router, "move-one", "/move-one", async ({ req, event }) => {
+    const userId = bodyString(req, "userId");
+    const to = bodyString(req, "to");
+    if (!USER_ID_RE.test(userId)) {
+      return { ok: false, message: "Pick a person from the list." };
+    }
+    if (to.length === 0 || to.length > 32) {
+      return { ok: false, message: "Choose where to move the person." };
+    }
+    const outcome = await moveEventMembers({
+      client,
+      guildId: event.guildId,
+      eventId: String(event._id),
+      // Moving one person is the host's explicit choice, host included.
+      excludeUserIds: [],
+      plan: ({ event: fresh }) => planMoveOne(fresh, userId, to),
+    });
+    const result = moveResult(client, event, "move-one", outcome);
+    if (result.details) result.details.userId = userId;
+    return result;
+  });
+}
+
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channelName = channelId
@@ -596,6 +816,9 @@ export function createHostEventsRouter(client: Client): Router {
   // The "Assign people" section and its actions (#1191).
   HOST_SECTION_RENDERERS.assignment = createAssignmentSection(client);
   registerAssignmentActions(router, client);
+  // The "Move people" section and its actions (#1192).
+  HOST_SECTION_RENDERERS.moves = createMovesSection(client);
+  registerMoveActions(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;

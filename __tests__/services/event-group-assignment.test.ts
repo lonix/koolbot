@@ -68,6 +68,8 @@ jest.unstable_mockModule(
   }),
 );
 
+const { markHostMove, unmarkHostMove, resetMoveGuardForTests } =
+  await import("../../src/services/event-move-guard.js");
 const {
   assignMember: assignMemberReal,
   randomiseMembers: randomiseMembersReal,
@@ -131,6 +133,7 @@ beforeEach(() => {
   fake.failUpdatesFor = null;
   fake.delayFor = null;
   eventsEnabled = true;
+  resetMoveGuardForTests();
 });
 
 describe("assignMember", () => {
@@ -534,6 +537,81 @@ describe("setGroupsLocked", () => {
 describe("handleGroupSelfJoin", () => {
   const join = (userId: string, channelId: string, admission = 1) =>
     handleGroupSelfJoin({ guildId: GUILD, userId, channelId, admission });
+
+  describe("a join caused by a host move (#1192)", () => {
+    const twoTeams = (): void => {
+      seed({
+        groups: [
+          group("a", { channelId: "ch-a", memberIds: ["u1"] }),
+          group("b", { channelId: "ch-b" }),
+        ],
+      });
+    };
+
+    it("does not reassign: the host moved u1 into Bravo's channel, u1 stays in Alpha", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u1", "ch-b");
+      expect(await join("u1", "ch-b")).toBe("host-move");
+      expect(members("a")).toEqual(["u1"]);
+      expect(members("b")).toEqual([]);
+      expect(updates).toEqual([]);
+    });
+
+    it("does not record an unassigned member the host moved into a group channel", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u9", "ch-b");
+      expect(await join("u9", "ch-b")).toBe("host-move");
+      expect(members("b")).toEqual([]);
+    });
+
+    it("is ignored once: the member's own next join records as usual", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u1", "ch-b");
+      await join("u1", "ch-b");
+      expect(await join("u1", "ch-a")).toBe("unchanged");
+      expect(await join("u1", "ch-b")).toBe("recorded");
+      expect(members("b")).toEqual(["u1"]);
+    });
+
+    it("only covers the marked channel", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u1", "ch-b");
+      expect(await join("u1", "ch-a")).toBe("unchanged");
+      // The mark for ch-b is still there for the real move's join.
+      expect(await join("u1", "ch-b")).toBe("host-move");
+    });
+
+    it("a refused move clears its mark, so a later join counts", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u1", "ch-b");
+      unmarkHostMove(GUILD, "u1", "ch-b");
+      expect(await join("u1", "ch-b")).toBe("recorded");
+    });
+
+    it("does not leak between members or guilds", async () => {
+      twoTeams();
+      markHostMove(GUILD, "u2", "ch-b");
+      expect(await join("u1", "ch-b")).toBe("recorded");
+      markHostMove("other-guild", "u3", "ch-b");
+      expect(await join("u3", "ch-b")).toBe("recorded");
+    });
+
+    it("leaves a host assignment made while a batch runs alone", async () => {
+      twoTeams();
+      // The host reassigns u1 to Bravo; the running batch then moves u1 to the
+      // channel of the group it read earlier (Alpha). The join must not undo it.
+      await assignMember({
+        guildId: GUILD,
+        eventId: EV,
+        userId: "u1",
+        groupKey: "b",
+      });
+      markHostMove(GUILD, "u1", "ch-a");
+      expect(await join("u1", "ch-a")).toBe("host-move");
+      expect(members("b")).toEqual(["u1"]);
+      expect(members("a")).toEqual([]);
+    });
+  });
 
   it("records a member who joins a team group's channel", async () => {
     seed();

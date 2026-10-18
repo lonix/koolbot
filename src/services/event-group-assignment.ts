@@ -34,6 +34,7 @@ import { Event, type IEvent } from "../models/event.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
+import { consumeHostMove } from "./event-move-guard.js";
 import { ConfigService } from "./config-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import {
@@ -443,7 +444,8 @@ export type SelfJoinOutcome =
   | "full"
   | "not-team"
   | "disabled"
-  | "blocked";
+  | "blocked"
+  | "host-move";
 
 /**
  * A member joined a voice channel: when it is a team group's channel of an
@@ -458,6 +460,12 @@ export type SelfJoinOutcome =
  * await (`TrackingOptOutService.admission()`), so a reset that engaged
  * meanwhile cannot be undone by this write.
  *
+ * A join that the host's own move caused (#1192, marked by the mover before
+ * it asked Discord, see `event-move-guard.ts`) is ignored whatever the target
+ * channel and whether or not the groups are locked: a host move never changes
+ * who is in which group. Only that one join is ignored; the mark is single use
+ * and expires.
+ *
  * Not audited (a self-join is the member's own act, not a host action), but it
  * fires `onGroupAssignmentChange` like any other change.
  */
@@ -468,6 +476,9 @@ export async function handleGroupSelfJoin(opts: {
   admission: number;
 }): Promise<SelfJoinOutcome> {
   const { guildId, userId } = opts;
+  // Synchronous, before anything is queued or awaited: the mark was set before
+  // the move was sent, and this call runs in gateway event order.
+  if (consumeHostMove(guildId, userId, opts.channelId)) return "host-move";
   // One at a time per member, queued in call order. The gateway starts these
   // calls in event order, synchronously, so queueing here (before any await)
   // keeps a member's joins in that order: a later join to B can never be
