@@ -68,6 +68,10 @@ import {
   renderUserVoiceBody,
 } from "../../src/web/user-layout.js";
 import {
+  renderHostPanelBody,
+  type HostPanelEvent,
+} from "../../src/web/host-panel-view.js";
+import {
   renderConsent,
   renderErrorPage,
   renderInvalidLink,
@@ -1737,6 +1741,49 @@ export function adminPages(): A11yPage[] {
   ];
 }
 
+/** A host-panel event (#1189); `groupsEnabled` adds two groups. */
+function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
+  const groupsEnabled = over.groupsEnabled === true;
+  return {
+    id: "65a000000000000000000001",
+    title: "Quiz night",
+    description: "Bring a pen.",
+    state: "scheduled",
+    when: "2030-01-01 19:00 (UTC)",
+    durationMinutes: 90,
+    recurrence: "weekly",
+    channel: "quiz-night",
+    groupsEnabled,
+    groupLabel: "Team",
+    leaderLabel: "Leader",
+    channelLeadMinutes: 30,
+    groups: groupsEnabled
+      ? [
+          {
+            name: "Reds",
+            marker: "🔴",
+            kind: "team",
+            size: 4,
+            tag: "RED",
+            hasChannel: true,
+            memberCount: 3,
+          },
+          {
+            name: "Spectators",
+            marker: "",
+            kind: "open",
+            size: null,
+            tag: "",
+            hasChannel: false,
+            memberCount: 0,
+          },
+        ]
+      : [],
+    adopted: false,
+    ...over,
+  };
+}
+
 /** Every `/me` member-facing page, rendered through the user layout. */
 export function userPages(): A11yPage[] {
   const shell = (title: string, active: string, body: string): string =>
@@ -1795,6 +1842,50 @@ export function userPages(): A11yPage[] {
             },
           ],
         }),
+      ),
+    },
+    {
+      name: "/me overview with hosted events",
+      html: shell(
+        "Overview",
+        "/me/",
+        renderUserIndexBody({
+          discordUserId: "u1",
+          guildId: "g1",
+          isAdmin: false,
+          hostedEvents: [
+            {
+              id: "65a000000000000000000001",
+              title: "Quiz night",
+              when: "2030-01-01 19:00 (UTC)",
+              state: "scheduled",
+            },
+          ],
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (scheduled, groups)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+      ),
+    },
+    {
+      name: "/me host panel (scheduled, no groups)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({ event: hostEvent({}) }),
+      ),
+    },
+    {
+      name: "/me host panel (ended)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({ event: hostEvent({ state: "ended" }) }),
       ),
     },
     {
