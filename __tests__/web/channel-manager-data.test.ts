@@ -302,20 +302,32 @@ describe("loadProtection", () => {
     await expect(loadProtection(guild, [])).rejects.toThrow("db down");
   });
 
-  it("protects the picker channel of an archived mapping but not its private channel", async () => {
+  it("protects an archived stamp's picker channel only while an active mapping still uses that message", async () => {
     reactionRoles.mockReturnValue(
       lean([
         {
-          _id: "rr-archived",
+          _id: "rr-shared-archived",
           archivedAt: new Date(),
+          messageId: "shared",
           channelId: "100000000000000051",
           categoryId: "100000000000000052",
           messageChannelId: "100000000000000050",
+        },
+        // The picker is still alive: an active mapping uses the message.
+        { _id: "rr-survivor", messageId: "shared" },
+        // Standalone archive deleted its picker: nothing left to protect.
+        {
+          _id: "rr-standalone",
+          archivedAt: new Date(),
+          messageId: "gone",
+          messageChannelId: "100000000000000053",
         },
       ]),
     );
     const map = await loadProtection(guild, []);
     expect(map.get("100000000000000050")![0]).toContain("picker channel");
+    expect(map.has("100000000000000053")).toBe(false);
+    // An archived mapping never protects its private channel or category.
     expect(map.has("100000000000000051")).toBe(false);
     expect(map.has("100000000000000052")).toBe(false);
   });

@@ -141,6 +141,9 @@ export async function loadProtection(
     ScheduledAnnouncement.find({ guildId }).lean(),
     effectiveLobbyNames(),
   ]);
+  const liveMessageIds = new Set(
+    reactionRoles.filter((r) => !r.archivedAt).map((r) => r.messageId),
+  );
   return buildProtectionMap({
     config,
     managedVoice: managedVoice.map((r) => ({
@@ -166,7 +169,13 @@ export async function loadProtection(
       id: String(r._id),
       channelId: r.archivedAt ? null : (r.channelId ?? null),
       categoryId: r.archivedAt ? null : (r.categoryId ?? null),
-      messageChannelId: r.messageChannelId ?? null,
+      // An archived row's picker may be gone (archiving a standalone mapping
+      // deletes it), so its stamp protects the channel only while an active
+      // mapping still uses the same message: then the picker is alive.
+      messageChannelId:
+        !r.archivedAt || liveMessageIds.has(r.messageId)
+          ? (r.messageChannelId ?? null)
+          : null,
     })),
     pollSchedules: polls.map((p) => ({
       id: String(p._id),
