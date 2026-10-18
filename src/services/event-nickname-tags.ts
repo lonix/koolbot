@@ -54,29 +54,34 @@
  * `OUTCOME_SETTLE_MS` from `attemptedAt` (a PATCH that timed out locally may
  * still be in flight at Discord); until then every decision on it is "kept".
  *
- * ### Nothing is queued between a read and its PATCH
+ * ### Nothing is queued or waited for between a read and its PATCH
  *
  * The question for every nickname edit: between the moment a decision is made
  * from a READ and the moment the PATCH leaves, can anything be queued or
- * awaited? Queues (the per-member lock, the pacing queue) are all entered BEFORE
- * the read:
+ * awaited? Everything that can wait is entered BEFORE the read:
  *
- * - **restore**: lock, then `pace()`, then the attempt is stamped (unresolved),
- *   then the member is read, classified and the PATCH sent with nothing awaited
- *   in between except the read itself;
- * - **retarget**: lock, `pace()`, the event is read again (the wait can be long,
- *   so "is this tag still wanted?" is decided again), the member is read and
- *   classified, then ONE conditional write (`advance`, or the attempt stamp) and
- *   the PATCH;
- * - **apply**: lock, `pace()`, the member is read and classified, then the claim
- *   (which carries the attempt time), the re-check of the event (invariant 5)
- *   and the PATCH.
+ * - the per-member lock, then the SLOT: one shared serial queue that runs the
+ *   work from the fresh read through the PATCH as one job and keeps `paceMs`
+ *   between one job's end and the next job's start. Spacing is in front of the
+ *   read, never after it, and two jobs can never be in their read-to-PATCH part
+ *   at the same time, so PATCHes cannot burst;
+ * - inside the slot: **restore** stamps the attempt (unresolved), reads,
+ *   classifies, PATCHes; **retarget** re-reads the event ("still wanted?", the
+ *   wait can be long), reads the member, classifies, makes ONE conditional write
+ *   (`advance`, or the attempt stamp) and PATCHes; **apply** reads, classifies,
+ *   claims (the claim carries the attempt time), re-checks the event
+ *   (invariant 5) and PATCHes;
+ * - the PATCH itself cannot wait either: the nickname REST client is FAIL-FAST
+ *   (`createFailFastRest`: no retries, and any rate-limit wait is rejected, never
+ *   slept), and the call gets one attempt. A rate-limit rejection means "not
+ *   sent": the stamp goes back to settled, the row stays, and a later pass starts
+ *   again from a fresh read.
  *
  * What remains between a read and its PATCH is bounded database round trips
  * (milliseconds, no queue), and Discord has no conditional nickname edit, so a
  * change made inside that window cannot be told apart from one made just after
  * the PATCH; it is the same window every bot has and is accepted. A change made
- * while the work was QUEUED can no longer be overwritten.
+ * while the work was QUEUED or rate-limited can no longer be overwritten.
  *
  * ### When an attempt is recorded
  *
@@ -137,7 +142,10 @@
  *    kept). Rate limit, timeout or anything unknown: keep the row, retry later.
  * 9. **Member data in memory.** The skipped-member report and the sweep
  *    cooldown are keyed by user id; a member data reset clears them
- *    (`forgetMemberInMemory`), and so does an unassignment.
+ *    (`forgetMemberInMemory`), and so does an unassignment. That state is only
+ *    ever written inside `syncMember`'s member lock (from fresh reads), never
+ *    from a sweep snapshot: a reset that finishes between a snapshot and a
+ *    write could otherwise leave an entry for an erased member.
  *
  * Edits are paced through one queue (`NICKNAME_PACE_MS` apart) and go through
  * `CommandManager.makeDiscordApiCall`. Fetching one member by id is a REST
@@ -159,7 +167,10 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { waitForClientReady } from "../utils/discord.js";
-import { cancellableCall, createWriteRest } from "../web/channel-write-rest.js";
+import {
+  cancellableCall,
+  createFailFastRest,
+} from "../web/channel-write-rest.js";
 import { ConfigService } from "./config-service.js";
 import { NICKNAME_MAX } from "./event-groups.js";
 import { onGroupAssignmentChange } from "./event-group-assignment.js";
@@ -284,7 +295,18 @@ function discordErrorCode(err: unknown): number | undefined {
   return undefined;
 }
 
-type FailureKind = "gone" | "permission" | "transient";
+type FailureKind = "gone" | "permission" | "not-sent" | "transient";
+
+/** A rate-limit rejection (fail-fast client): the request was never sent. */
+function isRateLimitRejection(err: unknown): boolean {
+  let e: unknown = err;
+  for (let i = 0; i < 3 && e && typeof e === "object"; i++) {
+    const o = e as { name?: unknown; status?: unknown };
+    if (o.name === "RateLimitError" || o.status === 429) return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 export function classifyDiscordFailure(err: unknown): FailureKind {
   const code = discordErrorCode(err);
@@ -294,6 +316,7 @@ export function classifyDiscordFailure(err: unknown): FailureKind {
   if (code === DISCORD_MISSING_PERMISSIONS || code === DISCORD_MISSING_ACCESS) {
     return "permission";
   }
+  if (isRateLimitRejection(err)) return "not-sent";
   return "transient";
 }
 
@@ -542,7 +565,7 @@ export function createClientDiscord(client: Client): TagDiscord {
   const rest = (): REST => {
     if (!writeRest) {
       if (!client.token) throw new Error("The bot is not logged in");
-      writeRest = createWriteRest(client.token);
+      writeRest = createFailFastRest(client.token);
     }
     return writeRest;
   };
@@ -601,6 +624,8 @@ export function createClientDiscord(client: Client): TagDiscord {
           }),
         "set nickname for tags",
         false,
+        // One attempt: a rate limit is rejected, never slept on or retried here.
+        1,
       )) as { nick?: string | null } | undefined;
       return updated?.nick ?? nickname;
     },
@@ -667,7 +692,8 @@ export class EventNicknameTags {
   private readonly eventsEnabledFn: () => Promise<boolean>;
   private readonly paceMs: number;
   private readonly now: () => number;
-  private paceChain: Promise<void> = Promise.resolve();
+  private slotChain: Promise<unknown> = Promise.resolve();
+  private lastSlotEnd = 0;
   private readonly retryMs: number;
   /** The member the restore-only worker stopped at (rotating batches). */
   private restoreCursor = "";
@@ -831,12 +857,28 @@ export class EventNicknameTags {
 
   // ---- pacing -------------------------------------------------------
 
-  /** All nickname edits queue here, `paceMs` apart. */
-  private pace(): Promise<void> {
-    if (this.paceMs <= 0) return Promise.resolve();
-    const next = this.paceChain.then(() => sleep(this.paceMs));
-    this.paceChain = next.catch(() => undefined);
-    return next;
+  /**
+   * The SLOT: one shared serial queue for the work from a fresh nickname read
+   * through its PATCH. A job starts `paceMs` after the previous one ended (the
+   * wait is in front of the read), and jobs never overlap, so PATCHes cannot
+   * burst. `work` must not call `slot` again.
+   */
+  private slot<T>(work: () => Promise<T>): Promise<T> {
+    const job = this.slotChain
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.paceMs > 0) {
+          const wait = this.lastSlotEnd + this.paceMs - Date.now();
+          if (wait > 0) await sleep(wait);
+        }
+        try {
+          return await work();
+        } finally {
+          this.lastSlotEnd = Date.now();
+        }
+      });
+    this.slotChain = job.catch(() => undefined);
+    return job;
   }
 
   // ---- the decision -------------------------------------------------
@@ -915,14 +957,28 @@ export class EventNicknameTags {
     want: WantedTag,
     desired: string,
   ): Promise<MemberOutcome> {
-    const { guildId, eventId, userId } = opts;
     // An earlier edit may still be in flight: nothing is decided until it has
     // settled (otherwise a late PATCH could land after this decision).
     if (this.settling(row)) return "kept";
     // Queue FIRST, read after: the wait can be long, so a change the member
     // makes meanwhile is seen by the read below, and "is this tag still wanted"
     // is decided again from a fresh read of the event.
-    await this.pace();
+    return this.slot(() => this.retargetSegment(opts, row, want, desired));
+  }
+
+  /** Runs inside the slot: fresh reads through the PATCH. */
+  private async retargetSegment(
+    opts: {
+      guildId: string;
+      eventId: string;
+      userId: string;
+      admission?: number;
+    },
+    row: BackupRow,
+    want: WantedTag,
+    desired: string,
+  ): Promise<MemberOutcome> {
+    const { guildId, eventId, userId } = opts;
     const now = await this.wantsNow(guildId, eventId, userId);
     if (!now || buildTaggedName(row.base, now.tag, now.suffix) !== desired) {
       return "none"; // the next pass decides again
@@ -1005,7 +1061,7 @@ export class EventNicknameTags {
     want: WantedTag,
     known: MemberView | null,
   ): Promise<MemberOutcome> {
-    const { guildId, eventId, userId } = opts;
+    const { guildId, eventId } = opts;
     const can = await this.discord.canManageNicknames(guildId);
     if (can === false) {
       this.report(eventId).warnings.add(MANAGE_NICKNAMES_WARNING);
@@ -1013,12 +1069,28 @@ export class EventNicknameTags {
     }
     if (can === true)
       this.report(eventId).warnings.delete(MANAGE_NICKNAMES_WARNING);
+    // Queue FIRST, read after: a change made while waiting is seen. A member
+    // handed in by `retargetSegment` was read a moment ago inside the slot.
+    if (known) return this.applySegment(opts, want, known);
+    return this.slot(() => this.applySegment(opts, want, null));
+  }
+
+  /** Runs inside the slot: fresh read through the PATCH. */
+  private async applySegment(
+    opts: {
+      guildId: string;
+      eventId: string;
+      userId: string;
+      admission?: number;
+    },
+    want: WantedTag,
+    known: MemberView | null,
+  ): Promise<MemberOutcome> {
+    const { guildId, eventId, userId } = opts;
     let member: MemberView | "gone";
     if (known) {
       member = known;
     } else {
-      // Queue FIRST, read after: a change made while waiting is seen.
-      await this.pace();
       try {
         member = await this.discord.fetchMember(guildId, userId);
       } catch (err) {
@@ -1140,6 +1212,12 @@ export class EventNicknameTags {
       await this.store.drop(guildId, row);
       return "dropped";
     }
+    if (kind === "not-sent") {
+      // Rate-limited: the request never left. The attempt counts as settled
+      // again and the row stays; a later pass starts from a fresh read.
+      await this.store.markAttempt(guildId, row, 0);
+      return this.keepAfterFailure(eventId, userId, err, "send the nickname");
+    }
     if (kind === "permission") {
       // Discord refused outright: nothing changed by this edit.
       if (nothingApplied) await this.store.drop(guildId, row);
@@ -1176,7 +1254,6 @@ export class EventNicknameTags {
     row: BackupRow,
     eventId: string,
   ): Promise<MemberOutcome> {
-    const userId = row.memberId;
     // An unconfirmed edit may still land: resolve it by a read after it settled.
     if (this.settling(row)) return "kept";
     const can = await this.discord.canManageNicknames(guildId);
@@ -1192,7 +1269,16 @@ export class EventNicknameTags {
     // and the PATCH follow each other with nothing queued in between. If the
     // PATCH response is lost the row must not keep claiming the old tag is
     // confirmed.
-    await this.pace();
+    return this.slot(() => this.restoreSegment(guildId, row, eventId));
+  }
+
+  /** Runs inside the slot: stamp, fresh read, classify, PATCH. */
+  private async restoreSegment(
+    guildId: string,
+    row: BackupRow,
+    eventId: string,
+  ): Promise<MemberOutcome> {
+    const userId = row.memberId;
     const sent = await this.stampDispatch(guildId, row);
     if (!sent) return "kept";
     let member: MemberView | "gone";
@@ -1223,6 +1309,11 @@ export class EventNicknameTags {
       if (kind === "gone") {
         await this.store.drop(guildId, sent);
         return "dropped";
+      }
+      if (kind === "not-sent") {
+        // Rate-limited: the PATCH never left; a later pass reads again.
+        await this.store.markAttempt(guildId, sent, 0);
+        return this.keepAfterFailure(eventId, userId, err, "send the restore");
       }
       if (kind === "permission") {
         // Refused outright: this PATCH is known not to be in flight, and the
@@ -1392,8 +1483,33 @@ export class EventNicknameTags {
     for (const [eventId, r] of this.reports) {
       if (!owing.has(eventId)) r.warnings.delete(RESTORE_PERMISSION_WARNING);
     }
+    // The permission is checked once per pass, whether or not anyone needs an
+    // edit: a revoked Manage Nicknames must reach the host panel of every
+    // running tagged event (and of every event that owes a restore), and the
+    // warning clears when it is back.
+    if (backups.length > 0 || (eventsOn && events.length > 0)) {
+      const can = await this.discord.canManageNicknames(guildId);
+      if (can !== null) {
+        if (eventsOn) {
+          for (const ev of events) {
+            const w = this.report(String(ev._id)).warnings;
+            if (can) w.delete(MANAGE_NICKNAMES_WARNING);
+            else w.add(MANAGE_NICKNAMES_WARNING);
+          }
+        }
+        for (const eventId of owing) {
+          const w = this.report(eventId).warnings;
+          if (can) w.delete(RESTORE_PERMISSION_WARNING);
+          else w.add(RESTORE_PERMISSION_WARNING);
+        }
+      }
+    }
     // member to the event and whether the job TAGS (and so honours the cooldown)
     const jobs = new Map<string, { eventId: string; applying: boolean }>();
+    // Members whose tag waits for another event's restore: explained on the host
+    // panel by `syncMember` (under the member lock, from fresh reads), never by
+    // a write from this snapshot.
+    const waiting: Array<{ userId: string; eventId: string }> = [];
 
     for (const b of backups) {
       const ev = eventById.get(b.eventId);
@@ -1422,8 +1538,8 @@ export class EventNicknameTags {
           for (const m of g.memberIds ?? []) {
             const held = backupOf.get(m);
             if (held && held.eventId !== eventId) {
-              // Another event's tag: explain on the host panel (no cooldown).
-              this.skip(eventId, m, WAITING_REASON, false);
+              // Another event's tag: explained through `syncMember` below.
+              waiting.push({ userId: m, eventId });
               continue;
             }
             if (!jobs.has(m) && !held) {
@@ -1461,6 +1577,21 @@ export class EventNicknameTags {
       } catch (err) {
         logger.error(
           `Event tags: sweep of ${sanitizeForLog(userId)} (event ${sanitizeForLog(job.eventId)}) failed:`,
+          err,
+        );
+      }
+    }
+    for (const w of waiting) {
+      try {
+        await this.syncMember({
+          guildId,
+          eventId: w.eventId,
+          userId: w.userId,
+          admission: TrackingOptOutService.getInstance().admission(),
+        });
+      } catch (err) {
+        logger.error(
+          `Event tags: sweep of ${sanitizeForLog(w.userId)} (event ${sanitizeForLog(w.eventId)}) failed:`,
           err,
         );
       }

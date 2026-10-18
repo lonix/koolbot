@@ -62,6 +62,27 @@ export function createWriteRest(
   }).setToken(token);
 }
 
+/**
+ * A REST client whose requests can never WAIT: no retries, and every
+ * rate-limit wait, long or short, is rejected (`RateLimitError`) instead of
+ * slept on. For a write whose decision was taken from a fresh read a moment
+ * ago (a member's nickname): a request that sat in a rate-limit queue could be
+ * applied seconds later over a change made meanwhile. `makeRequest` is only for
+ * tests.
+ */
+export function createFailFastRest(
+  token: string,
+  makeRequest?: RESTOptions["makeRequest"],
+): REST {
+  return new REST({
+    version: "10",
+    retries: 0,
+    timeout: WRITE_TIMEOUT_MS,
+    rejectOnRateLimit: () => true,
+    ...(makeRequest ? { makeRequest } : {}),
+  }).setToken(token);
+}
+
 /** The admin-facing message for a write Discord is rate limiting. */
 export function rateLimitMessage(waitMs: number): string {
   const minutes = Math.ceil(waitMs / 60_000);
@@ -108,6 +129,8 @@ export async function cancellableCall<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   opName: string,
   retryOnTimeout: boolean,
+  /** Attempts `makeDiscordApiCall` may make (rate-limit retries ignore `retryOnTimeout`). */
+  attempts = 3,
 ): Promise<T> {
   let current: AbortController | null = null;
   try {
@@ -119,7 +142,7 @@ export async function cancellableCall<T>(
       },
       opName,
       WRITE_TIMEOUT_MS,
-      3,
+      attempts,
       retryOnTimeout,
     );
   } catch (error) {

@@ -15,6 +15,7 @@ import {
 import { DiscordAPIError, HTTPError, RateLimitError, Routes } from "discord.js";
 import {
   cancellableCall,
+  createFailFastRest,
   createWriteRest,
   describeWriteFailure,
   rateLimitMessage,
@@ -268,5 +269,83 @@ describe("cancellableCall", () => {
     );
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
+  });
+});
+
+describe("createFailFastRest: nothing ever waits", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("rejects even a SHORT rate limit at once, where the write client would sleep on it", async () => {
+    const limited = (): Promise<Response> =>
+      Promise.resolve(
+        json(
+          429,
+          {
+            message: "You are being rate limited.",
+            retry_after: 2,
+            global: false,
+          },
+          { "Retry-After": "2", "X-RateLimit-Scope": "user" },
+        ),
+      );
+    const failFast = jest.fn<Transport>(limited);
+    const error = await createFailFastRest("token", failFast as never)
+      .patch(Routes.guildMember("1", "2"), { body: { nick: "x" } })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RateLimitError);
+    expect(failFast).toHaveBeenCalledTimes(1);
+
+    // The write client accepts a 2 s wait (it is under its 20 s limit): its
+    // promise is still pending until the timer fires.
+    const waits = jest.fn<Transport>(limited);
+    let settled = false;
+    void createWriteRest("token", waits as never)
+      .patch(Routes.guildMember("1", "2"), { body: { nick: "x" } })
+      .then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+  });
+
+  it("does not retry a lost response or a 5xx", async () => {
+    const transport = jest.fn<Transport>(async () => json(502, {}));
+    await expect(
+      createFailFastRest("token", transport as never).patch(
+        Routes.guildMember("1", "2"),
+        { body: { nick: "x" } },
+      ),
+    ).rejects.toThrow();
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cancellableCall: attempts", () => {
+  it("passes the attempt count to makeDiscordApiCall (its rate-limit retries ignore retryOnTimeout)", async () => {
+    const make = jest.fn(
+      async (...args: [() => Promise<unknown>, ...unknown[]]) => args[0](),
+    );
+    await cancellableCall(
+      { makeDiscordApiCall: make } as never,
+      async () => "ok",
+      "op",
+      false,
+      1,
+    );
+    expect(make.mock.calls[0]?.[3]).toBe(1);
+    expect(make.mock.calls[0]?.[4]).toBe(false);
+    await cancellableCall(
+      { makeDiscordApiCall: make } as never,
+      async () => "ok",
+      "op",
+      true,
+    );
+    expect(make.mock.calls[1]?.[3]).toBe(3);
   });
 });

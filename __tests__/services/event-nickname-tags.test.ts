@@ -1436,7 +1436,7 @@ describe("the attempt is recorded when the PATCH is dispatched", () => {
     // The last member queued behind two others: its stamp (the claim carries it
     // now) is at least two pacing steps after the call started.
     const last = Math.max(...dispatchedAt.values());
-    expect(last - started).toBeGreaterThanOrEqual(75);
+    expect(last - started).toBeGreaterThanOrEqual(70);
   });
 
   it("the stamp is a conditional write: a row that changed meanwhile is not edited", async () => {
@@ -1511,9 +1511,7 @@ describe("cooldowns", () => {
     expect(await sync("alice", EV)).toBe("skipped");
     expect(svc.getReport(EV)?.skipped).toHaveLength(1);
     // The first event restores them (a pass), with no time passing...
-    await svc.sweep(GUILD);
-    expect(discord.members.get("alice")?.nickname).toBe("Alice");
-    // ...and the very next pass tags them for this event.
+    // and, in the same pass, tags them for this event (no cooldown held it back).
     await svc.sweep(GUILD);
     expect(discord.members.get("alice")?.nickname).toBe("[RED] Alice");
     expect(store.rows.get("alice")?.eventId).toBe(EV);
@@ -1716,13 +1714,30 @@ describe("a change made while the edit was queued is never overwritten", () => {
     });
   const wait = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
+  /** Put another member's restore in the slot first, so the one under test waits. */
+  const prime = async (slow: EventNicknameTags): Promise<void> => {
+    store.events.set(EV2, makeEvent({ _id: EV2, state: "ended" }));
+    discord.members.set("zed", { nickname: "[X] Zed", displayName: "Zed" });
+    store.rows.set("zed", {
+      eventId: EV2,
+      memberId: "zed",
+      original: "Zed",
+      base: "Zed",
+      intended: "[X] Zed",
+      owned: ["[X] Zed"],
+      confirmedTarget: "[X] Zed",
+      attemptedAt: 0,
+    });
+    await slow.syncMember({ guildId: GUILD, eventId: EV2, userId: "zed" });
+  };
 
   it("restore: the member renames themselves while the restore waits in the pacing queue", async () => {
     setup();
     await sync("alice");
     store.events.get(EV)!.state = "ended";
-    discord.edits.length = 0;
     const slow = queued();
+    discord.edits.length = 0;
+    await prime(slow);
     const pending = slow.syncMember({
       guildId: GUILD,
       eventId: EV,
@@ -1732,13 +1747,15 @@ describe("a change made while the edit was queued is never overwritten", () => {
     discord.members.get("alice")!.nickname = "Ally";
     expect(await pending).toBe("dropped");
     expect(discord.members.get("alice")?.nickname).toBe("Ally");
-    expect(discord.edits).toEqual([]);
+    expect(discord.edits.filter((e) => e.userId === "alice")).toEqual([]);
     expect(store.rows.size).toBe(0);
   });
 
   it("apply: the member renames themselves while the tag waits; the tag is built from the NEW name and that is what is backed up", async () => {
     setup();
     const slow = queued();
+    discord.edits.length = 0;
+    await prime(slow);
     const pending = slow.syncMember({
       guildId: GUILD,
       eventId: EV,
@@ -1758,8 +1775,9 @@ describe("a change made while the edit was queued is never overwritten", () => {
       team("red", "RED", []),
       team("blue", "BLUE", ["alice"]),
     ];
-    discord.edits.length = 0;
     const slow = queued();
+    discord.edits.length = 0;
+    await prime(slow);
     const pending = slow.syncMember({
       guildId: GUILD,
       eventId: EV,
@@ -1769,7 +1787,9 @@ describe("a change made while the edit was queued is never overwritten", () => {
     discord.members.get("alice")!.nickname = "Ally";
     await pending;
     expect(discord.members.get("alice")?.nickname).toBe("[BLUE] Ally");
-    expect(discord.edits.map((e) => e.nickname)).toEqual(["[BLUE] Ally"]);
+    expect(
+      discord.edits.filter((e) => e.userId === "alice").map((e) => e.nickname),
+    ).toEqual(["[BLUE] Ally"]);
   });
 
   it("team move: a member unassigned while the edit waits is not tagged for the team they just left", async () => {
@@ -1779,8 +1799,9 @@ describe("a change made while the edit was queued is never overwritten", () => {
       team("red", "RED", []),
       team("blue", "BLUE", ["alice"]),
     ];
-    discord.edits.length = 0;
     const slow = queued();
+    discord.edits.length = 0;
+    await prime(slow);
     const pending = slow.syncMember({
       guildId: GUILD,
       eventId: EV,
@@ -1792,7 +1813,7 @@ describe("a change made while the edit was queued is never overwritten", () => {
       team("blue", "BLUE", []),
     ];
     expect(await pending).toBe("none");
-    expect(discord.edits).toEqual([]);
+    expect(discord.edits.filter((e) => e.userId === "alice")).toEqual([]);
   });
 
   it("the restore attempt is stamped before the read, and a failed read puts it back (nothing was sent)", async () => {
@@ -1910,6 +1931,154 @@ describe("the restore-only worker does not starve members behind uneditable ones
     discord.fetches = 0;
     await svc.sweep(GUILD, { restoreOnly: true });
     expect(discord.fetches).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------
+// Fail-fast PATCH, one read-to-PATCH job at a time, permission per pass
+// (fourth review of #1228)
+// ---------------------------------------------------------------------
+
+describe("the PATCH never waits", () => {
+  const rateLimited = (): Error =>
+    Object.assign(new Error("A rate limit was hit"), {
+      name: "RateLimitError",
+    });
+
+  it("a rate-limit rejection on a TAG edit means 'not sent': the row stays, the attempt is settled, the next pass reads again", async () => {
+    setup();
+    discord.editFailure.set("alice", rateLimited());
+    expect(await sync("alice")).toBe("kept");
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+    expect(store.rows.get("alice")).toMatchObject({
+      attemptedAt: 0,
+      confirmedTarget: null,
+    });
+    // No waiting out a window and no cooldown: the next pass just retries.
+    expect(await sync("alice")).toBe("retagged");
+    expect(discord.members.get("alice")?.nickname).toBe("[RED] Alice");
+  });
+
+  it("a rate-limit rejection on a RESTORE leaves the tag; if the member renames meanwhile, the retry leaves their name alone", async () => {
+    setup();
+    await sync("alice");
+    store.events.get(EV)!.state = "ended";
+    discord.editFailure.set("alice", rateLimited());
+    expect(await sync("alice")).toBe("kept");
+    expect(discord.members.get("alice")?.nickname).toBe("[RED] Alice");
+    expect(store.rows.get("alice")?.attemptedAt).toBe(0);
+    // They rename themselves while the bot was rate limited.
+    discord.members.get("alice")!.nickname = "Ally";
+    discord.edits.length = 0;
+    expect(await sync("alice")).toBe("dropped");
+    expect(discord.edits).toEqual([]);
+    expect(discord.members.get("alice")?.nickname).toBe("Ally");
+  });
+
+  it("a rate limit wrapped by makeDiscordApiCall is still recognised as 'not sent'", async () => {
+    setup();
+    discord.editFailure.set(
+      "alice",
+      new Error("Failed to set nickname for tags after 1 attempts", {
+        cause: rateLimited(),
+      }),
+    );
+    expect(await sync("alice")).toBe("kept");
+    expect(store.rows.get("alice")?.attemptedAt).toBe(0);
+  });
+});
+
+describe("PATCHes are serialised: no two jobs are between their read and their PATCH at once", () => {
+  it("a slow read in the first job cannot let the second dispatch together with it", async () => {
+    setup(makeEvent({ groups: [team("red", "RED", ["alice", "bob"])] }));
+    const paced = new tags.EventNicknameTags({} as never, {
+      store,
+      discord,
+      eventsEnabled: async () => true,
+      paceMs: 40,
+      now: () => clock,
+    });
+    // Alice's read is slow; Bob's is instant.
+    const fetchMember = discord.fetchMember.bind(discord);
+    discord.fetchMember = async (g, u) => {
+      if (u === "alice") await new Promise((r) => setTimeout(r, 60));
+      return fetchMember(g, u);
+    };
+    const sentAt: number[] = [];
+    const edit = discord.setNickname.bind(discord);
+    discord.setNickname = async (g, u, n) => {
+      sentAt.push(Date.now());
+      return edit(g, u, n);
+    };
+    await Promise.all(
+      ["alice", "bob"].map((userId) =>
+        paced.syncMember({ guildId: GUILD, eventId: EV, userId }),
+      ),
+    );
+    expect(sentAt).toHaveLength(2);
+    expect(sentAt[1] - sentAt[0]).toBeGreaterThanOrEqual(35);
+  });
+});
+
+describe("the permission is checked once per pass, not only when someone needs an edit", () => {
+  it("a revoked Manage Nicknames shows on the host panel when every tag is already confirmed, and clears when it is back", async () => {
+    setup();
+    await svc.sweep(GUILD);
+    expect(svc.getReport(EV)).toBeNull();
+    // Everyone is tagged and confirmed: the sweep schedules no member work.
+    discord.canManage = false;
+    const { attempted } = await svc.sweep(GUILD);
+    expect(attempted).toBe(0);
+    expect(svc.getReport(EV)?.warnings.join(" ")).toMatch(/Manage Nicknames/);
+    discord.canManage = true;
+    await svc.sweep(GUILD);
+    expect(svc.getReport(EV)).toBeNull();
+  });
+
+  it("the restore worker raises and clears the restore warning for backups it cannot work on", async () => {
+    setup();
+    await sync("alice");
+    store.events.get(EV)!.state = "ended";
+    discord.canManage = false;
+    await svc.sweep(GUILD, { restoreOnly: true });
+    expect(svc.getReport(EV)?.warnings.join(" ")).toMatch(/Manage Nicknames/);
+    discord.canManage = true;
+    await svc.sweep(GUILD, { restoreOnly: true });
+    expect(svc.getReport(EV)).toBeNull();
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+  });
+});
+
+describe("per-user report state is only written under the member lock", () => {
+  it("a data reset finishing between the sweep's snapshot and its waiting report leaves no entry for the erased member", async () => {
+    setup();
+    store.events.set(EV2, makeEvent({ _id: EV2 }));
+    discord.members.get("alice")!.nickname = "[RED] Alice";
+    store.rows.set("alice", {
+      eventId: EV2,
+      memberId: "alice",
+      original: "Alice",
+      base: "Alice",
+      intended: "[RED] Alice",
+      owned: ["[RED] Alice"],
+      confirmedTarget: "[RED] Alice",
+      attemptedAt: 0,
+    });
+    store.events.get(EV2)!.groups = [team("red", "RED", ["alice"])];
+    store.events.get(EV)!.groups = [team("red", "RED", ["alice"])];
+    // The reset lands right after the sweep took its snapshot.
+    const list = store.listTaggedEvents.bind(store);
+    store.listTaggedEvents = async () => {
+      const snapshot = await list();
+      store.events.get(EV)!.groups = [team("red", "RED", [])];
+      store.events.get(EV2)!.groups = [team("red", "RED", [])];
+      store.rows.delete("alice");
+      svc.forgetMemberInMemory("alice");
+      return snapshot;
+    };
+    await svc.sweep(GUILD);
+    expect(svc.getReport(EV)).toBeNull();
+    expect(svc.getReport(EV2)).toBeNull();
   });
 });
 

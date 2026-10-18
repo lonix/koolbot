@@ -1527,7 +1527,11 @@ Members cannot opt out. Nothing is a command: the host only ticks the box.
   600 ms apart, so a team of forty takes about half a minute. The wait comes BEFORE the bot
   reads the member's nickname, never between that read and the edit, so a nickname the member
   changes while the edit is waiting is seen and left alone (restore) or tagged from the new
-  name (apply).
+  name (apply). The edit itself never waits either: if Discord rate-limits it, it is rejected
+  and the whole decision is taken again from a fresh read on the next pass. One edit runs at a
+  time, so a team cannot burst into Discord's limits. Once per pass the bot also checks that it
+  still has Manage Nicknames, so a permission revoked mid-event shows on the host panel even
+  when nobody needed an edit.
 - **Member data:** the backup is the member's own data (`event-nickname-backup` in the
   member data export and reset). A reset restores the nickname first, then deletes the backup;
   if Discord refuses, the backup is deleted anyway and the reset reports that a tag may

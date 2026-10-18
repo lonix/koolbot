@@ -28,7 +28,7 @@ jest.unstable_mockModule(
 );
 
 const patch = jest.fn<(route: string, options: unknown) => Promise<unknown>>();
-const createWriteRest = jest.fn((...args: [string]) => ({
+const createFailFastRest = jest.fn((...args: [string]) => ({
   patch,
   token: args[0],
 }));
@@ -39,11 +39,12 @@ const cancellableCall = jest.fn(
       (signal: AbortSignal) => Promise<unknown>,
       string,
       boolean,
+      number,
     ]
   ) => args[1](new AbortController().signal),
 );
 jest.unstable_mockModule("../../src/web/channel-write-rest.js", () => ({
-  createWriteRest,
+  createFailFastRest,
   cancellableCall,
 }));
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
@@ -55,7 +56,7 @@ const { createClientDiscord } =
 
 beforeEach(() => {
   patch.mockReset();
-  createWriteRest.mockClear();
+  createFailFastRest.mockClear();
   cancellableCall.mockClear();
 });
 
@@ -72,7 +73,7 @@ describe("setNickname", () => {
     const shown = await discord.setNickname("g1", "u1", "[RED] Alice");
 
     expect(shown).toBe("[RED]  Alice");
-    expect(createWriteRest).toHaveBeenCalledWith("t0ken");
+    expect(createFailFastRest).toHaveBeenCalledWith("t0ken");
     const [route, options] = patch.mock.calls[0] as [
       string,
       { body: { nick: string }; reason: string; signal: AbortSignal },
@@ -83,6 +84,8 @@ describe("setNickname", () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
     // retryOnTimeout is false: a second request must not start behind the first.
     expect(cancellableCall.mock.calls[0]?.[3]).toBe(false);
+    // ...and makes ONE attempt: makeDiscordApiCall's rate-limit retries ignore the flag above.
+    expect(cancellableCall.mock.calls[0]?.[4]).toBe(1);
   });
 
   it("clears the nickname with null (the restore of 'no nickname')", async () => {
