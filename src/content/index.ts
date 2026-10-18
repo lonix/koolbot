@@ -5,3 +5,4 @@ export * from "./achievements.js";
 export * from "./bot-features.js";
 export * from "./reaction-role-groups.js";
 export * from "./known-bots.js";
+export * from "./event-group-presets.js";

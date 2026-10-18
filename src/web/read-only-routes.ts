@@ -258,6 +258,8 @@ export const EVENTS_SETTING_KEYS = [
   "events.reminder_minutes",
   "events.recurrence_enabled",
   "events.native.location",
+  "events.groups.default_count",
+  "events.groups.max_count",
 ] as const;
 
 /**
@@ -1310,6 +1312,8 @@ export function createReadOnlyRouter(
         tz,
         events,
         eventSettings,
+        groupDefaultCount,
+        groupMaxCount,
       ] = await Promise.all([
         config.getBoolean("events.enabled", false),
         config.getString("events.category_id", ""),
@@ -1318,6 +1322,8 @@ export function createReadOnlyRouter(
         service.listEvents(common.guildId),
         // Editable `events.*` settings card (#975).
         loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
+        config.getNumber("events.groups.default_count", 2),
+        config.getNumber("events.groups.max_count", 15),
       ]);
 
       // "Expected to show up": who marked Interested on the native event, read
@@ -1372,6 +1378,7 @@ export function createReadOnlyRouter(
             (e.state === "ended" || e.state === "cancelled") &&
             !e.nextSpawned &&
             !e.seriesCancelled,
+          groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
           cover: e.nativeAdopted
             ? ({ kind: "adopted" } as const)
             : coverIneligibleReason(e)
@@ -1403,6 +1410,10 @@ export function createReadOnlyRouter(
           settingsPickers: eventSettings.pickers,
           dependencyState: eventSettings.dependencyState,
           settingsUnavailable: eventSettings.unavailable,
+          groupLimits: {
+            defaultCount: groupDefaultCount,
+            maxCount: groupMaxCount,
+          },
           flash: readFlash(req),
         }),
       );

@@ -24,6 +24,21 @@ import {
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import { COVER_MAX_BYTES } from "../services/event-cover.js";
+import {
+  CHANNEL_LEAD_MAX,
+  CHANNEL_LEAD_MIN,
+  DEFAULT_GROUP_LABEL,
+  DEFAULT_LEADER_LABEL,
+  GROUP_FORM_FIELDS,
+  GROUP_LABEL_MAX,
+  GROUP_MARKER_MAX_CHARS,
+  GROUP_NAME_MAX,
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
+  GROUP_TAG_MAX,
+  resolveGroupCountLimits,
+} from "../services/event-groups.js";
+import { EVENT_GROUP_PRESETS } from "../content/event-group-presets.js";
 import { THEME } from "./theme.js";
 import {
   MAX_GROUP_ENTRIES,
@@ -2023,6 +2038,8 @@ export interface EventRow {
   /** Finished occurrence whose successor hasn't been created yet, so the
    * series is still live and can be cancelled from this row. */
   awaitingSuccessor?: boolean;
+  /** Number of groups when the event has a group setup (#1188), else absent. */
+  groupCount?: number;
   /**
    * Cover image control (#1181). `editable`: can be set, replaced or removed
    * (`series` when it applies to a whole recurring series); `adopted`: the
@@ -2060,6 +2077,8 @@ export interface EventsProps extends CommonProps {
    * notice instead of controls pre-filled with schema defaults.
    */
   settingsUnavailable?: boolean;
+  /** Group rows the form offers and the cap (#1188); defaults 2 and 15. */
+  groupLimits?: { defaultCount: number; maxCount: number };
   flash?: FlashMessage | null;
 }
 
@@ -2430,7 +2449,194 @@ function renderCoverCell(
   ${remove}`;
 }
 
+// ---------- Event groups form section (#1188) ----------
+
+const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
+  ["team", "Team (members belong to it)"],
+  ["open", "Open (anyone can join, e.g. spectators)"],
+  ["leads", "Leads (leaders and host only, at most one)"],
+];
+
+/**
+ * One group row. `index` and `position` are numbers for a rendered row and the
+ * `__N__` / `__P__` placeholders for the template the script clones.
+ */
+function renderGroupRow(
+  index: string,
+  position: string,
+  group?: { name: string },
+): string {
+  const field = (f: string): string => `group_${index}_${f}`;
+  const kinds = GROUP_KIND_OPTIONS.map(
+    ([value, label]) =>
+      `<option value="${value}">${escapeHtml(label)}</option>`,
+  ).join("");
+  return `<fieldset data-group-row>
+        <legend>Group ${position}</legend>
+        <label>Group ${position} name
+          <input type="text" name="${field("name")}" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
+        </label>
+        <label>Group ${position} kind
+          <select name="${field("kind")}">${kinds}</select>
+        </label>
+        <label>Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)
+          <input type="number" name="${field("size")}" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}">
+        </label>
+        <label>Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)
+          <input type="text" name="${field("tag")}" maxlength="${GROUP_TAG_MAX}">
+        </label>
+        <label>Group ${position} marker (optional, e.g. a coloured circle)
+          <input type="text" name="${field("marker")}" maxlength="${GROUP_MARKER_MAX_CHARS * 2}">
+        </label>
+      </fieldset>`;
+}
+
+function renderGroupsSection(limits: {
+  defaultCount: number;
+  maxCount: number;
+}): string {
+  const presetOptions = EVENT_GROUP_PRESETS.map((preset) => {
+    const groups = JSON.stringify(
+      preset.groups.map((g) => ({
+        name: g.name,
+        kind: g.kind,
+        size: g.size,
+        tag: g.tag,
+        marker: g.marker,
+      })),
+    );
+    // A preset bigger than the cap cannot be applied whole, so it is not offered
+    // (the server refuses it too).
+    const tooBig = preset.groups.length > limits.maxCount;
+    const note = tooBig
+      ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
+      : "";
+    return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}" data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
+  }).join("");
+  const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
+    renderGroupRow(String(i), String(i + 1)),
+  ).join("\n      ");
+  return `<fieldset data-groups-section>
+      <legend>Groups (optional)</legend>
+      <p class="muted">Split the event into groups, such as teams, squads or breakout rooms. The setup is saved with the event. Voice channels for the groups are not created yet; that comes in a later update. Leave this off for a plain event.</p>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.enabled}" value="1"> Use groups for this event</label>
+      <label>Preset
+        <select name="${GROUP_FORM_FIELDS.preset}">
+          <option value="">Custom: any number of groups and names</option>
+          ${presetOptions}
+        </select>
+      </label>
+      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups.</p>
+      <label>What a group is called (e.g. Team, Squad, Room, Party)
+        <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}">
+      </label>
+      <label>What a leader is called (e.g. Leader, Captain)
+        <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
+      </label>
+      <label>Create channels this many minutes before the start (empty = server default)
+        <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Server default">
+      </label>
+      <div data-group-rows data-max="${limits.maxCount}" class="stack">
+      ${rows}
+      </div>
+      <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
+      <button type="button" class="btn" data-add-group hidden>Add a group</button>
+      <p class="muted">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored.</p>
+      <div class="notice err" role="alert" data-group-errors hidden></div>
+    </fieldset>`;
+}
+
+// Progressive enhancement for the Groups section. Presets fill the rows, "Add a
+// group" clones the template, and the submit is checked in the browser first so
+// a mistake is shown next to the fields without losing the filled-in form. The
+// server repeats every check and stays the source of truth. If the server
+// still refuses, the entered values are kept in sessionStorage (this browser
+// tab only) and put back when the page comes back with the error. Everything
+// storage-related is wrapped in try/catch: it is a convenience only.
+const EVENT_GROUPS_SCRIPT =
+  "(function(){" +
+  "var form=document.querySelector('form[data-event-form]');" +
+  "var box=form&&form.querySelector('[data-group-rows]');" +
+  "var tpl=form&&form.querySelector('template[data-group-row-template]');" +
+  "if(!box||!tpl)return;" +
+  "var add=form.querySelector('[data-add-group]');" +
+  "var errBox=form.querySelector('[data-group-errors]');" +
+  "var preset=form.elements['groups_preset'];" +
+  "var KEY='koolbot-event-form-draft';" +
+  `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
+  "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
+  "function rows(){return box.querySelectorAll('[data-group-row]')}" +
+  "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
+  "function addRow(){var n=rows().length;if(n>=max)return false;" +
+  "var d=document.createElement('div');" +
+  "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
+  "box.appendChild(d.firstElementChild);sync();validity();return true}" +
+  "function sync(){if(add)add.hidden=rows().length>=max}" +
+  "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
+  "sync();" +
+  // While groups are off the section's number fields leave native validation
+  // (the server ignores them then); ticking the box restores min, max and step.
+  "function validity(){var on=form.elements['groups_enabled'].checked;" +
+  "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
+  "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
+  "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
+  "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
+  "form.elements['groups_enabled'].addEventListener('change',validity);" +
+  "validity();" +
+  "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
+  "form.elements['group_'+i+'_name'].value=g.name||'';" +
+  "form.elements['group_'+i+'_kind'].value=g.kind||'team';" +
+  "form.elements['group_'+i+'_size'].value=g.size==null?'':g.size;" +
+  "form.elements['group_'+i+'_tag'].value=g.tag||'';" +
+  "form.elements['group_'+i+'_marker'].value=g.marker||''}" +
+  // Typing in a group row switches groups on, so rows are never silently dropped.
+  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()});" +
+  "if(preset)preset.addEventListener('change',function(){" +
+  "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
+  "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
+  "if(g.length>max){preset.value='';return}" +
+  "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
+  "var n=Math.max(rows().length,g.length);" +
+  "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
+  "form.elements['groups_enabled'].checked=true;validity()});" +
+  "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
+  "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
+  "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
+  "if(!name&&!size&&!tag&&!mk)return;filled++;" +
+  "if(!name)errs.push('Group '+p+' name: a name is required.');" +
+  "else if(name.length>MAXNAME)errs.push('Group '+p+' name: at most '+MAXNAME+' characters.');" +
+  "else{var f=name.toLowerCase();if(seen[f])errs.push('Group '+p+' name: \"'+name+'\" is already used by group '+seen[f]+'.');else seen[f]=p}" +
+  "if(size&&!(/^\\d{1,3}$/.test(size)&&+size>=MINSIZE&&+size<=MAXSIZE))errs.push('Group '+p+' size: a whole number from '+MINSIZE+' to '+MAXSIZE+', or empty.');" +
+  "if(tag.length>MAXTAG)errs.push('Group '+p+' tag: at most '+MAXTAG+' characters.');" +
+  "if(val('group_'+i+'_kind')==='leads'&&++leads>1)errs.push('Group '+p+' kind: only one leads group is allowed.')});" +
+  "if(!filled&&!val('groups_preset'))errs.push('Add at least one group, or switch groups off.');" +
+  "return errs}" +
+  "form.addEventListener('submit',function(e){" +
+  "if(form.elements['groups_enabled'].checked){var errs=check();" +
+  "if(errs.length){e.preventDefault();errBox.textContent='';" +
+  "errs.forEach(function(m){var p=document.createElement('p');p.textContent=m;errBox.appendChild(p)});" +
+  "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
+  "errBox.hidden=true;" +
+  "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
+  "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
+  "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
+  "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
+  "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
+  "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
+  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||el.type==='file')return;" +
+  // A saved choice that is no longer offered (e.g. a preset now over the cap) is not put back.
+  "if(el.tagName==='SELECT'){var ok=false;Array.prototype.forEach.call(el.options,function(o){if(o.value===d[k]&&!o.disabled)ok=true});if(!ok)return}" +
+  "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
+  // Setting `checked` fires no change event, so reapply the number limits by hand.
+  "validity()}}catch(x){}" +
+  "})();";
+
 export function renderEventsPage(props: EventsProps): string {
+  const groupLimits = resolveGroupCountLimits(
+    props.groupLimits?.defaultCount ?? 2,
+    props.groupLimits?.maxCount ?? 15,
+  );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
   const tableRows = props.rows
@@ -2454,6 +2660,10 @@ export function renderEventsPage(props: EventsProps): string {
 <td>${escapeHtml(e.title)}${
         e.recurrence
           ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
+          : ""
+      }${
+        e.groupCount
+          ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span>`
           : ""
       }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
@@ -2531,7 +2741,7 @@ ${renderFeatureSettingsCard({
 </div>
 <div class="card">
   <h2>Schedule a new event</h2>
-  <form method="POST" action="/admin/events/create" class="stack">
+  <form method="POST" action="/admin/events/create" class="stack" data-event-form>
     ${csrfInput}
     <label>Title
       <input type="text" name="title" required maxlength="100" placeholder="Game Night">
@@ -2559,11 +2769,13 @@ ${renderFeatureSettingsCard({
         <option value="monthly">Monthly</option>
       </select>
     </label>
+    ${renderGroupsSection(groupLimits)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
   <p class="muted">A cover image is added to a scheduled event from the Cover image column above; it is shown on the Discord event.</p>
 </div>
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
+${scriptTag(EVENT_GROUPS_SCRIPT)}
 `;
 
   return renderAdminPage({

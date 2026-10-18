@@ -21,6 +21,12 @@ import {
 import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
 import { ConfigService } from "../../../services/config-service.js";
 import {
+  parseGroupForm,
+  resolveGroupCountLimits,
+  validateGroupSetup,
+  type EventGroupSetup,
+} from "../../../services/event-groups.js";
+import {
   COVER_MAX_BYTES,
   removeEventCover,
   setEventCover,
@@ -123,6 +129,30 @@ export function createEventsRouter(client: Client): Router {
         durationMinutes = parsed;
       }
 
+      // Optional Groups section (#1188). Read the cap only when groups are on,
+      // so a plain event takes exactly the path it always did.
+      const groupInput = parseGroupForm(req.body);
+      let groups: EventGroupSetup | undefined;
+      if (groupInput.enabled) {
+        const [defaultCount, configuredMax] = await Promise.all([
+          config.getNumber("events.groups.default_count", 2),
+          config.getNumber("events.groups.max_count", 15),
+        ]);
+        const { maxCount } = resolveGroupCountLimits(
+          defaultCount,
+          configuredMax,
+        );
+        const result = validateGroupSetup(groupInput, { maxCount });
+        if (!result.ok) {
+          flashRedirect(res, "/admin/events", {
+            type: "err",
+            text: `Groups: ${result.errors.join(" ")}`,
+          });
+          return;
+        }
+        groups = result.setup;
+      }
+
       const service = EventService.getInstance(client);
       try {
         const event = await service.createEvent({
@@ -133,6 +163,7 @@ export function createEventsRouter(client: Client): Router {
           timezone: resolveTimezone(timezone),
           durationMinutes,
           recurrence,
+          ...(groups ? { groups } : {}),
           createdBy: session.discordUserId,
         });
         await recordAudit(session, {
@@ -143,6 +174,13 @@ export function createEventsRouter(client: Client): Router {
             startTime: startTime.toISOString(),
             durationMinutes,
             recurrence,
+            ...(groups
+              ? {
+                  groups: groups.groups.length,
+                  groupPreset: groups.presetId,
+                  channelLeadMinutes: groups.channelLeadMinutes,
+                }
+              : {}),
           },
           result: "success",
         });

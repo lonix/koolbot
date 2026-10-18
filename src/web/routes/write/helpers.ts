@@ -384,6 +384,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "events.channel_grace_minutes",
     "events.recurrence_enabled",
     "events.native.location",
+    "events.groups.default_count",
+    "events.groups.max_count",
   ],
   digest: [
     "digest.enabled",
