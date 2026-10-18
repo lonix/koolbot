@@ -31,6 +31,10 @@ const mockCreateEvent = jest.fn<() => Promise<unknown>>();
 const mockCancelEvent = jest.fn<() => Promise<unknown>>();
 const mockStartEventNow = jest.fn<() => Promise<unknown>>();
 const mockCancelSeries = jest.fn<() => Promise<unknown>>();
+const mockEndEventNow =
+  jest.fn<
+    (id: string, guildId: string, o: { pullBack: boolean }) => Promise<unknown>
+  >();
 const mockConfigGetString = jest.fn<() => Promise<string>>();
 const mockConfigGetNumber = jest.fn<() => Promise<number>>();
 
@@ -69,6 +73,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
       cancelEvent: mockCancelEvent,
       cancelSeries: mockCancelSeries,
       startEventNow: mockStartEventNow,
+      endEventNow: mockEndEventNow,
     }),
   },
 }));
@@ -371,6 +376,106 @@ describe("POST /events/:id/cancel and /start-now", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("not found, ended, or cancelled");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      result: "failure",
+    });
+  });
+});
+
+describe("POST /events/:id/end-now (#1193)", () => {
+  const ended = {
+    status: "ended",
+    endedAt: new Date(),
+    event: {},
+    steps: [
+      {
+        id: "group-channels",
+        ok: true,
+        note: "Removed 2 group channel(s).",
+        counts: { removed: 2 },
+      },
+    ],
+  };
+
+  it("does nothing without the confirmation, and audits the refusal", async () => {
+    const res = await harness.post("/events/event-1/end-now", {
+      pullBack: "1",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Tick the box");
+    expect(mockEndEventNow).not.toHaveBeenCalled();
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.end-now",
+      targetId: "event-1",
+      result: "failure",
+      errorMessage: "not confirmed",
+    });
+  });
+
+  it("only the exact value 1 confirms", async () => {
+    for (const confirm of ["on", "true", "0", "yes"]) {
+      await harness.post("/events/event-1/end-now", { confirm });
+    }
+    expect(mockEndEventNow).not.toHaveBeenCalled();
+  });
+
+  it("ends the event for the session's guild with the shared teardown, and audits counts", async () => {
+    mockEndEventNow.mockResolvedValue(ended);
+    const res = await harness.post("/events/event-1/end-now", {
+      confirm: "1",
+      pullBack: "1",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(mockEndEventNow).toHaveBeenCalledWith("event-1", session.guildId, {
+      pullBack: true,
+    });
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toContain("The event has ended.");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.end-now",
+      targetId: "event-1",
+      result: "success",
+      details: { outcome: "ended", pullBack: true, removed: 2 },
+    });
+  });
+
+  it("the pull-back is off unless the box was ticked", async () => {
+    mockEndEventNow.mockResolvedValue(ended);
+    await harness.post("/events/event-1/end-now", { confirm: "1" });
+    expect(mockEndEventNow).toHaveBeenCalledWith("event-1", session.guildId, {
+      pullBack: false,
+    });
+  });
+
+  it("an already ended event is a success with a clear message", async () => {
+    mockEndEventNow.mockResolvedValue({
+      status: "already-ended",
+      endedAt: null,
+    });
+    const res = await harness.post("/events/event-1/end-now", {
+      confirm: "1",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toContain("already ended");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      result: "success",
+    });
+  });
+
+  it.each([
+    [{ status: "not-found" }, "could not be found"],
+    [{ status: "not-running", state: "scheduled" }, "has not started"],
+    [{ status: "refused", message: "Events are turned off." }, "turned off"],
+  ])("reports and audits %j as a failure", async (outcome, text) => {
+    mockEndEventNow.mockResolvedValue(outcome);
+    const res = await harness.post("/events/event-1/end-now", {
+      confirm: "1",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain(text);
     expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
       result: "failure",
     });

@@ -29,6 +29,7 @@ import {
   EventGroupChannels,
   type GroupChannelReport,
 } from "./event-group-channels.js";
+import { EventTeardown, type EndEventOutcome } from "./event-teardown.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -173,6 +174,8 @@ interface LifecycleView {
   reminderSent: boolean;
   /** Per-event channel lead (#1188); absent or null uses the global lead. */
   channelLeadMinutes?: number | null;
+  /** When the event was marked ended (#1193); absent or null: not recorded. */
+  endedAt?: Date | null;
 }
 
 /**
@@ -219,6 +222,17 @@ export function shouldEndEvent(event: LifecycleView, now: Date): boolean {
   );
 }
 
+/**
+ * The instant an event's grace period counts from: when it was marked ended
+ * (`endedAt`, #1193: the press of "End event now", or the scheduled end), else
+ * its scheduled end (a row ended before that field existed).
+ */
+export function effectiveEndTime(event: LifecycleView): Date {
+  return (
+    event.endedAt ?? computeEndTime(event.startTime, event.durationMinutes)
+  );
+}
+
 /** Whether an ended event's empty channel has aged past the grace period. */
 export function shouldCleanupChannel(
   event: LifecycleView,
@@ -229,8 +243,7 @@ export function shouldCleanupChannel(
   if (!event.channelId) return false;
   if (event.state !== "ended") return false;
   if (!channelEmpty) return false;
-  const end = computeEndTime(event.startTime, event.durationMinutes).getTime();
-  return now.getTime() >= end + graceMs;
+  return now.getTime() >= effectiveEndTime(event).getTime() + graceMs;
 }
 
 /** Human-readable start line, e.g. `2026-07-04 20:00 (Europe/London)`. */
@@ -343,6 +356,16 @@ export class EventService extends ScheduledService {
   private readonly groupChannels: EventGroupChannels;
   /** Per event: the failures last logged, so a standing one is logged once. */
   private readonly groupFailuresLogged = new Map<string, string>();
+  /** The one teardown of an ending event (#1193), manual and scheduled. */
+  private readonly teardown: EventTeardown;
+  /**
+   * Events being ended or ended moments ago (id to expiry): the scan skips
+   * them. A scan that loaded an event just before a manual end must not go on
+   * with its older, still-open copy (re-render the post as running, update the
+   * native event as live). In memory: the bot is one process, and a scan after
+   * a restart loads fresh rows.
+   */
+  private readonly endingEvents = new Map<string, number>();
 
   private constructor(client: Client) {
     super(client, {
@@ -361,6 +384,89 @@ export class EventService extends ScheduledService {
           15,
         )) * MS_PER_MINUTE,
     });
+    this.teardown = new EventTeardown({
+      client,
+      updateAnnouncement: (event) => this.updateAnnouncement(event),
+      syncNative: (event, guild) => this.nativeSync.syncEvent(event, guild),
+      cleanupGroupChannels: async (event, guild, now) => {
+        const report = await this.groupChannels.cleanup(event, guild, now);
+        await this.logGroupReport(event, report);
+        return report;
+      },
+      logLifecycle: (event) => this.logLifecycle(event),
+      getGraceMinutes: () =>
+        this.configService.getNumber("events.channel_grace_minutes", 15),
+      beginEnding: (id) => this.beginEnding(id),
+      abortEnding: (id) => {
+        this.endingEvents.delete(id);
+      },
+    });
+  }
+
+  /** The scan leaves an event alone for this long after an end began. */
+  private static readonly ENDING_HOLD_MS = 5 * MS_PER_MINUTE;
+
+  private beginEnding(eventId: string): void {
+    const now = Date.now();
+    for (const [id, until] of this.endingEvents) {
+      if (until <= now) this.endingEvents.delete(id);
+    }
+    this.endingEvents.set(eventId, now + EventService.ENDING_HOLD_MS);
+  }
+
+  private isBeingEnded(eventId: string): boolean {
+    const until = this.endingEvents.get(eventId);
+    if (until === undefined) return false;
+    if (until <= Date.now()) {
+      this.endingEvents.delete(eventId);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * "End event now" (#1193): run the shared teardown for a running event. The
+   * state is decided from the atomic claim inside the teardown, never from a
+   * copy the caller read earlier. Only an `active` event can be ended; an
+   * ended one answers "already ended" and changes nothing. Gated on
+   * `events.enabled` (fails closed). `pullBack` moves everyone from the group
+   * channels to the main channel first. A recurring occurrence's successor is
+   * created by the next scan, as after a scheduled end.
+   */
+  public async endEventNow(
+    eventId: string,
+    guildId: string,
+    options: { pullBack: boolean },
+  ): Promise<EndEventOutcome> {
+    if (!isValidObjectId(eventId)) return { status: "not-found" };
+    let enabled = false;
+    try {
+      enabled = await this.configService.getBoolean("events.enabled", false);
+    } catch (error) {
+      logger.warn("Could not read events.enabled to end an event:", error);
+    }
+    if (!enabled) {
+      return {
+        status: "refused",
+        message:
+          "Events are turned off, so the event was not ended. Turn on events.enabled first.",
+      };
+    }
+    const now = new Date();
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    const outcome = await this.teardown.run({
+      eventId,
+      guildId,
+      trigger: "manual",
+      pullBack: options.pullBack,
+      now,
+      endedAt: now,
+      fromStates: ["active"],
+      guild,
+      syncNative: true,
+    });
+    if (outcome.status === "ended") this.linkVerified.delete(eventId);
+    return outcome;
   }
 
   /**
@@ -553,6 +659,15 @@ export class EventService extends ScheduledService {
   ): Promise<void> {
     let changed = false;
 
+    // Being ended (or ended a moment ago) by "End event now" (#1193): this
+    // copy of the row is older than the end and must not be acted on.
+    if (
+      (event.state === "scheduled" || event.state === "active") &&
+      this.isBeingEnded(String(event._id))
+    ) {
+      return;
+    }
+
     // An adopted event follows its native event, which stays the source of
     // truth (#1034): its edits are copied onto the row, and one deleted or
     // cancelled in Discord cancels the row. Nothing is written to Discord.
@@ -635,11 +750,41 @@ export class EventService extends ScheduledService {
       }
     }
 
-    // 3. Mark ended once past the end time.
+    // 3. End once past the end time: the one shared teardown (#1193), the same
+    // a manual "End event now" runs. It saves the end with an atomic claim
+    // (state and times as this scan read them), so an end made meanwhile, a
+    // cancel or an edited schedule is not overwritten; the group channels go
+    // there too, and this scan's own native sync below closes the Discord event.
+    let teardownRan = false;
     if (shouldEndEvent(event, now)) {
-      event.state = "ended";
-      changed = true;
-      await this.updateAnnouncement(event);
+      const outcome = await this.teardown.run({
+        eventId: String(event._id),
+        guildId: event.guildId,
+        trigger: "scheduled",
+        pullBack: false,
+        now,
+        endedAt: computeEndTime(event.startTime, event.durationMinutes),
+        fromStates: ["scheduled", "active"],
+        expectTimes: {
+          startTime: event.startTime,
+          durationMinutes: event.durationMinutes,
+        },
+        guild,
+        event,
+        syncNative: false,
+      });
+      if (outcome.status === "ended") {
+        teardownRan = true;
+        changed = true;
+      } else if (outcome.status === "already-ended") {
+        // Ended elsewhere a moment ago (a manual end): follow it.
+        event.state = "ended";
+        event.endedAt = outcome.endedAt;
+      } else {
+        // Cancelled or edited meanwhile, or the end could not be saved: this
+        // copy is stale or the write failed; the next scan decides again.
+        return;
+      }
     }
 
     // 4. Sweep the empty channel after the grace period.
@@ -673,6 +818,7 @@ export class EventService extends ScheduledService {
     // 4b. Group channels of a finished event go with the main channel (#1190),
     // judged from the saved state (a fresh read), channel by channel.
     if (
+      !teardownRan &&
       this.hasRecordedGroupChannels(event) &&
       (event.state === "ended" || event.state === "cancelled")
     ) {
@@ -680,6 +826,14 @@ export class EventService extends ScheduledService {
         event,
         await this.groupChannels.cleanup(event, guild, now),
       );
+    }
+
+    // The slow steps above can outlast a manual end that landed meanwhile.
+    if (
+      (event.state === "scheduled" || event.state === "active") &&
+      this.isBeingEnded(String(event._id))
+    ) {
+      return;
     }
 
     // Keep the native scheduled event in line (#1034): creates it for events

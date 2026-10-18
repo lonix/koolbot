@@ -50,6 +50,7 @@ const {
   shouldSendReminder,
   shouldEndEvent,
   shouldCleanupChannel,
+  effectiveEndTime,
   formatEventWhen,
   computeOccurrenceStart,
   isRecurring,
@@ -261,6 +262,46 @@ describe("shouldCleanupChannel", () => {
     expect(
       shouldCleanupChannel(view({ state: "ended" }), now, grace, true),
     ).toBe(false);
+  });
+  it("counts the grace period from endedAt when the event was ended early (#1193)", () => {
+    const early = view({
+      state: "ended",
+      channelId: "c1",
+      endedAt: new Date("2026-07-04T20:30:00Z"),
+    });
+    // 10 minutes after the early end: still inside the grace period.
+    expect(
+      shouldCleanupChannel(
+        early,
+        new Date("2026-07-04T20:40:00Z"),
+        grace,
+        true,
+      ),
+    ).toBe(false);
+    // 20 minutes after it: due, although the scheduled end is 1h40 away.
+    expect(
+      shouldCleanupChannel(
+        early,
+        new Date("2026-07-04T20:50:00Z"),
+        grace,
+        true,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("effectiveEndTime", () => {
+  it("is endedAt when recorded, else start plus duration", () => {
+    const endedAt = new Date("2026-07-04T20:30:00Z");
+    expect(effectiveEndTime(view({ endedAt })).toISOString()).toBe(
+      endedAt.toISOString(),
+    );
+    expect(effectiveEndTime(view({ endedAt: null })).toISOString()).toBe(
+      "2026-07-04T22:00:00.000Z",
+    );
+    expect(effectiveEndTime(view()).toISOString()).toBe(
+      "2026-07-04T22:00:00.000Z",
+    );
   });
 });
 

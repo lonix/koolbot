@@ -32,6 +32,11 @@ import {
   removeEventCover,
   setEventCover,
 } from "../../../services/event-cover.js";
+import { summariseEnd } from "../../../services/event-teardown.js";
+import {
+  END_CONFIRM_FIELD,
+  END_PULL_BACK_FIELD,
+} from "../../event-end-view.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -358,6 +363,52 @@ export function createEventsRouter(client: Client): Router {
             ? `Cancelled the series containing event ${id}.`
             : `Cancelled event ${id}.`
           : `Event ${id} not found.`,
+      });
+    }),
+  );
+
+  // End event now (#1193): the same teardown the host panel and the scheduled
+  // end run. The state is decided by the teardown's atomic claim, so a stale
+  // page, a double click or a host ending it at the same time is a no-op.
+  router.post(
+    "/events/:id/end-now",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const confirmed = getString(req, END_CONFIRM_FIELD) === "1";
+      const pullBack = getString(req, END_PULL_BACK_FIELD) === "1";
+      if (!confirmed) {
+        await recordAudit(session, {
+          action: "event.end-now",
+          targetId: id,
+          details: { outcome: "not-confirmed", pullBack },
+          result: "failure",
+          errorMessage: "not confirmed",
+        });
+        flashRedirect(res, "/admin/events", {
+          type: "err",
+          text: "Tick the box to confirm that you want to end the event. Nothing was changed.",
+        });
+        return;
+      }
+      const outcome = await EventService.getInstance(client).endEventNow(
+        id,
+        session.guildId,
+        { pullBack },
+      );
+      const summary = summariseEnd(outcome);
+      await recordAudit(session, {
+        action: "event.end-now",
+        targetId: id,
+        details: { ...summary.details, pullBack },
+        result: summary.ok ? "success" : "failure",
+        errorMessage: summary.ok
+          ? null
+          : (summary.errorMessage ?? summary.message),
+      });
+      flashRedirect(res, "/admin/events", {
+        type: summary.ok ? "ok" : "err",
+        text: summary.message,
       });
     }),
   );

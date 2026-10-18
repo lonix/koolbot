@@ -758,7 +758,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "captainId",
     exportable: false,
     guildScoped: true,
-    note: "Which member leads an event group. No group leaders are recorded yet.",
+    note: "Which member leads an event group. No group leaders are recorded yet; when they are, the shared end-of-event teardown (#1193) already clears them as soon as the event ends (`groups.$[].captainId` set to null), so a finished event holds none.",
     onDelete: "retain",
     subject: "self",
     deleteNote:

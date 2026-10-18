@@ -823,7 +823,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 | `events.reminder_minutes`         | `30`      | How long before start the reminder is posted. Set to `0` to disable reminders                                                     |
 | `events.create_lead_minutes`      | `15`      | How long before start the temporary voice channel is created                                                                      |
 | `events.default_duration_minutes` | `120`     | Duration applied to an event when the organiser doesn't specify one                                                               |
-| `events.channel_grace_minutes`    | `15`      | How long after an event ends the bot waits before deleting its (now empty) channel                                                |
+| `events.channel_grace_minutes`    | `15`      | How long after an event actually ends (End now counts from the press) the bot waits before deleting its empty channel             |
 | `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
 | `events.native.location`          | see Notes | Location text shown on the native Discord event (max 100 characters)                                                              |
 | `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |

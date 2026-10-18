@@ -131,6 +131,8 @@ interface EventRow {
   categoryId?: string;
   createdBy?: string;
   seriesCancelled?: boolean;
+  /** Set when the event was ended through the shared teardown (#1193). */
+  endedAt?: Date | null;
   groupsEnabled?: boolean;
   groups?: GroupRow[];
 }
@@ -1035,9 +1037,10 @@ export class EventGroupChannels {
 
   /**
    * Delete the recorded group channels of an event that is over: right away
-   * once it is cancelled, after the grace period once it has ended (the moment
-   * the main channel is eligible). Channels with people in them stay until the
-   * next scan. The decision uses a fresh read of the event, never the caller's
+   * once it is cancelled or ended through the shared teardown (`endedAt` set,
+   * #1193), after the grace period for a row ended before that field existed
+   * (the moment the main channel is eligible). Channels with people in them
+   * stay until the next scan. The decision uses a fresh read of the event, never the caller's
    * copy, and does nothing for an event that is still open.
    */
   public cleanup(
@@ -1065,10 +1068,17 @@ export class EventGroupChannels {
       return report;
     }
     if (row.state === "ended") {
-      const end =
-        row.startTime.getTime() +
-        Math.max(0, row.durationMinutes) * MS_PER_MINUTE;
-      if (now.getTime() < end + (await this.deps.getGraceMs())) return report;
+      // An event ended through the shared teardown (#1193) has `endedAt`: its
+      // group channels go as soon as they are empty ("delete the sub-channels
+      // now"); only the main channel keeps the grace period. A row ended
+      // before that field existed keeps the old rule: the scheduled end plus
+      // the grace period, like the main channel.
+      if (!row.endedAt) {
+        const end =
+          row.startTime.getTime() +
+          Math.max(0, row.durationMinutes) * MS_PER_MINUTE;
+        if (now.getTime() < end + (await this.deps.getGraceMs())) return report;
+      }
     } else if (row.state !== "cancelled") {
       return report;
     }

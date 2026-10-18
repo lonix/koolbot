@@ -62,7 +62,7 @@ export interface IEventGroup {
   marker: string;
   /** Voice channel id, filled by #1190; null until then. */
   channelId: string | null;
-  /** Filled by #1195; null until then. A user id. */
+  /** Filled by #1195; null until then. A user id. Cleared when the event ends (#1193). */
   captainId: string | null;
   /**
    * The group's members (#1191): user ids, at most one group per member. Only
@@ -98,6 +98,14 @@ export interface IEvent extends Document {
   /** Message id of the RSVP/announcement post, for live edits + reminders. */
   announcementMessageId: string | null;
   state: EventState;
+  /**
+   * When the event was marked ended (#1193): the end instant the grace period
+   * counts from. The scheduled end sets it to the scheduled end time, "End event
+   * now" to the moment of the press. Null for a row that is not ended, and for
+   * one ended before this field existed (its end is then start plus duration).
+   * Not a user id: who pressed the button is only in the audit log.
+   */
+  endedAt: Date | null;
   reminderSent: boolean;
   /**
    * @deprecated Legacy KoolBot RSVPs (#1175). New events leave this empty:
@@ -266,6 +274,7 @@ const EventSchema = new Schema<IEvent>(
       default: "scheduled",
       index: true,
     },
+    endedAt: { type: Date, default: null },
     reminderSent: { type: Boolean, default: false },
     rsvps: { type: [EventRsvpSchema], default: [] },
     recurrence: {
