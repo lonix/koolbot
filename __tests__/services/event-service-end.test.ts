@@ -1419,7 +1419,7 @@ describe("the hold does not depend on a timeout while an older scan runs", () =>
   const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
 
   it("an old scan resumed after the hold would have expired still leaves the ended event alone", async () => {
-    const { service, guild } = setup();
+    const { service } = setup();
     configMock.getString.mockImplementation(async (k: string, d?: unknown) =>
       k === "GUILD_ID" ? "guild-1" : d,
     );

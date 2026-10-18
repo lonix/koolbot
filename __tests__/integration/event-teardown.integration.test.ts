@@ -222,6 +222,45 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
     expect(row.reminderSent).toBe(true);
   });
 
+  it("the scheduled end claims only while the channels it checked are still the stored ones", async () => {
+    const t = teardown();
+    const scheduledInput = (id: string, expectChannels: unknown): never =>
+      input(id, {
+        trigger: "scheduled",
+        fromStates: ["scheduled", "active"],
+        endedAt: END,
+        expectTimes: { startTime: START, durationMinutes: 120 },
+        expectChannels,
+      });
+    const id = await makeEvent();
+    const stored1 = await stored(id);
+    const matching = {
+      main: stored1.channelId ?? null,
+      groups: stored1.groups.map((g) => ({
+        key: g.key,
+        channelId: g.channelId ?? null,
+      })),
+    };
+    // A channel recorded since the check: refused, nothing runs.
+    expect(
+      await t.run(
+        scheduledInput(id, {
+          ...matching,
+          groups: matching.groups.map((g) =>
+            g.key === "g_a" ? { ...g, channelId: "ch-other" } : g,
+          ),
+        }),
+      ),
+    ).toEqual({ status: "changed" });
+    expect(
+      await t.run(scheduledInput(id, { ...matching, groups: [] })),
+    ).toEqual({ status: "changed" });
+    expect((await stored(id)).state).toBe("active");
+    // The same channels (a null matches a stored null): claimed.
+    expect((await t.run(scheduledInput(id, matching))).status).toBe("ended");
+    expect((await stored(id)).state).toBe("ended");
+  });
+
   it("an event of another server is not found and not ended", async () => {
     const id = await makeEvent();
     const outcome = await teardown().run(input(id, { guildId: "guild-2" }));

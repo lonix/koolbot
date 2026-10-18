@@ -1810,14 +1810,18 @@ The scheduled end differs from a manual one in four ways. It **waits while anyon
 channel of the event**: the main channel and every group channel (bots do not count). The
 event then stays live, nothing is deleted or moved, and the next scan asks again, so an event
 ends on its schedule only once its channels are empty; the wait is logged once, not every scan.
-Occupancy is read from Discord for each channel (a forced read of the channel, then the
-gateway's voice cache, like the channel cleanup uses); a channel that cannot be read counts as
-occupied. Only the host's manual **End event now** may end an event with people present. The
+Occupancy is decided from the stored event, not from the scan's older copy: the channel ids
+are read from it now, every channel is read from Discord first (a forced read, then the
+gateway's voice cache, like the channel cleanup uses), and only then are all the member lists
+looked at together, so someone moving between channels is not missed. The ids it looked at go
+into the end's own claim, which refuses a change (a group channel recorded since), and the next
+scan checks again. An event or a channel that cannot be read counts as occupied. Only the host's manual **End event now** may end an event with people present. The
 scheduled end also never pulls people back, it does not close the Discord event inside the
 teardown (the scan does, next), and it only acts on the event as the scan read it, so a cancel
 or an edited schedule made meanwhile is not overwritten.
-A scan that loaded an event just before a manual end skips it for the next few minutes instead
-of acting on its older copy, and it does not touch the event at all while a teardown is running
+A scan that loaded an event just before a manual end skips it instead of acting on its older
+copy: for at least five minutes, and for as long as any scan that started before the end is
+still running (the hold does not rely on a timeout), and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
 open copy never edits the announcement post once an end has begun. A cancel is saved first and
 only if the event is still in the state it was decided from, so a cancel decided on an older copy
