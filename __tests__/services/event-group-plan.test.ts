@@ -169,7 +169,7 @@ describe("planRandomise", () => {
     }
   });
 
-  it("fills sized groups up to their size, in order, and lists who does not fit", () => {
+  it("treats a size as a hard cap: skips full groups and lists who does not fit", () => {
     const groups = [g("heli", 2), g("assault", 3)];
     const plan = planRandomise(groups, ids(8), "unassigned", seededRandom(3));
     if (!plan.ok) throw new Error("expected a plan");
@@ -182,13 +182,27 @@ describe("planRandomise", () => {
     expect(all).toEqual([...ids(8)].sort());
   });
 
-  it("fills sized groups before sharing the rest evenly among unsized ones", () => {
-    const groups = [g("sized", 2), g("u1", null), g("u2", null)];
-    const plan = planRandomise(groups, ids(7), "unassigned", seededRandom(1));
+  it("splits evenly even when groups have sizes, instead of filling them in order", () => {
+    // Room for 5 + 5; 6 people must be 3 and 3, not 5 and 1.
+    const groups = [g("a", 5), g("b", 5)];
+    const plan = planRandomise(groups, ids(6), "unassigned", seededRandom(1));
     if (!plan.ok) throw new Error("expected a plan");
-    expect(plan.changes.sized).toHaveLength(2);
-    expect(plan.changes.u1.length + plan.changes.u2.length).toBe(5);
-    expect(Math.abs(plan.changes.u1.length - plan.changes.u2.length)).toBe(1);
+    expect(plan.changes.a).toHaveLength(3);
+    expect(plan.changes.b).toHaveLength(3);
+    expect(plan.unplaced).toEqual([]);
+  });
+
+  it("splits evenly across mixed sized and unsized groups until a cap is reached", () => {
+    const groups = [g("small", 2), g("u1", null), g("u2", null)];
+    const run = (n: number): number[] => {
+      const p = planRandomise(groups, ids(n), "unassigned", seededRandom(n));
+      if (!p.ok) throw new Error("expected a plan");
+      return ["small", "u1", "u2"].map((k) => (p.changes[k] ?? []).length);
+    };
+    expect(run(6)).toEqual([2, 2, 2]);
+    expect(run(5)).toEqual([2, 2, 1]);
+    // The small group is capped at 2; the others share the rest evenly.
+    expect(run(9)).toEqual([2, 4, 3]);
   });
 
   it("is reproducible for a seed and different for another", () => {

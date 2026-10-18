@@ -1474,14 +1474,15 @@ when it has no size.
   audited.
 - **Lock groups:** a switch for this event. While locked, joining a channel changes
   nobody's group (a member who hops channels keeps their stored group, and a
-  newcomer is not recorded); the host's own changes still work. A repeating event's
+  newcomer is not recorded, so someone who joins while groups are locked stays in the
+  main channel until the host assigns them by hand); the host's own changes still work. A repeating event's
   next occurrence starts unlocked.
 - **Randomise:** deals the people connected right now into the team groups, either
   only those who are not in a group yet or everyone again (people who are assigned
-  but not connected stay where they are and keep using their group's room). A group
-  with a size is filled up to its size, in the order listed; groups without a size
-  share the rest evenly (they end up within one person of each other). People who
-  do not fit stay unassigned and are listed in the result. The deal uses a random
+  but not connected stay where they are and keep using their group's room). The
+  split is always even: groups end up within one person of each other. A group's size
+  is a hard limit: a full group is skipped, and once every group is full the rest stay
+  unassigned and are listed in the result. The deal uses a random
   seed that is written to the audit row, so a result can be reproduced.
 - **Limits:** a person is in at most one group; a group holds at most its size, or 99
   without one; an event holds at most 500 assigned people.

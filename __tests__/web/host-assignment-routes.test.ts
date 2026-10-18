@@ -388,6 +388,7 @@ describe("assign", () => {
       eventId: EVENT_ID,
       userId: BEN,
       groupKey: "g_logi",
+      admission: expect.any(Number),
     });
     expect(flashOf(r.location)).toMatchObject({ type: "ok" });
     expect(flashOf(r.location).msg).toContain("is now in Logi");
@@ -480,6 +481,7 @@ describe("unassign", () => {
       eventId: EVENT_ID,
       userId: AWAY,
       groupKey: null,
+      admission: expect.any(Number),
     });
     expect(flashOf(r.location).type).toBe("ok");
     expect(auditRows.some((a) => a.action === "event.host.unassign")).toBe(
@@ -503,6 +505,7 @@ describe("randomise", () => {
       guildId: GUILD,
       eventId: EVENT_ID,
       mode: "everyone",
+      admission: expect.any(Number),
     });
     expect([...(arg.candidateIds as string[])].sort()).toEqual(
       [ANA, BEN].sort(),

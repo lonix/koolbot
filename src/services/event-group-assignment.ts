@@ -45,6 +45,8 @@ import {
 } from "./event-group-plan.js";
 
 const groupLock = createKeyedLock();
+/** Orders one member's self-joins (see `handleGroupSelfJoin`). */
+const selfJoinLock = createKeyedLock();
 
 /** An event id as stored (a Mongo ObjectId in hex); anything else is not an event. */
 const OBJECT_ID_RE = /^[0-9a-f]{24}$/i;
@@ -120,6 +122,7 @@ export type AssignmentFailure =
   | "event-full"
   | "no-teams"
   | "locked"
+  | "member-reset"
   | "write-failed";
 
 /** Host-facing wording of each refusal. */
@@ -133,6 +136,8 @@ export const ASSIGNMENT_FAILURE_MESSAGE: Record<AssignmentFailure, string> = {
   "event-full": "This event has reached its limit of assigned people.",
   "no-teams": "This event has no team groups to put people into.",
   locked: "Groups are locked.",
+  "member-reset":
+    "That member's data is being reset, so nobody was added. Try again in a moment.",
   "write-failed":
     "The groups changed while this was being saved. Reload the page and try again.",
 };
@@ -221,9 +226,38 @@ export async function assignMember(opts: {
   userId: string;
   groupKey: string | null;
   source?: AssignmentSource;
+  /**
+   * `TrackingOptOutService.admission()`, taken synchronously before the
+   * caller's first await. Adding a member is refused when a reset of that
+   * member is running or has run since (the reset drains this write first, so
+   * it never reports success while a membership remains). Removing is never
+   * refused.
+   */
+  admission: number;
 }): Promise<AssignResult> {
   const { guildId, eventId, userId, groupKey } = opts;
-  return withGroupLock(guildId, eventId, async () => {
+  const run = (): Promise<AssignResult> =>
+    withGroupLock(guildId, eventId, () => assignLocked(opts));
+  if (groupKey === null) return run();
+  const { admitted, value } =
+    await TrackingOptOutService.getInstance().resetAwareWrite(
+      [userId],
+      guildId,
+      run,
+      opts.admission,
+    );
+  return admitted.length === 0 || !value ? fail("member-reset") : value;
+}
+
+async function assignLocked(opts: {
+  guildId: string;
+  eventId: string;
+  userId: string;
+  groupKey: string | null;
+  source?: AssignmentSource;
+}): Promise<AssignResult> {
+  const { guildId, eventId, userId, groupKey } = opts;
+  {
     const row = await readRow(guildId, eventId);
     const bad = rowFailure(row);
     if (bad || !row) return fail(bad ?? "not-found");
@@ -251,7 +285,7 @@ export async function assignMember(opts: {
       fromKey: plan.fromKey,
       toKey: plan.toKey,
     };
-  });
+  }
 }
 
 export type RandomiseResult =
@@ -273,9 +307,39 @@ export async function randomiseMembers(opts: {
   candidateIds: readonly string[];
   mode: RandomiseMode;
   seed: number;
+  /** As for `assignMember`: the ticket taken before the caller's first await. */
+  admission: number;
+}): Promise<RandomiseResult> {
+  const { guildId } = opts;
+  // Candidates whose data is being reset (or was, since the ticket) are left
+  // out; the rest are dealt, and a reset of any of them waits for this write.
+  const { admitted, value } =
+    await TrackingOptOutService.getInstance().resetAwareWrite(
+      opts.candidateIds,
+      guildId,
+      (ids) =>
+        withGroupLock(guildId, opts.eventId, () =>
+          randomiseLocked({ ...opts, candidateIds: ids }),
+        ),
+      opts.admission,
+    );
+  if (admitted.length === 0 || !value) {
+    return opts.candidateIds.length === 0
+      ? fail("no-teams")
+      : fail("member-reset");
+  }
+  return value;
+}
+
+async function randomiseLocked(opts: {
+  guildId: string;
+  eventId: string;
+  candidateIds: readonly string[];
+  mode: RandomiseMode;
+  seed: number;
 }): Promise<RandomiseResult> {
   const { guildId, eventId } = opts;
-  return withGroupLock(guildId, eventId, async () => {
+  {
     const row = await readRow(guildId, eventId);
     const bad = rowFailure(row);
     if (bad || !row) return fail(bad ?? "not-found");
@@ -315,7 +379,7 @@ export async function randomiseMembers(opts: {
         })),
     );
     return { ok: true, placed: plan.placed, unplaced: plan.unplaced };
-  });
+  }
 }
 
 /**
@@ -373,6 +437,20 @@ export type SelfJoinOutcome =
  * fires `onGroupAssignmentChange` like any other change.
  */
 export async function handleGroupSelfJoin(opts: {
+  guildId: string;
+  userId: string;
+  channelId: string;
+  admission: number;
+}): Promise<SelfJoinOutcome> {
+  const { guildId, userId } = opts;
+  // One at a time per member, queued in call order. The gateway starts these
+  // calls in event order, synchronously, so queueing here (before any await)
+  // keeps a member's joins in that order: a later join to B can never be
+  // overtaken by the lookup of an earlier join to A and then be overwritten.
+  return selfJoinLock.run(`${guildId}:${userId}`, () => selfJoinOnce(opts));
+}
+
+async function selfJoinOnce(opts: {
   guildId: string;
   userId: string;
   channelId: string;

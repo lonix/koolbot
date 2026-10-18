@@ -171,7 +171,7 @@ describeWithMongo("event group members against a real MongoDB (#1191)", () => {
       seed: 11,
     });
     if (!result.ok) throw new Error("expected success");
-    // Heli has size 3 and is filled first; the rest share Logi (unsized).
+    // Even deal until Heli's size (3) is reached, then the rest go to Logi.
     expect(await members(id, "g_a")).toHaveLength(3);
     expect(await members(id, "g_b")).toHaveLength(5);
     expect(await members(id, "g_o")).toEqual([]);

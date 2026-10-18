@@ -9,127 +9,14 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
  * proven against MongoDB in `__tests__/integration/event-group-members`.
  */
 
-interface Group {
-  key: string;
-  name: string;
-  kind: string;
-  size: number | null;
-  channelId: string | null;
-  captainId: string | null;
-  memberIds: string[];
-}
-interface Doc {
-  _id: string;
-  guildId: string;
-  state: string;
-  groupsEnabled: boolean;
-  groupsLocked: boolean;
-  groups: Group[];
-}
-
-const store = new Map<string, Doc>();
-const updates: Array<{ filter: Record<string, unknown>; update: unknown }> = [];
-let failUpdatesFor: string | null = null;
-
-const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-const tick = async (): Promise<void> => {
-  for (let i = 0; i < 3; i++) await Promise.resolve();
-};
-
-function matches(doc: Doc, filter: Record<string, unknown>): boolean {
-  for (const [k, v] of Object.entries(filter)) {
-    if (k === "_id") {
-      if (doc._id !== v) return false;
-    } else if (k === "guildId") {
-      if (doc.guildId !== v) return false;
-    } else if (k === "groupsEnabled") {
-      if (doc.groupsEnabled !== v) return false;
-    } else if (k === "state") {
-      const states = (v as { $in: string[] }).$in;
-      if (!states.includes(doc.state)) return false;
-    } else if (k === "groups.channelId") {
-      if (!doc.groups.some((g) => g.channelId === v)) return false;
-    } else if (k === "groups.memberIds") {
-      if (!doc.groups.some((g) => g.memberIds.includes(v as string))) {
-        return false;
-      }
-    } else {
-      throw new Error(`unsupported filter ${k}`);
-    }
-  }
-  return true;
-}
-
-const EventMock = {
-  findOne: (filter: Record<string, unknown>) => {
-    const query = {
-      select: () => query,
-      lean: async () => {
-        await tick();
-        for (const doc of store.values()) {
-          if (matches(doc, filter)) return clone(doc);
-        }
-        return null;
-      },
-    };
-    return query;
-  },
-  find: (filter: Record<string, unknown>) => {
-    const query = {
-      select: () => query,
-      lean: async () => {
-        await tick();
-        return [...store.values()].filter((d) => matches(d, filter)).map(clone);
-      },
-    };
-    return query;
-  },
-  updateOne: async (
-    filter: Record<string, unknown>,
-    update: {
-      $set?: Record<string, unknown>;
-      $pull?: Record<string, unknown>;
-    },
-    options?: { arrayFilters?: Array<Record<string, string>> },
-  ) => {
-    updates.push({ filter, update });
-    await tick();
-    const doc = [...store.values()].find((d) => matches(d, filter));
-    if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-    if (failUpdatesFor && doc._id === failUpdatesFor) {
-      throw new Error("write conflict");
-    }
-    let modified = 0;
-    for (const [path, value] of Object.entries(update.$set ?? {})) {
-      const m = /^groups\.\$\[(g\d+)\]\.memberIds$/.exec(path);
-      if (m) {
-        const filterKey = options?.arrayFilters?.find(
-          (f) => `${m[1]}.key` in f,
-        )?.[`${m[1]}.key`];
-        for (const g of doc.groups) {
-          if (g.key === filterKey) {
-            g.memberIds = value as string[];
-            modified = 1;
-          }
-        }
-      } else if (path === "groupsLocked") {
-        doc.groupsLocked = value as boolean;
-        modified = 1;
-      } else {
-        throw new Error(`unsupported $set ${path}`);
-      }
-    }
-    for (const [path, value] of Object.entries(update.$pull ?? {})) {
-      if (path !== "groups.$[].memberIds") throw new Error(`bad $pull ${path}`);
-      for (const g of doc.groups) {
-        const before = g.memberIds.length;
-        g.memberIds = g.memberIds.filter((m) => m !== value);
-        if (g.memberIds.length !== before) modified = 1;
-      }
-    }
-    return { matchedCount: 1, modifiedCount: modified };
-  },
-};
+import {
+  store,
+  updates,
+  fake,
+  EventMock,
+  type Group,
+  type Doc,
+} from "./event-group-fake-event.js";
 
 jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: EventMock,
@@ -153,19 +40,36 @@ jest.unstable_mockModule(
           await write();
           return true;
         },
+        admission: () => 1,
+        // The real barrier is exercised in event-group-reset-race.test.ts.
+        resetAwareWrite: async (
+          userIds: string[],
+          _guildId: string,
+          write: (ids: string[]) => Promise<unknown>,
+        ) => {
+          const ids = [...new Set(userIds)];
+          return { admitted: ids, value: await write(ids) };
+        },
       }),
     },
   }),
 );
 
 const {
-  assignMember,
-  randomiseMembers,
+  assignMember: assignMemberReal,
+  randomiseMembers: randomiseMembersReal,
   setGroupsLocked,
   handleGroupSelfJoin,
   removeMemberFromEvents,
   onGroupAssignmentChange,
 } = await import("../../src/services/event-group-assignment.js");
+
+type AssignOpts = Parameters<typeof assignMemberReal>[0];
+type RandomiseOpts = Parameters<typeof randomiseMembersReal>[0];
+const assignMember = (o: Omit<AssignOpts, "admission">) =>
+  assignMemberReal({ admission: 1, ...o });
+const randomiseMembers = (o: Omit<RandomiseOpts, "admission">) =>
+  randomiseMembersReal({ admission: 1, ...o });
 
 const GUILD = "guild-1";
 const EV = "65a000000000000000000001";
@@ -209,7 +113,8 @@ beforeEach(() => {
   updates.length = 0;
   optedOut.clear();
   staleTicket = false;
-  failUpdatesFor = null;
+  fake.failUpdatesFor = null;
+  fake.delayFor = null;
 });
 
 describe("assignMember", () => {
@@ -630,6 +535,26 @@ describe("handleGroupSelfJoin", () => {
     expect(members("a")).toHaveLength(2);
   });
 
+  it("keeps a member's joins in the order they happened, even when the earlier lookup is slower", async () => {
+    seed({
+      groups: [
+        group("a", { channelId: "ch-a" }),
+        group("b", { channelId: "ch-b" }),
+      ],
+    });
+    // The lookup for the earlier join (to A) takes far longer than the later one.
+    fake.delayFor = (filter) =>
+      filter["groups.channelId"] === "ch-a" ? 60 : 0;
+    const first = join("u1", "ch-a");
+    const second = join("u1", "ch-b");
+    expect(await Promise.all([first, second])).toEqual([
+      "recorded",
+      "recorded",
+    ]);
+    expect(members("b")).toEqual(["u1"]);
+    expect(members("a")).toEqual([]);
+  });
+
   it("loses cleanly to a host assignment that fills the group first", async () => {
     seed({ groups: [group("a", { size: 1, channelId: "ch-a" })] });
     const [host, self] = await Promise.all([
@@ -693,7 +618,7 @@ describe("removeMemberFromEvents (member data reset)", () => {
       { groups: [group("a", { memberIds: ["me"] })] },
       "65a000000000000000000002",
     );
-    failUpdatesFor = "65a000000000000000000001";
+    fake.failUpdatesFor = "65a000000000000000000001";
     const result = await removeMemberFromEvents(GUILD, "me");
     expect(result).toEqual({ matched: 2, removed: 1, failed: 1 });
     expect(members("a", "65a000000000000000000002")).toEqual([]);

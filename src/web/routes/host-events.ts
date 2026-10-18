@@ -54,6 +54,7 @@ import {
 import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
 import { randomBytes } from "node:crypto";
+import { TrackingOptOutService } from "../../services/tracking-opt-out-service.js";
 import {
   assignMember,
   randomiseMembers,
@@ -311,6 +312,7 @@ function registerAssignmentActions(router: Router, client: Client): void {
     event: IEvent,
     userId: string,
     groupKey: string | null,
+    admission: number,
   ): Promise<HostActionResult> => {
     if (!USER_ID_RE.test(userId)) {
       return { ok: false, message: "Pick a person from the list." };
@@ -336,6 +338,7 @@ function registerAssignmentActions(router: Router, client: Client): void {
       eventId: String(event._id),
       userId,
       groupKey,
+      admission,
     });
     if (!result.ok) {
       return {
@@ -368,7 +371,11 @@ function registerAssignmentActions(router: Router, client: Client): void {
     };
   };
 
+  // Each write action takes its reset-admission ticket as its very first
+  // step, before any await, so a member data reset that engages while the
+  // action waits (the voice read, the event lock) refuses the add.
   hostAction(router, "assign", "/assign", ({ req, event }) => {
+    const admission = TrackingOptOutService.getInstance().admission();
     const group = bodyString(req, "group");
     if (group.length === 0 || group.length > 32) {
       return Promise.resolve({
@@ -376,14 +383,20 @@ function registerAssignmentActions(router: Router, client: Client): void {
         message: "Choose a group to put the person in.",
       });
     }
-    return assignTo(event, bodyString(req, "userId"), group);
+    return assignTo(event, bodyString(req, "userId"), group, admission);
   });
 
   hostAction(router, "unassign", "/unassign", ({ req, event }) =>
-    assignTo(event, bodyString(req, "userId"), null),
+    assignTo(
+      event,
+      bodyString(req, "userId"),
+      null,
+      TrackingOptOutService.getInstance().admission(),
+    ),
   );
 
   hostAction(router, "randomise", "/randomise", async ({ req, event }) => {
+    const admission = TrackingOptOutService.getInstance().admission();
     const rawMode = bodyString(req, "mode");
     if (rawMode !== "unassigned" && rawMode !== "everyone") {
       return { ok: false, message: "Choose who to randomise." };
@@ -401,6 +414,7 @@ function registerAssignmentActions(router: Router, client: Client): void {
       candidateIds: presence.members.map((m) => m.id),
       mode,
       seed,
+      admission,
     });
     if (!result.ok) {
       return { ok: false, message: result.message, errorMessage: result.code };

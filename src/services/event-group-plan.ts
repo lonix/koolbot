@@ -187,16 +187,12 @@ export type RandomisePlan =
  *   Members who are assigned but not connected stay where they are (they may
  *   come back) and keep using up their group's room.
  *
- * Dealing, one shuffled candidate at a time:
- * 1. the first group (in the event's order) that has a size and still has
- *    room, so a sized group is filled up to its size;
- * 2. else the unsized group with the fewest members (ties go to the earlier
- *    group), so unsized groups end up within one member of each other;
- * 3. else the candidate stays unassigned and is listed.
- *
- * With only unsized groups this is the even split (sizes differ by at most
- * one); with only sized groups it fills them in order and the overflow is
- * unplaced. Pass the same `random` for a reproducible result.
+ * Dealing, one shuffled candidate at a time: to the team group with the
+ * fewest members that still has room (ties go to the earlier group). So the
+ * split is always even (group sizes differ by at most one) while every group
+ * has room. A size is a hard cap: a full group is skipped, and once every
+ * group is full the rest stay unassigned and are listed. Pass the same
+ * `random` for a reproducible result.
  */
 export function planRandomise(
   groups: readonly PlanGroup[],
@@ -241,25 +237,15 @@ export function planRandomise(
       unplaced.push(id);
       continue;
     }
+    // The group with the fewest members that still has room (a size is a
+    // hard cap); ties go to the earlier group.
     let chosen: PlanGroup | undefined;
+    let fewest = Infinity;
     for (const g of teams) {
-      if (
-        g.size !== null &&
-        (working.get(g.key) ?? []).length < groupCapacity(g)
-      ) {
+      const n = (working.get(g.key) ?? []).length;
+      if (n < groupCapacity(g) && n < fewest) {
+        fewest = n;
         chosen = g;
-        break;
-      }
-    }
-    if (!chosen) {
-      let fewest = Infinity;
-      for (const g of teams) {
-        if (g.size !== null) continue;
-        const n = (working.get(g.key) ?? []).length;
-        if (n < groupCapacity(g) && n < fewest) {
-          fewest = n;
-          chosen = g;
-        }
       }
     }
     if (!chosen) {

@@ -8,6 +8,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { groupCapacity } from "../services/event-group-plan.js";
 
 export interface AssignmentGroupView {
   key: string;
@@ -95,7 +96,7 @@ function renderRow(d: AssignmentViewData, p: AssignmentPersonView): string {
   const options = teams
     .map((g) => {
       const here = p.groupKey === g.key;
-      const full = g.size !== null && g.memberCount >= g.size && !here;
+      const full = g.memberCount >= groupCapacity(g) && !here;
       return `<option value="${escapeHtml(g.key)}"${here ? " selected" : ""}${full ? " disabled" : ""}>${escapeHtml(groupLabelText(g))} (${escapeHtml(groupFill(g))}${full ? ", full" : ""})</option>`;
     })
     .join("");
@@ -143,7 +144,7 @@ function renderRandomise(d: AssignmentViewData): string {
   const label = escapeHtml(d.groupLabel.toLowerCase());
   const body =
     `<fieldset><legend>Randomise</legend>` +
-    `<p class="muted">Deal the people connected right now into the ${label}s at random. A ${label} with a size is filled up to its size, in the order listed; ${label}s without a size share the rest evenly. People who do not fit stay unassigned and are listed.</p>` +
+    `<p class="muted">Deal the people connected right now into the ${label}s at random. The split is even (the ${label}s differ by at most one person). A size is a hard limit: a full ${label} is skipped, and people who do not fit stay unassigned and are listed.</p>` +
     `<label><input type="radio" name="mode" value="unassigned" checked> Only people who are not in a ${label} yet</label><br>` +
     `<label><input type="radio" name="mode" value="everyone"> Everyone connected (people already placed are dealt again)</label>` +
     `</fieldset>` +
