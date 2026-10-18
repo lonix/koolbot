@@ -1820,8 +1820,11 @@ present. The scheduled end also never pulls people back, it does not close the D
 teardown (the scan does, next), and it only acts on the event as the scan read it, so a cancel
 or an edited schedule made meanwhile is not overwritten.
 A scan that loaded an event just before a manual end skips it instead of acting on its older
-copy: for at least five minutes, and for as long as any scan that started before the end is
-still running (the hold does not rely on a timeout), and it does not touch the event at all while a teardown is running
+copy: for at least five minutes after the end landed, and for as long as any scan that started
+before it landed (including one that started while the end was still being saved) is still
+running, so the hold does not rely on a timeout. A cancel takes the same hold. Event ids taken
+from a request are normalised to lower-case hex once, so an upper-case id cannot key a second,
+unseen set of holds, and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
 open copy never edits the announcement post once an end has begun. A cancel is saved first and
 only if the event is still in the state it was decided from, so a cancel decided on an older copy

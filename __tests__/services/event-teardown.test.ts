@@ -190,10 +190,12 @@ function make(over: DepOverrides = {}): {
   teardown: InstanceType<typeof EventTeardown>;
   begin: jest.Mock;
   abort: jest.Mock;
+  claimed: jest.Mock;
 } {
   let holds = 0;
   const begin = jest.fn(() => ++holds);
   const abort = jest.fn();
+  const claimed = jest.fn();
   const teardown = new EventTeardown({
     client,
     updateAnnouncement: async () => {
@@ -219,10 +221,10 @@ function make(over: DepOverrides = {}): {
     beginEnding: begin,
     abortEnding: abort,
     finishEnding: jest.fn(),
-    claimCompleted: jest.fn(),
+    claimCompleted: claimed,
     settleMs: 0,
   });
-  return { teardown, begin, abort };
+  return { teardown, begin, abort, claimed };
 }
 
 const NOW = new Date("2030-01-01T20:00:00Z");
@@ -405,6 +407,28 @@ describe("the claim", () => {
     expect(rows.get(ID)?.state).toBe("active");
     expect(calls).toEqual([]);
     expect(abort).toHaveBeenCalledWith(ID, 1);
+  });
+
+  it("tells the hold the claim landed, first of all, and only when it did", async () => {
+    const seenByAnnouncement: number[] = [];
+    const holder: { claimed?: jest.Mock } = {};
+    const made = make({
+      updateAnnouncement: async () => {
+        seenByAnnouncement.push(holder.claimed?.mock.calls.length ?? -1);
+        return true;
+      },
+    });
+    holder.claimed = made.claimed;
+    await made.teardown.run(manual());
+    expect(made.claimed).toHaveBeenCalledWith(ID, 1);
+    // Already told when the first step after the claim runs.
+    expect(seenByAnnouncement).toEqual([1]);
+
+    // A lost claim never reports completion.
+    rows.set(ID, row({ state: "ended" }));
+    const lost = make();
+    await lost.teardown.run(manual());
+    expect(lost.claimed).not.toHaveBeenCalled();
   });
 
   it("holds the scan off before its first await, and lets go when the claim is lost", async () => {
