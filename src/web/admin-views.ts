@@ -2625,7 +2625,11 @@ const EVENT_GROUPS_SCRIPT =
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||el.type==='file')return;" +
-  "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
+  // A saved choice that is no longer offered (e.g. a preset now over the cap) is not put back.
+  "if(el.tagName==='SELECT'){var ok=false;Array.prototype.forEach.call(el.options,function(o){if(o.value===d[k]&&!o.disabled)ok=true});if(!ok)return}" +
+  "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
+  // Setting `checked` fires no change event, so reapply the number limits by hand.
+  "validity()}}catch(x){}" +
   "})();";
 
 export function renderEventsPage(props: EventsProps): string {

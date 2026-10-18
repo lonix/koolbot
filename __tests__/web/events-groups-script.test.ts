@@ -27,12 +27,29 @@ function page(maxCount = 15, defaultCount = 2): string {
 }
 
 /** Load the page and run its groups script. */
-function boot(maxCount = 15, defaultCount = 2): JSDOM {
-  const html = page(maxCount, defaultCount);
+function boot(
+  maxCount = 15,
+  defaultCount = 2,
+  restore?: Record<string, unknown>,
+): JSDOM {
+  let html = page(maxCount, defaultCount);
+  if (restore) {
+    // The page as it comes back after a refused submit.
+    html = html.replace(
+      "<h1>Events</h1>",
+      '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+    );
+  }
   const dom = new JSDOM(html, {
     url: "http://localhost/admin/events",
     runScripts: "outside-only",
   });
+  if (restore) {
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-form-draft",
+      JSON.stringify(restore),
+    );
+  }
   const scripts = [
     ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
   ].map((m) => m[1]);
@@ -280,5 +297,79 @@ describe("duplicate name check in the page script (#1188)", () => {
       { maxCount: 15 },
     );
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("restoring a draft after a refused submit (#1188)", () => {
+  it("reapplies the number limits, so a bad lead time is flagged straight away", () => {
+    const dom = boot(15, 2, {
+      groups_enabled: true,
+      groups_lead_minutes: "1441",
+      group_0_name: "Alpha",
+      group_0_size: "100",
+    });
+    expect(field(dom, "groups_enabled").checked).toBe(true);
+    expect(field(dom, "groups_lead_minutes").value).toBe("1441");
+    expect(field(dom, "groups_lead_minutes").checkValidity()).toBe(false);
+    expect(field(dom, "group_0_size").checkValidity()).toBe(false);
+    field(dom, "groups_lead_minutes").value = "1.5";
+    expect(field(dom, "groups_lead_minutes").checkValidity()).toBe(false);
+    field(dom, "groups_lead_minutes").value = "30";
+    expect(field(dom, "groups_lead_minutes").checkValidity()).toBe(true);
+  });
+
+  it("keeps the fields released when the draft had groups off", () => {
+    const dom = boot(15, 2, {
+      groups_enabled: false,
+      groups_lead_minutes: "1441",
+    });
+    expect(field(dom, "groups_lead_minutes").value).toBe("1441");
+    expect(field(dom, "groups_lead_minutes").checkValidity()).toBe(true);
+  });
+
+  it("restores rows beyond the default count and their limits", () => {
+    const dom = boot(15, 1, {
+      groups_enabled: true,
+      group_2_name: "Third",
+      group_2_size: "100",
+    });
+    expect(field(dom, "group_2_name").value).toBe("Third");
+    expect(field(dom, "group_2_size").checkValidity()).toBe(false);
+  });
+
+  it("does not put back a preset that is no longer offered", () => {
+    const dom = boot(2, 2, {
+      groups_enabled: true,
+      groups_preset: "builtin:wardogs",
+    });
+    expect(
+      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
+    ).toBe("");
+  });
+
+  it("puts back a preset that is offered", () => {
+    const dom = boot(15, 2, { groups_preset: "builtin:wardogs" });
+    expect(
+      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
+    ).toBe("builtin:wardogs");
+  });
+
+  it("restores nothing without an error flash", () => {
+    const html = page();
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events",
+      runScripts: "outside-only",
+    });
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-form-draft",
+      JSON.stringify({ group_0_name: "Ghost" }),
+    );
+    const code = [
+      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ]
+      .map((m) => m[1])
+      .find((c) => c.includes("koolbot-event-form-draft"));
+    dom.window.eval(code as string);
+    expect(field(dom, "group_0_name").value).toBe("");
   });
 });
