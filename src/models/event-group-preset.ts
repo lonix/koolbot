@@ -59,7 +59,9 @@ const eventGroupPresetSchema = new Schema<IEventGroupPreset>(
   {
     guildId: { type: String, required: true },
     name: { type: String, required: true, maxlength: 50 },
-    nameKey: { type: String, required: true, maxlength: 50 },
+    // Derived from `name` (already limited to 50) by lower-casing, which can
+    // make it longer ("İ" lower-cases to two units), so it carries no limit.
+    nameKey: { type: String, required: true },
     description: { type: String, default: "", maxlength: 200 },
     groupLabel: { type: String, default: "Team", maxlength: 20 },
     leaderLabel: { type: String, default: "Leader", maxlength: 20 },
