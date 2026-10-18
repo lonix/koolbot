@@ -170,6 +170,39 @@ describeWithMongo(
         expect(await archivedMessageIds()).toEqual(["plain"]);
       });
 
+      it("uses an archived stamped row (role deleted, picker left) to find the picker's channel", async () => {
+        // The queries changed shape (no isArchived clause), so run them for real.
+        const seedArchivedStamp = async () => {
+          await insertRaw({ messageId: "shared", roleId: "r1", emoji: "1️⃣" });
+          await insertRaw({
+            messageId: "shared",
+            roleId: "r2",
+            emoji: "2️⃣",
+            messageChannelId: OLD,
+            isArchived: true,
+            archivedAt: new Date(),
+          });
+        };
+        // Deleting the configured channel keeps the survivor: its picker is in OLD.
+        await seedArchivedStamp();
+        await serviceWithConfigured(NEW).handleChannelDelete(deleted(NEW));
+        expect(
+          await ReactionRoleConfig.countDocuments({
+            roleId: "r1",
+            isArchived: false,
+          }),
+        ).toBe(1);
+
+        // Deleting OLD archives the survivor: the picker died with the channel.
+        await serviceWithConfigured(NEW).handleChannelDelete(deleted(OLD));
+        expect(
+          await ReactionRoleConfig.countDocuments({
+            roleId: "r1",
+            isArchived: true,
+          }),
+        ).toBe(1);
+      });
+
       it("archives the configured channel's own mappings and the older rows that follow the setting", async () => {
         await seed();
         await serviceWithConfigured(NEW).handleChannelDelete(deleted(NEW));

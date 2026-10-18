@@ -386,6 +386,48 @@ describe("reconcileConfigs with a remembered picker channel", () => {
     expect(sibling.isArchived).toBe(false);
   });
 
+  it("finds a picker's channel from an archived stamped row (role deleted, picker left)", async () => {
+    // Legacy mapping whose picker sits in OLD; its only stamped sibling was
+    // archived by a role deletion. The setting now points at CONFIGURED, where
+    // another legacy picker resolves, so without the archived stamp the first
+    // would be archived as missing.
+    const survivor = row({ _id: "s", messageId: "shared" });
+    const other = row({ _id: "o", messageId: "m-other", roleId: "r2" });
+    const archivedStamp = row({
+      _id: "stamp",
+      messageId: "shared",
+      messageChannelId: OLD,
+      isArchived: true,
+    });
+    Model.find.mockImplementation(async (q: Record<string, unknown>) =>
+      "isArchived" in q ? [survivor, other] : [archivedStamp],
+    );
+    const guild = fakeGuild([
+      fakeChannel(OLD, [fakeMessage("shared")]),
+      fakeChannel(CONFIGURED, [fakeMessage("m-other")]),
+    ]);
+
+    await makeService(guild).reconcileConfigs();
+
+    expect(survivor.isArchived).toBe(false);
+    expect(other.isArchived).toBe(false);
+    expect(guild.channels.fetch).toHaveBeenCalledWith(OLD, { force: true });
+  });
+
+  it("skips the pass instead of guessing when the stamped-row lookup fails", async () => {
+    const legacy = row({ messageId: "shared" });
+    Model.find.mockImplementation(async (q: Record<string, unknown>) => {
+      if ("isArchived" in q) return [legacy];
+      throw new Error("db down");
+    });
+    const guild = fakeGuild([fakeChannel(CONFIGURED)]);
+
+    await makeService(guild).reconcileConfigs();
+
+    expect(legacy.isArchived).toBe(false);
+    expect(guild.channels.fetch).not.toHaveBeenCalled();
+  });
+
   it("does not archive a stored mapping on a transient message error", async () => {
     const stored = row({ messageChannelId: OLD });
     const old = fakeChannel(OLD);
@@ -418,14 +460,20 @@ describe("handleChannelDelete with a remembered picker channel", () => {
     const service = makeService(fakeGuild([]));
 
     await service.handleChannelDelete(deleted(OLD));
-    expect(Model.find).toHaveBeenLastCalledWith({
+    expect(Model.find).toHaveBeenCalledWith({
       guildId: "g1",
       isArchived: false,
       $or: [{ messageChannelId: OLD }, { channelId: OLD }, { categoryId: OLD }],
     });
+    // Dead pickers are found from stamped rows in ANY state (role deletion
+    // archives a mapping but leaves the picker).
+    expect(Model.find).toHaveBeenCalledWith({
+      guildId: "g1",
+      messageChannelId: OLD,
+    });
 
     await service.handleChannelDelete(deleted(CONFIGURED));
-    expect(Model.find).toHaveBeenLastCalledWith({
+    expect(Model.find).toHaveBeenCalledWith({
       guildId: "g1",
       isArchived: false,
       $or: [
@@ -437,6 +485,22 @@ describe("handleChannelDelete with a remembered picker channel", () => {
     });
   });
 
+  /** Answer `find` by query shape, not call order. */
+  function routeFind(rows: {
+    matched?: unknown[];
+    stampedHere?: unknown[];
+    stampedLookup?: unknown[];
+    siblings?: unknown[];
+  }) {
+    Model.find.mockImplementation(async (q: Record<string, unknown>) => {
+      if ("$or" in q) return rows.matched ?? [];
+      const ids = q.messageId as { $in: string[] } | undefined;
+      if (!ids) return rows.stampedHere ?? [];
+      if (q.messageChannelId) return rows.stampedLookup ?? [];
+      return rows.siblings ?? [];
+    });
+  }
+
   it("also archives unstamped rows that share a deleted picker with a stamped one", async () => {
     // A legacy picker topped up after #1207: one row stamped, one not. Only the
     // stamped row matches the channel; the picker is gone for both.
@@ -446,12 +510,15 @@ describe("handleChannelDelete with a remembered picker channel", () => {
       messageChannelId: OLD,
     });
     const sibling = row({ _id: "sibling", messageId: "shared", roleId: "r2" });
-    Model.find.mockResolvedValueOnce([stamped]);
-    Model.find.mockResolvedValueOnce([stamped, sibling]);
+    routeFind({
+      matched: [stamped],
+      stampedHere: [stamped],
+      siblings: [stamped, sibling],
+    });
 
     await makeService(fakeGuild([])).handleChannelDelete(deleted(OLD));
 
-    expect(Model.find).toHaveBeenLastCalledWith({
+    expect(Model.find).toHaveBeenCalledWith({
       guildId: "g1",
       isArchived: false,
       messageId: { $in: ["shared"] },
@@ -462,9 +529,30 @@ describe("handleChannelDelete with a remembered picker channel", () => {
     expect(stamped.save).toHaveBeenCalledTimes(1);
   });
 
+  it("deleting the old channel archives the survivors of a picker whose only stamped row was archived by a role deletion", async () => {
+    // Role deletion archived the stamped binding but left the picker in OLD.
+    const archivedStamp = row({
+      _id: "stamp",
+      messageId: "shared",
+      messageChannelId: OLD,
+      isArchived: true,
+    });
+    const survivor = row({ _id: "s", messageId: "shared", roleId: "r2" });
+    routeFind({
+      matched: [],
+      stampedHere: [archivedStamp],
+      siblings: [survivor],
+    });
+
+    await makeService(fakeGuild([])).handleChannelDelete(deleted(OLD));
+
+    expect(survivor.isArchived).toBe(true);
+    expect(archivedStamp.save).not.toHaveBeenCalled();
+  });
+
   it("keeps an unstamped row whose picker a stamped sibling places in another channel", async () => {
-    // Legacy picker in OLD that gained a stamped row; the setting moved to CONFIGURED
-    // and CONFIGURED is deleted. The picker and its sibling are alive in OLD.
+    // Legacy picker in OLD that gained a stamped row; the setting moved to
+    // CONFIGURED and CONFIGURED is deleted. The picker is alive in OLD.
     const unstamped = row({ _id: "u", messageId: "shared" });
     const ownsDeleted = row({
       _id: "own",
@@ -472,16 +560,18 @@ describe("handleChannelDelete with a remembered picker channel", () => {
       channelId: CONFIGURED,
     });
     const plain = row({ _id: "plain", messageId: "plain", roleId: "r3" });
-    Model.find.mockResolvedValueOnce([unstamped, ownsDeleted, plain]);
-    Model.find.mockResolvedValueOnce([
-      row({ _id: "s", messageId: "shared", messageChannelId: OLD }),
-    ]);
+    routeFind({
+      matched: [unstamped, ownsDeleted, plain],
+      stampedLookup: [
+        row({ _id: "s", messageId: "shared", messageChannelId: OLD }),
+      ],
+    });
 
     await makeService(fakeGuild([])).handleChannelDelete(deleted(CONFIGURED));
 
-    expect(Model.find).toHaveBeenLastCalledWith({
+    // No `isArchived` clause: an archived stamp is as good a record.
+    expect(Model.find).toHaveBeenCalledWith({
       guildId: "g1",
-      isArchived: false,
       messageId: { $in: ["shared", "plain"] },
       messageChannelId: { $exists: true, $ne: "" },
     });

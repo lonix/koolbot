@@ -235,6 +235,35 @@ export class ReactionRoleService {
         );
       }
     }
+    // Same rule as pickerChannelForMessage: an ARCHIVED stamped row on the
+    // message also tells the channel (role deletion archives a mapping but
+    // leaves the shared picker). One query for all unstamped rows. Failing to
+    // read it must not turn a moved picker into a deletion, so skip the pass.
+    const unstampedMessageIds = [
+      ...new Set(
+        configs.filter((c) => !c.messageChannelId).map((c) => c.messageId),
+      ),
+    ];
+    if (unstampedMessageIds.length > 0) {
+      try {
+        const stampedElsewhere = await ReactionRoleConfig.find({
+          messageId: { $in: unstampedMessageIds },
+          messageChannelId: { $exists: true, $ne: "" },
+        });
+        for (const row of stampedElsewhere) {
+          const key = `${row.guildId}:${row.messageId}`;
+          if (row.messageChannelId && !storedChannelByMessage.has(key)) {
+            storedChannelByMessage.set(key, row.messageChannelId);
+          }
+        }
+      } catch (error) {
+        logger.error(
+          "Reaction role reconciliation: could not read picker channels, skipping this pass",
+          error,
+        );
+        return;
+      }
+    }
 
     for (const config of configs) {
       try {
@@ -653,9 +682,11 @@ export class ReactionRoleService {
           ),
         ];
         if (legacyMessageIds.length > 0) {
+          // Archived rows count too: role deletion archives a mapping but leaves
+          // the shared picker, so an archived stamp can be the only record of
+          // where it lives. Only active rows are ever archived below.
           const stamped = await ReactionRoleConfig.find({
             guildId: channel.guild.id,
-            isArchived: false,
             messageId: { $in: legacyMessageIds },
             messageChannelId: { $exists: true, $ne: "" },
           });
@@ -680,9 +711,15 @@ export class ReactionRoleService {
       // only the stamped ones match above. The picker is gone for all of them, so
       // archive their unstamped siblings too (otherwise half a group stays active
       // on a dead message).
+      // The stamp can sit on an archived row (role deletion archives a mapping
+      // and leaves the picker), so look at every state to find dead pickers.
+      const stampedHere = await ReactionRoleConfig.find({
+        guildId: channel.guild.id,
+        messageChannelId: channel.id,
+      });
       const deadMessageIds = [
         ...new Set(
-          matched
+          [...matched, ...stampedHere]
             .filter((c) => c.messageChannelId === channel.id)
             .map((c) => c.messageId),
         ),

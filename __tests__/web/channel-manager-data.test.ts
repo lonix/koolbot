@@ -274,7 +274,10 @@ describe("loadProtection", () => {
     expect(managed).toHaveBeenCalledWith({ guildId: "g1" });
     expect(reactionRoles).toHaveBeenCalledWith({
       guildId: "g1",
-      archivedAt: null,
+      $or: [
+        { archivedAt: null },
+        { messageChannelId: { $exists: true, $ne: "" } },
+      ],
     });
     expect(polls).toHaveBeenCalledWith({ guildId: "g1" });
     expect(announcements).toHaveBeenCalledWith({ guildId: "g1" });
@@ -297,6 +300,24 @@ describe("loadProtection", () => {
       throw new Error("db down");
     });
     await expect(loadProtection(guild, [])).rejects.toThrow("db down");
+  });
+
+  it("protects the picker channel of an archived mapping but not its private channel", async () => {
+    reactionRoles.mockReturnValue(
+      lean([
+        {
+          _id: "rr-archived",
+          archivedAt: new Date(),
+          channelId: "100000000000000051",
+          categoryId: "100000000000000052",
+          messageChannelId: "100000000000000050",
+        },
+      ]),
+    );
+    const map = await loadProtection(guild, []);
+    expect(map.get("100000000000000050")![0]).toContain("picker channel");
+    expect(map.has("100000000000000051")).toBe(false);
+    expect(map.has("100000000000000052")).toBe(false);
   });
 
   const voiceChannels = [
