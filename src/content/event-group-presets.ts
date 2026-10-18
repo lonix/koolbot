@@ -30,11 +30,22 @@ export interface EventGroupPreset {
   description: string;
   /** What a group is called for this preset ("Team", "Squad", ...). */
   groupLabel: string;
+  /** What a leader is called; absent = the default ("Leader"). Library presets only. */
+  leaderLabel?: string;
+  /** Channel creation time in minutes before the start; absent = server default. Library presets only. */
+  channelLeadMinutes?: number | null;
   groups: readonly EventGroupPresetGroup[];
 }
 
 /** Id prefix every built-in preset carries. */
 export const BUILTIN_PRESET_PREFIX = "builtin:";
+/**
+ * Id prefix of a preset in the server-wide library (#1200): `lib:` plus the
+ * row's ObjectId. The id is minted once and survives renames and edits, so
+ * `presetId` on an event stays a meaningful reference. Not `custom:`: the
+ * literal "custom" already means "no preset".
+ */
+export const LIBRARY_PRESET_PREFIX = "lib:";
 
 function team(name: string, marker = ""): EventGroupPresetGroup {
   return { name, kind: "team", size: null, tag: "", marker };
