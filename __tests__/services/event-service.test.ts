@@ -51,6 +51,7 @@ const {
   shouldEndEvent,
   shouldCleanupChannel,
   effectiveEndTime,
+  canonicalEventId,
   formatEventWhen,
   computeOccurrenceStart,
   isRecurring,
@@ -287,6 +288,26 @@ describe("shouldCleanupChannel", () => {
         true,
       ),
     ).toBe(true);
+  });
+});
+
+describe("canonicalEventId", () => {
+  it("lower-cases a 24-digit hex id and refuses anything else", () => {
+    expect(canonicalEventId("65A00000000000000000000A")).toBe(
+      "65a00000000000000000000a",
+    );
+    expect(canonicalEventId("65a00000000000000000000a")).toBe(
+      "65a00000000000000000000a",
+    );
+    for (const bad of [
+      "",
+      "abc",
+      "g".repeat(24),
+      "a".repeat(25),
+      "abcdefghijkl",
+    ]) {
+      expect(canonicalEventId(bad)).toBeNull();
+    }
   });
 });
 

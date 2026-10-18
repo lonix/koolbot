@@ -135,6 +135,18 @@ export class RecurrenceDisabledError extends Error {
 // Pure helpers (exported for unit testing)
 // ---------------------------------------------------------------
 
+/**
+ * The canonical form of an event id taken from outside (a route, a command): 24
+ * hex digits, lower case, which is what `String(doc._id)` yields; null when it
+ * is not one. The id-keyed maps of the service (holds, in-progress marks, locks,
+ * the link cache) all use that form.
+ */
+export function canonicalEventId(raw: string): string | null {
+  return typeof raw === "string" && /^[0-9a-f]{24}$/i.test(raw)
+    ? raw.toLowerCase()
+    : null;
+}
+
 /** The absolute end instant of an event. */
 export function computeEndTime(startTime: Date, durationMinutes: number): Date {
   return new Date(
@@ -363,23 +375,48 @@ export class EventService extends ScheduledService {
   /** The one teardown of an ending event (#1193), manual and scheduled. */
   private readonly teardown: EventTeardown;
   /**
-   * Events being ended or ended moments ago (id to expiry): the scan skips
-   * them. A scan that loaded an event just before a manual end must not go on
-   * with its older, still-open copy (re-render the post as running, update the
-   * native event as live). In memory: the bot is one process, and a scan after
-   * a restart loads fresh rows.
+   * THE HOLD MECHANISM (every event path that takes an event to a terminal state
+   * goes through it: an end, manual or scheduled, and a cancel).
+   *
+   * The danger: a scan loads every event once, then works through them one by
+   * one with no deadline, so its copy of an event can be arbitrarily old when
+   * the scan reaches it. If the event was ended (or cancelled) meanwhile, that
+   * open copy must not write anything (reminder, announcement, native sync,
+   * channel create, delete). A time-based hold alone cannot guarantee that.
+   *
+   * One clock (`scanClock`) orders scans and holds. A scan takes a tick when it
+   * starts (it loads its rows then). A hold takes a tick when it begins and
+   * starts out "pending": `clock = Infinity`, `until = Infinity`. When the claim
+   * lands (`claimCompleted`) the hold's clock becomes the tick of that moment,
+   * and its expiry restarts. Invariants:
+   *
+   * 1. A scan that started before the claim completed (so it may hold an open
+   *    row; this includes scans that started AFTER the hold began but while the
+   *    claim was still pending) has an id below the hold's clock. A hold is
+   *    removed only when it has expired AND no active scan has an id below its
+   *    clock. A pending hold is never removed by time, and every running scan
+   *    is "older" than a pending one.
+   * 2. A scan that started after the claim completed read the new state and
+   *    needs no protection.
+   * 3. A lost claim (`abortEnding`) removes only that caller's own hold and
+   *    in-progress mark; the winner has its own, taken before its own claim.
+   * 4. `endsInProgress` (set at begin, removed in `finishEnding`, in a `finally`
+   *    around the work) stops scans on a copy in ANY state while the work runs
+   *    (an ended copy must not sweep the main channel under a pull-back).
+   * 5. `mustSkipScan` is checked at the start of `processEvent`, after every
+   *    await that precedes an outward write, and again right before the
+   *    outward write itself where the write is preceded by its own fetches
+   *    (reminder send, announcement send and edit).
+   * 6. Holds and marks are keyed by the canonical event id (24 lower-case hex,
+   *    `String(doc._id)`); a caller that takes an id from outside normalises it
+   *    first (`canonicalEventId`).
+   * In memory: the bot is one process, and a scan after a restart loads fresh
+   * rows.
    */
   private readonly endingEvents = new Map<
     string,
     Map<number, { until: number; clock: number }>
   >();
-  /**
-   * One clock for scans and holds. A scan takes a tick when it starts (it loads
-   * every event then), a hold takes one when it begins. A hold is not released
-   * by its time alone: while a scan that started BEFORE it is still running,
-   * that scan may hold an open copy of the event, so the hold stays (otherwise a
-   * slow scan could outlive a fixed timeout and act on its older copy).
-   */
   private scanClock = 0;
   private readonly activeScans = new Set<number>();
   /**
@@ -430,6 +467,7 @@ export class EventService extends ScheduledService {
       beginEnding: (id): number => this.beginEnding(id),
       abortEnding: (id, hold): void => this.abortEnding(id, hold),
       finishEnding: (id, hold): void => this.finishEnding(id, hold),
+      claimCompleted: (id, hold): void => this.claimCompleted(id, hold),
     });
   }
 
@@ -542,12 +580,29 @@ export class EventService extends ScheduledService {
     const holds =
       this.endingEvents.get(eventId) ??
       new Map<number, { until: number; clock: number }>();
-    holds.set(hold, { until: now + EventService.ENDING_HOLD_MS, clock: hold });
+    // Pending until the claim lands: never expires by time, and every running
+    // scan counts as older (see the invariants above).
+    holds.set(hold, {
+      until: Number.POSITIVE_INFINITY,
+      clock: Number.POSITIVE_INFINITY,
+    });
     this.endingEvents.set(eventId, holds);
     const running = this.endsInProgress.get(eventId) ?? new Set<number>();
     running.add(hold);
     this.endsInProgress.set(eventId, running);
     return hold;
+  }
+
+  /**
+   * The claim landed. From this tick on, a scan that started earlier may still
+   * hold an open copy, a scan that starts later cannot: the hold's clock is
+   * this moment, and its expiry restarts.
+   */
+  private claimCompleted(eventId: string, hold: number): void {
+    const entry = this.endingEvents.get(eventId)?.get(hold);
+    if (!entry) return;
+    entry.clock = ++this.scanClock;
+    entry.until = Date.now() + EventService.ENDING_HOLD_MS;
   }
 
   /** The claim was lost: give up this caller's own holds, and only those. */
@@ -609,7 +664,12 @@ export class EventService extends ScheduledService {
     guildId: string,
     options: { pullBack: boolean },
   ): Promise<EndEventOutcome> {
-    if (!isValidObjectId(eventId)) return { status: "not-found" };
+    // One canonical id for the claim, the holds and every id-keyed map: a valid
+    // id posted in upper case reaches the same row, so it must not key a
+    // second, unseen set of holds.
+    const canonical = canonicalEventId(eventId);
+    if (!canonical) return { status: "not-found" };
+    eventId = canonical;
     let enabled = false;
     try {
       enabled = await this.configService.getBoolean("events.enabled", false);
@@ -1581,17 +1641,36 @@ export class EventService extends ScheduledService {
     // recorded by Start now or the scan after that copy was read). The stored
     // `channelId` is kept: it is the only record of the channel until Discord
     // confirms it is gone, so a restart in between leaves it for the scan.
+    // Like an end, a cancel takes a hold first (see the hold invariants): a scan
+    // holding an older, open copy must not write after it.
+    const id = String(event._id);
+    const hold = this.beginEnding(id);
+    try {
+      return await this.cancelClaimed(event, hold, nativeCache, skipNative);
+    } finally {
+      this.finishEnding(id, hold);
+    }
+  }
+
+  private async cancelClaimed(
+    event: IEvent,
+    hold: number,
+    nativeCache?: NativeCache | null,
+    skipNative = false,
+  ): Promise<boolean> {
     const claimed = (await Event.findOneAndUpdate(
       { _id: event._id, state: { $in: ["scheduled", "active"] } },
       { $set: { state: "cancelled" } },
       { new: false },
     )) as { channelId?: string | null } | null | undefined;
     if (claimed === null) {
+      this.abortEnding(String(event._id), hold);
       logger.info(
         `Event ${sanitizeForLog(String(event._id))} is no longer open; not cancelled`,
       );
       return false;
     }
+    this.claimCompleted(String(event._id), hold);
     const channelId =
       claimed && claimed.channelId !== undefined
         ? claimed.channelId

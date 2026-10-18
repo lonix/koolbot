@@ -1593,9 +1593,16 @@ describe("the hold does not depend on a timeout while an older scan runs", () =>
     const { service } = setup();
     const svc = service as unknown as {
       beginEnding: (id: string) => number;
+      claimCompleted: (id: string, hold: number) => void;
       isBeingEnded: (id: string) => boolean;
     };
-    svc.beginEnding(ID);
+    const hold = svc.beginEnding(ID);
+    // Pending until the claim lands: never expires by time.
+    const realNow0 = Date.now;
+    jest.spyOn(Date, "now").mockImplementation(() => realNow0() + 60 * MIN);
+    expect(svc.isBeingEnded(ID)).toBe(true);
+    jest.restoreAllMocks();
+    svc.claimCompleted(ID, hold);
     expect(svc.isBeingEnded(ID)).toBe(true);
     const realNow = Date.now;
     jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
@@ -1604,5 +1611,180 @@ describe("the hold does not depend on a timeout while an older scan runs", () =>
     } finally {
       jest.restoreAllMocks();
     }
+  });
+});
+
+describe("a scan that started while the end's claim was still pending", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  it("still leaves the ended event alone when it reaches it after the hold's time is up", async () => {
+    const { service } = setup();
+    configMock.getString.mockImplementation(async (k: string, d?: unknown) =>
+      k === "GUILD_ID" ? "guild-1" : d,
+    );
+    try {
+      const start = new Date(Date.now() + 10 * MIN);
+      store.set(ID, stored({ startTime: start }));
+      // Event B (the one being ended) is read open by the scan; event A, which
+      // comes first in the scan, is slow.
+      const other = "65a000000000000000000002";
+      const slowA = row({
+        _id: other,
+        nativeAdopted: true,
+        announcementMessageId: "m1",
+        startTime: start,
+      });
+      const staleB = row({ reminderSent: false, startTime: start });
+      EventMock.find = jest.fn(async () => [slowA, staleB]);
+      let releaseA!: () => void;
+      service.nativeSync.pullAdopted = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            releaseA = () => resolve("ok");
+          }),
+      );
+
+      // The end begins, and its claim stays pending.
+      let releaseClaim!: () => void;
+      claimDelay = new Promise((resolve) => {
+        releaseClaim = resolve;
+      });
+      const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+      await nap();
+
+      // The scan starts NOW, inside the pending-claim window, and reads B open.
+      const scan = (
+        service as unknown as { runOnce: () => Promise<void> }
+      ).runOnce();
+      await nap();
+      expect(service.nativeSync.pullAdopted).toHaveBeenCalledTimes(1);
+
+      // The claim lands and the end finishes; the scan is still on event A.
+      releaseClaim();
+      expect((await ending).status).toBe("ended");
+
+      // Much later than the hold's time, the scan reaches B's older copy.
+      const realNow = Date.now;
+      jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+      try {
+        releaseA();
+        await scan;
+      } finally {
+        jest.restoreAllMocks();
+      }
+      expect(service.postReminder).not.toHaveBeenCalled();
+      expect(store.get(ID)?.state).toBe("ended");
+    } finally {
+      configMock.getString.mockImplementation(
+        async (_k: string, d?: unknown) => d,
+      );
+    }
+  });
+});
+
+describe("a valid event id posted in upper case", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+  const UPPER = ID.toUpperCase();
+
+  it("is normalised once: the claim, the holds and the marks all use the canonical id", async () => {
+    const { service } = setup();
+    expect(UPPER).not.toBe(ID);
+    const svc = service as unknown as {
+      isBeingEnded: (id: string) => boolean;
+      endsInProgress: Map<string, unknown>;
+    };
+    const run = jest.spyOn(service.teardown, "run");
+    let release!: () => void;
+    service.updateAnnouncement = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    const ending = service.endEventNow(UPPER, "guild-1", { pullBack: false });
+    await nap();
+    // The holds a scan looks up (by String(doc._id)) are there.
+    expect(svc.isBeingEnded(ID)).toBe(true);
+    expect(svc.endsInProgress.has(ID)).toBe(true);
+    expect(svc.endsInProgress.has(UPPER)).toBe(false);
+    release();
+    expect((await ending).status).toBe("ended");
+    expect((run.mock.calls[0]?.[0] as { eventId: string }).eventId).toBe(ID);
+    expect(store.get(ID)?.state).toBe("ended");
+  });
+
+  it("a scan on an open copy is held off by an upper-case end", async () => {
+    const { service, guild } = setup();
+    let release!: () => void;
+    service.updateAnnouncement = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    const ending = service.endEventNow(UPPER, "guild-1", { pullBack: false });
+    await nap();
+    const del = jest.fn(async () => undefined);
+    guild.channels.cache.set("main-1", { delete: del });
+    await service.processEvent(
+      row({ state: "ended", endedAt: new Date(Date.now() - MIN) }),
+      guild,
+      new Date(),
+      { ...WINDOWS, graceMs: 0 },
+    );
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    release();
+    await ending;
+  });
+
+  it("anything that is not 24 hex digits is not found", async () => {
+    const { service } = setup();
+    for (const bad of ["", "12", "zzzzzzzzzzzzzzzzzzzzzzzz", "abcdefghijkl"]) {
+      expect(
+        (await service.endEventNow(bad, "guild-1", { pullBack: false })).status,
+      ).toBe("not-found");
+    }
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("a cancel holds the event like an end", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  it("an older, open copy writes nothing while the cancel works, and afterwards", async () => {
+    const { service, guild } = setup();
+    // The cancel claims the event and stalls on its announcement refresh.
+    (EventMock as unknown as { updateOne: jest.Mock }).updateOne = jest.fn(
+      async () => ({ matchedCount: 1 }),
+    );
+    let release!: () => void;
+    service.updateAnnouncement = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    const cancelling = service.cancelOne(row({ state: "active" }));
+    await nap();
+    expect(store.get(ID)?.state).toBe("cancelled");
+    // A scan whose copy still reads open reaches the event now.
+    await service.processEvent(
+      row({ reminderSent: false, announcementMessageId: "m1" }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    expect(service.postReminder).not.toHaveBeenCalled();
+    expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
+    release();
+    await cancelling;
+    // Still held after the cancel finished (the recently-ended hold).
+    await service.processEvent(
+      row({ reminderSent: false, announcementMessageId: "m1" }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    expect(service.postReminder).not.toHaveBeenCalled();
   });
 });

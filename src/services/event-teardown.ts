@@ -113,6 +113,11 @@ export interface TeardownDeps {
    * is no longer "in progress". The recently-ended hold stays until it expires.
    */
   finishEnding(eventId: string, hold: number): void;
+  /**
+   * The claim landed (called synchronously right after it resolves): scans that
+   * started before this moment may still hold an open copy and stay held off.
+   */
+  claimCompleted(eventId: string, hold: number): void;
   /** Pause after a pull-back so the gateway shows the moves (tests: 0). */
   settleMs?: number;
 }
@@ -190,6 +195,7 @@ export class EventTeardown {
       return claimed;
     }
 
+    this.deps.claimCompleted(eventId, hold);
     try {
       return await this.afterClaim(input, claimed.doc);
     } finally {

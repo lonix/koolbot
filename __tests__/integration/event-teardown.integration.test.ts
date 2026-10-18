@@ -49,6 +49,7 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
       beginEnding: () => 1,
       abortEnding: () => undefined,
       finishEnding: () => undefined,
+      claimCompleted: () => undefined,
       settleMs: 0,
     });
   }

@@ -219,6 +219,7 @@ function make(over: DepOverrides = {}): {
     beginEnding: begin,
     abortEnding: abort,
     finishEnding: jest.fn(),
+    claimCompleted: jest.fn(),
     settleMs: 0,
   });
   return { teardown, begin, abort };
