@@ -1002,9 +1002,13 @@ export class EventService extends ScheduledService {
 
     // 1. Reminder (before start, once).
     if (shouldSendReminder(event, now, windows.reminderMs)) {
-      await this.postReminder(event);
-      event.reminderSent = true;
-      changed = true;
+      // A reminder skipped because an end or cancel holds the event is not a
+      // sent reminder: it is not recorded as one (the event may still be open
+      // if that claim failed). Every other outcome is recorded as before.
+      if ((await this.postReminder(event)) !== false) {
+        event.reminderSent = true;
+        changed = true;
+      }
     }
 
     // 2. Create the temp channel shortly before start.
@@ -1014,8 +1018,27 @@ export class EventService extends ScheduledService {
     ) {
       const channel = await this.claimEventChannel(event, guild);
       if (channel) {
-        if (event.state === "scheduled") event.state = "active";
+        if (event.state === "scheduled") {
+          // `scheduled` to `active` is a conditional write, not a field the
+          // scan's later `save()` carries: a cancel (or an end) that landed
+          // since this copy was read must not be turned back into `active`.
+          // When the row is no longer `scheduled` this copy keeps its state
+          // (and nothing here writes it).
+          const moved = await Event.updateOne(
+            { _id: event._id, state: "scheduled" },
+            { $set: { state: "active" } },
+          );
+          if (
+            (moved as { matchedCount?: number } | undefined)?.matchedCount !== 0
+          ) {
+            event.state = "active";
+            (event as unknown as { $ignore?: (p: string) => void }).$ignore?.(
+              "state",
+            );
+          }
+        }
         changed = true;
+        // Skips itself (and says so) when an end or cancel holds the event.
         await this.updateAnnouncement(event);
       }
     }
@@ -2272,7 +2295,10 @@ export class EventService extends ScheduledService {
         (event.state === "scheduled" || event.state === "active") &&
         this.isBeingEnded(String(event._id))
       ) {
-        return true;
+        // Skipped, which is NOT a refresh: the post was not changed, so callers
+        // that must know it is current (a member's RSVP removal keeps the RSVP
+        // for a retry) see a failure, and the link refresh tries again.
+        return false;
       }
       await message.edit(
         legacy
@@ -2299,13 +2325,14 @@ export class EventService extends ScheduledService {
     }
   }
 
-  private async postReminder(event: IEvent): Promise<void> {
-    if (!event.announcementChannelId) return;
+  /** False only when the reminder was skipped because an end or cancel holds the event. */
+  private async postReminder(event: IEvent): Promise<boolean> {
+    if (!event.announcementChannelId) return true;
     const channel = await this.fetchTextChannel(
       event.guildId,
       event.announcementChannelId,
     );
-    if (!channel) return;
+    if (!channel) return true;
 
     const interested = event.rsvps
       .filter((r) => r.status === "going" || r.status === "maybe")
@@ -2334,11 +2361,12 @@ export class EventService extends ScheduledService {
 
     // The channel fetch above is an await: an older, still-open copy sends no
     // start reminder (legacy pings, old links) once an end has begun.
-    if (this.mustSkipScan(event)) return;
+    if (this.mustSkipScan(event)) return false;
     await channel.send({
       content,
       allowedMentions: { users: pinged },
     });
+    return true;
   }
 
   // ---------------------------------------------------------------

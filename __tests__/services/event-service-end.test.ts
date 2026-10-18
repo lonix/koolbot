@@ -74,6 +74,11 @@ interface Priv {
   postReminder: jest.Mock;
   deleteEventChannel: jest.Mock;
   cancelOne: (e: unknown) => Promise<void>;
+  claimEventChannel: jest.Mock;
+  removeRsvp: (
+    g: string,
+    u: string,
+  ) => Promise<{ matched: number; removed: number; rendersFailed: number }>;
   groupChannels: { reconcile: jest.Mock; cleanup: jest.Mock };
   teardown: { run: (i: Record<string, unknown>) => Promise<unknown> };
   linkVerified: Map<string, string>;
@@ -1196,12 +1201,13 @@ describe("the start reminder after an end began", () => {
           release = () => resolve(channel);
         }),
     );
+    const copy = row({
+      reminderSent: false,
+      announcementChannelId: "a1",
+      rsvps: [{ userId: "u1", status: "going" }],
+    });
     const scan = service.processEvent(
-      row({
-        reminderSent: false,
-        announcementChannelId: "a1",
-        rsvps: [{ userId: "u1", status: "going" }],
-      }),
+      copy,
       guild,
       new Date("2026-07-04T19:50:00Z"),
       { ...WINDOWS, reminderMs: 30 * MIN },
@@ -1215,6 +1221,8 @@ describe("the start reminder after an end began", () => {
     release();
     await scan;
     expect(send).not.toHaveBeenCalled();
+    // A skipped reminder is not recorded as a sent one.
+    expect(copy.reminderSent).toBe(false);
   });
 
   it("without an end the reminder is sent as before", async () => {
@@ -1890,5 +1898,155 @@ describe("a claim that fails leaves no hold that never expires", () => {
       jest.restoreAllMocks();
     }
     expect(store.get(ID)?.state).toBe("ended");
+  });
+});
+
+describe("the scan's scheduled to active step cannot undo a cancel", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+  const LEAD_NOW = new Date("2026-07-04T19:50:00Z");
+
+  function statefulUpdateOne(): void {
+    EventMock.updateOne = jest.fn(
+      async (filter: Record<string, unknown>, update: { $set: Row }) => {
+        const r = store.get(filter._id as string);
+        if (!r || (filter.state !== undefined && r.state !== filter.state)) {
+          return { matchedCount: 0 };
+        }
+        Object.assign(r, update.$set);
+        return { matchedCount: 1, modifiedCount: 1 };
+      },
+    );
+  }
+
+  function scheduledCopy(ignored: string[]): Row {
+    return row({
+      state: "scheduled",
+      channelId: null,
+      reminderSent: true,
+      $ignore: (path: string) => ignored.push(path),
+    });
+  }
+
+  it("a cancel that landed while the channel was being made is not turned back into active", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "scheduled", channelId: null }));
+    let release!: () => void;
+    service.claimEventChannel = jest.fn(
+      (e: unknown) =>
+        new Promise((resolve) => {
+          release = () => {
+            (e as Row).channelId = "main-1";
+            resolve({ id: "main-1" });
+          };
+        }),
+    );
+    const ignored: string[] = [];
+    const copy = scheduledCopy(ignored);
+    const scan = service.processEvent(copy, guild, LEAD_NOW, WINDOWS);
+    await nap();
+    expect(service.claimEventChannel).toHaveBeenCalledTimes(1);
+    // The cancel claims the stored row meanwhile.
+    await service.cancelOne(row({ state: "scheduled" }));
+    expect(store.get(ID)?.state).toBe("cancelled");
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("cancelled");
+    // The copy kept its state: nothing carries `active` into its save.
+    expect(copy.state).toBe("scheduled");
+    expect(ignored).not.toContain("state");
+  });
+
+  it("a cancel that landed during the announcement refresh survives the scan's save", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "scheduled", channelId: null }));
+    service.claimEventChannel = jest.fn(async (e: unknown) => {
+      (e as Row).channelId = "main-1";
+      return { id: "main-1" };
+    });
+    let release!: () => void;
+    let first = true;
+    service.updateAnnouncement = jest.fn(() => {
+      if (!first) return Promise.resolve(true);
+      first = false;
+      return new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      });
+    });
+    const ignored: string[] = [];
+    const copy = scheduledCopy(ignored);
+    const scan = service.processEvent(copy, guild, LEAD_NOW, WINDOWS);
+    await nap();
+    expect(store.get(ID)?.state).toBe("active");
+    await service.cancelOne(row({ state: "active" }));
+    expect(store.get(ID)?.state).toBe("cancelled");
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("cancelled");
+    // The transition was a conditional write; the copy's save does not carry it.
+    expect(ignored).toContain("state");
+    expect(EventMock.updateOne.mock.calls[0]?.[0]).toEqual({
+      _id: ID,
+      state: "scheduled",
+    });
+  });
+});
+
+describe("a skipped announcement edit is not a refresh (member reset)", () => {
+  function realAnnouncement(
+    service: ReturnType<typeof setup>["service"],
+    guild: ReturnType<typeof setup>["guild"],
+  ): jest.Mock {
+    delete (service as unknown as { updateAnnouncement?: unknown })
+      .updateAnnouncement;
+    const edit = jest.fn(async () => undefined);
+    const channel = Object.assign(Object.create(TextChannel.prototype), {
+      messages: { fetch: jest.fn(async () => ({ components: [], edit })) },
+    });
+    guild.channels.fetch = jest.fn(async (id: string) =>
+      id === "a1" ? channel : null,
+    );
+    return edit;
+  }
+
+  const match = (): Row =>
+    row({
+      announcementChannelId: "a1",
+      announcementMessageId: "m1",
+      rsvps: [{ userId: "u1", status: "going" }],
+    });
+
+  it("keeps the RSVP for a retry and reports the failure while a failed claim still holds the event", async () => {
+    const { service, guild } = setup();
+    const edit = realAnnouncement(service, guild);
+    const pull = jest.fn(async () => ({ _id: ID }));
+    (
+      EventMock as unknown as { findByIdAndUpdate: jest.Mock }
+    ).findByIdAndUpdate = pull;
+    EventMock.find = jest.fn(async () => [match()]);
+    // A failed claim: its hold is settled into a finite one.
+    EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("failed");
+
+    const first = await service.removeRsvp("guild-1", "u1");
+    expect(first).toEqual({ matched: 1, removed: 0, rendersFailed: 1 });
+    expect(pull).not.toHaveBeenCalled();
+    expect(edit).not.toHaveBeenCalled();
+
+    // Once the hold is over, the same reset goes through.
+    EventMock.find = jest.fn(async () => [match()]);
+    const realNow = Date.now;
+    jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
+    try {
+      const second = await service.removeRsvp("guild-1", "u1");
+      expect(second).toEqual({ matched: 1, removed: 1, rendersFailed: 0 });
+    } finally {
+      jest.restoreAllMocks();
+    }
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(pull).toHaveBeenCalledTimes(1);
   });
 });

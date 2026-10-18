@@ -300,6 +300,38 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
     expect((await stored(id)).state).toBe("ended");
   });
 
+  it("the scan's scheduled to active step is conditional, and its save does not carry the state", async () => {
+    const id = await makeEvent({ state: "scheduled" });
+    // The scan's copy, loaded while the event was still scheduled.
+    const doc = await Event.findById(id);
+    if (!doc) throw new Error("event missing");
+    // A cancel lands first: the conditional step then matches nothing.
+    await Event.updateOne({ _id: id }, { $set: { state: "cancelled" } });
+    const lost = await Event.updateOne(
+      { _id: id, state: "scheduled" },
+      { $set: { state: "active" } },
+    );
+    expect(lost.matchedCount).toBe(0);
+    // The other order: the step lands, a cancel follows, then the scan saves
+    // its copy for another field; the state it ignores is not written.
+    const id2 = await makeEvent({ state: "scheduled" });
+    const doc2 = await Event.findById(id2);
+    if (!doc2) throw new Error("event missing");
+    const won = await Event.updateOne(
+      { _id: id2, state: "scheduled" },
+      { $set: { state: "active" } },
+    );
+    expect(won.matchedCount).toBe(1);
+    doc2.state = "active";
+    doc2.$ignore("state");
+    await Event.updateOne({ _id: id2 }, { $set: { state: "cancelled" } });
+    doc2.reminderSent = true;
+    await doc2.save();
+    const row = await stored(id2);
+    expect(row.state).toBe("cancelled");
+    expect(row.reminderSent).toBe(true);
+  });
+
   it("an event of another server is not found and not ended", async () => {
     const id = await makeEvent();
     const outcome = await teardown().run(input(id, { guildId: "guild-2" }));
