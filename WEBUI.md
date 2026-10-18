@@ -1398,7 +1398,8 @@ list yet or Discord cannot be read, and "N+" when more than a few hundred
 members are interested. Events posted before native-only events also show their
 old RSVP tally until they end. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
-**Cancel** (a confirm-guarded stop) — while finished events show no actions. A
+**Cancel** (a confirm-guarded stop) — while finished events show no lifecycle
+actions. Every row has a **Host panel** link (see below). A
 **Schedule a new event** form creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
 
@@ -1422,10 +1423,36 @@ shown next to the fields before sending; the server checks everything again, nam
 the group and field in its message, and the page puts the entered values back after
 a refused submit. The setup is only stored: the events table shows the group count,
 a recurring series copies the setup (not members) to its next occurrence, and the
-group voice channels, host panel and assignment come in later updates of the groups
+group voice channels and assignment come in later updates of the groups
 epic (#1187). An event's own channel creation time already decides when its channel
 is created. Presets are built into the bot; the server-wide preset library is a
 later update.
+
+The **host panel** (#1189) is the page where the person running an event manages
+it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
+under `/admin`, because the host is the event's creator, who is often not a Web UI
+admin. The creator signs in with `/me` like any member and finds their open events
+under **Events you host** on the overview; admins open it from the **Host panel**
+link on each row of the Events page. Who may open it:
+
+- the member who created the event (`/event create` or the schedule form), and
+- an admin session, for any event of this server. An admin who signed in with
+  `/me` instead of `/config` holds a member session and sees only their own events.
+
+Everyone else gets a 403, with the same page whether the event does not exist,
+belongs to another server or belongs to someone else. Every request is checked
+against the live session, a state-changing request also needs the CSRF token, and
+anything that cannot be read counts as "not the host". An event adopted from an
+existing Discord event records the adopting admin as its creator but is not listed
+under Events you host, and the panel never changes the Discord event itself.
+
+The page shows a summary (state, start, duration, repeat, main voice channel) and the
+event's groups. Scheduled and active events also show a section for each control
+that later updates add (assigning people, moving people, ending the event, live
+settings); until then each says it is not available yet. Ended and cancelled events
+show the read-only summary only. Each action a host takes is recorded in the audit
+log with the event id. The Web UI must be on and the member must be able to get a
+sign-in link (`/me`) to reach the page.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event
