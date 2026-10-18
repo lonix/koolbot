@@ -46,7 +46,7 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
       },
       logLifecycle: async () => undefined,
       getGraceMinutes: async () => 15,
-      beginEnding: () => undefined,
+      beginEnding: () => 1,
       abortEnding: () => undefined,
       settleMs: 0,
     });
@@ -193,6 +193,32 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
     const ended = await t.run(scheduledInput(120));
     expect(ended.status).toBe("ended");
     expect((await stored(id)).endedAt).toEqual(END);
+  });
+
+  it("the scan's own copy does not write the claimed end again, so a cancel that lands meanwhile survives its save", async () => {
+    const id = await makeEvent({ state: "scheduled" });
+    // The scan's copy of the row, loaded before the end.
+    const doc = await Event.findById(id);
+    if (!doc) throw new Error("event missing");
+    const outcome = await teardown().run(
+      input(id, {
+        trigger: "scheduled",
+        fromStates: ["scheduled", "active"],
+        endedAt: END,
+        expectTimes: { startTime: START, durationMinutes: 120 },
+        event: doc,
+      }),
+    );
+    expect(outcome.status).toBe("ended");
+    expect(doc.state).toBe("ended");
+    expect(doc.endedAt).toEqual(END);
+    // A cancel lands, then the scan saves its copy for another change.
+    await Event.updateOne({ _id: id }, { $set: { state: "cancelled" } });
+    doc.reminderSent = true;
+    await doc.save();
+    const row = await stored(id);
+    expect(row.state).toBe("cancelled");
+    expect(row.reminderSent).toBe(true);
   });
 
   it("an event of another server is not found and not ended", async () => {

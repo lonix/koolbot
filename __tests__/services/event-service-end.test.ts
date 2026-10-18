@@ -448,6 +448,123 @@ describe("a scan that loaded the event before a manual end", () => {
     await ending;
   });
 
+  it("a second press that loses the claim does not lift the hold of the press that won it", async () => {
+    const { service, guild } = setup();
+    // A scan read an open copy inside its reminder window and stalls.
+    let releaseScan!: () => void;
+    service.postReminder = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseScan = resolve;
+        }),
+    );
+    const scan = service.processEvent(
+      row({ reminderSent: false }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Press 1 wins the claim and stalls in its group channel cleanup (a slow
+    // pull-back or Discord call).
+    store.set(
+      ID,
+      stored({
+        groupsEnabled: true,
+        groups: [
+          {
+            key: "g_a",
+            name: "A",
+            kind: "team",
+            channelId: "c1",
+            memberIds: [],
+          },
+        ],
+      }),
+    );
+    let releaseCleanup!: () => void;
+    service.groupChannels.cleanup = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseCleanup = () => resolve(emptyReport());
+        }),
+    );
+    const first = service.endEventNow(ID, "guild-1", { pullBack: false });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
+
+    // Press 2 (a double click, or an admin at the same moment) loses.
+    const second = await service.endEventNow(ID, "guild-1", {
+      pullBack: false,
+    });
+    expect(second.status).toBe("already-ended");
+
+    // The scan wakes up with its older, still-open copy while press 1 works.
+    releaseScan();
+    await scan;
+    expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+
+    releaseCleanup();
+    expect((await first).status).toBe("ended");
+    expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("the scheduled attempt that loses to a manual end leaves the work to the manual one", async () => {
+    const { service, guild } = setup();
+    store.set(
+      ID,
+      stored({
+        groupsEnabled: true,
+        groups: [
+          {
+            key: "g_a",
+            name: "A",
+            kind: "team",
+            channelId: "c1",
+            memberIds: [],
+          },
+        ],
+      }),
+    );
+    let releaseCleanup!: () => void;
+    service.groupChannels.cleanup = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseCleanup = () => resolve(emptyReport());
+        }),
+    );
+    const manual = service.endEventNow(ID, "guild-1", { pullBack: false });
+    await new Promise((r) => setTimeout(r, 10));
+    // The scan's copy is open and past its end: it tries to end it too.
+    const event = row({
+      groupsEnabled: true,
+      groups: [
+        { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
+      ],
+    });
+    await service.processEvent(event, guild, AFTER_END, WINDOWS);
+    // It lost, saw the manual end still working, and did nothing more.
+    expect(event.save).not.toHaveBeenCalled();
+    expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
+    expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
+    releaseCleanup();
+    await manual;
+  });
+
+  it("a copy that follows an end made long ago does not write the end again", async () => {
+    const { service, guild } = setup();
+    store.set(ID, stored({ state: "ended", endedAt: AFTER_END }));
+    const ignored: string[] = [];
+    const event = row({
+      $ignore: (path: string) => ignored.push(path),
+    });
+    await service.processEvent(event, guild, AFTER_END, WINDOWS);
+    expect(event.state).toBe("ended");
+    expect(ignored.sort()).toEqual(["endedAt", "state"]);
+  });
+
   it("is not skipped for good: an end that was refused lets the scan carry on", async () => {
     const { service, guild } = setup();
     store.set(ID, stored({ state: "scheduled" }));

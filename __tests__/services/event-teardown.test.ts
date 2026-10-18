@@ -135,7 +135,8 @@ function make(over: DepOverrides = {}): {
   begin: jest.Mock;
   abort: jest.Mock;
 } {
-  const begin = jest.fn();
+  let holds = 0;
+  const begin = jest.fn(() => ++holds);
   const abort = jest.fn();
   const teardown = new EventTeardown({
     client,
@@ -258,7 +259,7 @@ describe("the claim", () => {
     expect(outcome).toEqual({ status: "changed" });
     expect(rows.get(ID)?.state).toBe("active");
     expect(calls).toEqual([]);
-    expect(abort).toHaveBeenCalledWith(ID);
+    expect(abort).toHaveBeenCalledWith(ID, 1);
   });
 
   it("holds the scan off before its first await, and lets go when the claim is lost", async () => {
@@ -269,7 +270,8 @@ describe("the claim", () => {
     expect(begin).toHaveBeenCalledWith(ID);
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
     await promise;
-    expect(abort).toHaveBeenCalledWith(ID);
+    // Only this caller's own hold is given up (its token), never the event's.
+    expect(abort).toHaveBeenCalledWith(ID, 1);
   });
 
   it("a manual end of a scheduled (not started) event is refused, with no change", async () => {
@@ -503,6 +505,18 @@ describe("what runs for which event", () => {
     await teardown.run(scheduled());
     expect(calls).not.toContain("native");
     expect(calls).not.toContain("lifecycle");
+  });
+
+  it("the scan's save must not write the claimed state again (a cancel in between would be overwritten)", async () => {
+    const ignored: string[] = [];
+    const event = {
+      ...row(),
+      endedAt: null,
+      $ignore: (path: string) => ignored.push(path),
+    } as Row;
+    const { teardown } = make();
+    await teardown.run(scheduled({ event }));
+    expect(ignored.sort()).toEqual(["endedAt", "state"]);
   });
 
   it("the scheduled end keeps the scan's copy and syncs it with the claim", async () => {

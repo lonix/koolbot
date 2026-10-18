@@ -100,10 +100,14 @@ export interface TeardownDeps {
   ): Promise<GroupChannelReport>;
   logLifecycle(event: IEvent): Promise<void>;
   getGraceMinutes(): Promise<number>;
-  /** The scan must leave this event alone from now on (see EventService). */
-  beginEnding(eventId: string): void;
-  /** The claim was not won: undo `beginEnding`. */
-  abortEnding(eventId: string): void;
+  /**
+   * The scan must leave this event alone from now on (see EventService).
+   * Returns the caller's own hold: another caller's hold on the same event is
+   * never affected by this one being given up.
+   */
+  beginEnding(eventId: string): number;
+  /** The claim was not won: give up this caller's own hold, and only that one. */
+  abortEnding(eventId: string, hold: number): void;
   /** Pause after a pull-back so the gateway shows the moves (tests: 0). */
   settleMs?: number;
 }
@@ -159,10 +163,12 @@ export class EventTeardown {
 
     // Taken synchronously, before the first await, and undone below when the
     // claim is not won: the scan skips an event that is being ended.
-    this.deps.beginEnding(eventId);
+    const hold = this.deps.beginEnding(eventId);
     const claimed = await this.claim(input);
     if (!("doc" in claimed)) {
-      this.deps.abortEnding(eventId);
+      // Only this caller's hold: the caller that won the claim (and may be
+      // minutes into a pull-back) keeps its own.
+      this.deps.abortEnding(eventId, hold);
       return claimed;
     }
 
@@ -172,6 +178,12 @@ export class EventTeardown {
       // ended event. (Writing the same values again on its save is harmless.)
       event.state = "ended";
       event.endedAt = input.endedAt;
+      // The claim already wrote both. The scan's later `save()` must not write
+      // them again: if a cancel lands in between, an "ended" written from this
+      // copy would overwrite it. (A plain object in a test has no `$ignore`.)
+      const doc = event as { $ignore?: (path: string) => void };
+      doc.$ignore?.("state");
+      doc.$ignore?.("endedAt");
     }
 
     const steps: TeardownStep[] = [];

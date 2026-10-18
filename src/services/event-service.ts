@@ -365,7 +365,8 @@ export class EventService extends ScheduledService {
    * native event as live). In memory: the bot is one process, and a scan after
    * a restart loads fresh rows.
    */
-  private readonly endingEvents = new Map<string, number>();
+  private readonly endingEvents = new Map<string, Map<number, number>>();
+  private endingHoldCounter = 0;
 
   private constructor(client: Client) {
     super(client, {
@@ -397,31 +398,47 @@ export class EventService extends ScheduledService {
       getGraceMinutes: () =>
         this.configService.getNumber("events.channel_grace_minutes", 15),
       beginEnding: (id) => this.beginEnding(id),
-      abortEnding: (id) => {
-        this.endingEvents.delete(id);
-      },
+      abortEnding: (id, hold) => this.abortEnding(id, hold),
     });
   }
 
   /** The scan leaves an event alone for this long after an end began. */
   private static readonly ENDING_HOLD_MS = 5 * MS_PER_MINUTE;
 
-  private beginEnding(eventId: string): void {
+  /**
+   * Take a hold on an event. Each caller gets its own, so a caller that loses
+   * the claim (a double click, the scan's own attempt) gives up only its own
+   * and cannot lift the hold of the caller that is ending the event.
+   */
+  private beginEnding(eventId: string): number {
     const now = Date.now();
-    for (const [id, until] of this.endingEvents) {
-      if (until <= now) this.endingEvents.delete(id);
-    }
-    this.endingEvents.set(eventId, now + EventService.ENDING_HOLD_MS);
+    for (const id of [...this.endingEvents.keys()]) this.pruneHolds(id, now);
+    const hold = ++this.endingHoldCounter;
+    const holds = this.endingEvents.get(eventId) ?? new Map<number, number>();
+    holds.set(hold, now + EventService.ENDING_HOLD_MS);
+    this.endingEvents.set(eventId, holds);
+    return hold;
   }
 
-  private isBeingEnded(eventId: string): boolean {
-    const until = this.endingEvents.get(eventId);
-    if (until === undefined) return false;
-    if (until <= Date.now()) {
-      this.endingEvents.delete(eventId);
-      return false;
+  private abortEnding(eventId: string, hold: number): void {
+    const holds = this.endingEvents.get(eventId);
+    holds?.delete(hold);
+    if (holds && holds.size === 0) this.endingEvents.delete(eventId);
+  }
+
+  private pruneHolds(eventId: string, now: number): void {
+    const holds = this.endingEvents.get(eventId);
+    if (!holds) return;
+    for (const [hold, until] of holds) {
+      if (until <= now) holds.delete(hold);
     }
-    return true;
+    if (holds.size === 0) this.endingEvents.delete(eventId);
+  }
+
+  /** Whether any caller holds the event as being ended (or just ended). */
+  private isBeingEnded(eventId: string): boolean {
+    this.pruneHolds(eventId, Date.now());
+    return this.endingEvents.has(eventId);
   }
 
   /**
@@ -777,9 +794,17 @@ export class EventService extends ScheduledService {
         teardownRan = true;
         changed = true;
       } else if (outcome.status === "already-ended") {
-        // Ended elsewhere a moment ago (a manual end): follow it.
+        // Ended elsewhere a moment ago (a manual end). That caller is still
+        // working on it while it holds the event: leave it to finish alone and
+        // look again next scan, on a fresh copy.
+        if (this.isBeingEnded(String(event._id))) return;
+        // Ended earlier: follow it. The claim wrote both fields, so this copy's
+        // save must not write them again.
         event.state = "ended";
         event.endedAt = outcome.endedAt;
+        const doc = event as unknown as { $ignore?: (path: string) => void };
+        doc.$ignore?.("state");
+        doc.$ignore?.("endedAt");
       } else {
         // Cancelled or edited meanwhile, or the end could not be saved: this
         // copy is stale or the write failed; the next scan decides again.
