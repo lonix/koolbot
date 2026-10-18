@@ -523,8 +523,21 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
           }),
         }))
       : [],
+    groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
     adopted: event.nativeAdopted === true,
   };
+}
+
+/** The last group-channel pass's warnings and failures for the panel (#1190). */
+function groupNoticesFor(client: Client, event: IEvent): string[] {
+  const report = EventService.getInstance(client).getGroupChannelReport(
+    String(event._id),
+  );
+  if (!report) return [];
+  return [
+    ...report.warnings,
+    ...report.failures.map((f) => `${f.name}: ${f.reason}`),
+  ];
 }
 
 export function createHostEventsRouter(client: Client): Router {

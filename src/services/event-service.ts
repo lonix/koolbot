@@ -25,6 +25,10 @@ import {
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
+import {
+  EventGroupChannels,
+  type GroupChannelReport,
+} from "./event-group-channels.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -335,6 +339,10 @@ export class EventService extends ScheduledService {
   /** Per open event: the `message|native event` ids of the announcement last
    * rendered successfully (in memory: re-checked once after a restart). */
   private readonly linkVerified = new Map<string, string>();
+  /** Voice channels of event groups (#1190). */
+  private readonly groupChannels: EventGroupChannels;
+  /** Per event: the failures last logged, so a standing one is logged once. */
+  private readonly groupFailuresLogged = new Map<string, string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -344,6 +352,69 @@ export class EventService extends ScheduledService {
       runLabel: "Event scan",
     });
     this.nativeSync = new NativeEventSync(client);
+    this.groupChannels = new EventGroupChannels(client, {
+      getPrefix: (): Promise<string> =>
+        this.configService.getString("events.channel_prefix", "📅"),
+      getGraceMs: async (): Promise<number> =>
+        (await this.configService.getNumber(
+          "events.channel_grace_minutes",
+          15,
+        )) * MS_PER_MINUTE,
+    });
+  }
+
+  /**
+   * Make the group channels of an open event match its record now (create the
+   * missing ones, re-create deleted ones), for a retry from the host panel
+   * (#1189). Null when the event or the server is not found. The scan does the
+   * same every minute.
+   *
+   * For later issues (#1191 to #1199): the channel of a group is
+   * `event.groups.find((g) => g.key === key)?.channelId` (null until created;
+   * a lean row may have no `groups` at all). Anything that writes
+   * `groups[].channelId` must use a positional update such as
+   * `{ "groups.$.channelId": id }` filtered on the group, never `save()` a
+   * `groups` array read earlier, and must run through this class so it takes
+   * the same per-event lock; do not delete a group channel from anywhere else.
+   */
+  public async reconcileGroupChannels(
+    eventId: string,
+    guildId?: string,
+  ): Promise<GroupChannelReport | null> {
+    const event = await this.getEvent(eventId);
+    if (!event || (guildId && event.guildId !== guildId)) return null;
+    const guild = await this.client.guilds
+      .fetch(event.guildId)
+      .catch(() => null);
+    if (!guild) return null;
+    const report = await this.groupChannels.reconcile(event, guild);
+    await this.logGroupReport(event, report);
+    return report;
+  }
+
+  /**
+   * Remove the group channels of a finished event now (the same pass the scan
+   * runs: empty ones only, after the grace period of an ended event, at once
+   * for a cancelled one). The shared teardown of #1193 builds on this.
+   */
+  public async cleanupGroupChannels(
+    eventId: string,
+    guildId?: string,
+  ): Promise<GroupChannelReport | null> {
+    const event = await this.getEvent(eventId);
+    if (!event || (guildId && event.guildId !== guildId)) return null;
+    const guild = await this.client.guilds
+      .fetch(event.guildId)
+      .catch(() => null);
+    if (!guild) return null;
+    const report = await this.groupChannels.cleanup(event, guild, new Date());
+    await this.logGroupReport(event, report);
+    return report;
+  }
+
+  /** What the last group-channel pass did for an event (host panel, #1189). */
+  public getGroupChannelReport(eventId: string): GroupChannelReport | null {
+    return this.groupChannels.getReport(eventId);
   }
 
   protected async isEnabled(): Promise<boolean> {
@@ -409,6 +480,12 @@ export class EventService extends ScheduledService {
           state: { $in: ["ended", "cancelled"] },
           nativeEventId: null,
           nativeCreateStartedAt: { $ne: null },
+        },
+        // Finished or cancelled group events whose group channels are still
+        // recorded (#1190): the scan removes them once they are empty.
+        {
+          state: { $in: ["ended", "cancelled"] },
+          "groups.channelId": { $type: "string" },
         },
         // Ended — or individually cancelled — recurring occurrences whose
         // successor has not been created yet (e.g. a crash between ending
@@ -578,6 +655,31 @@ export class EventService extends ScheduledService {
     if (changed) {
       await event.save();
       await this.logLifecycle(event);
+    }
+
+    // 2b. Group channels (#1190): created next to the main channel, and made
+    // again after a restart or a deletion. Only a group event with a main
+    // channel gets here, and only while something is missing: a plain event
+    // makes no call at all. This runs after the scan's own save on purpose: the
+    // pass is slow (paced writes), and a cancel that lands meanwhile must not be
+    // overwritten by this scan saving its older copy of the event afterwards.
+    if (this.needsGroupReconcile(event, guild, now)) {
+      await this.logGroupReport(
+        event,
+        await this.groupChannels.reconcile(event, guild),
+      );
+    }
+
+    // 4b. Group channels of a finished event go with the main channel (#1190),
+    // judged from the saved state (a fresh read), channel by channel.
+    if (
+      this.hasRecordedGroupChannels(event) &&
+      (event.state === "ended" || event.state === "cancelled")
+    ) {
+      await this.logGroupReport(
+        event,
+        await this.groupChannels.cleanup(event, guild, now),
+      );
     }
 
     // Keep the native scheduled event in line (#1034): creates it for events
@@ -1097,6 +1199,20 @@ export class EventService extends ScheduledService {
     }
     event.state = "cancelled";
     await event.save();
+    // Group channels (#1190) are removed once the cancel is saved: the cleanup
+    // only acts on an event it reads back as cancelled. Occupied ones, and any
+    // failure, are retried by the scan.
+    if (this.hasRecordedGroupChannels(event)) {
+      const guild = await this.client.guilds
+        .fetch(event.guildId)
+        .catch(() => null);
+      if (guild) {
+        await this.logGroupReport(
+          event,
+          await this.groupChannels.cleanup(event, guild, new Date()),
+        );
+      }
+    }
     // Re-read before refreshing the post: a concurrent announcement claim
     // may have stored its message ids after this document was loaded, and an
     // edit driven by the stale (null) ids would be skipped, leaving live RSVP
@@ -1135,6 +1251,20 @@ export class EventService extends ScheduledService {
       if (channel) {
         event.state = "active";
         await event.save();
+        if (event.groupsEnabled === true && !event.nativeAdopted) {
+          // Not awaited: up to 25 paced creates must not hold the web request
+          // open. The per-event lock keeps it from overlapping the scan, which
+          // would also pick the groups up on its next tick.
+          void this.groupChannels
+            .reconcile(event, guild)
+            .then((report) => this.logGroupReport(event, report))
+            .catch((error) =>
+              logger.error(
+                `Event ${sanitizeForLog(String(event._id))}: group channels failed:`,
+                error,
+              ),
+            );
+        }
         await this.updateAnnouncement(event);
         logger.info(`Started event ${sanitizeForLog(String(event._id))} now`);
       } else if (!event.channelId) {
@@ -1770,10 +1900,11 @@ export class EventService extends ScheduledService {
     return channel;
   }
 
-  private async createEventChannel(
+  /** The category an event's channels live in, or null (logged). */
+  private async resolveEventCategory(
     event: IEvent,
     guild: Guild,
-  ): Promise<VoiceChannel | null> {
+  ): Promise<CategoryChannel | null> {
     const categoryId =
       event.categoryId ||
       (await this.configService.getString("events.category_id", ""));
@@ -1790,6 +1921,59 @@ export class EventService extends ScheduledService {
       );
       return null;
     }
+    return category as CategoryChannel;
+  }
+
+  /** Whether the group channels of this open event need a pass: a group has no
+   * channel yet, or a recorded one is not in the cache. False for a plain
+   * event, an adopted one, one without its main channel, or one past its end. */
+  private needsGroupReconcile(event: IEvent, guild: Guild, now: Date): boolean {
+    if (event.groupsEnabled !== true || event.nativeAdopted) return false;
+    if (!event.channelId) return false;
+    if (event.state !== "scheduled" && event.state !== "active") return false;
+    if (shouldEndEvent(event, now)) return false;
+    return (event.groups ?? []).some(
+      (group) => !group.channelId || !guild.channels.cache.has(group.channelId),
+    );
+  }
+
+  private hasRecordedGroupChannels(event: IEvent): boolean {
+    return (
+      event.groupsEnabled === true &&
+      (event.groups ?? []).some((group) => !!group.channelId)
+    );
+  }
+
+  private async logGroupReport(
+    event: IEvent,
+    report: GroupChannelReport,
+  ): Promise<void> {
+    const id = String(event._id);
+    if (report.failures.length === 0) {
+      this.groupFailuresLogged.delete(id);
+      return;
+    }
+    // A standing problem (a full category, a missing permission) is logged
+    // when it first appears or changes, not on every scan.
+    const signature = report.failures
+      .map((f) => `${f.key}:${f.reason}`)
+      .join("|");
+    if (this.groupFailuresLogged.get(id) === signature) return;
+    this.groupFailuresLogged.set(id, signature);
+    logger.warn(
+      `Event ${sanitizeForLog(String(event._id))}: ${report.failures.length} group channel(s) not applied: ` +
+        report.failures
+          .map((f) => `${sanitizeForLog(f.name)} (${sanitizeForLog(f.reason)})`)
+          .join("; "),
+    );
+  }
+
+  private async createEventChannel(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<VoiceChannel | null> {
+    const category = await this.resolveEventCategory(event, guild);
+    if (!category) return null;
 
     const prefix = await this.configService.getString(
       "events.channel_prefix",
@@ -1799,11 +1983,50 @@ export class EventService extends ScheduledService {
     const name = rawName.slice(0, 100);
 
     try {
-      const channel = await guild.channels.create({
-        name,
-        type: ChannelType.GuildVoice,
-        parent: category as CategoryChannel,
-      });
+      // A group event's host (#1190) also gets access to the main channel. A
+      // plain event keeps the exact call it always had.
+      const notices: string[] = [];
+      const overwrites =
+        event.groupsEnabled === true
+          ? this.groupChannels.hostOverwritesFor(
+              event,
+              guild,
+              category,
+              notices,
+            )
+          : null;
+      let channel: VoiceChannel;
+      try {
+        channel = await guild.channels.create({
+          name,
+          type: ChannelType.GuildVoice,
+          parent: category,
+          ...(overwrites ? { permissionOverwrites: overwrites } : {}),
+        });
+      } catch (error) {
+        // Discord refusing the host's overwrites must not cost the event its
+        // channel: retry as a plain channel, which inherits the category.
+        if (
+          !overwrites ||
+          !(error instanceof DiscordAPIError) ||
+          error.code !== 50013
+        ) {
+          throw error;
+        }
+        logger.warn(
+          `Discord refused the host's access on the main channel of event ${sanitizeForLog(String(event._id))}; creating it without`,
+        );
+        notices.push(
+          "Discord refused the host's access on the main voice channel, so it was created without it.",
+        );
+        channel = await guild.channels.create({
+          name,
+          type: ChannelType.GuildVoice,
+          parent: category,
+        });
+      }
+      // Kept for the host panel; a later group pass cannot replace them.
+      for (const notice of notices) this.groupChannels.addNotice(event, notice);
       logger.info(
         `Created event channel ${sanitizeForLog(name)} for event ${sanitizeForLog(String(event._id))}`,
       );
