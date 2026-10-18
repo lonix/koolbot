@@ -80,6 +80,8 @@ export class TrackingOptOutService {
   > = [];
   /** Members whose tracking is paused while their data is reset. */
   private paused = new Set<string>();
+  /** Epoch at which each member's latest data reset engaged or released. */
+  private resetBarrierAt = new Map<string, number>();
   /**
    * Admission epochs (see `admission`). `epoch` ticks each time any
    * member's barrier engages; `barrierAt` records, per member, the epoch of
@@ -205,6 +207,52 @@ export class TrackingOptOutService {
   }
 
   /**
+   * Run a write that adds members' data on someone's explicit say-so (a host
+   * assigning people to an event group) unless a data reset of that member is
+   * running, or engaged or finished since the caller took its `since` ticket
+   * (`admission`, taken synchronously before the first await). Unlike
+   * `trackWrite` a tracking opt-out alone does NOT block it: the member did
+   * not ask to be left out of what a host does by hand. The write is
+   * registered like a tracker write, so a reset waits for it to finish before
+   * it deletes, and sees what it wrote. `write` receives the admitted ids (at
+   * least one; otherwise it does not run and the result is `undefined`).
+   */
+  public async resetAwareWrite<T>(
+    userIds: readonly string[],
+    guildId: string,
+    write: (admitted: string[]) => Promise<T>,
+    since: number,
+  ): Promise<{ admitted: string[]; value: T | undefined }> {
+    const admitted: string[] = [];
+    const keys: string[] = [];
+    // No ticket means no proof that no reset engaged meanwhile: admit nobody.
+    if (typeof since !== "number") return { admitted, value: undefined };
+    for (const id of new Set(userIds)) {
+      const key = TrackingOptOutService.key(id, guildId);
+      if (this.paused.has(key)) continue;
+      if ((this.resetBarrierAt.get(key) ?? 0) > since) continue;
+      admitted.push(id);
+      keys.push(key);
+    }
+    if (admitted.length === 0) return { admitted, value: undefined };
+    const running = write(admitted);
+    for (const key of keys) {
+      const pending = this.inFlight.get(key) ?? new Set<Promise<unknown>>();
+      this.inFlight.set(key, pending);
+      pending.add(running);
+    }
+    try {
+      return { admitted, value: await running };
+    } finally {
+      for (const key of keys) {
+        const pending = this.inFlight.get(key);
+        pending?.delete(running);
+        if (pending && pending.size === 0) this.inFlight.delete(key);
+      }
+    }
+  }
+
+  /**
    * Register work that brings a member's tracking to rest: evict what is
    * live and wait out what is in flight. The voice tracker uses it for its
    * in-memory session and persists. It runs after the cache already blocks
@@ -327,12 +375,14 @@ export class TrackingOptOutService {
     return this.serialise(key, async () => {
       this.paused.add(key);
       this.engageBarrier(key);
+      this.resetBarrierAt.set(key, this.epoch);
       try {
         return await fn(await this.quiesce(userId, guildId, key));
       } finally {
         this.paused.delete(key);
         // Release edge: tickets taken during the reset stay invalid.
         this.engageBarrier(key);
+        this.resetBarrierAt.set(key, this.epoch);
       }
     });
   }

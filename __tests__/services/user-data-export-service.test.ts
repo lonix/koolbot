@@ -21,6 +21,8 @@ import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 const DATA: Record<string, unknown> = {};
 /** The filter each model was queried with, for the self-scope assertions. */
 const FILTERS: Record<string, unknown> = {};
+/** Every filter a model was queried with, in order (a model can serve two readers). */
+const ALL_FILTERS: Record<string, unknown[]> = {};
 /** The `limit()` each list read asked for, for the ceiling assertions. */
 const LIMITS: Record<string, number> = {};
 
@@ -37,6 +39,7 @@ function listModel(name: string): Record<string, unknown> {
   return {
     find: (filter: unknown) => {
       FILTERS[name] = filter;
+      (ALL_FILTERS[name] ??= []).push(filter);
       const query = {
         sort: () => query,
         limit: (n: number) => {
@@ -195,6 +198,7 @@ describe("UserDataExportService", () => {
   beforeEach(() => {
     for (const key of Object.keys(DATA)) delete DATA[key];
     for (const key of Object.keys(FILTERS)) delete FILTERS[key];
+    for (const key of Object.keys(ALL_FILTERS)) delete ALL_FILTERS[key];
     for (const key of Object.keys(LIMITS)) delete LIMITS[key];
     mockGetNumber.mockReset();
     mockGetNumber.mockResolvedValue(100);
@@ -269,10 +273,10 @@ describe("UserDataExportService", () => {
     expect(FILTERS["user-birthday"]).toEqual({ userId: USER, guildId: GUILD });
     expect(FILTERS["digest-state"]).toEqual({ userId: USER, guildId: GUILD });
     expect(FILTERS.reminder).toEqual({ userId: USER, guildId: GUILD });
-    expect(FILTERS.event).toEqual({
-      guildId: GUILD,
-      "rsvps.userId": USER,
-    });
+    expect(ALL_FILTERS.event).toEqual([
+      { guildId: GUILD, "rsvps.userId": USER },
+      { guildId: GUILD, "groups.memberIds": USER },
+    ]);
   });
 
   it("queries the three user-keyed collections without a guild filter", async () => {
@@ -493,6 +497,49 @@ describe("UserDataExportService", () => {
     // The organiser is classified as excluded (admin-authored field), so it
     // must not ride along on the RSVP the member IS entitled to.
     expect(raw).not.toContain("organiser-9");
+  });
+
+  it("returns the member's own group of each event, never the other members", async () => {
+    DATA.event = [
+      {
+        title: "Clan match",
+        startTime: "2026-03-01T18:00:00.000Z",
+        timezone: "UTC",
+        state: "ended",
+        createdBy: "organiser-9",
+        groups: [
+          {
+            name: "Heli",
+            kind: "team",
+            memberIds: ["other-member-7", USER],
+            captainId: "captain-5",
+          },
+          { name: "Logi", kind: "team", memberIds: ["other-member-8"] },
+          { name: "Spectators", kind: "open", memberIds: [] },
+        ],
+      },
+    ];
+
+    const { payload, raw } = await runExport();
+
+    expect(payload.data["event-group-member"]).toEqual([
+      {
+        title: "Clan match",
+        startTime: "2026-03-01T18:00:00.000Z",
+        timezone: "UTC",
+        state: "ended",
+        yourGroups: [{ name: "Heli", kind: "team" }],
+      },
+    ]);
+    for (const leaked of [
+      "other-member-7",
+      "other-member-8",
+      "captain-5",
+      "organiser-9",
+      "Logi",
+    ]) {
+      expect(raw).not.toContain(leaked);
+    }
   });
 
   it("returns only which reward roles list the member, not the roster", async () => {
