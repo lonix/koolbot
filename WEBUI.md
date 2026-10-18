@@ -1507,11 +1507,12 @@ when it has no size.
   not recorded. (Group channels themselves are created by the channel lifecycle
   update; until a group has a channel there is nothing to join.) Self-joins are not
   audited.
-- **Lock groups:** a switch for this event. While locked, joining a channel changes
-  nobody's group (a member who hops channels keeps their stored group, and a
-  newcomer is not recorded, so someone who joins while groups are locked stays in the
-  main channel until the host assigns them by hand); the host's own changes still work. A repeating event's
-  next occurrence starts unlocked.
+- **Lock groups:** a switch for this event. While locked, joining a group's voice
+  channel does not record or change anyone's group: a member who hops channels keeps
+  their stored group, and a newcomer is not recorded. Nobody is moved either: the
+  person stays in the channel they joined, unassigned, and you assign them by hand
+  on this panel. The host's own changes still work. A repeating event's next
+  occurrence starts unlocked.
 - **Randomise:** deals the people connected right now into the team groups, either
   only those who are not in a group yet or everyone again (people who are assigned
   but not connected stay where they are and keep using their group's room). The
