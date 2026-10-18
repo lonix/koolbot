@@ -161,6 +161,44 @@ describe("POST /events/presets/save", () => {
     expect(flash.msg).toContain("at most 4 groups");
   });
 
+  it("sends a refused edit back to that preset's editor, so a retry stays an edit", async () => {
+    const editId = `lib:${OID}`;
+    const invalid = await post("/events/presets/save", {
+      ...goodBody,
+      preset_id: editId,
+      group_0_size: "100",
+    });
+    expect(invalid.path).toBe("/admin/events/presets");
+    expect(invalid.type).toBe("err");
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: editId,
+      group_0_size: "100",
+    });
+    expect(res.headers.get("location")).toContain(
+      `?edit=${encodeURIComponent(editId)}&flash=err`,
+    );
+    mockUpdate.mockResolvedValue({
+      ok: false,
+      error: "A preset with that name already exists.",
+    });
+    const refused = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: editId,
+    });
+    expect(refused.headers.get("location")).toContain(
+      `?edit=${encodeURIComponent(editId)}&flash=err`,
+    );
+    // A refused add has nothing to go back to.
+    const add = await harness.post("/events/presets/save", {
+      ...goodBody,
+      group_0_size: "100",
+    });
+    expect(add.headers.get("location")).toMatch(
+      /^\/admin\/events\/presets\?flash=err/,
+    );
+  });
+
   it("reports and audits a refused write (duplicate name, full library)", async () => {
     mockCreate.mockResolvedValue({
       ok: false,

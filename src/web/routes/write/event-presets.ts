@@ -23,11 +23,33 @@ import { recordAudit } from "../../audit.js";
 import {
   asyncHandler,
   flashRedirect,
+  flashRedirectQuery,
+  type Flash,
   getString,
   requireSessionContext,
 } from "./helpers.js";
 
 const PAGE = "/admin/events/presets";
+
+/**
+ * Back to the editor after a refused save. An edit goes back to that preset's
+ * editor (`?edit=`), so the admin's retry is still an edit and not a second,
+ * new preset next to it.
+ */
+function backToEditor(
+  res: Parameters<typeof flashRedirect>[0],
+  id: string,
+  flash: Flash,
+): void {
+  if (!id) {
+    flashRedirect(res, PAGE, flash);
+    return;
+  }
+  res.redirect(
+    303,
+    `${PAGE}?edit=${encodeURIComponent(id)}&${flashRedirectQuery(flash)}`,
+  );
+}
 
 export function createEventPresetsRouter(): Router {
   const router = Router();
@@ -45,7 +67,7 @@ export function createEventPresetsRouter(): Router {
       const { maxCount } = resolveGroupCountLimits(defaultCount, configuredMax);
       const checked = validatePresetForm(req.body, { maxCount });
       if (!checked.ok) {
-        flashRedirect(res, PAGE, {
+        backToEditor(res, id, {
           type: "err",
           text: `Preset not saved. ${checked.errors.join(" ")}`,
         });
@@ -74,18 +96,19 @@ export function createEventPresetsRouter(): Router {
         result: result.ok ? "success" : "failure",
         errorMessage: result.ok ? null : result.error,
       });
-      flashRedirect(
-        res,
-        PAGE,
-        result.ok
-          ? {
-              type: "ok",
-              text: id
-                ? `Saved preset "${data.name}". Events that already used it are unchanged.`
-                : `Added preset "${data.name}". It is on, so hosts can pick it now.`,
-            }
-          : { type: "err", text: `Preset not saved. ${result.error}` },
-      );
+      if (result.ok) {
+        flashRedirect(res, PAGE, {
+          type: "ok",
+          text: id
+            ? `Saved preset "${data.name}". Events that already used it are unchanged.`
+            : `Added preset "${data.name}". It is on, so hosts can pick it now.`,
+        });
+      } else {
+        backToEditor(res, id, {
+          type: "err",
+          text: `Preset not saved. ${result.error}`,
+        });
+      }
     }),
   );
 

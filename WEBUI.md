@@ -1444,7 +1444,10 @@ and a library preset bigger than the cap is greyed out in the picker like a
 built-in one. A server can keep up to 50 presets. On the Events table, **Save as
 server preset** opens the editor prefilled with an event's groups (names, kinds,
 sizes, tags, markers, labels and lead time; never members, captains or channels);
-the event is not changed. Everything on these pages is admin-only and audited
+the event is not changed. Choosing a preset fills in its labels and channel
+creation time with scripts on; without scripts only the group and leader labels
+fall back to the preset's. The tag and leader switches an event may get later
+(#1194, #1195) are not part of a preset yet. Everything on these pages is admin-only and audited
 (`event-preset.create`, `.update`, `.delete`, `.toggle`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
