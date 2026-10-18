@@ -212,17 +212,29 @@ export class ReactionRoleService {
     let skipped = 0;
     let repaired = 0;
 
-    // The message-channel id is global, so its fate is decided once per guild
-    // rather than re-fetched for every config in that guild.
+    // Each picker channel is fetched once per pass (keyed by guild + channel),
+    // however many mappings live in it.
     const messageChannels = new Map<string, MessageChannelResolution>();
 
-    // Mappings whose picker message was reported gone (10008 / null) are not
-    // archived on the spot: whether that means "deleted" or "the setting now
-    // points at a different channel than the one the pickers were posted in"
-    // cannot be told from one lookup (#1113). They are decided per guild after
-    // the loop, once we know whether *any* picker in that guild still resolves.
+    // Mappings that remember their picker's channel (#1207) are looked up in
+    // that channel, so a 10008 there is a confirmed deletion and archives at
+    // once. Legacy rows (no stored channel) fall back to the configured channel,
+    // where a 10008 may mean "deleted" or "the setting was changed after the
+    // picker was posted" (#1113). Only those legacy rows are held back and
+    // decided per guild after the loop, once we know whether *any* legacy picker
+    // in that guild still resolves in the configured channel.
     const missingMessages = new Map<string, IReactionRoleConfig[]>();
     const liveMessages = new Map<string, number>();
+    // Rows that share a picker message share its channel.
+    const storedChannelByMessage = new Map<string, string>();
+    for (const config of configs) {
+      if (config.messageChannelId) {
+        storedChannelByMessage.set(
+          `${config.guildId}:${config.messageId}`,
+          config.messageChannelId,
+        );
+      }
+    }
 
     for (const config of configs) {
       try {
@@ -255,8 +267,14 @@ export class ReactionRoleService {
           continue;
         }
 
-        // Verify the reaction message still exists in the configured channel.
-        if (!messageChannelId) {
+        // Verify the reaction message still exists in its own channel, or in the
+        // configured one for a legacy row.
+        const storedChannelId =
+          config.messageChannelId ||
+          storedChannelByMessage.get(`${config.guildId}:${config.messageId}`) ||
+          "";
+        const pickerChannelId = storedChannelId || messageChannelId;
+        if (!pickerChannelId) {
           continue;
         }
         // A deleted message channel takes every mapping's message with it.
@@ -266,13 +284,13 @@ export class ReactionRoleService {
         // and message (10008) paths in this same loop (#870).
         const resolution = await this.resolveMessageChannel(
           guild,
-          messageChannelId,
+          pickerChannelId,
           messageChannels,
         );
         if (resolution.status === "deleted") {
           await this.archiveConfig(
             config,
-            `reaction message channel ${messageChannelId} no longer exists`,
+            `reaction message channel ${pickerChannelId} no longer exists`,
           );
           archived++;
           continue;
@@ -289,23 +307,35 @@ export class ReactionRoleService {
           message = await messageChannel.messages.fetch(config.messageId);
         } catch (error) {
           if (this.isUnknownEntityError(error, 10008)) {
-            this.noteMissingMessage(missingMessages, config);
+            message = null;
+          } else {
+            logger.warn(
+              `Reaction role reconciliation: transient error fetching message ${config.messageId}, skipping`,
+              error,
+            );
             continue;
           }
-          logger.warn(
-            `Reaction role reconciliation: transient error fetching message ${config.messageId}, skipping`,
-            error,
-          );
-          continue;
         }
         if (!message) {
-          this.noteMissingMessage(missingMessages, config);
+          if (storedChannelId) {
+            // The channel is the one the picker was posted in, so this is a
+            // real deletion, not a changed setting.
+            await this.archiveConfig(
+              config,
+              `reaction message ${config.messageId} no longer exists in channel ${pickerChannelId}`,
+            );
+            archived++;
+          } else {
+            this.noteMissingMessage(missingMessages, config);
+          }
           continue;
         }
-        liveMessages.set(
-          config.guildId,
-          (liveMessages.get(config.guildId) ?? 0) + 1,
-        );
+        if (!storedChannelId) {
+          liveMessages.set(
+            config.guildId,
+            (liveMessages.get(config.guildId) ?? 0) + 1,
+          );
+        }
 
         // Re-add the bot's own base reaction if it went missing.
         const hasOwnReaction = message.reactions.cache.some(
@@ -329,16 +359,19 @@ export class ReactionRoleService {
       }
     }
 
-    // A guild where no picker resolved in the configured channel looks exactly
-    // like one whose picker channel setting was changed after the pickers were
-    // posted. Archiving would orphan every still-valid picker, so leave the
-    // mappings active and flag it instead. The cost of being wrong the other
-    // way is a stale row that never fires, which is harmless and logged here.
+    // A guild where no legacy picker resolved in the configured channel looks
+    // exactly like one whose picker channel setting was changed after the
+    // pickers were posted. Archiving would orphan every still-valid picker, so
+    // leave the mappings active and flag it instead. The cost of being wrong the
+    // other way is a stale row that never fires, which is harmless and logged
+    // here. Pickers that remember their channel never reach this guard, and do
+    // not count towards it: one resolving in its own channel says nothing about
+    // whether a legacy picker's channel was changed.
     for (const [guildId, missing] of missingMessages) {
       if ((liveMessages.get(guildId) ?? 0) === 0) {
         logger.warn(
           `Reaction role reconciliation: none of the ${missing.length} reaction message(s) in guild ${sanitizeForLog(guildId)} were found in channel ${sanitizeForLog(messageChannelId)}. ` +
-            "Not archiving: if reactionroles.message_channel_id was changed after the pickers were posted, change it back or delete and regenerate the pickers (#1113).",
+            "Not archiving: these older pickers do not remember their channel, so if reactionroles.message_channel_id was changed after they were posted, change it back or delete and regenerate the pickers (#1113, #1207).",
         );
         skipped += missing.length;
         continue;
@@ -353,7 +386,7 @@ export class ReactionRoleService {
     }
 
     logger.info(
-      `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${skipped} kept (picker not found in configured channel), ${repaired} reaction(s) repaired`,
+      `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${skipped} kept (older picker not found in configured channel), ${repaired} reaction(s) repaired`,
     );
   }
 
@@ -367,9 +400,12 @@ export class ReactionRoleService {
   }
 
   /**
-   * Resolve the shared `reactionroles.message_channel_id` channel for a guild,
-   * memoized for the lifetime of one reconciliation pass so a single fetch
-   * decides the fate of every mapping in that guild.
+   * Resolve a picker channel for a guild (a mapping's stored channel, or the
+   * shared `reactionroles.message_channel_id` for a legacy row), memoized per
+   * guild + channel for the lifetime of one reconciliation pass so a single
+   * fetch decides the fate of every mapping in that channel. The fetch is
+   * forced: a cached channel would hide a deletion and a wrong answer here
+   * archives mappings.
    *
    * Only a confirmed `10003 Unknown Channel` (or an explicit null, which means
    * the same thing) reports `deleted`; every other failure reports
@@ -380,14 +416,17 @@ export class ReactionRoleService {
     messageChannelId: string,
     cache: Map<string, MessageChannelResolution>,
   ): Promise<MessageChannelResolution> {
-    const cached = cache.get(guild.id);
+    const cacheKey = `${guild.id}:${messageChannelId}`;
+    const cached = cache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
     let resolution: MessageChannelResolution;
     try {
-      const channel = await guild.channels.fetch(messageChannelId);
+      const channel = await guild.channels.fetch(messageChannelId, {
+        force: true,
+      });
       if (!channel) {
         resolution = { status: "deleted" };
       } else if (!channel.isTextBased()) {
@@ -416,7 +455,7 @@ export class ReactionRoleService {
       );
     }
 
-    cache.set(guild.id, resolution);
+    cache.set(cacheKey, resolution);
     return resolution;
   }
 
@@ -428,6 +467,44 @@ export class ReactionRoleService {
    */
   private isUnknownEntityError(error: unknown, code: number): boolean {
     return error instanceof DiscordAPIError && error.code === code;
+  }
+
+  /**
+   * The channel a picker message lives in (#1207): the channel stored on any of
+   * the given rows (rows on one message share it), otherwise the configured
+   * `reactionroles.message_channel_id`, which is where every legacy row (one
+   * created before the channel was stored) has always been looked up. Returns
+   * "" when neither is known.
+   */
+  private pickerChannelOf(
+    rows: Array<{ messageChannelId?: string | null }>,
+    configured: string,
+  ): string {
+    return rows.find((r) => r.messageChannelId)?.messageChannelId || configured;
+  }
+
+  /** {@link pickerChannelOf} for one mapping, reading the configured channel. */
+  private async pickerChannelFor(
+    config: Pick<IReactionRoleConfig, "guildId" | "messageId"> & {
+      messageChannelId?: string | null;
+    },
+  ): Promise<string> {
+    if (config.messageChannelId) {
+      return config.messageChannelId;
+    }
+    // A sibling on the same message may carry the channel the picker is in.
+    const sibling = await ReactionRoleConfig.findOne({
+      guildId: config.guildId,
+      messageId: config.messageId,
+      messageChannelId: { $exists: true, $ne: "" },
+    });
+    return this.pickerChannelOf(
+      sibling ? [sibling] : [],
+      await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      ),
+    );
   }
 
   /**
@@ -520,29 +597,39 @@ export class ReactionRoleService {
         "",
       );
 
-      // Deleting the shared message channel takes every reaction-role message
-      // with it, so *every* active mapping in the guild is invalidated — not
-      // just the ones that also own a dedicated channel. Bind-to-existing-role
-      // and `createChannel: false` mappings never set `channelId` at all, so a
-      // `channelId`-scoped clause would silently skip them (#860).
-      const filter =
-        messageChannelId === channel.id
-          ? { guildId: channel.guild.id, isArchived: false }
-          : {
-              guildId: channel.guild.id,
-              isArchived: false,
-              $or: [{ channelId: channel.id }, { categoryId: channel.id }],
-            };
+      // Deleting a picker channel takes every reaction-role message in it with
+      // it, so every active mapping whose picker lived there is invalidated —
+      // not just the ones that also own a dedicated channel. Bind-to-existing-
+      // role and `createChannel: false` mappings never set `channelId` at all,
+      // so a `channelId`-scoped clause would silently skip them (#860).
+      // A mapping lives in its stored `messageChannelId` (#1207); a legacy row
+      // without one lives in the configured channel. Pickers in other channels
+      // are untouched. `$in: [null, ""]` matches a row where the field is absent.
+      const filter = {
+        guildId: channel.guild.id,
+        isArchived: false,
+        $or: [
+          { messageChannelId: channel.id },
+          ...(messageChannelId === channel.id
+            ? [{ messageChannelId: { $in: [null, ""] } }]
+            : []),
+          { channelId: channel.id },
+          { categoryId: channel.id },
+        ],
+      };
 
       const configs = await ReactionRoleConfig.find(filter);
 
-      const reason =
-        messageChannelId === channel.id
-          ? `reaction message channel ${channel.id} was deleted`
-          : `channel ${channel.id} was deleted`;
-
       for (const config of configs) {
-        await this.archiveConfig(config, reason);
+        const pickerWasDeleted =
+          config.messageChannelId === channel.id ||
+          (!config.messageChannelId && messageChannelId === channel.id);
+        await this.archiveConfig(
+          config,
+          pickerWasDeleted
+            ? `reaction message channel ${channel.id} was deleted`
+            : `channel ${channel.id} was deleted`,
+        );
       }
     } catch (error) {
       logger.error("Error handling reaction-role channel delete:", error);
@@ -1632,6 +1719,7 @@ export class ReactionRoleService {
       const reactionRoleConfig = new ReactionRoleConfig({
         guildId,
         messageId: message.id,
+        messageChannelId,
         channelId: channel?.id,
         roleId: role.id,
         categoryId: category?.id,
@@ -1791,13 +1879,24 @@ export class ReactionRoleService {
 
       const normalizedEmoji = this.normalizeEmoji(emoji);
 
-      // Resolve the channel that owns (or will own) the reaction message.
-      const messageChannelId =
-        options.messageChannelId ||
-        (await this.configService.getString(
+      // Resolve the channel that owns (or will own) the reaction message. An
+      // existing picker is looked up in the channel its other mappings remember
+      // (#1207), not wherever the setting points now.
+      let messageChannelId = options.messageChannelId || "";
+      if (!messageChannelId && options.messageId) {
+        const onPicker = await ReactionRoleConfig.findOne({
+          guildId,
+          messageId: options.messageId,
+          messageChannelId: { $exists: true, $ne: "" },
+        });
+        messageChannelId = onPicker?.messageChannelId ?? "";
+      }
+      if (!messageChannelId) {
+        messageChannelId = await this.configService.getString(
           "reactionroles.message_channel_id",
           "",
-        ));
+        );
+      }
 
       if (!messageChannelId) {
         return {
@@ -1885,6 +1984,8 @@ export class ReactionRoleService {
       const reactionRoleConfig = new ReactionRoleConfig({
         guildId,
         messageId: targetMessage.id,
+        // The channel the message was actually found in or posted to.
+        messageChannelId,
         roleId: role.id,
         emoji: normalizedEmoji,
         roleName: role.name,
@@ -1969,9 +2070,10 @@ export class ReactionRoleService {
    * waits for the first one to finish and then finds its mapping, instead of
    * posting a second picker.
    *
-   * The picker goes to `input.channelId`, the channel the plan showed. If
-   * `reactionroles.message_channel_id` has changed since, it throws: startup
-   * reconciliation looks messages up in the configured channel.
+   * The picker goes to `input.channelId`, the channel the plan showed, and the
+   * mapping remembers it (#1207). If `reactionroles.message_channel_id` has
+   * changed since the preview, it still throws: the plan the admin approved
+   * named that channel.
    */
   public async registerGatedPairing(
     guildId: string,
@@ -2420,10 +2522,7 @@ export class ReactionRoleService {
       // Best-effort: remove the bot's own reaction so the picker stays tidy.
       if (guild) {
         try {
-          const messageChannelId = await this.configService.getString(
-            "reactionroles.message_channel_id",
-            "",
-          );
+          const messageChannelId = await this.pickerChannelFor(config);
           if (messageChannelId) {
             const channel = (await guild.channels
               .fetch(messageChannelId)
@@ -2728,6 +2827,7 @@ export class ReactionRoleService {
       const docs = entries.map((_, i) => ({
         guildId,
         messageId: message!.id,
+        messageChannelId,
         channelId: channel!.id,
         roleId: createdRoles[i].id,
         categoryId: category!.id,
@@ -2837,9 +2937,14 @@ export class ReactionRoleService {
 
       // Delete the shared message.
       try {
-        const messageChannelId = await this.configService.getString(
-          "reactionroles.message_channel_id",
-          "",
+        // The picker is in the channel the group's rows remember (#1207); only
+        // a legacy group falls back to the configured channel.
+        const messageChannelId = this.pickerChannelOf(
+          configs,
+          await this.configService.getString(
+            "reactionroles.message_channel_id",
+            "",
+          ),
         );
         if (messageChannelId) {
           const messageChannel = (await guild.channels.fetch(
@@ -2980,10 +3085,7 @@ export class ReactionRoleService {
       // Delete the reaction message
       try {
         const guild = await this.client.guilds.fetch(guildId);
-        const messageChannelId = await this.configService.getString(
-          "reactionroles.message_channel_id",
-          "",
-        );
+        const messageChannelId = await this.pickerChannelFor(config);
         const messageChannel = (await guild.channels.fetch(
           messageChannelId,
         )) as TextChannel;
@@ -3132,6 +3234,9 @@ export class ReactionRoleService {
         config.isArchived = false;
         config.archivedAt = undefined;
         config.messageId = message.id;
+        // The picker was just reposted in the configured channel, so that is
+        // where this mapping lives now, whatever channel it was archived from.
+        config.messageChannelId = messageChannelId;
         await config.save();
       } catch (dbError) {
         logger.error(
@@ -3206,10 +3311,7 @@ export class ReactionRoleService {
       // wipe those too — leave it in place (#813).
       if (config.autoCreated) {
         try {
-          const messageChannelId = await this.configService.getString(
-            "reactionroles.message_channel_id",
-            "",
-          );
+          const messageChannelId = await this.pickerChannelFor(config);
           if (messageChannelId) {
             const messageChannel = (await guild.channels.fetch(
               messageChannelId,

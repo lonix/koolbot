@@ -6,6 +6,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
+import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import {
   DISCORD_MESSAGE_CONTENT_LIMIT,
   truncateText,
@@ -171,17 +172,35 @@ export class WelcomeService {
 
   /**
    * Jump link to the reaction-role message when both ids are set, the
-   * channel mention when only the channel is, otherwise "".
+   * channel mention when only the channel is, otherwise "". A picker that
+   * remembers its own channel (#1207) is linked in that channel, so changing
+   * `reactionroles.message_channel_id` later does not break the link.
    */
   private async resolveRolesLink(guildId: string): Promise<string> {
     const config = ConfigService.getInstance();
-    const channelId = (
+    const configuredId = (
       await config.getString("reactionroles.message_channel_id", "")
     ).trim();
-    if (!channelId) return "";
     const messageId = (
       await config.getString("welcome.roles_message_id", "")
     ).trim();
+    let channelId = configuredId;
+    if (messageId) {
+      try {
+        const row = await ReactionRoleConfig.findOne({
+          guildId,
+          messageId,
+          messageChannelId: { $exists: true, $ne: "" },
+        }).lean();
+        channelId = row?.messageChannelId || configuredId;
+      } catch (error) {
+        // The lookup only refines the link; fall back to the configured channel.
+        logger.debug(
+          `Welcome: could not look up the picker channel: ${getErrorMessage(error)}`,
+        );
+      }
+    }
+    if (!channelId) return "";
     return messageId
       ? `https://discord.com/channels/${guildId}/${channelId}/${messageId}`
       : `<#${channelId}>`;

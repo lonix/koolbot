@@ -1278,7 +1278,7 @@ the Web UI's **Reaction Roles** page.
 | Setting                               | Default    | Description                                                                                            |
 | ------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `reactionroles.enabled`               | `false`    | Enable reaction role system                                                                            |
-| `reactionroles.message_channel_id`    | `""`       | Channel ID where reaction-role messages are posted (see the note below on changing it)                 |
+| `reactionroles.message_channel_id`    | `""`       | Channel ID where new reaction-role messages are posted (see the note below on changing it)             |
 | `reactionroles.style`                 | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu)          |
 | `reactionroles.group_role_colour`     | `""`       | Colour (`#RRGGBB`) for roles created by the grouped-role generator; empty keeps Discord's default      |
 | `reactionroles.max_toggles`           | `10`       | Role adds/removes one member may make per window, across reactions, buttons and menus (`0` = no limit) |
@@ -1290,12 +1290,22 @@ can pick one up. The Reaction Roles page shows which permission blocked it. The 
 grant, so an older binding to such a role (or a role edited later) stops granting: members get a short refusal
 and the bot logs one warning per role. The binding stays listed on the page so you can remove the permissions or unbind it.
 
-**Changing `reactionroles.message_channel_id` is not supported once pickers exist (#1113).** A mapping does not
-remember which channel its picker was posted in, so existing pickers stay in the old channel and every lookup
-uses the new one. Startup reconciliation does not archive a guild's mappings only while **none** of its pickers can
-be found in the configured channel: it keeps them active and logs a warning. As soon as any picker in the guild
-resolves there (for example one created after the switch), mappings whose picker is not found are archived.
-Delete the old pickers and mappings **before** switching channels, or switch back before cleaning up.
+**Changing `reactionroles.message_channel_id` is safe for pickers created from now on (#1207).** Each new mapping
+remembers the channel its picker was posted in, and every later step uses that channel: startup reconciliation,
+deleting a mapping or a group (the original picker is removed from its own channel), archiving, unarchiving
+(which reposts the picker in the channel configured at that time and remembers it), adding a mapping to an existing
+picker, topping up a generated group, and the channel-deleted handler (deleting a channel archives only the
+mappings whose picker lived in it). The setting only decides where the **next** picker is posted. Reacting needs no
+channel lookup at all: the handlers find the mapping from the message the member reacted on.
+
+Mappings created before this change (#1113, #1201) have no remembered channel and keep working as before: they
+are looked up in the configured channel, with no migration. For those **older** pickers, changing the setting is
+still not supported. Startup reconciliation keeps a guild's older mappings, and logs a warning, only while **none** of
+its older pickers can be found in the configured channel; as soon as one resolves there, the older mappings whose
+picker is not found are archived. Pickers that remember their channel do not count towards that check. Delete the
+older pickers and mappings **before** switching channels, or switch back before cleaning up. The Reaction Roles page
+shows a warning only while older mappings are active. Deleting a group or mapping, or deleting the channel, after
+the setting was changed also still misses an older picker that sits in the previous channel.
 
 ### How it works
 

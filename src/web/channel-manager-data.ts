@@ -158,6 +158,7 @@ export async function loadProtection(
       id: String(r._id),
       channelId: r.channelId ?? null,
       categoryId: r.categoryId ?? null,
+      messageChannelId: r.messageChannelId ?? null,
     })),
     pollSchedules: polls.map((p) => ({
       id: String(p._id),

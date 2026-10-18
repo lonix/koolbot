@@ -813,3 +813,98 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(s.guild.roles.create).not.toHaveBeenCalled();
   });
 });
+
+describe("ReactionRoleGroupService.provisionGroup picker channel (#1207)", () => {
+  const storedRow = {
+    roleId: "r1",
+    emoji: "🇪🇺",
+    roleName: "Europe",
+    messageId: "m1",
+    groupId: "m1",
+    mode: "unique",
+    messageChannelId: "old-chan",
+  };
+
+  /** The guild resolves channels by id, so a lookup in the wrong one fails. */
+  function routeChannels(s: ReturnType<typeof setup>, ids: string[]) {
+    s.guild.channels.fetch.mockImplementation(async (id: unknown) => {
+      if (ids.includes(id as string)) return s.channel;
+      throw Object.assign(new Error("Unknown Channel"), { code: 10003 });
+    });
+  }
+
+  function insertedDocs(): Array<Record<string, unknown>> {
+    return (
+      model.insertMany.mock.calls[0] as unknown as [
+        Array<Record<string, unknown>>,
+      ]
+    )[0];
+  }
+
+  it("stamps a fresh group's mappings with the channel the picker was posted in", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries, "unique");
+    expect(r.success).toBe(true);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("chan");
+    const docs = insertedDocs();
+    expect(docs).toHaveLength(2);
+    for (const d of docs) expect(d.messageChannelId).toBe("chan");
+  });
+
+  it("tops up in the channel the picker remembers after the setting changed", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    // The setting points at "chan"; the picker lives in "old-chan" only.
+    routeChannels(s, ["old-chan"]);
+    model.find.mockResolvedValue([storedRow]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r).toMatchObject({ success: true, addedEntries: 1 });
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("old-chan");
+    expect(s.guild.channels.fetch).not.toHaveBeenCalledWith("chan");
+    expect(s.message.edit).toHaveBeenCalledTimes(1);
+    expect(s.channel.send).not.toHaveBeenCalled();
+    const docs = insertedDocs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].messageChannelId).toBe("old-chan");
+  });
+
+  it("tops up a remembered picker even when no channel is configured", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["old-chan"]);
+    mockGetString.mockImplementation(async (_k, d) => d);
+    model.find.mockResolvedValue([storedRow]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+  });
+
+  it("still tops up a legacy group in the configured channel and stamps only the new rows", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["chan"]);
+    const legacy: Record<string, unknown> = { ...storedRow };
+    delete legacy.messageChannelId;
+    model.find.mockResolvedValue([legacy]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("chan");
+    expect(insertedDocs()[0].messageChannelId).toBe("chan");
+  });
+
+  it("says the picker was deleted, not that the setting changed, when a remembered picker is gone", async () => {
+    const s = setup([]);
+    routeChannels(s, ["old-chan"]);
+    model.find.mockResolvedValue([storedRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("<#old-chan>");
+    expect(r.message).toMatch(/probably deleted/);
+    expect(r.message).not.toMatch(/change it back/);
+    expect(model.insertMany).not.toHaveBeenCalled();
+  });
+});

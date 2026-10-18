@@ -2488,29 +2488,52 @@ describe("renderReactionRolesPage", () => {
     expect(new Set(labels).size).toBe(80);
   });
 
-  it("warns that changing the message channel does not move existing pickers (#1113)", () => {
+  it("warns about changing the message channel only while older pickers exist (#1113, #1207)", () => {
     const base = {
       ...COMMON,
       enabled: true,
       configChannel: null,
       archived: [],
     };
+    const mapping = (extra: Record<string, unknown>) =>
+      ({
+        mappingId: "m1",
+        roleName: "Gamer",
+        roleId: "1",
+        emoji: "x",
+        messageId: "2",
+        ...extra,
+      }) as never;
     const none = renderReactionRolesPage({ ...base, active: [] });
-    expect(none).not.toContain("does not move existing pickers");
-    const some = renderReactionRolesPage({
+    expect(none).not.toContain("remembered their channel");
+    // A picker that remembers its channel follows no setting: no warning, and
+    // its channel is shown (escaped) under the message id.
+    const remembered = renderReactionRolesPage({
+      ...base,
+      active: [mapping({ pickerChannelName: "old<b>chan" })],
+    });
+    expect(remembered).not.toContain("remembered their channel");
+    expect(remembered).toContain("in #old&lt;b&gt;chan");
+    expect(remembered).not.toContain("old<b>chan");
+    // An older mapping (no stored channel) still follows the setting.
+    const older = renderReactionRolesPage({
+      ...base,
+      active: [mapping({ pickerChannelName: null })],
+    });
+    expect(older).toContain(
+      "1 active mapping was created before pickers remembered their channel",
+    );
+    expect(older).toContain("before</em> changing");
+    // Counts only the older ones.
+    const mixed = renderReactionRolesPage({
       ...base,
       active: [
-        {
-          mappingId: "m1",
-          roleName: "Gamer",
-          roleId: "1",
-          emoji: "x",
-          messageId: "2",
-        } as never,
+        mapping({ pickerChannelName: "a" }),
+        mapping({ mappingId: "m2", pickerChannelName: null }),
+        mapping({ mappingId: "m3" }),
       ],
     });
-    expect(some).toContain("does not move existing pickers");
-    expect(some).toContain("before</em> changing");
+    expect(mixed).toContain("2 active mappings were created before");
   });
 
   it("shows the empty state for active and archived", () => {

@@ -1001,12 +1001,15 @@ removes only roles the bot created, so reused roles survive.
 Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
 (`reactionroles.message_channel_id`, a text-channel picker) and the surface
 style (`reactionroles.style`) in place. Turning the feature off from here leaves
-its channel and style untouched. Changing the message channel does not move
-existing pickers (#1113): the page shows a warning while mappings exist. Startup
-leaves a guild's mappings active (with a logged warning) only while none of its
-pickers is found in the configured channel; once any picker resolves there, mappings
-whose picker is not found are archived. Delete the old pickers and mappings before
-switching channels, or switch back before cleaning up.
+its channel and style untouched. Each new mapping remembers the channel its
+picker was posted in (#1207, shown under the message ID), so changing the message
+channel only decides where the next picker goes; existing pickers keep working,
+and deleting a group or mapping removes the picker from its own channel. Mappings
+created before this are not remembered: they are still looked up in the configured
+channel, the page shows a warning only while such mappings are active, and startup
+keeps them (with a logged warning) only while none of them is found there; once one
+resolves, the older ones whose picker is not found are archived. Delete those older
+pickers and mappings before switching channels, or switch back before cleaning up.
 
 The **Quotes** page (#984) is where moderators manage stored quotes without
 going through `/quote` in Discord. The list is newest first, 25 per page, and
