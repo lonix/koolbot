@@ -127,6 +127,12 @@ const removeRsvp = jest.fn<
     rendersFailed: number;
   }>
 >();
+const removeMemberFromEvents = jest.fn<
+  (
+    guildId: string,
+    userId: string,
+  ) => Promise<{ matched: number; removed: number; failed: number }>
+>();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -217,6 +223,13 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   },
 }));
 
+jest.unstable_mockModule("../../src/services/event-group-assignment.js", () => ({
+  removeMemberFromEvents: async (guildId: string, userId: string) => {
+    CALLS.push("event.removeMemberFromEvents");
+    return removeMemberFromEvents(guildId, userId);
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
   QuoteChannelManager: {
     getInstance: () => ({ deleteQuoteMessage: jest.fn() }),
@@ -299,6 +312,9 @@ describe("UserDataDeletionService.purge", () => {
     removeRsvp
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, rendersFailed: 0 });
+    removeMemberFromEvents
+      .mockReset()
+      .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
     purgeForUser.mockReset().mockResolvedValue({
       authored: 0,
       deleted: 0,
@@ -722,6 +738,26 @@ describe("UserDataDeletionService.purge", () => {
         matched: 3,
         removed: 2,
       });
+      expect(report.ok).toBe(false);
+    });
+
+    it("pulls the member out of every event group and reports a shortfall", async () => {
+      removeMemberFromEvents.mockResolvedValue({
+        matched: 3,
+        removed: 2,
+        failed: 1,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(removeMemberFromEvents).toHaveBeenCalledWith(GUILD, USER);
+      const step = stepsFor(report, "event-group-member")[0];
+      expect(step).toMatchObject({
+        action: "pull-member",
+        matched: 3,
+        removed: 2,
+      });
+      expect(step.error).toContain("1 event(s) could not be updated");
       expect(report.ok).toBe(false);
     });
 

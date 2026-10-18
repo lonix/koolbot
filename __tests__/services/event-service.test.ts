@@ -1048,6 +1048,8 @@ describe("recurring event lifecycle", () => {
       nextSpawned: false,
       seriesCancelled: false,
       groupsEnabled: true,
+      // The host's lock belongs to one occurrence (#1191).
+      groupsLocked: true,
       presetId: "builtin:wardogs",
       groupLabel: "Squad",
       leaderLabel: "Captain",
@@ -1072,6 +1074,8 @@ describe("recurring event lifecycle", () => {
       captainCustomisationEnabled: true,
       tagsEnabled: true,
     });
+    // The successor starts unlocked: the field is not carried at all.
+    expect(created[0].groupsLocked).toBeUndefined();
     expect(created[0].groups).toEqual([
       {
         key: "g_a",

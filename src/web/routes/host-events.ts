@@ -53,6 +53,26 @@ import {
 } from "../host-panel-view.js";
 import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
+import { randomBytes } from "node:crypto";
+import {
+  assignMember,
+  randomiseMembers,
+  setGroupsLocked,
+} from "../../services/event-group-assignment.js";
+import {
+  cachedMemberName,
+  readEventPresence,
+} from "../../services/event-group-presence.js";
+import {
+  groupKeyOf,
+  type RandomiseMode,
+} from "../../services/event-group-plan.js";
+import {
+  groupFill,
+  renderAssignmentSection,
+  type AssignmentGroupView,
+  type AssignmentPersonView,
+} from "../host-assignment-view.js";
 
 /** A request that has passed the host gate. */
 export type HostRequest = AuthenticatedRequest & {
@@ -214,6 +234,229 @@ export function hostAction(
   });
 }
 
+/** A Discord user id as posted by the panel's forms. */
+const USER_ID_RE = /^\d{15,25}$/;
+
+const NO_VOICE_STATE =
+  "The bot could not read who is in the voice channels, so nobody was assigned.";
+
+function bodyString(req: Request, name: string): string {
+  const body = req.body as Record<string, unknown> | undefined;
+  const value = body?.[name];
+  return typeof value === "string" ? value : "";
+}
+
+/** At most `limit` names, then "and N more". */
+function nameList(names: string[], limit = 10): string {
+  if (names.length <= limit) return names.join(", ");
+  return `${names.slice(0, limit).join(", ")} and ${names.length - limit} more`;
+}
+
+function groupViews(event: IEvent): AssignmentGroupView[] {
+  return (event.groups ?? []).map((g) => ({
+    key: g.key,
+    name: g.name,
+    marker: g.marker ?? "",
+    size: g.size ?? null,
+    memberCount: (g.memberIds ?? []).length,
+    isTeam: g.kind === "team",
+  }));
+}
+
+/** The "Assign people" section (#1191). */
+function createAssignmentSection(client: Client): HostSectionRenderer {
+  return (ctx) => {
+    const { event } = ctx;
+    if (event.groupsEnabled !== true) return undefined;
+    const presence = readEventPresence(client, event);
+    const people: AssignmentPersonView[] = [];
+    const listed = new Set<string>();
+    for (const m of presence.members) {
+      listed.add(m.id);
+      people.push({
+        id: m.id,
+        name: m.name,
+        connected: true,
+        groupKey: groupKeyOf(event.groups ?? [], m.id),
+      });
+    }
+    // Assigned but not connected: still listed so they can be unassigned.
+    for (const g of event.groups ?? []) {
+      for (const id of g.memberIds ?? []) {
+        if (listed.has(id)) continue;
+        listed.add(id);
+        people.push({
+          id,
+          name: cachedMemberName(client, event.guildId, id),
+          connected: false,
+          groupKey: groupKeyOf(event.groups ?? [], id),
+        });
+      }
+    }
+    return renderAssignmentSection({
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      groups: groupViews(event),
+      people,
+      presenceOk: presence.ok,
+      locked: event.groupsLocked === true,
+      groupLabel: event.groupLabel || "Group",
+    });
+  };
+}
+
+/** Assign, unassign, randomise and lock (#1191), each one audited change. */
+function registerAssignmentActions(router: Router, client: Client): void {
+  const assignTo = async (
+    event: IEvent,
+    userId: string,
+    groupKey: string | null,
+  ): Promise<HostActionResult> => {
+    if (!USER_ID_RE.test(userId)) {
+      return { ok: false, message: "Pick a person from the list." };
+    }
+    if (groupKey !== null) {
+      // Adding someone needs the live voice state (fail closed without it). A
+      // person already in a group can always be moved.
+      const already = groupKeyOf(event.groups ?? [], userId) !== null;
+      if (!already) {
+        const presence = readEventPresence(client, event);
+        if (!presence.ok) return { ok: false, message: NO_VOICE_STATE };
+        if (!presence.members.some((m) => m.id === userId)) {
+          return {
+            ok: false,
+            message:
+              "That person is not connected to this event's voice channels.",
+          };
+        }
+      }
+    }
+    const result = await assignMember({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      userId,
+      groupKey,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+        details: { userId, group: groupKey },
+        errorMessage: result.code,
+      };
+    }
+    const who = cachedMemberName(client, event.guildId, userId);
+    const group = groupKey
+      ? (event.groups ?? []).find((g) => g.key === groupKey)
+      : undefined;
+    const message = !result.changed
+      ? groupKey
+        ? `${who} is already in ${group?.name ?? "that group"}.`
+        : `${who} was not in a group.`
+      : groupKey
+        ? `${who} is now in ${group?.name ?? "the group"}.`
+        : `${who} was taken out of their group.`;
+    return {
+      ok: true,
+      message,
+      details: {
+        userId,
+        from: result.fromKey,
+        to: result.toKey,
+        changed: result.changed,
+      },
+    };
+  };
+
+  hostAction(router, "assign", "/assign", ({ req, event }) => {
+    const group = bodyString(req, "group");
+    if (group.length === 0 || group.length > 32) {
+      return Promise.resolve({
+        ok: false,
+        message: "Choose a group to put the person in.",
+      });
+    }
+    return assignTo(event, bodyString(req, "userId"), group);
+  });
+
+  hostAction(router, "unassign", "/unassign", ({ req, event }) =>
+    assignTo(event, bodyString(req, "userId"), null),
+  );
+
+  hostAction(router, "randomise", "/randomise", async ({ req, event }) => {
+    const rawMode = bodyString(req, "mode");
+    if (rawMode !== "unassigned" && rawMode !== "everyone") {
+      return { ok: false, message: "Choose who to randomise." };
+    }
+    const mode: RandomiseMode = rawMode;
+    const presence = readEventPresence(client, event);
+    if (!presence.ok) return { ok: false, message: NO_VOICE_STATE };
+    if (presence.members.length === 0) {
+      return { ok: false, message: "Nobody is connected to deal into groups." };
+    }
+    const seed = randomBytes(4).readUInt32BE(0);
+    const result = await randomiseMembers({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      candidateIds: presence.members.map((m) => m.id),
+      mode,
+      seed,
+    });
+    if (!result.ok) {
+      return { ok: false, message: result.message, errorMessage: result.code };
+    }
+    const names = new Map(presence.members.map((m) => [m.id, m.name]));
+    const perGroup = new Map<string, number>();
+    for (const p of result.placed) {
+      perGroup.set(p.groupKey, (perGroup.get(p.groupKey) ?? 0) + 1);
+    }
+    const parts = (event.groups ?? [])
+      .filter((g) => perGroup.has(g.key))
+      .map((g) => `${g.name} ${perGroup.get(g.key)}`);
+    const n = result.placed.length;
+    let message = `Placed ${n} ${n === 1 ? "person" : "people"}${parts.length ? ` (${parts.join(", ")})` : ""}.`;
+    if (result.unplaced.length > 0) {
+      const u = result.unplaced.length;
+      message += ` ${u} did not fit and ${u === 1 ? "is" : "are"} unassigned: ${nameList(result.unplaced.map((id) => names.get(id) ?? id))}.`;
+    }
+    return {
+      ok: true,
+      message,
+      // Counts and the seed, not names: one audit row for the whole deal.
+      details: {
+        mode,
+        seed,
+        candidates: presence.members.length,
+        placed: n,
+        unplaced: result.unplaced.length,
+      },
+    };
+  });
+
+  hostAction(router, "lock", "/lock", async ({ req, event }) => {
+    const raw = bodyString(req, "locked");
+    if (raw !== "1" && raw !== "0") {
+      return { ok: false, message: "Choose lock or unlock." };
+    }
+    const locked = raw === "1";
+    const result = await setGroupsLocked({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      locked,
+    });
+    if (!result.ok) {
+      return { ok: false, message: result.message, errorMessage: result.code };
+    }
+    return {
+      ok: true,
+      message: locked
+        ? "Groups are locked. Joining a channel no longer changes anyone's group."
+        : "Groups are unlocked. Joining a group's channel puts people in that group.",
+      details: { locked },
+    };
+  });
+}
+
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channelName = channelId
@@ -243,6 +486,10 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
           tag: g.tag ?? "",
           hasChannel: !!g.channelId,
           memberCount: (g.memberIds ?? []).length,
+          fill: groupFill({
+            size: g.size ?? null,
+            memberCount: (g.memberIds ?? []).length,
+          }),
         }))
       : [],
     adopted: event.nativeAdopted === true,
@@ -299,6 +546,10 @@ export function createHostEventsRouter(client: Client): Router {
         next(err);
       });
   });
+
+  // The "Assign people" section and its actions (#1191).
+  HOST_SECTION_RENDERERS.assignment = createAssignmentSection(client);
+  registerAssignmentActions(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;

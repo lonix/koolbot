@@ -336,6 +336,36 @@ const READERS: Record<string, CollectionReader> = {
     };
   },
 
+  // Shared aggregate: an event row lists every member of every group. The
+  // member gets the event and the name of their own group, never the others.
+  // Finished events are included: memberships stay on them (see the registry).
+  "event-group-member": async ({ userId, guildId, maxItems }) => {
+    const rows = await Event.find({ guildId, "groups.memberIds": userId })
+      .sort({ startTime: -1 })
+      .limit(maxItems + 1)
+      .lean();
+    const { rows: kept, truncated } = capped(rows, maxItems);
+    return {
+      value: kept.map((row) => {
+        const groups = (Array.isArray(row.groups) ? row.groups : []) as Array<{
+          name: string;
+          kind: string;
+          memberIds?: string[];
+        }>;
+        return {
+          title: row.title,
+          startTime: row.startTime,
+          timezone: row.timezone,
+          state: row.state,
+          yourGroups: groups
+            .filter((g) => (g.memberIds ?? []).includes(userId))
+            .map((g) => ({ name: g.name, kind: g.kind })),
+        };
+      }),
+      truncated,
+    };
+  },
+
   // Shared aggregate: the row lists every current holder of the reward role.
   // The member learns which roles list them, not who else is on them.
   "leaderboard-role-assignment": async ({ userId, guildId, maxItems }) => {

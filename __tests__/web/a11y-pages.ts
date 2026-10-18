@@ -71,6 +71,7 @@ import {
   renderHostPanelBody,
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
+import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import {
   renderConsent,
   renderErrorPage,
@@ -1767,6 +1768,7 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
             tag: "RED",
             hasChannel: true,
             memberCount: 3,
+            fill: "3/4",
           },
           {
             name: "Spectators",
@@ -1776,6 +1778,7 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
             tag: "",
             hasChannel: false,
             memberCount: 0,
+            fill: "0",
           },
         ]
       : [],
@@ -1870,6 +1873,110 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+      ),
+    },
+    {
+      name: "/me host panel (assign people, with people and a locked event)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          controls: {
+            assignment: renderAssignmentSection({
+              csrfToken: "token",
+              actionPath: (name) =>
+                `/me/events/65a000000000000000000001/host/${name}`,
+              groupLabel: "Team",
+              locked: true,
+              presenceOk: true,
+              groups: [
+                {
+                  key: "g_a",
+                  name: "Reds",
+                  marker: "🔴",
+                  size: 2,
+                  memberCount: 2,
+                  isTeam: true,
+                },
+                {
+                  key: "g_b",
+                  name: "Blues",
+                  marker: "",
+                  size: null,
+                  memberCount: 1,
+                  isTeam: true,
+                },
+                {
+                  key: "g_c",
+                  name: "Spectators",
+                  marker: "",
+                  size: null,
+                  memberCount: 0,
+                  isTeam: false,
+                },
+              ],
+              people: [
+                {
+                  id: "111111111111111111",
+                  name: "Ana",
+                  connected: true,
+                  groupKey: "g_a",
+                },
+                {
+                  id: "222222222222222222",
+                  name: "Ben",
+                  connected: true,
+                  groupKey: null,
+                },
+                {
+                  id: "333333333333333333",
+                  name: "Cal",
+                  connected: false,
+                  groupKey: "g_b",
+                },
+              ],
+            }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (assign people, voice state unreadable)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          controls: {
+            assignment: renderAssignmentSection({
+              csrfToken: "token",
+              actionPath: (name) =>
+                `/me/events/65a000000000000000000001/host/${name}`,
+              groupLabel: "Team",
+              locked: false,
+              presenceOk: false,
+              groups: [
+                {
+                  key: "g_a",
+                  name: "Reds",
+                  marker: "",
+                  size: 2,
+                  memberCount: 1,
+                  isTeam: true,
+                },
+              ],
+              people: [
+                {
+                  id: "333333333333333333",
+                  name: "Cal",
+                  connected: false,
+                  groupKey: "g_a",
+                },
+              ],
+            }),
+          },
+        }),
       ),
     },
     {

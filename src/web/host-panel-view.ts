@@ -62,6 +62,8 @@ export interface HostPanelGroup {
   tag: string;
   hasChannel: boolean;
   memberCount: number;
+  /** "2/2" for a sized group, "5" for an unsized one (#1191). */
+  fill: string;
 }
 
 export interface HostPanelEvent {
@@ -144,7 +146,7 @@ function renderGroups(e: HostPanelEvent): string {
         `<td>${g.size === null ? '<span class="muted">No limit</span>' : escapeHtml(g.size)}</td>` +
         `<td>${g.tag ? escapeHtml(g.tag) : '<span class="muted">None</span>'}</td>` +
         `<td>${g.hasChannel ? "Created" : '<span class="muted">Not created yet</span>'}</td>` +
-        `<td>${escapeHtml(g.memberCount)}</td></tr>`,
+        `<td>${g.kind === "team" ? `<span class="mono">${escapeHtml(g.fill)}</span>` : '<span class="muted">n/a</span>'}</td></tr>`,
     )
     .join("");
   const lead =
