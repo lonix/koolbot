@@ -31,6 +31,23 @@
  * - equal to `original`   : nothing of ours is on it;
  * - anything else         : the member changed it on purpose; leave it alone.
  *
+ * "In `owned`" is decided after ONE normalisation, `normalizeNickname` (NFC,
+ * trimmed, runs of whitespace collapsed; case is NOT folded, a case change is a
+ * deliberate edit), used for every comparison of a nickname read from Discord
+ * with one the bot sent: Discord may store a nickname in a slightly different
+ * spelling than the one requested, and when the answer is lost or the
+ * confirmation write fails the row only knows the requested spelling.
+ *
+ * An UNRESOLVED row (unconfirmed latest edit) whose nickname is neither owned
+ * nor the original is ambiguous: a deliberate rename, or a spelling the
+ * normalisation does not know. It is not decided on the first read: the row is
+ * kept (`mismatches` counts the settled re-reads) and only after
+ * `MISMATCH_READS_BEFORE_RENAME` such reads, or a day-long unresolved age, is it
+ * treated as the member's own rename (left alone, backup dropped, never
+ * restored over). A CONFIRMED row has the nickname Discord reported recorded in
+ * `owned`, so a mismatch there is a deliberate rename at once. A stuck-but-safe
+ * row beats a lost original.
+ *
  * `null` (no server nickname) is never "owned": the bot never sets null while
  * tagging, so a member who clears their nickname is "anything else" (or
  * "original", when the original was none), never mistaken for the bot.
@@ -54,6 +71,14 @@
  * `OUTCOME_SETTLE_MS` from `attemptedAt` (a PATCH that timed out locally may
  * still be in flight at Discord); until then every decision on it is "kept".
  *
+ * ### The attempt is stamped in the same step as the dispatch
+ *
+ * The stamp is written AFTER the read and the classification, immediately before
+ * the PATCH (restore, retarget via `advance`/stamp, apply), as a conditional
+ * write on the row decided from; if the row changed, nothing is sent. A slow
+ * read therefore cannot use up the settle window before the edit is even sent,
+ * and the member read has a single attempt (no retry budget of its own).
+ *
  * ### Nothing is queued or waited for between a read and its PATCH
  *
  * The question for every nickname edit: between the moment a decision is made
@@ -65,12 +90,11 @@
  *   between one job's end and the next job's start. Spacing is in front of the
  *   read, never after it, and two jobs can never be in their read-to-PATCH part
  *   at the same time, so PATCHes cannot burst;
- * - inside the slot: **restore** stamps the attempt (unresolved), reads,
- *   classifies, PATCHes; **retarget** re-reads the event ("still wanted?", the
+ * - inside the slot: **restore** reads, classifies, stamps the attempt
+ *   (unresolved), PATCHes; **retarget** re-reads the event ("still wanted?", the
  *   wait can be long), reads the member, classifies, makes ONE conditional write
  *   (`advance`, or the attempt stamp) and PATCHes; **apply** reads, classifies,
- *   claims (the claim carries the attempt time), re-checks the event
- *   (invariant 5) and PATCHes;
+ *   claims, re-checks the event (invariant 5), stamps the attempt and PATCHes;
  * - the PATCH itself cannot wait either: the nickname REST client is FAIL-FAST
  *   (`createFailFastRest`: no retries, and any rate-limit wait is rejected, never
  *   slept), and the call gets one attempt. A rate-limit rejection means "not
@@ -191,6 +215,13 @@ export const SKIP_COOLDOWN_MS = 10 * 60 * 1000;
 export const RESTORE_RETRY_MS = 60_000;
 /** The most members one restore-only pass works on (the rest wait for the next). */
 export const RESTORE_BATCH_MAX = 100;
+/**
+ * How many settled re-reads of an unresolved row whose nickname matches nothing
+ * we know are tolerated before it is taken for the member's own rename.
+ */
+export const MISMATCH_READS_BEFORE_RENAME = 3;
+/** An unresolved row older than this is resolved as a rename on its next mismatch. */
+export const MISMATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /** Name of the end-of-event hook. */
 export const TAGS_END_HOOK = "nickname-tags";
 const REASON = "KoolBot event tag";
@@ -337,6 +368,8 @@ export interface BackupRow {
   confirmedTarget: string | null;
   /** When the latest edit was started (ms since the epoch). */
   attemptedAt: number;
+  /** Settled re-reads of this unresolved row that matched nothing we know. */
+  mismatches: number;
 }
 
 export interface TagStore {
@@ -368,6 +401,11 @@ export interface TagStore {
     row: BackupRow,
     attemptedAt: number,
   ): Promise<boolean>;
+  /**
+   * Count one settled re-read of an UNRESOLVED row whose nickname matched
+   * nothing we know, while the row still reads `row.intended`.
+   */
+  noteMismatch(guildId: string, row: BackupRow): Promise<boolean>;
   /**
    * The edit of `row.intended` is confirmed: record it, and the nickname Discord
    * reported (it can differ from what was sent) into `owned`.
@@ -416,6 +454,7 @@ function rowOf(doc: unknown): BackupRow {
     confirmedTarget:
       typeof d.confirmedTarget === "string" ? d.confirmedTarget : null,
     attemptedAt: d.attemptedAt ? new Date(d.attemptedAt as Date).getTime() : 0,
+    mismatches: typeof d.mismatches === "number" ? d.mismatches : 0,
   };
 }
 
@@ -476,6 +515,7 @@ export const mongoTagStore: TagStore = {
             owned: row.owned,
             confirmedTarget: null,
             attemptedAt: new Date(row.attemptedAt),
+            mismatches: 0,
           },
         },
         { upsert: true },
@@ -500,6 +540,7 @@ export const mongoTagStore: TagStore = {
           intended,
           confirmedTarget: null,
           attemptedAt: new Date(attemptedAt),
+          mismatches: 0,
         },
         // Appended, never replaced: the earlier targets stay recognisable.
         $addToSet: { owned: intended },
@@ -516,7 +557,25 @@ export const mongoTagStore: TagStore = {
         intended: row.intended,
       },
       // A new attempt is unconfirmed by definition.
-      { $set: { attemptedAt: new Date(attemptedAt), confirmedTarget: null } },
+      {
+        $set: {
+          attemptedAt: new Date(attemptedAt),
+          confirmedTarget: null,
+          mismatches: 0,
+        },
+      },
+    );
+    return (result?.matchedCount ?? 0) === 1;
+  },
+  async noteMismatch(guildId, row) {
+    const result = await EventNicknameBackup.updateOne(
+      {
+        guildId,
+        memberId: row.memberId,
+        eventId: row.eventId,
+        intended: row.intended,
+      },
+      { $inc: { mismatches: 1 } },
     );
     return (result?.matchedCount ?? 0) === 1;
   },
@@ -548,7 +607,11 @@ export const mongoTagStore: TagStore = {
 
 /** The real Discord side: REST through `CommandManager.makeDiscordApiCall`. */
 export function createClientDiscord(client: Client): TagDiscord {
-  const call = async <T>(fn: () => Promise<T>, name: string): Promise<T> => {
+  const call = async <T>(
+    fn: () => Promise<T>,
+    name: string,
+    attempts = 2,
+  ): Promise<T> => {
     const { CommandManager } = await import("./command-manager.js");
     // Short timeout and one retry: a nickname edit is idempotent, and the
     // hook that restores nicknames has a 60 second budget.
@@ -556,7 +619,7 @@ export function createClientDiscord(client: Client): TagDiscord {
       fn,
       name,
       10000,
-      2,
+      attempts,
     );
   };
   // The edit goes through the write client: no automatic retries, and the
@@ -585,9 +648,12 @@ export function createClientDiscord(client: Client): TagDiscord {
       // Make sure the bot's own member is known: `manageable` needs it.
       await meOf(guildId);
       try {
+        // One attempt: the read must not have a retry budget of its own that
+        // could use up the settle window before the PATCH is stamped and sent.
         const member = await call(
           () => guild.members.fetch({ user: userId, force: true }),
           "fetch member for tags",
+          1,
         );
         return {
           nickname: member.nickname ?? null,
@@ -665,12 +731,28 @@ export interface TagDeps {
 
 const memberLock = createKeyedLock();
 
+/**
+ * The one normalisation behind every comparison of a nickname read from Discord
+ * with one the bot sent: Unicode NFC, trimmed, runs of whitespace collapsed to a
+ * single space. Deliberately conservative: case is not folded and nothing else
+ * is touched, so a deliberate edit is never mistaken for a spelling difference.
+ */
+export function normalizeNickname(name: string): string {
+  return name.normalize("NFC").replace(/\s+/g, " ").trim();
+}
+
+/** The same nickname, up to `normalizeNickname`. */
+export function sameNickname(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b;
+  return normalizeNickname(a) === normalizeNickname(b);
+}
+
 /** Whether a nickname read from Discord is one the bot has set or may have set. */
 export function isOwnedNickname(
   row: Pick<BackupRow, "owned">,
   current: string | null,
 ): boolean {
-  return current !== null && row.owned.includes(current);
+  return current !== null && row.owned.some((o) => sameNickname(o, current));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -804,6 +886,29 @@ export class EventNicknameTags {
     for (const key of [...this.cooldowns.keys()]) {
       if (key.endsWith(`:${userId}`)) this.cooldowns.delete(key);
     }
+  }
+
+  /**
+   * A nickname that is neither owned (after normalisation) nor the original.
+   * On a CONFIRMED row that is the member's own rename. On an UNRESOLVED row it
+   * is ambiguous (a rename, or a spelling Discord changed that we do not know):
+   * the row is kept and the re-read counted, and only after a few settled reads
+   * (or a day) is it taken for a rename. "wait": keep the row, change nothing.
+   */
+  private async mismatchVerdict(
+    guildId: string,
+    row: BackupRow,
+  ): Promise<"wait" | "rename"> {
+    if (!this.unresolved(row)) return "rename";
+    if (
+      row.attemptedAt > 0 &&
+      this.now() - row.attemptedAt >= MISMATCH_MAX_AGE_MS
+    ) {
+      return "rename";
+    }
+    if (row.mismatches + 1 >= MISMATCH_READS_BEFORE_RENAME) return "rename";
+    await this.store.noteMismatch(guildId, row);
+    return "wait";
   }
 
   /**
@@ -998,6 +1103,7 @@ export class EventNicknameTags {
     const owned = isOwnedNickname(row, current);
     const atOriginal = current === row.original;
     if (!owned && !atOriginal) {
+      if ((await this.mismatchVerdict(guildId, row)) === "wait") return "kept";
       // The member changed their nickname themselves: leave it, drop the old
       // backup, and tag the new name from scratch (participants cannot opt out).
       await this.store.drop(guildId, row);
@@ -1020,12 +1126,12 @@ export class EventNicknameTags {
         confirmedTarget: null,
         attemptedAt: this.now(),
       };
-    } else if (current !== desired) {
+    } else if (!sameNickname(current, desired)) {
       const sent = await this.stampDispatch(guildId, row);
       if (!sent) return "none";
       working = sent;
     }
-    if (current === desired) {
+    if (sameNickname(current, desired)) {
       // Already shows the wanted name (an edit that landed unconfirmed).
       await this.store.confirm(guildId, working, current);
       this.clearSkip(eventId, userId);
@@ -1140,6 +1246,7 @@ export class EventNicknameTags {
       owned: [intended],
       confirmedTarget: null,
       attemptedAt: this.now(),
+      mismatches: 0,
     };
     // The backup is written BEFORE the edit. A member whose data reset runs (or
     // ran since the caller's ticket) is not tagged: the barrier does not run the
@@ -1174,17 +1281,19 @@ export class EventNicknameTags {
       return "none";
     }
 
-    // The claim carried the attempt time (it was written just after the read,
-    // with nothing queued since): no further write sits before the PATCH.
+    // The attempt is stamped now, in the same step as the dispatch (the claim
+    // carried the time of the read; the re-check above may have taken a while).
+    const sent = await this.stampDispatch(guildId, row);
+    if (!sent) return "none";
     try {
       const shown = await this.discord.setNickname(guildId, userId, intended);
-      await this.store.confirm(guildId, row, shown);
+      await this.store.confirm(guildId, sent, shown);
       this.clearSkip(eventId, userId);
       return "tagged";
     } catch (err) {
       return this.afterFailedApplyEdit(
         guildId,
-        row,
+        sent,
         eventId,
         userId,
         err,
@@ -1264,44 +1373,53 @@ export class EventNicknameTags {
     if (can === true) {
       this.report(eventId).warnings.delete(RESTORE_PERMISSION_WARNING);
     }
-    // Queue FIRST (a member's change during the wait must be seen), then record
-    // the attempt as unresolved BEFORE the read, so the read, the classification
-    // and the PATCH follow each other with nothing queued in between. If the
-    // PATCH response is lost the row must not keep claiming the old tag is
-    // confirmed.
+    // Queue FIRST (a member's change during the wait must be seen): inside the
+    // slot the member is read, classified, the attempt is stamped (unresolved,
+    // so a lost response never leaves the old tag marked as confirmed) and the
+    // PATCH is sent.
     return this.slot(() => this.restoreSegment(guildId, row, eventId));
   }
 
-  /** Runs inside the slot: stamp, fresh read, classify, PATCH. */
+  /** Runs inside the slot: fresh read, classify, stamp, PATCH. */
   private async restoreSegment(
     guildId: string,
     row: BackupRow,
     eventId: string,
   ): Promise<MemberOutcome> {
     const userId = row.memberId;
-    const sent = await this.stampDispatch(guildId, row);
-    if (!sent) return "kept";
     let member: MemberView | "gone";
     try {
       member = await this.discord.fetchMember(guildId, userId);
     } catch (err) {
-      // Nothing was sent: the stamp goes back, so this is not "in flight".
-      await this.store.markAttempt(guildId, sent, 0);
       return this.keepAfterFailure(eventId, userId, err, "read the member");
     }
     if (member === "gone") {
-      await this.store.drop(guildId, sent);
+      await this.store.drop(guildId, row);
       this.clearSkip(eventId, userId);
       return "dropped";
     }
     const current = member.nickname;
-    if (!isOwnedNickname(row, current) || current === row.original) {
+    const ownedNow = isOwnedNickname(row, current);
+    if (!ownedNow && current !== row.original) {
+      if ((await this.mismatchVerdict(guildId, row)) === "wait") return "kept";
+    }
+    if (!ownedNow || current === row.original) {
       // The member changed it themselves, or an edit never landed: nothing of
       // ours is on the nickname. Leave it, drop the backup.
-      await this.store.drop(guildId, sent);
+      await this.store.drop(guildId, row);
       this.clearSkip(eventId, userId);
       return "dropped";
     }
+    // Unresolved from here on, stamped in the same step as the dispatch: a slow
+    // read above cannot use up the settle window before the PATCH is sent.
+    const sent = await this.stampDispatch(guildId, row);
+    if (!sent) return "kept";
+    // The PATCH was refused or never left: put the row back as it was, so a
+    // restore that did not happen does not leave a confirmed tag "unresolved".
+    const unsend = (): Promise<boolean> =>
+      row.confirmedTarget === row.intended
+        ? this.store.confirm(guildId, sent, null)
+        : this.store.markAttempt(guildId, sent, 0);
     try {
       await this.discord.setNickname(guildId, userId, row.original);
     } catch (err) {
@@ -1312,7 +1430,7 @@ export class EventNicknameTags {
       }
       if (kind === "not-sent") {
         // Rate-limited: the PATCH never left; a later pass reads again.
-        await this.store.markAttempt(guildId, sent, 0);
+        await unsend();
         return this.keepAfterFailure(eventId, userId, err, "send the restore");
       }
       if (kind === "permission") {
@@ -1320,7 +1438,7 @@ export class EventNicknameTags {
         // row was confirmed or already settled before it, so the attempt counts
         // as settled again (the confirmation stays cleared: the next pass reads
         // the nickname again and decides).
-        await this.store.markAttempt(guildId, sent, 0);
+        await unsend();
         this.skip(
           eventId,
           userId,

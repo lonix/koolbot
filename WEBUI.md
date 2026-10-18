@@ -1522,7 +1522,14 @@ Members cannot opt out. Nothing is a command: the host only ticks the box.
   that removes them runs the restore pass too.
 - **A nickname the member changed themselves** is left alone: at restore, if the nickname is
   neither the tag the bot set nor the original, the backup is dropped and nothing is edited.
-  The bot reads the member fresh from Discord for that decision, never from its cache.
+  The bot reads the member fresh from Discord for that decision, never from its cache. "The tag
+  the bot set" is compared after one conservative normalisation (Unicode NFC, trimmed, runs of
+  spaces collapsed; capital letters are never folded), because Discord may store a nickname in a
+  slightly different spelling than the one requested. When an edit was never confirmed and the
+  nickname then matches nothing the bot knows, it cannot tell a rename from a spelling it does
+  not know, so it keeps the backup and looks again on the next passes; after three such reads
+  (or a day) it treats the nickname as the member's own and leaves it alone. A stuck backup is
+  safer than a lost original.
 - **Pacing:** nickname edits go through `CommandManager.makeDiscordApiCall` and are queued
   600 ms apart, so a team of forty takes about half a minute. The wait comes BEFORE the bot
   reads the member's nickname, never between that read and the edit, so a nickname the member

@@ -32,6 +32,7 @@ function row(over: Partial<BackupRow> = {}): BackupRow {
     owned: ["[RED] Alice"],
     confirmedTarget: null,
     attemptedAt: Date.now(),
+    mismatches: 0,
     ...over,
   };
 }
@@ -138,6 +139,7 @@ describeWithMongo("event clan tags against a real MongoDB (#1194)", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: null,
       attemptedAt: 1000,
+      mismatches: 0,
     });
     expect(await mongoTagStore.confirm(GUILD, read, "[RED]  Alice")).toBe(true);
     const confirmed = (await mongoTagStore.readBackup(
@@ -158,6 +160,7 @@ describeWithMongo("event clan tags against a real MongoDB (#1194)", () => {
       intended: "[BLUE] Alice",
       confirmedTarget: null,
       attemptedAt: 2000,
+      mismatches: 0,
       owned: ["[RED] Alice", "[RED]  Alice", "[BLUE] Alice"],
     });
     // A stale reading no longer matches: it cannot advance, confirm, mark or
@@ -185,6 +188,33 @@ describeWithMongo("event clan tags against a real MongoDB (#1194)", () => {
     expect(marked.confirmedTarget).toBeNull();
     expect(await mongoTagStore.drop(GUILD, marked)).toBe(true);
     expect(await mongoTagStore.drop(GUILD, marked)).toBe(false);
+  });
+
+  it("noteMismatch counts settled re-reads of an unresolved row; an attempt or a move resets it; a stale reading cannot count", async () => {
+    await mongoTagStore.claim(GUILD, row());
+    const read = (await mongoTagStore.readBackup(GUILD, "alice")) as BackupRow;
+    expect(read.mismatches).toBe(0);
+    expect(await mongoTagStore.noteMismatch(GUILD, read)).toBe(true);
+    expect(await mongoTagStore.noteMismatch(GUILD, read)).toBe(true);
+    const counted = (await mongoTagStore.readBackup(
+      GUILD,
+      "alice",
+    )) as BackupRow;
+    expect(counted.mismatches).toBe(2);
+
+    expect(await mongoTagStore.markAttempt(GUILD, counted, 7000)).toBe(true);
+    expect(
+      ((await mongoTagStore.readBackup(GUILD, "alice")) as BackupRow)
+        .mismatches,
+    ).toBe(0);
+    await mongoTagStore.noteMismatch(GUILD, counted);
+    expect(
+      await mongoTagStore.advance(GUILD, counted, "[BLUE] Alice", 8000),
+    ).toBe(true);
+    const moved = (await mongoTagStore.readBackup(GUILD, "alice")) as BackupRow;
+    expect(moved.mismatches).toBe(0);
+    // A reading of the row before the move no longer matches.
+    expect(await mongoTagStore.noteMismatch(GUILD, counted)).toBe(false);
   });
 
   it("tags from a stored event and restores after the end, through the real store", async () => {

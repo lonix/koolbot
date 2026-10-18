@@ -50,6 +50,12 @@ export interface IEventNicknameBackup extends Document {
   confirmedTarget: string | null;
   /** When the latest edit was started; an unconfirmed edit is not resolved before it has settled. */
   attemptedAt: Date;
+  /**
+   * Settled re-reads of this UNRESOLVED row whose nickname matched nothing we
+   * know (neither owned after normalisation nor the original). A few such reads
+   * are tolerated before the row is taken for the member's own rename.
+   */
+  mismatches: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -65,6 +71,7 @@ const eventNicknameBackupSchema = new Schema<IEventNicknameBackup>(
     owned: { type: [{ type: String, maxlength: 64 }], default: [] },
     confirmedTarget: { type: String, default: null, maxlength: 32 },
     attemptedAt: { type: Date, default: Date.now },
+    mismatches: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

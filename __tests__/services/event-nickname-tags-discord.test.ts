@@ -105,3 +105,49 @@ describe("setNickname", () => {
     );
   });
 });
+
+describe("fetchMember", () => {
+  it("is ONE attempt: the read has no retry budget of its own that could use up the settle window", async () => {
+    const makeDiscordApiCall = jest.fn(
+      async (...args: [() => Promise<unknown>, string, number, number]) =>
+        args[0](),
+    );
+    const calls: Array<[string, number]> = [];
+    const member = {
+      id: "u1",
+      nickname: "Alice",
+      displayName: "Alice",
+      manageable: true,
+    };
+    const guild = {
+      ownerId: "owner",
+      members: {
+        me: { permissions: { has: () => true } },
+        fetch: async () => member,
+      },
+    };
+    const client = {
+      token: "t",
+      guilds: { cache: new Map([["g1", guild]]) },
+    } as never;
+    // The mocked CommandManager of this file records what it is asked for.
+    const { CommandManager } =
+      await import("../../src/services/command-manager.js");
+    (CommandManager as unknown as { getInstance: () => unknown }).getInstance =
+      () => ({
+        makeDiscordApiCall: async (
+          fn: () => Promise<unknown>,
+          name: string,
+          _timeout: number,
+          attempts: number,
+        ) => {
+          calls.push([name, attempts]);
+          return makeDiscordApiCall(fn, name, _timeout, attempts);
+        },
+      });
+    const discord = createClientDiscord(client);
+    const view = await discord.fetchMember("g1", "u1");
+    expect(view).toMatchObject({ nickname: "Alice" });
+    expect(calls.find(([n]) => n === "fetch member for tags")?.[1]).toBe(1);
+  });
+});

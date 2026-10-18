@@ -148,6 +148,7 @@ class MemStore implements TagStore {
     if (!cur.owned.includes(intended)) cur.owned.push(intended);
     cur.confirmedTarget = null;
     cur.attemptedAt = attemptedAt;
+    cur.mismatches = 0;
     this.log.push(`advance:${row.memberId}`);
     return true;
   }
@@ -158,7 +159,16 @@ class MemStore implements TagStore {
     }
     cur.attemptedAt = attemptedAt;
     cur.confirmedTarget = null;
+    cur.mismatches = 0;
     this.log.push(`attempt:${row.memberId}`);
+    return true;
+  }
+  async noteMismatch(_g: string, row: BackupRow) {
+    const cur = this.rows.get(row.memberId);
+    if (!cur || cur.eventId !== row.eventId || cur.intended !== row.intended) {
+      return false;
+    }
+    cur.mismatches += 1;
     return true;
   }
   async confirm(_g: string, row: BackupRow, shown: string | null) {
@@ -599,6 +609,7 @@ describe("apply", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: "[RED] Alice",
       attemptedAt: 0,
+      mismatches: 0,
     });
 
     expect(await sync("alice", EV)).toBe("skipped");
@@ -830,6 +841,7 @@ describe("a crash between tag and restore", () => {
       owned: ["[BLUE] Bob G"],
       confirmedTarget: "[BLUE] Bob G",
       attemptedAt: 0,
+      mismatches: 0,
     });
     store.events.delete(EV2);
     discord.members.get("bob")!.nickname = "[BLUE] Bob G";
@@ -849,6 +861,7 @@ describe("a crash between tag and restore", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: null,
       attemptedAt: 0,
+      mismatches: 0,
     });
     expect(await sync("alice")).toBe("dropped");
     expect(discord.edits).toEqual([]);
@@ -868,6 +881,7 @@ describe("a crash between tag and restore", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: null,
       attemptedAt: 0,
+      mismatches: 0,
     });
     expect(await sync("alice")).toBe("restored");
     expect(discord.members.get("alice")?.nickname).toBe("Alice");
@@ -1163,6 +1177,11 @@ describe("the owned set: what the bot may have put on a nickname", () => {
     discord.members.get("alice")!.nickname = null; // the member cleared it
     endEvent();
     settle();
+    // Ambiguous (a rename, or a spelling we do not know): kept for a few
+    // settled re-reads, then taken for the member's own change.
+    for (let i = 1; i < tags.MISMATCH_READS_BEFORE_RENAME; i++) {
+      expect(await sync("alice")).toBe("kept");
+    }
     expect(await sync("alice")).toBe("dropped");
     expect(discord.edits).toEqual([]);
     expect(discord.members.get("alice")?.nickname).toBeNull();
@@ -1177,6 +1196,9 @@ describe("the owned set: what the bot may have put on a nickname", () => {
     discord.members.get("alice")!.nickname = null;
     settle();
     moveToBlue();
+    for (let i = 1; i < tags.MISMATCH_READS_BEFORE_RENAME; i++) {
+      expect(await sync("alice")).toBe("kept");
+    }
     expect(await sync("alice")).toBe("tagged");
     expect(discord.members.get("alice")?.nickname).toBe("[BLUE] Alice D");
     expect(store.rows.get("alice")).toMatchObject({
@@ -1270,6 +1292,7 @@ describe("state table: every row state against every nickname and every want", (
       owned: [RED],
       confirmedTarget: null,
       attemptedAt: 0,
+      mismatches: 0,
     }),
     confirmed: () => ({
       eventId: EV,
@@ -1280,6 +1303,7 @@ describe("state table: every row state against every nickname and every want", (
       owned: [RED],
       confirmedTarget: RED,
       attemptedAt: 0,
+      mismatches: 0,
     }),
     retargeted: () => ({
       eventId: EV,
@@ -1290,6 +1314,7 @@ describe("state table: every row state against every nickname and every want", (
       owned: [RED, BLUE],
       confirmedTarget: null,
       attemptedAt: 0,
+      mismatches: 0,
     }),
     retargetedConfirmed: () => ({
       eventId: EV,
@@ -1300,6 +1325,7 @@ describe("state table: every row state against every nickname and every want", (
       owned: [RED, BLUE],
       confirmedTarget: BLUE,
       attemptedAt: 0,
+      mismatches: 0,
     }),
     settling: () => ({
       eventId: EV,
@@ -1310,13 +1336,22 @@ describe("state table: every row state against every nickname and every want", (
       owned: [RED],
       confirmedTarget: null,
       attemptedAt: clock - 1000,
+      mismatches: 0,
     }),
   };
-  const CURRENTS: Array<string | null> = [ORIG, RED, BLUE, "Ally", null];
+  const CURRENTS: Array<string | null> = [
+    ORIG,
+    RED,
+    BLUE,
+    "[RED]  Alice",
+    "[BLUE]  Alice",
+    "Ally",
+    null,
+  ];
   const WANTS = ["none", "RED", "BLUE"] as const;
 
   type Expected =
-    | { edit: string | null; row: "deleted" | "unchanged" }
+    | { edit: string | null; row: "deleted" | "unchanged" | "noted" }
     | { edit: string | null; row: "confirmed"; target: string; fresh?: string };
 
   function oracle(
@@ -1328,10 +1363,16 @@ describe("state table: every row state against every nickname and every want", (
     const unresolved = row.confirmedTarget !== row.intended;
     const settling =
       unresolved && clock - row.attemptedAt < tags.OUTCOME_SETTLE_MS;
-    const owned = current !== null && row.owned.includes(current);
+    // Discord-style normalisation, written out independently of the module.
+    const norm = (n: string): string => n.trim().replace(/\s+/g, " ");
+    const owned =
+      current !== null && row.owned.some((o) => norm(o) === norm(current));
     const atOriginal = current === ORIG;
+    // A nickname that matches nothing we know: ambiguous while unresolved.
+    const ambiguous = !owned && !atOriginal && unresolved;
     if (want === "none") {
       if (settling) return { edit: null, row: "unchanged" };
+      if (ambiguous) return { edit: null, row: "noted" };
       if (owned && current !== ORIG) return { edit: ORIG, row: "deleted" };
       return { edit: null, row: "deleted" };
     }
@@ -1340,6 +1381,7 @@ describe("state table: every row state against every nickname and every want", (
       return { edit: null, row: "unchanged" };
     }
     if (settling) return { edit: null, row: "unchanged" };
+    if (ambiguous) return { edit: null, row: "noted" };
     if (!owned && !atOriginal) {
       // The member changed it: the row goes, and they are tagged from scratch.
       const base = current ?? "Alice D";
@@ -1347,7 +1389,7 @@ describe("state table: every row state against every nickname and every want", (
       const target = `[${tag}] ${base}`;
       return { edit: target, row: "confirmed", target, fresh: current ?? "" };
     }
-    if (current === desired)
+    if (current !== null && norm(current) === norm(desired))
       return { edit: null, row: "confirmed", target: desired };
     return { edit: desired, row: "confirmed", target: desired };
   }
@@ -1383,6 +1425,9 @@ describe("state table: every row state against every nickname and every want", (
             expect(after).toBeUndefined();
           } else if (expected.row === "unchanged") {
             expect(after).toEqual(before);
+          } else if (expected.row === "noted") {
+            // Ambiguous: nothing is edited or decided, the re-read is counted.
+            expect(after).toEqual({ ...before, mismatches: 1 });
           } else {
             expect(after).toMatchObject({
               intended: expected.target,
@@ -1451,6 +1496,7 @@ describe("the attempt is recorded when the PATCH is dispatched", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: null,
       attemptedAt: 0,
+      mismatches: 0,
     });
     store.markAttempt = async () => false;
     expect(await sync("alice")).toBe("none");
@@ -1507,6 +1553,7 @@ describe("cooldowns", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: "[RED] Alice",
       attemptedAt: 0,
+      mismatches: 0,
     });
     expect(await sync("alice", EV)).toBe("skipped");
     expect(svc.getReport(EV)?.skipped).toHaveLength(1);
@@ -1639,6 +1686,7 @@ describe("the restore-only worker", () => {
         owned: ["[RED] X"],
         confirmedTarget: "[RED] X",
         attemptedAt: 0,
+        mismatches: 0,
       });
     }
     const first = await svc.sweep(GUILD, { restoreOnly: true });
@@ -1727,6 +1775,7 @@ describe("a change made while the edit was queued is never overwritten", () => {
       owned: ["[X] Zed"],
       confirmedTarget: "[X] Zed",
       attemptedAt: 0,
+      mismatches: 0,
     });
     await slow.syncMember({ guildId: GUILD, eventId: EV2, userId: "zed" });
   };
@@ -1816,17 +1865,16 @@ describe("a change made while the edit was queued is never overwritten", () => {
     expect(discord.edits.filter((e) => e.userId === "alice")).toEqual([]);
   });
 
-  it("the restore attempt is stamped before the read, and a failed read puts it back (nothing was sent)", async () => {
+  it("a failed read changes nothing on the row (nothing was sent, nothing was stamped)", async () => {
     setup();
     await sync("alice");
+    const before = { ...store.rows.get("alice")! };
     store.events.get(EV)!.state = "ended";
     discord.fetchMember = async () => {
       throw new Error("socket hang up");
     };
     expect(await sync("alice")).toBe("kept");
-    // Not left "in flight": the next pass may act at once.
-    expect(store.rows.get("alice")?.attemptedAt).toBe(0);
-    expect(store.rows.get("alice")?.confirmedTarget).toBeNull();
+    expect(store.rows.get("alice")).toEqual(before);
   });
 });
 
@@ -1875,6 +1923,7 @@ describe("warnings and reports (third review of #1228)", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: "[RED] Alice",
       attemptedAt: 0,
+      mismatches: 0,
     });
     // EV2 is still running and wants alice, so nobody restores her; a fresh
     // service (a restart) has an empty report.
@@ -1916,6 +1965,7 @@ describe("the restore-only worker does not starve members behind uneditable ones
         owned: ["[RED] X"],
         confirmedTarget: "[RED] X",
         attemptedAt: 0,
+        mismatches: 0,
       });
       if (i < stuck) discord.alwaysRefuse.add(id);
     }
@@ -1952,6 +2002,7 @@ describe("the PATCH never waits", () => {
     expect(discord.members.get("alice")?.nickname).toBe("Alice");
     expect(store.rows.get("alice")).toMatchObject({
       attemptedAt: 0,
+      mismatches: 0,
       confirmedTarget: null,
     });
     // No waiting out a window and no cooldown: the next pass just retries.
@@ -1966,7 +2017,8 @@ describe("the PATCH never waits", () => {
     discord.editFailure.set("alice", rateLimited());
     expect(await sync("alice")).toBe("kept");
     expect(discord.members.get("alice")?.nickname).toBe("[RED] Alice");
-    expect(store.rows.get("alice")?.attemptedAt).toBe(0);
+    // Nothing was sent: the row is exactly as it was, still confirmed.
+    expect(store.rows.get("alice")?.confirmedTarget).toBe("[RED] Alice");
     // They rename themselves while the bot was rate limited.
     discord.members.get("alice")!.nickname = "Ally";
     discord.edits.length = 0;
@@ -2063,6 +2115,7 @@ describe("per-user report state is only written under the member lock", () => {
       owned: ["[RED] Alice"],
       confirmedTarget: "[RED] Alice",
       attemptedAt: 0,
+      mismatches: 0,
     });
     store.events.get(EV2)!.groups = [team("red", "RED", ["alice"])];
     store.events.get(EV)!.groups = [team("red", "RED", ["alice"])];
@@ -2079,6 +2132,219 @@ describe("per-user report state is only written under the member lock", () => {
     await svc.sweep(GUILD);
     expect(svc.getReport(EV)).toBeNull();
     expect(svc.getReport(EV2)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------
+// Normalisation and the dispatch stamp (fifth review of #1228)
+// ---------------------------------------------------------------------
+
+describe("normalizeNickname", () => {
+  it("is conservative: NFC, trim and whitespace collapsing only; case is never folded", () => {
+    expect(tags.normalizeNickname("  [RED]   Alice \t")).toBe("[RED] Alice");
+    expect(tags.normalizeNickname("é")).toBe("é"); // NFC
+    expect(tags.normalizeNickname("[red] alice")).toBe("[red] alice");
+    expect(tags.sameNickname("[RED]  Alice", "[RED] Alice")).toBe(true);
+    expect(tags.sameNickname("[red] Alice", "[RED] Alice")).toBe(false);
+    expect(tags.sameNickname("[RED] Alicia", "[RED] Alice")).toBe(false);
+    expect(tags.sameNickname(null, null)).toBe(true);
+    expect(tags.sameNickname(null, "")).toBe(false);
+  });
+});
+
+describe("a nickname Discord normalised", () => {
+  const settle = (): void => {
+    clock += tags.OUTCOME_SETTLE_MS + 1;
+  };
+  const endEvent = (): void => {
+    store.events.get(EV)!.state = "ended";
+  };
+
+  it("PATCH applied with a normalised spelling but the response was lost: restore still restores the original", async () => {
+    setup();
+    discord.normalise = (n) => (n ? n.replace("[RED] ", "[RED]  ") : n);
+    discord.appliedThenLost.set("alice", new Error("socket hang up"));
+    expect(await sync("alice")).toBe("kept");
+    expect(discord.members.get("alice")?.nickname).toBe("[RED]  Alice");
+    // The row only knows the requested spelling.
+    expect(store.rows.get("alice")?.owned).toEqual(["[RED] Alice"]);
+
+    endEvent();
+    settle();
+    expect(await sync("alice")).toBe("restored");
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+    expect(store.rows.size).toBe(0);
+  });
+
+  it("PATCH applied and normalised but the confirmation write failed: restore still restores the original", async () => {
+    setup();
+    discord.normalise = (n) => (n ? n.replace("[RED] ", "[RED]  ") : n);
+    store.failNext = "confirm";
+    expect(await sync("alice")).toBe("kept");
+    expect(store.rows.get("alice")?.confirmedTarget).toBeNull();
+    endEvent();
+    settle();
+    expect(await sync("alice")).toBe("restored");
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+  });
+
+  it("a team move does not back up the already-tagged (normalised) name: it tags from the stored base", async () => {
+    setup();
+    discord.normalise = (n) => (n ? n.replace("] ", "]  ") : n);
+    discord.appliedThenLost.set("alice", new Error("socket hang up"));
+    await sync("alice");
+    settle();
+    store.events.get(EV)!.groups = [
+      team("red", "RED", []),
+      team("blue", "BLUE", ["alice"]),
+    ];
+    expect(await sync("alice")).toBe("retagged");
+    expect(store.rows.get("alice")).toMatchObject({
+      original: "Alice",
+      base: "Alice",
+      intended: "[BLUE] Alice",
+    });
+    // Never "[RED]  Alice" as the original, never a double tag.
+    expect(discord.edits.map((e) => e.nickname)).not.toContain(
+      "[BLUE] [RED]  Alice",
+    );
+    endEvent();
+    expect(await sync("alice")).toBe("restored");
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+  });
+
+  it("a deliberate rename that merely LOOKS similar is left alone (after the bounded re-reads)", async () => {
+    setup();
+    discord.editFailure.set("alice", new Error("socket hang up"));
+    await sync("alice"); // unresolved, owned: [RED] Alice
+    discord.members.get("alice")!.nickname = "[RED] Alicia";
+    endEvent();
+    settle();
+    for (let i = 1; i < tags.MISMATCH_READS_BEFORE_RENAME; i++) {
+      expect(await sync("alice")).toBe("kept");
+      expect(store.rows.get("alice")?.mismatches).toBe(i);
+    }
+    expect(await sync("alice")).toBe("dropped");
+    expect(discord.edits).toEqual([]);
+    expect(discord.members.get("alice")?.nickname).toBe("[RED] Alicia");
+  });
+
+  it("a CONFIRMED row has no ambiguity: a similar-looking rename is the member's own, at once", async () => {
+    setup();
+    await sync("alice"); // confirmed
+    discord.members.get("alice")!.nickname = "[RED] Alicia";
+    endEvent();
+    expect(await sync("alice")).toBe("dropped");
+    expect(discord.edits.filter((e) => e.nickname === "Alice")).toEqual([]);
+    expect(discord.members.get("alice")?.nickname).toBe("[RED] Alicia");
+  });
+
+  it("an unresolved row that has stayed ambiguous for a day is taken for a rename on its next read", async () => {
+    setup();
+    discord.editFailure.set("alice", new Error("socket hang up"));
+    await sync("alice");
+    discord.members.get("alice")!.nickname = "Ally";
+    endEvent();
+    clock += tags.MISMATCH_MAX_AGE_MS + 1;
+    expect(await sync("alice")).toBe("dropped");
+    expect(discord.members.get("alice")?.nickname).toBe("Ally");
+  });
+
+  it("a row whose spelling is only ambiguous is never lost: the worker does not loop on it forever", async () => {
+    setup();
+    discord.editFailure.set("alice", new Error("socket hang up"));
+    await sync("alice");
+    discord.members.get("alice")!.nickname = "Ally";
+    endEvent();
+    settle();
+    for (let pass = 0; pass < tags.MISMATCH_READS_BEFORE_RENAME + 1; pass++) {
+      await svc.sweep(GUILD, { restoreOnly: true });
+    }
+    expect(store.rows.size).toBe(0);
+  });
+});
+
+describe("the attempt is stamped after a slow read, in the same step as the PATCH", () => {
+  const real = Date.now();
+  const timed = (): EventNicknameTags =>
+    new tags.EventNicknameTags({} as never, {
+      store,
+      discord,
+      eventsEnabled: async () => true,
+      paceMs: 0,
+      now: () => Date.now() - real,
+    });
+  const slowRead = (ms: number): void => {
+    const fetchMember = discord.fetchMember.bind(discord);
+    discord.fetchMember = async (g, u) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return fetchMember(g, u);
+    };
+  };
+
+  it("restore: a slow read does not use up the settle window; a lost response is then not overtaken by a reassignment", async () => {
+    setup();
+    await sync("alice");
+    store.events.get(EV)!.state = "ended";
+    const svc2 = timed();
+    slowRead(60);
+    discord.appliedThenLost.set("alice", new Error("socket hang up"));
+    const started = Date.now() - real;
+    expect(
+      await svc2.syncMember({ guildId: GUILD, eventId: EV, userId: "alice" }),
+    ).toBe("kept");
+    // Stamped AFTER the 60 ms read, not before it.
+    expect(
+      (store.rows.get("alice")?.attemptedAt ?? 0) - started,
+    ).toBeGreaterThanOrEqual(55);
+    // Back in the team at once: still inside the window measured from dispatch.
+    store.events.get(EV)!.state = "active";
+    expect(
+      await svc2.syncMember({ guildId: GUILD, eventId: EV, userId: "alice" }),
+    ).toBe("kept");
+    expect(discord.members.get("alice")?.nickname).toBe("Alice");
+  });
+
+  it("apply: the event re-check after the claim does not use up the window either", async () => {
+    setup();
+    const svc2 = timed();
+    const read = store.readEvent.bind(store);
+    let n = 0;
+    store.readEvent = async (g, id) => {
+      n += 1;
+      // the re-check after the claim is the slow one
+      if (n === 2) await new Promise((r) => setTimeout(r, 60));
+      return read(g, id);
+    };
+    let claimedAt = 0;
+    const claim = store.claim.bind(store);
+    store.claim = async (g, row) => {
+      claimedAt = row.attemptedAt;
+      return claim(g, row);
+    };
+    let dispatchedAt = 0;
+    const edit = discord.setNickname.bind(discord);
+    discord.setNickname = async (g, u, nick) => {
+      dispatchedAt = store.rows.get(u)?.attemptedAt ?? -1;
+      return edit(g, u, nick);
+    };
+    await svc2.syncMember({ guildId: GUILD, eventId: EV, userId: "alice" });
+    expect(dispatchedAt - claimedAt).toBeGreaterThanOrEqual(55);
+  });
+
+  it("the member read is a single attempt (no retry budget of its own)", async () => {
+    // Asserted at the client in event-nickname-tags-discord.test.ts; here the
+    // service never retries a failed read inside the slot either.
+    setup();
+    await sync("alice");
+    store.events.get(EV)!.state = "ended";
+    let reads = 0;
+    discord.fetchMember = async () => {
+      reads += 1;
+      throw new Error("Discord API timeout");
+    };
+    await sync("alice");
+    expect(reads).toBe(1);
   });
 });
 
