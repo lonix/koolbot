@@ -545,16 +545,17 @@ export class EventTeardown {
     event: IEvent,
     guild: Guild | null,
   ): Promise<TeardownStep | null> {
-    // An adopted event is only let go of (never closed from here), and an event
-    // with no link and no create marker has nothing in Discord to close.
-    const pending = (): boolean =>
-      event.nativeAdopted !== true &&
-      (!!event.nativeEventId || !!event.nativeCreateStartedAt);
-    if (!pending()) return null;
+    // An event with no link and no create marker has nothing in Discord to
+    // close. An adopted one is only let go of (never closed from here): the
+    // sync still runs to release the link, but it is never a problem.
+    const linked = (): boolean =>
+      !!event.nativeEventId || !!event.nativeCreateStartedAt;
+    const pending = (): boolean => event.nativeAdopted !== true && linked();
+    if (!linked()) return null;
     const note =
       "The Discord event could not be closed yet. KoolBot tries again within a minute.";
     if (!guild) {
-      return { id: "native", ok: false, note };
+      return pending() ? { id: "native", ok: false, note } : null;
     }
     try {
       await this.deps.syncNative(event, guild);

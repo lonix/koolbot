@@ -103,7 +103,8 @@ function row(over: Row = {}): Row {
       { key: "g_a", name: "Red", kind: "team", channelId: "c-red" },
       { key: "g_b", name: "Blue", kind: "team", channelId: "c-blue" },
     ],
-    nativeEventId: null,
+    nativeEventId: "n0",
+    nativeCreateStartedAt: null,
     nativeAdopted: false,
     announcementMessageId: "m1",
     ...over,
@@ -147,6 +148,8 @@ function make(over: DepOverrides = {}): {
     syncNative: async (e) => {
       calls.push("native");
       if (over.syncNative) await over.syncNative(e as unknown as Row);
+      // The real sync releases the link once the Discord event is closed.
+      else (e as unknown as Row).nativeEventId = null;
     },
     cleanupGroupChannels: async () => {
       calls.push("cleanup");
@@ -160,6 +163,7 @@ function make(over: DepOverrides = {}): {
     getGraceMinutes: async () => 15,
     beginEnding: begin,
     abortEnding: abort,
+    finishEnding: jest.fn(),
     settleMs: 0,
   });
   return { teardown, begin, abort };
@@ -679,10 +683,54 @@ describe("partial failure never aborts the rest", () => {
     expect(closed.steps.find((s) => s.id === "native")).toBeUndefined();
   });
 
-  it("an adopted Discord event is only let go of: never a problem", async () => {
+  it("an adopted Discord event is only let go of: the sync runs, and it is never a problem", async () => {
     rows.set(ID, row({ nativeEventId: "n1", nativeAdopted: true }));
-    const outcome = await ended(make().teardown);
+    const outcome = await ended(
+      make({ syncNative: async () => undefined }).teardown,
+    );
+    expect(calls).toContain("native");
     expect(outcome.steps.find((s) => s.id === "native")).toBeUndefined();
+  });
+
+  it("an event with no Discord event and no pending create does not touch the sync", async () => {
+    rows.set(ID, row({ nativeEventId: null }));
+    const outcome = await ended(make().teardown);
+    expect(calls).not.toContain("native");
+    expect(outcome.steps.find((s) => s.id === "native")).toBeUndefined();
+  });
+
+  it("an unreachable server with a linked Discord event is a problem, not a silent skip", async () => {
+    const { teardown } = make();
+    const outcome = await teardown.run(manual({ guild: null }));
+    if (outcome.status !== "ended") throw new Error("not ended");
+    expect(outcome.steps.find((s) => s.id === "native")).toMatchObject({
+      ok: false,
+    });
+    expect(calls).not.toContain("native");
+  });
+
+  it("a create that timed out and is still being looked for is reported until it is cleared", async () => {
+    rows.set(
+      ID,
+      row({ nativeEventId: null, nativeCreateStartedAt: new Date() }),
+    );
+    const stuck = await ended(
+      make({ syncNative: async () => undefined }).teardown,
+    );
+    expect(stuck.steps.find((s) => s.id === "native")?.ok).toBe(false);
+
+    rows.set(
+      ID,
+      row({ nativeEventId: null, nativeCreateStartedAt: new Date() }),
+    );
+    const cleared = await ended(
+      make({
+        syncNative: async (e) => {
+          e.nativeCreateStartedAt = null;
+        },
+      }).teardown,
+    );
+    expect(cleared.steps.find((s) => s.id === "native")).toBeUndefined();
   });
 
   it("an unreachable server skips the Discord steps and says so", async () => {

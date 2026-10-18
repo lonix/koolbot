@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { ChannelType } from "discord.js";
+import { ChannelType, TextChannel } from "discord.js";
 
 // How EventService runs the shared teardown (#1193): the scheduled end
 // (`processEvent`) and "End event now" (`endEventNow`) both go through the one
@@ -135,7 +135,7 @@ function row(over: Row = {}): Row {
     seriesId: null,
     groupsEnabled: false,
     groups: [],
-    nativeEventId: null,
+    nativeEventId: "native-1",
     announcementMessageId: null,
     createdBy: HOST,
     save: jest.fn(async () => undefined),
@@ -642,5 +642,134 @@ describe("the main channel's grace period counts from the actual end", () => {
       WINDOWS,
     );
     expect(a.service.deleteEventChannel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a scan that overlaps an end in progress", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  it("does not delete the main channel while the teardown still needs it, even with no grace period", async () => {
+    const { service, guild } = setup();
+    // The manual end has claimed the event and stalls on the announcement
+    // refresh, before its pull-back has used the main channel.
+    let releaseAnnouncement!: () => void;
+    service.updateAnnouncement = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseAnnouncement = () => resolve(true);
+        }),
+    );
+    const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+    await nap();
+    expect(store.get(ID)?.state).toBe("ended");
+
+    // A scan that reads the row now sees an ended event whose grace (0) has
+    // passed and an empty main channel.
+    const channel = {
+      delete: jest.fn(async () => undefined),
+      type: ChannelType.GuildVoice,
+      members: { size: 0 },
+    };
+    guild.channels.cache.set("main-1", channel);
+    const ended = (): Row =>
+      row({ state: "ended", endedAt: new Date(Date.now() - MIN) });
+    const scanNow = new Date();
+    await service.processEvent(ended(), guild, scanNow, {
+      ...WINDOWS,
+      graceMs: 0,
+    });
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+
+    // Once the teardown is over the same scan may remove it.
+    releaseAnnouncement();
+    await ending;
+    await service.processEvent(ended(), guild, scanNow, {
+      ...WINDOWS,
+      graceMs: 0,
+    });
+    expect(service.deleteEventChannel).toHaveBeenCalledTimes(1);
+  });
+
+  it("an open copy does not refresh the announcement after the native sync it was waiting on", async () => {
+    const { service, guild } = setup();
+    // The scan's copy is open and needs its link refreshed; it stalls in the
+    // native sync (the first call; the manual end's own sync does not stall).
+    let releaseSync!: () => void;
+    let first = true;
+    service.nativeSync.syncEvent = jest.fn(() => {
+      if (!first) return Promise.resolve();
+      first = false;
+      return new Promise<void>((resolve) => {
+        releaseSync = resolve;
+      });
+    });
+    const scan = service.processEvent(
+      row({ announcementMessageId: "m1", announcementChannelId: "a1" }),
+      guild,
+      new Date("2026-07-04T20:10:00Z"),
+      WINDOWS,
+    );
+    await nap();
+    expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
+
+    const outcome = await service.endEventNow(ID, "guild-1", {
+      pullBack: false,
+    });
+    expect(outcome.status).toBe("ended");
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+
+    releaseSync();
+    await scan;
+    // No second render: the post still shows the ended event.
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+  });
+
+  it("an open copy does not edit the post after the fetches inside the announcement update", async () => {
+    const { service, guild } = setup();
+    // The real announcement update, on a fake text channel whose first message
+    // fetch (the scan's) stalls.
+    delete (service as unknown as { updateAnnouncement?: unknown })
+      .updateAnnouncement;
+    const edit = jest.fn(async () => undefined);
+    let releaseFetch!: () => void;
+    let first = true;
+    const channel = Object.assign(Object.create(TextChannel.prototype), {
+      messages: {
+        fetch: jest.fn(() => {
+          if (!first) return Promise.resolve({ components: [], edit });
+          first = false;
+          return new Promise((resolve) => {
+            releaseFetch = () => resolve({ components: [], edit });
+          });
+        }),
+      },
+    });
+    guild.channels.fetch = jest.fn(async (id: string) =>
+      id === "a1" ? channel : null,
+    );
+    store.set(
+      ID,
+      stored({ announcementMessageId: "m1", announcementChannelId: "a1" }),
+    );
+    const scan = service.processEvent(
+      row({ announcementMessageId: "m1", announcementChannelId: "a1" }),
+      guild,
+      new Date("2026-07-04T20:10:00Z"),
+      WINDOWS,
+    );
+    await nap();
+    expect(channel.messages.fetch).toHaveBeenCalledTimes(1);
+
+    // The manual end edits the post (as ended) while the scan waits.
+    const outcome = await service.endEventNow(ID, "guild-1", {
+      pullBack: false,
+    });
+    expect(outcome.status).toBe("ended");
+    expect(edit).toHaveBeenCalledTimes(1);
+
+    releaseFetch();
+    await scan;
+    // The scan's copy is still open, but it must not write the post now.
+    expect(edit).toHaveBeenCalledTimes(1);
   });
 });

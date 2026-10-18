@@ -128,7 +128,7 @@ function makeEvent(over: Json = {}): Json {
     leaderLabel: "Leader",
     channelLeadMinutes: null,
     groupsLocked: false,
-    nativeEventId: null,
+    nativeEventId: "native-1",
     announcementMessageId: null,
     groups: [
       team("g_heli", "Heli", { channelId: CH_HELI, memberIds: [ANA] }),
@@ -150,8 +150,10 @@ const cleanup = jest.fn(async () => {
   order.push("cleanup");
   return { created: 0, removed: 2, occupied: 0, failures: [], warnings: [] };
 });
-const syncEvent = jest.fn(async () => {
+const syncEvent = jest.fn(async (e: unknown) => {
   order.push("native");
+  // The real sync releases the link once the Discord event is closed.
+  (e as { nativeEventId: string | null }).nativeEventId = null;
 });
 
 function channelObj(id: string, limit = 0): unknown {

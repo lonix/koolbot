@@ -48,6 +48,7 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
       getGraceMinutes: async () => 15,
       beginEnding: () => 1,
       abortEnding: () => undefined,
+      finishEnding: () => undefined,
       settleMs: 0,
     });
   }

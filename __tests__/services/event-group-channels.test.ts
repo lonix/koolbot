@@ -376,6 +376,22 @@ describe("EventGroupChannels.reconcile", () => {
     ]);
   });
 
+  it("an unreadable event is a failure in the report and creates nothing", async () => {
+    store.set("evt1", makeRow());
+    const { service, guild, rest } = makeEnv({ perms: ALL_PERMS });
+    findById.mockImplementationOnce(() => ({
+      lean: async () => {
+        throw new Error("db down");
+      },
+    }));
+    const report = await service.reconcile({ _id: "evt1" }, guild);
+    expect(report.created).toBe(0);
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.reason).toContain("could not be read");
+    expect(rest.post).not.toHaveBeenCalled();
+    expect(service.getReport("evt1")?.failures).toHaveLength(1);
+  });
+
   it("gives the host View, Connect and Move Members as a Member overwrite on every group channel", async () => {
     store.set("evt1", makeRow());
     const { service, guild, rest } = makeEnv({
@@ -858,6 +874,33 @@ describe("EventGroupChannels.cleanup", () => {
       NOW_AFTER_GRACE,
     );
     expect(report.removed).toBe(3);
+  });
+
+  it("an unreadable event is a failure in the report, not an empty successful pass, and nothing is deleted", async () => {
+    store.set("evt1", recordedRow({ state: "cancelled" }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    seed(env);
+    findById.mockImplementationOnce(() => ({
+      lean: async () => {
+        throw new Error("db down");
+      },
+    }));
+    const report = await env.service.cleanup(
+      { _id: "evt1" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(report.removed).toBe(0);
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]?.reason).toContain("could not be read");
+    expect(env.rest.delete).not.toHaveBeenCalled();
+    // A missing event is not a failure: there is simply nothing to do.
+    const missing = await env.service.cleanup(
+      { _id: "gone" },
+      env.guild,
+      NOW_AFTER_GRACE,
+    );
+    expect(missing.failures).toEqual([]);
   });
 
   it("does nothing for an event that is still open, whatever the caller believes", async () => {
