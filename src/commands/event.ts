@@ -326,6 +326,12 @@ async function handleCancel(
       await interaction.editReply(`❌ Event \`${id}\` not found.`);
       return;
     }
+    if (!isRecurring(result.event) && result.cancelled === 0) {
+      await interaction.editReply(
+        `❌ **${result.event.title}** could not be cancelled: it is ${result.event.state}.`,
+      );
+      return;
+    }
     await interaction.editReply(
       isRecurring(result.event)
         ? `✅ Cancelled the **${result.event.title}** series (${result.cancelled} upcoming occurrence(s)).`
@@ -337,6 +343,12 @@ async function handleCancel(
   const event = await service.cancelEvent(id, interaction.guildId as string);
   if (!event) {
     await interaction.editReply(`❌ Event \`${id}\` not found.`);
+    return;
+  }
+  if (event.state !== "cancelled") {
+    await interaction.editReply(
+      `❌ **${event.title}** could not be cancelled: it is ${event.state}.`,
+    );
     return;
   }
   await interaction.editReply(

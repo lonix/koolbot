@@ -6,6 +6,7 @@
 
 import { scriptTag } from "./html.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import { renderEndEventForm } from "./event-end-view.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -2044,6 +2045,11 @@ export interface EventRow {
   awaitingSuccessor?: boolean;
   /** Number of groups when the event has a group setup (#1188), else absent. */
   groupCount?: number;
+  /** The event has group voice channels, so "End now" offers to move people
+   * back to the main channel first (#1193). */
+  hasGroupChannels?: boolean;
+  /** Adopted Discord event: ending leaves it as it is (#1177, #1193). */
+  nativeAdopted?: boolean;
   /**
    * Cover image control (#1181). `editable`: can be set, replaced or removed
    * (`series` when it applies to a whole recurring series); `adopted`: the
@@ -2688,12 +2694,28 @@ export function renderEventsPage(props: EventsProps): string {
       // The host panel lives on the member surface (#1189); an admin may open
       // it for any event, including a finished one (read-only summary).
       const hostLink = `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
+      // End now (#1193): only a running event, behind a confirmation the server
+      // checks again. Shared with the host panel's End section.
+      const endNow =
+        e.state === "active"
+          ? `<details class="end-now"><summary class="btn btn-danger">End now</summary>${renderEndEventForm(
+              {
+                actionPath: `/admin/events/${encodeURIComponent(e.id)}/end-now`,
+                csrfToken: props.csrfToken,
+                idSuffix: e.id,
+                offerPullBack: e.hasGroupChannels === true,
+                adopted: e.nativeAdopted === true,
+              },
+            )}</details>`
+          : "";
       const actions = finished
         ? e.awaitingSuccessor
           ? `${hostLink}\n  ${seriesForm}`
           : hostLink
         : `${hostLink}
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
+    endNow ? `\n  ${endNow}` : ""
+  }
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;

@@ -29,6 +29,11 @@ import {
   EventGroupChannels,
   type GroupChannelReport,
 } from "./event-group-channels.js";
+import {
+  EventTeardown,
+  type EndEventOutcome,
+  type ExpectChannels,
+} from "./event-teardown.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -130,6 +135,18 @@ export class RecurrenceDisabledError extends Error {
 // Pure helpers (exported for unit testing)
 // ---------------------------------------------------------------
 
+/**
+ * The canonical form of an event id taken from outside (a route, a command): 24
+ * hex digits, lower case, which is what `String(doc._id)` yields; null when it
+ * is not one. The id-keyed maps of the service (holds, in-progress marks, locks,
+ * the link cache) all use that form.
+ */
+export function canonicalEventId(raw: string): string | null {
+  return typeof raw === "string" && /^[0-9a-f]{24}$/i.test(raw)
+    ? raw.toLowerCase()
+    : null;
+}
+
 /** The absolute end instant of an event. */
 export function computeEndTime(startTime: Date, durationMinutes: number): Date {
   return new Date(
@@ -173,6 +190,8 @@ interface LifecycleView {
   reminderSent: boolean;
   /** Per-event channel lead (#1188); absent or null uses the global lead. */
   channelLeadMinutes?: number | null;
+  /** When the event was marked ended (#1193); absent or null: not recorded. */
+  endedAt?: Date | null;
 }
 
 /**
@@ -219,6 +238,17 @@ export function shouldEndEvent(event: LifecycleView, now: Date): boolean {
   );
 }
 
+/**
+ * The instant an event's grace period counts from: when it was marked ended
+ * (`endedAt`, #1193: the press of "End event now", or the scheduled end), else
+ * its scheduled end (a row ended before that field existed).
+ */
+export function effectiveEndTime(event: LifecycleView): Date {
+  return (
+    event.endedAt ?? computeEndTime(event.startTime, event.durationMinutes)
+  );
+}
+
 /** Whether an ended event's empty channel has aged past the grace period. */
 export function shouldCleanupChannel(
   event: LifecycleView,
@@ -229,8 +259,7 @@ export function shouldCleanupChannel(
   if (!event.channelId) return false;
   if (event.state !== "ended") return false;
   if (!channelEmpty) return false;
-  const end = computeEndTime(event.startTime, event.durationMinutes).getTime();
-  return now.getTime() >= end + graceMs;
+  return now.getTime() >= effectiveEndTime(event).getTime() + graceMs;
 }
 
 /** Human-readable start line, e.g. `2026-07-04 20:00 (Europe/London)`. */
@@ -343,6 +372,70 @@ export class EventService extends ScheduledService {
   private readonly groupChannels: EventGroupChannels;
   /** Per event: the failures last logged, so a standing one is logged once. */
   private readonly groupFailuresLogged = new Map<string, string>();
+  /** The one teardown of an ending event (#1193), manual and scheduled. */
+  private readonly teardown: EventTeardown;
+  /**
+   * THE HOLD MECHANISM (every event path that takes an event to a terminal state
+   * goes through it: an end, manual or scheduled, and a cancel).
+   *
+   * The danger: a scan loads every event once, then works through them one by
+   * one with no deadline, so its copy of an event can be arbitrarily old when
+   * the scan reaches it. If the event was ended (or cancelled) meanwhile, that
+   * open copy must not write anything (reminder, announcement, native sync,
+   * channel create, delete). A time-based hold alone cannot guarantee that.
+   *
+   * One clock (`scanClock`) orders scans and holds. A scan takes a tick when it
+   * starts (it loads its rows then). A hold takes a tick when it begins and
+   * starts out "pending": `clock = Infinity`, `until = Infinity`. When the claim
+   * lands (`claimCompleted`) the hold's clock becomes the tick of that moment,
+   * and its expiry restarts. Invariants:
+   *
+   * 1. A scan that started before the claim completed (so it may hold an open
+   *    row; this includes scans that started AFTER the hold began but while the
+   *    claim was still pending) has an id below the hold's clock. A hold is
+   *    removed only when it has expired AND no active scan has an id below its
+   *    clock. A pending hold is never removed by time, and every running scan
+   *    is "older" than a pending one.
+   * 2. A scan that started after the claim completed read the new state and
+   *    needs no protection.
+   * 3. A lost claim (`abortEnding`) removes only that caller's own hold and
+   *    in-progress mark; the winner has its own, taken before its own claim.
+   * 4. `endsInProgress` (set at begin, removed in `finishEnding`, in a `finally`
+   *    around the work) stops scans on a copy in ANY state while the work runs
+   *    (an ended copy must not sweep the main channel under a pull-back).
+   * 5. `mustSkipScan` is checked at the start of `processEvent`, after every
+   *    await that precedes an outward write, and again right before the
+   *    outward write itself where the write is preceded by its own fetches
+   *    (reminder send, announcement send and edit).
+   * 7. NO PATH LEAVES A HOLD THAT NEVER EXPIRES. `beginEnding` is paired, at
+   *    every call site (`EventTeardown.run`, `cancelOne`), with a `finally`
+   *    that calls `finishEnding`. From begin, a claim that lands calls
+   *    `claimCompleted` (finite hold); a claim that is LOST calls `abortEnding`
+   *    (hold removed); a claim that FAILS or work that THROWS reaches
+   *    `finishEnding` with the hold still pending, which settles it to a finite
+   *    hold stamped now (a failed write may have landed, so protection for
+   *    older scans stays, but only until they are done and the time is up).
+   * 6. Holds and marks are keyed by the canonical event id (24 lower-case hex,
+   *    `String(doc._id)`); a caller that takes an id from outside normalises it
+   *    first (`canonicalEventId`).
+   * In memory: the bot is one process, and a scan after a restart loads fresh
+   * rows.
+   */
+  private readonly endingEvents = new Map<
+    string,
+    Map<number, { until: number; clock: number }>
+  >();
+  private scanClock = 0;
+  private readonly activeScans = new Set<number>();
+  /**
+   * Events whose teardown is running right now (id to the callers' holds),
+   * given back when it finishes. Unlike `endingEvents` this also stops the scan
+   * on a copy that already reads `ended`: with a grace period of 0 it would
+   * otherwise delete the main channel before the pull-back has used it.
+   */
+  private readonly endsInProgress = new Map<string, Set<number>>();
+  /** Events whose scheduled end was deferred (people in a voice channel), so the deferral is logged once. */
+  private readonly endDeferred = new Set<string>();
 
   private constructor(client: Client) {
     super(client, {
@@ -361,6 +454,317 @@ export class EventService extends ScheduledService {
           15,
         )) * MS_PER_MINUTE,
     });
+    this.teardown = new EventTeardown({
+      client,
+      updateAnnouncement: (event): Promise<boolean> =>
+        this.updateAnnouncement(event),
+      syncNative: (event, guild): Promise<void> =>
+        this.nativeSync.syncEvent(event, guild),
+      cleanupGroupChannels: async (
+        event,
+        guild,
+        now,
+      ): Promise<GroupChannelReport> => {
+        const report = await this.groupChannels.cleanup(event, guild, now);
+        await this.logGroupReport(event, report);
+        return report;
+      },
+      logLifecycle: (event): Promise<void> => this.logLifecycle(event),
+      getGraceMinutes: (): Promise<number> =>
+        this.configService.getNumber("events.channel_grace_minutes", 15),
+      beginEnding: (id): number => this.beginEnding(id),
+      abortEnding: (id, hold): void => this.abortEnding(id, hold),
+      finishEnding: (id, hold): void => this.finishEnding(id, hold),
+      claimCompleted: (id, hold): void => this.claimCompleted(id, hold),
+    });
+  }
+
+  /**
+   * A SCHEDULED end never ends an event while anyone is in one of its voice
+   * channels: the main channel (the end removes it after the grace period) or
+   * any group channel. Bots do not count. The event then stays live and the
+   * next scan asks again: nothing is deleted and nobody is moved. Only the
+   * host's manual "End event now" may end it with people present.
+   *
+   * It decides from NOW, not from the scan's copy: the channel ids are read
+   * from the stored event (a group pass may have recorded one since the scan
+   * loaded it), every channel is read from Discord first (forced), and only then
+   * are all the live member lists looked at together, with nothing awaited
+   * between that look and the decision, so someone moving from a checked
+   * channel into another is not missed. The ids it looked at go into the end's
+   * claim (`expectChannels`), which refuses a change. Fails closed: an event
+   * that cannot be read, or a channel that cannot be read, counts as occupied;
+   * a channel that is gone (10003) cannot hold anyone.
+   *
+   * Occupancy is the gateway's voice cache of each channel after the forced
+   * read (Discord has no call that lists a channel's members; the per-person raw
+   * voice-state read of the mover needs the people first), the same count the
+   * channel cleanup uses. The deferral is logged once per event.
+   */
+  private async checkScheduledEnd(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<
+    { defer: true } | { defer: false; expectChannels: ExpectChannels }
+  > {
+    const id = String(event._id);
+    const defer = (): { defer: true } => {
+      if (!this.endDeferred.has(id)) {
+        this.endDeferred.add(id);
+        logger.info(
+          `Event ${sanitizeForLog(id)}: its scheduled end is deferred while someone is in one of its voice channels (or that cannot be checked); checked again every scan`,
+        );
+      }
+      return { defer: true };
+    };
+
+    let row: {
+      channelId?: string | null;
+      groupsEnabled?: boolean;
+      groups?: Array<{ key: string; channelId?: string | null }>;
+    } | null;
+    try {
+      row = (await Event.findById(event._id).lean()) as typeof row;
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(id)}: could not read the event to check its channels:`,
+        error,
+      );
+      row = null;
+    }
+    if (!row) return defer();
+    const main = row.channelId ?? null;
+    const groups =
+      row.groupsEnabled === true
+        ? (row.groups ?? []).map((g) => ({
+            key: g.key,
+            channelId: g.channelId ?? null,
+          }))
+        : [];
+    const ids = [main, ...groups.map((g) => g.channelId)].filter(
+      (cid): cid is string => !!cid,
+    );
+
+    // Every read first...
+    const seen: Array<{ channel: unknown; unreadable: boolean }> = [];
+    for (const channelId of ids) {
+      try {
+        seen.push({
+          channel: await guild.channels.fetch(channelId, { force: true }),
+          unreadable: false,
+        });
+      } catch (error) {
+        if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) continue;
+        seen.push({ channel: null, unreadable: true });
+      }
+    }
+    // ...then one look at all of them, synchronously.
+    const occupied = seen.some((s) => {
+      if (s.unreadable) return true;
+      const channel = s.channel as VoiceChannel | null;
+      if (!channel || channel.type !== ChannelType.GuildVoice) return false;
+      for (const member of channel.members.values()) {
+        if (!member.user?.bot) return true;
+      }
+      return false;
+    });
+    if (occupied) return defer();
+    this.endDeferred.delete(id);
+    return { defer: false, expectChannels: { main, groups } };
+  }
+
+  /**
+   * Keep paths a claim already wrote out of this copy's later `save()`: a
+   * claimed write is the source of truth, and a copy that is older than a
+   * concurrent claim (a cancel clearing the channel id, say) must not write it
+   * back. A later assignment to the path marks it modified again, so a step that
+   * really means to write it still can. (A plain object in a test has no
+   * `$ignore`.)
+   */
+  private ignoreClaimed(event: IEvent, ...paths: string[]): void {
+    const doc = event as unknown as { $ignore?: (path: string) => void };
+    for (const path of paths) doc.$ignore?.(path);
+  }
+
+  /**
+   * `scheduled` to `active` as a conditional write with an outcome, not a field
+   * the copy's `save()` carries: a cancel or an end that landed since the copy
+   * was read must not be turned back into `active`. True when the stored event
+   * is now `active` (this call moved it, or it already was); false when it is
+   * no longer open. The copy takes `active` (ignored by its save) only when the
+   * stored event is.
+   */
+  private async activateScheduled(event: IEvent): Promise<boolean> {
+    const moved = await Event.updateOne(
+      { _id: event._id, state: "scheduled" },
+      { $set: { state: "active" } },
+    );
+    let active =
+      (moved as { matchedCount?: number } | undefined)?.matchedCount !== 0;
+    if (!active) {
+      // Nothing matched: it may simply be `active` already (the scan or Start
+      // now got there first). Only a state that is not open is a refusal.
+      try {
+        const row = (await Event.findById(event._id).lean()) as {
+          state?: string;
+        } | null;
+        active = row?.state === "active";
+      } catch {
+        // Unreadable: not confirmed active.
+      }
+    }
+    if (active) {
+      event.state = "active";
+      this.ignoreClaimed(event, "state");
+    }
+    return active;
+  }
+
+  /** The scan leaves an event alone for this long after an end began. */
+  private static readonly ENDING_HOLD_MS = 5 * MS_PER_MINUTE;
+
+  /**
+   * Take a hold on an event. Each caller gets its own, so a caller that loses
+   * the claim (a double click, the scan's own attempt) gives up only its own
+   * and cannot lift the hold of the caller that is ending the event.
+   */
+  private beginEnding(eventId: string): number {
+    const now = Date.now();
+    for (const id of [...this.endingEvents.keys()]) this.pruneHolds(id, now);
+    const hold = ++this.scanClock;
+    const holds =
+      this.endingEvents.get(eventId) ??
+      new Map<number, { until: number; clock: number }>();
+    // Pending until the claim lands: never expires by time, and every running
+    // scan counts as older (see the invariants above).
+    holds.set(hold, {
+      until: Number.POSITIVE_INFINITY,
+      clock: Number.POSITIVE_INFINITY,
+    });
+    this.endingEvents.set(eventId, holds);
+    const running = this.endsInProgress.get(eventId) ?? new Set<number>();
+    running.add(hold);
+    this.endsInProgress.set(eventId, running);
+    return hold;
+  }
+
+  /**
+   * The claim landed. From this tick on, a scan that started earlier may still
+   * hold an open copy, a scan that starts later cannot: the hold's clock is
+   * this moment, and its expiry restarts.
+   */
+  private claimCompleted(eventId: string, hold: number): void {
+    const entry = this.endingEvents.get(eventId)?.get(hold);
+    if (!entry) return;
+    entry.clock = ++this.scanClock;
+    entry.until = Date.now() + EventService.ENDING_HOLD_MS;
+  }
+
+  /** The claim was lost: give up this caller's own holds, and only those. */
+  private abortEnding(eventId: string, hold: number): void {
+    const holds = this.endingEvents.get(eventId);
+    holds?.delete(hold);
+    if (holds && holds.size === 0) this.endingEvents.delete(eventId);
+    this.finishEnding(eventId, hold);
+  }
+
+  /**
+   * This caller's work is over, whatever happened. The in-progress mark goes,
+   * and a hold that is still pending (its claim neither landed nor was lost: it
+   * failed, or the work threw) is settled into a finite, scan-aware one: the
+   * write may have reached the database, so protection is not dropped, and it
+   * must not stay forever either. The recently-ended hold of a landed claim
+   * stays until it expires.
+   */
+  private finishEnding(eventId: string, hold: number): void {
+    const running = this.endsInProgress.get(eventId);
+    running?.delete(hold);
+    if (running && running.size === 0) this.endsInProgress.delete(eventId);
+    const entry = this.endingEvents.get(eventId)?.get(hold);
+    if (entry && entry.clock === Number.POSITIVE_INFINITY) {
+      entry.clock = ++this.scanClock;
+      entry.until = Date.now() + EventService.ENDING_HOLD_MS;
+    }
+  }
+
+  /**
+   * Whether a scan must not act on its copy of the event now: a teardown is
+   * running (whatever state the copy shows), or the copy is still open although
+   * an end began (an older copy than the end).
+   */
+  private mustSkipScan(event: IEvent): boolean {
+    const id = String(event._id);
+    if (this.endsInProgress.has(id)) return true;
+    return (
+      (event.state === "scheduled" || event.state === "active") &&
+      this.isBeingEnded(id)
+    );
+  }
+
+  private pruneHolds(eventId: string, now: number): void {
+    const holds = this.endingEvents.get(eventId);
+    if (!holds) return;
+    for (const [hold, { until, clock }] of holds) {
+      const olderScanRunning = [...this.activeScans].some((id) => id < clock);
+      if (until <= now && !olderScanRunning) holds.delete(hold);
+    }
+    if (holds.size === 0) this.endingEvents.delete(eventId);
+  }
+
+  /** Whether any caller holds the event as being ended (or just ended). */
+  private isBeingEnded(eventId: string): boolean {
+    this.pruneHolds(eventId, Date.now());
+    return this.endingEvents.has(eventId);
+  }
+
+  /**
+   * "End event now" (#1193): run the shared teardown for a running event. The
+   * state is decided from the atomic claim inside the teardown, never from a
+   * copy the caller read earlier. Only an `active` event can be ended; an
+   * ended one answers "already ended" and changes nothing. Gated on
+   * `events.enabled` (fails closed). `pullBack` moves everyone from the group
+   * channels to the main channel first. A recurring occurrence's successor is
+   * created by the next scan, as after a scheduled end.
+   */
+  public async endEventNow(
+    eventId: string,
+    guildId: string,
+    options: { pullBack: boolean },
+  ): Promise<EndEventOutcome> {
+    // One canonical id for the claim, the holds and every id-keyed map: a valid
+    // id posted in upper case reaches the same row, so it must not key a
+    // second, unseen set of holds.
+    const canonical = canonicalEventId(eventId);
+    if (!canonical) return { status: "not-found" };
+    eventId = canonical;
+    let enabled = false;
+    try {
+      enabled = await this.configService.getBoolean("events.enabled", false);
+    } catch (error) {
+      logger.warn("Could not read events.enabled to end an event:", error);
+    }
+    if (!enabled) {
+      return {
+        status: "refused",
+        message:
+          "Events are turned off, so the event was not ended. Turn on events.enabled first.",
+      };
+    }
+    const now = new Date();
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    const outcome = await this.teardown.run({
+      eventId,
+      guildId,
+      trigger: "manual",
+      pullBack: options.pullBack,
+      now,
+      endedAt: now,
+      fromStates: ["active"],
+      guild,
+      syncNative: true,
+    });
+    if (outcome.status === "ended") this.linkVerified.delete(eventId);
+    return outcome;
   }
 
   /**
@@ -449,6 +853,16 @@ export class EventService extends ScheduledService {
   // ---------------------------------------------------------------
 
   protected async runOnce(): Promise<void> {
+    const scanId = ++this.scanClock;
+    this.activeScans.add(scanId);
+    try {
+      await this.scanOnce();
+    } finally {
+      this.activeScans.delete(scanId);
+    }
+  }
+
+  private async scanOnce(): Promise<void> {
     const guildId = await this.configService.getString("GUILD_ID", "");
     if (!guildId) {
       logger.error("Event scan aborted: GUILD_ID not configured");
@@ -468,6 +882,9 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // A cancel keeps the channel id until Discord confirms the delete; the
+        // scan finishes one a restart or an error left behind.
+        { state: "cancelled", channelId: { $ne: null } },
         // Finished or cancelled events whose native scheduled event still
         // needs closing (#1034); the link is released once that succeeds.
         {
@@ -553,6 +970,11 @@ export class EventService extends ScheduledService {
   ): Promise<void> {
     let changed = false;
 
+    // Being ended (or ended a moment ago) by "End event now" (#1193): this
+    // copy of the row is older than the end, or the teardown is still using
+    // the event's channels, and must not be acted on.
+    if (this.mustSkipScan(event)) return;
+
     // An adopted event follows its native event, which stays the source of
     // truth (#1034): its edits are copied onto the row, and one deleted or
     // cancelled in Discord cancels the row. Nothing is written to Discord.
@@ -567,6 +989,9 @@ export class EventService extends ScheduledService {
         guild,
         windows.native,
       );
+      // The read above is an await: an end that began meanwhile (an adopted
+      // event can be `active` during its channel lead) makes this copy older.
+      if (this.mustSkipScan(event)) return;
       if (outcome === "gone") {
         // Before the start only. A temp channel that already has people in it
         // is left alone this tick; the check is repeated on the next scan.
@@ -576,6 +1001,9 @@ export class EventService extends ScheduledService {
         ) {
           return;
         }
+        // ...and so is the occupancy check. `cancelOne` also writes only if the
+        // stored state is still the one this copy decided from.
+        if (this.mustSkipScan(event)) return;
         await this.cancelOne(event, windows.native, windows.skipNative);
         return;
       }
@@ -615,11 +1043,19 @@ export class EventService extends ScheduledService {
       await this.ensureAnnouncement(event);
     }
 
+    // The reads above (the adopted event, the series) can outlast a manual end:
+    // an older, open copy posts no reminder and no new announcement after it.
+    if (this.mustSkipScan(event)) return;
+
     // 1. Reminder (before start, once).
     if (shouldSendReminder(event, now, windows.reminderMs)) {
-      await this.postReminder(event);
-      event.reminderSent = true;
-      changed = true;
+      // A reminder skipped because an end or cancel holds the event is not a
+      // sent reminder: it is not recorded as one (the event may still be open
+      // if that claim failed). Every other outcome is recorded as before.
+      if ((await this.postReminder(event)) !== false) {
+        event.reminderSent = true;
+        changed = true;
+      }
     }
 
     // 2. Create the temp channel shortly before start.
@@ -628,18 +1064,76 @@ export class EventService extends ScheduledService {
       !this.adoptedHasOwnChannel(event, windows.native)
     ) {
       const channel = await this.claimEventChannel(event, guild);
+      // The claim wrote the channel id (or adopted the winner's): the scan's
+      // save must not write it back, whatever a cancel does to it meanwhile.
+      this.ignoreClaimed(event, "channelId");
       if (channel) {
-        if (event.state === "scheduled") event.state = "active";
+        if (event.state === "scheduled") await this.activateScheduled(event);
         changed = true;
+        // Skips itself (and says so) when an end or cancel holds the event.
         await this.updateAnnouncement(event);
       }
     }
 
-    // 3. Mark ended once past the end time.
-    if (shouldEndEvent(event, now)) {
-      event.state = "ended";
-      changed = true;
-      await this.updateAnnouncement(event);
+    // 3. End once past the end time: the one shared teardown (#1193), the same
+    // a manual "End event now" runs. It saves the end with an atomic claim
+    // (state and times as this scan read them), so an end made meanwhile, a
+    // cancel or an edited schedule is not overwritten; the group channels go
+    // there too, and this scan's own native sync below closes the Discord event.
+    let teardownRan = false;
+    const endCheck = shouldEndEvent(event, now)
+      ? await this.checkScheduledEnd(event, guild)
+      : null;
+    if (endCheck && !endCheck.defer) {
+      // The occupancy reads are awaits: an end that began meanwhile wins.
+      if (this.mustSkipScan(event)) return;
+      const outcome = await this.teardown.run({
+        eventId: String(event._id),
+        guildId: event.guildId,
+        trigger: "scheduled",
+        pullBack: false,
+        now,
+        endedAt: computeEndTime(event.startTime, event.durationMinutes),
+        fromStates: ["scheduled", "active"],
+        expectTimes: {
+          startTime: event.startTime,
+          durationMinutes: event.durationMinutes,
+        },
+        expectChannels: endCheck.expectChannels,
+        guild,
+        event,
+        syncNative: false,
+      });
+      if (outcome.status === "ended") {
+        teardownRan = true;
+        changed = true;
+      } else if (outcome.status === "already-ended") {
+        // Ended elsewhere a moment ago (a manual end). That caller is still
+        // working on it while it holds the event: leave it to finish alone and
+        // look again next scan, on a fresh copy.
+        if (this.isBeingEnded(String(event._id))) return;
+        // Ended earlier: follow it. The claim wrote both fields, so this copy's
+        // save must not write them again.
+        event.state = "ended";
+        event.endedAt = outcome.endedAt;
+        const doc = event as unknown as { $ignore?: (path: string) => void };
+        doc.$ignore?.("state");
+        doc.$ignore?.("endedAt");
+      } else {
+        // Cancelled or edited meanwhile, or the end could not be saved: this
+        // copy is stale or the write failed; the next scan decides again.
+        return;
+      }
+    }
+
+    // 4a. A cancelled event's channel goes at once (the cancel's own delete did
+    // not finish, or was cut short by a restart).
+    if (
+      event.channelId &&
+      event.state === "cancelled" &&
+      !this.mustSkipScan(event)
+    ) {
+      await this.releaseCancelledChannel(event, guild, event.channelId);
     }
 
     // 4. Sweep the empty channel after the grace period.
@@ -673,6 +1167,7 @@ export class EventService extends ScheduledService {
     // 4b. Group channels of a finished event go with the main channel (#1190),
     // judged from the saved state (a fresh read), channel by channel.
     if (
+      !teardownRan &&
       this.hasRecordedGroupChannels(event) &&
       (event.state === "ended" || event.state === "cancelled")
     ) {
@@ -682,10 +1177,15 @@ export class EventService extends ScheduledService {
       );
     }
 
+    // The slow steps above can outlast a manual end that landed meanwhile.
+    if (this.mustSkipScan(event)) return;
+
     // Keep the native scheduled event in line (#1034): creates it for events
     // that predate the toggle, pushes edits, and closes it on end/cancel.
     if (!windows.skipNative) {
       await this.nativeSync.syncEvent(event, guild, windows.native);
+      // That await can outlast a manual end too: this copy still says open.
+      if (this.mustSkipScan(event)) return;
       // The announcement carries the native event's link. The ids are stored
       // before the post is edited, so a failed edit (or a post another sender
       // replaced) would not be noticed by comparing ids between scans.
@@ -1134,7 +1634,14 @@ export class EventService extends ScheduledService {
     if (guildId && event.guildId !== guildId) return null;
     if (event.state === "cancelled") return event;
 
-    await this.cancelOne(event);
+    // Only a cancel THIS call made is announced as one: a lost claim (the
+    // event ended, or was cancelled by someone else, since it was read) neither
+    // spawns a successor nor reports success. The caller reads `state` of the
+    // returned row: `cancelled` means cancelled, anything else means it was not.
+    const cancelled = await this.cancelOne(event);
+    if (!cancelled) {
+      return (await this.getEvent(eventId)) ?? event;
+    }
     if (isRecurring(event) && !event.nextSpawned && !event.seriesCancelled) {
       await this.spawnNextOccurrence(event, new Date());
     }
@@ -1155,9 +1662,11 @@ export class EventService extends ScheduledService {
     if (!event) return null;
     if (guildId && event.guildId !== guildId) return null;
     if (!isRecurring(event) || !event.seriesId) {
-      const wasLive = event.state !== "cancelled";
-      await this.cancelOne(event);
-      return { event, cancelled: wasLive ? 1 : 0 };
+      const cancelled = await this.cancelOne(event);
+      return {
+        event: cancelled ? event : ((await this.getEvent(eventId)) ?? event),
+        cancelled: cancelled ? 1 : 0,
+      };
     }
 
     // Block spawning first, so an occurrence ending mid-cancel cannot
@@ -1175,8 +1684,7 @@ export class EventService extends ScheduledService {
     for (const occurrence of open) {
       // Rows inserted after the bulk update above are still blocked.
       occurrence.seriesCancelled = true;
-      await this.cancelOne(occurrence);
-      cancelled += 1;
+      if (await this.cancelOne(occurrence)) cancelled += 1;
     }
     logger.info(
       `Cancelled event series ${sanitizeForLog(event.seriesId)} (${cancelled} occurrence(s))`,
@@ -1185,19 +1693,76 @@ export class EventService extends ScheduledService {
     return { event: fresh, cancelled };
   }
 
+  /**
+   * Cancel an open event. Returns whether THIS call cancelled it; callers must
+   * honour that (no success report, no counted cancellation, no successor when
+   * it is false).
+   *
+   * The cancel is saved FIRST, by one atomic update that matches only while the
+   * stored event is still open (`scheduled` or `active`, whichever it has
+   * become since this copy was read: the scan turns `scheduled` into `active`
+   * at the channel lead and that is still a cancel). An event that has ended
+   * (or is being ended: the end claim comes first) matches nothing, so a cancel
+   * decided on an older copy, or from an admin page opened earlier, neither
+   * deletes the main channel nor turns `ended` into `cancelled`.
+   */
   private async cancelOne(
     event: IEvent,
     nativeCache?: NativeCache | null,
     skipNative = false,
-  ): Promise<void> {
-    if (event.channelId) {
+  ): Promise<boolean> {
+    // `new: false`: the document as it was AT the claim. The channel to delete
+    // is read from it, not from the caller's copy, which may be older (a channel
+    // recorded by Start now or the scan after that copy was read). The stored
+    // `channelId` is kept: it is the only record of the channel until Discord
+    // confirms it is gone, so a restart in between leaves it for the scan.
+    // Like an end, a cancel takes a hold first (see the hold invariants): a scan
+    // holding an older, open copy must not write after it.
+    const id = String(event._id);
+    const hold = this.beginEnding(id);
+    try {
+      return await this.cancelClaimed(event, hold, nativeCache, skipNative);
+    } finally {
+      this.finishEnding(id, hold);
+    }
+  }
+
+  private async cancelClaimed(
+    event: IEvent,
+    hold: number,
+    nativeCache?: NativeCache | null,
+    skipNative = false,
+  ): Promise<boolean> {
+    const claimed = (await Event.findOneAndUpdate(
+      { _id: event._id, state: { $in: ["scheduled", "active"] } },
+      { $set: { state: "cancelled" } },
+      { new: false },
+    )) as { channelId?: string | null } | null | undefined;
+    if (claimed === null) {
+      this.abortEnding(String(event._id), hold);
+      logger.info(
+        `Event ${sanitizeForLog(String(event._id))} is no longer open; not cancelled`,
+      );
+      return false;
+    }
+    this.claimCompleted(String(event._id), hold);
+    const channelId =
+      claimed && claimed.channelId !== undefined
+        ? claimed.channelId
+        : event.channelId;
+    event.state = "cancelled";
+    event.channelId = channelId ?? null;
+    // The claim wrote the state; the save below carries only the other fields
+    // (a caller may have set `seriesCancelled`) and must not write it again.
+    const doc = event as unknown as { $ignore?: (path: string) => void };
+    doc.$ignore?.("state");
+    doc.$ignore?.("channelId");
+    if (channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
         .catch(() => null);
-      if (guild) await this.deleteEventChannel(guild, event.channelId);
-      event.channelId = null;
+      if (guild) await this.releaseCancelledChannel(event, guild, channelId);
     }
-    event.state = "cancelled";
     await event.save();
     // Group channels (#1190) are removed once the cancel is saved: the cleanup
     // only acts on an event it reads back as cancelled. Occupied ones, and any
@@ -1221,6 +1786,11 @@ export class EventService extends ScheduledService {
     if (fresh) {
       event.announcementChannelId = fresh.announcementChannelId;
       event.announcementMessageId = fresh.announcementMessageId;
+      this.ignoreClaimed(
+        event,
+        "announcementChannelId",
+        "announcementMessageId",
+      );
     }
     await this.updateAnnouncement(event);
     // When the scan's shared listing failed, skip (no per-event fetch). The
@@ -1230,6 +1800,7 @@ export class EventService extends ScheduledService {
       await this.nativeSync.syncEvent(event, null, nativeCache);
     }
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
+    return true;
   }
 
   /** Force the temp channel to spin up now, ahead of its scheduled lead. */
@@ -1248,9 +1819,17 @@ export class EventService extends ScheduledService {
         .catch(() => null);
       if (!guild) return null;
       const channel = await this.claimEventChannel(event, guild);
+      this.ignoreClaimed(event, "channelId");
       if (channel) {
-        event.state = "active";
-        await event.save();
+        // The claim wrote the channel id; the state step is conditional, so a
+        // cancel that landed since the read is not undone (and Start now then
+        // says it could not start).
+        if (
+          event.state === "scheduled" &&
+          !(await this.activateScheduled(event))
+        ) {
+          return null;
+        }
         if (event.groupsEnabled === true && !event.nativeAdopted) {
           // Not awaited: up to 25 paced creates must not hold the web request
           // open. The per-event lock keeps it from overlapping the scan, which
@@ -1648,6 +2227,9 @@ export class EventService extends ScheduledService {
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
     );
+    // Stored by an atomic claim (or adopted from the winner's): not written back
+    // by this copy's save.
+    this.ignoreClaimed(event, "announcementChannelId", "announcementMessageId");
   }
 
   private async postAnnouncement(event: IEvent): Promise<void> {
@@ -1664,6 +2246,8 @@ export class EventService extends ScheduledService {
     const channel = await this.fetchTextChannel(event.guildId, channelId);
     if (!channel) return;
 
+    // Same: the fetches above can outlast an end that began meanwhile.
+    if (this.mustSkipScan(event)) return;
     const message = await channel.send(this.buildAnnouncementPayload(event));
     // Claim the message id atomically (as `claimEventChannel` does for the
     // channel): the creator and the scan's retry can both be sending at once,
@@ -1752,6 +2336,18 @@ export class EventService extends ScheduledService {
       // A post that still carries buttons predates native-only events and
       // keeps its RSVP embed; anything else gets the link announcement.
       const legacy = message.components.length > 0;
+      // The fetches above are awaits: an open copy must not write the post once
+      // an end began meanwhile (it would show a finished event as running).
+      // Nothing is awaited between this check and the edit request.
+      if (
+        (event.state === "scheduled" || event.state === "active") &&
+        this.isBeingEnded(String(event._id))
+      ) {
+        // Skipped, which is NOT a refresh: the post was not changed, so callers
+        // that must know it is current (a member's RSVP removal keeps the RSVP
+        // for a retry) see a failure, and the link refresh tries again.
+        return false;
+      }
       await message.edit(
         legacy
           ? this.buildLegacyRsvpPayload(event)
@@ -1777,13 +2373,14 @@ export class EventService extends ScheduledService {
     }
   }
 
-  private async postReminder(event: IEvent): Promise<void> {
-    if (!event.announcementChannelId) return;
+  /** False only when the reminder was skipped because an end or cancel holds the event. */
+  private async postReminder(event: IEvent): Promise<boolean> {
+    if (!event.announcementChannelId) return true;
     const channel = await this.fetchTextChannel(
       event.guildId,
       event.announcementChannelId,
     );
-    if (!channel) return;
+    if (!channel) return true;
 
     const interested = event.rsvps
       .filter((r) => r.status === "going" || r.status === "maybe")
@@ -1810,10 +2407,14 @@ export class EventService extends ScheduledService {
       `⏰ **${event.title}** starts at ${formatEventWhen(event)}.${where}${link}` +
       (mentions ? `\n${mentions}` : "");
 
+    // The channel fetch above is an await: an older, still-open copy sends no
+    // start reminder (legacy pings, old links) once an end has begun.
+    if (this.mustSkipScan(event)) return false;
     await channel.send({
       content,
       allowedMentions: { users: pinged },
     });
+    return true;
   }
 
   // ---------------------------------------------------------------
@@ -2040,6 +2641,52 @@ export class EventService extends ScheduledService {
     } catch (error) {
       logger.error("Error creating event channel:", error);
       return null;
+    }
+  }
+
+  /**
+   * Delete a cancelled event's main channel and, only once Discord confirmed it
+   * is gone (deleted, or 10003), clear the stored reference (conditional on it
+   * still being that id). Any other failure keeps the id, so the scan retries.
+   * Cancel deletes at once, with no grace period.
+   */
+  private async releaseCancelledChannel(
+    event: IEvent,
+    guild: Guild,
+    channelId: string,
+  ): Promise<void> {
+    if (!(await this.deleteChannelConfirmed(guild, channelId))) return;
+    try {
+      await Event.updateOne(
+        { _id: event._id, channelId },
+        { $set: { channelId: null } },
+      );
+    } catch (error) {
+      logger.error("Could not clear a cancelled event's channel id:", error);
+      return;
+    }
+    event.channelId = null;
+    (event as unknown as { $ignore?: (p: string) => void }).$ignore?.(
+      "channelId",
+    );
+  }
+
+  /** True when the channel was deleted or Discord says it does not exist. */
+  private async deleteChannelConfirmed(
+    guild: Guild,
+    channelId: string,
+    reason = "Event cancelled",
+  ): Promise<boolean> {
+    try {
+      const channel =
+        guild.channels.cache.get(channelId) ??
+        (await guild.channels.fetch(channelId));
+      if (channel) await channel.delete(reason);
+      return true;
+    } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return true;
+      logger.error("Error deleting event channel:", error);
+      return false;
     }
   }
 

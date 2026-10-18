@@ -1887,7 +1887,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.channel_grace_minutes": {
     label: "Channel cleanup grace (minutes)",
     description:
-      "How long after an event ends the bot waits before deleting its (now empty) voice channel.",
+      "How long after an event ends (counted from when it actually ended, so ending it early with End now starts the clock then) the bot waits before deleting its (now empty) voice channel.",
     category: "events",
     type: "number",
   },

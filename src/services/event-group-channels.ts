@@ -131,9 +131,14 @@ interface EventRow {
   categoryId?: string;
   createdBy?: string;
   seriesCancelled?: boolean;
+  /** Set when the event was ended through the shared teardown (#1193). */
+  endedAt?: Date | null;
   groupsEnabled?: boolean;
   groups?: GroupRow[];
 }
+
+/** Report key of "the event could not be read". */
+const READ_FAILURE_KEY = "#read";
 
 export interface GroupChannelFailure {
   key: string;
@@ -528,7 +533,7 @@ export class EventGroupChannels {
     guild: Guild,
   ): Promise<GroupChannelReport> {
     const report = emptyReport();
-    const row = await this.readFresh(eventId);
+    const row = await this.readFresh(eventId, report);
     if (
       !row ||
       row.groupsEnabled !== true ||
@@ -649,7 +654,7 @@ export class EventGroupChannels {
     try {
       // Fresh again: the pass has created and recorded channels since it began,
       // and a cancel may have landed.
-      const row = await this.readFresh(eventId);
+      const row = await this.readFresh(eventId, report);
       if (
         !row ||
         row.groupsEnabled !== true ||
@@ -1035,9 +1040,10 @@ export class EventGroupChannels {
 
   /**
    * Delete the recorded group channels of an event that is over: right away
-   * once it is cancelled, after the grace period once it has ended (the moment
-   * the main channel is eligible). Channels with people in them stay until the
-   * next scan. The decision uses a fresh read of the event, never the caller's
+   * once it is cancelled or ended through the shared teardown (`endedAt` set,
+   * #1193), after the grace period for a row ended before that field existed
+   * (the moment the main channel is eligible). Channels with people in them
+   * stay until the next scan. The decision uses a fresh read of the event, never the caller's
    * copy, and does nothing for an event that is still open.
    */
   public cleanup(
@@ -1057,7 +1063,7 @@ export class EventGroupChannels {
     now: Date,
   ): Promise<GroupChannelReport> {
     const report = emptyReport();
-    const row = await this.readFresh(eventId);
+    const row = await this.readFresh(eventId, report);
     if (!row) return report;
     const recorded = (row.groups ?? []).filter((g) => !!g.channelId);
     if (recorded.length === 0) {
@@ -1065,10 +1071,17 @@ export class EventGroupChannels {
       return report;
     }
     if (row.state === "ended") {
-      const end =
-        row.startTime.getTime() +
-        Math.max(0, row.durationMinutes) * MS_PER_MINUTE;
-      if (now.getTime() < end + (await this.deps.getGraceMs())) return report;
+      // An event ended through the shared teardown (#1193) has `endedAt`: its
+      // group channels go as soon as they are empty ("delete the sub-channels
+      // now"); only the main channel keeps the grace period. A row ended
+      // before that field existed keeps the old rule: the scheduled end plus
+      // the grace period, like the main channel.
+      if (!row.endedAt) {
+        const end =
+          row.startTime.getTime() +
+          Math.max(0, row.durationMinutes) * MS_PER_MINUTE;
+        if (now.getTime() < end + (await this.deps.getGraceMs())) return report;
+      }
     } else if (row.state !== "cancelled") {
       return report;
     }
@@ -1206,7 +1219,17 @@ export class EventGroupChannels {
     logger.warn(`Event ${sanitizeForLog(String(event._id))}: ${message}`);
   }
 
-  private async readFresh(eventId: string): Promise<EventRow | null> {
+  /**
+   * The event as it is stored now. A missing event and an unreadable one both
+   * answer null (nothing is decided from a guess), but an unreadable one is
+   * also a failure in `report`, so a caller that looks at the report (the end
+   * teardown, the host panel) is told the pass did not run instead of seeing an
+   * empty, successful-looking result.
+   */
+  private async readFresh(
+    eventId: string,
+    report: GroupChannelReport,
+  ): Promise<EventRow | null> {
     try {
       return (await Event.findById(eventId).lean()) as EventRow | null;
     } catch (error) {
@@ -1214,6 +1237,13 @@ export class EventGroupChannels {
         `Event ${sanitizeForLog(eventId)}: could not read the event for its group channels:`,
         error,
       );
+      report.failures.push({
+        key: READ_FAILURE_KEY,
+        name: "Group channels",
+        reason:
+          "The event could not be read, so nothing was changed. Retried next scan.",
+      });
+      this.reports.set(eventId, report);
       return null;
     }
   }

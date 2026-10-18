@@ -87,6 +87,12 @@ import {
   type MovePersonView,
 } from "../host-moves-view.js";
 import {
+  END_CONFIRM_FIELD,
+  END_PULL_BACK_FIELD,
+  renderEndSection,
+} from "../event-end-view.js";
+import { summariseEnd } from "../../services/event-teardown.js";
+import {
   groupFill,
   renderAssignmentSection,
   type AssignmentGroupView,
@@ -738,6 +744,62 @@ function registerMoveActions(router: Router, client: Client): void {
   });
 }
 
+/** The "End the event" section (#1193): shown for every open event. */
+function createEndSection(): HostSectionRenderer {
+  return (ctx) =>
+    renderEndSection({
+      state: ctx.event.state,
+      actionPath: ctx.actionPath("end"),
+      csrfToken: ctx.csrfToken,
+      // Only an event with group channels has anyone to move back.
+      offerPullBack:
+        ctx.event.groupsEnabled === true &&
+        (ctx.event.groups ?? []).some((g) => !!g.channelId),
+      adopted: ctx.event.nativeAdopted === true,
+    });
+}
+
+/**
+ * End event now (#1193). `allowFinished`: an already-ended event is the
+ * idempotent "nothing changed" answer of the teardown, not the generic "can no
+ * longer be changed" refusal. The state is decided by the teardown's atomic
+ * claim from a fresh row, never from the gate's copy of the event.
+ */
+function registerEndAction(router: Router, client: Client): void {
+  hostAction(
+    router,
+    "end",
+    "/end",
+    async ({ req, event }) => {
+      // The body is read here, before the first await.
+      const confirmed = bodyString(req, END_CONFIRM_FIELD) === "1";
+      const pullBack = bodyString(req, END_PULL_BACK_FIELD) === "1";
+      if (!confirmed) {
+        return {
+          ok: false,
+          message:
+            "Tick the box to confirm that you want to end the event. Nothing was changed.",
+          details: { outcome: "not-confirmed" },
+          errorMessage: "not confirmed",
+        };
+      }
+      const outcome = await EventService.getInstance(client).endEventNow(
+        String(event._id),
+        event.guildId,
+        { pullBack },
+      );
+      const summary = summariseEnd(outcome);
+      return {
+        ok: summary.ok,
+        message: summary.message,
+        details: { ...summary.details, pullBack },
+        errorMessage: summary.errorMessage,
+      };
+    },
+    { allowFinished: true },
+  );
+}
+
 /** The "Leaders" section (#1195); only rendered while leaders are on. */
 function createLeadersSection(client: Client): HostSectionRenderer {
   return (ctx) => {
@@ -1037,6 +1099,9 @@ export function createHostEventsRouter(client: Client): Router {
   // The "Leaders" section and its actions (#1195).
   HOST_SECTION_RENDERERS.leaders = createLeadersSection(client);
   registerLeaderActions(router, client);
+  // The "End the event" section and its action (#1193).
+  HOST_SECTION_RENDERERS.end = createEndSection();
+  registerEndAction(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;

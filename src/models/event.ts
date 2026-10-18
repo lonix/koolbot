@@ -67,7 +67,8 @@ export interface IEventGroup {
    * `event-group-leaders.ts`, under the same per-event lock as `memberIds`.
    * A leader is a member of the group; read it through `effectiveLeaders`.
    * Exportable and erased by a member data reset (registry entry
-   * `event-group-captain`).
+   * `event-group-captain`). Cleared when the event ends (#1193, the shared
+   * teardown through `clearLeadersOnEnd`).
    */
   captainId: string | null;
   /**
@@ -104,6 +105,14 @@ export interface IEvent extends Document {
   /** Message id of the RSVP/announcement post, for live edits + reminders. */
   announcementMessageId: string | null;
   state: EventState;
+  /**
+   * When the event was marked ended (#1193): the end instant the grace period
+   * counts from. The scheduled end sets it to the scheduled end time, "End event
+   * now" to the moment of the press. Null for a row that is not ended, and for
+   * one ended before this field existed (its end is then start plus duration).
+   * Not a user id: who pressed the button is only in the audit log.
+   */
+  endedAt: Date | null;
   reminderSent: boolean;
   /**
    * @deprecated Legacy KoolBot RSVPs (#1175). New events leave this empty:
@@ -273,6 +282,7 @@ const EventSchema = new Schema<IEvent>(
       default: "scheduled",
       index: true,
     },
+    endedAt: { type: Date, default: null },
     reminderSent: { type: Boolean, default: false },
     rsvps: { type: [EventRsvpSchema], default: [] },
     recurrence: {

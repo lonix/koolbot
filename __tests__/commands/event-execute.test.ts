@@ -399,7 +399,11 @@ describe("/event list", () => {
 
 describe("/event cancel and /event start", () => {
   it("cancels an event in the invoking guild", async () => {
-    mockCancelEvent.mockResolvedValue({ _id: "event-1", title: "Raid" });
+    mockCancelEvent.mockResolvedValue({
+      _id: "event-1",
+      title: "Raid",
+      state: "cancelled",
+    });
     const it_ = interaction({
       subcommand: "cancel",
       strings: { id: " event-1 " },
@@ -411,10 +415,27 @@ describe("/event cancel and /event start", () => {
     );
   });
 
+  it("does not say cancelled when the event ended meanwhile", async () => {
+    mockCancelEvent.mockResolvedValue({
+      _id: "event-1",
+      title: "Raid",
+      state: "ended",
+    });
+    const it_ = interaction({
+      subcommand: "cancel",
+      strings: { id: "event-1" },
+    });
+    await execute(it_);
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("could not be cancelled: it is ended"),
+    );
+  });
+
   it("tells the admin a recurring cancel only skipped that date", async () => {
     mockCancelEvent.mockResolvedValue({
       _id: "event-1",
       title: "Game Night",
+      state: "cancelled",
       recurrence: "weekly",
       seriesId: "event-1",
     });

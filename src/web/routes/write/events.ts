@@ -11,6 +11,7 @@ import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import {
   EventService,
+  isRecurring,
   parseEventDateTime,
   RecurrenceDisabledError,
 } from "../../../services/event-service.js";
@@ -32,6 +33,11 @@ import {
   removeEventCover,
   setEventCover,
 } from "../../../services/event-cover.js";
+import { summariseEnd } from "../../../services/event-teardown.js";
+import {
+  END_CONFIRM_FIELD,
+  END_PULL_BACK_FIELD,
+} from "../../event-end-view.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -342,15 +348,32 @@ export function createEventsRouter(client: Client): Router {
       const id = String(req.params.id);
       const series = getString(req, "scope") === "series";
       const service = EventService.getInstance(client);
-      const event = series
-        ? ((await service.cancelSeries(id, session.guildId))?.event ?? null)
-        : await service.cancelEvent(id, session.guildId);
-      const ok = event !== null;
+      // The outcome is what the service reports: `cancelled` only when a cancel
+      // was really made (an event that ended, or started ending, meanwhile is
+      // not).
+      let event: { state?: string } | null;
+      let ok: boolean;
+      if (series) {
+        const result = await service.cancelSeries(id, session.guildId);
+        event = result?.event ?? null;
+        // A series cancel also stops further occurrences, so it counts even when
+        // no open occurrence was left to cancel.
+        ok =
+          result !== null &&
+          (result.cancelled > 0 ||
+            result.event.state === "cancelled" ||
+            isRecurring(result.event));
+      } else {
+        event = await service.cancelEvent(id, session.guildId);
+        ok = event !== null && event.state === "cancelled";
+      }
+      const reason =
+        event === null ? "not found or wrong guild" : `event is ${event.state}`;
       await recordAudit(session, {
         action: series ? "event.cancel-series" : "event.cancel",
         targetId: id,
         result: ok ? "success" : "failure",
-        errorMessage: ok ? null : "not found or wrong guild",
+        errorMessage: ok ? null : reason,
       });
       flashRedirect(res, "/admin/events", {
         type: ok ? "ok" : "err",
@@ -358,7 +381,55 @@ export function createEventsRouter(client: Client): Router {
           ? series
             ? `Cancelled the series containing event ${id}.`
             : `Cancelled event ${id}.`
-          : `Event ${id} not found.`,
+          : event === null
+            ? `Event ${id} not found.`
+            : `Event ${id} could not be cancelled: it is ${event.state}.`,
+      });
+    }),
+  );
+
+  // End event now (#1193): the same teardown the host panel and the scheduled
+  // end run. The state is decided by the teardown's atomic claim, so a stale
+  // page, a double click or a host ending it at the same time is a no-op.
+  router.post(
+    "/events/:id/end-now",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const confirmed = getString(req, END_CONFIRM_FIELD) === "1";
+      const pullBack = getString(req, END_PULL_BACK_FIELD) === "1";
+      if (!confirmed) {
+        await recordAudit(session, {
+          action: "event.end-now",
+          targetId: id,
+          details: { outcome: "not-confirmed", pullBack },
+          result: "failure",
+          errorMessage: "not confirmed",
+        });
+        flashRedirect(res, "/admin/events", {
+          type: "err",
+          text: "Tick the box to confirm that you want to end the event. Nothing was changed.",
+        });
+        return;
+      }
+      const outcome = await EventService.getInstance(client).endEventNow(
+        id,
+        session.guildId,
+        { pullBack },
+      );
+      const summary = summariseEnd(outcome);
+      await recordAudit(session, {
+        action: "event.end-now",
+        targetId: id,
+        details: { ...summary.details, pullBack },
+        result: summary.ok ? "success" : "failure",
+        errorMessage: summary.ok
+          ? null
+          : (summary.errorMessage ?? summary.message),
+      });
+      flashRedirect(res, "/admin/events", {
+        type: summary.ok ? "ok" : "err",
+        text: summary.message,
       });
     }),
   );
