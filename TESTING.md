@@ -357,8 +357,8 @@ Tests run automatically in GitHub Actions on pull requests to `main` and pushes 
 configuration lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alongside the `lint`
 and `typecheck` jobs:
 
-- The `test` job runs `npm run test:ci` on a Node 22 and Node 24 matrix (`fail-fast: false`, so both
-  legs always report).
+- The `test` job runs `npm run test:ci` on a Node 22, 24 and 26 matrix (`fail-fast: false`, so all
+  legs always report, and all three must pass).
 - The `coverage:drift` check and the `coverage-report` artifact upload only run on the Node 22 leg.
 - The `integration` job runs `npm run test:integration` on Node 22 against a `mongo:8.0` service
   container (see [Real-MongoDB integration tests](#real-mongodb-integration-tests)).

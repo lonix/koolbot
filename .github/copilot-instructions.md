@@ -275,7 +275,7 @@ Add to `COMMAND_CONFIGS` in `src/services/command-registry.ts`:
 The repository uses GitHub Actions for automated quality checks. Workflows live in `.github/workflows/`:
 
 - **CI** (`ci.yml`): the core gate on PRs to `main` and pushes to `main`. Parallel jobs `lint`
-  (ESLint + Prettier), `typecheck` (`npm run build`), and `test` (matrix Node 22 & 24, `npm run test:ci`
+  (ESLint + Prettier), `typecheck` (`npm run build`), and `test` (matrix Node 22, 24 & 26, all must pass, `npm run test:ci`
   with coverage thresholds). The `ci-success` aggregator is the single required status check — it fails if
   any job fails or is cancelled.
 - **Markdown Lint** (`markdown-lint.yml`): validates markdown on `**/*.md` changes.
