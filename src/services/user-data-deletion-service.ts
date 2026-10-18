@@ -62,6 +62,7 @@
 import { Client } from "discord.js";
 import { BirthdayService } from "./birthday-service.js";
 import { EventService } from "./event-service.js";
+import { removeMemberFromEvents } from "./event-group-assignment.js";
 import { LeaderboardRoleService } from "./leaderboard-role-service.js";
 import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
@@ -346,6 +347,28 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  // Shared event rows: `$pull` the id from every group of every event,
+  // finished ones included. Goes through the same per-event lock as every other
+  // membership change, so a concurrent assignment cannot write the member back.
+  "event-group-member": {
+    actions: ["pull-member"],
+    run: async ({ userId, guildId }, emit) => {
+      const { matched, removed, failed } = await removeMemberFromEvents(
+        guildId,
+        userId,
+      );
+      emit({
+        action: "pull-member",
+        matched,
+        removed,
+        error:
+          failed > 0
+            ? `${failed} event(s) could not be updated and may still list this member in a group`
+            : undefined,
+      });
+    },
+  },
+
   // ---------------------------------------------------------------
   // Inert collections
   // ---------------------------------------------------------------
@@ -600,6 +623,9 @@ export const PURGE_ORDER: readonly string[] = [
   "user-birthday",
   // Then the owning-service call that edits an event announcement.
   "event-rsvp",
+  // Group memberships on the same event rows (no Discord side effect today;
+  // #1194 listens to the change it fires to restore a tagged nickname).
+  "event-group-member",
   // Then everything inert.
   "voice-channel-tracking",
   "message-activity-tracking",

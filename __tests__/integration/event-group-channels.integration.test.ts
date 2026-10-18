@@ -211,6 +211,30 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
     expect(after.map((r) => String(r._id))).toEqual([groupEvent]);
   });
 
+  it("a channel id recorded here is what the voice self-join looks an event up by (#1191)", async () => {
+    const id = await makeEvent();
+    const { service, guild } = env();
+    await service.reconcile({ _id: id }, guild);
+    // The exact lookup `handleGroupSelfJoin` makes for a joined channel.
+    const found = await Event.findOne({
+      guildId: GUILD,
+      groupsEnabled: true,
+      state: { $in: ["scheduled", "active"] },
+      "groups.channelId": "chan-1",
+    })
+      .select("_id")
+      .lean();
+    expect(String((found as { _id: unknown })._id)).toBe(id);
+    // A channel that is not recorded finds nothing.
+    expect(
+      await Event.findOne({
+        guildId: GUILD,
+        groupsEnabled: true,
+        "groups.channelId": "chan-999",
+      }).lean(),
+    ).toBeNull();
+  });
+
   it("a lean read of an old row without group fields is safe for the readers", async () => {
     const { insertedId } = await Event.collection.insertOne({
       guildId: GUILD,

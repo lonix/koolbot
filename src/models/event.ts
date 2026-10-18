@@ -64,7 +64,12 @@ export interface IEventGroup {
   channelId: string | null;
   /** Filled by #1195; null until then. A user id. */
   captainId: string | null;
-  /** Filled by #1191; empty until then. User ids. */
+  /**
+   * The group's members (#1191): user ids, at most one group per member. Only
+   * `team` groups hold any. Written only through `event-group-assignment.ts`
+   * (one keyed lock per event); kept on a finished event until the member
+   * resets their data (see the registry entry `event-group-member`).
+   */
   memberIds: string[];
 }
 
@@ -197,6 +202,12 @@ export interface IEvent extends Document {
    * null falls back to `events.create_lead_minutes`. */
   channelLeadMinutes: number | null;
   groups: IEventGroup[];
+  /**
+   * Host's "lock groups" switch (#1191): while true, joining a group's channel
+   * does not change anyone's stored group. Per occurrence: a successor starts
+   * unlocked, so it is not part of `copyGroupSetup`.
+   */
+  groupsLocked: boolean;
   /** Used by later issues (#1195, #1196, #1194); stored, never read yet. */
   captainsEnabled: boolean;
   captainCustomisationEnabled: boolean;
@@ -283,6 +294,7 @@ const EventSchema = new Schema<IEvent>(
     leaderLabel: { type: String, default: "Leader", maxlength: 20 },
     channelLeadMinutes: { type: Number, default: null, min: 0, max: 1440 },
     groups: { type: [EventGroupSchema], default: [] },
+    groupsLocked: { type: Boolean, default: false },
     captainsEnabled: { type: Boolean, default: false },
     captainCustomisationEnabled: { type: Boolean, default: false },
     tagsEnabled: { type: Boolean, default: false },
@@ -297,6 +309,11 @@ const EventSchema = new Schema<IEvent>(
 // (`{ guildId, "rsvps.userId": userId }`), which was otherwise a collection
 // scan (#914).
 EventSchema.index({ "rsvps.userId": 1 });
+// Group assignment (#1191): the member export and reset find events by
+// `groups.memberIds`, and every voice join looks up the event whose group
+// channel it is by `groups.channelId`. Both were collection scans.
+EventSchema.index({ "groups.memberIds": 1 });
+EventSchema.index({ "groups.channelId": 1 });
 // One row per occurrence of a series. This unique key is what makes spawning
 // the successor idempotent across crashes, restarts and replicas (#744).
 EventSchema.index(

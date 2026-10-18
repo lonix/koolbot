@@ -67,6 +67,7 @@ import {
   RULES_ACCEPT_CUSTOM_ID,
 } from "./services/rules-service.js";
 import { EventService } from "./services/event-service.js";
+import { handleGroupSelfJoin } from "./services/event-group-assignment.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
@@ -1160,6 +1161,28 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     // Before the first await (#918): the tracker checks this ticket, so an
     // opt-out or reset landing while the channel manager runs still wins.
     const trackingAdmission = TrackingOptOutService.getInstance().admission();
+
+    // Event group self-join (#1191): joining a team group's channel records
+    // the member in that group. Started here, not awaited, and with its own
+    // error handling, so it neither waits for nor depends on the channel
+    // manager and tracker below. Its own cheap lookup finds nothing for any
+    // channel that is not an open event's group channel.
+    if (
+      member &&
+      !member.user.bot &&
+      newState.channelId &&
+      newState.channelId !== oldState.channelId
+    ) {
+      handleGroupSelfJoin({
+        guildId: newState.guild.id,
+        userId: member.id,
+        channelId: newState.channelId,
+        admission: trackingAdmission,
+      }).catch((error: unknown) => {
+        logger.error("Error recording event group self-join:", error);
+      });
+    }
+
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(
       oldState,

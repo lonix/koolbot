@@ -733,23 +733,24 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     deleteNote:
       "Admin-authored event belonging to the guild; the member's own RSVP on the same row IS purged (see `event-rsvp`).",
   },
-  // Event groups (#1188). Nothing writes these two fields yet, so the notes say
-  // so in member terms. Owed by the issues that start writing them: #1191
-  // (assignment) and #1195 (leaders) must make their field exportable with a
-  // reader, and add a purge (`$pull` from `groups.$[].memberIds`, clear a
-  // matching `captainId`), in the same change. Finished events are kept, so
-  // `retain` is only true while the fields stay empty.
+  // Event groups. `memberIds` is recorded since #1191 (host assignment,
+  // self-join, random split), so it is the member's own data: exportable with
+  // a reader, and erased by a reset. Be exact about when: a finished event is
+  // never deleted automatically, so memberships stay on it (as event history)
+  // until the member resets their data; only deleting the event row itself
+  // takes them with it. `captainId` is still unwritten: #1195 owes the same
+  // treatment (exportable with a reader, and a purge) in the same change.
   {
     source: "src/models/event.ts",
     collection: "event-group-member",
     field: "memberIds",
-    exportable: false,
+    exportable: true,
     guildScoped: true,
-    note: "Which event group a member was placed in. No group memberships are recorded yet.",
-    onDelete: "retain",
+    note: "Nested `groups[].memberIds`: which group of each event the member was placed in (by the host, by joining the group's voice channel, or by a random split). The export carries the event and the member's own group, never the other members.",
+    onDelete: "pull-member",
     subject: "self",
     deleteNote:
-      "No group memberships are recorded yet, so there is nothing to remove.",
+      "Shared event row: $pull the member's id from every group of every event, finished ones included, and leave the event and the other members standing. Memberships are otherwise kept on a finished event; nothing ages them out.",
   },
   {
     source: "src/models/event.ts",

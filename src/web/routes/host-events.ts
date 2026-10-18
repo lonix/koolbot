@@ -53,6 +53,28 @@ import {
 } from "../host-panel-view.js";
 import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
+import { randomBytes } from "node:crypto";
+import { ConfigService } from "../../services/config-service.js";
+import { TrackingOptOutService } from "../../services/tracking-opt-out-service.js";
+import {
+  assignMember,
+  randomiseMembers,
+  setGroupsLocked,
+} from "../../services/event-group-assignment.js";
+import {
+  cachedMemberName,
+  readEventPresence,
+} from "../../services/event-group-presence.js";
+import {
+  groupKeyOf,
+  type RandomiseMode,
+} from "../../services/event-group-plan.js";
+import {
+  groupFill,
+  renderAssignmentSection,
+  type AssignmentGroupView,
+  type AssignmentPersonView,
+} from "../host-assignment-view.js";
 
 /** A request that has passed the host gate. */
 export type HostRequest = AuthenticatedRequest & {
@@ -60,6 +82,14 @@ export type HostRequest = AuthenticatedRequest & {
   hostEvent: IEvent;
   /** The session, read once by the gate. */
   hostSession: WebSessionContext;
+  /**
+   * The member-reset admission ticket (`TrackingOptOutService.admission()`),
+   * taken synchronously at the start of the gate, BEFORE its asynchronous
+   * event lookup. A write that adds a member passes it on, so a reset of that
+   * member that completes while the request waits in the gate still refuses
+   * the add.
+   */
+  hostAdmission: number;
 };
 
 /**
@@ -214,6 +244,250 @@ export function hostAction(
   });
 }
 
+/** A Discord user id as posted by the panel's forms. */
+const USER_ID_RE = /^\d{15,25}$/;
+
+const NO_VOICE_STATE =
+  "The bot could not read who is in the voice channels, so nobody was assigned.";
+
+function bodyString(req: Request, name: string): string {
+  const body = req.body as Record<string, unknown> | undefined;
+  const value = body?.[name];
+  return typeof value === "string" ? value : "";
+}
+
+/** At most `limit` names, then "and N more". */
+function nameList(names: string[], limit = 10): string {
+  if (names.length <= limit) return names.join(", ");
+  return `${names.slice(0, limit).join(", ")} and ${names.length - limit} more`;
+}
+
+function groupViews(event: IEvent): AssignmentGroupView[] {
+  return (event.groups ?? []).map((g) => ({
+    key: g.key,
+    name: g.name,
+    marker: g.marker ?? "",
+    size: g.size ?? null,
+    memberCount: (g.memberIds ?? []).length,
+    isTeam: g.kind === "team",
+  }));
+}
+
+/** The "Assign people" section (#1191). */
+function createAssignmentSection(client: Client): HostSectionRenderer {
+  return (ctx) => {
+    const { event } = ctx;
+    if (event.groupsEnabled !== true) return undefined;
+    const presence = readEventPresence(client, event);
+    const people: AssignmentPersonView[] = [];
+    const listed = new Set<string>();
+    for (const m of presence.members) {
+      listed.add(m.id);
+      people.push({
+        id: m.id,
+        name: m.name,
+        connected: true,
+        groupKey: groupKeyOf(event.groups ?? [], m.id),
+      });
+    }
+    // Assigned but not connected: still listed so they can be unassigned.
+    for (const g of event.groups ?? []) {
+      for (const id of g.memberIds ?? []) {
+        if (listed.has(id)) continue;
+        listed.add(id);
+        people.push({
+          id,
+          name: cachedMemberName(client, event.guildId, id),
+          connected: false,
+          groupKey: groupKeyOf(event.groups ?? [], id),
+        });
+      }
+    }
+    return renderAssignmentSection({
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      groups: groupViews(event),
+      people,
+      presenceOk: presence.ok,
+      locked: event.groupsLocked === true,
+      groupLabel: event.groupLabel || "Group",
+    });
+  };
+}
+
+const EVENTS_OFF =
+  "Events are turned off, so nobody can be added to a group. Turn on events.enabled first.";
+
+/**
+ * The Events master switch (CLAUDE.md: a feature gates on its `*.enabled`
+ * key). Fails closed: a failed read counts as off. Adding people is gated;
+ * unassigning and the lock stay available.
+ */
+async function eventsEnabled(): Promise<boolean> {
+  try {
+    return await ConfigService.getInstance().getBoolean(
+      "events.enabled",
+      false,
+    );
+  } catch (err) {
+    logger.warn("Could not read events.enabled for a host action:", err);
+    return false;
+  }
+}
+
+/** Assign, unassign, randomise and lock (#1191), each one audited change. */
+function registerAssignmentActions(router: Router, client: Client): void {
+  const assignTo = async (
+    event: IEvent,
+    userId: string,
+    groupKey: string | null,
+    admission: number,
+  ): Promise<HostActionResult> => {
+    if (!USER_ID_RE.test(userId)) {
+      return { ok: false, message: "Pick a person from the list." };
+    }
+    const result = await assignMember({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      userId,
+      groupKey,
+      admission,
+      // Asked by the service, inside the event lock, only for a real add.
+      isConnected: () => {
+        const presence = readEventPresence(client, event);
+        return presence.ok
+          ? presence.members.some((m) => m.id === userId)
+          : null;
+      },
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+        details: { userId, group: groupKey },
+        errorMessage: result.code,
+      };
+    }
+    const who = cachedMemberName(client, event.guildId, userId);
+    const group = groupKey
+      ? (event.groups ?? []).find((g) => g.key === groupKey)
+      : undefined;
+    const message = !result.changed
+      ? groupKey
+        ? `${who} is already in ${group?.name ?? "that group"}.`
+        : `${who} was not in a group.`
+      : groupKey
+        ? `${who} is now in ${group?.name ?? "the group"}.`
+        : `${who} was taken out of their group.`;
+    return {
+      ok: true,
+      message,
+      details: {
+        userId,
+        from: result.fromKey,
+        to: result.toKey,
+        changed: result.changed,
+      },
+    };
+  };
+
+  // Each write action takes its reset-admission ticket as its very first
+  // step, before any await, so a member data reset that engages while the
+  // action waits (the voice read, the event lock) refuses the add.
+  hostAction(router, "assign", "/assign", async ({ req, event }) => {
+    const admission = req.hostAdmission;
+    if (!(await eventsEnabled())) return { ok: false, message: EVENTS_OFF };
+    const group = bodyString(req, "group");
+    if (group.length === 0 || group.length > 32) {
+      return {
+        ok: false,
+        message: "Choose a group to put the person in.",
+      };
+    }
+    return assignTo(event, bodyString(req, "userId"), group, admission);
+  });
+
+  hostAction(router, "unassign", "/unassign", ({ req, event }) =>
+    assignTo(event, bodyString(req, "userId"), null, req.hostAdmission),
+  );
+
+  hostAction(router, "randomise", "/randomise", async ({ req, event }) => {
+    const admission = req.hostAdmission;
+    if (!(await eventsEnabled())) return { ok: false, message: EVENTS_OFF };
+    const rawMode = bodyString(req, "mode");
+    if (rawMode !== "unassigned" && rawMode !== "everyone") {
+      return { ok: false, message: "Choose who to randomise." };
+    }
+    const mode: RandomiseMode = rawMode;
+    const presence = readEventPresence(client, event);
+    if (!presence.ok) return { ok: false, message: NO_VOICE_STATE };
+    if (presence.members.length === 0) {
+      return { ok: false, message: "Nobody is connected to deal into groups." };
+    }
+    const seed = randomBytes(4).readUInt32BE(0);
+    const result = await randomiseMembers({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      candidateIds: presence.members.map((m) => m.id),
+      mode,
+      seed,
+      admission,
+    });
+    if (!result.ok) {
+      return { ok: false, message: result.message, errorMessage: result.code };
+    }
+    const names = new Map(presence.members.map((m) => [m.id, m.name]));
+    const perGroup = new Map<string, number>();
+    for (const p of result.placed) {
+      perGroup.set(p.groupKey, (perGroup.get(p.groupKey) ?? 0) + 1);
+    }
+    const parts = (event.groups ?? [])
+      .filter((g) => perGroup.has(g.key))
+      .map((g) => `${g.name} ${perGroup.get(g.key)}`);
+    const n = result.placed.length;
+    let message = `Placed ${n} ${n === 1 ? "person" : "people"}${parts.length ? ` (${parts.join(", ")})` : ""}.`;
+    if (result.unplaced.length > 0) {
+      const u = result.unplaced.length;
+      message += ` ${u} did not fit and ${u === 1 ? "is" : "are"} unassigned: ${nameList(result.unplaced.map((id) => names.get(id) ?? id))}.`;
+    }
+    return {
+      ok: true,
+      message,
+      // Counts and the seed, not names: one audit row for the whole deal.
+      details: {
+        mode,
+        seed,
+        candidates: presence.members.length,
+        placed: n,
+        unplaced: result.unplaced.length,
+      },
+    };
+  });
+
+  hostAction(router, "lock", "/lock", async ({ req, event }) => {
+    const raw = bodyString(req, "locked");
+    if (raw !== "1" && raw !== "0") {
+      return { ok: false, message: "Choose lock or unlock." };
+    }
+    const locked = raw === "1";
+    const result = await setGroupsLocked({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      locked,
+    });
+    if (!result.ok) {
+      return { ok: false, message: result.message, errorMessage: result.code };
+    }
+    return {
+      ok: true,
+      message: locked
+        ? "Groups are locked. Joining a channel no longer changes anyone's group."
+        : "Groups are unlocked. Joining a group's channel puts people in that group.",
+      details: { locked },
+    };
+  });
+}
+
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channelName = channelId
@@ -243,6 +517,10 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
           tag: g.tag ?? "",
           hasChannel: !!g.channelId,
           memberCount: (g.memberIds ?? []).length,
+          fill: groupFill({
+            size: g.size ?? null,
+            memberCount: (g.memberIds ?? []).length,
+          }),
         }))
       : [],
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
@@ -271,6 +549,7 @@ export function createHostEventsRouter(client: Client): Router {
     // Take the session in one synchronous step, before the first await, and
     // use this copy from here on.
     const session = (req as AuthenticatedRequest).webSession;
+    const admission = TrackingOptOutService.getInstance().admission();
     const rawId = req.params.id;
     const id = typeof rawId === "string" ? rawId : "";
     const deny = async (reason: string): Promise<void> => {
@@ -302,6 +581,7 @@ export function createHostEventsRouter(client: Client): Router {
         const h = req as HostRequest;
         h.hostEvent = event;
         h.hostSession = session;
+        h.hostAdmission = admission;
         next();
       })
       .catch((err: unknown) => {
@@ -312,6 +592,10 @@ export function createHostEventsRouter(client: Client): Router {
         next(err);
       });
   });
+
+  // The "Assign people" section and its actions (#1191).
+  HOST_SECTION_RENDERERS.assignment = createAssignmentSection(client);
+  registerAssignmentActions(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;

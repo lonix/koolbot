@@ -1514,12 +1514,55 @@ existing Discord event records the adopting admin as its creator but is not list
 under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
-event's groups. Scheduled and active events also show a section for each control
-that later updates add (assigning people, moving people, ending the event, live
-settings); until then each says it is not available yet. Ended and cancelled events
+event's groups. Scheduled and active events also show a section for each control:
+**Assign people** (below) works today; moving people, ending the event and live
+settings are added by later updates, and until then each says it is not available yet. Ended and cancelled events
 show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.
+
+**Assign people** (#1191) puts members into the `team` groups of an event. Open and
+leaders-only groups never take members. The section lists everyone connected to the
+event's voice channels (the main channel and any group channel; bots left out) with
+their group, plus anyone already assigned who has left voice, so they can still be
+unassigned. Each group shows how full it is, for example "Heli 2/2" or "Assault 5"
+when it has no size.
+
+- **Assign / move / unassign:** pick a group for a person, or take them out. A group
+  that has reached its size refuses with a clear message. You can only add someone
+  who is connected right now; if the bot cannot read who is in the voice channels,
+  adding and randomising are off and you are told so (unassigning still works).
+- **Self-join:** a member who joins a team group's voice channel is recorded as a
+  member of that group, and moving to another team channel moves them. Joining the
+  main channel, an open channel or any other channel changes nothing. A full group
+  does not take them. A member who has opted out of tracking, or is being reset, is
+  not recorded. (The group channels are created by the event's channel lifecycle, see
+  **Group voice channels** above; until a group has a channel there is nothing to join.)
+  Self-joins are not audited.
+- **Lock groups:** a switch for this event. While locked, joining a group's voice
+  channel does not record or change anyone's group: a member who hops channels keeps
+  their stored group, and a newcomer is not recorded. Nobody is moved either: the
+  person stays in the channel they joined, unassigned, and you assign them by hand
+  on this panel. The host's own changes still work. A repeating event's next
+  occurrence starts unlocked.
+- **Randomise:** deals the people connected right now into the team groups, either
+  only those who are not in a group yet or everyone again (people who are assigned
+  but not connected stay where they are and keep using their group's room). The
+  split is always even: groups end up within one person of each other. A group's size
+  is a hard limit: a full group is skipped, and once every group is full the rest stay
+  unassigned and are listed in the result. The deal uses a random
+  seed that is written to the audit row, so a result can be reproduced.
+- **Limits:** a person is in at most one group; a group holds at most its size, or 99
+  without one; an event holds at most 500 assigned people.
+- **Kept:** an assignment is kept when someone leaves voice, until they are
+  unassigned. Assignments stay on a finished event as history. A member's data
+  export lists their own group of each event, and resetting their data on
+  `/me/privacy` removes them from every group of every event, finished ones too.
+- **Audit:** each host change is one audit entry (a randomise is one entry with
+  counts, not names).
+
+Assigning only changes KoolBot's own records; it moves nobody and writes nothing to
+Discord, so it also works for adopted events.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

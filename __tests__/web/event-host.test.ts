@@ -199,6 +199,7 @@ describe("renderHostPanelBody", () => {
       tag: "",
       hasChannel: false,
       memberCount: 0,
+      fill: "0",
     };
     const withNotices = renderHostPanelBody({
       event: {
@@ -213,6 +214,42 @@ describe("renderHostPanelBody", () => {
       event: { ...base, groups: [group] },
     });
     expect(none).not.toContain("could not be set up");
+  });
+
+  it("shows how full each team group is, and n/a for groups that take no members", () => {
+    const html = renderHostPanelBody({
+      event: {
+        ...base,
+        groups: [
+          {
+            ...base.groups[0],
+            kind: "team",
+            size: 2,
+            memberCount: 2,
+            fill: "2/2",
+          },
+          {
+            ...base.groups[0],
+            name: "Free",
+            kind: "team",
+            size: null,
+            memberCount: 5,
+            fill: "5",
+          },
+          {
+            ...base.groups[0],
+            name: "Watch",
+            kind: "open",
+            size: null,
+            memberCount: 0,
+            fill: "0",
+          },
+        ],
+      },
+    });
+    expect(html).toContain('<span class="mono">2/2</span>');
+    expect(html).toContain('<span class="mono">5</span>');
+    expect(html).toContain('<span class="muted">n/a</span>');
   });
 
   it("escapes every rendered value", () => {
@@ -232,6 +269,7 @@ describe("renderHostPanelBody", () => {
             tag: "<t>",
             hasChannel: false,
             memberCount: 0,
+            fill: "0",
           },
         ],
       },
