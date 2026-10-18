@@ -1537,7 +1537,7 @@ under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
 event's groups. Scheduled and active events also show a section for each control:
-**Assign people** (below) works today; moving people, ending the event and live
+**Assign people** and **Move people** (below) work today; ending the event and live
 settings are added by later updates, and until then each says it is not available yet. Ended and cancelled events
 show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
@@ -1585,6 +1585,86 @@ when it has no size.
 
 Assigning only changes KoolBot's own records; it moves nobody and writes nothing to
 Discord, so it also works for adopted events.
+
+**Move people** (#1192) moves members between the event's voice channels: the quiz
+and workshop flow of splitting into groups and coming back. It needs the bot to hold
+**Move Members**; without it (or when the bot cannot read who is in the voice
+channels) the buttons are disabled and the section says why, and the same checks run
+again when a button is pressed. It only runs while `events.enabled` is on and the
+event is scheduled or active.
+
+- **Send to groups:** every person assigned to a team group who is connected to one
+  of the event's voice channels goes to that group's own channel. Open and
+  leaders-only channels are never targets. Assigned people whose group has no
+  channel yet are not moved (the result says how many). Connected people who are
+  not assigned stay where they are.
+- **Return to main:** everyone connected to a group channel goes to the main
+  channel, `open` and leaders-only channels included. Tick **Leave people in open and
+  leader-only channels where they are** to skip those. People already in the main
+  channel are not touched.
+- **Move one person:** pick a connected person and the main channel or any group
+  channel that exists. A channel that has reached its size refuses.
+- **Who is skipped:** only people connected to voice can be moved, and only out of
+  the event's own channels: someone who is not connected, or who is in a channel
+  that is not part of the event, is skipped and listed. The size check reads who is in
+  the channel at that moment, after the person's voice state was read and again
+  just before the move, so someone who joined or left meanwhile counts. People
+  moved there earlier in the same run count even before the bot sees them arrive,
+  and a move Discord did not confirm keeps a place at the destination but does not
+  free the person's old one. Those bookkeeping entries last only until the bot's
+  voice cache shows the change, so anything a person does afterwards (going back
+  to where they were) counts as it happens. The count is the bot's voice cache
+  plus these entries, not Discord's own count, so a join or leave the bot has not
+  heard about yet is not in it; Discord has the last word when the move is sent.
+  The event's creator and the person pressing the button are never moved by Send to
+  groups or Return to main (they can join any channel themselves); Move one person
+  does move the person you pick, you included.
+- **The result** is one message, kept inside the Web UI's 500-character flash. It
+  starts with how many were moved, then the warning for any move Discord did not
+  answer in time ("may or may not have moved: check Discord before trying
+  again"), then how many were skipped for each reason (not connected, in another
+  channel, group full, missing permission, error), then any extra note, and last
+  as many error explanations and names as still fit (explanations first, then names,
+  people whose move was not confirmed first). A long explanation or list of names
+  is shortened ("and N more") or left out, never the counts, the warning or the
+  extra note. A rate limit that Discord says would last more than 20 seconds stops the
+  run (the request is not sent or repeated; shorter waits are waited out)
+  and lists the rest as not attempted. One run reads the voice state of, and moves, at most 60
+  people, so the page does not wait for minutes; the rest are listed as not
+  attempted and you press the button again. People the bot already sees in the
+  right channel, not connected, in a channel outside the event, or aimed at a
+  channel that is full right now, or one the bot cannot connect to or move out of
+  according to its cached permissions, are skipped without a request and do not count
+  towards the 60, so the second press gets past the people the first one moved.
+- **Pacing and safety:** each person who still has to move is checked against Discord's own voice state and
+  moved one at a time, about half a second apart, through the bot's rate-limited
+  request path. A move is never repeated after a timeout. Every destination is
+  read from Discord before anyone is moved into it, and the person's channel is
+  checked once more against the live voice state just before the move. The
+  voice-state read is the raw answer from Discord and never overwrites the bot's
+  own gateway state, so a person who has since moved to another channel is not
+  pulled back out of it. A move that has to wait for a short rate limit is checked
+  again at the moment its request really goes out (the person still in one of the
+  event's channels and not already in the destination, the destination not full), and
+  dropped if that no longer holds. A person who joined the destination on their own
+  while the bot was reading their state is listed as already there, not moved.
+- **One run at a time:** while a run is going for an event, a second press answers
+  "a move is already in progress" and moves nobody. Live edits of a running event
+  will share this lock.
+- **Moving never changes a group.** A move is not a self-join: the bot marks the move
+  before it asks Discord, and the voice join it causes is ignored by the group
+  self-join (whether groups are locked or not), once, for that channel. Every move
+  attempt has its own mark, so a later attempt for the same member, to the same
+  channel or another one, never cancels the mark of an earlier move that Discord
+  did not confirm, and an attempt that Discord refuses clears only its own mark.
+  Each mark covers one join. Which group
+  a person is assigned to changes only on **Assign people**, so moving someone into
+  another group's channel leaves them assigned to their own group, and Send to
+  groups always moves people to the room of the group they are in now. The mark
+  lives about 90 seconds, in memory: after a restart in the middle of a run the
+  remaining joins count as the members' own.
+- **Audit:** each press is one audit entry with counts (moved, skipped by reason,
+  not confirmed), no names. Move one person also records the person's id.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

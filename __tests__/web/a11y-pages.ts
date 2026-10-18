@@ -74,6 +74,7 @@ import {
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
+import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import {
   renderConsent,
   renderErrorPage,
@@ -2063,6 +2064,71 @@ export function userPages(): A11yPage[] {
                   groupKey: "g_a",
                 },
               ],
+            }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (move people, with people)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          controls: {
+            moves: renderMovesSection({
+              csrfToken: "token",
+              actionPath: (name) =>
+                `/me/events/65a000000000000000000001/host/${name}`,
+              blocker: null,
+              sendableGroups: 2,
+              waitingForChannel: 1,
+              hasMain: true,
+              groupLabel: "Team",
+              destinations: [
+                {
+                  value: "main",
+                  label: "Main channel",
+                  occupants: 2,
+                  limit: 0,
+                },
+                { value: "g_a", label: "Reds", occupants: 2, limit: 2 },
+                { value: "g_b", label: "Blues", occupants: 0, limit: 0 },
+              ],
+              people: [
+                {
+                  id: "111111111111111111",
+                  name: "Ana",
+                  where: "Main channel",
+                },
+                { id: "222222222222222222", name: "Ben", where: "Reds" },
+              ],
+            }),
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel (move people, switched off)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          controls: {
+            moves: renderMovesSection({
+              csrfToken: "token",
+              actionPath: (name) =>
+                `/me/events/65a000000000000000000001/host/${name}`,
+              blocker:
+                "The bot lacks the Move Members permission, so nobody was moved. Grant it to the bot's role.",
+              sendableGroups: 0,
+              waitingForChannel: 0,
+              hasMain: false,
+              groupLabel: "Team",
+              destinations: [],
+              people: [],
             }),
           },
         }),
