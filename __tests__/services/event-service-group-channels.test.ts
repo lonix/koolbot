@@ -452,3 +452,75 @@ describe("the main channel of a group event", () => {
     expect(guild.channels.create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("start now, the public passes and logging", () => {
+  type Pub = Priv & {
+    startEventNow: (id: string) => Promise<unknown>;
+    reconcileGroupChannels: (id: string, guildId?: string) => Promise<unknown>;
+    cleanupGroupChannels: (id: string, guildId?: string) => Promise<unknown>;
+    logGroupReport: (e: unknown, r: unknown) => Promise<void>;
+  };
+
+  it("start now returns without waiting for the group channels", async () => {
+    const { service } = setup();
+    const event = groupRow();
+    EventMock.findById = jest.fn(() => Promise.resolve(event));
+    service.groupChannels.reconcile = jest.fn(
+      () => new Promise(() => undefined),
+    );
+    const result = await (service as Pub).startEventNow("evt1");
+    expect(result).toBe(event);
+    expect(event.state).toBe("active");
+    expect(service.groupChannels.reconcile).toHaveBeenCalledTimes(1);
+  });
+
+  it("start now on a plain event makes no group call", async () => {
+    const { service } = setup();
+    EventMock.findById = jest.fn(() => Promise.resolve(row()));
+    await (service as Pub).startEventNow("evt1");
+    expect(service.groupChannels.reconcile).not.toHaveBeenCalled();
+  });
+
+  it("reconcileGroupChannels and cleanupGroupChannels run the passes for the event's own server only", async () => {
+    const { service } = setup();
+    EventMock.findById = jest.fn(() => Promise.resolve(groupRow()));
+    expect(
+      await (service as Pub).reconcileGroupChannels("evt1", "guild-1"),
+    ).toEqual(emptyReport());
+    expect(
+      await (service as Pub).cleanupGroupChannels("evt1", "guild-1"),
+    ).toEqual(emptyReport());
+    expect(
+      await (service as Pub).reconcileGroupChannels("evt1", "other"),
+    ).toBeNull();
+    expect(
+      await (service as Pub).cleanupGroupChannels("evt1", "other"),
+    ).toBeNull();
+    EventMock.findById = jest.fn(() => Promise.resolve(null));
+    expect(await (service as Pub).reconcileGroupChannels("nope")).toBeNull();
+    expect(service.groupChannels.reconcile).toHaveBeenCalledTimes(1);
+    expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a standing failure once, and again when it changes or after it cleared", async () => {
+    const { service } = setup();
+    const { default: logger } = await import("../../src/utils/logger.js");
+    const warn = logger.warn as unknown as jest.Mock;
+    warn.mockClear();
+    const failing = (reason: string): unknown => ({
+      ...emptyReport(),
+      failures: [{ key: "g_a", name: "Alpha", reason }],
+    });
+    const event = { _id: "evt-log" };
+    const pub = service as Pub;
+    await pub.logGroupReport(event, failing("full"));
+    await pub.logGroupReport(event, failing("full"));
+    await pub.logGroupReport(event, failing("full"));
+    expect(warn).toHaveBeenCalledTimes(1);
+    await pub.logGroupReport(event, failing("other"));
+    expect(warn).toHaveBeenCalledTimes(2);
+    await pub.logGroupReport(event, emptyReport());
+    await pub.logGroupReport(event, failing("other"));
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+});

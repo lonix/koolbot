@@ -1444,10 +1444,13 @@ removed. Every pass collects what it could not do (a full category, a rate limit
 permission) instead of stopping: the bot logs one warning per problem and the last result
 is kept for the host panel. Without **Manage Channels** the group channels are skipped and
 the event runs with its main channel only; without **Manage Roles** or **Move Members** the
-channels are created without the host's extra access. A create that times out may still have
-gone through: it is not repeated for ten minutes, and if Discord did make it, the unrecorded
-extra channel is not deleted by the bot (it only deletes channels it recorded), so remove it
-by hand. Events without groups are created and cleaned up exactly as before.
+channels are created without the host's extra access. A create Discord refuses (a full
+category, say) or rate limits is not repeated for a few minutes, so it cannot fire every scan.
+A create that times out may still have gone through: it is not repeated for ten minutes, and
+if Discord did make it, the unrecorded extra channel is not deleted by the bot (it only
+deletes channels it recorded), so remove it by hand. Channels are created in group order
+right after the main channel; one that is created again later (after someone deleted it)
+lands at the bottom of the category, so move it by hand if the order matters. Events without groups are created and cleaned up exactly as before.
 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not

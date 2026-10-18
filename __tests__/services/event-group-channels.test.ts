@@ -76,8 +76,12 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: { findById, updateOne },
 }));
 
-const { EventGroupChannels, buildHostOverwrites, groupChannelName } =
-  await import("../../src/services/event-group-channels.js");
+const {
+  EventGroupChannels,
+  buildHostOverwrites,
+  groupChannelName,
+  REFUSED_CREATE_BACKOFF_MS,
+} = await import("../../src/services/event-group-channels.js");
 
 const GUILD = "111111111111111111";
 const HOST = "222222222222222222";
@@ -436,6 +440,38 @@ describe("EventGroupChannels.reconcile", () => {
     expect(env.rest.post).toHaveBeenCalledTimes(1);
     expect(report.failures.map((f) => f.key)).toEqual(["g_a", "g_b", "g_c"]);
     expect(report.failures[1].reason).toContain("rate limiting");
+  });
+
+  it("does not post again on the next pass after Discord refused a create (a full category), and says why", async () => {
+    store.set("evt1", makeRow({ groups: [makeRow().groups[0]] }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    env.rest.post.mockImplementation(async () => {
+      throw apiError(30013);
+    });
+    const first = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    const second = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    const third = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(env.rest.post).toHaveBeenCalledTimes(1);
+    expect(first.failures).toHaveLength(1);
+    expect(second.failures).toEqual(third.failures);
+    expect(second.failures[0].reason).toContain("Tried again later");
+  });
+
+  it("tries a refused create again once its back-off has passed", async () => {
+    store.set("evt1", makeRow({ groups: [makeRow().groups[0]] }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    const original = env.rest.post.getMockImplementation();
+    env.rest.post.mockImplementationOnce(async () => {
+      throw apiError(30013);
+    });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    const spy = jest
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + REFUSED_CREATE_BACKOFF_MS + 1000);
+    env.rest.post.mockImplementation(original as never);
+    const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    spy.mockRestore();
+    expect(report.created).toBe(1);
   });
 
   it("does not repeat a create whose outcome is unknown (timeout) until the back-off ends", async () => {

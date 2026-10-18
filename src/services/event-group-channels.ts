@@ -18,6 +18,7 @@ import {
   cancellableCall,
   createWriteRest,
   describeWriteFailure,
+  rateLimitWaitMs,
 } from "../web/channel-write-rest.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
@@ -53,6 +54,14 @@ const MS_PER_MINUTE = 60 * 1000;
 export const GROUP_WRITE_PACE_MS = 600;
 /** After a create whose outcome is unknown, wait this long before trying again. */
 export const UNCONFIRMED_CREATE_BACKOFF_MS = 10 * MS_PER_MINUTE;
+/**
+ * After Discord refused a create (a full category, a missing permission), wait
+ * this long: the refusal will repeat until someone fixes it, and the scan runs
+ * every minute.
+ */
+export const REFUSED_CREATE_BACKOFF_MS = 5 * MS_PER_MINUTE;
+/** Never retry a rate-limited create sooner than this. */
+const MIN_RATE_LIMIT_BACKOFF_MS = MS_PER_MINUTE;
 
 /** What the host gets on the main channel and on every group channel. */
 export const HOST_CHANNEL_PERMISSIONS =
@@ -205,8 +214,8 @@ export interface GroupChannelOptions {
 export class EventGroupChannels {
   private readonly lock = createKeyedLock();
   private readonly reports = new Map<string, GroupChannelReport>();
-  /** `event:group` -> when a create of unknown outcome may be tried again. */
-  private readonly unconfirmed = new Map<string, number>();
+  /** `event:group` -> when a failed create may be tried again, and why it failed. */
+  private readonly holds = new Map<string, { until: number; reason: string }>();
   /** Warnings already logged, so a standing problem is not logged every scan. */
   private readonly warned = new Set<string>();
   private restClient: REST | null;
@@ -361,13 +370,12 @@ export class EventGroupChannels {
         });
         continue;
       }
-      const retryAt = this.unconfirmed.get(groupKey);
-      if (retryAt !== undefined && Date.now() < retryAt) {
+      const hold = this.holds.get(groupKey);
+      if (hold && Date.now() < hold.until) {
         report.failures.push({
           key: group.key,
           name: group.name,
-          reason:
-            "An earlier attempt may or may not have created this channel. Check the events category in Discord; it is tried again later.",
+          reason: hold.reason,
         });
         continue;
       }
@@ -384,14 +392,14 @@ export class EventGroupChannels {
         overwrites,
         report,
       );
-      if (outcome === "rate-limited") rateLimited = true;
-      if (outcome === "unconfirmed") {
-        this.unconfirmed.set(
-          groupKey,
-          Date.now() + UNCONFIRMED_CREATE_BACKOFF_MS,
-        );
+      if (outcome.kind === "rate-limited") rateLimited = true;
+      if (outcome.hold) {
+        this.holds.set(groupKey, {
+          until: Date.now() + outcome.hold.ms,
+          reason: outcome.hold.reason,
+        });
       } else {
-        this.unconfirmed.delete(groupKey);
+        this.holds.delete(groupKey);
       }
     }
     return report;
@@ -405,7 +413,11 @@ export class EventGroupChannels {
     name: string,
     overwrites: OverwriteSpec[] | null,
     report: GroupChannelReport,
-  ): Promise<"ok" | "failed" | "rate-limited" | "unconfirmed"> {
+  ): Promise<{
+    kind: "ok" | "failed" | "rate-limited" | "unconfirmed";
+    /** Set when this group must not be tried again straight away. */
+    hold?: { ms: number; reason: string };
+  }> {
     const eventId = String(row._id);
     const post = (withOverwrites: boolean): Promise<{ id: string }> =>
       this.call(
@@ -464,12 +476,37 @@ export class EventGroupChannels {
       logger.warn(
         `Event ${sanitizeForLog(eventId)}: group channel for ${sanitizeForLog(group.name)} not created: ${sanitizeForLog(reason)}`,
       );
-      if (error instanceof RateLimitError) return "rate-limited";
-      if (error instanceof DiscordAPIError) return "failed";
+      if (error instanceof RateLimitError) {
+        return {
+          kind: "rate-limited",
+          hold: {
+            ms: Math.max(MIN_RATE_LIMIT_BACKOFF_MS, rateLimitWaitMs(error)),
+            reason: `${reason} Tried again later.`,
+          },
+        };
+      }
+      if (error instanceof DiscordAPIError) {
+        // Discord answered no: nothing was created. The same request would be
+        // refused again until someone fixes the cause, so wait before retrying.
+        return {
+          kind: "failed",
+          hold: {
+            ms: REFUSED_CREATE_BACKOFF_MS,
+            reason: `${reason} Tried again later.`,
+          },
+        };
+      }
       // Timeout or lost answer: Discord may have made it. Reading state cannot
       // tell it apart from a foreign channel with the same name, so it is
       // never adopted; the create is just not repeated for a while.
-      return "unconfirmed";
+      return {
+        kind: "unconfirmed",
+        hold: {
+          ms: UNCONFIRMED_CREATE_BACKOFF_MS,
+          reason:
+            "An earlier attempt may or may not have created this channel. Check the events category in Discord; it is tried again later.",
+        },
+      };
     }
 
     // Record it. The update only matches while the group still has no channel
@@ -502,13 +539,13 @@ export class EventGroupChannels {
         reason:
           "The event changed while the channel was being created; it was removed again.",
       });
-      return "failed";
+      return { kind: "failed" };
     }
     report.created += 1;
     logger.info(
       `Created group channel ${sanitizeForLog(name)} for event ${sanitizeForLog(eventId)}`,
     );
-    return "ok";
+    return { kind: "ok" };
   }
 
   // -------------------------------------------------------------
@@ -643,8 +680,8 @@ export class EventGroupChannels {
 
   private forget(eventId: string): void {
     this.reports.delete(eventId);
-    for (const key of [...this.unconfirmed.keys()]) {
-      if (key.startsWith(`${eventId}:`)) this.unconfirmed.delete(key);
+    for (const key of [...this.holds.keys()]) {
+      if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }
     for (const key of [...this.warned]) {
       if (key.startsWith(`${eventId}:`)) this.warned.delete(key);
