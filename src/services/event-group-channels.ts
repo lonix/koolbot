@@ -241,12 +241,13 @@ export function isVoiceLike(type: ChannelType): boolean {
  *
  * `channels` are the voice-like channels of the main channel's category (the
  * main channel and `groupIds` among them). Order is compared, not raw numbers
- * (Discord may leave gaps), with ties broken by id as Discord and the Channel
- * Manager do, so a category that is already right yields no write. The main
- * channel and everything above it keep their numbers. The group channels take
- * the numbers right after the main channel; a foreign channel below it is
- * only moved when its number would otherwise collide or fall before a group
- * channel.
+ * (Discord may leave gaps): position, then id for equal positions, which is how
+ * discord.js reads a channel's `position` (`Snowflake.compare` on a tie). A
+ * category that is already right yields no write. The main channel and
+ * everything above it keep their numbers. The group channels take the numbers
+ * right after the main channel; a foreign channel below it is moved only until
+ * one already sits past the last group channel (the rest of the sorted list
+ * keeps its numbers).
  */
 export function planGroupOrder(
   mainId: string,
@@ -265,11 +266,7 @@ export function planGroupOrder(
 
   const chain = [main, ...groups];
   const start = sorted.findIndex((c) => c.id === mainId);
-  const inOrder = chain.every(
-    (c, i) =>
-      sorted[start + i]?.id === c.id &&
-      (i === 0 || c.rawPosition > chain[i - 1].rawPosition),
-  );
+  const inOrder = chain.every((c, i) => sorted[start + i]?.id === c.id);
   if (inOrder) return { inOrder: true, moves: [] };
 
   const groupSet = new Set(groups.map((c) => c.id));
@@ -280,9 +277,10 @@ export function planGroupOrder(
   let previous = main.rawPosition;
   for (const channel of below) {
     const next = previous + 1;
-    const position = groupSet.has(channel.id)
-      ? next
-      : Math.max(channel.rawPosition, next);
+    // A foreign channel already past the last placed one keeps its number, and
+    // so does everything after it (they are sorted): nothing more to make room for.
+    if (!groupSet.has(channel.id) && channel.rawPosition > previous) break;
+    const position = next;
     previous = position;
     if (position !== channel.rawPosition) {
       moves.push({ id: channel.id, position });

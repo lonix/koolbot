@@ -1492,7 +1492,7 @@ deletes channels it recorded), so remove it by hand. Events without groups are c
 the group order. They are created in that order, but Discord puts a new channel at the bottom of
 its category, so after a pass that created channels (the first time, or one created again after
 someone deleted it) the bot reads the whole server fresh from Discord and, if the voice channels
-of the main channel's category are not in that order, writes the new positions with one bulk
+of the main channel's category are not in that order (equal positions are read by id, as discord.js does), writes the new positions with one bulk
 request, after the same short pause the creates use. Only the event's own channels are placed. Another channel is
 sent in that request only when it has to move down to make room, and then keeps its place relative
 to the other channels. Voice and stage channels are ordered among themselves (text channels are

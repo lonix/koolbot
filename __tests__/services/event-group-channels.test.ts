@@ -1157,10 +1157,62 @@ describe("planGroupOrder", () => {
     expect(plan.moves).toEqual([{ id: "a", position: 1 }]);
   });
 
-  it("treats a tie between the main channel and a group as out of order", () => {
+  it("reads equal positions by id, as discord.js does: ties that are already in id order are in order", () => {
+    const plan = planGroupOrder(
+      "100000000000000001",
+      ["100000000000000002", "100000000000000003"],
+      [
+        vc("100000000000000001", 3),
+        vc("100000000000000002", 3),
+        vc("100000000000000003", 3),
+      ],
+    );
+    expect(plan).toEqual({ inOrder: true, moves: [] });
+  });
+
+  it("moves a group whose tie with the main channel resolves the wrong way by id", () => {
     const plan = planGroupOrder("m", ["a"], [vc("m", 3), vc("a", 3)]);
     expect(plan.inOrder).toBe(false);
     expect(plan.moves).toEqual([{ id: "a", position: 4 }]);
+  });
+
+  it("does not shift foreign channels that are tied with each other once there is room", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a"],
+      [vc("m", 0), vc("f1", 3), vc("f2", 3), vc("a", 9)],
+    );
+    expect(plan.moves).toEqual([{ id: "a", position: 1 }]);
+  });
+
+  it("shifts a foreign channel that sits exactly where the last group channel goes, and stops after it", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a"],
+      [vc("m", 0), vc("f1", 1), vc("f2", 5), vc("a", 9)],
+    );
+    expect(plan.moves).toEqual([
+      { id: "a", position: 1 },
+      { id: "f1", position: 2 },
+    ]);
+  });
+
+  it("handles a foreign channel between two groups", () => {
+    const plan = planGroupOrder(
+      "m",
+      ["a", "b"],
+      [vc("m", 0), vc("a", 1), vc("f", 2), vc("b", 3)],
+    );
+    expect(plan.moves).toEqual([
+      { id: "b", position: 2 },
+      { id: "f", position: 3 },
+    ]);
+  });
+
+  it("ignores nothing it was not given: only the channels passed in are ever planned", () => {
+    const plan = planGroupOrder("m", ["a"], [vc("m", 0), vc("a", 5)]);
+    expect(plan.moves).toEqual([]);
+    expect(plan.inOrder).toBe(true);
   });
 
   it("puts a group that was above the main channel below it", () => {
