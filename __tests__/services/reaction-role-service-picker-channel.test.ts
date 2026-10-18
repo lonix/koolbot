@@ -22,9 +22,9 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
   isDebugMode: jest.fn(() => false),
 }));
-const mockApi = jest.fn(async (fn: () => Promise<unknown>, _label: string) =>
-  fn(),
-);
+const mockApi = jest.fn<
+  (fn: () => Promise<unknown>, label: string) => Promise<unknown>
+>(async (fn) => fn());
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
   CommandManager: { getInstance: () => ({ makeDiscordApiCall: mockApi }) },
 }));
