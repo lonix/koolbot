@@ -1427,7 +1427,9 @@ bot; the server-wide preset library is a later update.
 
 **Group voice channels** (#1190). At the event's channel creation time (its own, else
 `events.create_lead_minutes`; "Start now" at once) the bot creates the main channel and
-then one voice channel per group in the same category, in the group order, named
+then one voice channel per group in the category the main channel is in (read from
+Discord each time, so changing `events.category_id` while an event runs does not move
+later channels, and nothing is created if that cannot be verified), in the group order, named
 `<prefix> <colour marker> <group name>` (at most 100 characters; the prefix is
 `events.channel_prefix`). A group's size is the channel's user limit; no size means no
 limit. The event's host (its creator) gets View, Connect and Move Members on the main

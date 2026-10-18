@@ -51,6 +51,22 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
       channels: {
         cache: new Map(),
         fetch: jest.fn(async (id: string) => {
+          if (id === "main-1") {
+            return {
+              id,
+              type: ChannelType.GuildVoice,
+              guildId: GUILD,
+              parentId: CATEGORY,
+              members: { size: 0 },
+            };
+          }
+          if (id === CATEGORY) {
+            return {
+              id,
+              type: ChannelType.GuildCategory,
+              permissionOverwrites: { cache: new Map() },
+            };
+          }
           if (!live.has(id)) throw notFound();
           return {
             id,
@@ -74,12 +90,6 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
     const service = new EventGroupChannels(
       {} as never,
       {
-        resolveCategory: async () =>
-          ({
-            id: CATEGORY,
-            type: ChannelType.GuildCategory,
-            permissionOverwrites: { cache: new Map() },
-          }) as never,
         getPrefix: async () => "📅",
         getGraceMs: async () => 0,
       },

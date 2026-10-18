@@ -353,8 +353,6 @@ export class EventService extends ScheduledService {
     });
     this.nativeSync = new NativeEventSync(client);
     this.groupChannels = new EventGroupChannels(client, {
-      resolveCategory: (event, guild): Promise<CategoryChannel | null> =>
-        this.resolveEventCategory(event as unknown as IEvent, guild),
       getPrefix: (): Promise<string> =>
         this.configService.getString("events.channel_prefix", "📅"),
       getGraceMs: async (): Promise<number> =>

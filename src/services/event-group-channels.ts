@@ -217,15 +217,18 @@ type ApiCaller = <T>(
 ) => Promise<T>;
 
 export interface GroupChannelDeps {
-  /** The category the event's channels live in, or null (already logged). */
-  resolveCategory: (
-    event: EventRow,
-    guild: Guild,
-  ) => Promise<CategoryChannel | null>;
   /** `events.channel_prefix`. */
   getPrefix: () => Promise<string>;
   /** `events.channel_grace_minutes`, in milliseconds. */
   getGraceMs: () => Promise<number>;
+}
+
+interface Placement {
+  category: CategoryChannel;
+  overwrites: OverwriteSpec[] | null;
+  /** Why the host's access is not sent (null when it is). */
+  noAccessReason: string | null;
+  prefix: string;
 }
 
 export interface GroupChannelOptions {
@@ -242,6 +245,9 @@ export class EventGroupChannels {
   /** Standing notices about an event (the main channel's refused host access),
    * kept apart from the per-pass reports so a pass cannot replace them. */
   private readonly notices = new Map<string, Set<string>>();
+  /** Per event, per recorded group channel: why that channel lacks the host's
+   * access. Kept until that channel is removed or replaced. */
+  private readonly channelWarnings = new Map<string, Map<string, string>>();
   /** `event:group` -> when a failed create may be tried again, and why it failed. */
   private readonly holds = new Map<string, { until: number; reason: string }>();
   /** Warnings already logged, so a standing problem is not logged every scan. */
@@ -263,7 +269,10 @@ export class EventGroupChannels {
   /** The last report for an event, for the host panel (#1189). */
   public getReport(eventId: string): GroupChannelReport | null {
     const base = this.reports.get(eventId) ?? null;
-    const extra = [...(this.notices.get(eventId) ?? [])];
+    const extra = [
+      ...(this.notices.get(eventId) ?? []),
+      ...(this.channelWarnings.get(eventId)?.values() ?? []),
+    ];
     if (!base && extra.length === 0) return null;
     const report = base ?? emptyReport();
     return {
@@ -356,31 +365,9 @@ export class EventGroupChannels {
     }
     this.reports.set(eventId, report);
 
-    const category = await this.deps.resolveCategory(row, guild);
-    if (!category) {
-      report.warnings.push(
-        "The events category could not be found, so no group channels were created.",
-      );
-      return report;
-    }
-    const perms = botPermissionsIn(guild, category);
-    if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
-      this.warnOnce(
-        row,
-        "manage-channels",
-        "The bot lacks Manage Channels in the events category, so no group channels were created and the event runs with its main channel only. Grant it to the bot's role.",
-        report.warnings,
-      );
-      return report;
-    }
-
-    const prefix = await this.deps.getPrefix();
-    const overwrites = this.hostOverwritesFor(
-      row,
-      guild,
-      category,
-      report.warnings,
-    );
+    // Worked out only when a channel has to be created, so a pass with nothing
+    // to create makes no Discord read at all.
+    let placement: Placement | null | undefined;
     let wrote = false;
     let rateLimited = false;
 
@@ -423,16 +410,29 @@ export class EventGroupChannels {
         continue;
       }
 
+      if (placement === undefined) {
+        placement = await this.resolvePlacement(row, guild, report);
+      }
+      if (!placement) {
+        report.failures.push({
+          key: group.key,
+          name: group.name,
+          reason: "Not created: see the warning above.",
+        });
+        continue;
+      }
+
       if (wrote && this.paceMs > 0) await sleep(this.paceMs);
       wrote = true;
-      const name = groupChannelName(prefix, group);
+      const name = groupChannelName(placement.prefix, group);
       const outcome = await this.createOne(
         row,
         guild,
-        category,
+        placement.category,
         group,
         name,
-        overwrites,
+        placement.overwrites,
+        placement.noAccessReason,
         report,
       );
       if (outcome.kind === "rate-limited") rateLimited = true;
@@ -448,6 +448,65 @@ export class EventGroupChannels {
     return report;
   }
 
+  /**
+   * Where and how to create this event's group channels: in the category the
+   * main channel is in now (read from Discord, never the current default
+   * category, which may have changed since), so replacements inherit the same
+   * access. Null, with a warning, when that cannot be verified.
+   */
+  private async resolvePlacement(
+    row: EventRow,
+    guild: Guild,
+    report: GroupChannelReport,
+  ): Promise<Placement | null> {
+    const fail = (kind: string, message: string): null => {
+      this.warnOnce(row, kind, message, report.warnings);
+      return null;
+    };
+    const main = await this.readChannel(guild, row.channelId as string);
+    if (main.status !== "ok") {
+      return fail(
+        "placement-main",
+        main.status === "gone"
+          ? "The event's main voice channel no longer exists, so no group channels were created."
+          : "The event's main voice channel could not be read, so no group channels were created. It is tried again on the next scan.",
+      );
+    }
+    const parentId = (main.channel as { parentId?: string | null }).parentId;
+    if (!parentId) {
+      return fail(
+        "placement-parent",
+        "The event's main voice channel is not in a category, so no group channels were created.",
+      );
+    }
+    const parent = await this.readChannel(guild, parentId);
+    if (
+      parent.status !== "ok" ||
+      parent.channel.type !== ChannelType.GuildCategory
+    ) {
+      return fail(
+        "placement-category",
+        "The category of the event's main voice channel could not be verified, so no group channels were created. It is tried again on the next scan.",
+      );
+    }
+    const category = parent.channel as CategoryChannel;
+    const perms = botPermissionsIn(guild, category);
+    if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
+      return fail(
+        "manage-channels",
+        "The bot lacks Manage Channels in the events category, so no group channels were created and the event runs with its main channel only. Grant it to the bot's role.",
+      );
+    }
+    const scratch: string[] = [];
+    const overwrites = this.hostOverwritesFor(row, guild, category, scratch);
+    return {
+      category,
+      overwrites,
+      noAccessReason: overwrites ? null : (scratch[0] ?? "no host access"),
+      prefix: await this.deps.getPrefix(),
+    };
+  }
+
   private async createOne(
     row: EventRow,
     guild: Guild,
@@ -455,6 +514,7 @@ export class EventGroupChannels {
     group: GroupRow,
     name: string,
     overwrites: OverwriteSpec[] | null,
+    noAccessReason: string | null,
     report: GroupChannelReport,
   ): Promise<{
     kind: "ok" | "failed" | "rate-limited" | "unconfirmed";
@@ -491,6 +551,8 @@ export class EventGroupChannels {
       ) as Promise<{ id: string }>;
 
     let created: { id: string };
+    // Why the new channel lacks the host's access, if it does.
+    let lacksAccess: string | null = noAccessReason;
     try {
       try {
         created = await post(true);
@@ -506,8 +568,9 @@ export class EventGroupChannels {
             row,
             "overwrite-refused",
             "Discord refused the host's channel access, so the group channels were created without it.",
-            report.warnings,
+            [],
           );
+          lacksAccess = "Discord refused the host's access";
           created = await post(false);
         } else {
           throw error;
@@ -585,6 +648,16 @@ export class EventGroupChannels {
       return { kind: "failed" };
     }
     report.created += 1;
+    if (lacksAccess) {
+      // Tied to this channel, so it outlives the pass that created it and goes
+      // when the channel is removed or replaced.
+      const forEvent = this.channelWarnings.get(eventId) ?? new Map();
+      forEvent.set(
+        created.id,
+        `${group.name}: created without the host's access (${lacksAccess}).`,
+      );
+      this.channelWarnings.set(eventId, forEvent);
+    }
     logger.info(
       `Created group channel ${sanitizeForLog(name)} for event ${sanitizeForLog(eventId)}`,
     );
@@ -745,6 +818,7 @@ export class EventGroupChannels {
   private forget(eventId: string): void {
     this.reports.delete(eventId);
     this.notices.delete(eventId);
+    this.channelWarnings.delete(eventId);
     for (const key of [...this.holds.keys()]) {
       if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }
@@ -810,6 +884,7 @@ export class EventGroupChannels {
     groupKey: string,
     channelId: string,
   ): Promise<void> {
+    this.channelWarnings.get(eventId)?.delete(channelId);
     try {
       await Event.updateOne(
         {

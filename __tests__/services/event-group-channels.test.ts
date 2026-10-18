@@ -86,6 +86,7 @@ const {
 const GUILD = "111111111111111111";
 const HOST = "222222222222222222";
 const CATEGORY = "333333333333333333";
+const OTHER_CATEGORY = "444444444444444444";
 const MIN = 60_000;
 
 function apiError(code: number): DiscordAPIError {
@@ -145,6 +146,26 @@ function makeEnv(
       ),
     },
   };
+  const otherCategory = {
+    ...category,
+    id: OTHER_CATEGORY,
+    permissionOverwrites: { cache: new Map() },
+  };
+  // The event's main channel and the categories, read by id (not group channels).
+  const fixed = new Map<string, unknown>([
+    [
+      "main-1",
+      {
+        id: "main-1",
+        type: ChannelType.GuildVoice,
+        guildId: GUILD,
+        parentId: CATEGORY,
+        members: { size: 0 },
+      },
+    ],
+    [CATEGORY, category],
+    [OTHER_CATEGORY, otherCategory],
+  ]);
   const guild = {
     id: GUILD,
     members: {
@@ -162,6 +183,7 @@ function makeEnv(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       fetch: jest.fn(async (id: string, _o?: unknown) => {
         if (fetchErrors.has(id)) throw fetchErrors.get(id);
+        if (fixed.has(id)) return fixed.get(id);
         const channel = channels.get(id);
         if (!channel) throw apiError(10003);
         return channel;
@@ -195,7 +217,6 @@ function makeEnv(
   const service = new EventGroupChannels(
     {} as never,
     {
-      resolveCategory: async () => category as never,
       getPrefix: async () => "📅",
       getGraceMs: async () => 15 * MIN,
     },
@@ -208,6 +229,7 @@ function makeEnv(
     call,
     channels,
     fetchErrors,
+    fixed,
     cache,
     fetch: guild.channels.fetch,
   };
@@ -377,7 +399,9 @@ describe("EventGroupChannels.reconcile", () => {
     for (const call of rest.post.mock.calls) {
       expect(call[1].body).not.toHaveProperty("permission_overwrites");
     }
-    expect(report.warnings.join(" ")).toContain("Manage Roles or Move Members");
+    const shown = service.getReport("evt1")?.warnings ?? [];
+    expect(shown.join(" ")).toContain("Manage Roles or Move Members");
+    expect(shown.filter((w) => w.startsWith("Alpha:"))).toHaveLength(1);
   });
 
   it("retries a create without overwrites when Discord refuses them (50013)", async () => {
@@ -399,8 +423,104 @@ describe("EventGroupChannels.reconcile", () => {
     expect(env.rest.post.mock.calls[1][1].body).not.toHaveProperty(
       "permission_overwrites",
     );
-    expect(report.warnings.join(" ")).toContain("refused");
+    expect(env.service.getReport("evt1")?.warnings.join(" ")).toContain(
+      "refused",
+    );
   });
+
+  it("keeps a channel's host-access warning across a later successful retry, until that channel is replaced", async () => {
+    store.set("evt1", makeRow({ groups: makeRow().groups.slice(0, 2) }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    const original = env.rest.post.getMockImplementation() as never;
+    // Alpha: created through the 50013 fallback. Bravo: refused.
+    env.rest.post
+      .mockImplementationOnce(async () => {
+        throw apiError(50013);
+      })
+      .mockImplementationOnce(original)
+      .mockImplementationOnce(async () => {
+        throw apiError(30013);
+      });
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(
+      env.service
+        .getReport("evt1")
+        ?.warnings.filter((w) => w.startsWith("Alpha:")),
+    ).toHaveLength(1);
+
+    // Later retry: Bravo is created, with the host's access this time.
+    env.rest.post.mockImplementation(original);
+    const spy = jest
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 10 * 60_000);
+    const retry = await env.service.reconcile({ _id: "evt1" }, env.guild);
+    spy.mockRestore();
+    expect(retry.created).toBe(1);
+    // Alpha still lacks the host's access, so the host panel still says so.
+    const shown = env.service.getReport("evt1")?.warnings ?? [];
+    expect(shown.filter((w) => w.startsWith("Alpha:"))).toHaveLength(1);
+    expect(shown.some((w) => w.startsWith("Bravo:"))).toBe(false);
+
+    // Alpha's channel is deleted in Discord: it is created again, with access,
+    // and the warning goes.
+    const alphaId = store.get("evt1")?.groups[0].channelId as string;
+    env.channels.delete(alphaId);
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(
+      (env.service.getReport("evt1")?.warnings ?? []).some((w) =>
+        w.startsWith("Alpha:"),
+      ),
+    ).toBe(false);
+  });
+
+  it("creates in the category the main channel is in now, not the current default (#1190)", async () => {
+    store.set("evt1", makeRow({ groups: [makeRow().groups[0]] }));
+    const env = makeEnv({ perms: ALL_PERMS });
+    (env.fixed.get("main-1") as { parentId: string }).parentId = OTHER_CATEGORY;
+    await env.service.reconcile({ _id: "evt1" }, env.guild);
+    expect(env.rest.post.mock.calls[0][1].body.parent_id).toBe(OTHER_CATEGORY);
+  });
+
+  it.each([
+    [
+      "the main channel cannot be read",
+      (e: ReturnType<typeof makeEnv>) =>
+        e.fetchErrors.set("main-1", new Error("socket hang up")),
+    ],
+    [
+      "the main channel is gone",
+      (e: ReturnType<typeof makeEnv>) => e.fixed.delete("main-1"),
+    ],
+    [
+      "the main channel has no category",
+      (e: ReturnType<typeof makeEnv>) =>
+        ((e.fixed.get("main-1") as { parentId: string | null }).parentId =
+          null),
+    ],
+    [
+      "its category cannot be read",
+      (e: ReturnType<typeof makeEnv>) =>
+        e.fetchErrors.set(CATEGORY, new Error("socket hang up")),
+    ],
+    [
+      "its parent is not a category",
+      (e: ReturnType<typeof makeEnv>) =>
+        ((e.fixed.get(CATEGORY) as { type: ChannelType }).type =
+          ChannelType.GuildText),
+    ],
+  ])(
+    "creates nothing, and says so, when %s (fails closed)",
+    async (_n, break_) => {
+      store.set("evt1", makeRow());
+      const env = makeEnv({ perms: ALL_PERMS });
+      break_(env);
+      const report = await env.service.reconcile({ _id: "evt1" }, env.guild);
+      expect(env.rest.post).not.toHaveBeenCalled();
+      expect(report.created).toBe(0);
+      expect(report.warnings).toHaveLength(1);
+      expect(report.failures).toHaveLength(3);
+    },
+  );
 
   it("never aborts the batch: one refused group is listed, the others are created", async () => {
     store.set("evt1", makeRow());
