@@ -122,7 +122,15 @@ export async function loadProtection(
     ManagedVoiceChannel.find({ guildId }).lean(),
     VoiceChannelOwnership.find({ guildId }).lean(),
     Ticket.find({ guildId }).select("channelId").lean(),
-    Event.find({ guildId, state: { $in: ["scheduled", "active"] } }).lean(),
+    // Open events, plus finished ones whose group channels are still recorded
+    // (their cleanup is the lifecycle's, not the Channel Manager's).
+    Event.find({
+      guildId,
+      $or: [
+        { state: { $in: ["scheduled", "active"] } },
+        { "groups.channelId": { $type: "string" } },
+      ],
+    }).lean(),
     LfgPost.find({
       guildId,
       state: { $in: ["creating", "open"] },
@@ -149,6 +157,7 @@ export async function loadProtection(
       channelId: e.channelId ?? null,
       categoryId: e.categoryId ?? "",
       announcementChannelId: e.announcementChannelId ?? null,
+      groupChannelIds: (e.groups ?? []).map((g) => g.channelId ?? null),
     })),
     lfg: lfg.map((l) => ({
       voiceChannelId: l.voiceChannelId ?? null,

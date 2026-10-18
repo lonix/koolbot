@@ -82,6 +82,7 @@ const {
   maxBitrateOf,
   viewOf,
 } = await import("../../src/web/channel-manager-data.js");
+const { deleteVerdict } = await import("../../src/web/channel-manager.js");
 const { VoiceChannelManager } =
   await import("../../src/services/voice-channel-manager.js");
 
@@ -284,8 +285,45 @@ describe("loadProtection", () => {
     expect(map2.get("100000000000000010")![0]).toContain("Announcements");
     expect(events.mock.calls[0][0]).toMatchObject({
       guildId: "g1",
-      state: { $in: ["scheduled", "active"] },
+      $or: [
+        { state: { $in: ["scheduled", "active"] } },
+        { "groups.channelId": { $type: "string" } },
+      ],
     });
+  });
+
+  it("protects an event's recorded group channels, so the Channel Manager cannot delete them (#1190)", async () => {
+    events.mockReturnValue(
+      lean([
+        {
+          _id: "e1",
+          channelId: "100000000000000005",
+          categoryId: "",
+          announcementChannelId: null,
+          groups: [
+            { channelId: "100000000000000051" },
+            { channelId: null },
+            { channelId: "100000000000000052" },
+          ],
+        },
+      ]),
+    );
+    const map = await loadProtection(guild, []);
+    expect(map.get("100000000000000051")![0]).toContain("Events");
+    expect(map.get("100000000000000052")![0]).toContain("Events");
+    const target = {
+      id: "100000000000000051",
+      name: "Alpha",
+      kind: "voice" as const,
+      typeLabel: "voice",
+      parentId: null,
+      position: 0,
+      topic: null,
+      userLimit: null,
+      bitrate: null,
+    };
+    const verdict = deleteVerdict(target, [target], map);
+    expect(verdict.ok).toBe(false);
   });
 
   it.each([

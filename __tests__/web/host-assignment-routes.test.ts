@@ -284,6 +284,7 @@ beforeEach(() => {
   } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => events[id] ?? null,
+    getGroupChannelReport: () => null,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async (key: string) =>
@@ -500,6 +501,7 @@ describe("the reset admission ticket", () => {
     const held = new Promise<Json>((r) => (release = r));
     (EventService.getInstance as jest.Mock).mockReturnValue({
       getEvent: async () => held,
+      getGroupChannelReport: () => null,
     });
     const before = tracking.admission();
     const pending = post(action, body);

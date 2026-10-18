@@ -1421,12 +1421,10 @@ fields are not checked by the browser and the server ignores them. With scripts
 on, choosing a preset fills in the rows, "Add a group" adds a row and mistakes are
 shown next to the fields before sending; the server checks everything again, names
 the group and field in its message, and the page puts the entered values back after
-a refused submit. The setup is only stored: the events table shows the group count,
-a recurring series copies the setup (not members) to its next occurrence, and the
-group voice channels and assignment come in later updates of the groups
-epic (#1187). An event's own channel creation time already decides when its channel
-is created. The preset picker lists the presets that are switched on for the
-server (see the next section), plus Custom, which is always available.
+a refused submit. The events table shows the group count, and a recurring
+series copies the setup (not members) to its next occurrence. The preset picker
+lists the presets that are switched on for the server (see the next section),
+plus Custom, which is always available.
 
 **Group presets** (`/admin/events/presets`, #1200; linked from the Groups section
 and the Events page) is the server-wide preset library. It lists the built-in
@@ -1462,6 +1460,40 @@ offered, when only the server's own presets cannot be read just the built-ins
 that are on are, with a notice either way; Custom always works. A server that
 never opens the page has every built-in on. Presets hold no member data, so they
 are not part of the member data export.
+
+**Group voice channels** (#1190). At the event's channel creation time (its own, else
+`events.create_lead_minutes`; "Start now" at once) the bot creates the main channel and
+then one voice channel per group in the category the main channel is in (read from
+Discord each time, so changing `events.category_id` while an event runs does not move
+later channels, and nothing is created if that cannot be verified), in the group order, named
+`<prefix> <colour marker> <group name>` (at most 100 characters; the prefix is
+`events.channel_prefix`). A group's size is the channel's user limit; no size means no
+limit. The event's host (its creator) gets View, Connect and Move Members on the main
+channel and on every group channel, on top of whatever the category already grants (the
+category's own permissions are copied, so a private category stays private). A `leads`
+group is created like any other until the leads-only command channel exists. The channels
+go when the event does: right away on cancel, and after `events.channel_grace_minutes` once
+it has ended, the same moment the main channel is eligible. A channel with someone in it is
+never removed; it is left and tried again on the next scan. Only channels the bot recorded on
+a group are ever deleted, and each is read from Discord just before. After a restart the
+scan makes the record and the server agree: a group whose channel was deleted is created
+again while the event is open, and channels recorded for a finished or cancelled event are
+removed. Every pass collects what it could not do (a full category, a rate limit, a missing
+permission) instead of stopping: the bot logs a standing problem once, and the last result is
+shown as a warning in the Groups section of the host panel. Without **Manage Channels** the group channels are skipped and
+the event runs with its main channel only; without **Manage Roles** or **Move Members** the
+channels are created without the host's extra access. A create Discord refuses (a full
+category, say) or rate limits is not repeated for a few minutes, so it cannot fire every scan.
+A create that times out may still have gone through: it is not repeated for ten minutes, and
+if Discord did make it, the unrecorded extra channel is not deleted by the bot (it only
+deletes channels it recorded), so remove it by hand. Channels are created in group order
+right after the main channel; one that is created again later (after someone deleted it)
+lands at the bottom of the category, so move it by hand if the order matters. Events without groups are created and cleaned up exactly as before.
+
+The voice channel sweeps never delete a recorded event channel, even when the events feature is
+switched off (turning it off only stops the scan), and they leave a channel alone for two minutes
+after it is created, which covers a group channel that exists but is not recorded yet. This only
+matters when events share the voice channels' category and managed-only cleanup is off.
 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
@@ -1504,9 +1536,9 @@ when it has no size.
   member of that group, and moving to another team channel moves them. Joining the
   main channel, an open channel or any other channel changes nothing. A full group
   does not take them. A member who has opted out of tracking, or is being reset, is
-  not recorded. (Group channels themselves are created by the channel lifecycle
-  update; until a group has a channel there is nothing to join.) Self-joins are not
-  audited.
+  not recorded. (The group channels are created by the event's channel lifecycle, see
+  **Group voice channels** above; until a group has a channel there is nothing to join.)
+  Self-joins are not audited.
 - **Lock groups:** a switch for this event. While locked, joining a group's voice
   channel does not record or change anyone's group: a member who hops channels keeps
   their stored group, and a newcomer is not recorded. Nobody is moved either: the

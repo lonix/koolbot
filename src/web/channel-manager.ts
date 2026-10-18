@@ -314,6 +314,9 @@ export interface ProtectionInputs {
     channelId: string | null;
     categoryId: string;
     announcementChannelId: string | null;
+    /** Recorded group voice channels (#1190); only the event lifecycle may
+     * delete them. Absent for a plain event. */
+    groupChannelIds?: ReadonlyArray<string | null>;
   }>;
   /** Open looking-for-group posts. */
   lfg: ReadonlyArray<{ voiceChannelId: string | null; channelId: string }>;
@@ -398,6 +401,9 @@ export function buildProtectionMap(
   for (const e of input.events) {
     add(e.channelId, "an active event's voice channel (Events)");
     add(e.announcementChannelId, "an event announcement channel (Events)");
+    for (const id of e.groupChannelIds ?? []) {
+      add(id, "a voice channel of an event's group (Events)");
+    }
     for (const id of ids(e.categoryId)) {
       add(id, "an event's category (Events)");
     }

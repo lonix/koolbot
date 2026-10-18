@@ -190,6 +190,32 @@ describe("renderHostPanelBody", () => {
     for (const s of HOST_SECTIONS) expect(html).toContain(`id="host-${s.id}"`);
   });
 
+  it("lists group channel problems as a warning, escaped, and nothing when there are none", () => {
+    const group = {
+      name: "A",
+      marker: "",
+      kind: "team" as const,
+      size: null,
+      tag: "",
+      hasChannel: false,
+      memberCount: 0,
+      fill: "0",
+    };
+    const withNotices = renderHostPanelBody({
+      event: {
+        ...base,
+        groups: [group],
+        groupNotices: ["No <b>permission</b>"],
+      },
+    });
+    expect(withNotices).toContain("No &lt;b&gt;permission&lt;/b&gt;");
+    expect(withNotices).not.toContain("<b>permission</b>");
+    const none = renderHostPanelBody({
+      event: { ...base, groups: [group] },
+    });
+    expect(none).not.toContain("could not be set up");
+  });
+
   it("shows how full each team group is, and n/a for groups that take no members", () => {
     const html = renderHostPanelBody({
       event: {
