@@ -317,7 +317,11 @@ describe("planLeadsSync", () => {
       { ...base, categoryOverwrites: privateCat },
     );
     const byId = Object.fromEntries(
-      ops.flatMap((o) => (o.kind === "put" ? [[o.spec.id, o.spec]] : [])),
+      ops.map((o) =>
+        o.kind === "put"
+          ? [o.spec.id, o.spec]
+          : [o.id, { id: o.id, allow: 0n, deny: 0n }],
+      ),
     );
     // The admin role loses the channel-level View (the category gives it none)
     // but keeps Connect and Speak; another role loses it too; a role the
@@ -347,7 +351,7 @@ describe("planLeadsSync", () => {
     expect(ops).toEqual([
       {
         kind: "put",
-        revoke: false,
+        revoke: true,
         spec: { id: "mods", type: OverwriteType.Role, allow: C | S, deny: V },
       },
     ]);
@@ -592,5 +596,250 @@ describe("planLeadsEviction", () => {
         },
       ),
     ).toHaveProperty("refuse");
+  });
+});
+
+// ---------------------------------------------------------------------
+// The View rule for roles: regressions, then the whole matrix
+// ---------------------------------------------------------------------
+
+/** What a plan leaves in the channel (an op replaces or deletes an entry). */
+function applyPlan(
+  current: OverwriteSpec[],
+  ops: ReturnType<typeof planLeadsSync>,
+): OverwriteSpec[] {
+  const map = new Map(current.map((o) => [`${o.type}:${o.id}`, o]));
+  for (const op of ops) {
+    if (op.kind === "delete") map.delete(`${op.type}:${op.id}`);
+    else map.set(`${op.spec.type}:${op.spec.id}`, op.spec);
+  }
+  return [...map.values()];
+}
+
+describe("a role's View follows the category's entry for that role", () => {
+  const base = ctx({ leaderIds: [] });
+  const channel = (): OverwriteSpec[] =>
+    buildLeadsOverwrites([], ctx({ leaderIds: [] }));
+
+  it("copies a category View deny on an ordinary role, with or without a channel entry", () => {
+    const cat = [role("muted", 0n, V)];
+    // The channel kept an old View allow for the role.
+    const existing = planLeadsSync([...channel(), role("muted", V, 0n)], {
+      ...base,
+      categoryOverwrites: cat,
+    });
+    expect(existing).toEqual([
+      {
+        kind: "put",
+        revoke: true,
+        spec: { id: "muted", type: OverwriteType.Role, allow: 0n, deny: V },
+      },
+    ]);
+    // The role has no channel entry at all yet.
+    const missing = planLeadsSync(channel(), {
+      ...base,
+      categoryOverwrites: cat,
+    });
+    expect(missing).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: "muted", type: OverwriteType.Role, allow: 0n, deny: V },
+      },
+    ]);
+  });
+
+  it("copies a private category's View grant to an admin group's role whose entry is missing or lacks View", () => {
+    const admin = ctx({
+      leaderIds: [],
+      adminRoleIds: new Set(["mods"]),
+      adminGrantRoleIds: new Set(["mods"]),
+      categoryOverwrites: [role(GUILD, 0n, V), role("mods", V, 0n)],
+    });
+    const hidden = channel().map((o) =>
+      o.id === GUILD ? { ...o, allow: 0n, deny: C | V } : o,
+    );
+    const missing = planLeadsSync(hidden, admin);
+    expect(missing).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: {
+          id: "mods",
+          type: OverwriteType.Role,
+          allow: V | C | S,
+          deny: 0n,
+        },
+      },
+    ]);
+    const lacking = planLeadsSync([...hidden, role("mods", C | S, 0n)], admin);
+    expect(lacking).toMatchObject([{ spec: { id: "mods", allow: V | C | S } }]);
+  });
+
+  // Rows: the kind of account. Columns: the category's View entry for it
+  // (none, allow, deny) and the channel's own (missing, allow, deny).
+  type Cat = "none" | "allow" | "deny";
+  type Chan = "missing" | "allow" | "deny";
+  const catOf = (id: string, c: Cat): OverwriteSpec[] =>
+    c === "allow" ? [role(id, V, 0n)] : c === "deny" ? [role(id, 0n, V)] : [];
+  const chanOf = (id: string, c: Chan): OverwriteSpec[] =>
+    c === "allow" ? [role(id, V, 0n)] : c === "deny" ? [role(id, 0n, V)] : [];
+  const cats: Cat[] = ["none", "allow", "deny"];
+  const chans: Chan[] = ["missing", "allow", "deny"];
+  const viewOf = (
+    specs: OverwriteSpec[],
+    id: string,
+    type = OverwriteType.Role,
+  ) => {
+    const o = specs.find((x) => x.id === id && x.type === type);
+    return {
+      allow: ((o?.allow ?? 0n) & V) !== 0n,
+      deny: ((o?.deny ?? 0n) & V) !== 0n,
+    };
+  };
+
+  for (const everyoneHidden of [false, true]) {
+    const everyoneCat = everyoneHidden ? [role(GUILD, 0n, V)] : [];
+    for (const c of cats) {
+      for (const h of chans) {
+        const where = `category ${c}, channel ${h}, category ${everyoneHidden ? "hides" : "shows"} the channel to @everyone`;
+        // The channel's @everyone entry as the rule leaves it (or it was).
+        const everyoneChan = everyoneHidden
+          ? [role(GUILD, 0n, C | V)]
+          : [role(GUILD, V, C)];
+
+        it(`ordinary role: ${where}`, () => {
+          const c0 = ctx({
+            leaderIds: [],
+            categoryOverwrites: [...everyoneCat, ...catOf("r", c)],
+          });
+          const out = applyPlan(
+            [...everyoneChan, ...chanOf("r", h)],
+            planLeadsSync([...everyoneChan, ...chanOf("r", h)], c0),
+          );
+          const v = viewOf(out, "r");
+          if (c === "deny") expect(v).toEqual({ allow: false, deny: true });
+          else if (c === "allow")
+            expect(v).toEqual(
+              h === "deny"
+                ? { allow: false, deny: true }
+                : { allow: true, deny: false },
+            );
+          else if (everyoneHidden) expect(v.allow).toBe(false);
+          // Never joinable by an allow, and nothing left to do.
+          expect((out.find((x) => x.id === "r")?.allow ?? 0n) & (C | S)).toBe(
+            0n,
+          );
+          expect(planLeadsSync(out, c0)).toEqual([]);
+          // Creation agrees with what a pass leaves.
+          const built = buildLeadsOverwrites(
+            [...everyoneCat, ...catOf("r", c)],
+            c0,
+          );
+          expect(viewOf(built, "r")).toEqual(
+            c === "deny"
+              ? { allow: false, deny: true }
+              : c === "allow"
+                ? { allow: true, deny: false }
+                : viewOf(built, "r"),
+          );
+        });
+
+        it(`admin group role: ${where}`, () => {
+          const c0 = ctx({
+            leaderIds: [],
+            adminRoleIds: new Set(["a"]),
+            adminGrantRoleIds: new Set(["a"]),
+            categoryOverwrites: [...everyoneCat, ...catOf("a", c)],
+          });
+          const start = [...everyoneChan, ...chanOf("a", h)];
+          const out = applyPlan(start, planLeadsSync(start, c0));
+          const v = viewOf(out, "a");
+          const entry = out.find((x) => x.id === "a");
+          if (c === "deny") expect(v).toEqual({ allow: false, deny: true });
+          else if (c === "allow")
+            expect(v.allow).toBe(h === "deny" ? false : true);
+          else if (everyoneHidden) expect(v.allow).toBe(false);
+          else if (h !== "deny") expect(v.allow).toBe(true);
+          // Admins are given Connect and Speak (unless denied), always.
+          if (!v.deny || h !== "deny") {
+            expect(
+              ((entry?.allow ?? 0n) & (C | S)) === (C | S) || c === "deny",
+            ).toBe(true);
+          }
+          expect(planLeadsSync(out, c0)).toEqual([]);
+          const built = buildLeadsOverwrites(
+            [...everyoneCat, ...catOf("a", c)],
+            c0,
+          );
+          expect(planLeadsSync(built, c0)).toEqual([]);
+        });
+      }
+    }
+  }
+
+  for (const c of cats) {
+    for (const h of chans) {
+      it(`bot, host and leader keep their View whatever the category says (category ${c}, channel ${h})`, () => {
+        const c0 = ctx({
+          leaderIds: ["l1"],
+          categoryOverwrites: [role(GUILD, 0n, V), ...catOf("r", c)],
+        });
+        const own = (id: string): OverwriteSpec[] =>
+          h === "allow"
+            ? [member(id, V, 0n)]
+            : h === "deny"
+              ? [member(id, 0n, V)]
+              : [];
+        const start = [
+          role(GUILD, 0n, C | V),
+          ...own(BOT),
+          ...own(HOST),
+          ...own("l1"),
+        ];
+        const out = applyPlan(start, planLeadsSync(start, c0));
+        for (const id of [BOT, HOST, "l1"]) {
+          expect(viewOf(out, id, OverwriteType.Member)).toEqual({
+            allow: true,
+            deny: false,
+          });
+        }
+        expect(planLeadsSync(out, c0)).toEqual([]);
+      });
+    }
+  }
+
+  it("@everyone: the category's deny wins, otherwise View is allowed unless the channel denies it", () => {
+    for (const c of cats) {
+      for (const h of chans) {
+        const c0 = ctx({
+          leaderIds: [],
+          categoryOverwrites:
+            c === "none"
+              ? []
+              : [role(GUILD, c === "allow" ? V : 0n, c === "deny" ? V : 0n)],
+        });
+        const start = [
+          ...(h === "missing"
+            ? []
+            : [
+                role(
+                  GUILD,
+                  h === "allow" ? V : 0n,
+                  (h === "deny" ? V : 0n) | C,
+                ),
+              ]),
+        ];
+        const out = applyPlan(start, planLeadsSync(start, c0));
+        const v = viewOf(out, GUILD);
+        if (c === "deny" || h === "deny")
+          expect(v).toEqual({ allow: false, deny: true });
+        else expect(v.allow).toBe(true);
+        expect(((out.find((x) => x.id === GUILD)?.deny ?? 0n) & C) !== 0n).toBe(
+          true,
+        );
+        expect(planLeadsSync(out, c0)).toEqual([]);
+      }
+    }
   });
 });

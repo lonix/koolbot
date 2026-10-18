@@ -158,38 +158,59 @@ function restrictEveryone(
   return { id: everyoneId, type: OverwriteType.Role, allow, deny };
 }
 
+/** What the one role rule needs to know besides the two entries. */
+interface RoleFacts {
+  /** The role of a KoolBot admin group: it is given its own access. */
+  grant: boolean;
+  /** The category denies View to @everyone. */
+  categoryDeniesView: boolean;
+  /** View may not be added on the bot's own account: @everyone's View is denied
+   * (by the category or the channel) or the category is unknown. */
+  viewBlocked: boolean;
+}
+
 /**
- * The explicit allow an admin group's role needs, or null when it has it. An
- * explicit deny already on the entry is never lifted (the bits it denies are
- * left out), and View is only added when @everyone's View is not denied (a
- * private category stays private).
+ * THE ONE RULE for the entry of any role (not @everyone), used identically at
+ * creation, in the sync pass and in the cache trigger (which runs the pass's
+ * planner), so they cannot disagree:
+ *
+ * - **Connect and Speak.** An ordinary role never keeps them as an allow (a
+ *   role's allow applies after @everyone's deny and would let its holders in);
+ *   an admin group's role is given them.
+ * - **View** is derived from the category's own entry for THAT role:
+ *   the category denies it, so the channel denies it and holds no allow; the
+ *   category allows it, so the channel allows it (kept or added, also when the
+ *   role has no entry yet); the category has no View entry for the role, so the
+ *   channel keeps only what was there before, except that it is taken away when
+ *   the category hides channels from @everyone (a channel-level allow would
+ *   show the channel to people who cannot see the category), and an admin
+ *   group's role is given it only while @everyone's View is not denied.
+ * - **Denies.** A deny the channel already has stays. The category's View deny
+ *   is copied, and for an admin group's role also its Connect and Speak deny.
+ *   Nothing else is ever denied here.
+ *
+ * Returns null when the role needs no entry at all.
  */
-function adminRoleGrant(
-  current: OverwriteSpec | undefined,
+function desiredRoleEntry(
   id: string,
-  everyoneDeniesView: boolean,
-  categoryDeny = 0n,
-  categoryAllow = 0n,
-  categoryDeniesView = false,
+  current: OverwriteSpec | undefined,
+  category: OverwriteSpec | undefined,
+  facts: RoleFacts,
 ): OverwriteSpec | null {
-  // What the category denies this role is copied onto the entry (the channel
-  // has its own copy of the overwrites) and wins over any allow; nothing is
-  // denied that neither the entry nor the category denies already.
+  const categoryDeny = category?.deny ?? 0n;
+  const categoryAllow = category?.allow ?? 0n;
   const deny =
-    (current?.deny ?? 0n) | (categoryDeny & (VIEW | CONNECT | SPEAK));
-  const bits = (everyoneDeniesView ? 0n : VIEW) | CONNECT | SPEAK;
-  const effective = bits & ~deny;
-  // A View allow the bot gave earlier stays only where the category itself
-  // grants this role View: with @everyone's View denied by the category, a
-  // channel-level allow would show the channel to people who cannot see the
-  // category.
-  const obsoleteView =
-    categoryDeniesView && (categoryAllow & VIEW) === 0n ? VIEW : 0n;
-  const allow =
-    ((current?.allow ?? 0n) & ~deny & ~obsoleteView) |
-    (effective & ~obsoleteView);
-  if (current && current.allow === allow && current.deny === deny) return null;
-  if (!current && allow === 0n && deny === 0n) return null;
+    (current?.deny ?? 0n) |
+    (categoryDeny & (facts.grant ? VIEW | CONNECT | SPEAK : VIEW));
+  let allow = (current?.allow ?? 0n) & ~deny;
+  if (!facts.grant) allow &= ~OPEN_BITS;
+  if ((deny & VIEW) === 0n) {
+    if ((categoryAllow & VIEW) !== 0n) allow |= VIEW;
+    else if (facts.categoryDeniesView) allow &= ~VIEW;
+    else if (facts.grant && !facts.viewBlocked) allow |= VIEW;
+  }
+  if (facts.grant) allow |= (CONNECT | SPEAK) & ~deny;
+  if (allow === 0n && deny === 0n) return null;
   return { id, type: OverwriteType.Role, allow, deny };
 }
 
@@ -231,34 +252,37 @@ export function buildLeadsOverwrites(
   specs.set(everyoneKey, restricted);
 
   for (const [key, spec] of specs) {
-    if (
-      spec.type === OverwriteType.Role &&
-      spec.id !== ctx.everyoneId &&
-      !isAdminRole(ctx, spec.id)
-    ) {
-      spec.allow &= ~OPEN_BITS;
-    } else if (spec.type === OverwriteType.Member && !desired.has(spec.id)) {
+    if (spec.type === OverwriteType.Member && !desired.has(spec.id)) {
       spec.allow &= ~LEADS_LEADER_PERMISSIONS;
       if (spec.allow === 0n && spec.deny === 0n) specs.delete(key);
     }
   }
+  // The roles, by the one rule; the category is the copy this started from.
+  const grants =
+    ctx.allRolesExempt === true ? new Set<string>() : ctx.adminGrantRoleIds;
+  const baseByKey = new Map(base.map((o) => [keyOf(o), o]));
+  const roleIds = new Set<string>(grants ?? []);
+  for (const o of specs.values()) {
+    if (o.type === OverwriteType.Role && o.id !== ctx.everyoneId) {
+      roleIds.add(o.id);
+    }
+  }
+  const categoryHides = (restricted.deny & VIEW) !== 0n;
+  for (const id of roleIds) {
+    const grant = grants?.has(id) === true;
+    if (isAdminRole(ctx, id) && !grant) continue;
+    const key = keyOf({ type: OverwriteType.Role, id });
+    const spec = desiredRoleEntry(id, specs.get(key), baseByKey.get(key), {
+      grant,
+      categoryDeniesView: categoryHides,
+      viewBlocked: categoryHides,
+    });
+    if (spec) specs.set(key, spec);
+    else specs.delete(key);
+  }
   for (const [id, bits] of desired) {
     const key = keyOf({ type: OverwriteType.Member, id });
     specs.set(key, widen(specs.get(key), id, bits));
-  }
-  if (ctx.allRolesExempt !== true) {
-    for (const id of ctx.adminGrantRoleIds ?? []) {
-      const key = keyOf({ type: OverwriteType.Role, id });
-      const grant = adminRoleGrant(
-        specs.get(key),
-        id,
-        (restricted.deny & VIEW) !== 0n,
-        0n,
-        specs.get(key)?.allow ?? 0n,
-        (restricted.deny & VIEW) !== 0n,
-      );
-      if (grant) specs.set(key, grant);
-    }
   }
   return [...specs.values()];
 }
@@ -310,31 +334,52 @@ export function planLeadsSync(
     ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
   const categoryDeniesView = ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
 
-  // 2. The roles that would defeat the @everyone deny (an allow on a role
-  // applies after it), on every pass: whether an earlier clean-up ran cannot
-  // be told from the channel, so it is simply never left undone. Admin roles
-  // are exempt; while the admin groups are unknown nothing is touched. Where
-  // the category hides channels from @everyone, a role's View allow goes too
-  // unless the category itself grants that role View.
-  for (const o of current) {
-    if (
-      o.type !== OverwriteType.Role ||
-      o.id === ctx.everyoneId ||
-      isAdminRole(ctx, o.id)
-    ) {
+  // 2. The roles, by the one rule (see `desiredRoleEntry`): on every pass,
+  // for every role in the channel, in the category or granted as an admin
+  // group's. Whether an earlier clean-up ran cannot be told from the channel,
+  // so it is simply never left undone. A role with the Administrator
+  // permission is not touched (it bypasses overwrites), nor is any role while
+  // the admin groups are unknown; without a readable category nothing is
+  // derived from it.
+  const grants =
+    ctx.allRolesExempt === true ? new Set<string>() : ctx.adminGrantRoleIds;
+  const roleIds = new Set<string>(grants ?? []);
+  for (const o of [...current, ...category.values()]) {
+    if (o.type === OverwriteType.Role && o.id !== ctx.everyoneId) {
+      roleIds.add(o.id);
+    }
+  }
+  const everyoneNow = byKey.get(
+    keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
+  );
+  const grantViewBlocked =
+    viewBlocked || ((everyoneNow?.deny ?? 0n) & VIEW) !== 0n;
+  for (const id of roleIds) {
+    const grant = grants?.has(id) === true;
+    if (isAdminRole(ctx, id) && !grant) continue;
+    const key = keyOf({ type: OverwriteType.Role, id });
+    const own = byKey.get(key);
+    const wanted = desiredRoleEntry(id, own, category.get(key), {
+      grant,
+      categoryDeniesView,
+      viewBlocked: grantViewBlocked,
+    });
+    if (!wanted) {
+      if (own && (own.allow !== 0n || own.deny !== 0n)) {
+        ops.push({
+          kind: "delete",
+          id,
+          type: OverwriteType.Role,
+          revoke: true,
+        });
+      }
       continue;
     }
-    const catRole = category.get(keyOf(o));
-    const strip =
-      OPEN_BITS |
-      (categoryDeniesView && ((catRole?.allow ?? 0n) & VIEW) === 0n
-        ? VIEW
-        : 0n);
-    if ((o.allow & strip) === 0n) continue;
+    if (own && own.allow === wanted.allow && own.deny === wanted.deny) continue;
     ops.push({
       kind: "put",
-      spec: { ...o, allow: o.allow & ~strip },
-      revoke: true,
+      spec: wanted,
+      revoke: ((own?.allow ?? 0n) & ~wanted.allow) !== 0n,
     });
   }
   // ... and @everyone itself.
@@ -369,23 +414,6 @@ export function planLeadsSync(
     const o = byKey.get(keyOf({ type: OverwriteType.Member, id }));
     if (o && (o.allow & bits) === bits && (o.deny & bits) === 0n) continue;
     ops.push({ kind: "put", spec: widen(o, id, bits), revoke: false });
-  }
-  if (ctx.allRolesExempt !== true) {
-    const everyoneDeniesView =
-      viewBlocked || ((everyone?.deny ?? 0n) & VIEW) !== 0n;
-    for (const id of ctx.adminGrantRoleIds ?? []) {
-      const own = byKey.get(keyOf({ type: OverwriteType.Role, id }));
-      const inherited = category.get(keyOf({ type: OverwriteType.Role, id }));
-      const grant = adminRoleGrant(
-        own,
-        id,
-        everyoneDeniesView,
-        inherited?.deny ?? 0n,
-        inherited?.allow ?? 0n,
-        categoryDeniesView,
-      );
-      if (grant) ops.push({ kind: "put", spec: grant, revoke: false });
-    }
   }
   return ops;
 }
