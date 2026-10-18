@@ -4,7 +4,10 @@ import {
   type EventGroupKind,
 } from "../models/event-group-kinds.js";
 import type { IEventGroup } from "../models/event.js";
-import { getEventGroupPreset } from "../content/event-group-presets.js";
+import {
+  getEventGroupPreset,
+  type EventGroupPreset,
+} from "../content/event-group-presets.js";
 
 /**
  * Event group setup (#1188): the pure helpers for validating, building and
@@ -106,6 +109,45 @@ export interface GroupSetupInput {
   /** `""` falls back to the global lead time. */
   channelLeadMinutes: string;
   rows: RawGroupRow[];
+}
+
+/**
+ * How the validator finds a preset by id. The event form passes a resolver
+ * built from the server's enabled presets (#1200); without one only the
+ * built-ins are known, all on, as before the library existed.
+ */
+export type PresetLookup =
+  | { preset: EventGroupPreset }
+  | {
+      /**
+       * `disabled`: switched off for the server; `unreadable`: the library
+       * could not be read, so availability is unknown (fail closed);
+       * `unknown`: no such preset (never existed, or deleted).
+       */
+      refused: "disabled" | "unreadable" | "unknown";
+      label?: string;
+    };
+
+export type PresetResolver = (id: string) => PresetLookup;
+
+/** The default lookup: the built-in presets, all on. */
+export const builtinPresetResolver: PresetResolver = (id) => {
+  const preset = getEventGroupPreset(id);
+  return preset ? { preset } : { refused: "unknown" };
+};
+
+function presetRefusal(
+  refused: "disabled" | "unreadable" | "unknown",
+  label?: string,
+): string {
+  const name = label ? `"${label}"` : "that preset";
+  if (refused === "disabled") {
+    return `Preset ${name} is switched off on this server. Choose another preset or Custom.`;
+  }
+  if (refused === "unreadable") {
+    return `Preset ${name} cannot be checked right now because the preset library could not be read. Choose Custom, or try again.`;
+  }
+  return "Unknown group preset: it does not exist or was deleted. Choose another preset or Custom.";
 }
 
 export type GroupSetupResult =
@@ -214,7 +256,7 @@ function clampInt(
  */
 export function validateGroupSetup(
   input: GroupSetupInput,
-  options: { maxCount: number },
+  options: { maxCount: number; resolvePreset?: PresetResolver },
 ): GroupSetupResult {
   if (!input.enabled) return { ok: true, setup: emptyGroupSetup() };
 
@@ -226,17 +268,21 @@ export function validateGroupSetup(
     GROUP_COUNT_HARD_MAX,
   );
 
-  // Preset: "" and "custom" are Custom; anything else must be a built-in.
+  // Preset: "" and "custom" are Custom; anything else must be a preset the
+  // resolver offers (a switched-off or deleted one is refused, never silently
+  // accepted or dropped).
   let presetId: string | null = null;
+  let preset: EventGroupPreset | undefined;
   const rawPreset = input.presetId.trim();
   if (rawPreset && rawPreset !== "custom") {
-    if (getEventGroupPreset(rawPreset)) {
+    const found = (options.resolvePreset ?? builtinPresetResolver)(rawPreset);
+    if ("preset" in found) {
       presetId = rawPreset;
+      preset = found.preset;
     } else {
-      errors.push("Unknown group preset.");
+      errors.push(presetRefusal(found.refused, found.label));
     }
   }
-  const preset = getEventGroupPreset(presetId);
   // A preset bigger than the cap is refused, never saved as a truncated copy
   // under its own id.
   if (preset && preset.groups.length > maxCount) {
@@ -254,7 +300,7 @@ export function validateGroupSetup(
   const leaderLabel = checkLabel(
     "Leader label",
     input.leaderLabel,
-    DEFAULT_LEADER_LABEL,
+    preset?.leaderLabel ?? DEFAULT_LEADER_LABEL,
     errors,
   );
 

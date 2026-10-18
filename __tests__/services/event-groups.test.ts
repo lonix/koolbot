@@ -148,8 +148,8 @@ describe("validateGroupSetup", () => {
   });
 
   it("rejects an unknown preset, and treats 'custom' as Custom", () => {
-    expect(errorsOf(input({ presetId: "builtin:nope" }))).toContain(
-      "Unknown group preset.",
+    expect(errorsOf(input({ presetId: "builtin:nope" }))[0]).toMatch(
+      /^Unknown group preset: it does not exist or was deleted/,
     );
     const custom = validateGroupSetup(input({ presetId: "custom" }), {
       maxCount: 15,

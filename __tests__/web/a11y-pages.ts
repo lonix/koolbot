@@ -37,6 +37,8 @@ import {
   renderWizardStepPage,
   type SettingRow,
 } from "../../src/web/admin-views.js";
+import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
@@ -996,6 +998,93 @@ export function adminPages(): A11yPage[] {
         ],
         groupLimits: { defaultCount: 3, maxCount: 8 },
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Events (library presets, unreadable notice)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        groupLimits: { defaultCount: 2, maxCount: 8 },
+        groupPresets: [
+          EVENT_GROUP_PRESETS[0],
+          {
+            id: "lib:0123456789abcdef01234567",
+            label: "Clan match",
+            description: "Five roles",
+            groupLabel: "Squad",
+            leaderLabel: "Lead",
+            channelLeadMinutes: 30,
+            groups: [
+              { name: "Assault", kind: "team", size: 8, tag: "", marker: "" },
+            ],
+          },
+        ],
+        groupPresetsNotice:
+          "The server's own presets could not be read, so only the built-in presets that are switched on are offered.",
+      }),
+    },
+    {
+      name: "Group presets",
+      html: renderEventPresetsPage({
+        ...COMMON,
+        entries: [
+          ...EVENT_GROUP_PRESETS.map((p, i) => ({
+            ...p,
+            source: "builtin" as const,
+            enabled: i !== 1,
+          })),
+          {
+            id: "lib:0123456789abcdef01234567",
+            source: "library" as const,
+            enabled: true,
+            label: "Clan match",
+            description: "Five roles",
+            groupLabel: "Squad",
+            leaderLabel: "Lead",
+            channelLeadMinutes: 30,
+            groups: [
+              { name: "Assault", kind: "team", size: 8, tag: "", marker: "🟢" },
+            ],
+          },
+        ],
+        state: "ok",
+        maxCount: 15,
+        defaultCount: 2,
+        editing: null,
+        values: {},
+        prefillNote: null,
+        flash: FLASH,
+      }),
+    },
+    {
+      name: "Group presets (editing, library unreadable)",
+      html: renderEventPresetsPage({
+        ...COMMON,
+        entries: EVENT_GROUP_PRESETS.map((p) => ({
+          ...p,
+          source: "builtin" as const,
+          enabled: true,
+        })),
+        state: "library-unreadable",
+        maxCount: 8,
+        defaultCount: 2,
+        editing: { id: "lib:0123456789abcdef01234567", label: "Clan match" },
+        values: {
+          preset_name: "Clan match",
+          groups_label: "Squad",
+          group_0_name: "Assault",
+          group_0_kind: "team",
+          group_0_size: "8",
+          group_1_name: "Command",
+          group_1_kind: "leads",
+        },
+        prefillNote: 'Prefilled from the groups of the event "Game night".',
       }),
     },
     {

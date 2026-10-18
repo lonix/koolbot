@@ -61,6 +61,44 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   },
 }));
 
+// The preset library is read through `loadPresetResolver`; the real resolver
+// and validator run, only the Mongo read is replaced (#1200).
+const mockLoadPresetResolver =
+  jest.fn<
+    (guildId: string) => Promise<{ resolve: unknown; catalog: unknown }>
+  >();
+const actualPresetService =
+  await import("../../src/services/event-group-preset-service.js");
+jest.unstable_mockModule(
+  "../../src/services/event-group-preset-service.js",
+  () => ({
+    ...actualPresetService,
+    loadPresetResolver: mockLoadPresetResolver,
+  }),
+);
+const { EVENT_GROUP_PRESETS } =
+  await import("../../src/content/event-group-presets.js");
+
+type Catalog =
+  import("../../src/services/event-group-preset-service.js").PresetCatalog;
+
+function useCatalog(catalog: Catalog): void {
+  mockLoadPresetResolver.mockResolvedValue({
+    catalog,
+    resolve: actualPresetService.presetResolver(catalog),
+  });
+}
+
+function builtinEntries(off: string[] = []): Catalog["entries"] {
+  return EVENT_GROUP_PRESETS.map((p) => ({
+    ...p,
+    source: "builtin" as const,
+    enabled: !off.includes(p.id),
+  }));
+}
+
+const LIB_ID = "lib:0123456789abcdef01234567";
+
 const { createEventsRouter } =
   await import("../../src/web/routes/write/events.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -85,6 +123,7 @@ beforeEach(async () => {
     return fallback;
   });
   mockCreateEvent.mockResolvedValue({ _id: "event-1" });
+  useCatalog({ entries: builtinEntries(), state: "ok" });
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -244,5 +283,142 @@ describe("POST /events/create with groups (#1188)", () => {
     const flash = await create({ groups_enabled: "1" });
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("at least one group");
+  });
+});
+
+describe("POST /events/create with the preset library (#1200)", () => {
+  const libraryPreset = {
+    id: LIB_ID,
+    source: "library" as const,
+    enabled: true,
+    label: "Clan match",
+    description: "",
+    groupLabel: "Squad",
+    leaderLabel: "Lead",
+    channelLeadMinutes: 30,
+    groups: [
+      { name: "Assault", kind: "team" as const, size: 8, tag: "", marker: "" },
+      { name: "Logi", kind: "team" as const, size: 4, tag: "", marker: "" },
+    ],
+  };
+
+  it("accepts an enabled library preset and stores its id with the groups copied", async () => {
+    useCatalog({
+      entries: [...builtinEntries(), libraryPreset],
+      state: "ok",
+    });
+    const flash = await create({
+      groups_enabled: "1",
+      groups_preset: LIB_ID,
+    });
+    expect(flash.type).toBe("ok");
+    const arg = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect(arg.groups?.presetId).toBe(LIB_ID);
+    expect(arg.groups?.groupLabel).toBe("Squad");
+    expect(arg.groups?.groups.map((g) => [g.name, g.size])).toEqual([
+      ["Assault", 8],
+      ["Logi", 4],
+    ]);
+  });
+
+  it("refuses a switched-off built-in preset clearly, creating nothing", async () => {
+    useCatalog({
+      entries: builtinEntries(["builtin:wardogs"]),
+      state: "ok",
+    });
+    const flash = await create({
+      groups_enabled: "1",
+      groups_preset: "builtin:wardogs",
+    });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("switched off");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a switched-off library preset even when rows were typed", async () => {
+    useCatalog({
+      entries: [...builtinEntries(), { ...libraryPreset, enabled: false }],
+      state: "ok",
+    });
+    const flash = await create({
+      groups_enabled: "1",
+      groups_preset: LIB_ID,
+      group_0_name: "Alpha",
+    });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("switched off");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses the id of a deleted preset", async () => {
+    const flash = await create({
+      groups_enabled: "1",
+      groups_preset: "lib:ffffffffffffffffffffffff",
+    });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("does not exist or was deleted");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a library preset bigger than events.groups.max_count", async () => {
+    useCatalog({
+      entries: [
+        ...builtinEntries(),
+        {
+          ...libraryPreset,
+          groups: Array.from({ length: 5 }, (_, i) => ({
+            name: `G${i}`,
+            kind: "team" as const,
+            size: null,
+            tag: "",
+            marker: "",
+          })),
+        },
+      ],
+      state: "ok",
+    });
+    const flash = await create({ groups_enabled: "1", groups_preset: LIB_ID });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("limit is 4");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the library cannot be read: a named preset is refused, Custom still works without a read", async () => {
+    useCatalog({ entries: [], state: "all-unreadable" });
+    const refused = await create({
+      groups_enabled: "1",
+      groups_preset: "builtin:wardogs",
+    });
+    expect(refused.type).toBe("err");
+    expect(refused.msg).toContain("could not be read");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+
+    mockLoadPresetResolver.mockClear();
+    const custom = await create({
+      groups_enabled: "1",
+      group_0_name: "Alpha",
+      group_1_name: "Bravo",
+    });
+    expect(custom.type).toBe("ok");
+    expect(mockLoadPresetResolver).not.toHaveBeenCalled();
+  });
+
+  it("offers only the built-ins when just the library part is unreadable", async () => {
+    useCatalog({ entries: builtinEntries(), state: "library-unreadable" });
+    const ok = await create({
+      groups_enabled: "1",
+      groups_preset: "builtin:red-vs-blue",
+    });
+    expect(ok.type).toBe("ok");
+    const refused = await create({
+      groups_enabled: "1",
+      groups_preset: LIB_ID,
+    });
+    expect(refused.type).toBe("err");
+  });
+
+  it("does not read the library for a plain event", async () => {
+    await create({});
+    expect(mockLoadPresetResolver).not.toHaveBeenCalled();
   });
 });
