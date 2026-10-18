@@ -84,10 +84,18 @@ jobs:
     name: Test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The experimental leg may fail without failing this job's contribution to
+    # ci-success (see #1208, which makes it required).
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24', '26']
+        node: ['22', '24']
+        experimental: [false]
+        include:
+          # Node 26 is tested but allowed to fail until #1208 makes it required.
+          - node: '26'
+            experimental: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,6 +113,14 @@ jobs:
 
       - name: Run tests
         run: npm run test:ci
+
+      # continue-on-error turns a failed experimental leg green in the checks list,
+      # so surface it as an annotation instead of hiding it.
+      - name: Flag failed experimental leg
+        if: failure() && matrix.experimental
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+        run: echo "::warning title=Node ${NODE_VERSION} failed::This leg is allowed to fail (see #1208), but the failure is real. Check the Run tests step."
 
       # Jest's coverageThreshold only catches coverage falling; this catches the
       # floors falling behind actual coverage and going stale (#848). Also writes

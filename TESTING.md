@@ -358,7 +358,8 @@ configuration lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), a
 and `typecheck` jobs:
 
 - The `test` job runs `npm run test:ci` on a Node 22, 24 and 26 matrix (`fail-fast: false`, so all
-  legs always report).
+  legs always report). Node 26 is tested but allowed to fail for now (`continue-on-error`, see #1208): a red 26 leg
+  does not fail `ci-success`, and a warning annotation flags it. Node 22 and 24 are required.
 - The `coverage:drift` check and the `coverage-report` artifact upload only run on the Node 22 leg.
 - The `integration` job runs `npm run test:integration` on Node 22 against a `mongo:8.0` service
   container (see [Real-MongoDB integration tests](#real-mongodb-integration-tests)).
