@@ -783,6 +783,10 @@ export class EventService extends ScheduledService {
       await this.ensureAnnouncement(event);
     }
 
+    // The reads above (the adopted event, the series) can outlast a manual end:
+    // an older, open copy posts no reminder and no new announcement after it.
+    if (this.mustSkipScan(event)) return;
+
     // 1. Reminder (before start, once).
     if (shouldSendReminder(event, now, windows.reminderMs)) {
       await this.postReminder(event);

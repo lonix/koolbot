@@ -690,6 +690,35 @@ describe("a scan that overlaps an end in progress", () => {
     expect(service.deleteEventChannel).toHaveBeenCalledTimes(1);
   });
 
+  it("an open copy posts no reminder after the read of the adopted Discord event it was waiting on", async () => {
+    const { service, guild } = setup();
+    let releaseRead!: () => void;
+    service.nativeSync.pullAdopted = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseRead = () => resolve("ok");
+        }),
+    );
+    const scan = service.processEvent(
+      row({
+        nativeAdopted: true,
+        announcementMessageId: "m1",
+        reminderSent: false,
+      }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    await nap();
+    expect(service.nativeSync.pullAdopted).toHaveBeenCalledTimes(1);
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("ended");
+    releaseRead();
+    await scan;
+    expect(service.postReminder).not.toHaveBeenCalled();
+  });
+
   it("an open copy does not refresh the announcement after the native sync it was waiting on", async () => {
     const { service, guild } = setup();
     // The scan's copy is open and needs its link refreshed; it stalls in the
