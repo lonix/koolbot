@@ -106,6 +106,12 @@ export interface GroupSetupInput {
   presetId: string;
   groupLabel: string;
   leaderLabel: string;
+  /**
+   * Group leaders on for this event (#1195). Optional: only the event form
+   * posts it. The preset library never does (a preset has no default for
+   * leaders), so a preset can neither store nor apply it.
+   */
+  captainsEnabled?: boolean;
   /** `""` falls back to the global lead time. */
   channelLeadMinutes: string;
   rows: RawGroupRow[];
@@ -159,6 +165,7 @@ export const GROUP_FORM_FIELDS = {
   preset: "groups_preset",
   label: "groups_label",
   leaderLabel: "groups_leader_label",
+  captains: "groups_captains",
   leadMinutes: "groups_lead_minutes",
 } as const;
 
@@ -194,6 +201,7 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
     presetId: str(GROUP_FORM_FIELDS.preset),
     groupLabel: str(GROUP_FORM_FIELDS.label),
     leaderLabel: str(GROUP_FORM_FIELDS.leaderLabel),
+    captainsEnabled: str(GROUP_FORM_FIELDS.captains).length > 0,
     channelLeadMinutes: str(GROUP_FORM_FIELDS.leadMinutes),
     rows,
   };
@@ -449,11 +457,26 @@ export function validateGroupSetup(
       leaderLabel,
       channelLeadMinutes,
       groups,
-      captainsEnabled: false,
+      captainsEnabled: input.captainsEnabled === true,
       captainCustomisationEnabled: false,
       tagsEnabled: false,
     },
   };
+}
+
+/**
+ * Validate a leader label typed on the host panel (#1195): empty falls back to
+ * "Leader"; control characters and more than `GROUP_LABEL_MAX` characters are
+ * refused. Same rules as the event form's label.
+ */
+export function validateLeaderLabel(
+  raw: string,
+): { ok: true; value: string } | { ok: false; error: string } {
+  const errors: string[] = [];
+  const value = checkLabel("Leader label", raw, DEFAULT_LEADER_LABEL, errors);
+  return errors.length > 0
+    ? { ok: false, error: errors.join(" ") }
+    : { ok: true, value };
 }
 
 function checkLabel(

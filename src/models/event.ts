@@ -62,7 +62,13 @@ export interface IEventGroup {
   marker: string;
   /** Voice channel id, filled by #1190; null until then. */
   channelId: string | null;
-  /** Filled by #1195; null until then. A user id. */
+  /**
+   * The group's leader (#1195): a user id, null = none. Written only through
+   * `event-group-leaders.ts`, under the same per-event lock as `memberIds`.
+   * A leader is a member of the group; read it through `effectiveLeaders`.
+   * Exportable and erased by a member data reset (registry entry
+   * `event-group-captain`).
+   */
   captainId: string | null;
   /**
    * The group's members (#1191): user ids, at most one group per member. Only
@@ -208,8 +214,9 @@ export interface IEvent extends Document {
    * unlocked, so it is not part of `copyGroupSetup`.
    */
   groupsLocked: boolean;
-  /** Used by later issues (#1195, #1196, #1194); stored, never read yet. */
+  /** Group leaders on for this event (#1195); set on the event form. */
   captainsEnabled: boolean;
+  /** Used by later issues (#1196, #1194); stored, never read yet. */
   captainCustomisationEnabled: boolean;
   tagsEnabled: boolean;
   createdBy: string;
@@ -314,6 +321,8 @@ EventSchema.index({ "rsvps.userId": 1 });
 // channel it is by `groups.channelId`. Both were collection scans.
 EventSchema.index({ "groups.memberIds": 1 });
 EventSchema.index({ "groups.channelId": 1 });
+// Leaders (#1195): the member export and reset find events by `groups.captainId`.
+EventSchema.index({ "groups.captainId": 1 });
 // One row per occurrence of a series. This unique key is what makes spawning
 // the successor idempotent across crashes, restarts and replicas (#744).
 EventSchema.index(

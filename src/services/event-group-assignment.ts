@@ -566,7 +566,10 @@ export interface MembershipRemoval {
  * events included (the member data reset). Each event goes through the same
  * lock as any other change, so a reset cannot interleave with a change that
  * would write the member back. A failure on one event is counted and does not
- * stop the others. Captains are not touched here (#1195 owns `captainId`).
+ * stop the others. The leader slot is not written here: the change this fires
+ * (`source: "purge"`) lets `event-group-leaders.ts` clear a leader whose
+ * membership ended, and the reset's own `event-group-captain` step clears the
+ * rest (#1195).
  */
 export async function removeMemberFromEvents(
   guildId: string,
@@ -584,10 +587,13 @@ export async function removeMemberFromEvents(
         const row = (await Event.findOne({ _id: eventId, guildId })
           .select("groups")
           .lean()) as Pick<IEvent, "groups"> | null;
-        if (!row) return false;
+        // Gone, or the member is already out (a concurrent reset or change):
+        // the data is gone, which is what the reset owes.
+        if (!row) return true;
         const fromKeys = row.groups
           .filter((g) => (g.memberIds ?? []).includes(userId))
           .map((g) => g.key);
+        if (fromKeys.length === 0) return true;
         const result = await Event.updateOne(
           { _id: eventId, guildId, "groups.memberIds": userId },
           { $pull: { "groups.$[].memberIds": userId } },

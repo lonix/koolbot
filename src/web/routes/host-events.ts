@@ -20,6 +20,8 @@
  *
  * Extension points for later issues: add a section body to
  * `HOST_SECTION_RENDERERS`, and add an action with `hostAction`.
+ * Leaders (#1195) are the `leaders` section: `set-leader`, `leader-label`,
+ * `pull-leaders`.
  */
 
 import {
@@ -90,6 +92,22 @@ import {
   type AssignmentGroupView,
   type AssignmentPersonView,
 } from "../host-assignment-view.js";
+import {
+  effectiveLeaders,
+  planPullLeaders,
+  resolveLeadsChannel,
+  setGroupLeader,
+  setLeaderLabel,
+  PULL_DEFAULT,
+  PULL_HERE,
+  PULL_MAIN,
+} from "../../services/event-group-leaders.js";
+import { validateLeaderLabel } from "../../services/event-groups.js";
+import {
+  renderLeadersSection,
+  type LeaderDestinationView,
+  type LeaderGroupView,
+} from "../host-leaders-view.js";
 
 /** A request that has passed the host gate. */
 export type HostRequest = AuthenticatedRequest & {
@@ -296,6 +314,14 @@ function createAssignmentSection(client: Client): HostSectionRenderer {
     const presence = readEventPresence(client, event);
     const people: AssignmentPersonView[] = [];
     const listed = new Set<string>();
+    // Leaders are marked only while the event has them switched on (#1195).
+    const leaderIds = new Set(
+      event.captainsEnabled === true
+        ? effectiveLeaders(event.groups).map((l) => l.userId)
+        : [],
+    );
+    const leaderLabelOf = (id: string): string | null =>
+      leaderIds.has(id) ? event.leaderLabel || "Leader" : null;
     for (const m of presence.members) {
       listed.add(m.id);
       people.push({
@@ -303,6 +329,7 @@ function createAssignmentSection(client: Client): HostSectionRenderer {
         name: m.name,
         connected: true,
         groupKey: groupKeyOf(event.groups ?? [], m.id),
+        leaderLabel: leaderLabelOf(m.id),
       });
     }
     // Assigned but not connected: still listed so they can be unassigned.
@@ -315,6 +342,7 @@ function createAssignmentSection(client: Client): HostSectionRenderer {
           name: cachedMemberName(client, event.guildId, id),
           connected: false,
           groupKey: groupKeyOf(event.groups ?? [], id),
+          leaderLabel: leaderLabelOf(id),
         });
       }
     }
@@ -628,12 +656,13 @@ function moveResult(
   };
 }
 
+/** People never moved by a bulk run: the event's host and whoever is acting. */
+function hostIds(event: IEvent, actingId: string): string[] {
+  return [event.createdBy, actingId].filter((id): id is string => !!id);
+}
+
 /** Send to groups, return to main and move one person (#1192). */
 function registerMoveActions(router: Router, client: Client): void {
-  // People never moved by a bulk run: the event's host and whoever is acting.
-  const hostIds = (event: IEvent, actingId: string): string[] =>
-    [event.createdBy, actingId].filter((id): id is string => !!id);
-
   hostAction(
     router,
     "send-to-groups",
@@ -709,6 +738,177 @@ function registerMoveActions(router: Router, client: Client): void {
   });
 }
 
+/** The "Leaders" section (#1195); only rendered while leaders are on. */
+function createLeadersSection(client: Client): HostSectionRenderer {
+  return (ctx) => {
+    const { event } = ctx;
+    if (event.groupsEnabled !== true || event.captainsEnabled !== true) {
+      return undefined;
+    }
+    const guild = client.guilds?.cache?.get(event.guildId);
+    const presence = readEventPresence(client, event);
+    let blocker = moveMembersBlocker(guild);
+    if (!blocker && !presence.ok) {
+      blocker =
+        "The bot could not read who is in the voice channels, so pulling people is switched off.";
+    }
+    const leaderOf = new Map(
+      effectiveLeaders(event.groups).map((l) => [l.groupKey, l.userId]),
+    );
+    const groups: LeaderGroupView[] = (event.groups ?? [])
+      .filter((g) => g.kind === "team")
+      .map((g) => ({
+        key: g.key,
+        name: g.name,
+        marker: g.marker ?? "",
+        leaderId: leaderOf.get(g.key) ?? null,
+        members: (g.memberIds ?? []).map((id) => ({
+          id,
+          name: cachedMemberName(client, event.guildId, id),
+        })),
+      }));
+    const labelOf = (g: { marker?: string; name: string }): string =>
+      `${g.marker ? `${g.marker} ` : ""}${g.name}`;
+    const leads = (event.groups ?? []).find(
+      (g) => g.channelId && g.channelId === resolveLeadsChannel(event),
+    );
+    const defaultWhere = leads
+      ? `the ${labelOf(leads)} channel.`
+      : event.channelId
+        ? "the main channel (the event has no leaders-only channel yet)."
+        : "the channel you are in (the event has no main channel yet).";
+    const destinations: LeaderDestinationView[] = [
+      { value: PULL_DEFAULT, label: "Default" },
+    ];
+    if (event.channelId) {
+      destinations.push({ value: PULL_MAIN, label: "Main channel" });
+    }
+    destinations.push({ value: PULL_HERE, label: "The channel I am in" });
+    for (const g of event.groups ?? []) {
+      if (g.channelId) {
+        destinations.push({ value: g.key, label: labelOf(g) });
+      }
+    }
+    return renderLeadersSection({
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      leaderLabel: event.leaderLabel || "Leader",
+      groupLabel: event.groupLabel || "Group",
+      groups,
+      defaultWhere,
+      destinations,
+      blocker,
+    });
+  };
+}
+
+/** Set a leader, rename the label and pull the leaders (#1195). */
+function registerLeaderActions(router: Router, client: Client): void {
+  hostAction(router, "set-leader", "/set-leader", async ({ req, event }) => {
+    // The member-reset ticket, before any await (see the assignment actions).
+    const admission = req.hostAdmission;
+    const label = (event.leaderLabel || "Leader").toLowerCase();
+    const group = bodyString(req, "group");
+    if (group.length === 0 || group.length > 32) {
+      return { ok: false, message: "Choose a group." };
+    }
+    const rawUser = bodyString(req, "userId");
+    if (rawUser !== "" && !USER_ID_RE.test(rawUser)) {
+      return { ok: false, message: "Pick a person from the list." };
+    }
+    const userId = rawUser === "" ? null : rawUser;
+    const result = await setGroupLeader({
+      guildId: event.guildId,
+      eventId: String(event._id),
+      groupKey: group,
+      userId,
+      admission,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+        details: { group, userId },
+        errorMessage: result.code,
+      };
+    }
+    const groupName =
+      (event.groups ?? []).find((g) => g.key === group)?.name ?? "the group";
+    const who = userId ? cachedMemberName(client, event.guildId, userId) : "";
+    const message = !result.changed
+      ? userId
+        ? `${who} is already the ${label} of ${groupName}.`
+        : `${groupName} had no ${label}.`
+      : userId
+        ? `${who} is now the ${label} of ${groupName}.`
+        : `${groupName} no longer has a ${label}.`;
+    return {
+      ok: true,
+      message,
+      details: {
+        group,
+        userId,
+        from: result.fromUserId,
+        to: result.toUserId,
+        changed: result.changed,
+      },
+    };
+  });
+
+  hostAction(
+    router,
+    "leader-label",
+    "/leader-label",
+    async ({ req, event }) => {
+      const parsed = validateLeaderLabel(bodyString(req, "label"));
+      if (!parsed.ok) return { ok: false, message: parsed.error };
+      const result = await setLeaderLabel({
+        guildId: event.guildId,
+        eventId: String(event._id),
+        label: parsed.value,
+      });
+      if (!result.ok) {
+        return {
+          ok: false,
+          message: result.message,
+          errorMessage: result.code,
+        };
+      }
+      return {
+        ok: true,
+        message: `Leaders are now called "${parsed.value}".`,
+        details: { label: parsed.value },
+      };
+    },
+  );
+
+  hostAction(
+    router,
+    "pull-leaders",
+    "/pull-leaders",
+    async ({ req, event, session }) => {
+      // Everything taken from the request and the session before the first await.
+      const to = bodyString(req, "to");
+      const actingId = session.discordUserId;
+      if (to.length === 0 || to.length > 32) {
+        return { ok: false, message: "Choose where to pull the leaders." };
+      }
+      const outcome = await moveEventMembers({
+        client,
+        guildId: event.guildId,
+        eventId: String(event._id),
+        excludeUserIds: hostIds(event, actingId),
+        // Pure, on the fresh row inside the mover's lock: no other lock here.
+        plan: ({ event: fresh, presence }) =>
+          planPullLeaders(fresh, presence, to, actingId),
+      });
+      const result = moveResult(client, event, "pull-leaders", outcome);
+      if (result.details) result.details.destination = to;
+      return result;
+    },
+  );
+}
+
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channelName = channelId
@@ -716,6 +916,12 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
         ?.name ?? null)
     : null;
   const groupsEnabled = event.groupsEnabled === true;
+  const captainsEnabled = groupsEnabled && event.captainsEnabled === true;
+  const leaderOf = new Map(
+    captainsEnabled
+      ? effectiveLeaders(event.groups).map((l) => [l.groupKey, l.userId])
+      : [],
+  );
   return {
     id: String(event._id),
     title: event.title,
@@ -728,9 +934,17 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     groupsEnabled,
     groupLabel: event.groupLabel || "Group",
     leaderLabel: event.leaderLabel || "Leader",
+    captainsEnabled,
     channelLeadMinutes: event.channelLeadMinutes ?? null,
     groups: groupsEnabled
       ? (event.groups ?? []).map((g) => ({
+          leaderName: leaderOf.has(g.key)
+            ? cachedMemberName(
+                client,
+                event.guildId,
+                leaderOf.get(g.key) as string,
+              )
+            : null,
           name: g.name,
           marker: g.marker ?? "",
           kind: g.kind,
@@ -820,6 +1034,9 @@ export function createHostEventsRouter(client: Client): Router {
   // The "Move people" section and its actions (#1192).
   HOST_SECTION_RENDERERS.moves = createMovesSection(client);
   registerMoveActions(router, client);
+  // The "Leaders" section and its actions (#1195).
+  HOST_SECTION_RENDERERS.leaders = createLeadersSection(client);
+  registerLeaderActions(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;

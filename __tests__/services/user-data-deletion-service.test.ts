@@ -134,6 +134,13 @@ const removeMemberFromEvents =
       userId: string,
     ) => Promise<{ matched: number; removed: number; failed: number }>
   >();
+const removeLeaderFromEvents =
+  jest.fn<
+    (
+      guildId: string,
+      userId: string,
+    ) => Promise<{ matched: number; removed: number; failed: number }>
+  >();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -234,6 +241,13 @@ jest.unstable_mockModule(
   }),
 );
 
+jest.unstable_mockModule("../../src/services/event-group-leaders.js", () => ({
+  removeLeaderFromEvents: async (guildId: string, userId: string) => {
+    CALLS.push("event.removeLeaderFromEvents");
+    return removeLeaderFromEvents(guildId, userId);
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
   QuoteChannelManager: {
     getInstance: () => ({ deleteQuoteMessage: jest.fn() }),
@@ -317,6 +331,9 @@ describe("UserDataDeletionService.purge", () => {
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, rendersFailed: 0 });
     removeMemberFromEvents
+      .mockReset()
+      .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
+    removeLeaderFromEvents
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
     purgeForUser.mockReset().mockResolvedValue({
@@ -762,6 +779,26 @@ describe("UserDataDeletionService.purge", () => {
         removed: 2,
       });
       expect(step.error).toContain("1 event(s) could not be updated");
+      expect(report.ok).toBe(false);
+    });
+
+    it("clears the member as a group leader and reports a shortfall (#1195)", async () => {
+      removeLeaderFromEvents.mockResolvedValue({
+        matched: 2,
+        removed: 1,
+        failed: 1,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(removeLeaderFromEvents).toHaveBeenCalledWith(GUILD, USER);
+      const step = stepsFor(report, "event-group-captain")[0];
+      expect(step).toMatchObject({
+        action: "pull-member",
+        matched: 2,
+        removed: 1,
+      });
+      expect(step.error).toContain("group leader");
       expect(report.ok).toBe(false);
     });
 

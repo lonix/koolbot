@@ -269,6 +269,23 @@ describe("POST /events/create with groups (#1188)", () => {
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
+  it("stores the leaders switch only when its box was ticked, and audits it (#1195)", async () => {
+    await create({ groups_enabled: "1", group_0_name: "A" });
+    expect(
+      (mockCreateEvent.mock.calls[0][0] as CreateInput).groups?.captainsEnabled,
+    ).toBe(false);
+    mockCreateEvent.mockClear();
+    const flash = await create({
+      groups_enabled: "1",
+      groups_captains: "1",
+      group_0_name: "A",
+    });
+    expect(flash.type).toBe("ok");
+    expect(
+      (mockCreateEvent.mock.calls[0][0] as CreateInput).groups?.captainsEnabled,
+    ).toBe(true);
+  });
+
   it("refuses an out-of-range channel creation time", async () => {
     const flash = await create({
       groups_enabled: "1",

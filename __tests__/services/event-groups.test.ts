@@ -15,6 +15,7 @@ import {
   validateGroupSetup,
   type GroupSetupInput,
   type RawGroupRow,
+  validateLeaderLabel,
 } from "../../src/services/event-groups.js";
 
 function row(position: number, extra: Partial<RawGroupRow> = {}): RawGroupRow {
@@ -318,6 +319,64 @@ describe("validateGroupSetup", () => {
     expect(errorsOf(input({ leaderLabel: "x".repeat(21) }))[0]).toMatch(
       /^Leader label:/,
     );
+  });
+});
+
+describe("group leaders on the event form (#1195)", () => {
+  it("are off unless the form switched them on, and only with groups on", () => {
+    const off = validateGroupSetup(input(), { maxCount: 15 });
+    expect(off.ok && off.setup.captainsEnabled).toBe(false);
+    const on = validateGroupSetup(input({ captainsEnabled: true }), {
+      maxCount: 15,
+    });
+    expect(on.ok && on.setup.captainsEnabled).toBe(true);
+    // Groups off: the empty setup, whatever else was posted.
+    const plain = validateGroupSetup(
+      input({ enabled: false, captainsEnabled: true }),
+      { maxCount: 15 },
+    );
+    expect(plain.ok && plain.setup.captainsEnabled).toBe(false);
+  });
+
+  it("are read from the leaders checkbox", () => {
+    expect(parseGroupForm({ groups_enabled: "1" }).captainsEnabled).toBe(false);
+    expect(
+      parseGroupForm({ groups_enabled: "1", groups_captains: "1" })
+        .captainsEnabled,
+    ).toBe(true);
+    expect(
+      parseGroupForm({ groups_captains: ["1", "1"] }).captainsEnabled,
+    ).toBe(false);
+  });
+
+  it("a preset's groups never switch them on", () => {
+    const result = validateGroupSetup(
+      input({ presetId: "builtin:wardogs", rows: [] }),
+      { maxCount: 15 },
+    );
+    expect(result.ok && result.setup.captainsEnabled).toBe(false);
+  });
+
+  it("the next occurrence of a series keeps the switch but not the leaders", () => {
+    const copy = copyGroupSetup({
+      groupsEnabled: true,
+      captainsEnabled: true,
+      groups: [{ key: "g_1", name: "A", kind: "team", captainId: "u9" }],
+    });
+    expect(copy.captainsEnabled).toBe(true);
+    expect(copy.groups[0].captainId).toBeNull();
+  });
+});
+
+describe("validateLeaderLabel", () => {
+  it("takes a name, collapses spaces, defaults an empty one and refuses a bad one", () => {
+    expect(validateLeaderLabel("  Squad   Lead ")).toEqual({
+      ok: true,
+      value: "Squad Lead",
+    });
+    expect(validateLeaderLabel("")).toEqual({ ok: true, value: "Leader" });
+    expect(validateLeaderLabel("x".repeat(21))).toMatchObject({ ok: false });
+    expect(validateLeaderLabel("bad\u0007")).toMatchObject({ ok: false });
   });
 });
 

@@ -2570,6 +2570,7 @@ function renderGroupsSection(
       <label>What a leader is called (e.g. Leader, Captain)
         <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
       </label>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
       <label>Create channels this many minutes before the start (empty = server default)
         <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Server default">
       </label>

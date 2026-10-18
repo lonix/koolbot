@@ -264,6 +264,27 @@ describe("validatePresetForm", () => {
     expect(r.data.groups).toHaveLength(2);
   });
 
+  it("never stores or carries the leaders switch: a preset has no default for leaders (#1195)", () => {
+    const r = svc.validatePresetForm(body({ groups_captains: "1" }), {
+      maxCount: 15,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(Object.keys(r.data).sort()).toEqual(
+      [
+        "channelLeadMinutes",
+        "description",
+        "groupLabel",
+        "groups",
+        "leaderLabel",
+        "name",
+      ].sort(),
+    );
+    expect(svc.presetToFormValues(r.data)).not.toHaveProperty(
+      "groups_captains",
+    );
+  });
+
   it("runs the event form's own rules on the groups", () => {
     const r = svc.validatePresetForm(
       body({

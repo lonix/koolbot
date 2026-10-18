@@ -151,6 +151,9 @@ export interface MoveEventRow {
   groupsEnabled?: boolean;
   channelId?: string | null;
   createdBy?: string;
+  /** Read by the leader planner (#1195). */
+  captainsEnabled?: boolean;
+  leaderLabel?: string;
   groups?: Array<{
     key: string;
     name: string;
@@ -158,6 +161,7 @@ export interface MoveEventRow {
     size?: number | null;
     channelId?: string | null;
     memberIds?: string[];
+    captainId?: string | null;
   }>;
 }
 
