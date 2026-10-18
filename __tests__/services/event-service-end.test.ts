@@ -513,21 +513,31 @@ describe("a scan that loaded the event before a manual end", () => {
 
   it("the scheduled attempt that loses to a manual end leaves the work to the manual one", async () => {
     const { service, guild } = setup();
-    store.set(
-      ID,
-      stored({
-        groupsEnabled: true,
-        groups: [
-          {
-            key: "g_a",
-            name: "A",
-            kind: "team",
-            channelId: "c1",
-            memberIds: [],
-          },
-        ],
-      }),
+    const groups = [
+      { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
+    ];
+    store.set(ID, stored({ groupsEnabled: true, groups }));
+    // The scan's copy is open and past its end. It starts before any end is
+    // under way (so the scan's first look finds no hold) and stalls on the
+    // read of its adopted Discord event.
+    let releaseScan!: () => void;
+    service.nativeSync.pullAdopted = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseScan = () => resolve("ok");
+        }),
     );
+    const event = row({
+      nativeAdopted: true,
+      announcementMessageId: "m1",
+      groupsEnabled: true,
+      groups,
+    });
+    const scan = service.processEvent(event, guild, AFTER_END, WINDOWS);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(service.nativeSync.pullAdopted).toHaveBeenCalledTimes(1);
+
+    // A manual end now wins the claim and stalls in its group channel cleanup.
     let releaseCleanup!: () => void;
     service.groupChannels.cleanup = jest.fn(
       () =>
@@ -537,20 +547,17 @@ describe("a scan that loaded the event before a manual end", () => {
     );
     const manual = service.endEventNow(ID, "guild-1", { pullBack: false });
     await new Promise((r) => setTimeout(r, 10));
-    // The scan's copy is open and past its end: it tries to end it too.
-    const event = row({
-      groupsEnabled: true,
-      groups: [
-        { key: "g_a", name: "A", kind: "team", channelId: "c1", memberIds: [] },
-      ],
-    });
-    await service.processEvent(event, guild, AFTER_END, WINDOWS);
-    // It lost, saw the manual end still working, and did nothing more.
+    expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
+
+    // The scan wakes up, tries to end the event on its schedule, loses the
+    // claim, sees the manual end still working and does nothing more.
+    releaseScan();
+    await scan;
     expect(event.save).not.toHaveBeenCalled();
     expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
     expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
     releaseCleanup();
-    await manual;
+    expect((await manual).status).toBe("ended");
   });
 
   it("a copy that follows an end made long ago does not write the end again", async () => {
