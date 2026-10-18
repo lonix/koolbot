@@ -175,7 +175,7 @@ export class EventTeardown {
     const event = input.event ?? claimed.doc;
     if (input.event) {
       // The scan's copy follows the claim, so the rest of its tick sees an
-      // ended event. (Writing the same values again on its save is harmless.)
+      // ended event.
       event.state = "ended";
       event.endedAt = input.endedAt;
       // The claim already wrote both. The scan's later `save()` must not write
