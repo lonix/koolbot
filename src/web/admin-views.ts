@@ -5,6 +5,7 @@
  */
 
 import { scriptTag } from "./html.js";
+import { hostPanelPath } from "./host-panel-shared.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -2645,11 +2646,15 @@ export function renderEventsPage(props: EventsProps): string {
       const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?">${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
       // A finished occurrence still awaiting its successor (e.g. recurrence
       // was switched off meanwhile) keeps the series live: allow stopping it.
+      // The host panel lives on the member surface (#1189); an admin may open
+      // it for any event, including a finished one (read-only summary).
+      const hostLink = `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
       const actions = finished
         ? e.awaitingSuccessor
-          ? seriesForm
-          : '<span class="muted">—</span>'
-        : `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
+          ? `${hostLink}\n  ${seriesForm}`
+          : hostLink
+        : `${hostLink}
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;

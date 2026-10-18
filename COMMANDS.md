@@ -994,7 +994,9 @@ administrators (admin panel); `/me` is for everyone (personal settings).
 **Description:** Open your personal Koolbot settings. Sends you a
 single-use, time-limited sign-in link via DM that opens the **personal
 self-service surface** (`/me/`): birthday, timezone, notification opt-ins,
-voice presets, Rewind, and privacy export/reset.
+voice presets, Rewind, and privacy export/reset. If you created an
+upcoming event, the overview also lists it under **Events you host**, with a
+link to its host panel (`/me/events/<id>/host`, see `WEBUI.md`).
 
 **Permission:** Every guild member, admins included. `/me` **always**
 issues a `user`-role session, even for administrators, so a personal link

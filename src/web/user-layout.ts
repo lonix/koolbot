@@ -12,6 +12,7 @@
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
 import { THEME } from "./theme.js";
+import { hostPanelPath } from "./host-panel-shared.js";
 import {
   DAY_NAMES,
   formatHourLabel,
@@ -473,6 +474,14 @@ export function renderUserIndexBody(opts: {
   // Whether the feature-gated Privacy page is enabled (#719). When false, its
   // card is not rendered at all (#1066).
   privacyEnabled?: boolean;
+  // Open events the member created (#1189), each linking to its host panel.
+  // Empty or absent hides the card.
+  hostedEvents?: Array<{
+    id: string;
+    title: string;
+    when: string;
+    state: string;
+  }>;
   // The member's poll-participation summary (#655), or null/undefined when
   // poll-participation capture is off or the member has never voted. When
   // present, a small read-only "Poll participation" card surfaces their
@@ -531,6 +540,23 @@ export function renderUserIndexBody(opts: {
           "See what Koolbot stores about you — and download all of it as a single JSON file.",
           true,
         );
+  // Events the member created (#1189): one link per event to its host panel.
+  const hosted = opts.hostedEvents ?? [];
+  const hostedCard =
+    hosted.length > 0
+      ? [
+          '<div class="card">',
+          "<h2>Events you host</h2>",
+          '<ul class="feature-list">',
+          ...hosted.map(
+            (e) =>
+              `<li><span class="feature-name"><a href="${escapeHtml(hostPanelPath(e.id))}">Host panel: ${escapeHtml(e.title)}</a></span>` +
+              `<span class="feature-desc">${escapeHtml(e.when)} · ${escapeHtml(e.state)}</span></li>`,
+          ),
+          "</ul>",
+          "</div>",
+        ].join("")
+      : "";
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;
@@ -575,6 +601,7 @@ export function renderUserIndexBody(opts: {
     privacyCard,
     "</ul>",
     "</div>",
+    hostedCard,
     pollCard,
     '<div class="card">',
     "<h2>Account context</h2>",

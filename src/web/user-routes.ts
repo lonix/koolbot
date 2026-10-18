@@ -92,6 +92,9 @@ import {
 import { renderSignedOut } from "./views.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { createHostEventsRouter } from "./routes/host-events.js";
+import { listHostedEvents } from "./event-host.js";
+import { formatEventWhen } from "../services/event-service.js";
 
 // Everything on the `/me` surface may carry member-supplied strings, so every
 // audit row written from here is bounded first (#1142).
@@ -558,6 +561,11 @@ export function createUserRouter(
     writeLimiter(req, res, next);
   });
 
+  // ---------- Event host panel (#1189) ----------
+  // Behind the session check and the write limiter above. The sub-router's
+  // own gate (CSRF, then the event-host check) covers every path under it.
+  router.use("/events/:id/host", createHostEventsRouter(client));
+
   // ---------- Index ----------
   router.get(
     "/",
@@ -570,6 +578,14 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
+      const hostedEvents = (
+        await listHostedEvents(session.guildId, session.discordUserId)
+      ).map((e) => ({
+        id: e.id,
+        title: e.title,
+        when: formatEventWhen(e),
+        state: e.state,
+      }));
 
       // Read-only poll-participation summary for the overview card (#655).
       // Only fetched when capture is on; a member who has never voted has no
@@ -589,6 +605,7 @@ export function createUserRouter(
             guildId: session.guildId,
             isAdmin: session.role === "admin",
             ...flags,
+            hostedEvents,
             pollParticipation: pollParticipation
               ? {
                   totalVotes: pollParticipation.totalVotes,
