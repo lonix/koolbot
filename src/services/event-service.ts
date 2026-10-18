@@ -735,6 +735,9 @@ export class EventService extends ScheduledService {
         guild,
         windows.native,
       );
+      // The read above is an await: an end that began meanwhile (an adopted
+      // event can be `active` during its channel lead) makes this copy older.
+      if (this.mustSkipScan(event)) return;
       if (outcome === "gone") {
         // Before the start only. A temp channel that already has people in it
         // is left alone this tick; the check is repeated on the next scan.
@@ -744,6 +747,9 @@ export class EventService extends ScheduledService {
         ) {
           return;
         }
+        // ...and so is the occupancy check. `cancelOne` also writes only if the
+        // stored state is still the one this copy decided from.
+        if (this.mustSkipScan(event)) return;
         await this.cancelOne(event, windows.native, windows.skipNative);
         return;
       }
@@ -1406,14 +1412,33 @@ export class EventService extends ScheduledService {
     nativeCache?: NativeCache | null,
     skipNative = false,
   ): Promise<void> {
-    if (event.channelId) {
+    // The cancel is saved FIRST and only if the stored state is still the one
+    // this copy decided from: a copy that is older than an end ("End event
+    // now") must neither delete the channel nor turn `ended` into `cancelled`.
+    const channelId = event.channelId;
+    const saved = await Event.updateOne(
+      { _id: event._id, state: event.state },
+      { $set: { state: "cancelled", channelId: null } },
+    );
+    if ((saved as { matchedCount?: number } | undefined)?.matchedCount === 0) {
+      logger.info(
+        `Event ${sanitizeForLog(String(event._id))} changed since it was read; not cancelled`,
+      );
+      return;
+    }
+    event.state = "cancelled";
+    event.channelId = null;
+    // Both are written; the save below carries only the other fields (a caller
+    // may have set `seriesCancelled`) and must not write them again.
+    const doc = event as unknown as { $ignore?: (path: string) => void };
+    doc.$ignore?.("state");
+    doc.$ignore?.("channelId");
+    if (channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
         .catch(() => null);
-      if (guild) await this.deleteEventChannel(guild, event.channelId);
-      event.channelId = null;
+      if (guild) await this.deleteEventChannel(guild, channelId);
     }
-    event.state = "cancelled";
     await event.save();
     // Group channels (#1190) are removed once the cancel is saved: the cleanup
     // only acts on an event it reads back as cancelled. Occupied ones, and any

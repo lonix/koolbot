@@ -73,6 +73,7 @@ interface Priv {
   updateAnnouncement: jest.Mock;
   postReminder: jest.Mock;
   deleteEventChannel: jest.Mock;
+  cancelOne: (e: unknown) => Promise<void>;
   groupChannels: { reconcile: jest.Mock; cleanup: jest.Mock };
   teardown: { run: (i: Record<string, unknown>) => Promise<unknown> };
   linkVerified: Map<string, string>;
@@ -800,5 +801,111 @@ describe("a scan that overlaps an end in progress", () => {
     await scan;
     // The scan's copy is still open, but it must not write the post now.
     expect(edit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a cancel that decided on an older copy (an adopted event gone in Discord)", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  // The cancel write is conditional on the stored state, like the claim.
+  function statefulUpdateOne(): void {
+    EventMock.updateOne = jest.fn(
+      async (filter: Record<string, unknown>, update: { $set: Row }) => {
+        const r = store.get(filter._id as string);
+        if (!r || (filter.state !== undefined && r.state !== filter.state)) {
+          return { matchedCount: 0 };
+        }
+        Object.assign(r, update.$set);
+        return { matchedCount: 1, modifiedCount: 1 };
+      },
+    );
+  }
+
+  const adopted = (): Row =>
+    row({ nativeAdopted: true, announcementMessageId: "m1" });
+
+  it("does not cancel or delete the channel when an end landed during the read of the adopted event", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    let release!: () => void;
+    service.nativeSync.pullAdopted = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve("gone");
+        }),
+    );
+    const event = adopted();
+    const scan = service.processEvent(
+      event,
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      WINDOWS,
+    );
+    await nap();
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("ended");
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("ended");
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    expect(event.save).not.toHaveBeenCalled();
+  });
+
+  it("does not cancel when an end landed during the occupancy check", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    service.nativeSync.pullAdopted = jest.fn(async () => "gone");
+    // The channel is not cached, so the occupancy check reads it from Discord.
+    let release!: () => void;
+    guild.channels.fetch = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(null);
+        }),
+    );
+    const event = adopted();
+    const scan = service.processEvent(
+      event,
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      WINDOWS,
+    );
+    await nap();
+    expect(guild.channels.fetch).toHaveBeenCalledTimes(1);
+    guild.channels.fetch = jest.fn(async () => null);
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("ended");
+    release();
+    await scan;
+    expect(store.get(ID)?.state).toBe("ended");
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    expect(event.save).not.toHaveBeenCalled();
+  });
+
+  it("cancelOne itself never turns an ended event into a cancelled one, nor deletes its channel", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "ended", endedAt: new Date() }));
+    const stale = row({ state: "active" });
+    await service.cancelOne(stale);
+    expect(store.get(ID)?.state).toBe("ended");
+    expect(store.get(ID)?.channelId).toBe("main-1");
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    expect(stale.save).not.toHaveBeenCalled();
+    expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
+  });
+
+  it("a cancel of an open event still saves, deletes the channel and syncs", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    const event = row({ state: "active" });
+    await service.cancelOne(event);
+    expect(store.get(ID)?.state).toBe("cancelled");
+    expect(store.get(ID)?.channelId).toBeNull();
+    expect(service.deleteEventChannel).toHaveBeenCalledTimes(1);
+    expect(event.save).toHaveBeenCalledTimes(1);
+    expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
   });
 });
