@@ -118,7 +118,7 @@ const { CommandManager } =
 const { cancellableCall } = await import("../../src/web/channel-write-rest.js");
 const { buildLeadsOverwrites, LEADS_LEADER_PERMISSIONS } =
   await import("../../src/services/event-leads-access.js");
-const { installLeadsChannelSync, syncLeadsAccess } =
+const { installLeadsChannelSync, syncLeadsAccess, evictFromLeads } =
   await import("../../src/services/event-leads-sync.js");
 const { setGroupLeader, installLeaderCleanup, removeLeaderFromEvents } =
   await import("../../src/services/event-group-leaders.js");
@@ -1379,6 +1379,157 @@ describe("Move Members granted in the events category only", () => {
     setCaptain("a", null);
     await w.run(() => [L1]);
     expect(w.where(L1)).toBe("ch-a");
+  });
+});
+
+describe("the generation is taken before the event is read", () => {
+  it("withdraws a move when the leader was reappointed while the older row was still on its way", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    uninstallSync = installLeadsChannelSync(
+      async () => undefined,
+      (change) => w.gc.trackLeaderChange(change.eventId, change),
+    );
+    // L1 was cleared as leader (the row says so) and sits in the channel.
+    setCaptain("a", null);
+    w.place(L1, "ch-leads");
+    const stale = JSON.parse(JSON.stringify(store.get(EV)));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const original = Event.findById;
+    let reads = 0;
+    // The mover's read (the second) is answered with the row as it was before
+    // the reappointment, after the reappointment has completed.
+    Event.findById = ((id: string) => ({
+      lean: async () => {
+        reads += 1;
+        const snapshot = reads <= 2 ? JSON.parse(JSON.stringify(stale)) : null;
+        if (reads === 2) await gate;
+        return snapshot ?? JSON.parse(JSON.stringify(store.get(id)));
+      },
+    })) as never;
+    try {
+      const evicting = evictFromLeads({
+        client: w.client as never,
+        channels: w.gc,
+        guildId: GUILD,
+        eventId: EV,
+        revoked: [L1],
+      });
+      await settle();
+      expect(reads).toBe(2);
+      await setGroupLeader({
+        guildId: GUILD,
+        eventId: EV,
+        groupKey: "a",
+        userId: L1,
+        admission: 1,
+      });
+      release();
+      await evicting;
+    } finally {
+      Event.findById = original;
+    }
+    expect(w.moves).toEqual([]);
+    expect(w.where(L1)).toBe("ch-leads");
+  });
+});
+
+describe("verification after an incomplete pass", () => {
+  it("is not kept from before: a verified channel is checked again once the category can be read", async () => {
+    seed();
+    const w = makeWorld({
+      categoryOverwrites: [
+        { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: 0n },
+      ],
+    });
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    expect((await w.sync()).wrote).toBe(0);
+    const event = store.get(EV) as never;
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    // A leader change while the category cannot be read: the grant lands,
+    // the pass cannot judge View, and says so.
+    w.hooks.fetchError.set(CATEGORY, new Error("gateway down"));
+    setCaptain("a", L2);
+    store
+      .get(EV)
+      ?.groups.find((g) => g.key === "a")
+      ?.memberIds.push(L2);
+    expect((await w.sync()).status).toBe("ok");
+    expect(allowOf(w, L2)).toBe(LEADS_LEADER_PERMISSIONS);
+    w.hooks.fetchError.clear();
+    jest.useFakeTimers({
+      now: Date.now() + 6 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      // The cached overwrites match, but the channel is no longer known to be
+      // right: the scan asks for another look, which clears the report.
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      expect((await w.sync()).status).toBe("ok");
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(
+      (w.gc.getReport(EV)?.failures ?? []).filter((f) => f.key === "#leads"),
+    ).toEqual([]);
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+  });
+
+  it("is not kept from before when a pass with nothing to write cannot read the category", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    await w.sync();
+    expect((await w.sync()).wrote).toBe(0);
+    const event = store.get(EV) as never;
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    w.hooks.fetchError.set(CATEGORY, new Error("gateway down"));
+    expect((await w.sync()).wrote).toBe(0);
+    w.hooks.fetchError.clear();
+    jest.useFakeTimers({
+      now: Date.now() + 6 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("is not kept from before when the admin groups cannot be read", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["mods"] });
+    w.seedRight();
+    await w.sync();
+    expect((await w.sync()).wrote).toBe(0);
+    // A second instance that never read the admin groups, and cannot.
+    const fresh = new EventGroupChannels(
+      w.client as never,
+      {
+        getPrefix: async () => "E",
+        getGraceMs: async () => 0,
+        getAdminRoleIds: async () => {
+          throw new Error("database down");
+        },
+      },
+      {
+        rest: w.rest as never,
+        paceMs: 0,
+        call: ((fn: (s: AbortSignal) => Promise<unknown>) =>
+          fn(new AbortController().signal)) as never,
+      },
+    );
+    setCaptain("a", null);
+    // Verified before (on this instance too), then an incomplete pass.
+    (fresh as unknown as { leadsChecked: Set<string> }).leadsChecked.add(EV);
+    expect((await fresh.syncLeads(EV, w.guild as never)).status).toBe("ok");
+    expect(
+      (fresh as unknown as { leadsChecked: Set<string> }).leadsChecked.has(EV),
+    ).toBe(false);
   });
 });
 

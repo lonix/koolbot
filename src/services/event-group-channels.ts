@@ -1593,6 +1593,7 @@ export class EventGroupChannels {
       if (ops.length === 0) {
         this.leadsWritten.delete(eventId);
         this.holds.delete(holdKey);
+        if (!enabled || incomplete) this.leadsChecked.delete(eventId);
         if (enabled && incomplete) {
           // The roles could not be cleaned up or granted without knowing the
           // admin groups, or View not judged without the category: not
@@ -1673,6 +1674,8 @@ export class EventGroupChannels {
       this.leadsWritten.set(eventId, planKey);
       this.holds.delete(holdKey);
       this.setLeadsProblem(eventId, LEADS_HOLD, null);
+      // Nothing was settled for sure: whatever was verified before no longer is.
+      if (incomplete || !enabled) this.leadsChecked.delete(eventId);
       if (incomplete) {
         holdFor(incomplete);
         problem(incomplete);

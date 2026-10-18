@@ -123,6 +123,10 @@ export async function evictFromLeads(opts: {
   revoked: readonly string[];
 }): Promise<void> {
   const { client, channels, guildId, eventId } = opts;
+  // The generation first, every read after it: an appointment that lands
+  // while the event is being read (whose answer may be the older row) is then
+  // newer than this plan and withdraws the move.
+  const stamp = channels.leaderStamp();
   const revoked = new Set(opts.revoked);
   // Read before the plan (which runs inside the mover's lock and must not
   // wait on the database): the admins who are never moved.
@@ -133,8 +137,6 @@ export async function evictFromLeads(opts: {
     const probe = leadsId
       ? channels.leadsProbe(ctx.guild, leadsId, admins)
       : null;
-    // Taken in the same tick as the fresh row this plan was made from.
-    const stamp = channels.leaderStamp();
     const wishes = planLeadsEviction(ctx.event, ctx.presence, {
       revoked,
       isAdmin: probe?.isAdmin ?? ((): boolean => true),
