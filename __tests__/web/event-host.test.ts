@@ -185,9 +185,18 @@ describe("renderHostPanelBody", () => {
     expect(html).toContain("Not available yet");
   });
 
-  it("offers one section per definition when groups are on", () => {
+  it("offers one section per definition when groups are on (leaders only while switched on)", () => {
     const html = renderHostPanelBody({ event: base });
-    for (const s of HOST_SECTIONS) expect(html).toContain(`id="host-${s.id}"`);
+    for (const s of HOST_SECTIONS.filter((d) => !d.needsLeaders)) {
+      expect(html).toContain(`id="host-${s.id}"`);
+    }
+    expect(html).not.toContain('id="host-leaders"');
+    const withLeaders = renderHostPanelBody({
+      event: { ...base, captainsEnabled: true },
+    });
+    for (const s of HOST_SECTIONS) {
+      expect(withLeaders).toContain(`id="host-${s.id}"`);
+    }
   });
 
   it("lists group channel problems as a warning, escaped, and nothing when there are none", () => {

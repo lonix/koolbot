@@ -1724,8 +1724,8 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
 - **Not shown in the event post.** Leaders appear on the host panel only.
 - **Member data:** a leader's id is the member's own data: their export lists the event and
   the group they lead (never other leaders), and resetting their data on `/me/privacy`
-  clears it in every event, finished ones too. A leader kept on a finished event stays
-  there as history until then; the event-teardown work (#1193) does not clear it yet.
+  clears it in every event, finished ones too. Leaders are not cleared when an event ends or
+  is cancelled: a leader stays on a finished event as history until that member resets.
 - **Audit:** `event.host.set-leader` (with the group and the person's id),
   `event.host.leader-label` and `event.host.pull-leaders` (counts and the destination
   word, no names). The step that ends a role after an unassign is not audited on its own;
