@@ -1,4 +1,11 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import {
   ChannelType,
   DiscordAPIError,
@@ -13,6 +20,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
     error: jest.fn(),
     debug: jest.fn(),
   },
+  isDebugMode: () => false,
 }));
 
 type Group = {
@@ -66,6 +74,8 @@ const {
   moveMembersBlocker,
   MAX_MOVES_PER_RUN,
 } = await import("../../src/services/event-member-moves.js");
+const { CommandManager } =
+  await import("../../src/services/command-manager.js");
 const { consumeHostMove, withEventMoveLock, resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
 
@@ -871,6 +881,206 @@ describe("third review of #1221", () => {
     if (out.status !== "done") throw new Error("expected done");
     expect(out.report.moved).toEqual(["p"]);
     expect(reasons(out.report).u2).toBe("group-full");
+  });
+});
+
+describe("fourth review of #1221", () => {
+  it("a member who joins the destination while the voice-state read is pending is not 'moved', and no mark is left", async () => {
+    const w = makeWorld();
+    w.place("u3", MAIN);
+    w.readVoice.mockImplementationOnce(async () => {
+      w.place("u3", CH_B); // joined Bravo on their own; the older answer says MAIN
+      return { channelId: MAIN };
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual([]);
+    expect(reasons(out.report).u3).toBe("already-there");
+    expect(w.patch).not.toHaveBeenCalled();
+    // Their later voluntary join is not taken for the host's.
+    expect(consumeHostMove(GUILD, "u3", CH_B)).toBe(false);
+  });
+
+  it("a rate limit wrapped by the call helper (cause) still stops the run", async () => {
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "b"
+            ? { ...g, memberIds: ["u3", "u4", "u5"] }
+            : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld();
+    for (const u of ["u3", "u4", "u5"]) w.place(u, MAIN);
+    w.patchBehaviour.set(
+      "u4",
+      new Error("Failed to move event member after 3 attempts", {
+        cause: rateLimit(),
+      }),
+    );
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["u3"]);
+    expect(out.report.unconfirmed).toEqual([]);
+    expect(reasons(out.report)).toEqual({
+      u4: "rate-limited",
+      u5: "rate-limited",
+    });
+  });
+
+  describe("through the real write client and the real call helper", () => {
+    const response = (
+      status: number,
+      body: unknown,
+      headers: Record<string, string> = {},
+    ) => ({
+      status,
+      statusText: "",
+      ok: status >= 200 && status < 300,
+      headers: new Headers({ "content-type": "application/json", ...headers }),
+      body: null,
+      bodyUsed: false,
+      url: "",
+      arrayBuffer: async () => new ArrayBuffer(0),
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    });
+
+    let managerSpy: { mockRestore: () => void } | null = null;
+    afterEach(() => {
+      managerSpy?.mockRestore();
+      managerSpy = null;
+    });
+
+    /** A world whose moves go through the real REST client, with a scripted network. */
+    function realWorld(
+      network: (user: string, to: string, call: number) => unknown,
+    ) {
+      store.set(
+        EV,
+        makeRow({
+          groups: makeRow().groups.map((g) =>
+            g.key === "b"
+              ? { ...g, memberIds: ["u3", "u4", "u5"] }
+              : { ...g, memberIds: [] },
+          ),
+        }),
+      );
+      const w = makeWorld();
+      for (const u of ["u3", "u4", "u5"]) w.place(u, MAIN);
+      const seen: Array<{ user: string; to: string }> = [];
+      const perUser = new Map<string, number>();
+      const makeRequest = jest.fn(
+        async (url: string, init: { body?: unknown }) => {
+          const user = String(url).split("?")[0].split("/").pop() as string;
+          const to = (JSON.parse(String(init.body)) as { channel_id: string })
+            .channel_id;
+          seen.push({ user, to });
+          const n = (perUser.get(user) ?? 0) + 1;
+          perUser.set(user, n);
+          return network(user, to, n) as never;
+        },
+      );
+      managerSpy = jest
+        .spyOn(CommandManager, "getInstance")
+        .mockReturnValue(
+          Object.create(CommandManager.prototype) as InstanceType<
+            typeof CommandManager
+          >,
+        );
+      const deps = { makeRequest: makeRequest as never, paceMs: 0 };
+      return { w, seen, deps, makeRequest };
+    }
+
+    const runReal = (w: World, deps: { makeRequest: never; paceMs: number }) =>
+      moveEventMembers({
+        client: w.client as never,
+        guildId: GUILD,
+        eventId: EV,
+        plan: ({ event }) => planSendToGroups(event),
+        excludeUserIds: [HOST],
+        deps,
+      });
+
+    it("a rate limit the client rejects is NOT retried and stops the run (the call helper keeps the original error)", async () => {
+      const { w, seen, deps } = realWorld((user, to) => {
+        if (user === "u4") {
+          return response(
+            429,
+            { retry_after: 30, global: false },
+            {
+              "retry-after": "30",
+            },
+          );
+        }
+        w.place(user, to);
+        return response(200, {});
+      });
+      const out = await runReal(w, deps);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(out.report.moved).toEqual(["u3"]);
+      expect(out.report.unconfirmed).toEqual([]);
+      expect(reasons(out.report)).toEqual({
+        u4: "rate-limited",
+        u5: "rate-limited",
+      });
+      // u4 was sent once (not replayed by the call helper), u5 never.
+      expect(seen.map((x) => x.user)).toEqual(["u3", "u4"]);
+      // And u4's mark was cleared: the request did not run.
+      expect(consumeHostMove(GUILD, "u4", CH_B)).toBe(false);
+    });
+
+    it("a move queued behind a rate-limit wait is re-checked when it is really dispatched: a member who left meanwhile is not pulled back", async () => {
+      const { w, seen, deps } = realWorld((user, to, call) => {
+        if (user === "u3" && call === 1) {
+          // Rate limited for a short wait; during it u3 goes elsewhere.
+          w.place("u3", ELSEWHERE);
+          return response(
+            429,
+            { retry_after: 0.05, global: false },
+            {
+              "retry-after": "0.05",
+            },
+          );
+        }
+        w.place(user, to);
+        return response(200, {});
+      });
+      const out = await runReal(w, deps);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u3).toBe("elsewhere");
+      expect(out.report.moved.sort()).toEqual(["u4", "u5"]);
+      // u3 was dispatched once (the 429); the dispatch after the wait was
+      // stopped before it reached the network.
+      expect(seen.filter((x) => x.user === "u3")).toHaveLength(1);
+      expect(w.where("u3")).toBe(ELSEWHERE);
+      expect(consumeHostMove(GUILD, "u3", CH_B)).toBe(false);
+    });
+
+    it("a destination that fills during the wait refuses the queued move at dispatch", async () => {
+      const { w, seen, deps } = realWorld((user, to, call) => {
+        if (user === "u3" && call === 1) {
+          w.place("stranger", CH_B); // Bravo (limit 1, see below) fills
+          return response(
+            429,
+            { retry_after: 0.05, global: false },
+            {
+              "retry-after": "0.05",
+            },
+          );
+        }
+        w.place(user, to);
+        return response(200, {});
+      });
+      // Bravo holds one person.
+      (w.guild.channels.cache.get(CH_B) as { userLimit: number }).userLimit = 1;
+      const out = await runReal(w, deps);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u3).toBe("group-full");
+      expect(seen.filter((x) => x.user === "u3")).toHaveLength(1);
+    });
   });
 });
 

@@ -1627,7 +1627,8 @@ event is scheduled or active.
   as many error explanations and names as still fit (explanations first, then names,
   people whose move was not confirmed first). A long explanation or list of names
   is shortened ("and N more") or left out, never the counts, the warning or the
-  extra note. A rate limit stops the run
+  extra note. A rate limit that Discord says would last more than 20 seconds stops the
+  run (the request is not sent or repeated; shorter waits are waited out)
   and lists the rest as not attempted. One run reads the voice state of, and moves, at most 60
   people, so the page does not wait for minutes; the rest are listed as not
   attempted and you press the button again. People the bot already sees in the
@@ -1642,7 +1643,11 @@ event is scheduled or active.
   checked once more against the live voice state just before the move. The
   voice-state read is the raw answer from Discord and never overwrites the bot's
   own gateway state, so a person who has since moved to another channel is not
-  pulled back out of it.
+  pulled back out of it. A move that has to wait for a short rate limit is checked
+  again at the moment its request really goes out (the person still in one of the
+  event's channels and not already in the destination, the destination not full), and
+  dropped if that no longer holds. A person who joined the destination on their own
+  while the bot was reading their state is listed as already there, not moved.
 - **One run at a time:** while a run is going for an event, a second press answers
   "a move is already in progress" and moves nobody. Live edits of a running event
   will share this lock.

@@ -41,7 +41,9 @@
 
 import {
   ChannelType,
+  DefaultRestOptions,
   DiscordAPIError,
+  HTTPError,
   PermissionFlagsBits,
   RateLimitError,
   Routes,
@@ -50,6 +52,7 @@ import {
   type Guild,
   type VoiceState,
   type REST,
+  type RESTOptions,
   type VoiceChannel,
 } from "discord.js";
 import { Event, type IEvent } from "../models/event.js";
@@ -194,12 +197,39 @@ export interface MoverDeps {
   rest?: REST;
   call?: ApiCaller;
   paceMs?: number;
+  /** Tests: the network under the guarded write client (default: discord.js's). */
+  makeRequest?: RESTOptions["makeRequest"];
 }
 
 let defaultDepsForTests: MoverDeps | undefined;
 /** Tests of callers (the host routes): stand in for Discord for every run. */
 export function setMoverDepsForTests(deps: MoverDeps | undefined): void {
   defaultDepsForTests = deps;
+}
+
+/** Thrown when the member is already in the destination by the time of the write. */
+class AlreadyThereError extends Error {
+  constructor() {
+    super("The member is already in the destination channel");
+    this.name = "AlreadyThereError";
+  }
+}
+
+/**
+ * A rate limit, however it reached us: the write client's own rejection, or
+ * wrapped by `makeDiscordApiCall` (`cause`), or a plain HTTP 429. A 429 means
+ * the request did not run.
+ */
+function isRateLimited(error: unknown, depth = 0): boolean {
+  if (depth > 3 || !error) return false;
+  if (error instanceof RateLimitError) return true;
+  if (
+    (error instanceof DiscordAPIError || error instanceof HTTPError) &&
+    error.status === 429
+  ) {
+    return true;
+  }
+  return isRateLimited((error as { cause?: unknown }).cause, depth + 1);
 }
 
 /** Thrown inside a move attempt when the destination filled up meanwhile. */
@@ -372,6 +402,7 @@ async function runLocked(opts: {
 
 class Mover {
   private restClient: REST | null;
+  private readonly baseMakeRequest?: RESTOptions["makeRequest"];
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
   /** People Discord confirmed moving, by destination (the gateway may lag). */
@@ -382,6 +413,11 @@ class Mover {
   /** People whose move was not confirmed: reserved a place at the destination
    * but never assumed to have left their source. */
   private readonly unconfirmedTo = new Map<string, string>();
+  /**
+   * For each member whose move is queued or in flight: the check that must
+   * still hold at the moment the request actually goes out (see `rest()`).
+   */
+  private readonly dispatchGuards = new Map<string, () => void>();
   /** Moves sent and not answered yet: member -> destination. */
   private readonly inflight = new Map<string, string>();
   /** Members whose arrival at the destination was seen while in flight. */
@@ -394,6 +430,7 @@ class Mover {
     private readonly eventChannels: Set<string>,
     deps: MoverDeps = {},
   ) {
+    this.baseMakeRequest = deps.makeRequest;
     this.restClient = deps.rest ?? null;
     this.callOverride = deps.call;
     this.paceMs = deps.paceMs ?? MOVE_PACE_MS;
@@ -628,21 +665,30 @@ class Mover {
       const attempt = markHostMove(this.guild.id, userId, toChannelId);
       this.inflight.set(userId, toChannelId);
       this.arrived.delete(userId);
+      // The checks that must hold when the request is sent: the member still
+      // in an event channel (and not already in the destination), and the
+      // destination not full. They run when the move is enqueued AND again,
+      // through the write client's `makeRequest`, at the moment the request
+      // actually goes out, so a rate-limit wait in the client's queue cannot
+      // leave a stale decision behind.
+      const assertMovable = (): string => {
+        const live = this.guild.voiceStates.cache.get(userId)?.channelId;
+        if (!live || !this.eventChannels.has(live)) {
+          throw new MovedAwayError(!!live);
+        }
+        if (live === toChannelId) throw new AlreadyThereError();
+        if (this.isFull(toChannelId, dest.limit)) {
+          throw new DestinationFullError();
+        }
+        return live;
+      };
+      this.dispatchGuards.set(userId, () => {
+        assertMovable();
+      });
       try {
         await this.call(
           (signal) => {
-            // The gateway's live state, in the same tick as the request: the
-            // person may have left the event's channels since the read above.
-            const live = this.guild.voiceStates.cache.get(userId)?.channelId;
-            if (!live || !this.eventChannels.has(live)) {
-              throw new MovedAwayError(!!live);
-            }
-            startsFrom = live;
-            // And the destination's size, in the same tick as the request:
-            // someone may have joined while this move waited its turn.
-            if (this.isFull(toChannelId, dest.limit)) {
-              throw new DestinationFullError();
-            }
+            startsFrom = assertMovable();
             return this.rest().patch(
               Routes.guildMember(this.guild.id, userId),
               {
@@ -665,13 +711,18 @@ class Mover {
           this.confirmedTo.set(userId, { from: startsFrom, to: toChannelId });
         }
       } catch (error) {
-        if (error instanceof DestinationFullError) {
+        if (error instanceof AlreadyThereError) {
+          // Arrived on its own meanwhile: nothing was sent, and the join that
+          // already happened must not be taken as ours.
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
+          skip(userId, "already-there");
+        } else if (error instanceof DestinationFullError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "group-full");
         } else if (error instanceof MovedAwayError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, error.connected ? "elsewhere" : "not-connected");
-        } else if (error instanceof RateLimitError) {
+        } else if (isRateLimited(error)) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           rateLimited = true;
           skip(userId, "rate-limited");
@@ -698,6 +749,7 @@ class Mover {
           );
         }
       } finally {
+        this.dispatchGuards.delete(userId);
         this.inflight.delete(userId);
         this.arrived.delete(userId);
       }
@@ -769,7 +821,17 @@ class Mover {
   private rest(): REST {
     if (!this.restClient) {
       if (!this.client.token) throw new Error("The bot is not logged in");
-      this.restClient = createWriteRest(this.client.token);
+      const base = this.baseMakeRequest ?? DefaultRestOptions.makeRequest;
+      const memberPath = new RegExp(
+        `/guilds/${this.guild.id}/members/([^/]+)$`,
+      );
+      this.restClient = createWriteRest(this.client.token, (url, init) => {
+        // Every dispatch (the first, and the one after a rate-limit wait)
+        // passes here: re-check the member before the request really goes out.
+        const id = memberPath.exec(String(url).split("?")[0])?.[1];
+        if (id) this.dispatchGuards.get(id)?.();
+        return base(url, init);
+      });
     }
     return this.restClient;
   }
