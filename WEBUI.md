@@ -1735,7 +1735,10 @@ event as the scan read it, so a cancel or an edited schedule made meanwhile is n
 A scan that loaded an event just before a manual end skips it for the next few minutes instead
 of acting on its older copy, and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
-open copy never edits the announcement post once an end has begun. A recurring event's next occurrence is created by the next scan,
+open copy never edits the announcement post once an end has begun. A cancel is saved first and
+only if the event is still in the state it was decided from, so a cancel decided on an older copy
+(an adopted event reported gone in Discord, say) can neither turn an ended event into a cancelled
+one nor delete its channel. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
