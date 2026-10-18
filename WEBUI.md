@@ -1822,7 +1822,9 @@ or an edited schedule made meanwhile is not overwritten.
 A scan that loaded an event just before a manual end skips it instead of acting on its older
 copy: for at least five minutes after the end landed, and for as long as any scan that started
 before it landed (including one that started while the end was still being saved) is still
-running, so the hold does not rely on a timeout. A cancel takes the same hold. Event ids taken
+running, so the hold does not rely on a timeout. A cancel takes the same hold. If saving the end or the cancel fails (the database is
+unreachable), the hold is not kept forever: it becomes a finite one (the write may have landed),
+so once it is over a scan carries on with the event as usual. Event ids taken
 from a request are normalised to lower-case hex once, so an upper-case id cannot key a second,
 unseen set of holds, and it does not touch the event at all while a teardown is running
 (so a grace period of 0 cannot remove the main channel before the pull-back has used it); an
