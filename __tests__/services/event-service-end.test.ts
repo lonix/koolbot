@@ -812,7 +812,12 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     EventMock.updateOne = jest.fn(
       async (filter: Record<string, unknown>, update: { $set: Row }) => {
         const r = store.get(filter._id as string);
-        if (!r || (filter.state !== undefined && r.state !== filter.state)) {
+        const wanted = filter.state as string | { $in: string[] } | undefined;
+        const states = typeof wanted === "string" ? [wanted] : wanted?.$in;
+        if (
+          !r ||
+          (states !== undefined && !states.includes(r.state as string))
+        ) {
           return { matchedCount: 0 };
         }
         Object.assign(r, update.$set);
@@ -897,6 +902,102 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     expect(service.nativeSync.syncEvent).not.toHaveBeenCalled();
   });
 
+  it("cancelOne reports whether this call cancelled the event", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    const open = await (
+      service as unknown as { cancelOne: (e: unknown) => Promise<boolean> }
+    ).cancelOne(row({ state: "active" }));
+    expect(open).toBe(true);
+    store.set(ID, stored({ state: "ended", endedAt: new Date() }));
+    const ended = await (
+      service as unknown as { cancelOne: (e: unknown) => Promise<boolean> }
+    ).cancelOne(row({ state: "active" }));
+    expect(ended).toBe(false);
+  });
+
+  it("a cancel from an admin page opened earlier cannot cancel an event that is being ended (its main channel survives)", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    let releaseAnnouncement!: () => void;
+    service.updateAnnouncement = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseAnnouncement = () => resolve(true);
+        }),
+    );
+    const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+    await nap();
+    expect(store.get(ID)?.state).toBe("ended");
+    const svc = service as unknown as {
+      cancelEvent: (id: string, g: string) => Promise<{ state: string } | null>;
+      spawnNextOccurrence: jest.Mock;
+    };
+    svc.spawnNextOccurrence = jest.fn();
+    const result = await svc.cancelEvent(ID, "guild-1");
+    // Not cancelled: the row is ended, the caller can see it, the channel and
+    // the record are untouched and no successor is made.
+    expect(result?.state).toBe("ended");
+    expect(store.get(ID)?.channelId).toBe("main-1");
+    expect(service.deleteEventChannel).not.toHaveBeenCalled();
+    expect(svc.spawnNextOccurrence).not.toHaveBeenCalled();
+    releaseAnnouncement();
+    await ending;
+  });
+
+  it("a cancel still applies when the scan turned the scheduled event active after the read", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    // The admin page read `scheduled`; the stored row is now `active`.
+    store.set(ID, stored({ state: "active" }));
+    const svc = service as unknown as {
+      cancelEvent: (id: string, g: string) => Promise<{ state: string } | null>;
+      getEvent: (id: string) => Promise<unknown>;
+    };
+    const stale = row({ state: "scheduled" });
+    svc.getEvent = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValue({ ...stored({ state: "cancelled" }) });
+    const result = await svc.cancelEvent(ID, "guild-1");
+    expect(store.get(ID)?.state).toBe("cancelled");
+    expect(result?.state).toBe("cancelled");
+  });
+
+  it("a lost cancel claim is reported, not counted, and spawns no successor (series and one-off)", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "ended", endedAt: new Date() }));
+    const svc = service as unknown as {
+      cancelEvent: (id: string, g: string) => Promise<{ state: string } | null>;
+      cancelSeries: (
+        id: string,
+        g: string,
+      ) => Promise<{ event: { state: string }; cancelled: number } | null>;
+      getEvent: (id: string) => Promise<unknown>;
+      spawnNextOccurrence: jest.Mock;
+    };
+    svc.spawnNextOccurrence = jest.fn();
+    // Both calls read the event as open (an older read) and lose the claim.
+    svc.getEvent = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(
+        row({ state: "active", recurrence: "weekly", seriesId: "s1" }),
+      )
+      .mockResolvedValueOnce({ ...stored({ state: "ended" }) });
+    const one = await svc.cancelEvent(ID, "guild-1");
+    expect(one?.state).toBe("ended");
+    expect(svc.spawnNextOccurrence).not.toHaveBeenCalled();
+
+    svc.getEvent = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(row({ state: "active" }))
+      .mockResolvedValueOnce({ ...stored({ state: "ended" }) });
+    const series = await svc.cancelSeries(ID, "guild-1");
+    expect(series?.cancelled).toBe(0);
+    expect(series?.event.state).toBe("ended");
+  });
+
   it("a cancel of an open event still saves, deletes the channel and syncs", async () => {
     const { service } = setup();
     statefulUpdateOne();
@@ -907,5 +1008,62 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     expect(service.deleteEventChannel).toHaveBeenCalledTimes(1);
     expect(event.save).toHaveBeenCalledTimes(1);
     expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the start reminder after an end began", () => {
+  const nap = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+
+  it("an older open copy sends no reminder when the end landed during the channel fetch", async () => {
+    const { service, guild } = setup();
+    // The real reminder, on a text channel whose fetch (the scan's) stalls.
+    delete (service as unknown as { postReminder?: unknown }).postReminder;
+    const send = jest.fn(async () => undefined);
+    const channel = Object.assign(Object.create(TextChannel.prototype), {
+      send,
+    });
+    let release!: () => void;
+    guild.channels.fetch = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(channel);
+        }),
+    );
+    const scan = service.processEvent(
+      row({
+        reminderSent: false,
+        announcementChannelId: "a1",
+        rsvps: [{ userId: "u1", status: "going" }],
+      }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    await nap();
+    expect(guild.channels.fetch).toHaveBeenCalledTimes(1);
+    guild.channels.fetch = jest.fn(async () => null);
+    expect(
+      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
+    ).toBe("ended");
+    release();
+    await scan;
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("without an end the reminder is sent as before", async () => {
+    const { service, guild } = setup();
+    delete (service as unknown as { postReminder?: unknown }).postReminder;
+    const send = jest.fn(async () => undefined);
+    const channel = Object.assign(Object.create(TextChannel.prototype), {
+      send,
+    });
+    guild.channels.fetch = jest.fn(async () => channel);
+    await service.processEvent(
+      row({ reminderSent: false, announcementChannelId: "a1", rsvps: [] }),
+      guild,
+      new Date("2026-07-04T19:50:00Z"),
+      { ...WINDOWS, reminderMs: 30 * MIN },
+    );
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

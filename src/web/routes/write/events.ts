@@ -11,6 +11,7 @@ import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import {
   EventService,
+  isRecurring,
   parseEventDateTime,
   RecurrenceDisabledError,
 } from "../../../services/event-service.js";
@@ -347,15 +348,32 @@ export function createEventsRouter(client: Client): Router {
       const id = String(req.params.id);
       const series = getString(req, "scope") === "series";
       const service = EventService.getInstance(client);
-      const event = series
-        ? ((await service.cancelSeries(id, session.guildId))?.event ?? null)
-        : await service.cancelEvent(id, session.guildId);
-      const ok = event !== null;
+      // The outcome is what the service reports: `cancelled` only when a cancel
+      // was really made (an event that ended, or started ending, meanwhile is
+      // not).
+      let event: { state?: string } | null;
+      let ok: boolean;
+      if (series) {
+        const result = await service.cancelSeries(id, session.guildId);
+        event = result?.event ?? null;
+        // A series cancel also stops further occurrences, so it counts even when
+        // no open occurrence was left to cancel.
+        ok =
+          result !== null &&
+          (result.cancelled > 0 ||
+            result.event.state === "cancelled" ||
+            isRecurring(result.event));
+      } else {
+        event = await service.cancelEvent(id, session.guildId);
+        ok = event !== null && event.state === "cancelled";
+      }
+      const reason =
+        event === null ? "not found or wrong guild" : `event is ${event.state}`;
       await recordAudit(session, {
         action: series ? "event.cancel-series" : "event.cancel",
         targetId: id,
         result: ok ? "success" : "failure",
-        errorMessage: ok ? null : "not found or wrong guild",
+        errorMessage: ok ? null : reason,
       });
       flashRedirect(res, "/admin/events", {
         type: ok ? "ok" : "err",
@@ -363,7 +381,9 @@ export function createEventsRouter(client: Client): Router {
           ? series
             ? `Cancelled the series containing event ${id}.`
             : `Cancelled event ${id}.`
-          : `Event ${id} not found.`,
+          : event === null
+            ? `Event ${id} not found.`
+            : `Event ${id} could not be cancelled: it is ${event.state}.`,
       });
     }),
   );

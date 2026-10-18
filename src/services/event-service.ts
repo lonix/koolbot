@@ -1356,7 +1356,14 @@ export class EventService extends ScheduledService {
     if (guildId && event.guildId !== guildId) return null;
     if (event.state === "cancelled") return event;
 
-    await this.cancelOne(event);
+    // Only a cancel THIS call made is announced as one: a lost claim (the
+    // event ended, or was cancelled by someone else, since it was read) neither
+    // spawns a successor nor reports success. The caller reads `state` of the
+    // returned row: `cancelled` means cancelled, anything else means it was not.
+    const cancelled = await this.cancelOne(event);
+    if (!cancelled) {
+      return (await this.getEvent(eventId)) ?? event;
+    }
     if (isRecurring(event) && !event.nextSpawned && !event.seriesCancelled) {
       await this.spawnNextOccurrence(event, new Date());
     }
@@ -1377,9 +1384,11 @@ export class EventService extends ScheduledService {
     if (!event) return null;
     if (guildId && event.guildId !== guildId) return null;
     if (!isRecurring(event) || !event.seriesId) {
-      const wasLive = event.state !== "cancelled";
-      await this.cancelOne(event);
-      return { event, cancelled: wasLive ? 1 : 0 };
+      const cancelled = await this.cancelOne(event);
+      return {
+        event: cancelled ? event : ((await this.getEvent(eventId)) ?? event),
+        cancelled: cancelled ? 1 : 0,
+      };
     }
 
     // Block spawning first, so an occurrence ending mid-cancel cannot
@@ -1397,8 +1406,7 @@ export class EventService extends ScheduledService {
     for (const occurrence of open) {
       // Rows inserted after the bulk update above are still blocked.
       occurrence.seriesCancelled = true;
-      await this.cancelOne(occurrence);
-      cancelled += 1;
+      if (await this.cancelOne(occurrence)) cancelled += 1;
     }
     logger.info(
       `Cancelled event series ${sanitizeForLog(event.seriesId)} (${cancelled} occurrence(s))`,
@@ -1407,24 +1415,34 @@ export class EventService extends ScheduledService {
     return { event: fresh, cancelled };
   }
 
+  /**
+   * Cancel an open event. Returns whether THIS call cancelled it; callers must
+   * honour that (no success report, no counted cancellation, no successor when
+   * it is false).
+   *
+   * The cancel is saved FIRST, by one atomic update that matches only while the
+   * stored event is still open (`scheduled` or `active`, whichever it has
+   * become since this copy was read: the scan turns `scheduled` into `active`
+   * at the channel lead and that is still a cancel). An event that has ended
+   * (or is being ended: the end claim comes first) matches nothing, so a cancel
+   * decided on an older copy, or from an admin page opened earlier, neither
+   * deletes the main channel nor turns `ended` into `cancelled`.
+   */
   private async cancelOne(
     event: IEvent,
     nativeCache?: NativeCache | null,
     skipNative = false,
-  ): Promise<void> {
-    // The cancel is saved FIRST and only if the stored state is still the one
-    // this copy decided from: a copy that is older than an end ("End event
-    // now") must neither delete the channel nor turn `ended` into `cancelled`.
+  ): Promise<boolean> {
     const channelId = event.channelId;
     const saved = await Event.updateOne(
-      { _id: event._id, state: event.state },
+      { _id: event._id, state: { $in: ["scheduled", "active"] } },
       { $set: { state: "cancelled", channelId: null } },
     );
     if ((saved as { matchedCount?: number } | undefined)?.matchedCount === 0) {
       logger.info(
-        `Event ${sanitizeForLog(String(event._id))} changed since it was read; not cancelled`,
+        `Event ${sanitizeForLog(String(event._id))} is no longer open; not cancelled`,
       );
-      return;
+      return false;
     }
     event.state = "cancelled";
     event.channelId = null;
@@ -1471,6 +1489,7 @@ export class EventService extends ScheduledService {
       await this.nativeSync.syncEvent(event, null, nativeCache);
     }
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
+    return true;
   }
 
   /** Force the temp channel to spin up now, ahead of its scheduled lead. */
@@ -1905,6 +1924,8 @@ export class EventService extends ScheduledService {
     const channel = await this.fetchTextChannel(event.guildId, channelId);
     if (!channel) return;
 
+    // Same: the fetches above can outlast an end that began meanwhile.
+    if (this.mustSkipScan(event)) return;
     const message = await channel.send(this.buildAnnouncementPayload(event));
     // Claim the message id atomically (as `claimEventChannel` does for the
     // channel): the creator and the scan's retry can both be sending at once,
@@ -2060,6 +2081,9 @@ export class EventService extends ScheduledService {
       `⏰ **${event.title}** starts at ${formatEventWhen(event)}.${where}${link}` +
       (mentions ? `\n${mentions}` : "");
 
+    // The channel fetch above is an await: an older, still-open copy sends no
+    // start reminder (legacy pings, old links) once an end has begun.
+    if (this.mustSkipScan(event)) return;
     await channel.send({
       content,
       allowedMentions: { users: pinged },

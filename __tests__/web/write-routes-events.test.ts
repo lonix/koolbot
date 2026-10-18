@@ -334,7 +334,7 @@ describe("recurring events", () => {
 
 describe("POST /events/:id/cancel and /start-now", () => {
   it("cancels an event scoped to the session's guild", async () => {
-    mockCancelEvent.mockResolvedValue({ _id: "event-1" });
+    mockCancelEvent.mockResolvedValue({ _id: "event-1", state: "cancelled" });
     const res = await harness.post("/events/event-1/cancel");
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(mockCancelEvent).toHaveBeenCalledWith("event-1", session.guildId);
@@ -343,6 +343,35 @@ describe("POST /events/:id/cancel and /start-now", () => {
       action: "event.cancel",
       targetId: "event-1",
       result: "success",
+    });
+  });
+
+  it("does not report success for an event that ended meanwhile (a lost cancel claim)", async () => {
+    mockCancelEvent.mockResolvedValue({ _id: "event-1", state: "ended" });
+    const res = await harness.post("/events/event-1/cancel");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("could not be cancelled");
+    expect(flash.msg).toContain("ended");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.cancel",
+      result: "failure",
+      errorMessage: "event is ended",
+    });
+  });
+
+  it("a series cancel that cancelled nothing of a one-off event is a failure", async () => {
+    mockCancelSeries.mockResolvedValue({
+      event: { _id: "event-1", state: "ended" },
+      cancelled: 0,
+    });
+    const res = await harness.post("/events/event-1/cancel", {
+      scope: "series",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.cancel-series",
+      result: "failure",
     });
   });
 
