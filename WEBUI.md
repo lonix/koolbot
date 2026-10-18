@@ -1632,13 +1632,17 @@ event is scheduled or active.
   people, so the page does not wait for minutes; the rest are listed as not
   attempted and you press the button again. People the bot already sees in the
   right channel, not connected, in a channel outside the event, or aimed at a
-  channel that is full right now are skipped without a request and do not count
+  channel that is full right now, or one the bot cannot connect to or move out of
+  according to its cached permissions, are skipped without a request and do not count
   towards the 60, so the second press gets past the people the first one moved.
 - **Pacing and safety:** each person who still has to move is checked against Discord's own voice state and
   moved one at a time, about half a second apart, through the bot's rate-limited
   request path. A move is never repeated after a timeout. Every destination is
   read from Discord before anyone is moved into it, and the person's channel is
-  checked once more against the live voice state just before the move.
+  checked once more against the live voice state just before the move. The
+  voice-state read is the raw answer from Discord and never overwrites the bot's
+  own gateway state, so a person who has since moved to another channel is not
+  pulled back out of it.
 - **One run at a time:** while a run is going for an event, a second press answers
   "a move is already in progress" and moves nobody. Live edits of a running event
   will share this lock.

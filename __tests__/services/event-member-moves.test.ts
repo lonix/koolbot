@@ -152,7 +152,12 @@ function makeRow(over: Partial<Row> = {}): Row {
 
 /** A fake server: voice channels, who is in them, and what Discord answers. */
 function makeWorld(
-  opts: { limits?: Record<string, number>; mePerms?: bigint[] | null } = {},
+  opts: {
+    limits?: Record<string, number>;
+    mePerms?: bigint[] | null;
+    /** Channels where the bot lacks Connect. */
+    denyConnect?: string[];
+  } = {},
 ) {
   const limits: Record<string, number> = {
     [CH_A]: 2,
@@ -198,7 +203,14 @@ function makeWorld(
           ? null
           : {
               permissions: { has: (bit: bigint) => allowed(bit) },
-              permissionsIn: () => ({ has: (bit: bigint) => allowed(bit) }),
+              permissionsIn: (ch: { id: string }) => ({
+                has: (bit: bigint) =>
+                  allowed(bit) &&
+                  !(
+                    bit === PermissionFlagsBits.Connect &&
+                    (opts.denyConnect ?? []).includes(ch.id)
+                  ),
+              }),
             },
     },
     channels: {
@@ -218,21 +230,35 @@ function makeWorld(
           return c ? { channelId: c } : undefined;
         },
       },
+      // Models discord.js: `voiceStates.fetch` writes the REST answer over the
+      // cached gateway state (`VoiceStateManager._add` patches an existing
+      // entry). The mover must not use it.
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       fetch: jest.fn(async (id: string, _o?: unknown) => {
-        if (voiceReadFail.has(id)) throw voiceReadFail.get(id);
-        const c = inChannel.get(id);
-        if (!c) throw apiError(10065, "GET");
-        return { channelId: c };
+        const r = await readVoice(id);
+        inChannel.set(id, r.channelId);
+        return r;
       }),
     },
   };
+  /** The raw `GET /guilds/{guild}/voice-states/{user}` answer, scriptable. */
+  const readVoice = jest.fn(async (id: string) => {
+    if (voiceReadFail.has(id)) throw voiceReadFail.get(id);
+    const c = inChannel.get(id);
+    if (!c) throw apiError(10065, "GET");
+    return { channelId: c as string };
+  });
+  const restGet = jest.fn(async (route: string) => {
+    const r = await readVoice(route.split("/").pop() as string);
+    return { channel_id: r.channelId };
+  });
   const voiceListeners = new Set<(o: unknown, n: unknown) => void>();
   const client = {
     guilds: {
       cache: { get: (id: string) => (id === GUILD ? guild : undefined) },
     },
     token: "t",
+    rest: { get: restGet },
     on: (_event: string, fn: (o: unknown, n: unknown) => void) => {
       voiceListeners.add(fn);
     },
@@ -255,6 +281,8 @@ function makeWorld(
     guild,
     client,
     patch,
+    readVoice,
+    restGet,
     /** The gateway announces a voice change (the cache is set by `place`). */
     emitVoice: (user: string, channel: string | null) => {
       for (const fn of [...voiceListeners]) {
@@ -519,7 +547,7 @@ describe("send to groups", () => {
     if (first.status !== "done") throw new Error("expected done");
     expect(first.report.moved).toHaveLength(MAX_MOVES_PER_RUN);
     w.patch.mockClear();
-    w.guild.voiceStates.fetch.mockClear();
+    w.readVoice.mockClear();
     const second = await run(w, ({ event }) => planSendToGroups(event));
     if (second.status !== "done") throw new Error("expected done");
     expect(second.report.moved).toEqual(ids.slice(MAX_MOVES_PER_RUN));
@@ -527,7 +555,7 @@ describe("send to groups", () => {
       second.report.skipped.filter((s) => s.reason === "already-there"),
     ).toHaveLength(MAX_MOVES_PER_RUN);
     // People already in place cost no request at all.
-    expect(w.guild.voiceStates.fetch).toHaveBeenCalledTimes(3);
+    expect(w.readVoice).toHaveBeenCalledTimes(3);
     expect(w.patch).toHaveBeenCalledTimes(3);
     ids.forEach((id) => expect(w.where(id)).toBe(CH_B));
   });
@@ -536,7 +564,7 @@ describe("send to groups", () => {
     const w = makeWorld();
     w.place("u3", MAIN);
     // Discord's read says MAIN; by the time of the write the gateway has them elsewhere.
-    w.guild.voiceStates.fetch.mockImplementationOnce(async () => {
+    w.readVoice.mockImplementationOnce(async () => {
       w.place("u3", ELSEWHERE);
       return { channelId: MAIN };
     });
@@ -572,9 +600,9 @@ describe("send to groups", () => {
     w.place("u3", MAIN);
     await run(w, ({ event }) => planSendToGroups(event));
     expect(w.guild.channels.fetch).toHaveBeenCalledWith(CH_B, { force: true });
-    expect(w.guild.voiceStates.fetch).toHaveBeenCalledWith("u3", {
-      force: true,
-    });
+    expect(w.restGet).toHaveBeenCalledWith(
+      expect.stringContaining("/voice-states/u3"),
+    );
   });
 
   it("does not replay a move after a timeout", async () => {
@@ -624,7 +652,7 @@ describe("capacity is read live (review of #1221)", () => {
     w.place("u7", CH_A);
     w.place("u1", MAIN);
     w.place("u2", MAIN);
-    w.guild.voiceStates.fetch.mockImplementationOnce(async () => {
+    w.readVoice.mockImplementationOnce(async () => {
       w.place("stranger", CH_A); // a normal join, not a move
       return { channelId: MAIN };
     });
@@ -673,7 +701,7 @@ describe("capacity is read live (review of #1221)", () => {
     w.place("u7", CH_A);
     w.place("p", MAIN);
     w.place("u1", MAIN);
-    w.guild.voiceStates.fetch.mockImplementationOnce(async () => {
+    w.readVoice.mockImplementationOnce(async () => {
       w.place("u7", MAIN); // leaves Alpha on their own
       return { channelId: MAIN };
     });
@@ -759,7 +787,90 @@ describe("capacity is read live (review of #1221)", () => {
       false,
     );
     // Nobody aimed at the full group cost a voice-state read.
-    expect(w.guild.voiceStates.fetch).toHaveBeenCalledTimes(1);
+    expect(w.readVoice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("third review of #1221", () => {
+  it("an older REST answer never overwrites a newer gateway state: nobody is pulled out of an unrelated channel", async () => {
+    const w = makeWorld();
+    w.place("u3", MAIN);
+    w.readVoice.mockImplementationOnce(async () => {
+      // The gateway moves u3 into an unrelated channel while the GET is
+      // pending; the GET then answers with the older state (still MAIN).
+      w.place("u3", ELSEWHERE);
+      return { channelId: MAIN };
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(reasons(out.report).u3).toBe("elsewhere");
+    expect(w.patch).not.toHaveBeenCalled();
+    expect(w.where("u3")).toBe(ELSEWHERE);
+    // The gateway cache was left alone by the read.
+    expect(w.guild.voiceStates.fetch).not.toHaveBeenCalled();
+  });
+
+  it("bot permissions the cache shows missing cost no request and no budget", async () => {
+    const stuck = Array.from(
+      { length: MAX_MOVES_PER_RUN + 1 },
+      (_, i) => `f${i}`,
+    );
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "a"
+            ? { ...g, size: null, memberIds: stuck }
+            : g.key === "b"
+              ? { ...g, memberIds: ["z1"] }
+              : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld({ limits: {}, denyConnect: [CH_A] });
+    for (const id of [...stuck, "z1"]) w.place(id, MAIN);
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["z1"]);
+    expect(
+      out.report.skipped.filter((x) => x.reason === "missing-permission"),
+    ).toHaveLength(stuck.length);
+    expect(out.report.skipped.some((x) => x.reason === "over-limit")).toBe(
+      false,
+    );
+    expect(w.readVoice).toHaveBeenCalledTimes(1);
+  });
+
+  it("a move that starts from another event channel than the one read still records the right source", async () => {
+    // Bravo holds one; p and u2 both go there. p is read in MAIN but is in
+    // the open channel by the time of the write; Discord confirms, the
+    // gateway lags (p still shows in the open channel).
+    store.set(
+      EV,
+      makeRow({
+        groups: makeRow().groups.map((g) =>
+          g.key === "b"
+            ? { ...g, memberIds: ["p", "u2"] }
+            : { ...g, memberIds: [] },
+        ),
+      }),
+    );
+    const w = makeWorld({ limits: { [CH_B]: 1 } });
+    w.place("p", MAIN);
+    w.place("u2", MAIN);
+    const original = w.readVoice.getMockImplementation();
+    w.readVoice.mockImplementationOnce(async (id) => {
+      const r = await (
+        original as (i: string) => Promise<{ channelId: string }>
+      )(id);
+      w.place("p", CH_OPEN); // switches between the read and the write
+      return r;
+    });
+    w.patch.mockImplementationOnce(async () => ({})); // yes; the gateway lags
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["p"]);
+    expect(reasons(out.report).u2).toBe("group-full");
   });
 });
 
@@ -948,8 +1059,8 @@ describe("later voice changes win over the run's bookkeeping (second review of #
     // The next person's voice read happens after their pre-check, which has
     // seen p in Bravo; p then goes back before the write.
     let reads = 0;
-    const original = w.guild.voiceStates.fetch.getMockImplementation();
-    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+    const original = w.readVoice.getMockImplementation();
+    w.readVoice.mockImplementation(async (id, o) => {
       reads += 1;
       if (reads === 2) w.place("p", CH_A);
       return (original as (i: string, x?: unknown) => Promise<unknown>)(
@@ -966,8 +1077,8 @@ describe("later voice changes win over the run's bookkeeping (second review of #
     const w = swapSetup();
     w.patch.mockImplementationOnce(async () => ({})); // yes; the gateway lags
     let reads = 0;
-    const original = w.guild.voiceStates.fetch.getMockImplementation();
-    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+    const original = w.readVoice.getMockImplementation();
+    w.readVoice.mockImplementation(async (id, o) => {
       reads += 1;
       if (reads === 2) {
         // The lagging arrival finally comes, and p goes straight back.
@@ -993,8 +1104,8 @@ describe("later voice changes win over the run's bookkeeping (second review of #
     delete w.client.on;
     w.patch.mockImplementationOnce(async () => ({})); // yes; the gateway lags
     let reads = 0;
-    const original = w.guild.voiceStates.fetch.getMockImplementation();
-    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+    const original = w.readVoice.getMockImplementation();
+    w.readVoice.mockImplementation(async (id, o) => {
       reads += 1;
       // The lagging arrival of p shows up in the cache during q's turn: u2's
       // check then sees it; p goes back during u2's read, before the write.

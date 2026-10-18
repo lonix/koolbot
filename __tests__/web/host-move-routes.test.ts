@@ -201,6 +201,23 @@ function fakeClient(): never {
     guilds: {
       cache: { get: (id: string) => (id === GUILD ? guild : undefined) },
     },
+    // The raw voice-state read the mover makes.
+    rest: {
+      get: async (route: string) => {
+        const c = voice.get(route.split("/").pop() as string);
+        if (!c) {
+          throw new DiscordAPIError(
+            { code: 10065, message: "x" },
+            10065,
+            404,
+            "GET",
+            "/",
+            {},
+          );
+        }
+        return { channel_id: c };
+      },
+    },
   } as never;
 }
 

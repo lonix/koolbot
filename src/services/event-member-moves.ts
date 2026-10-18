@@ -13,8 +13,8 @@
  *   runs on that fresh row. Nothing is decided from a copy loaded earlier.
  * - **Fails closed.** An unreadable event, switch, guild or bot membership
  *   refuses the whole run. Per person, the voice state is read from Discord
- *   (`voiceStates.fetch(id, { force: true })`) and an unreadable one skips
- *   that person. Every destination channel is force-fetched and must be a
+ *   (`GET /guilds/{guild}/voice-states/{user}`, the raw payload, see below)
+ *   and an unreadable one skips that person. Every destination channel is force-fetched and must be a
  *   voice channel of this server that belongs to the event.
  * - **Only out of the event's own channels, only into them.** A person whose
  *   voice channel is not one of the event's (or who is not connected) is
@@ -553,6 +553,12 @@ class Mover {
         skip(userId, "group-full");
         continue;
       }
+      // A permission the cache already shows missing costs no request either
+      // (checked again after the read, from the Discord-read source channel).
+      if (!this.botMayMove(cachedChannel, toChannelId)) {
+        skip(userId, "missing-permission");
+        continue;
+      }
       if (attempted >= MAX_MOVES_PER_RUN) {
         skip(userId, "over-limit");
         continue;
@@ -564,11 +570,19 @@ class Mover {
       // The person's voice state, from Discord.
       let sourceId: string | null;
       try {
-        const state = await this.call(
-          () => this.guild.voiceStates.fetch(userId, { force: true }),
+        // The raw payload, NOT `guild.voiceStates.fetch`: discord.js patches
+        // an existing cached voice state with the REST answer
+        // (`VoiceStateManager._add` -> `existing._patch(data)`, even with
+        // `cache: false`), so an older answer arriving after a newer gateway
+        // update would put the member back where the gateway just said they
+        // no longer are. The gateway cache stays the gateway's.
+        const raw = (await this.call(
+          () =>
+            this.client.rest.get(Routes.guildVoiceState(this.guild.id, userId)),
           "read member voice state",
           true,
-        );
+        )) as { channel_id?: string | null };
+        const state = { channelId: raw?.channel_id ?? null };
         sourceId = state.channelId ?? null;
       } catch (error) {
         if (
@@ -607,6 +621,10 @@ class Mover {
       }
 
       // Marked before the request: the join can reach the gateway first.
+      // Where the move really starts: the live channel in the same tick as
+      // the request (the member may have gone from one event channel to
+      // another since the read).
+      let startsFrom: string = sourceId;
       const attempt = markHostMove(this.guild.id, userId, toChannelId);
       this.inflight.set(userId, toChannelId);
       this.arrived.delete(userId);
@@ -619,6 +637,7 @@ class Mover {
             if (!live || !this.eventChannels.has(live)) {
               throw new MovedAwayError(!!live);
             }
+            startsFrom = live;
             // And the destination's size, in the same tick as the request:
             // someone may have joined while this move waited its turn.
             if (this.isFull(toChannelId, dest.limit)) {
@@ -643,7 +662,7 @@ class Mover {
         // showed (even if the member has since gone back) is in the cache.
         const live = this.guild.voiceStates.cache.get(userId)?.channelId;
         if (!this.arrived.has(userId) && live !== toChannelId) {
-          this.confirmedTo.set(userId, { from: sourceId, to: toChannelId });
+          this.confirmedTo.set(userId, { from: startsFrom, to: toChannelId });
         }
       } catch (error) {
         if (error instanceof DestinationFullError) {
