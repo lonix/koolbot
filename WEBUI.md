@@ -1826,7 +1826,9 @@ still running (the hold does not rely on a timeout), and it does not touch the e
 open copy never edits the announcement post once an end has begun. A cancel is saved first and
 only if the event is still in the state it was decided from, so a cancel decided on an older copy
 (an adopted event reported gone in Discord, say) can neither turn an ended event into a cancelled
-one nor delete its channel. Cancelling reports whether it really cancelled: an event that has
+one nor delete its channel. A cancel keeps the event's main channel id on the record until Discord
+confirms the channel is gone (deleted, or already missing), and takes the id from the row as it is
+at the claim; if the delete fails or the bot restarts, the scan finishes it within a minute. Cancelling reports whether it really cancelled: an event that has
 ended, or is being ended, answers "could not be cancelled: it is ended" (admin page, `/event
 cancel`), is not counted by a series cancel and spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
