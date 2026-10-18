@@ -754,6 +754,8 @@ describe("claimEventChannel (start-now path)", () => {
       if (opts.claimError) throw opts.claimError;
       return opts.findOneAndUpdate;
     });
+    // The conditional scheduled-to-active step (#1193).
+    EventMock.updateOne = jest.fn(async () => ({ matchedCount: 1 }));
 
     const createdChannel = { id: opts.createdChannelId };
     const createChannel = jest.fn(async () => createdChannel);
@@ -787,7 +789,12 @@ describe("claimEventChannel (start-now path)", () => {
     expect(createChannel).toHaveBeenCalledTimes(1);
     expect(result?.channelId).toBe("chan-win");
     expect(result?.state).toBe("active");
-    expect(event.save).toHaveBeenCalledTimes(1);
+    // The state step is a conditional write; the copy is not saved for it.
+    expect(event.save).not.toHaveBeenCalled();
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "evt-1", state: "scheduled" },
+      { $set: { state: "active" } },
+    );
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         _id: "evt-1",

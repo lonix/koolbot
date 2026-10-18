@@ -573,6 +573,53 @@ export class EventService extends ScheduledService {
     return { defer: false, expectChannels: { main, groups } };
   }
 
+  /**
+   * Keep paths a claim already wrote out of this copy's later `save()`: a
+   * claimed write is the source of truth, and a copy that is older than a
+   * concurrent claim (a cancel clearing the channel id, say) must not write it
+   * back. A later assignment to the path marks it modified again, so a step that
+   * really means to write it still can. (A plain object in a test has no
+   * `$ignore`.)
+   */
+  private ignoreClaimed(event: IEvent, ...paths: string[]): void {
+    const doc = event as unknown as { $ignore?: (path: string) => void };
+    for (const path of paths) doc.$ignore?.(path);
+  }
+
+  /**
+   * `scheduled` to `active` as a conditional write with an outcome, not a field
+   * the copy's `save()` carries: a cancel or an end that landed since the copy
+   * was read must not be turned back into `active`. True when the stored event
+   * is now `active` (this call moved it, or it already was); false when it is
+   * no longer open. The copy takes `active` (ignored by its save) only when the
+   * stored event is.
+   */
+  private async activateScheduled(event: IEvent): Promise<boolean> {
+    const moved = await Event.updateOne(
+      { _id: event._id, state: "scheduled" },
+      { $set: { state: "active" } },
+    );
+    let active =
+      (moved as { matchedCount?: number } | undefined)?.matchedCount !== 0;
+    if (!active) {
+      // Nothing matched: it may simply be `active` already (the scan or Start
+      // now got there first). Only a state that is not open is a refusal.
+      try {
+        const row = (await Event.findById(event._id).lean()) as {
+          state?: string;
+        } | null;
+        active = row?.state === "active";
+      } catch {
+        // Unreadable: not confirmed active.
+      }
+    }
+    if (active) {
+      event.state = "active";
+      this.ignoreClaimed(event, "state");
+    }
+    return active;
+  }
+
   /** The scan leaves an event alone for this long after an end began. */
   private static readonly ENDING_HOLD_MS = 5 * MS_PER_MINUTE;
 
@@ -1017,26 +1064,11 @@ export class EventService extends ScheduledService {
       !this.adoptedHasOwnChannel(event, windows.native)
     ) {
       const channel = await this.claimEventChannel(event, guild);
+      // The claim wrote the channel id (or adopted the winner's): the scan's
+      // save must not write it back, whatever a cancel does to it meanwhile.
+      this.ignoreClaimed(event, "channelId");
       if (channel) {
-        if (event.state === "scheduled") {
-          // `scheduled` to `active` is a conditional write, not a field the
-          // scan's later `save()` carries: a cancel (or an end) that landed
-          // since this copy was read must not be turned back into `active`.
-          // When the row is no longer `scheduled` this copy keeps its state
-          // (and nothing here writes it).
-          const moved = await Event.updateOne(
-            { _id: event._id, state: "scheduled" },
-            { $set: { state: "active" } },
-          );
-          if (
-            (moved as { matchedCount?: number } | undefined)?.matchedCount !== 0
-          ) {
-            event.state = "active";
-            (event as unknown as { $ignore?: (p: string) => void }).$ignore?.(
-              "state",
-            );
-          }
-        }
+        if (event.state === "scheduled") await this.activateScheduled(event);
         changed = true;
         // Skips itself (and says so) when an end or cancel holds the event.
         await this.updateAnnouncement(event);
@@ -1754,6 +1786,11 @@ export class EventService extends ScheduledService {
     if (fresh) {
       event.announcementChannelId = fresh.announcementChannelId;
       event.announcementMessageId = fresh.announcementMessageId;
+      this.ignoreClaimed(
+        event,
+        "announcementChannelId",
+        "announcementMessageId",
+      );
     }
     await this.updateAnnouncement(event);
     // When the scan's shared listing failed, skip (no per-event fetch). The
@@ -1782,9 +1819,17 @@ export class EventService extends ScheduledService {
         .catch(() => null);
       if (!guild) return null;
       const channel = await this.claimEventChannel(event, guild);
+      this.ignoreClaimed(event, "channelId");
       if (channel) {
-        event.state = "active";
-        await event.save();
+        // The claim wrote the channel id; the state step is conditional, so a
+        // cancel that landed since the read is not undone (and Start now then
+        // says it could not start).
+        if (
+          event.state === "scheduled" &&
+          !(await this.activateScheduled(event))
+        ) {
+          return null;
+        }
         if (event.groupsEnabled === true && !event.nativeAdopted) {
           // Not awaited: up to 25 paced creates must not hold the web request
           // open. The per-event lock keeps it from overlapping the scan, which
@@ -2182,6 +2227,9 @@ export class EventService extends ScheduledService {
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
     );
+    // Stored by an atomic claim (or adopted from the winner's): not written back
+    // by this copy's save.
+    this.ignoreClaimed(event, "announcementChannelId", "announcementMessageId");
   }
 
   private async postAnnouncement(event: IEvent): Promise<void> {

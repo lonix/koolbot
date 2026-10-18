@@ -22,6 +22,11 @@ export interface EndFormOptions {
   idSuffix: string;
   /** Offer "move everyone back to the main channel first". */
   offerPullBack: boolean;
+  /**
+   * An adopted Discord event (#1177) is one KoolBot never wrote: ending only
+   * releases KoolBot's link to it, the Discord event is left as it is.
+   */
+  adopted?: boolean;
 }
 
 export function renderEndEventForm(opts: EndFormOptions): string {
@@ -35,7 +40,11 @@ export function renderEndEventForm(opts: EndFormOptions): string {
     opts.offerPullBack
       ? "Group channels are removed as soon as they are empty, and any group leaders are cleared. "
       : ""
-  }The main channel is removed after the usual grace period, once it is empty, and the Discord event is closed. This cannot be undone.</p>
+  }The main channel is removed after the usual grace period, once it is empty, and ${
+    opts.adopted === true
+      ? "KoolBot stops tracking the Discord event; the Discord event is left as it is"
+      : "the Discord event is closed"
+  }. This cannot be undone.</p>
 ${pull}<p><label><input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required> I want to end this event now</label></p>
 <button type="submit" class="btn btn-danger">End event now</button>
 </form>`;
@@ -47,6 +56,7 @@ export function renderEndSection(opts: {
   actionPath: string;
   csrfToken: string;
   offerPullBack: boolean;
+  adopted?: boolean;
 }): string {
   if (opts.state !== "active") {
     return `<p class="muted">Only a running event can be ended. This one has not started yet; it can be ended once it has.</p>`;
@@ -56,5 +66,6 @@ export function renderEndSection(opts: {
     csrfToken: opts.csrfToken,
     idSuffix: "host",
     offerPullBack: opts.offerPullBack,
+    adopted: opts.adopted,
   });
 }

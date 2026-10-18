@@ -2048,6 +2048,8 @@ export interface EventRow {
   /** The event has group voice channels, so "End now" offers to move people
    * back to the main channel first (#1193). */
   hasGroupChannels?: boolean;
+  /** Adopted Discord event: ending leaves it as it is (#1177, #1193). */
+  nativeAdopted?: boolean;
   /**
    * Cover image control (#1181). `editable`: can be set, replaced or removed
    * (`series` when it applies to a whole recurring series); `adopted`: the
@@ -2702,6 +2704,7 @@ export function renderEventsPage(props: EventsProps): string {
                 csrfToken: props.csrfToken,
                 idSuffix: e.id,
                 offerPullBack: e.hasGroupChannels === true,
+                adopted: e.nativeAdopted === true,
               },
             )}</details>`
           : "";

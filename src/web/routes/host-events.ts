@@ -755,6 +755,7 @@ function createEndSection(): HostSectionRenderer {
       offerPullBack:
         ctx.event.groupsEnabled === true &&
         (ctx.event.groups ?? []).some((g) => !!g.channelId),
+      adopted: ctx.event.nativeAdopted === true,
     });
 }
 

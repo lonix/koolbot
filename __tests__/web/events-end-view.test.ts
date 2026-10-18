@@ -64,6 +64,17 @@ describe("renderEventsPage: End now (#1193)", () => {
     expect(endForm(noChannels)).not.toContain(END_PULL_BACK_FIELD);
   });
 
+  it("the Events table says which of the two it does to the Discord event", () => {
+    const own = renderEventsPage({ ...COMMON, rows: [row({})] } as never);
+    expect(endForm(own)).toContain("the Discord event is closed");
+    const adopted = renderEventsPage({
+      ...COMMON,
+      rows: [row({ nativeAdopted: true })],
+    } as never);
+    expect(endForm(adopted)).toContain("the Discord event is left as it is");
+    expect(endForm(adopted)).not.toContain("Discord event is closed");
+  });
+
   it.each(["scheduled", "ended", "cancelled"])(
     "has no End now for a %s event",
     (state) => {
@@ -115,6 +126,25 @@ describe("renderEndEventForm and renderEndSection", () => {
     expect(html).toContain("cannot be undone");
     const plain = renderEndEventForm({ ...base, offerPullBack: false });
     expect(plain).not.toContain("group leaders");
+  });
+
+  it("says the Discord event is closed, or for an adopted one that it is left as it is", () => {
+    const own = renderEndEventForm(base);
+    expect(own).toContain("the Discord event is closed");
+    expect(own).not.toContain("left as it is");
+    const adopted = renderEndEventForm({ ...base, adopted: true });
+    expect(adopted).toContain(
+      "KoolBot stops tracking the Discord event; the Discord event is left as it is",
+    );
+    expect(adopted).not.toContain("Discord event is closed");
+    const section = renderEndSection({
+      state: "active",
+      actionPath: "/p/end",
+      csrfToken: "t",
+      offerPullBack: false,
+      adopted: true,
+    });
+    expect(section).toContain("the Discord event is left as it is");
   });
 
   it("gives the form a description for assistive technology", () => {

@@ -1794,7 +1794,10 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    is deleted, a running one is completed; an adopted one is only let go of). The scheduled end
    leaves this to the scan's own sync right after the teardown. If the server cannot be reached,
    or the Discord event (or a create that timed out and is still being looked for) is still
-   linked afterwards, the result says so and the scan tries again.
+   linked afterwards, the result says so and the scan tries again. The confirmation text says
+   which of the two applies: "the Discord event is closed", or for an adopted event "KoolBot
+   stops tracking the Discord event; the Discord event is left as it is" (host panel and Events
+   table alike).
 
 Every step after the first is attempted whatever an earlier one did (a group channel pass that
 cannot read the event is reported as a failure, not as an empty success). A step that fails is

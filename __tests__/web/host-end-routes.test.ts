@@ -424,6 +424,17 @@ describe("the end section", () => {
     expect(form).toContain("This cannot be undone");
   });
 
+  it("says the Discord event is closed, or for an adopted event that it is left as it is", async () => {
+    const own = await call(PANEL);
+    expect(own.text).toContain("the Discord event is closed");
+    events[EVENT_ID] = makeEvent({ nativeAdopted: true });
+    const adopted = await call(PANEL);
+    expect(adopted.text).toContain(
+      "KoolBot stops tracking the Discord event; the Discord event is left as it is",
+    );
+    expect(adopted.text).not.toContain("the Discord event is closed");
+  });
+
   it("offers no pull-back for an event without group channels", async () => {
     events[EVENT_ID] = makeEvent({ groupsEnabled: false, groups: [] });
     const r = await call(PANEL);

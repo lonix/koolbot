@@ -1957,6 +1957,71 @@ describe("the scan's scheduled to active step cannot undo a cancel", () => {
     expect(ignored).not.toContain("state");
   });
 
+  it("the scan's save does not write the channel id back after a cancel deleted the channel and cleared it", async () => {
+    const { service, guild } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "scheduled", channelId: null }));
+    // The claim wrote the channel id to the row.
+    service.claimEventChannel = jest.fn(async (e: unknown) => {
+      (e as Row).channelId = "main-1";
+      store.get(ID)!.channelId = "main-1";
+      return { id: "main-1" };
+    });
+    const del = jest.fn(async () => undefined);
+    guild.channels.cache.set("main-1", { delete: del });
+    let release!: () => void;
+    let first = true;
+    service.updateAnnouncement = jest.fn(() => {
+      if (!first) return Promise.resolve(true);
+      first = false;
+      return new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      });
+    });
+    // A copy whose save writes the paths it was not told to ignore (the plain
+    // object has no change tracking: what the scan assigned counts as changed).
+    const ignored = new Set<string>();
+    const copy = scheduledCopy([]);
+    copy.$ignore = (path: string): void => {
+      ignored.add(path);
+    };
+    copy.save = jest.fn(async () => {
+      if (!ignored.has("channelId")) {
+        store.get(ID)!.channelId = copy.channelId;
+      }
+    });
+    const scan = service.processEvent(copy, guild, LEAD_NOW, WINDOWS);
+    await nap();
+    // A cancel deletes the channel and clears the stored reference.
+    await service.cancelOne(row({ state: "active", channelId: null }));
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(store.get(ID)?.channelId).toBeNull();
+    release();
+    await scan;
+    expect(store.get(ID)?.channelId).toBeNull();
+    expect(store.get(ID)?.state).toBe("cancelled");
+  });
+
+  it("Start now does not undo a cancel that landed after it read the event", async () => {
+    const { service } = setup();
+    statefulUpdateOne();
+    store.set(ID, stored({ state: "cancelled", channelId: null }));
+    const svc = service as unknown as {
+      startEventNow: (id: string, g: string) => Promise<unknown>;
+      getEvent: (id: string) => Promise<unknown>;
+    };
+    // Read as scheduled; the stored row has been cancelled since.
+    svc.getEvent = jest.fn(async () =>
+      row({ state: "scheduled", channelId: null }),
+    );
+    service.claimEventChannel = jest.fn(async (e: unknown) => {
+      (e as Row).channelId = "main-1";
+      return { id: "main-1" };
+    });
+    expect(await svc.startEventNow(ID, "guild-1")).toBeNull();
+    expect(store.get(ID)?.state).toBe("cancelled");
+  });
+
   it("a cancel that landed during the announcement refresh survives the scan's save", async () => {
     const { service, guild } = setup();
     statefulUpdateOne();
