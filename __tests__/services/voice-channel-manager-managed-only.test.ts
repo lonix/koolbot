@@ -179,6 +179,7 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     const managedModel = mockModel("ManagedVoiceChannel");
     const migrationModel = mockModel("ManagedVoiceMigration");
     const ownershipModel = mockModel("VoiceChannelOwnership");
+    mockModel("Event").find = jest.fn<any>().mockResolvedValue([]);
 
     managedModel.find = jest
       .fn<any>()
@@ -439,9 +440,9 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     beforeEach(() => {
       settings["events.enabled"] = true;
       eventRows = [];
-      mockModel("Event").find = jest.fn<any>().mockImplementation(() => ({
-        lean: async () => eventRows,
-      }));
+      mockModel("Event").find = jest
+        .fn<any>()
+        .mockImplementation(async () => eventRows);
     });
 
     it("periodic cleanup leaves event channels alone in both modes, even with a managed-looking name", async () => {
@@ -508,11 +509,9 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     it("deletes nothing when the event channels cannot be listed (fails closed)", async () => {
       addChannel("lobby-id", "Lobby");
       const foreign = addChannel("foreign-id", "Permanent Room");
-      mockModel("Event").find = jest.fn<any>().mockImplementation(() => ({
-        lean: async () => {
-          throw new Error("mongo down");
-        },
-      }));
+      mockModel("Event").find = jest.fn<any>().mockImplementation(async () => {
+        throw new Error("mongo down");
+      });
 
       expect(await manager.cleanupEmptyChannels()).toBe(false);
       await manager.initialize(GUILD_ID);
@@ -520,15 +519,53 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(foreign.delete).not.toHaveBeenCalled();
     });
 
-    it("does not read events at all while the events feature is off", async () => {
-      settings["events.enabled"] = false;
+    it("the startup sweep also leaves a just-created channel alone", async () => {
       addChannel("lobby-id", "Lobby");
+      const justCreated = addChannel("ev-new", "📅 Alpha");
+      justCreated.createdTimestamp = Date.now() - 5_000;
+      const old = addChannel("old-stray", "Permanent Room");
+      old.createdTimestamp = Date.now() - 60 * 60_000;
+
+      await manager.initialize(GUILD_ID);
+
+      expect(justCreated.delete).not.toHaveBeenCalled();
+      expect(old.delete).toHaveBeenCalled();
+    });
+
+    it("still protects persisted event channels while the events feature is switched off", async () => {
+      // Switching events off stops the scan; the rows and channels stay.
+      settings["events.enabled"] = false;
+      eventRows = [
+        { channelId: "ev-main", groups: [{ channelId: "ev-group" }] },
+      ];
+      addChannel("lobby-id", "Lobby");
+      const main = addChannel("ev-main", "📅 Game night");
+      const group = addChannel("ev-group", "📅 Alpha");
       const foreign = addChannel("foreign-id", "Permanent Room");
 
       expect(await manager.cleanupEmptyChannels()).toBe(true);
 
+      expect(main.delete).not.toHaveBeenCalled();
+      expect(group.delete).not.toHaveBeenCalled();
       expect(foreign.delete).toHaveBeenCalled();
-      expect(mockModel("Event").find).not.toHaveBeenCalled();
+    });
+
+    it("leaves a channel created in the last minutes alone even though the event list read just before it was recorded (in-flight create)", async () => {
+      addChannel("lobby-id", "Lobby");
+      // The snapshot of event channels was taken before this one was recorded.
+      eventRows = [];
+      const justCreated = addChannel("ev-new", "📅 Alpha");
+      justCreated.createdTimestamp = Date.now() - 5_000;
+      const old = addChannel("old-stray", "Permanent Room");
+      old.createdTimestamp = Date.now() - 60 * 60_000;
+      const freshByName = addChannel("fresh-named", "🎮 Someone's Room");
+      freshByName.createdTimestamp = Date.now() - 5_000;
+
+      await manager.cleanupEmptyChannels();
+
+      expect(justCreated.delete).not.toHaveBeenCalled();
+      expect(freshByName.delete).not.toHaveBeenCalled();
+      expect(old.delete).toHaveBeenCalled();
     });
   });
 

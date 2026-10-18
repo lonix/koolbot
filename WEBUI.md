@@ -1490,6 +1490,11 @@ deletes channels it recorded), so remove it by hand. Channels are created in gro
 right after the main channel; one that is created again later (after someone deleted it)
 lands at the bottom of the category, so move it by hand if the order matters. Events without groups are created and cleaned up exactly as before.
 
+The voice channel sweeps never delete a recorded event channel, even when the events feature is
+switched off (turning it off only stops the scan), and they leave a channel alone for two minutes
+after it is created, which covers a group channel that exists but is not recorded yet. This only
+matters when events share the voice channels' category and managed-only cleanup is off.
+
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
 under `/admin`, because the host is the event's creator, who is often not a Web UI
