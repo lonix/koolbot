@@ -351,6 +351,51 @@ describe("the presets admin page (#1200)", () => {
     expect(html).toContain("cannot be loaded right now");
   });
 
+  it("after a refused save, restoring the draft rebuilds every submitted row, even beyond the cap", () => {
+    // Duplicate or Save-from-event of 4 groups at a cap of 2: the refused
+    // create comes back to a page with the default 2 rows and the draft.
+    const html = adminPage({ maxCount: 2 }).replace(
+      "<h1>Group presets</h1>",
+      '<h1>Group presets</h1><div class="notice err" data-flash>Preset not saved.</div>',
+    );
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    const draft: Record<string, string> = { preset_name: "Copy" };
+    for (let i = 0; i < 4; i++) {
+      draft[`group_${i}_name`] = `G${i}`;
+      draft[`group_${i}_kind`] = "team";
+      draft[`group_${i}_size`] = String(i + 1);
+    }
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-preset-draft",
+      JSON.stringify(draft),
+    );
+    const code = [
+      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ]
+      .map((m) => m[1])
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    const doc = dom.window.document;
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(4);
+    for (let i = 0; i < 4; i++) {
+      expect(
+        (doc.querySelector(`[name="group_${i}_name"]`) as HTMLInputElement)
+          .value,
+      ).toBe(`G${i}`);
+      expect(
+        (doc.querySelector(`[name="group_${i}_size"]`) as HTMLInputElement)
+          .value,
+      ).toBe(String(i + 1));
+    }
+    // A user's own additions stay capped.
+    expect((doc.querySelector("[data-add-group]") as HTMLElement).hidden).toBe(
+      true,
+    );
+  });
+
   it("Add a group clones a row, up to the cap", () => {
     const html = adminPage({ maxCount: 3 });
     const dom = new JSDOM(html, {

@@ -191,7 +191,9 @@ const EVENT_PRESETS_SCRIPT =
   "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
   "var KEY='koolbot-event-preset-draft';" +
   "function rows(){return box.querySelectorAll('[data-group-row]')}" +
-  "function addRow(){var n=rows().length;if(n>=max)return false;" +
+  // `force` is only for putting back rows that were submitted before (the cap
+  // applies to a person adding rows, not to restoring what they had entered).
+  "function addRow(force){var n=rows().length;if(n>=max&&!force)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
   "box.appendChild(d.firstElementChild);if(add)add.hidden=rows().length>=max;return true}" +
@@ -201,7 +203,7 @@ const EVENT_PRESETS_SCRIPT =
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
-  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
+  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||typeof d[k]!=='string')return;" +
   "if(k==='preset_id')return;el.value=d[k]})}}catch(x){}" +
   "})();";
