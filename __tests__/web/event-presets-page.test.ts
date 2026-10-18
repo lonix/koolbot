@@ -169,6 +169,47 @@ describe("loadEventPresetsPage", () => {
     expect(JSON.stringify(page.values)).not.toContain("123");
   });
 
+  it("fromEvent= copies the event's clan tags setting as the preset's default, and leaves the format behind (#1194)", async () => {
+    const event = (tagsEnabled: boolean): Record<string, unknown> => ({
+      guildId: "g1",
+      title: "Quiz",
+      groupsEnabled: true,
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      channelLeadMinutes: null,
+      tagsEnabled,
+      tagsSuffix: true,
+      groups: [
+        {
+          key: "g_00000001",
+          name: "Red",
+          kind: "team",
+          size: null,
+          tag: "RED",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    mockGetEvent.mockResolvedValueOnce(event(true));
+    const on = await loadEventPresetsPage(client, "g1", { fromEvent: "e1" });
+    expect(on.values.groups_tags).toBe("1");
+    expect(on.values).not.toHaveProperty("groups_tags_suffix");
+    mockGetEvent.mockResolvedValueOnce(event(false));
+    const off = await loadEventPresetsPage(client, "g1", { fromEvent: "e1" });
+    expect(off.values).not.toHaveProperty("groups_tags");
+  });
+
+  it("from= duplicates a preset's clan tags default (#1194)", async () => {
+    // The mocked catalog's first built-in has no default: nothing is ticked.
+    const page = await loadEventPresetsPage(client, "g1", {
+      from: "builtin:red-vs-blue",
+    });
+    expect(page.values).not.toHaveProperty("groups_tags");
+  });
+
   it("fromEvent= of another guild's event, a plain event or a failed lookup prefills nothing", async () => {
     mockGetEvent.mockResolvedValueOnce({
       guildId: "other",

@@ -764,6 +764,23 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     deleteNote:
       "Shared event row: clear `captainId` in every group of every event where it is the member's id, finished events included, and leave the event and the other members standing. The leader slot is cleared when an event ends through the teardown; on an event that ended before that, or was cancelled, it is kept until this reset.",
   },
+  // Temporary clan tags (#1194). A backup row exists only while an event's tag
+  // may be on the member's nickname: it is written before the first edit and
+  // deleted as soon as the nickname is restored, so it is short-lived. It is
+  // still the member's own data (their original nickname), so it is exportable
+  // and erased by a reset, which restores the nickname first.
+  {
+    source: "src/models/event-nickname-backup.ts",
+    collection: "event-nickname-backup",
+    field: "memberId",
+    exportable: true,
+    guildScoped: true,
+    note: "The member's original server nickname, kept while an event's temporary clan tag may be on it so the bot can put it back. Deleted as soon as it is restored; a row only outlives its event while a restore is being retried.",
+    onDelete: "hard-delete",
+    subject: "self",
+    deleteNote:
+      "The member's own backup row. The reset first tries to put the original nickname back (under the same per-member lock as tagging), then deletes the row; if Discord refuses the restore the row is deleted anyway and the purge reports that a tag may remain on the nickname.",
+  },
 ];
 
 /** Registry entries that belong in a member's export, in registry order. */

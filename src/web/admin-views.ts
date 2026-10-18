@@ -2551,7 +2551,10 @@ function renderGroupsSection(
           ? ` data-lead="${preset.channelLeadMinutes}"`
           : preset.channelLeadMinutes === null
             ? ' data-lead=""'
-            : "");
+            : "") +
+        // The preset's default for the clan tags box (#1194); absent = off. The
+        // script sets the box from it when the preset is chosen.
+        ` data-tags="${preset.tagsEnabled === true ? "1" : "0"}"`;
       return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
     })
     .join("");
@@ -2577,6 +2580,8 @@ function renderGroupsSection(
         <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
       </label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"> Clan tags: while the event runs, put each team's tag on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.</label>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tagsSuffix}" value="1"> Put the tag after the name (Alice [RED]) instead of before it</label>
       <label>Create channels this many minutes before the start (empty = server default)
         <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Server default">
       </label>
@@ -2642,6 +2647,8 @@ const EVENT_GROUPS_SCRIPT =
   "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
   "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
   "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
+  // The preset's clan tags default (#1194); the host can still change the box.
+  "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
   "var n=Math.max(rows().length,g.length);" +
   "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
   "form.elements['groups_enabled'].checked=true;validity()});" +

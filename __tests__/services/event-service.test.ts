@@ -1126,6 +1126,7 @@ describe("recurring event lifecycle", () => {
       captainsEnabled: true,
       captainCustomisationEnabled: true,
       tagsEnabled: true,
+      tagsSuffix: true,
       groups: [
         group("g_a", "Manticore", { marker: "🟢", size: 8, tag: "MAN" }),
         group("g_b", "Spectators", { kind: "open" }),
@@ -1142,6 +1143,7 @@ describe("recurring event lifecycle", () => {
       captainsEnabled: true,
       captainCustomisationEnabled: true,
       tagsEnabled: true,
+      tagsSuffix: true,
     });
     // The successor starts unlocked: the field is not carried at all.
     expect(created[0].groupsLocked).toBeUndefined();
@@ -1203,6 +1205,7 @@ describe("recurring event lifecycle", () => {
       captainsEnabled: false,
       captainCustomisationEnabled: false,
       tagsEnabled: false,
+      tagsSuffix: false,
     };
     await service.createEvent({ ...base, groups: setup });
     expect(created[1]).toMatchObject({

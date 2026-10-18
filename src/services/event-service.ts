@@ -27,6 +27,7 @@ import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
 import { syncLeadsAccess } from "./event-leads-sync.js";
 import { resolveLeadsChannel } from "./event-leader-roles.js";
+import { EventNicknameTags } from "./event-nickname-tags.js";
 import {
   EventGroupChannels,
   type GroupChannelReport,
@@ -367,6 +368,12 @@ export class EventService extends ScheduledService {
   private static instance: EventService;
   /** Mirrors events to Discord native scheduled events (#1034); opt-in. */
   private readonly nativeSync: NativeEventSync;
+  /**
+   * Temporary clan tags on nicknames (#1194). Every decision there is taken
+   * from a fresh read, never from this service's event copies, so none of the
+   * hold invariants above apply to it; this class only tells it when to look.
+   */
+  private readonly nicknameTags: EventNicknameTags;
   /** Per open event: the `message|native event` ids of the announcement last
    * rendered successfully (in memory: re-checked once after a restart). */
   private readonly linkVerified = new Map<string, string>();
@@ -447,6 +454,7 @@ export class EventService extends ScheduledService {
       runLabel: "Event scan",
     });
     this.nativeSync = new NativeEventSync(client);
+    this.nicknameTags = EventNicknameTags.getInstance(client);
     this.groupChannels = new EventGroupChannels(client, {
       getPrefix: (): Promise<string> =>
         this.configService.getString("events.channel_prefix", "📅"),
@@ -601,6 +609,30 @@ export class EventService extends ScheduledService {
   }
 
   /**
+   * Ask the nickname tags to look at an event (#1194): `sync` applies what is
+   * wanted now (the event just went active), `restore` puts every nickname back
+   * (cancel). Fire and forget: the decision is made there from a fresh read, a
+   * failure is logged, and the sweep after every scan retries whatever is left.
+   * Only an event that has tags on can have anything to do.
+   */
+  private kickTags(event: IEvent, what: "sync" | "restore"): void {
+    if (event.tagsEnabled !== true) return;
+    const id = String(event._id);
+    const work =
+      what === "sync"
+        ? this.nicknameTags.syncEvent(event.guildId, id)
+        : this.nicknameTags
+            .restoreEvent(event.guildId, id)
+            .then(() => undefined);
+    void work.catch((error: unknown) =>
+      logger.error(
+        `Event ${sanitizeForLog(id)}: nickname tags (${what}) failed:`,
+        error,
+      ),
+    );
+  }
+
+  /**
    * `scheduled` to `active` as a conditional write with an outcome, not a field
    * the copy's `save()` carries: a cancel or an end that landed since the copy
    * was read must not be turned back into `active`. True when the stored event
@@ -630,6 +662,9 @@ export class EventService extends ScheduledService {
     if (active) {
       event.state = "active";
       this.ignoreClaimed(event, "state");
+      // Assignments already in place get their tags now (#1194). Not awaited:
+      // paced edits must not hold the scan; the sweep repeats it every scan.
+      this.kickTags(event, "sync");
     }
     return active;
   }
@@ -1017,6 +1052,12 @@ export class EventService extends ScheduledService {
         );
       }
     }
+
+    // Clan tags (#1194): ask for a pass (restore what is owed, tag members of
+    // running events). Not awaited: nickname edits are paced and can take
+    // minutes, and the scan (starts, reminders, scheduled ends of unrelated
+    // events) must never wait on them. One pass runs at a time.
+    this.nicknameTags.requestSweep(guildId);
   }
 
   private async processEvent(
@@ -1828,6 +1869,9 @@ export class EventService extends ScheduledService {
       return false;
     }
     this.claimCompleted(String(event._id), hold);
+    // A cancel runs no end hooks: put the nicknames back here (#1194). Not
+    // awaited, and safe to repeat; whatever is left is finished by the sweep.
+    this.kickTags(event, "restore");
     const channelId =
       claimed && claimed.channelId !== undefined
         ? claimed.channelId

@@ -73,6 +73,7 @@ interface PresetRow {
   groupLabel?: string;
   leaderLabel?: string;
   channelLeadMinutes?: number | null;
+  tagsEnabled?: boolean;
   groups?: Array<{
     name: string;
     kind?: string;
@@ -107,6 +108,8 @@ function rowToEntry(row: PresetRow): PresetEntry {
       typeof row.channelLeadMinutes === "number"
         ? row.channelLeadMinutes
         : null,
+    // A row from before the field existed has none: off, no migration.
+    tagsEnabled: row.tagsEnabled === true,
     groups: (row.groups ?? []).map((g) => ({
       name: g.name,
       kind: (g.kind as "team" | "open" | "leads") || "team",
@@ -231,6 +234,8 @@ export interface PresetData {
   groupLabel: string;
   leaderLabel: string;
   channelLeadMinutes: number | null;
+  /** Default for the event form's clan tags box (#1194). */
+  tagsEnabled: boolean;
   groups: Array<{
     name: string;
     kind: "team" | "open" | "leads";
@@ -310,6 +315,7 @@ export function validatePresetForm(
       groupLabel: setup.groupLabel,
       leaderLabel: setup.leaderLabel,
       channelLeadMinutes: setup.channelLeadMinutes,
+      tagsEnabled: setup.tagsEnabled,
       groups: setup.groups.map((g) => ({
         name: g.name,
         kind: g.kind,
@@ -339,6 +345,7 @@ export function presetToFormValues(source: {
   groupLabel: string;
   leaderLabel?: string | null;
   channelLeadMinutes?: number | null;
+  tagsEnabled?: boolean;
   groups: ReadonlyArray<{
     name: string;
     kind: string;
@@ -356,6 +363,8 @@ export function presetToFormValues(source: {
       typeof source.channelLeadMinutes === "number"
         ? String(source.channelLeadMinutes)
         : "",
+    // A checkbox: present only when ticked, like a posted form.
+    ...(source.tagsEnabled === true ? { [GROUP_FORM_FIELDS.tags]: "1" } : {}),
   };
   source.groups.forEach((g, i) => {
     values[`group_${i}_name`] = g.name;
@@ -371,13 +380,18 @@ export function presetToFormValues(source: {
 export function eventSetupToFormValues(
   event: Pick<
     EventGroupSetup,
-    "groupLabel" | "leaderLabel" | "channelLeadMinutes" | "groups"
+    | "groupLabel"
+    | "leaderLabel"
+    | "channelLeadMinutes"
+    | "tagsEnabled"
+    | "groups"
   >,
 ): Record<string, string> {
   return presetToFormValues({
     groupLabel: event.groupLabel,
     leaderLabel: event.leaderLabel,
     channelLeadMinutes: event.channelLeadMinutes,
+    tagsEnabled: event.tagsEnabled,
     groups: event.groups,
   });
 }
@@ -406,6 +420,7 @@ function toDoc(data: PresetData): Record<string, unknown> {
     groupLabel: data.groupLabel,
     leaderLabel: data.leaderLabel,
     channelLeadMinutes: data.channelLeadMinutes,
+    tagsEnabled: data.tagsEnabled,
     groups: data.groups,
   };
 }

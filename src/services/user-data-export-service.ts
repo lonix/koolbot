@@ -37,6 +37,7 @@ import { isSameUserId, userIdMatchForms } from "../utils/user-id.js";
 import { ChannelInvite } from "../models/channel-invite.js";
 import { DigestState } from "../models/digest-state.js";
 import { Event } from "../models/event.js";
+import { EventNicknameBackup } from "../models/event-nickname-backup.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { PollParticipationTracking } from "../models/poll-participation-tracking.js";
@@ -392,6 +393,35 @@ const READERS: Record<string, CollectionReader> = {
             .map((g) => ({ name: g.name, kind: g.kind })),
         };
       }),
+      truncated,
+    };
+  },
+
+  // The member's own backup of the nickname an event tag may be on (#1194).
+  "event-nickname-backup": async ({ userId, guildId, maxItems }) => {
+    const rows = await EventNicknameBackup.find({ guildId, memberId: userId })
+      .limit(maxItems + 1)
+      .lean();
+    const { rows: kept, truncated } = capped(rows, maxItems);
+    const ids = kept
+      .map((row) => String(row.eventId))
+      .filter((id) => /^[0-9a-f]{24}$/i.test(id));
+    const titles = new Map<string, string>(
+      ids.length === 0
+        ? []
+        : (
+            (await Event.find({ _id: { $in: ids }, guildId })
+              .limit(ids.length)
+              .lean()) as Array<{ _id: unknown; title?: string }>
+          ).map((e) => [String(e._id), String(e.title ?? "")]),
+    );
+    return {
+      value: kept.map((row) => ({
+        event: titles.get(String(row.eventId)) ?? null,
+        originalNickname: row.original ?? null,
+        taggedNickname: row.intended,
+        since: row.createdAt,
+      })),
       truncated,
     };
   },

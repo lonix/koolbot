@@ -4,8 +4,11 @@
  * (`event-teardown.ts`) runs every registered hook once, for a manual "End
  * event now" and for the scheduled end alike.
  *
- * The list is empty today. The clan-tags issue (#1194) registers its nickname
- * restore here.
+ * Registered today: `nickname-tags` (#1194), which restores the nicknames the
+ * clan tags changed. It is the model of a hook that must not lose work: it
+ * decides from a fresh read, is safe to run twice or late, and leaves its
+ * backup rows in place until each nickname is restored, so a crash or a
+ * timeout is finished by the startup reconcile and the scan's sweep.
  *
  * What a hook can rely on, and what it cannot:
  * - It runs AFTER the event has been saved as `ended` (the claim is the first

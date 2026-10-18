@@ -227,7 +227,14 @@ export interface IEvent extends Document {
   captainsEnabled: boolean;
   /** Used by later issues (#1196, #1194); stored, never read yet. */
   captainCustomisationEnabled: boolean;
+  /**
+   * Temporary clan tags on the members' server nicknames while the event is
+   * active (#1194). Off by default; participants cannot opt out. The backups of
+   * the original nicknames live in `models/event-nickname-backup.ts`.
+   */
   tagsEnabled: boolean;
+  /** The tag goes after the name ("Alice [RED]") instead of before it ("[RED] Alice"). */
+  tagsSuffix: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -315,6 +322,7 @@ const EventSchema = new Schema<IEvent>(
     captainsEnabled: { type: Boolean, default: false },
     captainCustomisationEnabled: { type: Boolean, default: false },
     tagsEnabled: { type: Boolean, default: false },
+    tagsSuffix: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },
   {

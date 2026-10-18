@@ -64,6 +64,8 @@ export interface EventGroupSetup {
   captainsEnabled: boolean;
   captainCustomisationEnabled: boolean;
   tagsEnabled: boolean;
+  /** Tag after the name instead of before it (#1194). */
+  tagsSuffix: boolean;
 }
 
 /** What a plain event stores: no groups, every toggle off. */
@@ -78,6 +80,7 @@ export function emptyGroupSetup(): EventGroupSetup {
     captainsEnabled: false,
     captainCustomisationEnabled: false,
     tagsEnabled: false,
+    tagsSuffix: false,
   };
 }
 
@@ -112,6 +115,15 @@ export interface GroupSetupInput {
    * leaders), so a preset can neither store nor apply it.
    */
   captainsEnabled?: boolean;
+  /**
+   * Temporary clan tags on nicknames for this event (#1194). Optional: the
+   * event form posts it (a chosen preset only pre-ticks the box in the browser,
+   * the host's final choice is what arrives here); the preset editor posts it
+   * too, as the preset's default.
+   */
+  tagsEnabled?: boolean;
+  /** The tag goes after the name (#1194); only meaningful with `tagsEnabled`. */
+  tagsSuffix?: boolean;
   /** `""` falls back to the global lead time. */
   channelLeadMinutes: string;
   rows: RawGroupRow[];
@@ -166,6 +178,8 @@ export const GROUP_FORM_FIELDS = {
   label: "groups_label",
   leaderLabel: "groups_leader_label",
   captains: "groups_captains",
+  tags: "groups_tags",
+  tagsSuffix: "groups_tags_suffix",
   leadMinutes: "groups_lead_minutes",
 } as const;
 
@@ -202,6 +216,8 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
     groupLabel: str(GROUP_FORM_FIELDS.label),
     leaderLabel: str(GROUP_FORM_FIELDS.leaderLabel),
     captainsEnabled: str(GROUP_FORM_FIELDS.captains).length > 0,
+    tagsEnabled: str(GROUP_FORM_FIELDS.tags).length > 0,
+    tagsSuffix: str(GROUP_FORM_FIELDS.tagsSuffix).length > 0,
     channelLeadMinutes: str(GROUP_FORM_FIELDS.leadMinutes),
     rows,
   };
@@ -459,7 +475,8 @@ export function validateGroupSetup(
       groups,
       captainsEnabled: input.captainsEnabled === true,
       captainCustomisationEnabled: false,
-      tagsEnabled: false,
+      tagsEnabled: input.tagsEnabled === true,
+      tagsSuffix: input.tagsEnabled === true && input.tagsSuffix === true,
     },
   };
 }
@@ -511,6 +528,7 @@ export interface GroupSetupSource {
   captainsEnabled?: boolean | null;
   captainCustomisationEnabled?: boolean | null;
   tagsEnabled?: boolean | null;
+  tagsSuffix?: boolean | null;
 }
 
 /**
@@ -548,6 +566,7 @@ export function copyGroupSetup(source: GroupSetupSource): EventGroupSetup {
     captainsEnabled: source.captainsEnabled === true,
     captainCustomisationEnabled: source.captainCustomisationEnabled === true,
     tagsEnabled: source.tagsEnabled === true,
+    tagsSuffix: source.tagsSuffix === true,
   };
 }
 

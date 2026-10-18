@@ -103,6 +103,18 @@ describe("loadPresetCatalog", () => {
     ]);
   });
 
+  it("reads the clan tags default: off for a row without the field, on when stored (#1194)", async () => {
+    libraryRows = [
+      row({ _id: "b".repeat(24), name: "Quiz", tagsEnabled: true }),
+      row(),
+    ];
+    const catalog = await svc.loadPresetCatalog("g1");
+    const byId = new Map(catalog.entries.map((e) => [e.id, e]));
+    expect(byId.get(`lib:${"b".repeat(24)}`)?.tagsEnabled).toBe(true);
+    expect(byId.get(`lib:${OID}`)?.tagsEnabled).toBe(false);
+    expect(byId.get("builtin:wardogs")?.tagsEnabled).not.toBe(true);
+  });
+
   it("applies built-in switches and lists library presets with their id", async () => {
     toggleRows = [{ builtinId: "builtin:eve-factions", enabled: false }];
     libraryRows = [
@@ -278,11 +290,41 @@ describe("validatePresetForm", () => {
         "groups",
         "leaderLabel",
         "name",
+        "tagsEnabled",
       ].sort(),
     );
     expect(svc.presetToFormValues(r.data)).not.toHaveProperty(
       "groups_captains",
     );
+  });
+
+  it("carries the clan tags default through the editor and back (#1194)", () => {
+    const on = svc.validatePresetForm(body({ groups_tags: "1" }), {
+      maxCount: 15,
+    });
+    expect(on.ok && on.data.tagsEnabled).toBe(true);
+    const off = svc.validatePresetForm(body(), { maxCount: 15 });
+    expect(off.ok && off.data.tagsEnabled).toBe(false);
+    if (!on.ok || !off.ok) return;
+    // The editor is prefilled with the same field the form posts; a preset
+    // without the default shows the box unticked (no key at all).
+    expect(svc.presetToFormValues(on.data)).toMatchObject({ groups_tags: "1" });
+    expect(svc.presetToFormValues(off.data)).not.toHaveProperty("groups_tags");
+  });
+
+  it("copies an event's clan tags setting into 'Save as server preset' (#1194)", () => {
+    const base = {
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      channelLeadMinutes: null,
+      groups: [],
+    };
+    expect(
+      svc.eventSetupToFormValues({ ...base, tagsEnabled: true }),
+    ).toMatchObject({ groups_tags: "1" });
+    expect(
+      svc.eventSetupToFormValues({ ...base, tagsEnabled: false }),
+    ).not.toHaveProperty("groups_tags");
   });
 
   it("runs the event form's own rules on the groups", () => {
@@ -361,10 +403,20 @@ describe("writes", () => {
     groupLabel: "Squad",
     leaderLabel: "Leader",
     channelLeadMinutes: null,
+    tagsEnabled: false,
     groups: [
       { name: "A", kind: "team" as const, size: null, tag: "", marker: "" },
     ],
   };
+
+  it("stores the clan tags default with the preset (#1194)", async () => {
+    mockCreate.mockResolvedValue({ _id: OID });
+    await svc.createLibraryPreset("g1", { ...data, tagsEnabled: true });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ tagsEnabled: true });
+    mockCreate.mockClear();
+    await svc.createLibraryPreset("g1", data);
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ tagsEnabled: false });
+  });
 
   it("creates with a lower-cased nameKey and returns the lib: id", async () => {
     mockCreate.mockResolvedValue({ _id: OID });

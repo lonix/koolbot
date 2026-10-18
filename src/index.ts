@@ -70,6 +70,10 @@ import { EventService } from "./services/event-service.js";
 import { handleGroupSelfJoin } from "./services/event-group-assignment.js";
 import { installLeaderCleanup } from "./services/event-group-leaders.js";
 import { installLeadsChannelSync } from "./services/event-leads-sync.js";
+import {
+  EventNicknameTags,
+  installEventNicknameTags,
+} from "./services/event-nickname-tags.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
@@ -590,6 +594,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         rewindNudgeService.destroy();
         birthdayService.destroy();
         eventService.destroy();
+        EventNicknameTags.getInstance(client).destroy();
         lfgService.destroy();
         reminderService.destroy();
         WizardService.getInstance().shutdown();
@@ -704,6 +709,10 @@ try {
       events.syncLeadsAccess(guildId, eventId, takeRevoked),
     (change) => events.trackLeaderChange(change),
   );
+  // Temporary clan tags (#1194): tag on assignment, restore on unassign and,
+  // through the end-of-event hook, when an event ends. Cancel, the periodic
+  // sweep and the startup reconcile (below) cover the rest.
+  installEventNicknameTags(client);
   lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);
@@ -848,6 +857,13 @@ async function initializeServices(): Promise<void> {
     // birthday today (in their timezone)?" check.
     await birthdayService.start();
     await eventService.start();
+    // Restore any nickname a crash left tagged (#1194). Runs even with events
+    // off (restoring is never gated); not awaited, it paces its Discord calls.
+    void EventNicknameTags.getInstance(client)
+      .reconcileOnStartup()
+      .catch((error: unknown) =>
+        logger.error("Event nickname tag reconcile failed:", error),
+      );
 
     // Start the ad-hoc LFG sweep (#957). Members open posts with /lfg; this
     // closes the ones that filled nobody's party before their timer ran out.
