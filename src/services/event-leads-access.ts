@@ -108,6 +108,18 @@ export interface LeadsAccessContext {
    * admin groups are unknown (nothing is guessed).
    */
   adminGrantRoleIds?: ReadonlySet<string>;
+  /**
+   * The events category's own overwrites, read fresh. A sync plan never grants
+   * View where the category denies it (to @everyone, or to the role being
+   * granted): the channel's own entries do not show that (a degraded channel
+   * may have lost the deny). Creation starts from a copy of them instead.
+   */
+  categoryOverwrites?: readonly OverwriteSpec[];
+  /**
+   * The category could not be read: no View is granted to anyone (nothing is
+   * exposed on a guess).
+   */
+  categoryUnknown?: boolean;
 }
 
 const keyOf = (o: { type: OverwriteType; id: string }): string =>
@@ -130,10 +142,11 @@ export function desiredMembers(ctx: LeadsAccessContext): Map<string, bigint> {
 function restrictEveryone(
   current: OverwriteSpec | undefined,
   everyoneId: string,
+  viewBlocked = false,
 ): OverwriteSpec {
   const deny = (current?.deny ?? 0n) | CONNECT;
   let allow = (current?.allow ?? 0n) & ~CONNECT;
-  if ((deny & VIEW) === 0n) allow |= VIEW;
+  if ((deny & VIEW) === 0n && !viewBlocked) allow |= VIEW;
   return { id: everyoneId, type: OverwriteType.Role, allow, deny };
 }
 
@@ -147,9 +160,10 @@ function adminRoleGrant(
   current: OverwriteSpec | undefined,
   id: string,
   everyoneDeniesView: boolean,
+  categoryDeny = 0n,
 ): OverwriteSpec | null {
   const bits = (everyoneDeniesView ? 0n : VIEW) | CONNECT | SPEAK;
-  const effective = bits & ~(current?.deny ?? 0n);
+  const effective = bits & ~((current?.deny ?? 0n) | categoryDeny);
   if (effective === 0n) return null;
   if (current && (current.allow & effective) === effective) return null;
   return {
@@ -190,7 +204,11 @@ export function buildLeadsOverwrites(
   const desired = desiredMembers(ctx);
 
   const everyoneKey = keyOf({ type: OverwriteType.Role, id: ctx.everyoneId });
-  const restricted = restrictEveryone(specs.get(everyoneKey), ctx.everyoneId);
+  const restricted = restrictEveryone(
+    specs.get(everyoneKey),
+    ctx.everyoneId,
+    ctx.categoryUnknown === true,
+  );
   specs.set(everyoneKey, restricted);
 
   for (const [key, spec] of specs) {
@@ -280,16 +298,28 @@ export function planLeadsSync(
   const everyone = byKey.get(
     keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
   );
+  // What the category itself denies counts as denied here: the channel's own
+  // entries may have lost it, and it is never lifted (nor View granted over it).
+  const category = new Map(
+    (ctx.categoryOverwrites ?? []).map((o) => [keyOf(o), o]),
+  );
+  const categoryEveryone = category.get(
+    keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
+  );
+  const viewBlocked =
+    ctx.categoryUnknown === true ||
+    ((categoryEveryone?.deny ?? 0n) & VIEW) !== 0n;
   // (A deny of Connect with no View allowed or denied is repaired too: the
-  // channel was made without the rule, as creation would have.)
+  // channel was made without the rule, as creation would have, unless View is
+  // blocked.)
   if (
     !everyone ||
     (everyone.deny & CONNECT) === 0n ||
-    ((everyone.allow | everyone.deny) & VIEW) === 0n
+    (((everyone.allow | everyone.deny) & VIEW) === 0n && !viewBlocked)
   ) {
     ops.push({
       kind: "put",
-      spec: restrictEveryone(everyone, ctx.everyoneId),
+      spec: restrictEveryone(everyone, ctx.everyoneId, viewBlocked),
       revoke: false,
     });
   }
@@ -301,12 +331,16 @@ export function planLeadsSync(
     ops.push({ kind: "put", spec: widen(o, id, bits), revoke: false });
   }
   if (ctx.allRolesExempt !== true) {
-    const everyoneDeniesView = ((everyone?.deny ?? 0n) & VIEW) !== 0n;
+    const everyoneDeniesView =
+      viewBlocked || ((everyone?.deny ?? 0n) & VIEW) !== 0n;
     for (const id of ctx.adminGrantRoleIds ?? []) {
+      const own = byKey.get(keyOf({ type: OverwriteType.Role, id }));
+      const inherited = category.get(keyOf({ type: OverwriteType.Role, id }));
       const grant = adminRoleGrant(
-        byKey.get(keyOf({ type: OverwriteType.Role, id })),
+        own,
         id,
         everyoneDeniesView,
+        inherited?.deny ?? 0n,
       );
       if (grant) ops.push({ kind: "put", spec: grant, revoke: false });
     }

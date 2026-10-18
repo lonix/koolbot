@@ -62,7 +62,8 @@ type LeadsOps = Pick<
   | "syncLeads"
   | "leadsProbe"
   | "leadsAdminRoles"
-  | "isTrackedLeader"
+  | "leaderAppointedSince"
+  | "leaderStamp"
   | "queueEviction"
   | "holdEviction"
   | "setLeadsProblem"
@@ -132,6 +133,8 @@ export async function evictFromLeads(opts: {
     const probe = leadsId
       ? channels.leadsProbe(ctx.guild, leadsId, admins)
       : null;
+    // Taken in the same tick as the fresh row this plan was made from.
+    const stamp = channels.leaderStamp();
     const wishes = planLeadsEviction(ctx.event, ctx.presence, {
       revoked,
       isAdmin: probe?.isAdmin ?? ((): boolean => true),
@@ -143,9 +146,21 @@ export async function evictFromLeads(opts: {
     // each request.
     return wishes.map((w) => ({
       ...w,
+      // Asked at dispatch, so each part reads the state of that moment: a
+      // leader appointed since this plan's read (not one from before it), and
+      // the admin groups' roles as the scan last refreshed them (the plan's
+      // own snapshot would miss a role that became an admin role meanwhile).
       skipIf: (): boolean =>
-        channels.isTrackedLeader(eventId, w.userId) ||
-        (probe?.isAdmin(w.userId) ?? true),
+        channels.leaderAppointedSince(eventId, w.userId, stamp) ||
+        !admins.known ||
+        (leadsId
+          ? channels.leadsProbe(ctx.guild, leadsId).isAdmin(w.userId) ||
+            // Someone moved only because the cache said they cannot connect:
+            // not if they can by now (a role given meanwhile).
+            (!revoked.has(w.userId) &&
+              channels.leadsProbe(ctx.guild, leadsId).canConnect(w.userId) ===
+                true)
+          : true),
     }));
   };
   const clearProblem = (): void =>
@@ -175,6 +190,8 @@ export async function evictFromLeads(opts: {
     guildId,
     eventId,
     plan,
+    // The bot's Move Members may be granted in the events category only.
+    channelScopedPermissions: true,
   });
   if (outcome.status === "busy") {
     channels.queueEviction(eventId, revoked);

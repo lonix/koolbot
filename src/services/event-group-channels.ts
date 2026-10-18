@@ -393,6 +393,9 @@ const LEADS_HOLD = "#leads";
 /** Start of the warning a leads channel created without its restriction leaves in the pass report. */
 const LEADS_UNRESTRICTED_WARNING =
   "The leaders-only channel is created WITHOUT its restriction, so anyone who can see it can join:";
+/** Shown (and the channel left unverified) while the events category cannot be read. */
+const CATEGORY_UNKNOWN =
+  "The events category could not be read, so the leaders-only channel's visibility was not checked. It is tried again later.";
 /** Shown (and the channel left unverified) while the admin groups cannot be read. */
 const ADMIN_GROUPS_UNKNOWN =
   "The admin groups could not be read, so the leaders-only channel's roles were not checked and the admins' access was not granted. It is tried again later.";
@@ -448,7 +451,9 @@ export class EventGroupChannels {
    * hook reported them (checked synchronously when a move out of the leads
    * channel is about to be sent, because a reappointment can land while the
    * move waits on Discord; a later change that ends the role removes them). */
-  private readonly leadersNow = new Map<string, Set<string>>();
+  private readonly leadersNow = new Map<string, Map<string, number>>();
+  /** Counts leader changes in this process, to say "since the plan was made". */
+  private leaderSeq = 0;
   /** Per server: the admin group roles last read (the cache-only trigger uses it). */
   private readonly adminRolesSeen = new Map<string, Set<string>>();
   /** Per event: problems with the leads channel the host panel shows (kept apart
@@ -1186,6 +1191,9 @@ export class EventGroupChannels {
       roleIds: this.adminRolesSeen.get(guild.id) ?? new Set(),
       known: true,
     },
+    /** The category's overwrites; null when they could not be read; absent
+     * when the caller builds from a copy of them (creation). */
+    category?: OverwriteSpec[] | null,
   ): LeadsAccessContext {
     const hostId = SNOWFLAKE.test(row.createdBy ?? "")
       ? (row.createdBy as string)
@@ -1206,6 +1214,11 @@ export class EventGroupChannels {
       allRolesExempt: !admins.known,
       // Admin groups get an explicit allow, never on a guess.
       adminGrantRoleIds: admins.known ? new Set(admins.roleIds) : new Set(),
+      ...(category === undefined
+        ? {}
+        : category === null
+          ? { categoryUnknown: true }
+          : { categoryOverwrites: category }),
     };
   }
 
@@ -1287,7 +1300,20 @@ export class EventGroupChannels {
     const channel = guild.channels.cache.get(leadsId) as
       VoiceChannel | undefined;
     if (!channel) return false;
-    const ctx = this.leadsContext(event as EventRow, guild);
+    // The category as the cache has it (unknown when it is not cached).
+    const parent = channel.parentId
+      ? guild.channels.cache.get(channel.parentId)
+      : undefined;
+    const ctx = this.leadsContext(
+      event as EventRow,
+      guild,
+      undefined,
+      channel.parentId
+        ? parent
+          ? overwriteSpecsOf(parent as CategoryChannel)
+          : null
+        : [],
+    );
     if (planLeadsSync(overwriteSpecsOf(channel), ctx).length > 0) return true;
     // Seen right: whatever was written before did take effect, so the same
     // write may legitimately be wanted again later (see `syncLeadsLocked`).
@@ -1362,16 +1388,31 @@ export class EventGroupChannels {
     eventId: string,
     change: { fromUserId: string | null; toUserId: string | null },
   ): void {
-    const set = this.leadersNow.get(eventId) ?? new Set<string>();
-    if (change.fromUserId) set.delete(change.fromUserId);
-    if (change.toUserId) set.add(change.toUserId);
-    if (set.size > 0) this.leadersNow.set(eventId, set);
+    const map = this.leadersNow.get(eventId) ?? new Map<string, number>();
+    this.leaderSeq += 1;
+    if (change.fromUserId) map.delete(change.fromUserId);
+    if (change.toUserId) map.set(change.toUserId, this.leaderSeq);
+    if (map.size > 0) this.leadersNow.set(eventId, map);
     else this.leadersNow.delete(eventId);
   }
 
-  /** Was this person made a leader since this process started (and not removed since)? */
-  public isTrackedLeader(eventId: string, userId: string): boolean {
-    return this.leadersNow.get(eventId)?.has(userId) === true;
+  /** The stamp to compare appointments with (see `leaderAppointedSince`). */
+  public leaderStamp(): number {
+    return this.leaderSeq;
+  }
+
+  /**
+   * Was this person made a leader after `stamp` was taken (and not removed
+   * since)? Only a concurrent appointment counts: one from before the plan was
+   * made is already in the row the plan used, and a leader whose role ended
+   * without the hook hearing of it (a failed cleanup) must not shield them.
+   */
+  public leaderAppointedSince(
+    eventId: string,
+    userId: string,
+    stamp: number,
+  ): boolean {
+    return (this.leadersNow.get(eventId)?.get(userId) ?? 0) > stamp;
   }
 
   /** Remember people who still have to be moved out of the leads channel. */
@@ -1519,11 +1560,31 @@ export class EventGroupChannels {
         return failed(leadsId);
       }
 
+      // The category, fresh and inside the lock: its own deny of View is what
+      // keeps a private category private, and the channel's entries may have
+      // lost it. If it cannot be established no View is granted.
+      let category: OverwriteSpec[] | null = [];
+      const parentId = (channel as { parentId?: string | null }).parentId;
+      if (parentId) {
+        const parent = await this.readChannel(guild, parentId);
+        category =
+          parent.status === "ok" &&
+          parent.channel.type === ChannelType.GuildCategory
+            ? overwriteSpecsOf(parent.channel as CategoryChannel)
+            : null;
+      }
       const ctx = this.leadsContext(
         row,
         guild,
         await this.leadsAdminRoles(guild.id),
+        category,
       );
+      // What stops the channel being called verified, if anything.
+      const incomplete = ctx.allRolesExempt
+        ? ADMIN_GROUPS_UNKNOWN
+        : ctx.categoryUnknown
+          ? CATEGORY_UNKNOWN
+          : null;
       let ops = planLeadsSync(overwriteSpecsOf(channel), ctx);
       // With events off nothing is given, only taken away from members.
       if (!enabled) ops = ops.filter(isMemberRevoke);
@@ -1532,11 +1593,12 @@ export class EventGroupChannels {
       if (ops.length === 0) {
         this.leadsWritten.delete(eventId);
         this.holds.delete(holdKey);
-        if (enabled && ctx.allRolesExempt) {
+        if (enabled && incomplete) {
           // The roles could not be cleaned up or granted without knowing the
-          // admin groups: not verified, and tried again when they can be read.
-          holdFor(ADMIN_GROUPS_UNKNOWN);
-          problem(ADMIN_GROUPS_UNKNOWN);
+          // admin groups, or View not judged without the category: not
+          // verified, and tried again when they can be read.
+          holdFor(incomplete);
+          problem(incomplete);
         } else if (enabled) {
           // Seen right, from Discord itself.
           this.leadsChecked.add(eventId);
@@ -1611,9 +1673,9 @@ export class EventGroupChannels {
       this.leadsWritten.set(eventId, planKey);
       this.holds.delete(holdKey);
       this.setLeadsProblem(eventId, LEADS_HOLD, null);
-      if (ctx.allRolesExempt) {
-        holdFor(ADMIN_GROUPS_UNKNOWN);
-        problem(ADMIN_GROUPS_UNKNOWN);
+      if (incomplete) {
+        holdFor(incomplete);
+        problem(incomplete);
       }
       logger.info(
         `Updated the leaders-only channel access of event ${sanitizeForLog(eventId)} (${ops.length} overwrite(s) written)`,

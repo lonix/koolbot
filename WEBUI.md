@@ -1781,7 +1781,9 @@ see but not join. It is made with the other group channels (#1190) and removed w
   permission and anyone holding the role of a KoolBot admin group are never moved (nobody
   is moved while the admin groups cannot be read). The move only happens if the person is still in
   the leaders-only channel when it is sent (someone who walked elsewhere is left alone),
-  uses the same mover as **Move people** (Move Members, one at a time, never replayed) and
+  uses the same mover as **Move people** (Move Members, one at a time, never replayed; for
+  this move it is enough that the bot holds Move Members in the events category, not
+  server-wide) and
   is skipped while a **Move people** run is going and tried again later. A person who
   could not be moved is remembered and tried again about five minutes later, and the host
   panel says how many are still in the channel.
@@ -1791,7 +1793,10 @@ see but not join. It is made with the other group channels (#1190) and removed w
   in it, or a move is still owed. A pass reads Discord again before it writes, removes a
   stale member overwrite (a leader who is no longer one, a member whose data was reset, an
   entry added by hand), adds a missing one and restores @everyone's Connect deny and View
-  (View only where the category does not deny it). Each scan also reads the admin groups'
+  (View only where the category does not deny it: a pass reads the events category fresh,
+  never grants View, to @everyone or to an admin group's role, over a deny the category
+  has, and while the category cannot be read grants no View and leaves the channel
+  unverified with a note in the Groups section). Each scan also reads the admin groups'
   roles again, so a role that became or stopped being an admin group's role gets its allow
   or loses it without anyone touching the event. A pass that fails marks the channel
   unverified, so one more check runs after the wait and clears what was reported. Someone who

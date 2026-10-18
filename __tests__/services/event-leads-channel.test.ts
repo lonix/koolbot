@@ -226,6 +226,8 @@ function makeWorld(
     }>;
     /** Permissions the bot lacks. */
     botLacks?: bigint[];
+    /** Move Members is granted in the category only, not server-wide. */
+    guildLacksMove?: boolean;
     /** Roles of KoolBot's admin groups; "fail" when they cannot be read. */
     adminRoles?: string[] | "fail";
   } = {},
@@ -315,7 +317,10 @@ function makeWorld(
     members: {
       me: {
         permissionsIn: () => ({ has: (bit: bigint) => !lacks.has(bit) }),
-        permissions: { has: (bit: bigint) => !lacks.has(bit) },
+        permissions: {
+          has: (bit: bigint) =>
+            !lacks.has(bit) && !(opts.guildLacksMove && bit === M),
+        },
       },
       cache: {
         get: (id: string) => ({
@@ -1294,6 +1299,151 @@ describe("admin status that changes after it was read", () => {
     await pass;
     expect(w.moves).toEqual([]);
     expect(w.where(U3)).toBe("ch-leads");
+  });
+});
+
+describe("the events category (private)", () => {
+  const degrade = (w: World): void => {
+    // Connect denied, the View deny lost, as a degraded channel can be.
+    w.channels
+      .get("ch-leads")
+      ?.permissionOverwrites.cache.set(`${OverwriteType.Role}:${GUILD}`, {
+        id: GUILD,
+        type: OverwriteType.Role,
+        allow: { bitfield: 0n },
+        deny: { bitfield: C },
+      });
+  };
+  const privateCategory = {
+    categoryOverwrites: [
+      { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: V },
+    ],
+  };
+
+  it("is not exposed by the View repair, and is verified", async () => {
+    seed();
+    const w = makeWorld(privateCategory);
+    w.seedRight();
+    degrade(w);
+    const out = await w.sync();
+    expect(out.status).toBe("ok");
+    expect(w.puts.some((p) => p.id === GUILD)).toBe(false);
+    expect(w.overwritesOf().find((o) => o.id === GUILD)?.allow ?? 0n).toBe(0n);
+    // The cache check agrees once the category is cached.
+    w.guild.channels.cache.set(
+      CATEGORY,
+      (await w.guild.channels.fetch(CATEGORY)) as never,
+    );
+    expect((await w.sync()).wrote).toBe(0);
+    expect(
+      w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+    ).toBe(false);
+  });
+
+  it("stays unverified and says so while the category cannot be read", async () => {
+    seed();
+    const w = makeWorld(privateCategory);
+    w.seedRight();
+    degrade(w);
+    w.hooks.fetchError.set(CATEGORY, new Error("gateway down"));
+    expect((await w.sync()).status).toBe("ok");
+    // No View was granted on a guess.
+    expect(w.puts.some((p) => p.id === GUILD)).toBe(false);
+    expect(
+      w.gc
+        .getReport(EV)
+        ?.failures.map((f) => f.reason)
+        .join("\n"),
+    ).toMatch(/events category could not be read/);
+    expect(
+      w.gc.leadsNeedsAttention(store.get(EV) as never, w.guild as never),
+    ).toBe(false);
+  });
+
+  it("repairs the View of a normal category's channel as before", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    degrade(w);
+    await w.sync();
+    expect(w.overwritesOf().find((o) => o.id === GUILD)?.allow).toBe(V);
+  });
+});
+
+describe("Move Members granted in the events category only", () => {
+  it("still moves a removed leader out", async () => {
+    seed();
+    const w = makeWorld({ guildLacksMove: true });
+    w.seedRight();
+    w.place(L1, "ch-leads");
+    setCaptain("a", null);
+    await w.run(() => [L1]);
+    expect(w.where(L1)).toBe("ch-a");
+  });
+});
+
+describe("plan-time snapshots at dispatch", () => {
+  it("uses the admin roles as they are when the move is sent, not when it was planned", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: [] });
+    w.seedRight();
+    w.place(U3, "ch-leads");
+    w.memberRoles.set(U3, ["r1"]);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    w.client.rest.get.mockImplementationOnce(async () => {
+      await gate;
+      return { channel_id: "ch-leads" };
+    });
+    const pass = w.run(() => [U3]);
+    await settle();
+    // r1 becomes an admin group's role (an existing role of the member), and a
+    // scan reads the groups again.
+    w.admin.roles = ["r1"];
+    await w.gc.leadsAdminRoles(GUILD);
+    release();
+    await pass;
+    expect(w.moves).toEqual([]);
+    expect(w.where(U3)).toBe("ch-leads");
+  });
+
+  it("withdraws only for an appointment newer than the plan: a leader whose role ended without the hook hearing of it is still moved", async () => {
+    seed({
+      groups: [
+        group("a", { channelId: "ch-a", memberIds: [L1, L2] }),
+        group("l", { kind: "leads", channelId: "ch-leads" }),
+      ],
+    });
+    const w = makeWorld();
+    w.seedRight();
+    uninstallSync = installLeadsChannelSync(
+      (g, e, t) =>
+        syncLeadsAccess({
+          client: w.client as never,
+          channels: w.gc,
+          guildId: g,
+          eventId: e,
+          takeRevoked: t,
+        }),
+      (change) => w.gc.trackLeaderChange(change.eventId, change),
+    );
+    await setGroupLeader({
+      guildId: GUILD,
+      eventId: EV,
+      groupKey: "a",
+      userId: L1,
+      admission: 1,
+    });
+    await settle();
+    expect(allowOf(w, L1)).toBe(LEADS_LEADER_PERMISSIONS);
+    // L1 is unassigned and the leader cleanup fails: the row names nobody
+    // (effective leaders ignore a non-member) but no hook was told.
+    const a = store.get(EV)?.groups.find((g) => g.key === "a");
+    if (a) a.memberIds = [L2];
+    w.place(L1, "ch-leads");
+    await w.run(() => [L1]);
+    expect(has(w, L1)).toBe(false);
+    expect(w.where(L1)).toBe("main");
   });
 });
 

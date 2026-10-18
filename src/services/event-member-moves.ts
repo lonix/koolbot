@@ -309,12 +309,18 @@ const REFUSAL_TEXT: Record<MoveRefusalCode, string> = {
  * the host panel (to disable the buttons and say why) and by the run itself.
  * An unknown bot membership counts as "cannot".
  */
-export function moveMembersBlocker(guild: Guild | undefined): string | null {
+export function moveMembersBlocker(
+  guild: Guild | undefined,
+  channelScoped = false,
+): string | null {
   if (!guild) return REFUSAL_TEXT["no-guild"];
   const me = guild.members?.me;
   if (!me) {
     return "The bot could not check its own permissions, so moving people is switched off.";
   }
+  // Move Members granted on a category only is enough for the moves the
+  // per-channel checks allow: the caller then leaves the decision to them.
+  if (channelScoped) return null;
   try {
     return me.permissions.has(PermissionFlagsBits.MoveMembers)
       ? null
@@ -361,6 +367,12 @@ export function moveEventMembers(opts: {
    * end state first and then has to empty the group channels, so it opts in.
    */
   allowFinished?: boolean;
+  /**
+   * Do not refuse the run for lacking Move Members server-wide: the per-move
+   * checks (Move Members on the source channel, Connect on the destination)
+   * decide. For callers whose permission is granted in the events category.
+   */
+  channelScopedPermissions?: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   // Everything taken from the caller happens here, synchronously.
@@ -375,6 +387,7 @@ export function moveEventMembers(opts: {
       plan,
       exclude,
       allowFinished: opts.allowFinished === true,
+      channelScoped: opts.channelScopedPermissions === true,
       deps,
     }),
   ).then((result) => (result.busy ? { status: "busy" } : result.value));
@@ -387,6 +400,7 @@ async function runLocked(opts: {
   plan: (ctx: MovePlanContext) => MovePlan;
   exclude: Set<string>;
   allowFinished: boolean;
+  channelScoped: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   const { client, guildId, eventId, exclude } = opts;
@@ -420,7 +434,7 @@ async function runLocked(opts: {
 
   const guild = client.guilds?.cache?.get(guildId);
   if (!guild) return refuse("no-guild");
-  const blocker = moveMembersBlocker(guild);
+  const blocker = moveMembersBlocker(guild, opts.channelScoped);
   if (blocker) {
     return refuse(
       blocker === REFUSAL_TEXT["no-permission"] ? "no-permission" : "no-guild",

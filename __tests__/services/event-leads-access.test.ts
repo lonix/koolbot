@@ -228,6 +228,60 @@ describe("planLeadsSync", () => {
     expect(planLeadsSync(hidden, ctx({ leaderIds: ["l1", "l2"] }))).toEqual([]);
   });
 
+  it("never grants View where the category denies it, whatever the channel's own entries say", () => {
+    const privateCat = [role(GUILD, 0n, V)];
+    // A degraded channel: Connect denied, but the View deny was lost.
+    const degraded = right().map((o) =>
+      o.id === GUILD ? { ...o, allow: 0n, deny: C } : o,
+    );
+    const c = ctx({
+      leaderIds: ["l1", "l2"],
+      categoryOverwrites: privateCat,
+      adminGrantRoleIds: new Set(["mods"]),
+    });
+    const ops = planLeadsSync(degraded, c);
+    // Nothing is written for @everyone, and the admin role gets no View.
+    expect(ops.some((o) => o.kind === "put" && o.spec.id === GUILD)).toBe(
+      false,
+    );
+    expect(
+      ops.find((o) => o.kind === "put" && o.spec.id === "mods"),
+    ).toMatchObject({ spec: { allow: C | S } });
+    // An @everyone entry that is missing altogether is restricted without View.
+    const missing = planLeadsSync(
+      right().filter((o) => o.id !== GUILD),
+      ctx({ leaderIds: ["l1", "l2"], categoryOverwrites: privateCat }),
+    );
+    expect(missing).toEqual([
+      {
+        kind: "put",
+        revoke: false,
+        spec: { id: GUILD, type: OverwriteType.Role, allow: 0n, deny: C },
+      },
+    ]);
+  });
+
+  it("does not grant a deny the category has on the admin role itself, nor View without knowing the category", () => {
+    const denied = planLeadsSync(
+      right(),
+      ctx({
+        leaderIds: ["l1", "l2"],
+        categoryOverwrites: [role("mods", 0n, C)],
+        adminGrantRoleIds: new Set(["mods"]),
+      }),
+    );
+    expect(denied).toMatchObject([{ spec: { id: "mods", allow: V | S } }]);
+    const unknown = planLeadsSync(
+      right().map((o) => (o.id === GUILD ? { ...o, allow: 0n, deny: C } : o)),
+      ctx({
+        leaderIds: ["l1", "l2"],
+        categoryUnknown: true,
+        adminGrantRoleIds: new Set(["mods"]),
+      }),
+    );
+    expect(unknown).toMatchObject([{ spec: { id: "mods", allow: C | S } }]);
+  });
+
   it("touches no role when the admin groups are unknown", () => {
     const current = [...right(), role("verified", V | C, 0n)];
     expect(

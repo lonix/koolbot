@@ -167,6 +167,8 @@ function makeWorld(
   opts: {
     limits?: Record<string, number>;
     mePerms?: bigint[] | null;
+    /** The bot lacks Move Members server-wide but holds it per channel (a category grant). */
+    guildLacksMove?: boolean;
     /** Channels where the bot lacks Connect. */
     denyConnect?: string[];
   } = {},
@@ -214,7 +216,14 @@ function makeWorld(
         opts.mePerms === null
           ? null
           : {
-              permissions: { has: (bit: bigint) => allowed(bit) },
+              permissions: {
+                has: (bit: bigint) =>
+                  allowed(bit) &&
+                  !(
+                    opts.guildLacksMove &&
+                    bit === PermissionFlagsBits.MoveMembers
+                  ),
+              },
               permissionsIn: (ch: { id: string }) => ({
                 has: (bit: bigint) =>
                   allowed(bit) &&
@@ -1555,6 +1564,45 @@ describe("the leads channel (#1199)", () => {
       expect(w.patch).not.toHaveBeenCalled();
       expect(w.where("u1")).toBe(MAIN);
     });
+  });
+});
+
+describe("Move Members granted per channel only (#1199)", () => {
+  const go = (w: World, channelScopedPermissions?: boolean) =>
+    moveEventMembers({
+      client: w.client as never,
+      guildId: GUILD,
+      eventId: EV,
+      plan: ({ event }) => planMoveOne(event, "u1", "a"),
+      deps: w.deps,
+      channelScopedPermissions,
+    });
+
+  it("is refused by the server-wide gate by default, as other callers rely on", async () => {
+    const w = makeWorld({ guildLacksMove: true });
+    w.place("u1", MAIN);
+    const out = await go(w);
+    expect(out).toMatchObject({ status: "refused", code: "no-permission" });
+    expect(w.patch).not.toHaveBeenCalled();
+  });
+
+  it("lets the per-channel checks decide when the caller asks for it", async () => {
+    const w = makeWorld({ guildLacksMove: true });
+    w.place("u1", MAIN);
+    const out = await go(w, true);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["u1"]);
+    // A channel where the bot really lacks it is still skipped.
+    const none = makeWorld({ guildLacksMove: true, mePerms: [] });
+    none.place("u1", MAIN);
+    const out2 = await go(none, true);
+    if (out2.status !== "done") throw new Error("expected done");
+    expect(reasons(out2.report).u1).toBe("missing-permission");
+  });
+
+  it("still refuses an unknown bot membership", async () => {
+    const w = makeWorld({ mePerms: null });
+    expect(await go(w, true)).toMatchObject({ status: "refused" });
   });
 });
 
