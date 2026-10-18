@@ -176,7 +176,7 @@ adding a category. Sanitize untrusted values with `utils/log-sanitize.ts`.
 CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.github/workflows/`:
 
 - **`ci.yml`** — the core gate. Parallel jobs: `lint` (ESLint + Prettier), `typecheck` (`npm run build`),
-  and `test` (matrix Node 22 & 24, `npm run test:ci`). The `ci-success` aggregator job is the single
+  and `test` (matrix Node 22, 24 & 26, `npm run test:ci`). The `ci-success` aggregator job is the single
   required status check — it fails if any job failed or was cancelled.
 - **`markdown-lint.yml`** — markdownlint on `**/*.md` changes.
 - **`actionlint.yml`** / **`zizmor`** — lint + security-audit workflow YAML when `.github/workflows/**`
