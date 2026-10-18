@@ -1246,6 +1246,106 @@ describe("roles and admin groups", () => {
   });
 });
 
+describe("admin status that changes after it was read", () => {
+  it("is picked up by the scan's refresh: a role that stopped or started being an admin's needs a pass", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["mods"] });
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    expect((await w.sync()).wrote).toBe(0);
+    const event = store.get(EV) as never;
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    // The group is unlinked: nothing runs by itself, the cache check still
+    // judges by the old snapshot.
+    w.admin.roles = [];
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    await w.gc.leadsAdminRoles(GUILD);
+    // mods keeps its explicit allow, which a non-admin role must not have.
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+    await w.sync();
+    expect(w.overwritesOf().find((o) => o.id === "mods")?.allow).toBe(V);
+    // A newly designated admin role is granted.
+    w.admin.roles = ["newmods"];
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    await w.gc.leadsAdminRoles(GUILD);
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+    await w.sync();
+    expect(w.overwritesOf().find((o) => o.id === "newmods")?.allow).toBe(
+      V | C | S,
+    );
+  });
+
+  it("does not move someone who became an admin while the move waits on Discord", async () => {
+    seed();
+    const w = makeWorld({ adminRoles: ["mods"] });
+    w.seedRight();
+    w.place(U3, "ch-leads");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    w.client.rest.get.mockImplementationOnce(async () => {
+      await gate;
+      return { channel_id: "ch-leads" };
+    });
+    const pass = w.run(() => [U3]);
+    await settle();
+    // Given an admin group's role while the voice-state read is pending.
+    w.memberRoles.set(U3, ["mods"]);
+    release();
+    await pass;
+    expect(w.moves).toEqual([]);
+    expect(w.where(U3)).toBe("ch-leads");
+  });
+});
+
+describe("a failed pass on a verified channel", () => {
+  it("is checked again after the hold even when the write had landed", async () => {
+    seed();
+    const w = makeWorld();
+    w.seedRight();
+    expect((await w.sync()).status).toBe("ok");
+    const event = store.get(EV) as never;
+    expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(false);
+    // L2 is made leader; the grant lands but its answer is lost.
+    setCaptain("a", L2);
+    store
+      .get(EV)
+      ?.groups.find((g) => g.key === "a")
+      ?.memberIds.push(L2);
+    w.hooks.put = (): never => {
+      w.channels
+        .get("ch-leads")
+        ?.permissionOverwrites.cache.set(`${OverwriteType.Member}:${L2}`, {
+          id: L2,
+          type: OverwriteType.Member,
+          allow: { bitfield: LEADS_LEADER_PERMISSIONS },
+          deny: { bitfield: 0n },
+        });
+      throw rateLimit();
+    };
+    expect((await w.sync()).status).toBe("failed");
+    w.channels
+      .get("ch-leads")
+      ?.permissionOverwrites.cache.delete(`${OverwriteType.Member}:${L1}`);
+    w.hooks.put = null;
+    expect(w.gc.getReport(EV)?.failures.map((f) => f.key)).toContain("#leads");
+    jest.useFakeTimers({
+      now: Date.now() + 3 * 60_000,
+      doNotFake: ["setTimeout", "setImmediate", "nextTick", "queueMicrotask"],
+    });
+    try {
+      // The cached overwrites match by now; only the lost verification asks
+      // for another look.
+      expect(w.gc.leadsNeedsAttention(event, w.guild as never)).toBe(true);
+      expect((await w.sync()).status).toBe("ok");
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(
+      (w.gc.getReport(EV)?.failures ?? []).filter((f) => f.key === "#leads"),
+    ).toEqual([]);
+  });
+});
+
 describe("a leader reappointed while a move out is pending", () => {
   it("is not moved by the plan that was made before", async () => {
     seed();

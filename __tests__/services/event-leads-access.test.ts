@@ -212,6 +212,22 @@ describe("planLeadsSync", () => {
     ]);
   });
 
+  it("repairs a missing View allow on @everyone when Connect is already denied, never lifting a View deny", () => {
+    const noView = right().map((o) =>
+      o.id === GUILD ? { ...o, allow: 0n, deny: C } : o,
+    );
+    const ops = planLeadsSync(noView, ctx({ leaderIds: ["l1", "l2"] }));
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({
+      kind: "put",
+      spec: { id: GUILD, allow: V, deny: C },
+    });
+    const hidden = right().map((o) =>
+      o.id === GUILD ? { ...o, allow: 0n, deny: C | V } : o,
+    );
+    expect(planLeadsSync(hidden, ctx({ leaderIds: ["l1", "l2"] }))).toEqual([]);
+  });
+
   it("touches no role when the admin groups are unknown", () => {
     const current = [...right(), role("verified", V | C, 0n)];
     expect(

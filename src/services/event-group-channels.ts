@@ -1441,6 +1441,10 @@ export class EventGroupChannels {
       wrote = 0,
     ): LeadsSyncResult => {
       this.queueEviction(eventId, revoked);
+      // A write may have landed although its answer did not (or only part of
+      // the plan did): the channel is no longer known to be right, so the scan
+      // checks it again once the hold has run out and clears what was reported.
+      this.leadsChecked.delete(eventId);
       return result("failed", leadsChannelId, [], wrote);
     };
     const holdKey = `${eventId}:${LEADS_HOLD}`;

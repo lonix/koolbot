@@ -143,7 +143,9 @@ export async function evictFromLeads(opts: {
     // each request.
     return wishes.map((w) => ({
       ...w,
-      skipIf: (): boolean => channels.isTrackedLeader(eventId, w.userId),
+      skipIf: (): boolean =>
+        channels.isTrackedLeader(eventId, w.userId) ||
+        (probe?.isAdmin(w.userId) ?? true),
     }));
   };
   const clearProblem = (): void =>

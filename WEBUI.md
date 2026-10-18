@@ -1790,7 +1790,12 @@ see but not join. It is made with the other group channels (#1190) and removed w
   overwrites differ from who should have access, someone who cannot connect is sitting
   in it, or a move is still owed. A pass reads Discord again before it writes, removes a
   stale member overwrite (a leader who is no longer one, a member whose data was reset, an
-  entry added by hand), adds a missing one and restores @everyone's Connect deny. A write
+  entry added by hand), adds a missing one and restores @everyone's Connect deny and View
+  (View only where the category does not deny it). Each scan also reads the admin groups'
+  roles again, so a role that became or stopped being an admin group's role gets its allow
+  or loses it without anyone touching the event. A pass that fails marks the channel
+  unverified, so one more check runs after the wait and clears what was reported. Someone who
+  becomes an admin while a move out of the channel is waiting on Discord is not moved. A write
   Discord did not take is not repeated every minute: the bot waits and says so. A
   pass leaves a member entry that only denies, and any deny, as it is.
 - **Without the permissions.** Creating the restricted channel needs **Manage Channels**

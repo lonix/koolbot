@@ -26,6 +26,7 @@ import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
 import { syncLeadsAccess } from "./event-leads-sync.js";
+import { resolveLeadsChannel } from "./event-leader-roles.js";
 import {
   EventGroupChannels,
   type GroupChannelReport,
@@ -376,6 +377,23 @@ export class EventService extends ScheduledService {
     });
   }
 
+  /**
+   * Whether the leads channel needs a pass (the cache-only check), after
+   * refreshing the snapshot of the admin groups' roles it judges by: they
+   * change in the role-group settings without any event noticing, so each scan
+   * reads them again (the role-group service caches them briefly) and a role
+   * that became or stopped being an admin's shows up as a difference.
+   */
+  private async leadsAdminsChanged(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<boolean> {
+    if (resolveLeadsChannel(event)) {
+      await this.groupChannels.leadsAdminRoles(event.guildId);
+    }
+    return this.groupChannels.leadsNeedsAttention(event, guild);
+  }
+
   /** Note a leader change synchronously (see `EventGroupChannels.trackLeaderChange`). */
   public trackLeaderChange(change: {
     eventId: string;
@@ -723,7 +741,7 @@ export class EventService extends ScheduledService {
       event.groupsEnabled === true &&
       !event.nativeAdopted &&
       (event.state === "scheduled" || event.state === "active") &&
-      this.groupChannels.leadsNeedsAttention(event, guild)
+      (await this.leadsAdminsChanged(event, guild))
     ) {
       await this.syncLeadsAccess(event.guildId, String(event._id));
     }

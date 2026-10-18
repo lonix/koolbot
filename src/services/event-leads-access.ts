@@ -280,7 +280,13 @@ export function planLeadsSync(
   const everyone = byKey.get(
     keyOf({ type: OverwriteType.Role, id: ctx.everyoneId }),
   );
-  if (!everyone || (everyone.deny & CONNECT) === 0n) {
+  // (A deny of Connect with no View allowed or denied is repaired too: the
+  // channel was made without the rule, as creation would have.)
+  if (
+    !everyone ||
+    (everyone.deny & CONNECT) === 0n ||
+    ((everyone.allow | everyone.deny) & VIEW) === 0n
+  ) {
     ops.push({
       kind: "put",
       spec: restrictEveryone(everyone, ctx.everyoneId),

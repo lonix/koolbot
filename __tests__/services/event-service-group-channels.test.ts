@@ -333,7 +333,13 @@ describe("group channels in the scan", () => {
       const sync = jest.fn(async () => undefined);
       (service as unknown as { syncLeadsAccess: unknown }).syncLeadsAccess =
         sync;
+      const admins = jest.fn(async () => ({ roleIds: new Set(), known: true }));
+      (
+        service.groupChannels as unknown as { leadsAdminRoles: unknown }
+      ).leadsAdminRoles = admins;
       await service.processEvent(open(), guild, NOW, WINDOWS);
+      // The admin groups are read again before the cache check.
+      expect(admins).toHaveBeenCalledWith("guild-1");
       // Never verified since the start: one pass, with no revoked ids.
       expect(sync).toHaveBeenCalledTimes(1);
       expect(sync).toHaveBeenCalledWith("guild-1", "evt1");
