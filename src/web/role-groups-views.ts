@@ -270,7 +270,9 @@ export function renderRoleDeletePage(props: RoleDeletePageProps): string {
     props.reviewToken !== null;
   const form = applicable
     ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><input type="hidden" name="approvedAt" value="${escapeHtml(props.approvedAt)}"><input type="hidden" name="reviewToken" value="${escapeHtml(props.reviewToken ?? "")}">
-<p>I understand that deleting <strong>@${escapeHtml(props.confirmName ?? "")}</strong> removes it from every member who holds it. A rollback can recreate a role with the same settings, but not its role ID or its member assignments, so anything that referred to the old ID stays disconnected.</p>
+<p>The role is named exactly (spaces included, ${(props.confirmName ?? "").length} characters):</p>
+<pre class="mono">${escapeHtml(props.confirmName ?? "")}</pre>
+<p>I understand that deleting this role removes it from every member who holds it. A rollback can recreate a role with the same settings, but not its role ID or its member assignments, so anything that referred to the old ID stays disconnected.</p>
 <label>Type the role name to confirm <input type="text" name="confirmName" required autocomplete="off" placeholder="${escapeHtml(props.confirmName ?? "")}"></label>
 <button type="submit" class="btn btn-danger">Delete role and group</button> <a class="btn" href="/admin/role-groups">Cancel</a>
 <span class="muted">This review is valid for ${props.validForMinutes} minutes. A snapshot is saved first.</span></form>`

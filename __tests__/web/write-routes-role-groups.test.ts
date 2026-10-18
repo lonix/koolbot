@@ -556,6 +556,38 @@ describe("POST /role-groups/:id/delete-role/apply (#1184)", () => {
     expect(svc.remove).not.toHaveBeenCalled();
   });
 
+  it("matches the role name exactly, so a name with leading and trailing spaces can be confirmed", async () => {
+    mockPlanDelete.mockResolvedValue({
+      plan: deletePlan({
+        operations: [
+          {
+            type: "role.delete",
+            class: "destructive",
+            before: { name: "  Helpers ", permissions: "0" },
+          },
+        ],
+      }),
+      extraErrors: [],
+    });
+    await mount();
+    // The trimmed name is not the role's name.
+    for (const typed of ["Helpers", "  Helpers", "Helpers ", " Helpers "]) {
+      const refused = await harness.post(
+        "/role-groups/g1/delete-role/apply",
+        body({ confirmName: typed }),
+      );
+      expect(flashOf(refused).msg).toContain("doesn't match");
+    }
+    expect(mockStartApply).not.toHaveBeenCalled();
+    const ok = await harness.post(
+      "/role-groups/g1/delete-role/apply",
+      body({ confirmName: "  Helpers " }),
+    );
+    expect(ok.headers.get("location")).toContain("?job=");
+    expect(mockStartApply).toHaveBeenCalledTimes(1);
+    expect(svc.remove).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a plan id the admin did not review", async () => {
     await mount();
     const res = await harness.post(

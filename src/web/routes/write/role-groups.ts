@@ -36,6 +36,7 @@ import {
   asyncHandler,
   flashRedirect,
   getCheckbox,
+  getRawString,
   getString,
   requireSessionContext,
 } from "./helpers.js";
@@ -425,7 +426,9 @@ export function createRoleGroupsRouter(client: Client): Router {
       // Everything the request carries is read here, before the first await.
       const planId = getString(req, "planId");
       const approvedAt = getString(req, "approvedAt");
-      const typedName = getString(req, "confirmName").trim();
+      // Exactly as typed: the role's name may have leading or trailing
+      // spaces, and the match is exact on both sides.
+      const typedName = getRawString(req, "confirmName");
       const reviewToken = getString(req, "reviewToken");
       const sessionId = session.sessionId;
       // The stamp is only trusted if the server issued it for this session,

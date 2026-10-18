@@ -192,6 +192,16 @@ export function getString(req: AuthenticatedRequest, name: string): string {
 }
 
 /**
+ * A form field exactly as submitted, without the trimming `getString` does.
+ * For values that must match server data character for character, such as a
+ * typed confirmation of a role name that has leading or trailing spaces.
+ */
+export function getRawString(req: AuthenticatedRequest, name: string): string {
+  const raw = (req.body as Record<string, unknown> | undefined)?.[name];
+  return typeof raw === "string" ? raw : "";
+}
+
+/**
  * Allowlisted post-action redirect targets (#610). The feature pages render an
  * inline "Enable <feature>" form that POSTs to /admin/settings/set with a
  * `redirect` field so the operator lands back on the page they enabled rather

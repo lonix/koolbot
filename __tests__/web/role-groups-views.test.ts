@@ -560,6 +560,12 @@ describe("renderRoleDeletePage (#1184)", () => {
     expect(html).not.toContain("Mods <b>");
   });
 
+  it("shows the exact name, padding included, escaped and in a whitespace-preserving element", () => {
+    const html = renderRoleDeletePage(p({ confirmName: "  A <i> " }));
+    expect(html).toContain('<pre class="mono">  A &lt;i&gt; </pre>');
+    expect(html).toContain("8 characters");
+  });
+
   it("says the role ID and member assignments can't be restored", () => {
     const html = renderRoleDeletePage(p());
     expect(html).toContain("role ID");
