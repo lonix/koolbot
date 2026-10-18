@@ -39,7 +39,10 @@ import {
   GROUP_TAG_MAX,
   resolveGroupCountLimits,
 } from "../services/event-groups.js";
-import { EVENT_GROUP_PRESETS } from "../content/event-group-presets.js";
+import {
+  EVENT_GROUP_PRESETS,
+  type EventGroupPreset,
+} from "../content/event-group-presets.js";
 import { THEME } from "./theme.js";
 import {
   MAX_GROUP_ENTRIES,
@@ -2080,6 +2083,13 @@ export interface EventsProps extends CommonProps {
   settingsUnavailable?: boolean;
   /** Group rows the form offers and the cap (#1188); defaults 2 and 15. */
   groupLimits?: { defaultCount: number; maxCount: number };
+  /**
+   * The presets the picker offers (#1200): the enabled built-ins and library
+   * presets. Absent = every built-in, as before the library existed.
+   */
+  groupPresets?: readonly EventGroupPreset[];
+  /** Shown above the picker when the preset library could not be read. */
+  groupPresetsNotice?: string | null;
   flash?: FlashMessage | null;
 }
 
@@ -2452,7 +2462,7 @@ function renderCoverCell(
 
 // ---------- Event groups form section (#1188) ----------
 
-const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
+export const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
   ["team", "Team (members belong to it)"],
   ["open", "Open (anyone can join, e.g. spectators)"],
   ["leads", "Leads (leaders and host only, at most one)"],
@@ -2462,15 +2472,21 @@ const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
  * One group row. `index` and `position` are numbers for a rendered row and the
  * `__N__` / `__P__` placeholders for the template the script clones.
  */
-function renderGroupRow(
+export function renderGroupRow(
   index: string,
   position: string,
-  group?: { name: string },
+  group?: {
+    name?: string;
+    kind?: string;
+    size?: string;
+    tag?: string;
+    marker?: string;
+  },
 ): string {
   const field = (f: string): string => `group_${index}_${f}`;
   const kinds = GROUP_KIND_OPTIONS.map(
     ([value, label]) =>
-      `<option value="${value}">${escapeHtml(label)}</option>`,
+      `<option value="${value}"${group?.kind === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
   ).join("");
   return `<fieldset data-group-row>
         <legend>Group ${position}</legend>
@@ -2481,39 +2497,58 @@ function renderGroupRow(
           <select name="${field("kind")}">${kinds}</select>
         </label>
         <label>Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)
-          <input type="number" name="${field("size")}" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}">
+          <input type="number" name="${field("size")}" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
         </label>
         <label>Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)
-          <input type="text" name="${field("tag")}" maxlength="${GROUP_TAG_MAX}">
+          <input type="text" name="${field("tag")}" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
         </label>
         <label>Group ${position} marker (optional, e.g. a coloured circle)
-          <input type="text" name="${field("marker")}" maxlength="${GROUP_MARKER_MAX_CHARS * 2}">
+          <input type="text" name="${field("marker")}" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
         </label>
       </fieldset>`;
 }
 
-function renderGroupsSection(limits: {
-  defaultCount: number;
-  maxCount: number;
-}): string {
-  const presetOptions = EVENT_GROUP_PRESETS.map((preset) => {
-    const groups = JSON.stringify(
-      preset.groups.map((g) => ({
-        name: g.name,
-        kind: g.kind,
-        size: g.size,
-        tag: g.tag,
-        marker: g.marker,
-      })),
-    );
-    // A preset bigger than the cap cannot be applied whole, so it is not offered
-    // (the server refuses it too).
-    const tooBig = preset.groups.length > limits.maxCount;
-    const note = tooBig
-      ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
-      : "";
-    return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}" data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
-  }).join("");
+function renderGroupsSection(
+  limits: {
+    defaultCount: number;
+    maxCount: number;
+  },
+  presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
+  presetsNotice: string | null = null,
+): string {
+  const presetOptions = presets
+    .map((preset) => {
+      const groups = JSON.stringify(
+        preset.groups.map((g) => ({
+          name: g.name,
+          kind: g.kind,
+          size: g.size,
+          tag: g.tag,
+          marker: g.marker,
+        })),
+      );
+      // A preset bigger than the cap cannot be applied whole, so it is not offered
+      // (the server refuses it too).
+      const tooBig = preset.groups.length > limits.maxCount;
+      const note = tooBig
+        ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
+        : "";
+      // Library presets may carry a leader label and a lead time; the script
+      // fills those fields only when the attribute is there. An explicit null
+      // (a library preset that uses the server default) is an empty attribute,
+      // which clears the field; a built-in has none and leaves it alone.
+      const extra =
+        (preset.leaderLabel
+          ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
+          : "") +
+        (typeof preset.channelLeadMinutes === "number"
+          ? ` data-lead="${preset.channelLeadMinutes}"`
+          : preset.channelLeadMinutes === null
+            ? ' data-lead=""'
+            : "");
+      return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
+    })
+    .join("");
   const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1)),
   ).join("\n      ");
@@ -2527,7 +2562,8 @@ function renderGroupsSection(limits: {
           ${presetOptions}
         </select>
       </label>
-      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups.</p>
+      ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
+      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups. Which presets are offered is managed on the <a href="/admin/events/presets">group presets page</a>.</p>
       <label>What a group is called (e.g. Team, Squad, Room, Party)
         <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}">
       </label>
@@ -2597,6 +2633,8 @@ const EVENT_GROUPS_SCRIPT =
   "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
   "if(g.length>max){preset.value='';return}" +
   "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
+  "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
+  "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
   "var n=Math.max(rows().length,g.length);" +
   "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
   "form.elements['groups_enabled'].checked=true;validity()});" +
@@ -2668,7 +2706,7 @@ export function renderEventsPage(props: EventsProps): string {
           : ""
       }${
         e.groupCount
-          ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span>`
+          ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
           : ""
       }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
@@ -2774,7 +2812,7 @@ ${renderFeatureSettingsCard({
         <option value="monthly">Monthly</option>
       </select>
     </label>
-    ${renderGroupsSection(groupLimits)}
+    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
   <p class="muted">A cover image is added to a scheduled event from the Cover image column above; it is shown on the Discord event.</p>

@@ -20,6 +20,7 @@ import {
 } from "../../../models/event.js";
 import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
 import { ConfigService } from "../../../services/config-service.js";
+import { loadPresetResolver } from "../../../services/event-group-preset-service.js";
 import {
   parseGroupForm,
   resolveGroupCountLimits,
@@ -142,7 +143,18 @@ export function createEventsRouter(client: Client): Router {
           defaultCount,
           configuredMax,
         );
-        const result = validateGroupSetup(groupInput, { maxCount });
+        // The enabled presets are read once, here, and used for the whole
+        // request. Custom needs no read, so it works even when the library is
+        // unreadable; a named preset that cannot be confirmed is refused.
+        const presetId = groupInput.presetId;
+        const resolvePreset =
+          presetId && presetId !== "custom"
+            ? (await loadPresetResolver(session.guildId)).resolve
+            : undefined;
+        const result = validateGroupSetup(groupInput, {
+          maxCount,
+          ...(resolvePreset ? { resolvePreset } : {}),
+        });
         if (!result.ok) {
           flashRedirect(res, "/admin/events", {
             type: "err",

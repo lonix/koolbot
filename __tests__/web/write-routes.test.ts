@@ -872,7 +872,7 @@ describe("createWriteRouter (#850)", () => {
       true,
     );
     // The adoption rate limits plus every domain module, each mounted once.
-    expect(stack.length - 3).toBe(25);
+    expect(stack.length - 3).toBe(26);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -919,6 +919,9 @@ describe("createWriteRouter (#850)", () => {
         "POST /events/:id/cover/remove",
         "POST /events/:id/start-now",
         "POST /events/create",
+        "POST /events/presets/delete",
+        "POST /events/presets/save",
+        "POST /events/presets/toggle",
         "POST /leaderboard-roles/run-now",
         "POST /leaderboard-roles/tiers",
         "POST /moderation/cases/:id/permanent",
