@@ -367,6 +367,13 @@ export class EventService extends ScheduledService {
    */
   private readonly endingEvents = new Map<string, Map<number, number>>();
   private endingHoldCounter = 0;
+  /**
+   * Events whose teardown is running right now (id to the callers' holds),
+   * given back when it finishes. Unlike `endingEvents` this also stops the scan
+   * on a copy that already reads `ended`: with a grace period of 0 it would
+   * otherwise delete the main channel before the pull-back has used it.
+   */
+  private readonly endsInProgress = new Map<string, Set<number>>();
 
   private constructor(client: Client) {
     super(client, {
@@ -399,6 +406,7 @@ export class EventService extends ScheduledService {
         this.configService.getNumber("events.channel_grace_minutes", 15),
       beginEnding: (id) => this.beginEnding(id),
       abortEnding: (id, hold) => this.abortEnding(id, hold),
+      finishEnding: (id, hold) => this.finishEnding(id, hold),
     });
   }
 
@@ -417,13 +425,39 @@ export class EventService extends ScheduledService {
     const holds = this.endingEvents.get(eventId) ?? new Map<number, number>();
     holds.set(hold, now + EventService.ENDING_HOLD_MS);
     this.endingEvents.set(eventId, holds);
+    const running = this.endsInProgress.get(eventId) ?? new Set<number>();
+    running.add(hold);
+    this.endsInProgress.set(eventId, running);
     return hold;
   }
 
+  /** The claim was lost: give up this caller's own holds, and only those. */
   private abortEnding(eventId: string, hold: number): void {
     const holds = this.endingEvents.get(eventId);
     holds?.delete(hold);
     if (holds && holds.size === 0) this.endingEvents.delete(eventId);
+    this.finishEnding(eventId, hold);
+  }
+
+  /** This caller's teardown is over; the recently-ended hold stays. */
+  private finishEnding(eventId: string, hold: number): void {
+    const running = this.endsInProgress.get(eventId);
+    running?.delete(hold);
+    if (running && running.size === 0) this.endsInProgress.delete(eventId);
+  }
+
+  /**
+   * Whether a scan must not act on its copy of the event now: a teardown is
+   * running (whatever state the copy shows), or the copy is still open although
+   * an end began (an older copy than the end).
+   */
+  private mustSkipScan(event: IEvent): boolean {
+    const id = String(event._id);
+    if (this.endsInProgress.has(id)) return true;
+    return (
+      (event.state === "scheduled" || event.state === "active") &&
+      this.isBeingEnded(id)
+    );
   }
 
   private pruneHolds(eventId: string, now: number): void {
@@ -677,13 +711,9 @@ export class EventService extends ScheduledService {
     let changed = false;
 
     // Being ended (or ended a moment ago) by "End event now" (#1193): this
-    // copy of the row is older than the end and must not be acted on.
-    if (
-      (event.state === "scheduled" || event.state === "active") &&
-      this.isBeingEnded(String(event._id))
-    ) {
-      return;
-    }
+    // copy of the row is older than the end, or the teardown is still using
+    // the event's channels, and must not be acted on.
+    if (this.mustSkipScan(event)) return;
 
     // An adopted event follows its native event, which stays the source of
     // truth (#1034): its edits are copied onto the row, and one deleted or
@@ -854,17 +884,14 @@ export class EventService extends ScheduledService {
     }
 
     // The slow steps above can outlast a manual end that landed meanwhile.
-    if (
-      (event.state === "scheduled" || event.state === "active") &&
-      this.isBeingEnded(String(event._id))
-    ) {
-      return;
-    }
+    if (this.mustSkipScan(event)) return;
 
     // Keep the native scheduled event in line (#1034): creates it for events
     // that predate the toggle, pushes edits, and closes it on end/cancel.
     if (!windows.skipNative) {
       await this.nativeSync.syncEvent(event, guild, windows.native);
+      // That await can outlast a manual end too: this copy still says open.
+      if (this.mustSkipScan(event)) return;
       // The announcement carries the native event's link. The ids are stored
       // before the post is edited, so a failed edit (or a post another sender
       // replaced) would not be noticed by comparing ids between scans.
@@ -1931,6 +1958,15 @@ export class EventService extends ScheduledService {
       // A post that still carries buttons predates native-only events and
       // keeps its RSVP embed; anything else gets the link announcement.
       const legacy = message.components.length > 0;
+      // The fetches above are awaits: an open copy must not write the post once
+      // an end began meanwhile (it would show a finished event as running).
+      // Nothing is awaited between this check and the edit request.
+      if (
+        (event.state === "scheduled" || event.state === "active") &&
+        this.isBeingEnded(String(event._id))
+      ) {
+        return true;
+      }
       await message.edit(
         legacy
           ? this.buildLegacyRsvpPayload(event)

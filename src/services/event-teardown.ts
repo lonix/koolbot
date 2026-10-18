@@ -108,6 +108,11 @@ export interface TeardownDeps {
   beginEnding(eventId: string): number;
   /** The claim was not won: give up this caller's own hold, and only that one. */
   abortEnding(eventId: string, hold: number): void;
+  /**
+   * The teardown that won the claim has finished (whatever happened): the event
+   * is no longer "in progress". The recently-ended hold stays until it expires.
+   */
+  finishEnding(eventId: string, hold: number): void;
   /** Pause after a pull-back so the gateway shows the moves (tests: 0). */
   settleMs?: number;
 }
@@ -172,7 +177,20 @@ export class EventTeardown {
       return claimed;
     }
 
-    const event = input.event ?? claimed.doc;
+    try {
+      return await this.afterClaim(input, claimed.doc);
+    } finally {
+      this.deps.finishEnding(eventId, hold);
+    }
+  }
+
+  /** Everything after the claim: the steps, each attempted whatever the last did. */
+  private async afterClaim(
+    input: TeardownInput,
+    claimedDoc: IEvent,
+  ): Promise<EndEventOutcome> {
+    const { eventId } = input;
+    const event = input.event ?? claimedDoc;
     if (input.event) {
       // The scan's copy follows the claim, so the rest of its tick sees an
       // ended event.
@@ -527,23 +545,28 @@ export class EventTeardown {
     event: IEvent,
     guild: Guild | null,
   ): Promise<TeardownStep | null> {
-    if (!guild) return null;
-    const hadLink = !!event.nativeEventId;
+    // An adopted event is only let go of (never closed from here), and an event
+    // with no link and no create marker has nothing in Discord to close.
+    const pending = (): boolean =>
+      event.nativeAdopted !== true &&
+      (!!event.nativeEventId || !!event.nativeCreateStartedAt);
+    if (!pending()) return null;
+    const note =
+      "The Discord event could not be closed yet. KoolBot tries again within a minute.";
+    if (!guild) {
+      return { id: "native", ok: false, note };
+    }
     try {
       await this.deps.syncNative(event, guild);
     } catch (error) {
       logger.error("Event end: native sync threw:", error);
     }
-    // `syncEvent` swallows its own errors; the link still being there after
+    // `syncEvent` swallows its own errors; the link (or the marker of a create
+    // that timed out and is still being looked for) still being there after
     // the sync is the only sign that closing it did not go through (it also
     // stays when native events are switched off or the bot may not manage
     // them). The scan's terminal-row query tries again.
-    if (!hadLink || !event.nativeEventId || event.nativeAdopted) return null;
-    return {
-      id: "native",
-      ok: false,
-      note: "The Discord event could not be closed yet. KoolBot tries again within a minute.",
-    };
+    return pending() ? { id: "native", ok: false, note } : null;
   }
 
   private async mainChannel(event: IEvent): Promise<TeardownStep | null> {

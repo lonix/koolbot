@@ -137,6 +137,9 @@ interface EventRow {
   groups?: GroupRow[];
 }
 
+/** Report key of "the event could not be read". */
+const READ_FAILURE_KEY = "#read";
+
 export interface GroupChannelFailure {
   key: string;
   name: string;
@@ -530,7 +533,7 @@ export class EventGroupChannels {
     guild: Guild,
   ): Promise<GroupChannelReport> {
     const report = emptyReport();
-    const row = await this.readFresh(eventId);
+    const row = await this.readFresh(eventId, report);
     if (
       !row ||
       row.groupsEnabled !== true ||
@@ -651,7 +654,7 @@ export class EventGroupChannels {
     try {
       // Fresh again: the pass has created and recorded channels since it began,
       // and a cancel may have landed.
-      const row = await this.readFresh(eventId);
+      const row = await this.readFresh(eventId, report);
       if (
         !row ||
         row.groupsEnabled !== true ||
@@ -1060,7 +1063,7 @@ export class EventGroupChannels {
     now: Date,
   ): Promise<GroupChannelReport> {
     const report = emptyReport();
-    const row = await this.readFresh(eventId);
+    const row = await this.readFresh(eventId, report);
     if (!row) return report;
     const recorded = (row.groups ?? []).filter((g) => !!g.channelId);
     if (recorded.length === 0) {
@@ -1216,7 +1219,17 @@ export class EventGroupChannels {
     logger.warn(`Event ${sanitizeForLog(String(event._id))}: ${message}`);
   }
 
-  private async readFresh(eventId: string): Promise<EventRow | null> {
+  /**
+   * The event as it is stored now. A missing event and an unreadable one both
+   * answer null (nothing is decided from a guess), but an unreadable one is
+   * also a failure in `report`, so a caller that looks at the report (the end
+   * teardown, the host panel) is told the pass did not run instead of seeing an
+   * empty, successful-looking result.
+   */
+  private async readFresh(
+    eventId: string,
+    report: GroupChannelReport,
+  ): Promise<EventRow | null> {
     try {
       return (await Event.findById(eventId).lean()) as EventRow | null;
     } catch (error) {
@@ -1224,6 +1237,13 @@ export class EventGroupChannels {
         `Event ${sanitizeForLog(eventId)}: could not read the event for its group channels:`,
         error,
       );
+      report.failures.push({
+        key: READ_FAILURE_KEY,
+        name: "Group channels",
+        reason:
+          "The event could not be read, so nothing was changed. Retried next scan.",
+      });
+      this.reports.set(eventId, report);
       return null;
     }
   }
