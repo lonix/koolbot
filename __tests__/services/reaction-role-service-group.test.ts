@@ -154,6 +154,23 @@ describe("ReactionRoleService.createReactionRoleGroup", () => {
     expect(docs.map((d) => d.emoji)).toEqual(["🔴", "🔵"]);
   });
 
+  it("remembers the channel the shared picker was posted in (#1207)", async () => {
+    const { client } = makeCreateClient();
+    const { service } = createService(client);
+
+    await service.createReactionRoleGroup("g1", "Colour", [
+      { roleName: "Red", emoji: "🔴" },
+      { roleName: "Blue", emoji: "🔵" },
+    ]);
+
+    const docs = model.insertMany.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    // The private channel (`channelId`) and the picker's channel differ.
+    expect(docs.every((d) => d.messageChannelId === "msgchan")).toBe(true);
+    expect(docs.every((d) => d.channelId === "chan1")).toBe(true);
+  });
+
   it("rejects a group with fewer than two options without touching Discord", async () => {
     const { client, guild } = makeCreateClient();
     const { service } = createService(client);

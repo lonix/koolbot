@@ -289,6 +289,23 @@ describe("buildProtectionMap: Mongo-backed feature bindings", () => {
     expect(map.size).toBe(2);
   });
 
+  it("protects the channel a reaction-role picker was posted in, even after the setting moved", () => {
+    // The configured channel (B) is protected through config; the picker's own
+    // channel (A) is not configured any more but still holds a live picker.
+    const map = buildProtectionMap(
+      baseInputs({
+        config: { "reactionroles.message_channel_id": B },
+        reactionRoles: [
+          { id: "rr1", channelId: null, categoryId: null, messageChannelId: A },
+          { id: "rr2", channelId: null, categoryId: null },
+        ],
+      }),
+    );
+    expect(map.get(A)![0]).toContain("picker channel");
+    expect(map.get(A)![0]).toContain("rr1");
+    expect(map.has(B)).toBe(true);
+  });
+
   it("protects poll schedule destinations, naming the feature", () => {
     const map = buildProtectionMap(
       baseInputs({ pollSchedules: [{ id: "ps1", channelId: B }] }),

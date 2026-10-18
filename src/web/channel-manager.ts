@@ -330,6 +330,8 @@ export interface ProtectionInputs {
     id: string;
     channelId: string | null;
     categoryId: string | null;
+    /** The channel its picker message lives in (#1207); absent on older rows. */
+    messageChannelId?: string | null;
   }>;
   /** Poll schedules, enabled or not (a disabled one can be turned back on). */
   pollSchedules: ReadonlyArray<{ id: string; channelId: string }>;
@@ -413,6 +415,10 @@ export function buildProtectionMap(
     add(l.channelId, "a looking-for-group post channel (LFG)");
   }
   for (const r of input.reactionRoles) {
+    add(
+      r.messageChannelId,
+      `a reaction role's picker channel (Reaction Roles, mapping ${r.id})`,
+    );
     add(
       r.channelId,
       `a reaction role's private channel (Reaction Roles, mapping ${r.id})`,

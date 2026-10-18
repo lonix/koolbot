@@ -1585,6 +1585,7 @@ export function createReadOnlyRouter(
         categoryId?: string | null;
         channelId?: string | null;
         messageId: string;
+        messageChannelId?: string | null;
         autoCreated?: boolean;
         mode?: string;
         groupId?: string | null;
@@ -1598,6 +1599,9 @@ export function createReadOnlyRouter(
         categoryName: resolveChannel(rr.categoryId),
         channelName: resolveChannel(rr.channelId),
         messageId: rr.messageId,
+        pickerChannelName: rr.messageChannelId
+          ? (channelNames.get(rr.messageChannelId) ?? rr.messageChannelId)
+          : null,
         autoCreated: rr.autoCreated ?? true,
         mode: rr.mode ?? "toggle",
         groupId: rr.groupId ?? null,

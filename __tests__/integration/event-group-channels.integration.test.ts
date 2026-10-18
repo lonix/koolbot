@@ -33,8 +33,21 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
     service: EventGroupChannels;
     guild: Guild;
     live: Set<string>;
+    rest: {
+      patch: jest.Mock<
+        (
+          route: string,
+          o: { body: Array<{ id: string; position: number }> },
+        ) => Promise<void>
+      >;
+    };
   } {
     const live = new Set<string>();
+    // Where each channel is (raw position); a create lands at the bottom.
+    const positions = new Map<string, number>([
+      ["main-1", 0],
+      ["foreign-1", 1],
+    ]);
     let seq = 0;
     const notFound = (): DiscordAPIError =>
       new DiscordAPIError(
@@ -50,7 +63,26 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
       members: { me: null },
       channels: {
         cache: new Map(),
-        fetch: jest.fn(async (id: string) => {
+        fetch: jest.fn(async (id?: string) => {
+          if (id === undefined) {
+            // The whole server, read fresh: what the ordering step uses.
+            const all = new Map<string, unknown>();
+            for (const [cid, rawPosition] of positions) {
+              all.set(cid, {
+                id: cid,
+                type: ChannelType.GuildVoice,
+                guildId: GUILD,
+                parentId: CATEGORY,
+                rawPosition,
+              });
+            }
+            all.set(CATEGORY, {
+              id: CATEGORY,
+              type: ChannelType.GuildCategory,
+              permissionOverwrites: { cache: new Map() },
+            });
+            return all;
+          }
           if (id === "main-1") {
             return {
               id,
@@ -58,6 +90,7 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
               guildId: GUILD,
               parentId: CATEGORY,
               members: { size: 0 },
+              rawPosition: 0,
             };
           }
           if (id === CATEGORY) {
@@ -81,8 +114,17 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
       post: jest.fn(async () => {
         seq += 1;
         live.add(`chan-${seq}`);
+        positions.set(`chan-${seq}`, 100 + seq);
         return { id: `chan-${seq}` };
       }),
+      patch: jest.fn(
+        async (
+          _route: string,
+          o: { body: Array<{ id: string; position: number }> },
+        ) => {
+          for (const move of o.body) positions.set(move.id, move.position);
+        },
+      ),
       delete: jest.fn(async (route: string) => {
         live.delete(route.split("/").pop() as string);
       }),
@@ -100,7 +142,7 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
         paceMs: 0,
       },
     );
-    return { service, guild, live };
+    return { service, guild, live, rest };
   }
 
   async function makeEvent(state = "active"): Promise<string> {
@@ -134,6 +176,28 @@ describeWithMongo("event group channels against a real MongoDB (#1190)", () => {
       "chan-2",
     ]);
     expect(live.size).toBe(2);
+  });
+
+  it("puts the groups right below the main channel with one position write and leaves the recorded ids as they were (#1214)", async () => {
+    const id = await makeEvent();
+    const { service, guild, rest } = env();
+    const report = await service.reconcile({ _id: id }, guild);
+    expect(report.failures).toEqual([]);
+    expect(rest.patch).toHaveBeenCalledTimes(1);
+    // The foreign channel sat right below the main channel: the groups take
+    // its place and it shifts down.
+    expect(rest.patch.mock.calls[0][1]).toMatchObject({
+      body: [
+        { id: "chan-1", position: 1 },
+        { id: "chan-2", position: 2 },
+        { id: "foreign-1", position: 3 },
+      ],
+    });
+    const stored = await Event.findById(id).lean();
+    expect(stored?.groups.map((g) => g.channelId)).toEqual([
+      "chan-1",
+      "chan-2",
+    ]);
   });
 
   it("an id recorded by the positional update survives a save of a copy loaded before it", async () => {

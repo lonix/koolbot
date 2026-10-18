@@ -28,6 +28,13 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
     })),
   },
 }));
+const mockPickerRow =
+  jest.fn<() => Promise<{ messageChannelId?: string } | null>>();
+jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
+  ReactionRoleConfig: {
+    findOne: jest.fn(() => ({ lean: mockPickerRow })),
+  },
+}));
 jest.unstable_mockModule("../../src/config/env.js", () => ({ env: mockEnv }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: mockLogger,
@@ -149,6 +156,7 @@ describe("WelcomeService", () => {
     mockGetString.mockImplementation(
       async (k, d) => (cfg[k] as string) ?? d ?? "",
     );
+    mockPickerRow.mockResolvedValue(null);
     send.mockResolvedValue(undefined);
     fetchChannel.mockResolvedValue({ isTextBased: () => true, send });
   });
@@ -185,6 +193,32 @@ describe("WelcomeService", () => {
       expect.objectContaining({
         content:
           "Welcome <@43> to Kool Place https://discord.com/channels/guild-1/rr/m1",
+      }),
+    );
+  });
+
+  it("links a picker in the channel it remembers, not the configured one (#1207)", async () => {
+    cfg["reactionroles.message_channel_id"] = "rr-new";
+    cfg["welcome.roles_message_id"] = "m1";
+    mockPickerRow.mockResolvedValue({ messageChannelId: "rr-old" });
+    await svc().handleMemberJoin(makeMember());
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content:
+          "Welcome <@42> to Kool Place https://discord.com/channels/guild-1/rr-old/m1",
+      }),
+    );
+  });
+
+  it("falls back to the configured channel when the picker lookup fails", async () => {
+    cfg["reactionroles.message_channel_id"] = "rr";
+    cfg["welcome.roles_message_id"] = "m1";
+    mockPickerRow.mockRejectedValue(new Error("db down"));
+    await svc().handleMemberJoin(makeMember());
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content:
+          "Welcome <@42> to Kool Place https://discord.com/channels/guild-1/rr/m1",
       }),
     );
   });

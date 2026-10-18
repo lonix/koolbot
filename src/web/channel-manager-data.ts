@@ -135,12 +135,23 @@ export async function loadProtection(
       guildId,
       state: { $in: ["creating", "open"] },
     }).lean(),
-    // Archived mappings no longer own their channel.
-    ReactionRoleConfig.find({ guildId, archivedAt: null }).lean(),
+    // Archived mappings no longer own their private channel, but one that
+    // remembers its picker channel still records where a live picker may be
+    // (role deletion archives a mapping and leaves the shared picker).
+    ReactionRoleConfig.find({
+      guildId,
+      $or: [
+        { archivedAt: null },
+        { messageChannelId: { $exists: true, $ne: "" } },
+      ],
+    }).lean(),
     PollSchedule.find({ guildId }).lean(),
     ScheduledAnnouncement.find({ guildId }).lean(),
     effectiveLobbyNames(),
   ]);
+  const liveMessageIds = new Set(
+    reactionRoles.filter((r) => !r.archivedAt).map((r) => r.messageId),
+  );
   return buildProtectionMap({
     config,
     managedVoice: managedVoice.map((r) => ({
@@ -165,8 +176,15 @@ export async function loadProtection(
     })),
     reactionRoles: reactionRoles.map((r) => ({
       id: String(r._id),
-      channelId: r.channelId ?? null,
-      categoryId: r.categoryId ?? null,
+      channelId: r.archivedAt ? null : (r.channelId ?? null),
+      categoryId: r.archivedAt ? null : (r.categoryId ?? null),
+      // An archived row's picker may be gone (archiving a standalone mapping
+      // deletes it), so its stamp protects the channel only while an active
+      // mapping still uses the same message: then the picker is alive.
+      messageChannelId:
+        !r.archivedAt || liveMessageIds.has(r.messageId)
+          ? (r.messageChannelId ?? null)
+          : null,
     })),
     pollSchedules: polls.map((p) => ({
       id: String(p._id),

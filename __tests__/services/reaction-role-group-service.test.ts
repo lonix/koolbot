@@ -27,11 +27,20 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: { getInstance: () => ({ getString: mockGetString }) },
 }));
+const mockPickerChannel =
+  jest.fn<
+    (
+      guildId: string,
+      messageId: string,
+      known: Array<{ messageChannelId?: string }>,
+    ) => Promise<{ channelId: string; remembered: boolean }>
+  >();
 jest.unstable_mockModule("../../src/services/reaction-role-service.js", () => ({
   ReactionRoleService: {
     getInstance: () => ({
       normalizeEmoji: (e: string) => e,
       validateRoleAssignable: mockValidate,
+      pickerChannelForMessage: mockPickerChannel,
     }),
   },
 }));
@@ -119,6 +128,19 @@ beforeEach(() => {
         ? "#336699"
         : d,
   );
+  // Default resolver: a stored channel on a known row, else the configured one.
+  mockPickerChannel.mockImplementation(async (_g, _m, known) => {
+    const own = known.find((r) => r.messageChannelId)?.messageChannelId;
+    return own
+      ? { channelId: own, remembered: true }
+      : {
+          channelId: await mockGetString(
+            "reactionroles.message_channel_id",
+            "",
+          ),
+          remembered: false,
+        };
+  });
   model.find.mockResolvedValue([]);
   model.insertMany.mockResolvedValue([]);
   model.updateMany.mockResolvedValue({});
@@ -811,5 +833,119 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     ]);
     expect(dup.success).toBe(false);
     expect(s.guild.roles.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReactionRoleGroupService.provisionGroup picker channel (#1207)", () => {
+  const storedRow = {
+    roleId: "r1",
+    emoji: "🇪🇺",
+    roleName: "Europe",
+    messageId: "m1",
+    groupId: "m1",
+    mode: "unique",
+    messageChannelId: "old-chan",
+  };
+
+  /** The guild resolves channels by id, so a lookup in the wrong one fails. */
+  function routeChannels(s: ReturnType<typeof setup>, ids: string[]) {
+    s.guild.channels.fetch.mockImplementation(async (id: unknown) => {
+      if (ids.includes(id as string)) return s.channel;
+      throw Object.assign(new Error("Unknown Channel"), { code: 10003 });
+    });
+  }
+
+  function insertedDocs(): Array<Record<string, unknown>> {
+    return (
+      model.insertMany.mock.calls[0] as unknown as [
+        Array<Record<string, unknown>>,
+      ]
+    )[0];
+  }
+
+  it("stamps a fresh group's mappings with the channel the picker was posted in", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries, "unique");
+    expect(r.success).toBe(true);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("chan");
+    const docs = insertedDocs();
+    expect(docs).toHaveLength(2);
+    for (const d of docs) expect(d.messageChannelId).toBe("chan");
+  });
+
+  it("tops up in the channel the picker remembers after the setting changed", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    // The setting points at "chan"; the picker lives in "old-chan" only.
+    routeChannels(s, ["old-chan"]);
+    model.find.mockResolvedValue([storedRow]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r).toMatchObject({ success: true, addedEntries: 1 });
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("old-chan");
+    expect(s.guild.channels.fetch).not.toHaveBeenCalledWith("chan");
+    expect(s.message.edit).toHaveBeenCalledTimes(1);
+    expect(s.channel.send).not.toHaveBeenCalled();
+    const docs = insertedDocs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].messageChannelId).toBe("old-chan");
+  });
+
+  it("finds a stamped sibling outside the group's rows (bound to the picker without a groupKey)", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["old-chan"]);
+    const legacy: Record<string, unknown> = { ...storedRow };
+    delete legacy.messageChannelId;
+    model.find.mockResolvedValue([legacy]);
+    // The shared resolver finds the stamped sibling on the anchor's message id.
+    mockPickerChannel.mockResolvedValue({
+      channelId: "old-chan",
+      remembered: true,
+    });
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(mockPickerChannel).toHaveBeenCalledWith("g1", "m1", [legacy]);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("old-chan");
+    expect(insertedDocs()[0].messageChannelId).toBe("old-chan");
+  });
+
+  it("tops up a remembered picker even when no channel is configured", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["old-chan"]);
+    mockGetString.mockImplementation(async (_k, d) => d);
+    model.find.mockResolvedValue([storedRow]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+  });
+
+  it("still tops up a legacy group in the configured channel and stamps only the new rows", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    routeChannels(s, ["chan"]);
+    const legacy: Record<string, unknown> = { ...storedRow };
+    delete legacy.messageChannelId;
+    model.find.mockResolvedValue([legacy]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(s.guild.channels.fetch).toHaveBeenCalledWith("chan");
+    expect(insertedDocs()[0].messageChannelId).toBe("chan");
+  });
+
+  it("says the picker was deleted, not that the setting changed, when a remembered picker is gone", async () => {
+    const s = setup([]);
+    routeChannels(s, ["old-chan"]);
+    model.find.mockResolvedValue([storedRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("<#old-chan>");
+    expect(r.message).toMatch(/probably deleted/);
+    expect(r.message).not.toMatch(/change it back/);
+    expect(model.insertMany).not.toHaveBeenCalled();
   });
 });
