@@ -1489,9 +1489,28 @@ channels are created without the host's extra access. A create Discord refuses (
 category, say) or rate limits is not repeated for a few minutes, so it cannot fire every scan.
 A create that times out may still have gone through: it is not repeated for ten minutes, and
 if Discord did make it, the unrecorded extra channel is not deleted by the bot (it only
-deletes channels it recorded), so remove it by hand. Channels are created in group order
-right after the main channel; one that is created again later (after someone deleted it)
-lands at the bottom of the category, so move it by hand if the order matters. Events without groups are created and cleaned up exactly as before.
+deletes channels it recorded), so remove it by hand. Events without groups are created and cleaned up exactly as before.
+
+**Group channel order** (#1214). The group channels belong directly below the main channel, in
+the group order. They are created in that order, but Discord puts a new channel at the bottom of
+its category, so after a pass that created channels (the first time, or one created again after
+someone deleted it) the bot reads the whole server fresh from Discord and, if the voice channels
+of the main channel's category are not in that order (equal positions are read by id, as discord.js does), writes the new positions with one bulk
+request, after the same short pause the creates use. Only the event's own channels are placed. Another channel is
+sent in that request only when it has to move down to make room, and then keeps its place relative
+to the other channels. Voice and stage channels are ordered among themselves (text channels are
+never touched). When a pass runs, a group channel found in another category is left there and the
+host panel says so (that alone does not start a pass). Nothing is written, and the host panel says why, when the server or one of the
+recorded channels cannot be read, or when the bot lacks Manage Channels in the category (it looks again after five minutes). The scan
+also compares the order in the bot's own cache every minute (no Discord call) and starts a pass
+when a group channel has been moved out of place, so a channel someone drags away is put back
+within a minute or two; that also means a deliberate manual move of a group channel is undone.
+A rate limit, a refusal or a timeout is shown in the Groups section of the host panel and the
+write is tried again later (after the wait Discord gave, at least a minute; five minutes after a
+refusal; ten after a timeout or any answer that was lost, since the outcome is then unknown), always after reading again first. If
+a write went through but Discord still reports another order, the bot waits five minutes before it
+tries again instead of repeating the request every scan. When the order is already right nothing
+is written; and while the cache shows the order right the bot makes no Discord call for it.
 
 The voice channel sweeps never delete a recorded event channel, even when the events feature is
 switched off (turning it off only stops the scan), and they leave a channel alone for two minutes

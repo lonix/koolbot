@@ -306,6 +306,45 @@ describe("group channels in the scan", () => {
     expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
   });
 
+  it("reconciles when every channel is present but the cache shows the groups out of order (#1214), and not when the order is right", async () => {
+    const voice = (
+      id: string,
+      rawPosition: number,
+    ): Record<string, unknown> => ({
+      id,
+      type: ChannelType.GuildVoice,
+      parentId: CATEGORY,
+      rawPosition,
+    });
+    const groups = [
+      { key: "g_a", name: "A", size: null, marker: "", channelId: "c1" },
+      { key: "g_b", name: "B", size: null, marker: "", channelId: "c2" },
+    ];
+    const wrong = setup();
+    for (const c of [voice("main-1", 0), voice("c1", 9), voice("c2", 1)]) {
+      wrong.guild.channels.cache.set(c.id as string, c);
+    }
+    await wrong.service.processEvent(
+      groupRow({ state: "active", channelId: "main-1", groups }),
+      wrong.guild,
+      NOW,
+      WINDOWS,
+    );
+    expect(wrong.service.groupChannels.reconcile).toHaveBeenCalledTimes(1);
+
+    const right = setup();
+    for (const c of [voice("main-1", 0), voice("c1", 1), voice("c2", 2)]) {
+      right.guild.channels.cache.set(c.id as string, c);
+    }
+    await right.service.processEvent(
+      groupRow({ state: "active", channelId: "main-1", groups }),
+      right.guild,
+      NOW,
+      WINDOWS,
+    );
+    expect(right.service.groupChannels.reconcile).not.toHaveBeenCalled();
+  });
+
   it("does not reconcile for an adopted event or one past its end", async () => {
     const { service, guild } = setup();
     await service.processEvent(

@@ -20,6 +20,7 @@ import {
   describeWriteFailure,
   rateLimitWaitMs,
 } from "../web/channel-write-rest.js";
+import { compareIds } from "../web/channel-manager.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -44,6 +45,16 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  *   A channel with someone in it is left until it is empty.
  * - One failed group never stops the others; every failure is returned in the
  *   report, which the host panel (#1189) shows.
+ * - Order (#1214): after a pass that created channels, or when the cached order
+ *   looks wrong, the group channels are put directly below the main channel in
+ *   group order with ONE paced bulk position write under the same lock. The
+ *   channels are read fresh first (`guild.channels.fetch()` with no id always
+ *   asks Discord; `force` only exists for the by-id form) and nothing is
+ *   written unless every recorded channel and the category could be read. Only
+ *   the event's own channels are placed; a foreign channel is sent only when
+ *   it has to shift to make room. A failure holds the ordering back for the
+ *   same durations as a failed create and is retried by a later pass, which
+ *   reads again before it writes.
  */
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
@@ -60,6 +71,10 @@ export const UNCONFIRMED_CREATE_BACKOFF_MS = 10 * MS_PER_MINUTE;
  * every minute.
  */
 export const REFUSED_CREATE_BACKOFF_MS = 5 * MS_PER_MINUTE;
+/** Key suffix of the ordering hold in `holds`; a group key never starts with `#`. */
+const ORDER_HOLD = "#order";
+/** The name the host panel shows for an ordering problem. */
+const ORDER_FAILURE_NAME = "Group channel order";
 /** Never retry a rate-limited create sooner than this. */
 const MIN_RATE_LIMIT_BACKOFF_MS = MS_PER_MINUTE;
 
@@ -196,6 +211,110 @@ export function buildHostOverwrites(
   return [...specs.values()];
 }
 
+/** A channel as far as ordering is concerned. */
+export interface OrderChannel {
+  id: string;
+  parentId: string | null;
+  type: ChannelType;
+  rawPosition: number;
+}
+
+export interface OrderPlan {
+  /** The main channel is followed by the group channels, in group order. */
+  inOrder: boolean;
+  /**
+   * What to send when it is not: the group channels, and only the foreign
+   * channels that have to shift to make room for them.
+   */
+  moves: Array<{ id: string; position: number }>;
+}
+
+/** Voice and stage channels sort together, below the text channels. */
+export function isVoiceLike(type: ChannelType): boolean {
+  return (
+    type === ChannelType.GuildVoice || type === ChannelType.GuildStageVoice
+  );
+}
+
+/**
+ * Where the group channels go: directly below the main channel, in group order.
+ *
+ * `channels` are the voice-like channels of the main channel's category (the
+ * main channel and `groupIds` among them). Order is compared, not raw numbers
+ * (Discord may leave gaps): position, then id for equal positions, which is how
+ * discord.js reads a channel's `position` (`Snowflake.compare` on a tie). A
+ * category that is already right yields no write. The main channel and
+ * everything above it keep their numbers. The group channels take the numbers
+ * right after the main channel; a foreign channel below it is moved only until
+ * one already sits past the last group channel (the rest of the sorted list
+ * keeps its numbers).
+ */
+export function planGroupOrder(
+  mainId: string,
+  groupIds: readonly string[],
+  channels: readonly OrderChannel[],
+): OrderPlan {
+  const byPosition = (a: OrderChannel, b: OrderChannel): number =>
+    a.rawPosition - b.rawPosition || compareIds(a.id, b.id);
+  const sorted = [...channels].sort(byPosition);
+  const byId = new Map(channels.map((c) => [c.id, c]));
+  const main = byId.get(mainId);
+  const groups = groupIds
+    .map((id) => byId.get(id))
+    .filter((c): c is OrderChannel => !!c);
+  if (!main || groups.length === 0) return { inOrder: true, moves: [] };
+
+  const chain = [main, ...groups];
+  const start = sorted.findIndex((c) => c.id === mainId);
+  const inOrder = chain.every((c, i) => sorted[start + i]?.id === c.id);
+  if (inOrder) return { inOrder: true, moves: [] };
+
+  const groupSet = new Set(groups.map((c) => c.id));
+  const others = sorted.filter((c) => !groupSet.has(c.id));
+  const mainAt = others.findIndex((c) => c.id === mainId);
+  const below = [...groups, ...others.slice(mainAt + 1)];
+  const moves: Array<{ id: string; position: number }> = [];
+  let previous = main.rawPosition;
+  for (const channel of below) {
+    const next = previous + 1;
+    // A foreign channel already past the last placed one keeps its number, and
+    // so does everything after it (they are sorted): nothing more to make room for.
+    if (!groupSet.has(channel.id) && channel.rawPosition > previous) break;
+    const position = next;
+    previous = position;
+    if (position !== channel.rawPosition) {
+      moves.push({ id: channel.id, position });
+    }
+  }
+  return moves.length === 0
+    ? { inOrder: true, moves: [] }
+    : { inOrder: false, moves };
+}
+
+/** The ordering facts of a discord.js channel, or null when it has none. */
+function orderChannelOf(channel: unknown): OrderChannel | null {
+  const c = channel as {
+    id?: unknown;
+    type?: unknown;
+    parentId?: unknown;
+    rawPosition?: unknown;
+  } | null;
+  if (
+    !c ||
+    typeof c.id !== "string" ||
+    typeof c.type !== "number" ||
+    typeof c.rawPosition !== "number"
+  ) {
+    return null;
+  }
+  return {
+    id: c.id,
+    type: c.type,
+    parentId: typeof c.parentId === "string" ? c.parentId : null,
+    rawPosition: c.rawPosition,
+  };
+}
+
 /** What can be said about the bot's permissions in a category, or null if unknown. */
 function botPermissionsIn(
   guild: Guild,
@@ -252,6 +371,12 @@ export class EventGroupChannels {
   private readonly holds = new Map<string, { until: number; reason: string }>();
   /** Warnings already logged, so a standing problem is not logged every scan. */
   private readonly warned = new Set<string>();
+  /** Per event: the position write that last went through. A fresh read that
+   * still wants exactly that write means Discord did not take it, and sending
+   * it again would repeat the request every scan (see `orderLocked`). Cleared
+   * as soon as the order is seen right, so a later, different problem is
+   * written, never mistaken for this one. */
+  private readonly orderWritten = new Map<string, string>();
   private restClient: REST | null;
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
@@ -332,6 +457,57 @@ export class EventGroupChannels {
   // -------------------------------------------------------------
   // Create and reconcile
   // -------------------------------------------------------------
+
+  /**
+   * Does the gateway cache show the group channels out of place (the scan's
+   * trigger for an ordering pass)? Cache only, no Discord call, and never the
+   * basis of a write: the pass reads fresh. Unknown counts as "no" (a channel
+   * or position that is not cached), as does a pending ordering hold.
+   */
+  public orderLooksWrong(
+    event: {
+      _id: unknown;
+      channelId?: string | null;
+      groups?: Array<{ channelId?: string | null }>;
+    },
+    guild: Guild,
+  ): boolean {
+    const hold = this.holds.get(`${String(event._id)}:${ORDER_HOLD}`);
+    if (hold && Date.now() < hold.until) return false;
+    const wrong = this.cacheOrderWrong(event, guild);
+    // Seen right: whatever was written before did take effect.
+    if (!wrong) this.orderWritten.delete(String(event._id));
+    return wrong;
+  }
+
+  private cacheOrderWrong(
+    event: {
+      channelId?: string | null;
+      groups?: Array<{ channelId?: string | null }>;
+    },
+    guild: Guild,
+  ): boolean {
+    if (!event.channelId) return false;
+    const main = orderChannelOf(guild.channels.cache.get(event.channelId));
+    if (!main || !main.parentId || !isVoiceLike(main.type)) return false;
+    const groupIds: string[] = [];
+    for (const group of event.groups ?? []) {
+      if (!group.channelId) continue;
+      const channel = orderChannelOf(guild.channels.cache.get(group.channelId));
+      if (!channel) return false;
+      // One in another category is left where it is, so it is not "wrong".
+      if (channel.parentId === main.parentId) groupIds.push(channel.id);
+    }
+    if (groupIds.length === 0) return false;
+    const siblings: OrderChannel[] = [];
+    for (const cached of guild.channels.cache.values()) {
+      const c = orderChannelOf(cached);
+      if (c && c.parentId === main.parentId && isVoiceLike(c.type)) {
+        siblings.push(c);
+      }
+    }
+    return !planGroupOrder(main.id, groupIds, siblings).inOrder;
+  }
 
   /**
    * Make the group channels of an open event match its record: create the ones
@@ -445,7 +621,196 @@ export class EventGroupChannels {
         this.holds.delete(groupKey);
       }
     }
+    await this.orderLocked(eventId, guild, report, { wrote, rateLimited });
     return report;
+  }
+
+  /**
+   * Put the group channels directly below the main channel (#1214). Runs at the
+   * end of a pass, under the pass's lock, when it created channels or the
+   * cache shows the order wrong; otherwise it makes no Discord call. It never
+   * throws and never stops anything: a problem is a failure in the report and
+   * a hold, and a later pass reads again before it writes.
+   */
+  private async orderLocked(
+    eventId: string,
+    guild: Guild,
+    report: GroupChannelReport,
+    pass: { wrote: boolean; rateLimited: boolean },
+  ): Promise<void> {
+    const holdKey = `${eventId}:${ORDER_HOLD}`;
+    const fail = (reason: string): void => {
+      report.failures.push({
+        key: ORDER_HOLD,
+        name: ORDER_FAILURE_NAME,
+        reason,
+      });
+    };
+    try {
+      // Fresh again: the pass has created and recorded channels since it began,
+      // and a cancel may have landed.
+      const row = await this.readFresh(eventId);
+      if (
+        !row ||
+        row.groupsEnabled !== true ||
+        !(row.state === "scheduled" || row.state === "active") ||
+        row.seriesCancelled === true ||
+        !row.channelId
+      ) {
+        return;
+      }
+      const mainId = row.channelId;
+      const groupIds = (row.groups ?? [])
+        .map((g) => g.channelId)
+        .filter((id): id is string => !!id);
+      if (groupIds.length === 0) return;
+      if (report.created === 0 && !this.cacheOrderWrong(row, guild)) return;
+
+      const hold = this.holds.get(holdKey);
+      if (hold && Date.now() < hold.until) {
+        fail(hold.reason);
+        return;
+      }
+      if (pass.rateLimited) {
+        fail("Not attempted: Discord is rate limiting. Retried next scan.");
+        return;
+      }
+      if (pass.wrote && this.paceMs > 0) await sleep(this.paceMs);
+
+      let all: Map<string, unknown>;
+      try {
+        all = new Map(
+          [...(await guild.channels.fetch()).entries()].filter(
+            ([, channel]) => !!channel,
+          ),
+        );
+      } catch (error) {
+        fail(
+          `The channels could not be read, so the order was not changed: ${describeWriteFailure(error)}`,
+        );
+        return;
+      }
+      const main = orderChannelOf(all.get(mainId));
+      if (!main || !isVoiceLike(main.type) || !main.parentId) {
+        fail(
+          "The event's main voice channel could not be found in a category, so the group channels were not put in order.",
+        );
+        return;
+      }
+      const category = all.get(main.parentId) as CategoryChannel | undefined;
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        fail(
+          "The category of the event's main voice channel could not be read, so the group channels were not put in order.",
+        );
+        return;
+      }
+      // Every recorded channel must be readable, or nothing is written.
+      const placed: string[] = [];
+      for (const group of row.groups ?? []) {
+        if (!group.channelId) continue;
+        const channel = orderChannelOf(all.get(group.channelId));
+        if (!channel || channel.type !== ChannelType.GuildVoice) {
+          fail(
+            `The channel of ${group.name} could not be read as a voice channel, so the order was not changed.`,
+          );
+          return;
+        }
+        if (channel.parentId !== main.parentId) {
+          // Moving it between categories is not ordering: leave it, say so.
+          this.warnOnce(
+            row,
+            `order-category-${group.channelId}`,
+            `${group.name}: its channel is not in the main channel's category, so it was left where it is.`,
+            report.warnings,
+          );
+          continue;
+        }
+        placed.push(channel.id);
+      }
+      const siblings: OrderChannel[] = [];
+      for (const candidate of all.values()) {
+        const c = orderChannelOf(candidate);
+        if (c && c.parentId === main.parentId && isVoiceLike(c.type)) {
+          siblings.push(c);
+        }
+      }
+      const plan = planGroupOrder(main.id, placed, siblings);
+      if (plan.inOrder) {
+        this.orderWritten.delete(eventId);
+        this.holds.delete(holdKey);
+        return;
+      }
+      const wanted = JSON.stringify(plan.moves);
+      if (this.orderWritten.get(eventId) === wanted) {
+        // The very write that went through last time is wanted again: Discord
+        // did not take it, and writing it again would only repeat the request
+        // every scan. Say so and wait. (A different plan is a new situation
+        // and is written.)
+        this.orderWritten.delete(eventId);
+        const reason =
+          "The channel order was written but Discord still reports a different order. It is tried again later; move the group channels by hand if it persists.";
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
+        fail(reason);
+        return;
+      }
+      const perms = botPermissionsIn(guild, category);
+      if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
+        const reason =
+          "The bot lacks Manage Channels in the events category, so the group channels were not put in order. Grant it to the bot's role.";
+        this.warnOnce(row, "order-manage-channels", reason, report.warnings);
+        // Until someone grants it, do not read the whole server every scan.
+        this.holds.set(holdKey, {
+          until: Date.now() + REFUSED_CREATE_BACKOFF_MS,
+          reason,
+        });
+        return;
+      }
+
+      try {
+        await this.call(
+          (signal) =>
+            this.rest().patch(Routes.guildChannels(guild.id), {
+              body: plan.moves,
+              reason: `Event group channel order (${sanitizeForLog(eventId)})`,
+              signal,
+            }),
+          "order event group channels",
+          // A timed-out write may have landed; the next pass reads first.
+          false,
+        );
+      } catch (error) {
+        const reason = describeWriteFailure(error);
+        let waitMs = UNCONFIRMED_CREATE_BACKOFF_MS;
+        if (error instanceof RateLimitError) {
+          waitMs = Math.max(MIN_RATE_LIMIT_BACKOFF_MS, rateLimitWaitMs(error));
+        } else if (error instanceof DiscordAPIError) {
+          waitMs = REFUSED_CREATE_BACKOFF_MS;
+        }
+        this.holds.set(holdKey, {
+          until: Date.now() + waitMs,
+          reason: `${reason} Tried again later.`,
+        });
+        fail(reason);
+        logger.warn(
+          `Event ${sanitizeForLog(eventId)}: group channels not put in order: ${sanitizeForLog(reason)}`,
+        );
+        return;
+      }
+      this.orderWritten.set(eventId, wanted);
+      this.holds.delete(holdKey);
+      logger.info(
+        `Put the group channels of event ${sanitizeForLog(eventId)} in order (${plan.moves.length} position(s) written)`,
+      );
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(eventId)}: ordering the group channels failed:`,
+        error,
+      );
+      fail("Ordering the group channels failed unexpectedly. See the log.");
+    }
   }
 
   /**
@@ -819,6 +1184,7 @@ export class EventGroupChannels {
     this.reports.delete(eventId);
     this.notices.delete(eventId);
     this.channelWarnings.delete(eventId);
+    this.orderWritten.delete(eventId);
     for (const key of [...this.holds.keys()]) {
       if (key.startsWith(`${eventId}:`)) this.holds.delete(key);
     }
