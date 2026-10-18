@@ -37,8 +37,8 @@ describe("host-move marks", () => {
     markHostMove("g", "u", "cB", 1000);
     // Consuming or clearing B leaves A's protection alone.
     expect(consumeHostMove("g", "u", "cB", 1001)).toBe(true);
-    markHostMove("g", "u", "cB", 1002);
-    unmarkHostMove("g", "u", "cB");
+    const b = markHostMove("g", "u", "cB", 1002);
+    unmarkHostMove("g", "u", "cB", b);
     expect(consumeHostMove("g", "u", "cA", 1003)).toBe(true);
     // A expires without taking B with it.
     markHostMove("g", "u", "cA", 0);
@@ -52,12 +52,31 @@ describe("host-move marks", () => {
   });
 
   it("unmark removes only the mark for that channel", () => {
-    markHostMove("g", "u", "c1", 0);
-    unmarkHostMove("g", "u", "c2");
+    const a = markHostMove("g", "u", "c1", 0);
+    unmarkHostMove("g", "u", "c2", a);
     expect(consumeHostMove("g", "u", "c1", 1)).toBe(true);
-    markHostMove("g", "u", "c1", 0);
-    unmarkHostMove("g", "u", "c1");
+    const b = markHostMove("g", "u", "c1", 0);
+    unmarkHostMove("g", "u", "c1", b);
     expect(consumeHostMove("g", "u", "c1", 1)).toBe(false);
+  });
+
+  it("keeps attempts to the SAME channel apart: clearing a refused one leaves the earlier one", () => {
+    const first = markHostMove("g", "u", "c1", 0); // unconfirmed, kept
+    const second = markHostMove("g", "u", "c1", 1); // refused
+    unmarkHostMove("g", "u", "c1", second);
+    expect(consumeHostMove("g", "u", "c1", 2)).toBe(true);
+    expect(consumeHostMove("g", "u", "c1", 3)).toBe(false);
+    // Two kept attempts are two marks, each used once and expiring on its own.
+    markHostMove("g", "u", "c1", 0);
+    markHostMove("g", "u", "c1", HOST_MOVE_MARK_TTL_MS);
+    expect(consumeHostMove("g", "u", "c1", HOST_MOVE_MARK_TTL_MS + 1)).toBe(
+      true,
+    );
+    expect(consumeHostMove("g", "u", "c1", HOST_MOVE_MARK_TTL_MS + 2)).toBe(
+      false,
+    );
+    // Clearing an id that is already gone changes nothing.
+    unmarkHostMove("g", "u", "c1", first);
   });
 });
 

@@ -583,8 +583,8 @@ describe("handleGroupSelfJoin", () => {
 
     it("a refused move clears its mark, so a later join counts", async () => {
       twoTeams();
-      markHostMove(GUILD, "u1", "ch-b");
-      unmarkHostMove(GUILD, "u1", "ch-b");
+      const attempt = markHostMove(GUILD, "u1", "ch-b");
+      unmarkHostMove(GUILD, "u1", "ch-b", attempt);
       expect(await join("u1", "ch-b")).toBe("recorded");
     });
 

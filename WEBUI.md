@@ -1611,8 +1611,12 @@ event is scheduled or active.
   just before the move, so someone who joined or left meanwhile counts. People
   moved there earlier in the same run count even before the bot sees them arrive,
   and a move Discord did not confirm keeps a place at the destination but does not
-  free the person's old one. The
-  event's creator and the person pressing the button are never moved by Send to
+  free the person's old one. Those bookkeeping entries last only until the bot's
+  voice cache shows the change, so anything a person does afterwards (going back
+  to where they were) counts as it happens. The count is the bot's voice cache
+  plus these entries, not Discord's own count, so a join or leave the bot has not
+  heard about yet is not in it; Discord has the last word when the move is sent.
+  The event's creator and the person pressing the button are never moved by Send to
   groups or Return to main (they can join any channel themselves); Move one person
   does move the person you pick, you included.
 - **The result** is one message, kept inside the Web UI's 500-character flash. It
@@ -1620,9 +1624,10 @@ event is scheduled or active.
   answer in time ("may or may not have moved: check Discord before trying
   again"), then how many were skipped for each reason (not connected, in another
   channel, group full, missing permission, error), then any extra note, and last
-  as many names as still fit, people whose move was not confirmed first. A long
-  list of names is shortened ("and N more") or left out, never the counts or the
-  warning. A rate limit stops the run
+  as many error explanations and names as still fit (explanations first, then names,
+  people whose move was not confirmed first). A long explanation or list of names
+  is shortened ("and N more") or left out, never the counts, the warning or the
+  extra note. A rate limit stops the run
   and lists the rest as not attempted. One run reads the voice state of, and moves, at most 60
   people, so the page does not wait for minutes; the rest are listed as not
   attempted and you press the button again. People the bot already sees in the
@@ -1639,10 +1644,11 @@ event is scheduled or active.
   will share this lock.
 - **Moving never changes a group.** A move is not a self-join: the bot marks the move
   before it asks Discord, and the voice join it causes is ignored by the group
-  self-join (whether groups are locked or not), once, for that channel. A member can have a
-  separate mark for each channel they were moved to, so a later move of the same
-  member somewhere else does not cancel the mark of an earlier move that Discord
-  did not confirm. Which group
+  self-join (whether groups are locked or not), once, for that channel. Every move
+  attempt has its own mark, so a later attempt for the same member, to the same
+  channel or another one, never cancels the mark of an earlier move that Discord
+  did not confirm, and an attempt that Discord refuses clears only its own mark.
+  Each mark covers one join. Which group
   a person is assigned to changes only on **Assign people**, so moving someone into
   another group's channel leaves them assigned to their own group, and Send to
   groups always moves people to the room of the group they are in now. The mark

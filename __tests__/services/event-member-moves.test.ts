@@ -227,12 +227,19 @@ function makeWorld(
       }),
     },
   };
+  const voiceListeners = new Set<(o: unknown, n: unknown) => void>();
   const client = {
     guilds: {
       cache: { get: (id: string) => (id === GUILD ? guild : undefined) },
     },
     token: "t",
-  };
+    on: (_event: string, fn: (o: unknown, n: unknown) => void) => {
+      voiceListeners.add(fn);
+    },
+    off: (_event: string, fn: (o: unknown, n: unknown) => void) => {
+      voiceListeners.delete(fn);
+    },
+  } as { token: string; guilds: unknown; on?: unknown; off?: unknown };
   const patch = jest.fn(
     async (
       route: string,
@@ -248,6 +255,13 @@ function makeWorld(
     guild,
     client,
     patch,
+    /** The gateway announces a voice change (the cache is set by `place`). */
+    emitVoice: (user: string, channel: string | null) => {
+      for (const fn of [...voiceListeners]) {
+        fn({}, { id: user, channelId: channel, guild: { id: GUILD } });
+      }
+    },
+    listenerCount: () => voiceListeners.size,
     place: (user: string, channel: string | null) =>
       inChannel.set(user, channel),
     where: (user: string) => inChannel.get(user) ?? null,
@@ -820,6 +834,54 @@ describe("the flash keeps what matters inside its limit (review of #1221)", () =
     );
   });
 
+  it("keeps long diagnostic details out of the always-whole part", () => {
+    const longDetail = (n: number): string =>
+      `Discord didn't answer within 30 seconds (case ${n}), so it is unknown whether the change was applied: the request was cancelled here, but Discord may already have accepted it. Check Discord before trying again.`;
+    const skipped = [
+      ...[1, 2, 3].map((n) => ({
+        userId: `e${n}`,
+        reason: "error" as const,
+        detail: longDetail(n),
+      })),
+      ...(
+        [
+          "not-connected",
+          "elsewhere",
+          "group-full",
+          "missing-permission",
+        ] as const
+      ).map((reason) => ({ userId: `x-${reason}`, reason })),
+    ];
+    const extra = [
+      "2 assigned people are in a group without a channel yet and were not moved.",
+    ];
+    const text = describeMoveReport(
+      { moved: ["a"], skipped, unconfirmed: ["slow"] },
+      (id) => `Name ${id}`,
+      extra,
+    );
+    expect(text.length).toBeLessThanOrEqual(500);
+    // The counts, the warning and the note are whole even though the
+    // details would not fit.
+    expect(text).toContain("did not confirm 1");
+    expect(text).toContain("check Discord before trying again");
+    expect(text).toContain("3 error");
+    expect(text).toContain("1 not connected to voice");
+    expect(text).toContain("1 group full");
+    expect(text).toContain(extra[0]);
+    // And with nothing else to say the detail is added, clipped.
+    const alone = describeMoveReport(
+      {
+        moved: [],
+        skipped: [{ userId: "e1", reason: "error", detail: longDetail(1) }],
+        unconfirmed: [],
+      },
+      (id) => id,
+    );
+    expect(alone).toContain("Error: Discord didn't answer");
+    expect(alone.length).toBeLessThanOrEqual(500);
+  });
+
   it("adds names while they fit, unconfirmed people first", () => {
     const text = describeMoveReport(
       {
@@ -834,6 +896,153 @@ describe("the flash keeps what matters inside its limit (review of #1221)", () =
     expect(text.indexOf("Not confirmed")).toBeLessThan(
       text.indexOf("Not connected to voice:"),
     );
+  });
+});
+
+describe("later voice changes win over the run's bookkeeping (second review of #1221)", () => {
+  const swapSetup = (): ReturnType<typeof makeWorld> => {
+    const base = makeRow();
+    store.set(
+      EV,
+      makeRow({
+        groups: [
+          { ...base.groups[1], memberIds: ["p"] }, // Bravo first
+          { ...base.groups[0], size: 1, memberIds: ["u2"] }, // Alpha, size 1
+          base.groups[2],
+          base.groups[3],
+        ],
+      }),
+    );
+    const w = makeWorld({ limits: { [CH_A]: 1 } });
+    w.place("p", CH_A);
+    w.place("u2", MAIN);
+    return w;
+  };
+
+  it("a person who arrives and then goes straight back to the source counts at the source again (gateway events)", async () => {
+    const w = swapSetup();
+    w.patch.mockImplementationOnce(async (route, o) => {
+      const user = route.split("/").pop() as string;
+      w.place(user, o.body.channel_id);
+      w.emitVoice(user, o.body.channel_id); // arrival observed
+      w.place(user, CH_A); // and back to Alpha on their own
+      return {};
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["p"]);
+    // Alpha (size 1) holds p again: u2 must not be moved into it.
+    expect(reasons(out.report).u2).toBe("group-full");
+    expect(w.where("u2")).toBe(MAIN);
+    // The listener is gone when the run ends.
+    expect(w.listenerCount()).toBe(0);
+  });
+
+  it("the same without gateway events: the cache showing the arrival retires the entry", async () => {
+    const w = swapSetup();
+    delete w.client.on;
+    w.patch.mockImplementationOnce(async (route, o) => {
+      w.place(route.split("/").pop() as string, o.body.channel_id);
+      return {};
+    });
+    // The next person's voice read happens after their pre-check, which has
+    // seen p in Bravo; p then goes back before the write.
+    let reads = 0;
+    const original = w.guild.voiceStates.fetch.getMockImplementation();
+    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+      reads += 1;
+      if (reads === 2) w.place("p", CH_A);
+      return (original as (i: string, x?: unknown) => Promise<unknown>)(
+        id,
+        o,
+      ) as never;
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(reasons(out.report).u2).toBe("group-full");
+  });
+
+  it("an arrival the gateway shows AFTER the answer retires the entry, so a quick return counts (gateway events)", async () => {
+    const w = swapSetup();
+    w.patch.mockImplementationOnce(async () => ({})); // yes; the gateway lags
+    let reads = 0;
+    const original = w.guild.voiceStates.fetch.getMockImplementation();
+    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+      reads += 1;
+      if (reads === 2) {
+        // The lagging arrival finally comes, and p goes straight back.
+        w.place("p", CH_B);
+        w.emitVoice("p", CH_B);
+        w.place("p", CH_A);
+      }
+      return (original as (i: string, x?: unknown) => Promise<unknown>)(
+        id,
+        o,
+      ) as never;
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(reasons(out.report).u2).toBe("group-full");
+  });
+
+  it("the same without gateway events: seeing the arrival in the cache retires the entry", async () => {
+    const w = swapSetup();
+    // A third person (q) goes to Bravo between p and u2.
+    store.get(EV)!.groups[0].memberIds = ["p", "q"];
+    w.place("q", MAIN);
+    delete w.client.on;
+    w.patch.mockImplementationOnce(async () => ({})); // yes; the gateway lags
+    let reads = 0;
+    const original = w.guild.voiceStates.fetch.getMockImplementation();
+    w.guild.voiceStates.fetch.mockImplementation(async (id, o) => {
+      reads += 1;
+      // The lagging arrival of p shows up in the cache during q's turn: u2's
+      // check then sees it; p goes back during u2's read, before the write.
+      if (reads === 2) w.place("p", CH_B);
+      if (reads === 3) w.place("p", CH_A);
+      return (original as (i: string, x?: unknown) => Promise<unknown>)(
+        id,
+        o,
+      ) as never;
+    });
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(reasons(out.report).u2).toBe("group-full");
+  });
+
+  it("still protects a destination while the gateway lags behind a confirmed move", async () => {
+    const w = swapSetup();
+    w.patch.mockImplementationOnce(async () => ({})); // yes, but p still shows in Alpha
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved.sort()).toEqual(["p", "u2"]);
+  });
+});
+
+describe("two attempts to the same channel (second review of #1221)", () => {
+  it("an unconfirmed attempt followed by a refused one to the same channel keeps the first mark", async () => {
+    const w = makeWorld();
+    w.place("u3", MAIN);
+    w.patchBehaviour.set("u3", new Error("Discord API timeout after 30000ms"));
+    const first = await run(
+      w,
+      ({ event }) => planMoveOne(event, "u3", "b"),
+      [],
+    );
+    if (first.status !== "done") throw new Error("expected done");
+    expect(first.report.unconfirmed).toEqual(["u3"]);
+    w.patchBehaviour.set("u3", apiError(50013));
+    const second = await run(
+      w,
+      ({ event }) => planMoveOne(event, "u3", "b"),
+      [],
+    );
+    if (second.status !== "done") throw new Error("expected done");
+    expect(reasons(second.report).u3).toBe("missing-permission");
+    // The delayed join of the first attempt is still the host's.
+    expect(consumeHostMove(GUILD, "u3", CH_B)).toBe(true);
+    // The refused attempt left nothing behind.
+    expect(consumeHostMove(GUILD, "u3", CH_B)).toBe(false);
   });
 });
 

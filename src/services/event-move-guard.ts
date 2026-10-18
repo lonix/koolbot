@@ -29,9 +29,10 @@
  * `handleGroupSelfJoin` consumes the mark synchronously, before it queues
  * anything, and ignores that one join. A mark matches only its own target
  * channel, is used once, and expires: a later join by the member records as
- * usual. Marks are kept per (guild, member, target channel): a second move of
- * the same member to another channel never replaces the mark of an earlier,
- * unconfirmed one. A move that Discord clearly refused clears its mark. A move whose
+ * usual. Every attempt has its own mark (kept under guild, member and target
+ * channel): a second move of the same member, to the same or another channel,
+ * never replaces the mark of an earlier, unconfirmed one, and a refused attempt
+ * clears only its own. A move that Discord clearly refused clears its mark. A move whose
  * outcome is unknown (timeout) keeps it, because the move may have landed.
  * The marks are in memory: after a restart in the middle of a batch the
  * remaining joins are treated as the members' own.
@@ -43,39 +44,65 @@
  */
 export const HOST_MOVE_MARK_TTL_MS = 90_000;
 
-/** One mark per (guild, member, target channel), each expiring on its own. */
-const marks = new Map<string, number>();
+/**
+ * Every attempt is its own mark, with its own expiry, under the key (guild,
+ * member, target channel): two attempts to the same channel are two marks, so
+ * clearing a refused attempt never removes the protection of an earlier
+ * unconfirmed one.
+ */
+const marks = new Map<string, Array<{ id: number; until: number }>>();
+let nextAttemptId = 1;
 const busy = new Set<string>();
 
 function markKey(guildId: string, userId: string, channelId: string): string {
   return `${guildId}:${userId}:${channelId}`;
 }
 
-/** Mark a host move that is about to be asked of Discord. */
+/**
+ * Mark a host move that is about to be asked of Discord. Returns the attempt's
+ * id, which is what `unmarkHostMove` needs to clear exactly this mark.
+ */
 export function markHostMove(
   guildId: string,
   userId: string,
   channelId: string,
   now: number = Date.now(),
-): void {
-  for (const [key, until] of marks) {
-    if (until <= now) marks.delete(key);
+): number {
+  for (const [key, list] of marks) {
+    const live = list.filter((m) => m.until > now);
+    if (live.length === 0) marks.delete(key);
+    else if (live.length !== list.length) marks.set(key, live);
   }
-  marks.set(markKey(guildId, userId, channelId), now + HOST_MOVE_MARK_TTL_MS);
+  const id = nextAttemptId++;
+  const key = markKey(guildId, userId, channelId);
+  const list = marks.get(key) ?? [];
+  list.push({ id, until: now + HOST_MOVE_MARK_TTL_MS });
+  marks.set(key, list);
+  return id;
 }
 
-/** Drop a mark whose move Discord refused. Only the mark for that channel. */
+/**
+ * Drop the mark of one attempt whose move Discord refused (the id
+ * `markHostMove` returned). No other attempt's mark is touched.
+ */
 export function unmarkHostMove(
   guildId: string,
   userId: string,
   channelId: string,
+  attemptId: number,
 ): void {
-  marks.delete(markKey(guildId, userId, channelId));
+  const key = markKey(guildId, userId, channelId);
+  const list = marks.get(key);
+  if (!list) return;
+  const rest = list.filter((m) => m.id !== attemptId);
+  if (rest.length === 0) marks.delete(key);
+  else marks.set(key, rest);
 }
 
 /**
- * Is this join the result of a host move? True once, for the marked target
- * channel, while the mark lives. Synchronous on purpose.
+ * Is this join the result of a host move? True once per mark, for the marked
+ * target channel, while a mark lives (the oldest live mark is used up).
+ * Synchronous on purpose.
  */
 export function consumeHostMove(
   guildId: string,
@@ -84,10 +111,11 @@ export function consumeHostMove(
   now: number = Date.now(),
 ): boolean {
   const key = markKey(guildId, userId, channelId);
-  const until = marks.get(key);
-  if (until === undefined) return false;
-  marks.delete(key);
-  return until > now;
+  const list = (marks.get(key) ?? []).filter((m) => m.until > now);
+  const used = list.shift();
+  if (list.length === 0) marks.delete(key);
+  else marks.set(key, list);
+  return used !== undefined;
 }
 
 export type MoveLockResult<T> = { busy: true } | { busy: false; value: T };

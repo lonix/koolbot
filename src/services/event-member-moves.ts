@@ -45,8 +45,10 @@ import {
   PermissionFlagsBits,
   RateLimitError,
   Routes,
+  Events,
   type Client,
   type Guild,
+  type VoiceState,
   type REST,
   type VoiceChannel,
 } from "discord.js";
@@ -62,6 +64,8 @@ import {
 } from "../web/channel-write-rest.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { env } from "../config/env.js";
+import { shouldIgnoreGuild } from "../utils/guild-scope.js";
 import { FLASH_MAX } from "../web/http-flash.js";
 import { ConfigService } from "./config-service.js";
 import {
@@ -371,10 +375,18 @@ class Mover {
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
   /** People Discord confirmed moving, by destination (the gateway may lag). */
-  private readonly confirmedTo = new Map<string, string>();
+  private readonly confirmedTo = new Map<
+    string,
+    { from: string; to: string }
+  >();
   /** People whose move was not confirmed: reserved a place at the destination
    * but never assumed to have left their source. */
   private readonly unconfirmedTo = new Map<string, string>();
+  /** Moves sent and not answered yet: member -> destination. */
+  private readonly inflight = new Map<string, string>();
+  /** Members whose arrival at the destination was seen while in flight. */
+  private readonly arrived = new Set<string>();
+  private voiceListener: ((o: VoiceState, n: VoiceState) => void) | null = null;
 
   constructor(
     private readonly client: Client,
@@ -388,6 +400,57 @@ class Mover {
   }
 
   async run(wishes: MoveWish[], exclude: Set<string>): Promise<MoveReport> {
+    this.attach();
+    try {
+      return await this.runInner(wishes, exclude);
+    } finally {
+      this.detach();
+    }
+  }
+
+  /**
+   * Retire reconciliation entries as soon as the gateway shows the change they
+   * stand in for, so later voice changes (someone going back to where they
+   * came from) take precedence over a bookkeeping entry. Without a gateway
+   * (a stand-in client) `occupancy` retires them by looking at the cache.
+   */
+  private attach(): void {
+    const client = this.client as { on?: unknown; off?: unknown };
+    if (typeof client.on !== "function") return;
+    this.voiceListener = (_old, next): void => {
+      if (shouldIgnoreGuild(next.guild.id, env.guildId)) return;
+      if (next.guild.id !== this.guild.id || !next.id) return;
+      const live = next.channelId ?? null;
+      // The arrival can reach the gateway before the REST answer does: note
+      // it for a move that is still in flight, so the answer does not create
+      // an entry for a change that was already seen (and possibly undone).
+      if (this.inflight.get(next.id) === live) this.arrived.add(next.id);
+      this.retire(next.id, live);
+    };
+    this.client.on(Events.VoiceStateUpdate, this.voiceListener);
+  }
+
+  private detach(): void {
+    if (!this.voiceListener) return;
+    this.client.off?.(Events.VoiceStateUpdate, this.voiceListener);
+    this.voiceListener = null;
+  }
+
+  /** The gateway says `userId` is in `live` (null = not connected). */
+  private retire(userId: string, live: string | null): void {
+    const confirmed = this.confirmedTo.get(userId);
+    // Still in the source: the gateway is only lagging, keep the entry. Any
+    // other state (arrived, or moved on by themselves) is the truth.
+    if (confirmed && live !== confirmed.from) this.confirmedTo.delete(userId);
+    if (this.unconfirmedTo.get(userId) === live) {
+      this.unconfirmedTo.delete(userId);
+    }
+  }
+
+  private async runInner(
+    wishes: MoveWish[],
+    exclude: Set<string>,
+  ): Promise<MoveReport> {
     const report: MoveReport = { moved: [], skipped: [], unconfirmed: [] };
     const skip = (
       userId: string,
@@ -544,7 +607,9 @@ class Mover {
       }
 
       // Marked before the request: the join can reach the gateway first.
-      markHostMove(this.guild.id, userId, toChannelId);
+      const attempt = markHostMove(this.guild.id, userId, toChannelId);
+      this.inflight.set(userId, toChannelId);
+      this.arrived.delete(userId);
       try {
         await this.call(
           (signal) => {
@@ -574,20 +639,25 @@ class Mover {
           false,
         );
         report.moved.push(userId);
-        this.confirmedTo.set(userId, toChannelId);
+        // Only a change the gateway has NOT shown yet needs an entry; one it
+        // showed (even if the member has since gone back) is in the cache.
+        const live = this.guild.voiceStates.cache.get(userId)?.channelId;
+        if (!this.arrived.has(userId) && live !== toChannelId) {
+          this.confirmedTo.set(userId, { from: sourceId, to: toChannelId });
+        }
       } catch (error) {
         if (error instanceof DestinationFullError) {
-          unmarkHostMove(this.guild.id, userId, toChannelId);
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "group-full");
         } else if (error instanceof MovedAwayError) {
-          unmarkHostMove(this.guild.id, userId, toChannelId);
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, error.connected ? "elsewhere" : "not-connected");
         } else if (error instanceof RateLimitError) {
-          unmarkHostMove(this.guild.id, userId, toChannelId);
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           rateLimited = true;
           skip(userId, "rate-limited");
         } else if (error instanceof DiscordAPIError) {
-          unmarkHostMove(this.guild.id, userId, toChannelId);
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           if (error.code === DISCORD_NOT_IN_VOICE) {
             skip(userId, "not-connected");
           } else if (error.code === DISCORD_MISSING_PERMISSIONS) {
@@ -601,11 +671,16 @@ class Mover {
           // assumed to have left their source: that stays counted until the
           // gateway shows otherwise.
           report.unconfirmed.push(userId);
-          this.unconfirmedTo.set(userId, toChannelId);
+          if (!this.arrived.has(userId)) {
+            this.unconfirmedTo.set(userId, toChannelId);
+          }
           logger.warn(
             `Event move of ${sanitizeForLog(userId)} not confirmed: ${sanitizeForLog(describeWriteFailure(error))}`,
           );
         }
+      } finally {
+        this.inflight.delete(userId);
+        this.arrived.delete(userId);
       }
     }
     return report;
@@ -615,16 +690,33 @@ class Mover {
    * Who is in `channelId` now: the gateway's live members, plus the people this
    * run moved there (confirmed or not) that the gateway has not shown yet, and
    * minus the people Discord confirmed moving out of it that the gateway still
-   * shows. A person whose move was not confirmed keeps counting at their
-   * source. Counted by id, so nobody is counted twice.
+   * shows in their source. A person whose move was not confirmed keeps
+   * counting at their source. An entry lasts only until the gateway shows the
+   * arrival (or any other state than the source), so a later voice change
+   * always wins. Counted by id, so nobody is counted twice. The guarantee is
+   * the gateway cache plus these reservations; it is not Discord's own count.
    */
   private occupancy(channelId: string): number {
+    // Look at the cache first: an entry whose change the gateway already
+    // shows is done with, and what the gateway says from then on wins.
+    for (const userId of [...this.confirmedTo.keys()]) {
+      this.retire(
+        userId,
+        this.guild.voiceStates.cache.get(userId)?.channelId ?? null,
+      );
+    }
+    for (const userId of [...this.unconfirmedTo.keys()]) {
+      this.retire(
+        userId,
+        this.guild.voiceStates.cache.get(userId)?.channelId ?? null,
+      );
+    }
     const ids = new Set<string>();
     const channel = this.guild.channels.cache.get(channelId);
     if (channel?.isVoiceBased()) {
       for (const id of channel.members.keys()) ids.add(id);
     }
-    for (const [userId, to] of this.confirmedTo) {
+    for (const [userId, { to }] of this.confirmedTo) {
       if (to === channelId) ids.add(userId);
       else ids.delete(userId);
     }
@@ -788,8 +880,7 @@ export function describeMoveReport(
     const reasons = [...byReason.entries()]
       .filter(([reason]) => reason !== "already-there")
       .map(([reason, list]) => {
-        const detail = list.find((s) => s.detail)?.detail;
-        return `${list.length} ${MOVE_SKIP_LABEL[reason]}${detail ? ` (${detail})` : ""}`;
+        return `${list.length} ${MOVE_SKIP_LABEL[reason]}`;
       });
     core.push(`Skipped ${loud}: ${reasons.join("; ")}.`);
   }
@@ -808,6 +899,20 @@ export function describeMoveReport(
       list.map((s) => nameOf(s.userId)),
     ]);
   }
+  // Diagnostic details (a failure explanation can be long) only while they
+  // fit, before the names: each distinct text once, shortened.
+  const seenDetails = new Set<string>();
+  for (const skip of report.skipped) {
+    if (!skip.detail || seenDetails.has(skip.detail)) continue;
+    seenDetails.add(skip.detail);
+    for (const max of [160, 80, 40]) {
+      const piece = ` ${MOVE_SKIP_LABEL[skip.reason].replace(/^./, (c) => c.toUpperCase())}: ${clip(skip.detail, max)}.`;
+      if (text.length + piece.length <= budget) {
+        text += piece;
+        break;
+      }
+    }
+  }
   for (const [label, who] of groups) {
     for (const limit of [10, 5, 2, 1]) {
       const piece = ` ${label}: ${names(who, limit)}.`;
@@ -818,6 +923,10 @@ export function describeMoveReport(
     }
   }
   return text;
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function names(list: string[], limit: number): string {
