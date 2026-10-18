@@ -25,6 +25,8 @@ import {
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
+import { syncLeadsAccess } from "./event-leads-sync.js";
+import { resolveLeadsChannel } from "./event-leader-roles.js";
 import {
   EventGroupChannels,
   type GroupChannelReport,
@@ -453,6 +455,18 @@ export class EventService extends ScheduledService {
           "events.channel_grace_minutes",
           15,
         )) * MS_PER_MINUTE,
+      isEnabled: (): Promise<boolean> =>
+        this.configService.getBoolean("events.enabled", false),
+      // The Web UI's admins (who may act as host) hold the role of an admin
+      // group; the leaders-only channel never denies or moves them (#1199).
+      // Loaded on demand: only an event with a leads channel gets here.
+      getAdminRoleIds: async (guildId: string): Promise<string[]> => {
+        const { RoleGroupService } = await import("./role-group-service.js");
+        const { adminGroupRoleIds } = await import("./role-group-adoption.js");
+        return adminGroupRoleIds(
+          await RoleGroupService.getInstance().list(guildId),
+        );
+      },
     });
     this.teardown = new EventTeardown({
       client,
@@ -765,6 +779,55 @@ export class EventService extends ScheduledService {
     });
     if (outcome.status === "ended") this.linkVerified.delete(eventId);
     return outcome;
+  }
+
+  /**
+   * Whether the leads channel needs a pass (the cache-only check), after
+   * refreshing the snapshot of the admin groups' roles it judges by: they
+   * change in the role-group settings without any event noticing, so each scan
+   * reads them again (the role-group service caches them briefly) and a role
+   * that became or stopped being an admin's shows up as a difference.
+   */
+  private async leadsAdminsChanged(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<boolean> {
+    if (resolveLeadsChannel(event)) {
+      await this.groupChannels.leadsAdminRoles(event.guildId);
+    }
+    return this.groupChannels.leadsNeedsAttention(event, guild);
+  }
+
+  /** Note a leader change synchronously (see `EventGroupChannels.trackLeaderChange`). */
+  public trackLeaderChange(change: {
+    eventId: string;
+    groupKey: string;
+    fromUserId: string | null;
+    toUserId: string | null;
+  }): void {
+    this.groupChannels.trackLeaderChange(change.eventId, change);
+  }
+
+  /**
+   * Make the leaders-only channel of an event match who leads it now, and move
+   * out whoever lost access (#1199). Called by the leader-change subscription
+   * (`installLeadsChannelSync` in `src/index.ts`, once for every source of a
+   * change) and by the scan. It decides from a fresh read of the event and the
+   * channel, never from the change that asked for it. Never throws.
+   * `takeRevoked` runs first thing inside the pass's lock.
+   */
+  public syncLeadsAccess(
+    guildId: string,
+    eventId: string,
+    takeRevoked?: () => readonly string[],
+  ): Promise<void> {
+    return syncLeadsAccess({
+      client: this.client,
+      channels: this.groupChannels,
+      guildId,
+      eventId,
+      takeRevoked,
+    });
   }
 
   /**
@@ -1162,6 +1225,25 @@ export class EventService extends ScheduledService {
         event,
         await this.groupChannels.reconcile(event, guild),
       );
+    }
+
+    // 2c. The leaders-only channel's access (#1199): never verified since it was
+    // created or since a restart, overwrites that differ from who leads, a
+    // stranger in it, or a move still owed. Judged from the cache only; the
+    // pass reads Discord and the event fresh before it writes anything. An
+    // event that is still open keeps being looked after past its scheduled end:
+    // that end is deferred while people are in its channels (#1193), and the
+    // admin roles and owed moves must not wait for them to leave. One this scan
+    // just ended, and any ended or cancelled one, is left alone (and the pass
+    // itself ignores an event that is not open).
+    if (
+      event.groupsEnabled === true &&
+      !event.nativeAdopted &&
+      !teardownRan &&
+      (event.state === "scheduled" || event.state === "active") &&
+      (await this.leadsAdminsChanged(event, guild))
+    ) {
+      await this.syncLeadsAccess(event.guildId, String(event._id));
     }
 
     // 4b. Group channels of a finished event go with the main channel (#1190),

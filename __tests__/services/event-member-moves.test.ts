@@ -30,8 +30,10 @@ type Group = {
   size: number | null;
   channelId: string | null;
   memberIds: string[];
+  captainId?: string | null;
 };
 type Row = {
+  captainsEnabled?: boolean;
   _id: string;
   guildId: string;
   state: string;
@@ -165,6 +167,8 @@ function makeWorld(
   opts: {
     limits?: Record<string, number>;
     mePerms?: bigint[] | null;
+    /** The bot lacks Move Members server-wide but holds it per channel (a category grant). */
+    guildLacksMove?: boolean;
     /** Channels where the bot lacks Connect. */
     denyConnect?: string[];
   } = {},
@@ -212,7 +216,14 @@ function makeWorld(
         opts.mePerms === null
           ? null
           : {
-              permissions: { has: (bit: bigint) => allowed(bit) },
+              permissions: {
+                has: (bit: bigint) =>
+                  allowed(bit) &&
+                  !(
+                    opts.guildLacksMove &&
+                    bit === PermissionFlagsBits.MoveMembers
+                  ),
+              },
               permissionsIn: (ch: { id: string }) => ({
                 has: (bit: bigint) =>
                   allowed(bit) &&
@@ -1450,6 +1461,151 @@ describe("move one person", () => {
   });
 });
 
+describe("the leads channel (#1199)", () => {
+  it("only the host and a current leader can be moved into it", async () => {
+    store.set(
+      EV,
+      makeRow({
+        captainsEnabled: true,
+        groups: makeRow().groups.map((g) =>
+          g.key === "a" ? { ...g, captainId: "u1" } : g,
+        ),
+      } as Partial<Row>),
+    );
+    const w = makeWorld();
+    w.place("u1", MAIN);
+    w.place("u2", MAIN);
+    w.place(HOST, MAIN);
+    let out = await run(w, ({ event }) => planMoveOne(event, "u2", "l"), []);
+    expect(out.status).toBe("refused");
+    expect(w.where("u2")).toBe(MAIN);
+    out = await run(w, ({ event }) => planMoveOne(event, "u1", "l"), []);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(w.where("u1")).toBe(CH_LEADS);
+    out = await run(w, ({ event }) => planMoveOne(event, HOST, "l"), []);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(w.where(HOST)).toBe(CH_LEADS);
+  });
+
+  it("a leader is not a leader for this once leaders are switched off", async () => {
+    store.set(
+      EV,
+      makeRow({
+        captainsEnabled: false,
+        groups: makeRow().groups.map((g) =>
+          g.key === "a" ? { ...g, captainId: "u1" } : g,
+        ),
+      } as Partial<Row>),
+    );
+    const w = makeWorld();
+    w.place("u1", MAIN);
+    const out = await run(w, ({ event }) => planMoveOne(event, "u1", "l"), []);
+    expect(out.status).toBe("refused");
+  });
+
+  it("send to groups never targets the leads or open channel", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_LEADS);
+    w.place("u3", CH_OPEN);
+    const out = await run(w, ({ event }) => planSendToGroups(event));
+    if (out.status !== "done") throw new Error("expected done");
+    expect(
+      w.patch.mock.calls
+        .map((c) => (c[1] as { body: { channel_id: string } }).body.channel_id)
+        .sort(),
+    ).toEqual([CH_A, CH_B]);
+  });
+
+  describe("a wish pinned to the channel the person must move out of", () => {
+    const wish = (userId: string) => () => [
+      { userId, toChannelId: MAIN, fromChannelId: CH_LEADS },
+    ];
+
+    it("moves someone who is in it", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(out.report.moved).toEqual(["u1"]);
+    });
+
+    it("skips someone the gateway shows elsewhere, with no request at all", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_B);
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.readVoice).not.toHaveBeenCalled();
+      expect(w.patch).not.toHaveBeenCalled();
+    });
+
+    it("skips someone Discord's own answer shows elsewhere", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      w.readVoice.mockImplementationOnce(async () => ({ channelId: CH_B }));
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.patch).not.toHaveBeenCalled();
+    });
+
+    it("skips someone who walked away between the read and the request", async () => {
+      const w = makeWorld();
+      w.place("u1", CH_LEADS);
+      w.readVoice.mockImplementationOnce(async () => {
+        // The read says they are in the leads channel; by the time the
+        // request is made the gateway shows them in the main channel.
+        w.place("u1", MAIN);
+        return { channelId: CH_LEADS };
+      });
+      const out = await run(w, wish("u1"), []);
+      if (out.status !== "done") throw new Error("expected done");
+      expect(reasons(out.report).u1).toBe("moved-on");
+      expect(w.patch).not.toHaveBeenCalled();
+      expect(w.where("u1")).toBe(MAIN);
+    });
+  });
+});
+
+describe("Move Members granted per channel only (#1199)", () => {
+  const go = (w: World, channelScopedPermissions?: boolean) =>
+    moveEventMembers({
+      client: w.client as never,
+      guildId: GUILD,
+      eventId: EV,
+      plan: ({ event }) => planMoveOne(event, "u1", "a"),
+      deps: w.deps,
+      channelScopedPermissions,
+    });
+
+  it("is refused by the server-wide gate by default, as other callers rely on", async () => {
+    const w = makeWorld({ guildLacksMove: true });
+    w.place("u1", MAIN);
+    const out = await go(w);
+    expect(out).toMatchObject({ status: "refused", code: "no-permission" });
+    expect(w.patch).not.toHaveBeenCalled();
+  });
+
+  it("lets the per-channel checks decide when the caller asks for it", async () => {
+    const w = makeWorld({ guildLacksMove: true });
+    w.place("u1", MAIN);
+    const out = await go(w, true);
+    if (out.status !== "done") throw new Error("expected done");
+    expect(out.report.moved).toEqual(["u1"]);
+    // A channel where the bot really lacks it is still skipped.
+    const none = makeWorld({ guildLacksMove: true, mePerms: [] });
+    none.place("u1", MAIN);
+    const out2 = await go(none, true);
+    if (out2.status !== "done") throw new Error("expected done");
+    expect(reasons(out2.report).u1).toBe("missing-permission");
+  });
+
+  it("still refuses an unknown bot membership", async () => {
+    const w = makeWorld({ mePerms: null });
+    expect(await go(w, true)).toMatchObject({ status: "refused" });
+  });
+});
+
 describe("gates", () => {
   const plan = ({ event }: { event: Parameters<typeof planSendToGroups>[0] }) =>
     planSendToGroups(event);
@@ -1514,10 +1670,17 @@ describe("gates", () => {
     expect((await run(w, plan)).status).toBe("refused");
     store.get(EV)!.groupsEnabled = true;
     findFails = true;
-    expect((await run(w, plan)).status).toBe("refused");
+    // An unreadable event is not a missing one: a caller owing moves retries.
+    expect(await run(w, plan)).toMatchObject({
+      status: "refused",
+      code: "unreadable",
+    });
     findFails = false;
     store.set(EV, makeRow({ guildId: "other-guild" }));
-    expect((await run(w, plan)).status).toBe("refused");
+    expect(await run(w, plan)).toMatchObject({
+      status: "refused",
+      code: "no-event",
+    });
     expect(w.patch).not.toHaveBeenCalled();
   });
 

@@ -1477,8 +1477,8 @@ later channels, and nothing is created if that cannot be verified), in the group
 `events.channel_prefix`). A group's size is the channel's user limit; no size means no
 limit. The event's host (its creator) gets View, Connect and Move Members on the main
 channel and on every group channel, on top of whatever the category already grants (the
-category's own permissions are copied, so a private category stays private). A `leads`
-group is created like any other until the leads-only command channel exists. The channels
+category's own permissions are copied, so a private category stays private). The channel
+of a `leads` group is created restricted (see **Leaders-only channel** below). The channels
 go when the event does: right away on cancel, and as soon as they are empty once it has ended
 (through **End event now** or the scheduled end, both of which record when the event ended, see
 "End the event" below); the main channel keeps `events.channel_grace_minutes` after that end. An
@@ -1614,7 +1614,9 @@ event is scheduled or active.
   leader-only channels where they are** to skip those. People already in the main
   channel are not touched.
 - **Move one person:** pick a connected person and the main channel or any group
-  channel that exists. A channel that has reached its size refuses.
+  channel that exists. A channel that has reached its size refuses. The
+  leaders-only channel takes only the host and a current leader: asking for anyone
+  else is refused (the channel's own upkeep would move them straight out again).
 - **Who is skipped:** only people connected to voice can be moved, and only out of
   the event's own channels: someone who is not connected, or who is in a channel
   that is not part of the event, is skipped and listed. The size check reads who is in
@@ -1704,9 +1706,8 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   member of the group is not shown as a leader and is never pulled.
 - **Pull leaders only:** moves every connected leader to one channel, for a briefing.
   Everyone else stays where they are. **To:** the default is the leaders-only channel
-  when the event has a `leads` group with a channel (until the leads-only channel work,
-  #1199, that is an ordinary group channel anyone can join), otherwise the main channel,
-  otherwise the channel you are in; or choose the main channel, **the channel I am in**
+  when the event has a `leads` group with a channel (see **Leaders-only channel**
+  below), otherwise the main channel, otherwise the channel you are in; or choose the main channel, **the channel I am in**
   (the event channel you are connected to now), or any group's channel. The destination is
   posted as a word or a group key, never a channel id. It is the same mover as **Move
   people**, so everything there applies: it needs **Move Members** and `events.enabled`,
@@ -1722,9 +1723,11 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
 - **Moving changes no group or leader.** A pull marks each move like any other move, so
   pulling a leader into another team's channel does not record them in that team, and
   they stay leader of the group they are assigned to.
-- **For the leaders-only channel (#1199):** every leader change (host set or clear, the
-  unassign step, a reset, the end of the event) is announced to a hook (`onLeaderChange`) after it is written;
-  nothing listens yet. The hook names the id that was stored as leader before the change,
+- **The leaders-only channel follows leader changes (#1199):** every leader change (host
+  set or clear, the unassign step, a reset, the end of the event) is announced to a hook
+  (`onLeaderChange`) after it is written, and the leaders-only channel listens (see
+  **Leaders-only channel** below; a pass ignores an event that is not open). The hook
+  names the id that was stored as leader before the change,
   even a member who left the group an instant earlier and whose cleanup had not run, so a
   replacement made in between still reports who lost the role. After a randomise or other
   burst of unassigns the clearing step runs as one pass, not once per person.
@@ -1738,6 +1741,112 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   `event.host.leader-label` and `event.host.pull-leaders` (counts and the destination
   word, no names). The step that ends a role after an unassign is not audited on its own;
   it follows an audited unassign, an audited randomise, an unaudited self-join or a reset.
+
+**Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
+command channel for the host and the leaders of the team groups, which everyone else can
+see but not join. It is made with the other group channels (#1190) and removed with them.
+
+- **Who gets what.** @everyone is denied **Connect**; **View** is allowed so people can
+  see that it exists, unless the events category already hides channels from @everyone
+  (a private category stays private, and that is never lifted). The host (the event
+  creator) gets View, Connect and Speak, plus Move Members as on every group channel.
+  Each current leader gets View, Connect and Speak. The bot gets its own View, Connect
+  and Move Members (with @everyone denied, a bot that only had Connect from its role
+  could not connect to move anyone). Admins keep access through their roles: nothing
+  adds a deny for anyone but @everyone, and an admin role (one with the Administrator
+  permission, or the role of a KoolBot admin group, which is who the Web UI treats as
+  admins) is not stripped. The category's own overwrites are copied first. On every pass
+  (a new channel, an existing one, after a restart) the Connect and Speak **allow** of every
+  other role is removed, because Discord applies a role's allow after @everyone's deny and
+  the role's holders would otherwise walk in; only allow bits are removed, never a deny
+  added. That includes a role you add to the channel by hand: to let a role in, make it an
+  admin group's role. The role of each KoolBot admin group gets an explicit allow
+  (View, Connect and Speak), because its holders may get Connect only from their server
+  permissions, which the @everyone deny overrides; a deny the category already has (View
+  for @everyone, or any deny on that role) is never lifted, and View is not added while
+  @everyone's View is denied. While the admin groups cannot be read nothing is stripped
+  or granted on a guess, the channel is not marked verified, the Groups section says so, and
+  the next pass after a few minutes does it.
+- **Leaders** here are the event's current leaders (a team group's leader who is also
+  a member of it, only while the event's leaders switch is on), read from the event as it
+  is when the channel is written, never from the change that asked for it.
+- **When a leader changes** (set, replaced, cleared, ended by an unassign, cleared by a
+  member data reset) the bot compares the channel's overwrites, read from Discord, with
+  who should have access and writes the difference: one request per person, access taken
+  away first, paced, under the same per-event lock as creating and removing the group
+  channels. It decides from a fresh read of the event and of the channel, so a change
+  that lands while earlier overwrites are being written is simply the next pass (passes
+  for one event are merged into one when several changes arrive together), and a channel
+  that was deleted and made again meanwhile is handled from the new record. Nothing is
+  written when the event or the channel cannot be read, or when the bot lacks **Manage
+  Roles** on the channel: the Groups section of the host panel says why.
+- **A leader who loses access is moved out** (after the overwrites, never inside the
+  channel lock): if they are connected to the leaders-only channel they go to the channel
+  of the team group they are in, or to the main channel if they have none or it has no
+  channel yet. The host, current leaders, the server's owner, anyone with the Administrator
+  permission and anyone holding the role of a KoolBot admin group are never moved (nobody
+  is moved while the admin groups cannot be read). The move only happens if the person is still in
+  the leaders-only channel when it is sent (someone who walked elsewhere is left alone),
+  uses the same mover as **Move people** (Move Members, one at a time, never replayed; for
+  this move it is enough that the bot holds Move Members in the events category, not
+  server-wide) and
+  is skipped while a **Move people** run is going and tried again later. A person who
+  could not be moved is remembered and tried again about five minutes later, and the host
+  panel says how many are still in the channel. Such a person is forgotten only after a
+  definitive outcome (moved, refused for good, or the event no longer exists): a failed
+  read of the event, or a server the bot cannot read at that moment, keeps them for the
+  retry. The scan keeps looking after an open event past its scheduled end (that end
+  waits while people are in its channels), until the event is ended.
+- **After a restart, and every minute** the scan asks whether the channel needs a pass
+  (cache only): it has never been verified since it was created or since the restart, its
+  overwrites differ from who should have access, someone who cannot connect is sitting
+  in it, or a move is still owed. A pass reads Discord again before it writes, removes a
+  stale member overwrite (a leader who is no longer one, a member whose data was reset, an
+  entry added by hand), adds a missing one and restores @everyone's Connect deny and View
+  (View only where the category does not deny it: a pass reads the events category fresh,
+  never grants View, to @everyone or to an admin group's role, over a deny the category
+  has, enforces that deny (it is copied onto the channel's own @everyone entry, or the
+  admin group's role entry, and a View allow that contradicts it is removed, which is what
+  makes a category that became private hide the channel). For every role other than
+  @everyone, in the channel or in the category, View follows the category's own entry for
+  that role: a category deny is copied (and any allow removed), a category allow is copied
+  (also when the channel has no entry for the role yet), and with no category entry the
+  channel keeps what it had, except that a View allow goes while the category hides the
+  channel from @everyone and an admin group's role is given View only while @everyone's View
+  is not denied. The host and the leaders keep the View that goes with their access, and the
+  bot its own. A category's View deny for a single member is copied onto the channel's
+  entry for that member the same way (for anyone but the host, the bot and the leaders,
+  who keep their View). Writes go out restrictive first: whatever takes access away (a
+  role's allow removed, a deny added, the @everyone restriction) is sent before anything
+  that gives access (a new admin group's role), and an entry that does both is split into
+  a restrictive write and a granting write, so a refused grant cannot leave a former admin
+  role with access. This holds the same way when the channel is created, in a pass and in the
+  scan's check. While the category cannot be
+  read grants no View, enforces nothing and leaves the channel
+  unverified with a note in the Groups section). Each scan also reads the admin groups'
+  roles again, so a role that became or stopped being an admin group's role gets its allow
+  or loses it without anyone touching the event. A pass that fails marks the channel
+  unverified, so one more check runs after the wait and clears what was reported. Someone who
+  becomes an admin while a move out of the channel is waiting on Discord is not moved. A write
+  Discord did not take is not repeated every minute: the bot waits and says so. A
+  pass leaves a member entry that only denies, and any deny, as it is.
+- **Without the permissions.** Creating the restricted channel needs **Manage Channels**
+  (as for every group channel) and **Manage Roles** plus the permissions it grants (View
+  Channel, Connect, Speak and Move Members) in the events category. If any is missing, or
+  Discord refuses the overwrites anyway, the channel is created **without** the
+  restriction, so anyone who can see it can join, and the Groups section of the host
+  panel says so, naming what is missing, until a later pass has restricted it. Later
+  changes need **Manage Roles** on the channel. While `events.enabled` is off a pass only
+  takes access away, never gives it.
+- **Data.** Nothing is stored for this in the database. The overwrites on the channel are
+  derived from the event's host and leader ids (the leader id is already member data,
+  exported and erased on a reset; the host id is the event creator) and live only on
+  the Discord channel, which goes with the event. A member data reset clears the leader id,
+  which takes the member's overwrite away from a running event's channel; an event that is
+  already over is not changed (its channel is removed by the cleanup).
+- **Moves.** Send to groups never targets it; Return to main includes it unless you tick
+  the box to leave people in open and leaders-only channels; Pull leaders only aims at it
+  by default; Move one person accepts only the host or a leader for it.
 
 **End the event** (#1193) ends a running event now. It is the **End the event** section of
 the host panel (shown for every open event; the form only for an `active` one, a scheduled

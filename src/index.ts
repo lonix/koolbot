@@ -69,6 +69,7 @@ import {
 import { EventService } from "./services/event-service.js";
 import { handleGroupSelfJoin } from "./services/event-group-assignment.js";
 import { installLeaderCleanup } from "./services/event-group-leaders.js";
+import { installLeadsChannelSync } from "./services/event-leads-sync.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
@@ -695,6 +696,14 @@ try {
   // Group leaders (#1195): unassigning a member clears their leader role, for
   // every source of assignment changes (Web UI, self-join, member data reset).
   installLeaderCleanup();
+  // Leads-only channel (#1199): a leader change updates who may join it, for
+  // every source of a change (host panel, unassign cleanup, member data reset).
+  const events = eventService;
+  installLeadsChannelSync(
+    (guildId, eventId, takeRevoked) =>
+      events.syncLeadsAccess(guildId, eventId, takeRevoked),
+    (change) => events.trackLeaderChange(change),
+  );
   lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);

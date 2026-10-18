@@ -56,6 +56,7 @@ import {
   type VoiceChannel,
 } from "discord.js";
 import { Event, type IEvent } from "../models/event.js";
+import { leadsLeaderIds } from "./event-leads-access.js";
 
 // A lean row has the fields the presence helpers read, without Mongoose typing.
 type PresenceRow = Pick<IEvent, "guildId" | "channelId" | "groups">;
@@ -102,6 +103,8 @@ const OPEN_STATES = ["scheduled", "active"];
 export type MoveSkipReason =
   | "not-connected"
   | "elsewhere"
+  | "moved-on"
+  | "withdrawn"
   | "already-there"
   | "group-full"
   | "missing-permission"
@@ -113,6 +116,8 @@ export type MoveSkipReason =
 export const MOVE_SKIP_LABEL: Record<MoveSkipReason, string> = {
   "not-connected": "not connected to voice",
   elsewhere: "in a channel that is not part of the event",
+  "moved-on": "no longer in the channel they were to be moved out of",
+  withdrawn: "no longer to be moved",
   "already-there": "already in the right channel",
   "group-full": "group full",
   "missing-permission": "missing permission",
@@ -126,6 +131,20 @@ export interface MoveWish {
   userId: string;
   /** One of the event's channels (main or a group's). */
   toChannelId: string;
+  /**
+   * Only move the person if they are in THIS channel (checked from the cache
+   * before any request, from Discord's own answer, and again in the same tick
+   * as the request). Used by the leads channel (#1199) to move someone out of
+   * it without touching a person who has walked somewhere else meanwhile.
+   */
+  fromChannelId?: string;
+  /**
+   * Asked synchronously just before the request is sent (and again when the
+   * request leaves the write client's queue): true withdraws the wish. For a
+   * decision the plan made that something has since overtaken, such as a
+   * person who was reappointed leader while the run waited on Discord.
+   */
+  skipIf?: () => boolean;
 }
 
 export interface MoveSkip {
@@ -252,6 +271,24 @@ class MovedAwayError extends Error {
   }
 }
 
+/** Thrown when the member is not in the channel a wish said to move them out of. */
+class MovedOnError extends Error {
+  constructor() {
+    super(
+      "The member is no longer in the channel they were to be moved out of",
+    );
+    this.name = "MovedOnError";
+  }
+}
+
+/** Thrown when the wish was withdrawn between the plan and the request. */
+class WithdrawnError extends Error {
+  constructor() {
+    super("The move was withdrawn");
+    this.name = "WithdrawnError";
+  }
+}
+
 const REFUSAL_TEXT: Record<MoveRefusalCode, string> = {
   "events-off":
     "Events are turned off, so nobody was moved. Turn on events.enabled first.",
@@ -272,12 +309,18 @@ const REFUSAL_TEXT: Record<MoveRefusalCode, string> = {
  * the host panel (to disable the buttons and say why) and by the run itself.
  * An unknown bot membership counts as "cannot".
  */
-export function moveMembersBlocker(guild: Guild | undefined): string | null {
+export function moveMembersBlocker(
+  guild: Guild | undefined,
+  channelScoped = false,
+): string | null {
   if (!guild) return REFUSAL_TEXT["no-guild"];
   const me = guild.members?.me;
   if (!me) {
     return "The bot could not check its own permissions, so moving people is switched off.";
   }
+  // Move Members granted on a category only is enough for the moves the
+  // per-channel checks allow: the caller then leaves the decision to them.
+  if (channelScoped) return null;
   try {
     return me.permissions.has(PermissionFlagsBits.MoveMembers)
       ? null
@@ -324,6 +367,12 @@ export function moveEventMembers(opts: {
    * end state first and then has to empty the group channels, so it opts in.
    */
   allowFinished?: boolean;
+  /**
+   * Do not refuse the run for lacking Move Members server-wide: the per-move
+   * checks (Move Members on the source channel, Connect on the destination)
+   * decide. For callers whose permission is granted in the events category.
+   */
+  channelScopedPermissions?: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   // Everything taken from the caller happens here, synchronously.
@@ -338,6 +387,7 @@ export function moveEventMembers(opts: {
       plan,
       exclude,
       allowFinished: opts.allowFinished === true,
+      channelScoped: opts.channelScopedPermissions === true,
       deps,
     }),
   ).then((result) => (result.busy ? { status: "busy" } : result.value));
@@ -350,6 +400,7 @@ async function runLocked(opts: {
   plan: (ctx: MovePlanContext) => MovePlan;
   exclude: Set<string>;
   allowFinished: boolean;
+  channelScoped: boolean;
   deps?: MoverDeps;
 }): Promise<MoveOutcome> {
   const { client, guildId, eventId, exclude } = opts;
@@ -370,7 +421,12 @@ async function runLocked(opts: {
       `Event ${sanitizeForLog(eventId)}: could not read the event for a move:`,
       error,
     );
-    return refuse("no-event");
+    // Not "no-event": the event may well exist, so a caller that owes moves
+    // must be able to tell this from a deleted one and try again.
+    return refuse(
+      "unreadable",
+      "The event could not be read, so nobody was moved.",
+    );
   }
   if (!row || row.guildId !== guildId) return refuse("no-event");
   const states = opts.allowFinished
@@ -383,7 +439,7 @@ async function runLocked(opts: {
 
   const guild = client.guilds?.cache?.get(guildId);
   if (!guild) return refuse("no-guild");
-  const blocker = moveMembersBlocker(guild);
+  const blocker = moveMembersBlocker(guild, opts.channelScoped);
   if (blocker) {
     return refuse(
       blocker === REFUSAL_TEXT["no-permission"] ? "no-permission" : "no-guild",
@@ -553,9 +609,13 @@ class Mover {
     let attempted = 0;
     let touched = false;
     for (const wish of queue) {
-      const { userId, toChannelId } = wish;
+      const { userId, toChannelId, fromChannelId, skipIf } = wish;
       if (rateLimited) {
         skip(userId, "rate-limited");
+        continue;
+      }
+      if (skipIf?.()) {
+        skip(userId, "withdrawn");
         continue;
       }
       const dest = destinations.get(toChannelId);
@@ -582,6 +642,10 @@ class Mover {
       }
       if (!this.eventChannels.has(cachedChannel)) {
         skip(userId, "elsewhere");
+        continue;
+      }
+      if (fromChannelId && cachedChannel !== fromChannelId) {
+        skip(userId, "moved-on");
         continue;
       }
       if (cachedChannel === toChannelId) {
@@ -647,6 +711,10 @@ class Mover {
         skip(userId, "elsewhere");
         continue;
       }
+      if (fromChannelId && sourceId !== fromChannelId) {
+        skip(userId, "moved-on");
+        continue;
+      }
       if (sourceId === toChannelId) {
         skip(userId, "already-there");
         continue;
@@ -676,9 +744,13 @@ class Mover {
       // actually goes out, so a rate-limit wait in the client's queue cannot
       // leave a stale decision behind.
       const assertMovable = (): string => {
+        if (skipIf?.()) throw new WithdrawnError();
         const live = this.guild.voiceStates.cache.get(userId)?.channelId;
         if (!live || !this.eventChannels.has(live)) {
           throw new MovedAwayError(!!live);
+        }
+        if (fromChannelId && live !== fromChannelId) {
+          throw new MovedOnError();
         }
         if (live === toChannelId) throw new AlreadyThereError();
         if (this.isFull(toChannelId, dest.limit)) {
@@ -723,6 +795,12 @@ class Mover {
         } else if (error instanceof DestinationFullError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, "group-full");
+        } else if (error instanceof WithdrawnError) {
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
+          skip(userId, "withdrawn");
+        } else if (error instanceof MovedOnError) {
+          unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
+          skip(userId, "moved-on");
         } else if (error instanceof MovedAwayError) {
           unmarkHostMove(this.guild.id, userId, toChannelId, attempt);
           skip(userId, error.connected ? "elsewhere" : "not-connected");
@@ -914,17 +992,30 @@ export function planMoveOne(
   destination: string,
 ): MovePlan {
   let channelId: string | null | undefined;
+  let kind: string | undefined;
   if (destination === "main") {
     channelId = event.channelId;
   } else {
-    channelId = (event.groups ?? []).find(
-      (g) => g.key === destination,
-    )?.channelId;
+    const group = (event.groups ?? []).find((g) => g.key === destination);
+    channelId = group?.channelId;
+    kind = group?.kind;
   }
   if (!channelId) {
     return {
       refuse:
         "That channel does not exist (yet), so nobody was moved. Pick another destination.",
+    };
+  }
+  // The leads channel is for the host and the leaders (#1199): putting anyone
+  // else there would only be undone by the channel's own upkeep.
+  if (
+    kind === "leads" &&
+    userId !== event.createdBy &&
+    !leadsLeaderIds(event).includes(userId)
+  ) {
+    return {
+      refuse:
+        "Only the host and the leaders can be moved into the leaders-only channel, so nobody was moved.",
     };
   }
   return [{ userId, toChannelId: channelId }];

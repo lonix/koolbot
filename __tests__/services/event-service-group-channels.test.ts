@@ -311,6 +311,118 @@ describe("group channels in the scan", () => {
     expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
   });
 
+  describe("the leads channel's access (#1199)", () => {
+    const leadsGroups = [
+      { key: "g_a", name: "A", size: null, marker: "", channelId: "c1" },
+      {
+        key: "g_l",
+        name: "Leads",
+        kind: "leads",
+        size: null,
+        marker: "",
+        channelId: "c2",
+      },
+    ];
+    const open = (over: Record<string, unknown> = {}) =>
+      groupRow({
+        state: "active",
+        channelId: "main-1",
+        groups: leadsGroups,
+        ...over,
+      });
+
+    it("runs the access pass for an open event whose leads channel needs one", async () => {
+      const { service, guild } = setup();
+      guild.channels.cache.set("c1", {});
+      guild.channels.cache.set("c2", {});
+      const sync = jest.fn(async () => undefined);
+      (service as unknown as { syncLeadsAccess: unknown }).syncLeadsAccess =
+        sync;
+      const admins = jest.fn(async () => ({ roleIds: new Set(), known: true }));
+      (
+        service.groupChannels as unknown as { leadsAdminRoles: unknown }
+      ).leadsAdminRoles = admins;
+      await service.processEvent(open(), guild, NOW, WINDOWS);
+      // The admin groups are read again before the cache check.
+      expect(admins).toHaveBeenCalledWith("guild-1");
+      // Never verified since the start: one pass, with no revoked ids.
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(sync).toHaveBeenCalledWith("guild-1", "evt1");
+      expect(service.groupChannels.reconcile).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a plain event, a group event without a leads channel, an adopted one, or one past its end", async () => {
+      const { service, guild } = setup();
+      guild.channels.cache.set("c1", {});
+      guild.channels.cache.set("c2", {});
+      const sync = jest.fn(async () => undefined);
+      (service as unknown as { syncLeadsAccess: unknown }).syncLeadsAccess =
+        sync;
+      const needs = jest.spyOn(
+        (
+          service as unknown as {
+            groupChannels: { leadsNeedsAttention: () => boolean };
+          }
+        ).groupChannels,
+        "leadsNeedsAttention",
+      );
+      await service.processEvent(
+        row({ state: "active", channelId: "main-1" }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      expect(needs).not.toHaveBeenCalled();
+      await service.processEvent(
+        open({ groups: [leadsGroups[0]] }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      await service.processEvent(
+        open({ nativeAdopted: true }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      await service.processEvent(open({ state: "ended" }), guild, NOW, WINDOWS);
+      await service.processEvent(
+        open({ state: "cancelled" }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      expect(sync).not.toHaveBeenCalled();
+    });
+
+    it("keeps looking after an open event past its scheduled end, whose end is deferred while people are in its channels", async () => {
+      const { service, guild } = setup();
+      guild.channels.cache.set("c1", {});
+      guild.channels.cache.set("c2", {});
+      const sync = jest.fn(async () => undefined);
+      (service as unknown as { syncLeadsAccess: unknown }).syncLeadsAccess =
+        sync;
+      (
+        service.groupChannels as unknown as { leadsAdminRoles: unknown }
+      ).leadsAdminRoles = jest.fn(async () => ({
+        roleIds: new Set(),
+        known: true,
+      }));
+      // Past its deadline and still `active`: the end is deferred (here the
+      // occupancy of its channels cannot be established, which defers it too).
+      await service.processEvent(
+        open({
+          durationMinutes: 5,
+          startTime: new Date(NOW.getTime() - 60 * MIN),
+        }),
+        guild,
+        NOW,
+        WINDOWS,
+      );
+      expect(sync).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("reconciles when every channel is present but the cache shows the groups out of order (#1214), and not when the order is right", async () => {
     const voice = (
       id: string,

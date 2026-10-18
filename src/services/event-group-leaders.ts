@@ -43,8 +43,9 @@
  * `onLeaderChange(listener)` fires once per leader change after the write
  * landed (host set or clear, the unassign cleanup, a member data reset, and the
  * end of the event: source `ended`, one change per group that had a leader).
- * Nothing subscribes yet; #1199 will update the leads channel's overwrites
- * from it. A listener that throws is logged and ignored. `resolveLeadsChannel`
+ * The leads channel (#1199, `installLeadsChannelSync` in `event-leads-sync.ts`)
+ * updates its overwrites from it (a pass ignores an event that is not open).
+ * A listener that throws is logged and ignored. `resolveLeadsChannel`
  * is the one place that says which channel "Pull leaders only" aims at by
  * default.
  */
@@ -60,6 +61,7 @@ import {
 } from "./event-group-assignment.js";
 import type { EventPresence } from "./event-group-presence.js";
 import type { MoveEventRow, MovePlan, MoveWish } from "./event-member-moves.js";
+import { effectiveLeaders, resolveLeadsChannel } from "./event-leader-roles.js";
 
 const OBJECT_ID_RE = /^[0-9a-f]{24}$/i;
 const OPEN_STATES = ["scheduled", "active"] as const;
@@ -90,10 +92,10 @@ type LeaderListener = (change: LeaderChange) => void | Promise<void>;
 const leaderListeners = new Set<LeaderListener>();
 
 /**
- * Subscribe to leader changes (#1199 updates the leads-only channel's access
- * from this). Fired after the write, once per group whose leader changed.
- * Nothing subscribes yet. A listener that throws is logged and ignored: it can
- * never undo or fail the change. Returns the unsubscribe function.
+ * Subscribe to leader changes (the leads-only channel's access, #1199, follows
+ * from this). Fired after the write, once per group whose leader changed. A
+ * listener that throws is logged and ignored: it can never undo or fail the
+ * change. Returns the unsubscribe function.
  */
 export function onLeaderChange(listener: LeaderListener): () => void {
   leaderListeners.add(listener);
@@ -121,53 +123,14 @@ function emitLeaderChanges(changes: LeaderChange[]): void {
 // Pure reads
 // ---------------------------------------------------------------------
 
-/** The part of a group the leader rules read (lean rows may lack any field). */
-export interface LeaderGroup {
-  key: string;
-  kind?: string;
-  channelId?: string | null;
-  memberIds?: string[];
-  captainId?: string | null;
-}
-
-export interface EffectiveLeader {
-  groupKey: string;
-  userId: string;
-}
-
-/**
- * The leaders of an event as every reader must see them: a team group's
- * `captainId` that is also in that group's `memberIds`. A stored id that fails
- * this (the member was unassigned and the cleanup has not run, or never ran)
- * is not a leader.
- */
-export function effectiveLeaders(
-  groups: readonly LeaderGroup[] | null | undefined,
-): EffectiveLeader[] {
-  const leaders: EffectiveLeader[] = [];
-  for (const g of groups ?? []) {
-    const id = g.captainId;
-    if (!id || g.kind !== "team") continue;
-    if (!(g.memberIds ?? []).includes(id)) continue;
-    leaders.push({ groupKey: g.key, userId: id });
-  }
-  return leaders;
-}
-
-/**
- * The channel "Pull leaders only" aims at by default: the `leads` group's
- * channel when that group exists and has one, else null. #1199 turns that
- * channel into a leaders-only one; until then it is an ordinary group channel
- * (#1190), so the default already works for an event that has a leads group.
- */
-export function resolveLeadsChannel(
-  event: Pick<MoveEventRow, "groups">,
-): string | null {
-  for (const g of event.groups ?? []) {
-    if (g.kind === "leads" && g.channelId) return g.channelId;
-  }
-  return null;
-}
+// The pure reads live in `event-leader-roles.ts` (no database or Discord
+// import), so the channel code can share them; re-exported for existing callers.
+export {
+  effectiveLeaders,
+  resolveLeadsChannel,
+  type EffectiveLeader,
+  type LeaderGroup,
+} from "./event-leader-roles.js";
 
 // ---------------------------------------------------------------------
 // Setting and clearing a leader
