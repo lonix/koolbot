@@ -1043,10 +1043,13 @@ export class EventNicknameTags {
     }
 
     const desired = buildTaggedName(ours.base, want.tag, want.suffix) as string;
-    // Only a CONFIRMED edit of exactly this target is "already done".
-    if (ours.confirmedTarget === desired && ours.intended === desired) {
-      return "none";
-    }
+    // A direct call (an assignment or team move) never trusts the row alone,
+    // even for a CONFIRMED edit of exactly this target: the member may have
+    // renamed themselves since, and a move to a team with the same tag must
+    // then tag the new name. It goes through a fresh read and the ownership
+    // classification; a nickname that still shows the target is only confirmed.
+    // (The sweep keeps its prefilter for unchanged confirmed targets: nothing
+    // in the row says the nickname changed.)
     return this.retargetRow(opts, ours, want, desired);
   }
 

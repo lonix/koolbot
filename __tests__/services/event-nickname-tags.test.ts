@@ -441,14 +441,34 @@ describe("apply", () => {
     expect(store.rows.size).toBe(0);
   });
 
-  it("is idempotent: a second pass makes no call at all", async () => {
+  it("is idempotent: a second direct sync reads once and edits nothing", async () => {
     setup();
     await sync("alice");
     const fetches = discord.fetches;
     const edits = discord.edits.length;
     expect(await sync("alice")).toBe("none");
-    expect(discord.fetches).toBe(fetches);
+    expect(discord.fetches).toBe(fetches + 1);
     expect(discord.edits).toHaveLength(edits);
+  });
+
+  it("a rename followed by a move to a team with the SAME tag is tagged from the new name", async () => {
+    setup();
+    await sync("alice"); // [RED] Alice, confirmed
+    discord.members.get("alice")!.nickname = "Ally";
+    store.events.get(EV)!.groups = [
+      team("red", "RED", []),
+      team("red2", "RED", ["alice"]),
+    ];
+    expect(await sync("alice")).toBe("tagged");
+    expect(discord.members.get("alice")?.nickname).toBe("[RED] Ally");
+    expect(store.rows.get("alice")).toMatchObject({
+      original: "Ally",
+      base: "Ally",
+      intended: "[RED] Ally",
+    });
+    store.events.get(EV)!.state = "ended";
+    expect(await sync("alice")).toBe("restored");
+    expect(discord.members.get("alice")?.nickname).toBe("Ally");
   });
 
   it("two concurrent passes for one member tag once and keep one backup", async () => {
@@ -1377,9 +1397,7 @@ describe("state table: every row state against every nickname and every want", (
       return { edit: null, row: "deleted" };
     }
     const desired = want === "RED" ? RED : BLUE;
-    if (row.confirmedTarget === desired && row.intended === desired) {
-      return { edit: null, row: "unchanged" };
-    }
+    // A direct call never takes the confirmed shortcut: it reads the nickname.
     if (settling) return { edit: null, row: "unchanged" };
     if (ambiguous) return { edit: null, row: "noted" };
     if (!owned && !atOriginal) {
