@@ -7,9 +7,9 @@ import {
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
-  PermissionFlagsBits,
   type Snowflake,
 } from "discord.js";
+import { NATIVE_EVENTS_WARNING, PERM } from "./bot-permission-registry.js";
 import { ConfigService } from "./config-service.js";
 import { Event, type IEvent } from "../models/event.js";
 import {
@@ -378,16 +378,13 @@ export class NativeEventSync {
       guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
     const ok =
       !!me &&
-      (me.permissions.has(PermissionFlagsBits.ManageEvents) ||
-        me.permissions.has(PermissionFlagsBits.CreateEvents));
+      (me.permissions.has(PERM.manageEvents.bit) ||
+        me.permissions.has(PERM.createEvents.bit));
     if (ok) {
       this.warned.delete("permission");
       return true;
     }
-    this.warnOnce(
-      "permission",
-      "Events are not being created in Discord's Events list because the bot lacks the Create Events / Manage Events permission, so announcements have no event card and members cannot mark Interested. Grant it to the bot's role.",
-    );
+    this.warnOnce("permission", NATIVE_EVENTS_WARNING);
     return false;
   }
 

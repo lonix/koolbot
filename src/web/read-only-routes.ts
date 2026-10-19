@@ -26,6 +26,9 @@ import {
   loadEventPresetsPage,
   renderEventPresetsPage,
 } from "./event-presets-page.js";
+import { renderBotPermissionsPage } from "./bot-permissions-view.js";
+import { checkBotPermissions } from "../services/bot-permission-check.js";
+import { missingNeeds, PERM } from "../services/bot-permission-registry.js";
 import {
   catalogNotice,
   enabledPresets,
@@ -43,12 +46,7 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
-import {
-  ChannelType,
-  Client,
-  PermissionFlagsBits,
-  type Guild,
-} from "discord.js";
+import { ChannelType, Client, type Guild } from "discord.js";
 import mongoose from "mongoose";
 import { readSignedFlash } from "./http-flash.js";
 import logger from "../utils/logger.js";
@@ -915,6 +913,17 @@ export function createReadOnlyRouter(
   router.get("/session/ping", createSessionPingHandler());
 
   router.use(requireSession);
+
+  // Keep the navigation badge for missing bot permissions (#1217) current. The
+  // check is read-only, shares one Discord read per 30 seconds and never
+  // throws; a page is never held up for it.
+  router.use((req, _res, next) => {
+    const guildId = (req as AuthenticatedRequest).webSession?.guildId;
+    if (req.method === "GET" && guildId && req.path !== "/bot-permissions") {
+      void checkBotPermissions(client, guildId);
+    }
+    next();
+  });
   // Every `/admin/*` page below this point is admin-only. User-role
   // sessions get a 403 page that points them at `/me/` (#481).
   router.use(requireAdminRoleMiddleware());
@@ -1373,8 +1382,10 @@ export function createReadOnlyRouter(
       const me = client.guilds.cache.get(common.guildId)?.members.me;
       const nativePermissionMissing =
         !!me &&
-        !me.permissions.has(PermissionFlagsBits.ManageEvents) &&
-        !me.permissions.has(PermissionFlagsBits.CreateEvents);
+        missingNeeds(
+          { needs: [PERM.createEvents, PERM.manageEvents], anyOf: true },
+          (bit) => me.permissions.has(bit),
+        ).length > 0;
 
       const rows = events.map((e) => {
         const counts = countRsvps(e.rsvps);
@@ -1448,6 +1459,18 @@ export function createReadOnlyRouter(
           flash: readFlash(req),
         }),
       );
+    }),
+  );
+
+  // Which bot permissions the enabled features are missing, and where (#1217).
+  router.get(
+    "/bot-permissions",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const report = await checkBotPermissions(client, common.guildId);
+      res
+        .type("text/html")
+        .send(renderBotPermissionsPage({ ...common, report }));
     }),
   );
 

@@ -13,6 +13,15 @@ import {
   type REST,
   type VoiceChannel,
 } from "discord.js";
+import {
+  HOST_ACCESS_WARNING,
+  LEADS_MANAGE_ROLES_WARNING,
+  LEADS_NEEDS,
+  MANAGE_CHANNELS_CREATE_WARNING,
+  MANAGE_CHANNELS_ORDER_WARNING,
+  missingNeeds,
+  PERM,
+} from "./bot-permission-registry.js";
 import { Event } from "../models/event.js";
 import {
   cancellableCall,
@@ -32,7 +41,6 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
-  LEADS_REQUIRED_BOT_PERMISSIONS,
   buildLeadsOverwrites,
   describePlan,
   leadsLeaderIds,
@@ -612,17 +620,9 @@ export class EventGroupChannels {
     const perms = botPermissionsIn(guild, category);
     if (
       perms &&
-      !(
-        perms.has(PermissionFlagsBits.ManageRoles) &&
-        perms.has(PermissionFlagsBits.MoveMembers)
-      )
+      !(perms.has(PERM.manageRoles.bit) && perms.has(PERM.moveMembers.bit))
     ) {
-      this.warnOnce(
-        event,
-        "host-perms",
-        "The bot lacks Manage Roles or Move Members in the events category, so the host got no extra channel access. Grant both to the bot's role.",
-        warnings,
-      );
+      this.warnOnce(event, "host-perms", HOST_ACCESS_WARNING, warnings);
       return null;
     }
     return buildHostOverwrites(category, hostId);
@@ -944,9 +944,8 @@ export class EventGroupChannels {
         return;
       }
       const perms = botPermissionsIn(guild, category);
-      if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
-        const reason =
-          "The bot lacks Manage Channels in the events category, so the group channels were not put in order. Grant it to the bot's role.";
+      if (perms && !perms.has(PERM.manageChannels.bit)) {
+        const reason = MANAGE_CHANNELS_ORDER_WARNING;
         this.warnOnce(row, "order-manage-channels", reason, report.warnings);
         // Until someone grants it, do not read the whole server every scan.
         this.holds.set(holdKey, {
@@ -1043,11 +1042,8 @@ export class EventGroupChannels {
     }
     const category = parent.channel as CategoryChannel;
     const perms = botPermissionsIn(guild, category);
-    if (perms && !perms.has(PermissionFlagsBits.ManageChannels)) {
-      return fail(
-        "manage-channels",
-        "The bot lacks Manage Channels in the events category, so no group channels were created and the event runs with its main channel only. Grant it to the bot's role.",
-      );
+    if (perms && !perms.has(PERM.manageChannels.bit)) {
+      return fail("manage-channels", MANAGE_CHANNELS_CREATE_WARNING);
     }
     const scratch: string[] = [];
     const overwrites = this.hostOverwritesFor(row, guild, category, scratch);
@@ -1645,9 +1641,8 @@ export class EventGroupChannels {
         return failed(leadsId);
       }
       const perms = botPermissionsIn(guild, channel);
-      if (perms && !perms.has(PermissionFlagsBits.ManageRoles)) {
-        const reason =
-          "The bot lacks Manage Roles on the leaders-only channel, so it cannot change who may join it. Grant it to the bot's role.";
+      if (perms && !perms.has(PERM.manageRoles.bit)) {
+        const reason = LEADS_MANAGE_ROLES_WARNING;
         this.warnOnce(row, "leads-manage-roles", reason, []);
         problem(reason);
         this.holds.set(holdKey, {
@@ -3120,25 +3115,11 @@ export class EventGroupChannels {
 /** The name the host panel shows for a leads channel access problem. */
 const LEADS_PROBLEM_NAME = "Leaders-only channel access";
 
-const LEADS_PERMISSION_NAMES: Array<[string, bigint]> = [
-  ["View Channel", PermissionFlagsBits.ViewChannel],
-  ["Connect", PermissionFlagsBits.Connect],
-  ["Speak", PermissionFlagsBits.Speak],
-  ["Move Members", PermissionFlagsBits.MoveMembers],
-  ["Manage Roles", PermissionFlagsBits.ManageRoles],
-];
-
 /** The permissions the bot needs in the category to grant the leads access, that it lacks. */
 function missingLeadsPermissions(
   perms: Readonly<PermissionsBitField>,
 ): string[] {
-  const names: string[] = [];
-  for (const [name, bit] of LEADS_PERMISSION_NAMES) {
-    if ((LEADS_REQUIRED_BOT_PERMISSIONS & bit) !== 0n && !perms.has(bit)) {
-      names.push(name);
-    }
-  }
-  return names;
+  return missingNeeds({ needs: LEADS_NEEDS }, (bit) => perms.has(bit));
 }
 
 /** A channel's overwrites as plain values (its cache, which a fresh fetch refreshes). */
