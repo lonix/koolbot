@@ -361,7 +361,7 @@ describe("the presets admin page (#1200)", () => {
         adminPage({ hostPresets: { page: 1, hasMore: true, rows } }),
       ).window.document;
       const hrefs = Array.from(
-        doc.querySelectorAll<HTMLAnchorElement>("a[href*='hostPage=']"),
+        doc.querySelectorAll("a[href*='hostPage=']"),
       ).map((a) => a.getAttribute("href"));
       expect(hrefs).toEqual([
         "/admin/events/presets?hostPage=0#host-presets",
