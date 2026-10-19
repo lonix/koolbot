@@ -2705,6 +2705,11 @@ const EVENT_GROUPS_SCRIPT =
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+  // A draft from before the switch can hold a row of kind leads (the select no
+  // longer offers it): that row is the captains lobby now, so it ticks the box
+  // and is not restored as a team. The other rows are left as they are.
+  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
+  "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(f){delete d['group_'+m[1]+'_'+f]});d['groups_captains_lobby']=true}});" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||el.type==='file')return;" +
   // A saved choice that is no longer offered (e.g. a preset now over the cap) is not put back.

@@ -90,6 +90,7 @@ import {
   newGroupKey,
   captainsLobbyName,
   hasCaptainsLobby,
+  resolveGroupCountLimits,
 } from "./event-groups.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -145,7 +146,33 @@ function lobbyValue(e: IEvent): {
 }
 
 async function turnOn(ctx: ApplyContext<boolean>): Promise<RowOutcome> {
-  const g = lobbyValue(ctx.event);
+  // The name, the key and the group count come from a FRESH read: earlier rows
+  // of this save (the leader label, a rename, a group added) have been applied
+  // since the plan was made, and `ctx.event` is the plan's snapshot.
+  const fresh = (await Event.findOne({
+    _id: ctx.eventId,
+    guildId: ctx.guildId,
+  }).lean()) as IEvent | null;
+  if (!fresh) return { status: "lost" };
+  if (hasCaptainsLobby(fresh.groups)) return { status: "applied" };
+  // The limit holds against what the save has added so far (the plan judged the
+  // count it started from); the lobby counts, it is a channel.
+  const maxCount = await ctx.maxGroups();
+  if (maxCount === null) {
+    return {
+      status: "failed",
+      message:
+        "the group limit could not be read, so no lobby was made. Save again",
+    };
+  }
+  const limit = resolveGroupCountLimits(1, maxCount).maxCount;
+  if ((fresh.groups ?? []).length >= limit) {
+    return {
+      status: "failed",
+      message: `the event already has ${(fresh.groups ?? []).length} groups and the limit is ${limit} (events.groups.max_count); the lobby counts as a group, so no lobby was made`,
+    };
+  }
+  const g = lobbyValue(fresh);
   // `captainsEnabled: true` is part of the write: an earlier row of this save
   // (leaders) may have turned them off after the plan was made.
   return addGroupLocked(ctx, g, { captainsEnabled: true });
@@ -157,7 +184,10 @@ async function turnOff(ctx: ApplyContext<boolean>): Promise<RowOutcome> {
   const mark = { committed: false };
   let step: Awaited<ReturnType<typeof removeOne>>;
   try {
-    step = await removeOne(ctx, lobby.key, mark);
+    // The channel the plan and the confirmation saw: a channel the pass records
+    // meanwhile (it has its own lock and does not move the revision) was not
+    // part of what the host was asked about, so nothing is moved or deleted.
+    step = await removeOne(ctx, lobby.key, mark, lobby.channelId ?? null);
   } catch (err) {
     logger.error(
       `Event ${sanitizeForLog(ctx.eventId)}: turning off the captains lobby failed:`,

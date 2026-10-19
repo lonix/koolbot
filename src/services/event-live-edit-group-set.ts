@@ -551,6 +551,12 @@ export async function removeOne(
   key: string,
   /** Set once a write of this group landed (the members were unassigned). */
   mark: { committed: boolean },
+  /**
+   * The channel the plan (and the confirmation) saw for this group: when it is
+   * not the one stored now, nothing is done, so the next save is planned, and
+   * asked, from the new state. `undefined`: not checked.
+   */
+  expectChannel?: string | null,
 ): Promise<RemoveStep> {
   const fresh = await readFresh(ctx.eventId, ctx.guildId);
   if (!fresh) return { kind: "lost" };
@@ -558,6 +564,15 @@ export async function removeOne(
   const group = groups.find((g) => g.key === key);
   if (!group) return { kind: "gone" };
   const name = `"${group.name}"`;
+  if (
+    expectChannel !== undefined &&
+    (group.channelId ?? null) !== expectChannel
+  ) {
+    return {
+      kind: "refused",
+      reason: `${name}: its channel changed since you reviewed it, so nothing was removed. Save again (you are asked again if anybody is connected)`,
+    };
+  }
   // An event keeps at least one group the host can see: the hidden captains
   // lobby (#1251) is not one, so it never counts as the group that is left.
   const lobby = group.kind === "leads";

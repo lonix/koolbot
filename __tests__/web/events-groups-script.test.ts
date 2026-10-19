@@ -481,6 +481,30 @@ describe("the Captains lobby switch of the event form (#1251)", () => {
     expect(field(off, "groups_captains_lobby").disabled).toBe(true);
   });
 
+  it("a draft from before the switch that holds a leads row ticks the lobby box and does not restore that row as a team", () => {
+    const dom = boot(15, 3, {
+      groups_enabled: true,
+      groups_captains: true,
+      group_0_name: "Alpha",
+      group_0_kind: "team",
+      group_0_size: "4",
+      group_1_name: "Command",
+      group_1_kind: "leads",
+      group_1_tag: "C",
+      group_2_name: "Bravo",
+      group_2_kind: "open",
+    });
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    // The leads row is gone from the list; the other rows are intact.
+    expect(field(dom, "group_1_name").value).toBe("");
+    expect(field(dom, "group_1_tag").value).toBe("");
+    expect(field(dom, "group_0_name").value).toBe("Alpha");
+    expect(field(dom, "group_0_size").value).toBe("4");
+    expect(field(dom, "group_2_name").value).toBe("Bravo");
+    expect(field(dom, "group_2_kind").value).toBe("open");
+  });
+
   it("a row that is already a leads group (an old preset in the preset editor) keeps its own option, so saving never turns it into a team", () => {
     const html = renderGroupRow("0", "1", { name: "Command", kind: "leads" });
     expect(html).toContain('<option value="leads" selected>');

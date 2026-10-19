@@ -158,6 +158,7 @@ beforeEach(() => {
   // The leaders row writes `captainsEnabled`; the stand-in lets it through for
   // the tests of this file that save it together with the lobby.
   SETTABLE.add("captainsEnabled");
+  SETTABLE.add("leaderLabel");
   enabled = true;
   ending = false;
   connected = new Set(["c-lobby"]);
@@ -410,9 +411,13 @@ describe("turning it on", () => {
   it("never pushes a second leads group when one appears between the plan and the write", async () => {
     // A concurrent writer turns a group into a leads group without changing the
     // count: only the `groups.kind $ne` condition notices.
+    // Before the push (the second write: the first is the save's claim), after
+    // the row's own fresh read.
     fake.beforeWrite = () => {
-      fake.beforeWrite = null;
-      groupsOf()[1].kind = "leads";
+      if (writes.length >= 1) {
+        fake.beforeWrite = null;
+        groupsOf()[1].kind = "leads";
+      }
     };
     const out = done(await lobbyOn());
     expect(out.applied).toEqual([]);
@@ -444,6 +449,68 @@ describe("turning it on", () => {
       expect(leadsRows()[0].channelId).toMatch(/^made-/);
       expect(calls).toContain("leads");
     }
+  });
+
+  it("is named from the state the save leaves: the leader label changed in the same save", async () => {
+    const out = done(
+      await run([
+        entry("leaderLabel", "Captain", "Leader"),
+        entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+      ]),
+    );
+    expect(out.applied.map((c) => c.rowId)).toEqual([
+      "leaderLabel",
+      "captainsLobby",
+    ]);
+    expect(leadsRows()[0].name).toBe("Captain lobby");
+  });
+
+  it("picks a unique name when another group is renamed to the lobby's name in the same save", async () => {
+    const out = done(
+      await run([
+        entry(groupNameRowId(0), "Leader lobby", "Alpha"),
+        entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+      ]),
+    );
+    expect(out.applied.map((c) => c.rowId)).toEqual([
+      groupNameRowId(0),
+      "captainsLobby",
+    ]);
+    expect(out.notApplied).toEqual([]);
+    expect(groupsOf()[0].name).toBe("Leader lobby");
+    expect(leadsRows()[0].name).toBe("Leader lobby 2");
+  });
+
+  it("holds events.groups.max_count against a group added in the same save: 14 plus the new group is 15, the lobby would be 16", async () => {
+    const many = Array.from({ length: 14 }, (_, i) =>
+      teamGroup(`g_${(i + 16).toString(16).padStart(8, "0")}`, `Team ${i}`, {
+        channelId: null,
+      }),
+    );
+    seed(many);
+    const out = done(
+      await run([
+        entry(
+          "groupAdd",
+          [
+            {
+              key: "g_0000abcd",
+              name: "Extra",
+              kind: "team",
+              size: null,
+              tag: "",
+            },
+          ],
+          [],
+        ),
+        entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+      ]),
+    );
+    expect(out.applied.map((c) => c.rowId)).toEqual(["groupAdd"]);
+    expect(out.notApplied).toHaveLength(1);
+    expect(text(out)).toContain("the limit is 15");
+    expect(groupsOf()).toHaveLength(15);
+    expect(leadsRows()).toEqual([]);
   });
 
   it("leaders off and the lobby on in one save is refused, and nothing at all is written", async () => {
@@ -745,6 +812,30 @@ describe("turning it off", () => {
     });
     expect(done(out).applied).toHaveLength(1);
     expect(leadsRows()).toEqual([]);
+  });
+
+  it("a channel recorded after the plan is not part of what was asked: nothing is moved or deleted, the next save asks", async () => {
+    connected = new Set();
+    seed([
+      teamGroup(A, "Alpha"),
+      teamGroup(B, "Bravo"),
+      lobbyGroup({ channelId: null }),
+    ]);
+    // The plan sees no channel and nobody connected, so no confirmation. The
+    // channel pass (its own lock, no revision) records one before the row runs.
+    fake.beforeWrite = () => {
+      fake.beforeWrite = null;
+      groupsOf()[2].channelId = "c-late";
+      connected = new Set(["c-late"]);
+    };
+    const out = done(await lobbyOff());
+    expect(out.applied).toEqual([]);
+    expect(text(out)).toContain("its channel changed since you reviewed it");
+    expect(calls).toEqual([]);
+    expect(leadsRows()).toHaveLength(1);
+    expect(leadsRows()[0].channelId).toBe("c-late");
+    // Saved again, it is planned from the new state and asks.
+    expect((await lobbyOff()).status).toBe("needs-confirmation");
   });
 
   it("a lobby that has no channel yet is removed without asking, by one conditional pull", async () => {

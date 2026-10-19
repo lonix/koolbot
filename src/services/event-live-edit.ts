@@ -320,6 +320,12 @@ export interface ApplyContext<V extends JsonValue = JsonValue> {
   /** Synchronous: an end or cancel holds the event. Ask before every outward write. */
   ending(): boolean;
   /**
+   * `events.groups.max_count` read now (null: unreadable). For a row that adds a
+   * group and must hold the limit against what an earlier row of the same save
+   * already added: the plan judged the count it started from.
+   */
+  maxGroups(): Promise<number | null>;
+  /**
    * The outward effects (`deps.effects`), for a row whose `apply` or `reconcile`
    * follows its stored change with a Discord call and reports it as `partial`
    * (names and sizes, #1241). Absent: the row stores and reports it as owed.
@@ -1302,6 +1308,8 @@ export async function runLiveEdit(opts: {
           from: change.from,
           to: change.to,
           ending: (): boolean => deps.isEnding(eventId),
+          maxGroups: (): Promise<number | null> =>
+            deps.maxGroups().catch(() => null),
           effects: deps.effects,
         };
         outcome =
