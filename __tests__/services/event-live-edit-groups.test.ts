@@ -1438,6 +1438,20 @@ describe("switch preset and the captains lobby (#1263)", () => {
     expect(writes).toEqual([]);
   });
 
+  it("a preset name is checked against the whole setup by the group's own place: a visible group cannot take the lobby's name", async () => {
+    seedWithLobby();
+    const out = await run([
+      entry(
+        GROUP_PRESET_ROW_ID,
+        squads([{}, { name: "Leader lobby" }]),
+        baseOf(),
+      ),
+    ]);
+    expect(out).toMatchObject({ status: "invalid" });
+    expect(text(out)).toContain("names must be unique");
+    expect(writes).toEqual([]);
+  });
+
   it("a preset value that names a leads group is out of date (the lobby is never part of a switch)", () => {
     expect(
       groupPresetRow.parse(

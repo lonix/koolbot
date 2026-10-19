@@ -2484,7 +2484,7 @@ export const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
 /** The option of a row that is already a leads group (an old preset). */
 const LEADS_KIND_OPTION: [string, string] = [
   "leads",
-  "Leads (leaders and host only; use the Captains lobby switch instead)",
+  "Leads (leaders and host only; use the Captains lobby tick instead)",
 ];
 
 /**
