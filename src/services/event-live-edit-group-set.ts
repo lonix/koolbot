@@ -600,7 +600,9 @@ export async function removeOne(
   if (visibleGroups(groups).length <= (lobby ? 0 : 1)) {
     return {
       kind: "refused",
-      reason: `${name} is the last group of the event, and an event keeps at least one`,
+      reason: lobby
+        ? `${name} is the only group of the event (an event saved with only a leaders-only group), and an event keeps at least one group: add a group first, or switch groups off under "Groups on or off", which removes it`
+        : `${name} is the last group of the event, and an event keeps at least one`,
     };
   }
   const channelId = group.channelId ?? null;

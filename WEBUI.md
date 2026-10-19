@@ -2136,6 +2136,9 @@ from the host and the current leaders.
   is removed**: the lobby stays, the result says why, and saving again plans the removal again. Turning
   it on again later makes a new, empty channel. If an end or cancel takes hold of the event during the
   removal, the group's record is left for the end to clean up.
+- **An old event with only a leaders-only group.** An event saved with nothing but a `leads` group
+  keeps it when the lobby is turned off, because an event keeps at least one group; the result says
+  so. Add a group first, or use **Groups on or off**, which removes everything.
 - **Leaders turned off while the lobby exists.** The lobby is kept (stored data is kept, the
   switches hide it), but with leaders off nobody but you is let in, and any leader connected to it
   is moved out by the usual pass. Turn leaders on again and the current leaders get access again;

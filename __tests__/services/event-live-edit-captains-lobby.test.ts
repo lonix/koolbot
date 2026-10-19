@@ -1071,6 +1071,18 @@ describe("the hidden group in the group rows", () => {
     expect(writes).toEqual([]);
   });
 
+  it("a legacy event with only a leads group keeps it on 'off' and says how to get rid of it: an event keeps at least one group", async () => {
+    seed([lobbyGroup()]);
+    connected = new Set();
+    const out = done(await lobbyOff());
+    expect(out.applied).toEqual([]);
+    expect(out.notApplied).toHaveLength(1);
+    expect(text(out)).toContain("only group of the event");
+    expect(text(out)).toContain("Groups on or off");
+    expect(groupsOf()).toHaveLength(1);
+    expect(calls).toEqual([]);
+  });
+
   it("a group can still be removed while another visible group stays", async () => {
     seed([teamGroup(A, "Alpha"), teamGroup(B, "Bravo"), lobbyGroup()]);
     const { second } = await confirmed([entry(GROUP_REMOVE_ROW_ID, [B], [])]);
