@@ -37,7 +37,10 @@ jest.unstable_mockModule(
     TrackingOptOutService: { getInstance: () => ({ admission: () => 1 }) },
   }),
 );
-const syncMember = jest.fn(async (_o: unknown) => "none");
+const syncMember = jest.fn(async (...args: unknown[]): Promise<string> => {
+  void args;
+  return "none";
+});
 const requestSweep = jest.fn();
 jest.unstable_mockModule("../../src/services/event-nickname-tags.js", () => ({
   EventNicknameTags: { getInstance: () => ({ syncMember, requestSweep }) },
