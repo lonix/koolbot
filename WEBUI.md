@@ -1830,8 +1830,13 @@ set its clan tag from Discord; the host can put any team back at any time.
   **Customise team** message in the chat of each team group's voice channel. It names nobody
   and pings nobody. The bot finds its own message again after a restart instead of posting a
   second one, and removes it (and forgets it) when leaders or customising are switched off, so
-  no button is left behind. It is checked on every scan; a post Discord refuses (the bot cannot
-  send messages in that channel) is shown in the group notices and tried again later.
+  no button is left behind (switches can only be changed after creation once live settings,
+  #1197, land; until then this happens when the event ends and its channels go). The scan posts
+  a missing message and removes an extra one; it checks that a recorded message still exists
+  once per run of the bot, so a message a moderator deletes by hand comes back after the next
+  restart. While `events.enabled` is off the scan does not run, so a button stays but only
+  answers that events are off. A post Discord refuses (the bot cannot send messages in that
+  channel) is shown in the group notices and tried again later.
 - **Who may use it.** Only that team's current leader, for that team only. Anyone else (another
   team's leader, a team member, a stranger, a host who is not the leader) gets a private
   message saying so. The check made when the button is pressed is only a courtesy: it is made

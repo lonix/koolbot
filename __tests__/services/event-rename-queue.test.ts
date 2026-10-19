@@ -138,7 +138,7 @@ describe("ChannelRenameQueue (#1196)", () => {
   });
 
   it("describes a wait in words", () => {
-    expect(describeRetryIn(500)).toBe("about 1 seconds");
+    expect(describeRetryIn(500)).toBe("about 1 second");
     expect(describeRetryIn(40_000)).toBe("about 40 seconds");
     expect(describeRetryIn(60_000)).toBe("about 1 minute");
     expect(describeRetryIn(7 * 60_000 - 1)).toBe("about 7 minutes");

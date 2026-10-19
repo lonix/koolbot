@@ -180,7 +180,7 @@ describeWithMongo(
       expect(await group(id)).toMatchObject({ name: "Red", tag: "RED" });
     });
 
-    it("the write itself refuses a leader who stopped being one after the read (a stale decision cannot store)", async () => {
+    it("refuses someone who is no longer the stored leader (the gate and the write filter agree; the read-to-write race itself is in the unit suite)", async () => {
       const id = await makeEvent();
       // Make the filter fail exactly as a lost race would: the stored leader changed.
       await Event.updateOne(

@@ -65,8 +65,14 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { handleCustomiseButton, handleCustomiseModal, BUTTON_READ_DEADLINE_MS } =
-  await import("../../src/handlers/event-customise-handler.js");
+const {
+  handleCustomiseButton,
+  handleCustomiseModal,
+  BUTTON_READ_DEADLINE_MS,
+  BUTTON_TOTAL_BUDGET_MS,
+  BUTTON_MIN_READ_MS,
+  buttonReadBudget,
+} = await import("../../src/handlers/event-customise-handler.js");
 type Deps =
   import("../../src/services/event-leader-customise.js").CustomiseDeps;
 const { getRenameQueue } =
@@ -132,6 +138,7 @@ function makeButton(
     guildId?: string | null;
     channelId?: string;
     userId?: string;
+    createdTimestamp?: number;
   } = {},
 ) {
   const replies: Reply[] = [];
@@ -140,6 +147,7 @@ function makeButton(
     guildId: over.guildId === undefined ? GUILD : over.guildId,
     channelId: over.channelId ?? RED_CH,
     user: { id: over.userId ?? LEADER },
+    createdTimestamp: over.createdTimestamp ?? Date.now(),
     client: {},
     replied: false,
     deferred: false,
@@ -376,6 +384,49 @@ describe("the Customise team button (#1196)", () => {
     expect(i.showModal).not.toHaveBeenCalled();
     expect(replies).toHaveLength(1);
     expect(replies[0].content).toMatch(/Press the button again/);
+  });
+
+  it("the deadline counts from when Discord made the interaction, not from when the handler started", async () => {
+    jest.useFakeTimers();
+    eventsEnabled = "hang";
+    // The dispatcher already used 2.4 s of Discord's 3: the read gets what is left.
+    const { i, replies } = makeButton({ createdTimestamp: Date.now() - 2400 });
+    const done = handleCustomiseButton(i as never);
+    await jest.advanceTimersByTimeAsync(BUTTON_MIN_READ_MS + 1);
+    await done;
+    expect(replies).toHaveLength(1);
+    expect(replies[0].content).toMatch(/Press the button again/);
+    expect(i.showModal).not.toHaveBeenCalled();
+  });
+
+  it("buttonReadBudget: full budget when fresh, what is left when late, never below the minimum, tolerant of a bad clock", () => {
+    const now = 1_000_000;
+    expect(buttonReadBudget(now, now)).toBe(BUTTON_READ_DEADLINE_MS);
+    expect(buttonReadBudget(now - 1000, now)).toBe(
+      BUTTON_TOTAL_BUDGET_MS - 1000,
+    );
+    expect(buttonReadBudget(now - 2800, now)).toBe(BUTTON_MIN_READ_MS);
+    expect(buttonReadBudget(now - 60_000, now)).toBe(BUTTON_MIN_READ_MS);
+    // A clock that runs behind Discord's (a creation time in the future) or an
+    // interaction without one never shortens the budget.
+    expect(buttonReadBudget(now + 5000, now)).toBe(BUTTON_READ_DEADLINE_MS);
+    expect(buttonReadBudget(undefined, now)).toBe(BUTTON_READ_DEADLINE_MS);
+    expect(buttonReadBudget(Number.NaN, now)).toBe(BUTTON_READ_DEADLINE_MS);
+    expect(BUTTON_TOTAL_BUDGET_MS).toBeLessThan(3000);
+  });
+
+  it("a team without a tag gets an empty tag field with no value (never an empty value)", async () => {
+    red().tag = "";
+    const { i } = makeButton();
+    await handleCustomiseButton(i as never);
+    const modal = (i.showModal.mock.calls[0] as unknown[])[0] as {
+      toJSON: () => {
+        components: Array<{ components: Array<Record<string, unknown>> }>;
+      };
+    };
+    const tag = modal.toJSON().components[1].components[0];
+    expect(tag.custom_id).toBe("tag");
+    expect("value" in tag).toBe(false);
   });
 
   it("a failed read answers 'try again' too", async () => {

@@ -55,6 +55,30 @@ import { GROUP_NAME_MAX, GROUP_TAG_MAX } from "../services/event-groups.js";
 
 /** How long the button waits for its read before answering "try again". */
 export const BUTTON_READ_DEADLINE_MS = 2000;
+/**
+ * Counted from the moment Discord made the interaction: the whole answer (read
+ * and `showModal`) must leave inside Discord's 3 seconds, and the dispatcher
+ * (`src/index.ts`: rate-limit check, audit, a first dynamic import) has already
+ * used part of them by the time this handler runs.
+ */
+export const BUTTON_TOTAL_BUDGET_MS = 2600;
+/** The read is never given less than this, so a skewed clock cannot refuse every click. */
+export const BUTTON_MIN_READ_MS = 250;
+
+/** The time the button's read may take, given when the interaction was made. */
+export function buttonReadBudget(
+  createdTimestamp: number | undefined,
+  now: number = Date.now(),
+): number {
+  const elapsed =
+    typeof createdTimestamp === "number" && Number.isFinite(createdTimestamp)
+      ? Math.max(0, now - createdTimestamp)
+      : 0;
+  return Math.max(
+    BUTTON_MIN_READ_MS,
+    Math.min(BUTTON_READ_DEADLINE_MS, BUTTON_TOTAL_BUDGET_MS - elapsed),
+  );
+}
 
 const NAME_FIELD = "name";
 const TAG_FIELD = "tag";
@@ -109,7 +133,7 @@ export async function handleCustomiseButton(
   try {
     [eventsEnabled, row] = await withDeadline(
       Promise.all([readEventsEnabled(), readCustomiseRow(guildId, eventId)]),
-      BUTTON_READ_DEADLINE_MS,
+      buttonReadBudget(interaction.createdTimestamp),
     );
   } catch (err) {
     logger.warn("Customise button could not read the event in time:", err);
@@ -153,16 +177,16 @@ export async function handleCustomiseButton(
   );
   // The tag only means something while the event puts tags on nicknames.
   if (row.tagsEnabled === true) {
+    const tagInput = new TextInputBuilder()
+      .setCustomId(TAG_FIELD)
+      .setLabel("Clan tag (empty for none)")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(GROUP_TAG_MAX);
+    // An empty prefill is left out: Discord may refuse an empty `value`.
+    if (group.tag) tagInput.setValue(group.tag);
     modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId(TAG_FIELD)
-          .setLabel("Clan tag (empty for none)")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(false)
-          .setMaxLength(GROUP_TAG_MAX)
-          .setValue(group.tag ?? ""),
-      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(tagInput),
     );
   }
   try {

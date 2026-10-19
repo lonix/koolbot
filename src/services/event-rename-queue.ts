@@ -85,7 +85,8 @@ export function rateLimitWait(err: unknown): number | null {
 /** "about 7 minutes", "about 40 seconds": the wait shown to a person. */
 export function describeRetryIn(ms: number): string {
   if (ms < 60_000) {
-    return `about ${Math.max(1, Math.ceil(ms / 1000))} seconds`;
+    const seconds = Math.max(1, Math.ceil(ms / 1000));
+    return `about ${seconds} second${seconds === 1 ? "" : "s"}`;
   }
   const minutes = Math.ceil(ms / 60_000);
   return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
