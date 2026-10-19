@@ -333,19 +333,40 @@ describe("the scheduled end runs the shared teardown", () => {
       expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
     });
 
-    it("a scheduled end of a RECURRING event claims it too (the successor is made from an ended row)", async () => {
+    it("a scheduled end of a RECURRING event hands over to its successor, which keeps the setup with groups off", async () => {
       const { service, guild } = setup();
-      store.set(
-        ID,
-        stored({ groupsEnabled: false, groups: kept, recurrence: "weekly" }),
-      );
-      await service.processEvent(
-        row({ groupsEnabled: false, groups: kept, recurrence: "weekly" }),
-        guild,
-        AFTER_END,
-        WINDOWS,
-      );
+      const series = {
+        groupsEnabled: false,
+        groups: kept,
+        recurrence: "weekly",
+        seriesId: "series-1",
+        nextSpawned: false,
+      };
+      store.set(ID, stored(series));
+      const svc = service as unknown as {
+        spawnNextOccurrence: jest.Mock;
+        isSeriesCancelled: jest.Mock;
+      };
+      svc.spawnNextOccurrence = jest.fn();
+      svc.isSeriesCancelled = jest.fn(async () => false);
+      await service.processEvent(row(series), guild, AFTER_END, WINDOWS);
       expect(store.get(ID)?.state).toBe("ended");
+      // The claim worked, so the scan went on to hand over to the next occurrence.
+      expect(svc.spawnNextOccurrence).toHaveBeenCalledTimes(1);
+      const handed = svc.spawnNextOccurrence.mock.calls[0][0] as Row;
+      expect(handed.state).toBe("ended");
+      expect(handed.groups).toEqual(kept);
+      // What the successor is made from (the existing rule): the kept setup is
+      // copied with groups still off, memberships and channels left behind.
+      const { copyGroupSetup } =
+        await import("../../src/services/event-groups.js");
+      expect(copyGroupSetup(handed as never)).toMatchObject({
+        groupsEnabled: false,
+        groups: [
+          { key: "g_a", channelId: null, memberIds: [] },
+          { key: "g_b", channelId: null, memberIds: [] },
+        ],
+      });
     });
 
     it("a channel recorded on a disabled group still stops the claim", async () => {
