@@ -6,16 +6,18 @@
  *
  * The forms follow the core's convention (`services/event-live-edit.ts` rule 3):
  * the value the page SHOWED (`b_groupsEnabled`) next to the value it holds
- * (`s_groupsEnabled`, `{"on":true}` or `{"on":false}`). The CONTENT of the
- * groups a switch-on creates is never posted: the select names a preset by id
- * (`groups_pick`) and the SERVER turns that id into the preset's content
- * (`prepareGroupsSwitchBody`), from its own catalog, read at that moment; a
- * posted `setup` is dropped. Switching off always goes through the
- * confirmation page. Everything dynamic goes through `escapeHtml`.
+ * (`s_groupsEnabled`, `{"on":true}` or `{"on":false}`). A posted `setup` is
+ * always dropped: the content of the groups a switch-on creates is either a
+ * PRESET (the select names it by id, `groups_pick`, and the SERVER turns the id
+ * into its content from its own catalog, read at that moment) or the host's OWN
+ * starter groups (the `custom_*` rows, read and checked by the server with the
+ * event form's rules, then validated again by the row as the whole edited
+ * setup). Switching off always goes through the confirmation page. Everything dynamic goes through `escapeHtml`.
  */
 
 import { escapeHtml } from "./html.js";
 import {
+  type SwitchSetup,
   GROUPS_PICK_FIELD,
   GROUPS_SWITCH_ROW_ID,
   parseSwitchValue,
@@ -28,6 +30,19 @@ import {
   loadPresetCatalog,
   presetResolver,
 } from "../services/event-group-preset-service.js";
+import { GROUP_KIND_OPTIONS } from "./admin-views.js";
+import {
+  DEFAULT_GROUP_LABEL,
+  DEFAULT_LEADER_LABEL,
+  GROUP_NAME_MAX,
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
+  GROUP_TAG_MAX,
+  checkGroupName,
+  checkGroupSize,
+  checkGroupTag,
+} from "../services/event-groups.js";
+import { EVENT_GROUP_KINDS } from "../models/event-group-kinds.js";
 import type { PreparedBody } from "./host-settings-groups.js";
 import type { IEvent } from "../models/event.js";
 
@@ -50,6 +65,10 @@ export interface GroupsSwitchView {
   groupCount: number;
   channelCount: number;
 }
+
+/** How many starter groups the custom setup form has (blank names are skipped). */
+export const CUSTOM_GROUP_ROWS = 6;
+const customField = (part: string, i: number): string => `custom_${part}_${i}`;
 
 function hidden(name: string, value: string): string {
   return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
@@ -106,10 +125,12 @@ function form(
   csrfToken: string,
   body: string,
   button: string,
+  /** Skip the browser's own field checks (the server checks what is used). */
+  noValidate = false,
 ): string {
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 ${body}
-<button type="submit">${escapeHtml(button)}</button>
+<button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>
 </form>`;
 }
 
@@ -163,27 +184,91 @@ ${hidden(id, ON)}${hidden(base, OFF)}
   const notice = v.presetNotice
     ? `<p class="muted">${escapeHtml(v.presetNotice)}</p>`
     : "";
-  if (v.presets.length === 0) {
-    return `<div class="field"><p><strong>Groups are off.</strong></p><p class="muted">Groups are switched on from a preset, and no preset is available on this server right now. Presets are managed in the Web UI under Events.</p>${notice}</div>`;
-  }
   const options = v.presets
     .map(
       (p) =>
         `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)} (${escapeHtml(p.count)} ${p.count === 1 ? "group" : "groups"})</option>`,
     )
     .join("");
+  const picker =
+    v.presets.length === 0
+      ? `<p class="muted">No preset is available on this server right now, so set the groups up yourself below.</p>`
+      : `<label for="host-settings-groups-pick">Switch groups on with a preset</label>
+<select id="host-settings-groups-pick" name="${GROUPS_PICK_FIELD}">
+<option value="">No preset: use my own groups below</option>${options}
+</select>`;
+  const kinds = GROUP_KIND_OPTIONS.map(
+    ([value, text]) =>
+      `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`,
+  ).join("");
+  const rows = Array.from({ length: CUSTOM_GROUP_ROWS }, (_, k) => {
+    const i = k + 1;
+    return `<tr><td>${i}</td><td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${customField("name", i)}" aria-label="Name of group ${i}"></td>
+<td><select name="${customField("kind", i)}" aria-label="Kind of group ${i}">${kinds}</select></td>
+<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${customField("size", i)}" placeholder="No limit" aria-label="Size of group ${i}"></td>
+<td><input type="text" maxlength="${GROUP_TAG_MAX}" name="${customField("tag", i)}" aria-label="Tag of group ${i}"></td></tr>`;
+  }).join("");
   return form(
     actionPath,
     csrfToken,
     `<div class="field"><p><strong>Groups are off.</strong> This event has no groups yet.</p>
-<label for="host-settings-groups-pick">Switch groups on with</label>
-<select id="host-settings-groups-pick" name="${GROUPS_PICK_FIELD}" required>
-<option value="">Choose a preset</option>${options}
-</select>
+${picker}
+<table class="prefs-table"><caption class="muted">Or your own groups (leave a name empty to skip a row)</caption><thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Size</th><th scope="col">Tag</th></tr></thead><tbody>${rows}</tbody></table>
 ${hidden(base, OFF)}
-<p class="muted">The preset's groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and clan tags follow the preset's default. Nobody is assigned yet. Rename, add or remove groups afterwards if the preset is not quite right.</p>${notice}</div>`,
+<p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
     "Switch groups on",
+    // Six rows, most of them blank or ignored (a chosen preset wins, a blank
+    // name skips its row): the browser must not refuse the submit over a size in
+    // a row the server does not use. Every row that IS used is checked by the
+    // server (name, size, tag, kind) and by the row's whole-setup validation.
+    true,
   );
+}
+
+/**
+ * The host's own starter groups, read from the `custom_*` fields with the
+ * rules of the event form (the typed content is the host's own, unlike a preset's;
+ * the row validates it again as the whole edited setup). Null when no row has a
+ * name; an error names the row and the field.
+ */
+function customSetup(
+  source: Record<string, unknown>,
+): { setup: SwitchSetup } | { error: string } | null {
+  const str = (part: string, i: number): string => {
+    const v = source[customField(part, i)];
+    return typeof v === "string" ? v : "";
+  };
+  const groups: SwitchSetup["groups"] = [];
+  for (let i = 1; i <= CUSTOM_GROUP_ROWS; i++) {
+    if (str("name", i).trim() === "") continue;
+    const name = checkGroupName(str("name", i));
+    if (!name.ok) return { error: `Group ${i} name: ${name.error}` };
+    const size = checkGroupSize(str("size", i));
+    if (!size.ok) return { error: `Group ${i} size: ${size.error}` };
+    const tag = checkGroupTag(str("tag", i));
+    if (!tag.ok) return { error: `Group ${i} tag: ${tag.error}` };
+    const kind = str("kind", i) || "team";
+    if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) {
+      return { error: `Group ${i} kind: must be team, open or leads.` };
+    }
+    groups.push({
+      name: name.value,
+      kind,
+      size: size.value,
+      tag: tag.value,
+      marker: "",
+    });
+  }
+  if (groups.length === 0) return null;
+  return {
+    setup: {
+      id: "",
+      groupLabel: DEFAULT_GROUP_LABEL,
+      leaderLabel: DEFAULT_LEADER_LABEL,
+      tagsEnabled: false,
+      groups,
+    },
+  };
 }
 
 const REFUSED_TEXT = {
@@ -194,11 +279,11 @@ const REFUSED_TEXT = {
 } as const;
 
 /**
- * Turn the posted form into what `parseSubmission` reads. The content of the
- * groups is never taken from the client: a posted `s_groupsEnabled` keeps only
- * its on flag, and a chosen preset id (`groups_pick`) is resolved against the
- * server's own catalog, read now, and its content becomes the row's value. An
- * id that cannot be resolved fails closed with a reason, and nothing is saved.
+ * Turn the posted form into what `parseSubmission` reads. A posted
+ * `s_groupsEnabled` keeps only its on flag; a chosen preset id (`groups_pick`)
+ * is resolved against the server's own catalog, read now, and its content becomes
+ * the row's value (an id that cannot be resolved fails closed with a reason, and
+ * nothing is saved); without one, the filled `custom_*` rows become the value.
  */
 export async function prepareGroupsSwitchBody(
   body: Record<string, unknown>,
@@ -214,8 +299,18 @@ export async function prepareGroupsSwitchBody(
     // An unreadable value is left as it is: the parser refuses it.
     if (value) source[field] = JSON.stringify({ on: value.on });
   }
-  if (typeof pick !== "string" || pick === "")
+  const custom = customSetup(source);
+  for (let i = 1; i <= CUSTOM_GROUP_ROWS; i++) {
+    for (const part of ["name", "kind", "size", "tag"]) {
+      delete source[customField(part, i)];
+    }
+  }
+  if (typeof pick !== "string" || pick === "") {
+    if (custom === null) return { ok: true, body: source };
+    if ("error" in custom) return { ok: false, error: custom.error };
+    source[field] = JSON.stringify({ on: true, setup: custom.setup });
     return { ok: true, body: source };
+  }
   const catalog = await loadPresetCatalog(guildId);
   const found = presetResolver(catalog)(pick);
   if (!("preset" in found)) {

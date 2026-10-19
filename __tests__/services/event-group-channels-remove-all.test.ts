@@ -122,6 +122,9 @@ function makeEnv(
   );
   const gone = new Set<string>();
   const calls: string[] = [];
+  const hooks: { beforeDispatch: (() => void | Promise<void>) | null } = {
+    beforeDispatch: null,
+  };
   const failures: {
     delete?: (id: string) => unknown;
     fetch?: (id: string) => unknown;
@@ -172,8 +175,12 @@ function makeEnv(
     },
     {
       rest: rest as never,
-      call: ((fn: (s: AbortSignal) => Promise<unknown>) =>
-        fn(new AbortController().signal)) as never,
+      // The caller may wait (a limiter, an import) before the request is
+      // dispatched: `hooks.beforeDispatch` runs in that gap.
+      call: (async (fn: (s: AbortSignal) => Promise<unknown>) => {
+        await hooks.beforeDispatch?.();
+        return fn(new AbortController().signal);
+      }) as never,
       paceMs: 0,
     },
   );
@@ -186,6 +193,7 @@ function makeEnv(
     calls,
     failures,
     cache,
+    hooks,
   };
 }
 
@@ -272,6 +280,46 @@ describe("removeAllGroupChannels switches the groups off", () => {
     expect(out).toEqual({ status: "occupied", remaining: 2, groupKey: B });
     expect(env.rest.delete).not.toHaveBeenCalled();
     expect(writes).toEqual([]);
+    expect(doc().groupsEnabled).toBe(true);
+    expect(channelIds()).toEqual([A_CH, B_CH, null]);
+  });
+
+  it("somebody who joins an earlier channel while a LATER one is being read keeps every channel: nothing is deleted", async () => {
+    const C_CH = "200000000000000003";
+    (store.get(EV)!.groups as Json[])[2].channelId = C_CH;
+    const env = makeEnv();
+    env.cache.set(C_CH, {
+      id: C_CH,
+      guildId: GUILD,
+      type: 2,
+      members: new Map(),
+    });
+    const guild = env.guild as unknown as {
+      channels: { fetch: (id: string) => Promise<unknown> };
+    };
+    const fetch = guild.channels.fetch;
+    guild.channels.fetch = async (id: string) => {
+      const channel = await fetch(id);
+      // B was looked at (empty) before; now C is read, and somebody joins B.
+      if (id === C_CH) env.members.set(B_CH, new Set(["u7"]));
+      return channel;
+    };
+    const out = await env.channels.removeAllGroupChannels(EV, env.guild, {});
+    expect(out).toEqual({ status: "occupied", remaining: 1, groupKey: B });
+    expect(env.rest.delete).not.toHaveBeenCalled();
+    expect(doc().groupsEnabled).toBe(true);
+    expect(channelIds()).toEqual([A_CH, B_CH, C_CH]);
+  });
+
+  it("somebody who joins a LATER channel while the first delete waits to be dispatched keeps every channel (the dispatch looks at all of them)", async () => {
+    const env = makeEnv();
+    env.hooks.beforeDispatch = async () => {
+      await Promise.resolve();
+      env.members.set(B_CH, new Set(["u7"]));
+    };
+    const out = await env.channels.removeAllGroupChannels(EV, env.guild, {});
+    expect(out).toEqual({ status: "occupied", remaining: 1, groupKey: B });
+    expect(env.rest.delete).not.toHaveBeenCalled();
     expect(doc().groupsEnabled).toBe(true);
     expect(channelIds()).toEqual([A_CH, B_CH, null]);
   });

@@ -21,6 +21,7 @@ export function makeEffects(handlers: {
   retagMembers?: (guildId: string, eventId: string, ids: string[]) => void;
   createGroupChannels?: LiveEditEffects["createGroupChannels"];
   emptyGroupChannel?: LiveEditEffects["emptyGroupChannel"];
+  emptyGroupChannels?: LiveEditEffects["emptyGroupChannels"];
   removeGroupChannel?: LiveEditEffects["removeGroupChannel"];
   removeAllGroupChannels?: LiveEditEffects["removeAllGroupChannels"];
   syncTags?: LiveEditEffects["syncTags"];
@@ -37,6 +38,15 @@ export function makeEffects(handlers: {
     emptyGroupChannel:
       handlers.emptyGroupChannel ??
       (async () => ({ status: "empty" as const, moved: [] })),
+    emptyGroupChannels:
+      handlers.emptyGroupChannels ??
+      (async () => ({
+        status: "done" as const,
+        moved: [],
+        occupied: [],
+        unconfirmed: 0,
+        detail: "",
+      })),
     removeGroupChannel:
       handlers.removeGroupChannel ??
       (async () => ({ status: "removed" as const })),

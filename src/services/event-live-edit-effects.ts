@@ -15,6 +15,7 @@ import { EventNicknameTags } from "./event-nickname-tags.js";
 import type { MoveSkipReason } from "./event-member-moves.js";
 import type {
   EmptyChannelOutcome,
+  EmptyChannelsOutcome,
   GroupChannelSyncOutcome,
   GroupRemoveResult,
   GroupsOffResult,
@@ -34,18 +35,39 @@ import type {
 export const MOVE_SETTLE_MS = 1500;
 const MOVE_SETTLE_STEP_MS = 100;
 
-async function emptyGroupChannelOf(
+/** What one run over several group channels did (see `emptyGroupChannelsOf`). */
+type EmptyRun =
+  | { status: "failed"; reason: string }
+  | {
+      status: "done";
+      moved: string[];
+      /** Per channel id: how many people the cache still shows in it. */
+      present: Map<string, number>;
+      unconfirmed: number;
+      /** Why people could not be moved, counted for the whole run. */
+      detail: string;
+    };
+
+/**
+ * ONE mover run over every channel in `targets`: everybody connected to any of
+ * them goes to the main channel. One run means one attempt budget
+ * (`MAX_MOVES_PER_RUN`) and one pacing for the whole call: a switch-off over
+ * many groups cannot multiply the bound that keeps the request short. People the
+ * budget did not reach stay where they are and are reported by channel; a
+ * re-save moves the next batch.
+ */
+async function emptyGroupChannelsOf(
   client: Client,
   guildId: string,
   eventId: string,
-  groupKey: string,
-  channelId: string,
+  targets: ReadonlyArray<{ groupKey: string; channelId: string }>,
   ending: () => boolean,
-): Promise<EmptyChannelOutcome> {
+): Promise<EmptyRun> {
   // Loaded on first use, like `EventService`: the mover pulls in the Discord
   // write client, which a live edit that never removes a group does not need.
   const { MOVE_SKIP_LABEL, moveEventMembersHoldingLock } =
     await import("./event-member-moves.js");
+  const channelIds = new Set(targets.map((t) => t.channelId));
   const outcome = await moveEventMembersHoldingLock({
     client,
     guildId,
@@ -55,11 +77,15 @@ async function emptyGroupChannelOf(
     // per-move checks decide.
     channelScopedPermissions: true,
     plan: ({ event, presence }) => {
-      const group = (event.groups ?? []).find((g) => g.key === groupKey);
-      if (!group || group.channelId !== channelId) {
-        return { refuse: "The group changed, so nobody was moved." };
+      for (const t of targets) {
+        const group = (event.groups ?? []).find((g) => g.key === t.groupKey);
+        if (!group || group.channelId !== t.channelId) {
+          return { refuse: "The group changed, so nobody was moved." };
+        }
       }
-      const inside = presence.members.filter((m) => m.channelId === channelId);
+      const inside = presence.members.filter((m) =>
+        channelIds.has(m.channelId ?? ""),
+      );
       if (inside.length === 0) return [];
       const main = event.channelId;
       if (!main) {
@@ -72,7 +98,7 @@ async function emptyGroupChannelOf(
         userId: m.id,
         toChannelId: main,
         // Only out of THIS channel: somebody who walked elsewhere is left be.
-        fromChannelId: channelId,
+        fromChannelId: m.channelId as string,
         // Asked right before each request: the batch stops once an end or
         // cancel holds the event.
         skipIf: ending,
@@ -86,23 +112,27 @@ async function emptyGroupChannelOf(
     return { status: "failed", reason: outcome.message };
   }
   const moved = outcome.report.moved;
-  const channel = client.guilds?.cache
-    ?.get(guildId)
-    ?.channels?.cache?.get(channelId);
-  const presentNow = (): string[] =>
-    channel && channel.isVoiceBased() ? [...channel.members.keys()] : [];
+  const channelsOf = (): Array<{ id: string; members: string[] }> =>
+    targets.flatMap((t) => {
+      const channel = client.guilds?.cache
+        ?.get(guildId)
+        ?.channels?.cache?.get(t.channelId);
+      return channel && channel.isVoiceBased()
+        ? [{ id: t.channelId, members: [...channel.members.keys()] }]
+        : [{ id: t.channelId, members: [] }];
+    });
   // Give the gateway a moment to show the moves Discord confirmed.
   for (
     let waited = 0;
-    waited < MOVE_SETTLE_MS && presentNow().some((id) => moved.includes(id));
+    waited < MOVE_SETTLE_MS &&
+    channelsOf().some((c) => c.members.some((id) => moved.includes(id)));
     waited += MOVE_SETTLE_STEP_MS
   ) {
     await new Promise((resolve) => setTimeout(resolve, MOVE_SETTLE_STEP_MS));
   }
-  const remaining = presentNow();
-  if (remaining.length === 0 && outcome.report.unconfirmed.length === 0) {
-    return { status: "empty", moved: [...moved] };
-  }
+  // Everybody the cache then still shows counts as present, so a person who
+  // moved back in is never taken for one who left (the host saves again).
+  const present = new Map(channelsOf().map((c) => [c.id, c.members.length]));
   const reasons = new Map<MoveSkipReason, number>();
   for (const skip of outcome.report.skipped) {
     // "Not connected", "elsewhere" and "moved on" mean they are not in it.
@@ -119,20 +149,74 @@ async function emptyGroupChannelOf(
   const parts = [...reasons.entries()].map(
     ([reason, n]) => `${n} ${MOVE_SKIP_LABEL[reason]}`,
   );
-  if (outcome.report.unconfirmed.length > 0) {
-    parts.push(
-      `${outcome.report.unconfirmed.length} not confirmed by Discord (check Discord)`,
-    );
+  const unconfirmed = outcome.report.unconfirmed.length;
+  if (unconfirmed > 0) {
+    parts.push(`${unconfirmed} not confirmed by Discord (check Discord)`);
   }
-  const left = Math.max(remaining.length, outcome.report.unconfirmed.length, 1);
   return {
-    status: "occupied",
+    status: "done",
     moved: [...moved],
-    remaining: left,
+    present,
+    unconfirmed,
     detail:
       parts.length > 0
         ? parts.join("; ")
         : "somebody is still connected, perhaps a bot",
+  };
+}
+
+async function emptyGroupChannelOf(
+  client: Client,
+  guildId: string,
+  eventId: string,
+  groupKey: string,
+  channelId: string,
+  ending: () => boolean,
+): Promise<EmptyChannelOutcome> {
+  const run = await emptyGroupChannelsOf(
+    client,
+    guildId,
+    eventId,
+    [{ groupKey, channelId }],
+    ending,
+  );
+  if (run.status === "failed") return run;
+  const remaining = run.present.get(channelId) ?? 0;
+  if (remaining === 0 && run.unconfirmed === 0) {
+    return { status: "empty", moved: run.moved };
+  }
+  return {
+    status: "occupied",
+    moved: run.moved,
+    remaining: Math.max(remaining, run.unconfirmed, 1),
+    detail: run.detail,
+  };
+}
+
+async function emptyGroupChannelsOutcome(
+  client: Client,
+  guildId: string,
+  eventId: string,
+  targets: ReadonlyArray<{ groupKey: string; channelId: string }>,
+  ending: () => boolean,
+): Promise<EmptyChannelsOutcome> {
+  const run = await emptyGroupChannelsOf(
+    client,
+    guildId,
+    eventId,
+    targets,
+    ending,
+  );
+  if (run.status === "failed") return run;
+  return {
+    status: "done",
+    moved: run.moved,
+    occupied: targets.flatMap((t) => {
+      const remaining = run.present.get(t.channelId) ?? 0;
+      return remaining > 0 ? [{ groupKey: t.groupKey, remaining }] : [];
+    }),
+    unconfirmed: run.unconfirmed,
+    detail: run.detail,
   };
 }
 
@@ -239,6 +323,31 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
         return {
           status: "failed",
           reason: "the people in its channel could not be moved (see the log)",
+        };
+      }
+    },
+    async emptyGroupChannels(
+      guildId,
+      eventId,
+      targets,
+      ending,
+    ): Promise<EmptyChannelsOutcome> {
+      try {
+        return await emptyGroupChannelsOutcome(
+          client,
+          guildId,
+          eventId,
+          targets,
+          ending,
+        );
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: moving people out of the group channels failed:`,
+          err,
+        );
+        return {
+          status: "failed",
+          reason: "the people in the channels could not be moved (see the log)",
         };
       }
     },
