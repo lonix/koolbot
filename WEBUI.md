@@ -1882,14 +1882,16 @@ set its clan tag from Discord; the host can put any team back at any time.
 
 **Live settings** (#1239) is the section of the host panel where the host changes the settings of
 a running event and saves once. It is the first step of live editing (#1197); the rows below work
-today, and later steps add leaders and tags, names, sizes and presets, kind and adding or
-removing groups, and groups on or off, each as another row of the same form.
+today, and later steps add leaders and tags, kind and adding or removing groups, and groups on or
+off, each as another row of the same form. Names, sizes and presets are described below
+(#1241).
 
 - **What can be changed now.** The **channel creation time** (minutes before the start, empty
   for the server default) while no channel of the event exists yet; once the main channel or any
   group channel exists it is shown as text and cannot be changed. **Lock groups** on or off (the
-  same switch as in Assign people), for an event with groups. Names, sizes, kinds, tags and the
-  group list are not editable here yet.
+  same switch as in Assign people), for an event with groups. The **name** and the **size** of each
+  group, and a **preset switch**, are described under "Group names, sizes and presets" below. Kinds,
+  tags and the group list are not editable here yet.
 - **One save, one result.** Save plans from the event as it is at that moment, inside the same
   per-event lock as host moves and membership changes, so a save and a bulk move never run at
   the same time (the second answers that one is already in progress). Only the fields you
@@ -1921,7 +1923,7 @@ removing groups, and groups on or off, each as another row of the same form.
   and a token only works at the revision it was issued at), and one for an event that changed
   since the page was shown all apply nothing. Without a session secret a change that needs
   confirmation is refused. There is no browser-only confirm dialog.
-- **Groups over their size** (more people than the size, after a later step lowers a size) are
+- **Groups over their size** (more people than the size, after a size is lowered) are
   shown with an "over size" mark in the section's table. That state is worked out each time from
   the member count and the size; it is never stored.
 - **Audit.** Each save is one audit entry, `event.host.settings`, with the outcome (`applied`,
@@ -1932,6 +1934,52 @@ removing groups, and groups on or off, each as another row of the same form.
 - **Nothing new is stored per member.** The only new stored value is that revision counter on the
   event itself; the confirmation token is checked and then compared with the event.
 - **While an end or cancel holds the event** the section shows that instead of the form.
+
+**Group names, sizes and presets** (#1241) are rows of the Live settings form. The form shows one
+name field and one size field per group, with the people count next to them, and a separate **Switch
+preset** form under it.
+
+- **Rename a group.** The group keeps its members, its leader and its channel; the channel is renamed
+  in place. Discord allows about 2 renames of one channel per 10 minutes, and KoolBot never waits for
+  that: the shared rename budget (the one a leader's rename uses) answers at once. If the budget is
+  used up, or Discord refuses (a missing permission) or does not confirm, the new name is saved
+  anyway and the result says so, with the time to wait: "Saved but not finished: Name of group 2 is
+  now ... (the channel is not renamed yet: ... about 7 minutes ...)". The scan renames the channel
+  by itself when the budget is back, and saving the same form again tries at once. A name another
+  group has, or another group goes back to when its leader's rename is reset, is refused (compared
+  without regard to case). Two renames in one save to the same name give the first and refuse the
+  second.
+- **What happens to the stored original of a renamed group.** The host's edit becomes the new
+  original: when a leader had renamed the group (it has an original name), the original name is set
+  to the name you typed and the original tag is kept, so the host's "Reset" of that team goes back
+  to your name; when nobody had renamed it, there is no original and the stored name is the
+  original, which is also what a repeating event's next occurrence starts from.
+- **Change a size.** The size is the most people the group takes and its channel's user limit (1 to
+  99, empty for no limit). The channel's limit follows through the same kind of pass as the rename
+  (one attempt, never waiting on a rate limit, finished by the scan if Discord refused). Lowering
+  a size below the number of people moves nobody: they stay where they are and the group is marked
+  **over size**. Over size is worked out on every page load from the people count and the size and
+  is never stored. An over-size group takes nobody new (host Assign people, a join to its channel
+  and Randomise all see it as full) until it is below its size again; people can still leave it.
+- **Switch preset.** Choose a preset (the server's enabled presets that have the same number of
+  groups and the same kinds as the event) and its names, sizes and default tags are applied to the
+  existing groups by position, in one write. The presets are read from the server's library when the
+  page is shown and again when you save; what you confirm is exactly that content, bound into the
+  signed confirmation, and nothing a browser posts is taken as the content of a preset. Every name
+  that would change is shown on the confirmation page first, including names the host or a leader
+  chose by hand. A group's leader customisation (its original name and tag) is cleared by the
+  switch, because the preset is the new baseline, and the nicknames of its members are brought in
+  line with the new tag in the background when tags are on and the event is running. A preset with
+  another number of groups, or one that would change a group's kind, is refused: adding and removing
+  groups and changing a kind also move members and change channel access, and are separate changes.
+  Do not change names or sizes in the same save as a preset switch: the switch applies only to groups
+  as they were when you looked, so it is listed as not saved and you run it again.
+- **Counted like every save.** A leader's rename or tag change, and the host's reset of one, also
+  move the event's revision number, so a confirmation page shown before such a change can never be
+  used afterwards (not even when the leader's change was reversed in between).
+- **Audit.** One entry per save (`event.host.settings`, or `event.host.settings-confirm`), with the
+  changed names, sizes and the preset content as old and new values, and what is still owed to a
+  channel.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can

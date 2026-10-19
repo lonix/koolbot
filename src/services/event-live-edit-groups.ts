@@ -158,19 +158,28 @@ export function configureGroupEditEffects(next: GroupEditEffects | null): void {
 export function createGroupEditEffects(client: Client): GroupEditEffects {
   const customise = async (): Promise<
     ReturnType<typeof import("./event-leader-customise.js").createCustomiseDeps>
-  > => (await import("./event-leader-customise.js")).createCustomiseDeps(client);
+  > =>
+    (await import("./event-leader-customise.js")).createCustomiseDeps(client);
   return {
-    async syncName(guildId, eventId, groupKey) {
+    async syncName(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<NameSyncOutcome | null> {
       return (await customise()).syncName(guildId, eventId, groupKey);
     },
-    async syncUserLimit(guildId, eventId, groupKey) {
+    async syncUserLimit(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<NameSyncOutcome | null> {
       const { EventService } = await import("./event-service.js");
       const outcomes = await EventService.getInstance(
         client,
       ).syncGroupUserLimits(eventId, guildId, groupKey);
       return outcomes?.find((o) => o.groupKey === groupKey) ?? null;
     },
-    retag(guildId, eventId, memberIds) {
+    retag(guildId, eventId, memberIds): void {
       void customise()
         .then((deps) => deps.retag(guildId, eventId, memberIds))
         .catch((err: unknown) =>
@@ -220,9 +229,10 @@ async function readFresh(
   eventId: string,
   guildId: string,
 ): Promise<IEvent | null> {
-  return (await Event.findOne({ _id: eventId, guildId }).lean()) as
-    | IEvent
-    | null;
+  return (await Event.findOne({
+    _id: eventId,
+    guildId,
+  }).lean()) as IEvent | null;
 }
 
 /** What a failed or unfinished channel rename means for the host, or null when it is done. */
@@ -285,7 +295,9 @@ function renameThunk(
   key: string,
 ): (() => Promise<NameSyncOutcome | null>) | null {
   const fx = effects;
-  return fx ? () => fx.syncName(guildId, eventId, key) : null;
+  return fx
+    ? (): Promise<NameSyncOutcome | null> => fx.syncName(guildId, eventId, key)
+    : null;
 }
 
 /** The user limit of one group's channel as a thunk, or null without effects. */
@@ -295,7 +307,10 @@ function limitThunk(
   key: string,
 ): (() => Promise<NameSyncOutcome | null>) | null {
   const fx = effects;
-  return fx ? () => fx.syncUserLimit(guildId, eventId, key) : null;
+  return fx
+    ? (): Promise<NameSyncOutcome | null> =>
+        fx.syncUserLimit(guildId, eventId, key)
+    : null;
 }
 
 // ---------------------------------------------------------------
@@ -314,8 +329,7 @@ function nameRow(index: number): LiveEditRow {
     if (ctx.ending()) {
       return {
         status: "partial",
-        message:
-          "the channel was not renamed because the event is being ended",
+        message: "the channel was not renamed because the event is being ended",
       };
     }
     const outcome = await attempt(
@@ -366,7 +380,8 @@ function nameRow(index: number): LiveEditRow {
       // this group or taken the name (decision 2).
       const fresh = await readFresh(ctx.eventId, ctx.guildId);
       const group = (fresh?.groups ?? []).find((g) => g.key === key);
-      if (!fresh || !group || group.name !== ctx.from) return { status: "lost" };
+      if (!fresh || !group || group.name !== ctx.from)
+        return { status: "lost" };
       if (nameTakenByOther(fresh.groups, key, ctx.to)) {
         return {
           status: "failed",
@@ -750,7 +765,9 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
         },
       };
     });
-    const $set: Record<string, unknown> = { presetId: to.id === "" ? null : to.id };
+    const $set: Record<string, unknown> = {
+      presetId: to.id === "" ? null : to.id,
+    };
     const $unset: Record<string, ""> = {};
     const arrayFilters: Array<Record<string, string>> = [];
     const work: Array<{

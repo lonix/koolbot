@@ -5,8 +5,9 @@
  * applies it under the per-event locks with ONE result (and, in the route, ONE
  * audit entry) per save.
  *
- * Rows delivered here: channel lead time and lock groups on/off. Later steps
- * (#1240 leaders and tags, #1241 names, sizes and preset, #1242 kind and
+ * Rows delivered here: channel lead time and lock groups on/off. Names, sizes
+ * and the preset (#1241) are rows of `event-live-edit-groups.ts`, listed in
+ * `LIVE_EDIT_ROWS` below. Later steps (#1240 leaders and tags, #1242 kind and
  * add/remove, #1243 groups on/off) only ADD ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`

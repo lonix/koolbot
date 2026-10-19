@@ -163,8 +163,7 @@ export async function buildGroupEditView(
 }
 
 export type PreparedBody =
-  | { ok: true; body: Record<string, unknown> }
-  | { ok: false; error: string };
+  { ok: true; body: Record<string, unknown> } | { ok: false; error: string };
 
 const REFUSED_TEXT = {
   disabled: "That preset is switched off on this server.",
@@ -188,7 +187,8 @@ export async function prepareGroupEditBody(
   delete source[valueField(GROUP_PRESET_ROW_ID)];
   const pick = source[PRESET_PICK_FIELD];
   delete source[PRESET_PICK_FIELD];
-  if (typeof pick !== "string" || pick === "") return { ok: true, body: source };
+  if (typeof pick !== "string" || pick === "")
+    return { ok: true, body: source };
   const catalog = await loadPresetCatalog(guildId);
   const found = presetResolver(catalog)(pick);
   if (!("preset" in found)) {
