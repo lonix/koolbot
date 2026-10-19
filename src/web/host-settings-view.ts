@@ -18,6 +18,7 @@ import {
 import { baseField, valueField } from "../services/event-live-edit.js";
 import {
   renderGroupEditor,
+  renderGroupSetForms,
   renderPresetForm,
   type GroupEditViewData,
 } from "./host-settings-groups.js";
@@ -112,7 +113,8 @@ ${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
 ${renderLeadersTagsFields(d.leadersTags ?? null)}
 <button type="submit">Save settings</button>
 </form>
-${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}`;
+${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}
+${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken) : ""}`;
 }
 
 export interface ConfirmChangeView {

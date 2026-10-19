@@ -1498,3 +1498,191 @@ describe("the result text", () => {
     }
   });
 });
+
+describe("the planner's two hooks for rows that name a thing or take a request (#1242)", () => {
+  const event = (over: Json = {}): IEvent => seed(over) as unknown as IEvent;
+  const noop = async (): Promise<{ status: "applied" }> => ({
+    status: "applied",
+  });
+
+  /** A row of "the thing at position 1", whose value cannot tell which thing it is. */
+  const sizeRow = (shownKey: () => string): LiveEditRow =>
+    defineRow<number>({
+      id: "testSize",
+      label: "Test size",
+      read: (e) => Number((e as unknown as Json).testSize ?? 1),
+      parse: (raw) => ({ ok: true, value: Number(raw) }),
+      applicable: () => null,
+      guard: () => shownKey(),
+      describe: (v) => String(v),
+      apply: noop,
+    });
+  const entry = (guard?: string) => ({
+    rowId: "testSize",
+    to: 5,
+    base: 1,
+    ...(guard === undefined ? {} : { guard }),
+  });
+  const plan = (row: LiveEditRow, entries: unknown[]) =>
+    planLiveEdit({
+      event: event({ testSize: 1 }),
+      entries: entries as never,
+      rows: [row],
+      maxGroups: 15,
+    });
+
+  it("guard: the form's identity equal to the fresh row's is a change", () => {
+    const p = plan(
+      sizeRow(() => "g_a"),
+      [entry("g_a")],
+    );
+    expect(p.changes).toHaveLength(1);
+    expect(p.conflicts).toEqual([]);
+  });
+
+  it("guard: another thing at that position is a conflict, never a write", () => {
+    const p = plan(
+      sizeRow(() => "g_b"),
+      [entry("g_a")],
+    );
+    expect(p.changes).toEqual([]);
+    expect(p.conflicts).toEqual([
+      {
+        rowId: "testSize",
+        label: "Test size",
+        message:
+          "was changed by someone else while you were editing. Reload the page and try again",
+      },
+    ]);
+  });
+
+  it("guard: a post without an identity (an older form, a confirmed change set) is not checked", () => {
+    const p = plan(
+      sizeRow(() => "g_b"),
+      [entry()],
+    );
+    expect(p.changes).toHaveLength(1);
+  });
+
+  it("guard: a field the host did not change is untouched whatever the identity", () => {
+    const p = plan(
+      sizeRow(() => "g_b"),
+      [{ rowId: "testSize", to: 1, base: 1, guard: "g_a" }],
+    );
+    expect(p).toMatchObject({ changes: [], conflicts: [], alreadyApplied: [] });
+  });
+
+  it("guard: collect returns it into the submitted entry, and nothing else adds one", () => {
+    const row = defineRow<number>({
+      id: "testSize",
+      label: "Test size",
+      read: () => 1,
+      parse: (raw) => ({ ok: true, value: Number(raw) }),
+      applicable: () => null,
+      collect: (body) => ({
+        raw: String(body.v),
+        base: String(body.b),
+        guard: String(body.k),
+      }),
+      describe: String,
+      apply: noop,
+    });
+    expect(
+      parseSubmission({ v: "5", b: "1", k: "g_a" }, [row]).entries,
+    ).toEqual([{ rowId: "testSize", to: 5, base: 1, guard: "g_a" }]);
+    expect(
+      parseSubmission({ s_testSize: "5", b_testSize: "1" }, [nameRow]).entries,
+    ).toEqual([]);
+  });
+
+  /** A row whose value is a request: its stored value is always empty. */
+  const requestRow = (
+    satisfied: (to: string[]) => boolean,
+    extra: Partial<LiveEditRow<string[]>> = {},
+  ): LiveEditRow =>
+    defineRow<string[]>({
+      id: "testReq",
+      label: "Test request",
+      read: () => [],
+      parse: (raw) => ({ ok: true, value: JSON.parse(raw) as string[] }),
+      applicable: () => null,
+      satisfied: (_e, to) => satisfied(to),
+      describe: (v) => v.join(","),
+      apply: noop,
+      ...extra,
+    });
+  const reqPlan = (row: LiveEditRow, to: string[]) =>
+    planLiveEdit({
+      event: event(),
+      entries: [{ rowId: "testReq", to, base: [] }] as never,
+      rows: [row],
+      maxGroups: 15,
+    });
+
+  it("satisfied: a request the fresh row already satisfies is already applied, not applied again", () => {
+    const p = reqPlan(
+      requestRow(() => true),
+      ["x"],
+    );
+    expect(p).toMatchObject({
+      changes: [],
+      alreadyApplied: ["testReq"],
+      conflicts: [],
+    });
+  });
+
+  it("satisfied: a request it does not satisfy is a change from the stored empty value", () => {
+    const p = reqPlan(
+      requestRow(() => false),
+      ["x"],
+    );
+    expect(p.changes).toHaveLength(1);
+    expect(p.changes[0]).toMatchObject({ from: [], to: ["x"] });
+    expect(p.alreadyApplied).toEqual([]);
+  });
+
+  it("satisfied: finishes an owed follow-up of a re-posted request", () => {
+    const p = reqPlan(
+      requestRow(() => true, {
+        owed: () => "still owed",
+        reconcile: noop,
+      }),
+      ["x"],
+    );
+    expect(p.changes).toEqual([
+      expect.objectContaining({ rowId: "testReq", reconcile: true }),
+    ]);
+    expect(p.alreadyApplied).toEqual([]);
+  });
+
+  it("satisfied: without the hook the same re-posted request would be applied twice", () => {
+    const row = requestRow(() => true);
+    const bare = defineRow<string[]>({
+      id: "testReq",
+      label: "Test request",
+      read: () => [],
+      parse: (raw) => ({ ok: true, value: JSON.parse(raw) as string[] }),
+      applicable: () => null,
+      describe: (v) => v.join(","),
+      apply: noop,
+    });
+    expect(reqPlan(row, ["x"]).changes).toHaveLength(0);
+    expect(reqPlan(bare, ["x"]).changes).toHaveLength(1);
+  });
+
+  it("satisfied: a confirmed change set of a request that was satisfied meanwhile is stale", async () => {
+    seed();
+    const row = requestRow(() => true, {
+      needsConfirmation: () => "Sure?",
+    });
+    const out = await runLiveEdit({
+      guildId: GUILD,
+      eventId: EV,
+      deps: deps(),
+      rows: [row],
+      confirmed: [{ rowId: "testReq", from: [], to: ["x"] }],
+      confirmedRevision: 0,
+    });
+    expect(out).toMatchObject({ status: "stale" });
+  });
+});

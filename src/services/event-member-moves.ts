@@ -354,7 +354,32 @@ function sleep(ms: number): Promise<void> {
  * the rules; the caller supplies only what to move (`plan`, run on the fresh
  * row inside the lock) and who to leave alone (`excludeUserIds`).
  */
-export function moveEventMembers(opts: {
+export function moveEventMembers(
+  opts: MoveEventMembersOptions,
+): Promise<MoveOutcome> {
+  // Everything taken from the caller happens here, synchronously.
+  const { eventId } = opts;
+  const run = lockedRunOf(opts);
+  return withEventMoveLock(eventId, run).then((result) =>
+    result.busy ? { status: "busy" } : result.value,
+  );
+}
+
+/**
+ * The same run for a caller that ALREADY HOLDS `withEventMoveLock(eventId)`:
+ * the host panel's live edit (#1242) takes that lock for a whole save and must
+ * empty a group's channel inside it, where `moveEventMembers` would answer
+ * `busy` to the very lock its caller holds. It never takes the lock itself, so
+ * calling it without holding the lock lets a bulk move and this run interleave:
+ * only the live-edit effects (`event-live-edit-effects.ts`) call it.
+ */
+export function moveEventMembersHoldingLock(
+  opts: MoveEventMembersOptions,
+): Promise<MoveOutcome> {
+  return lockedRunOf(opts)();
+}
+
+export interface MoveEventMembersOptions {
   client: Client;
   guildId: string;
   eventId: string;
@@ -374,23 +399,28 @@ export function moveEventMembers(opts: {
    */
   channelScopedPermissions?: boolean;
   deps?: MoverDeps;
-}): Promise<MoveOutcome> {
-  // Everything taken from the caller happens here, synchronously.
+}
+
+/** The run of one call, with everything it needs taken from the caller now. */
+function lockedRunOf(
+  opts: MoveEventMembersOptions,
+): () => Promise<MoveOutcome> {
   const { client, guildId, eventId, plan } = opts;
   const deps = opts.deps ?? defaultDepsForTests;
   const exclude = new Set(opts.excludeUserIds ?? []);
-  return withEventMoveLock(eventId, () =>
+  const allowFinished = opts.allowFinished === true;
+  const channelScoped = opts.channelScopedPermissions === true;
+  return () =>
     runLocked({
       client,
       guildId,
       eventId,
       plan,
       exclude,
-      allowFinished: opts.allowFinished === true,
-      channelScoped: opts.channelScopedPermissions === true,
+      allowFinished,
+      channelScoped,
       deps,
-    }),
-  ).then((result) => (result.busy ? { status: "busy" } : result.value));
+    });
 }
 
 async function runLocked(opts: {

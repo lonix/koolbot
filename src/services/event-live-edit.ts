@@ -8,9 +8,10 @@
  * Rows delivered here: channel lead time and lock groups on/off. Names, sizes
  * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
  * leaders, leader customisation, the leader label, tagging, the tag position
- * and each team's tag (`event-live-edit-leaders-tags.ts`). Both are listed in
- * `LIVE_EDIT_ROWS` below. Later steps (#1242 kind and add/remove, #1243
- * groups on/off) only ADD ROWS (see "Extension contract").
+ * and each team's tag (`event-live-edit-leaders-tags.ts`). #1242 adds and
+ * removes groups (`event-live-edit-group-set.ts`). All are listed in
+ * `LIVE_EDIT_ROWS` below. Later steps (a group's kind, #1243 groups on/off) only
+ * ADD ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`
  * has a table test over them)
@@ -133,7 +134,19 @@
  *     converge. It reaches the outside world only through `ctx.effects`.
  *   - `collect?(body)` (#1240): for a row whose control is several inputs (one
  *     per group). It returns the posted value and the shown base as the two
- *     texts that `parse` reads, or null when the row was not posted.
+ *     texts that `parse` reads (and, with `guard`, the identity the form
+ *     showed), or null when the row was not posted.
+ *   - `guard?(event)` (#1242): for a row addressed by POSITION whose value
+ *     cannot say which thing it belongs to (the size of "group 2"). The form
+ *     posts the key it showed, `collect` returns it, and a different one in the
+ *     fresh row is a conflict like any other change made while the form was
+ *     open (the base value rule alone cannot see it when two groups have the
+ *     same size). A post without an identity is not checked.
+ *   - `satisfied?(event, to)` (#1242): for a row whose posted value is a
+ *     REQUEST (add this group, remove these groups) that `read` cannot answer
+ *     with a state. True when the fresh row already satisfies it; the planner
+ *     then treats it as "stored equals submitted" (already applied, or its owed
+ *     follow-up finished), so a re-posted request is never applied twice.
  * Order of execution is the order of `LIVE_EDIT_ROWS`. Values must be JSON
  * (they travel in the token and the audit row).
  *
@@ -155,6 +168,7 @@ import { withEventMoveLock } from "./event-move-guard.js";
 import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
 import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
+import { groupSetRows } from "./event-live-edit-group-set.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -331,8 +345,33 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
   afterSave?(ctx: AfterSaveContext): Promise<void> | void;
   /** Rows with the same group share one `afterSave` run per save. */
   afterSaveGroup?: string;
-  /** See "Extension contract": a row posted as several inputs. */
-  collect?(body: Record<string, unknown>): { raw: string; base: string } | null;
+  /**
+   * See "Extension contract": a row posted as several inputs. `guard` is the
+   * identity of what the form showed (see `LiveEditRow.guard`).
+   */
+  collect?(
+    body: Record<string, unknown>,
+  ): { raw: string; base: string; guard?: string } | null;
+  /**
+   * For a row whose value does not say WHICH thing it is the value of (#1242):
+   * the size of "the group at position 2" reads the same after another save
+   * removed group 1 and a different group moved into position 2, and the base
+   * value rule cannot see that when both groups have the same size. The form
+   * posts this identity as it showed it (`collect` returns it as `guard`);
+   * when it differs from the fresh row's, the field is a conflict, like any
+   * other change made while the form was open. Absent in the posted entry (an
+   * older form, a confirmed change set) means no check: a confirmed change
+   * set is bound to the event's revision instead.
+   */
+  guard?(event: IEvent): string;
+  /**
+   * For a row whose posted value is a REQUEST (add this group, remove these
+   * groups) rather than a state `read` can return: true when the fresh row
+   * already satisfies `to`. The planner then treats it like "stored equals
+   * submitted": nothing to do (reported as already applied), or its owed
+   * follow-up finished. Without it a re-posted request would be applied twice.
+   */
+  satisfied?(event: IEvent, to: V): boolean;
 }
 
 /** What the follow-up of a stored change may touch. Set by the route; absent means none. */
@@ -381,7 +420,57 @@ export interface LiveEditEffects {
    * background (paced; never awaited by the save).
    */
   retagMembers(guildId: string, eventId: string, memberIds: string[]): void;
+  /**
+   * One group-channel pass that creates the channels the event's groups lack
+   * (`EventService.reconcileGroupChannels`, which also puts them in order and
+   * creates a `leads` channel restricted). `failures` are the groups it could
+   * not make a channel for, with the reason; null when the server cannot be
+   * found. Never throws.
+   */
+  createGroupChannels(
+    guildId: string,
+    eventId: string,
+  ): Promise<{ failures: Array<{ key: string; reason: string }> } | null>;
+  /**
+   * Move everyone out of one group's channel to the main channel (the mover,
+   * run inside the live edit's own move lock: `moveEventMembersHoldingLock`).
+   * Nobody is left out, the host included: the channel is going. Never throws.
+   */
+  emptyGroupChannel(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+    channelId: string,
+  ): Promise<EmptyChannelOutcome>;
+  /**
+   * Delete one group's channel and the group's record in one step under the
+   * channel lock (`EventGroupChannels.removeGroup`). Null when the server
+   * cannot be found. Never throws.
+   */
+  removeGroupChannel(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+    channelId: string,
+    opts: { ignore: ReadonlySet<string>; ending: () => boolean },
+  ): Promise<GroupRemoveResult | null>;
 }
+
+/** What emptying a group's channel did. */
+export type EmptyChannelOutcome =
+  /** Nobody is connected any more; `moved` are the people who just left it. */
+  | { status: "empty"; moved: string[] }
+  /** Somebody still is (or may be): `detail` says who could not be moved and why. */
+  | { status: "occupied"; moved: string[]; remaining: number; detail: string }
+  /** The move could not be tried at all (a refusal of the mover). */
+  | { status: "failed"; reason: string };
+
+/** What `EventGroupChannels.removeGroup` did (same shape, no import cycle). */
+export type GroupRemoveResult =
+  | { status: "removed" }
+  | { status: "occupied"; remaining: number }
+  | { status: "lost" }
+  | { status: "failed"; reason: string };
 
 /** What one channel pass did for one group (`NameSyncOutcome` of the channel pass). */
 export interface GroupChannelSyncOutcome {
@@ -484,6 +573,8 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   // Names, sizes and preset of the groups (#1241): `event-live-edit-groups.ts`.
   ...GROUP_EDIT_ROWS,
   ...leadersTagsRows,
+  // Removing and adding groups (#1242): `event-live-edit-group-set.ts`.
+  ...groupSetRows,
 ];
 
 // ---------------------------------------------------------------
@@ -552,6 +643,8 @@ export interface SubmittedEntry {
   base: JsonValue;
   /** A confirmed reconcile change (see `LiveEditRow.owed`); only from a token. */
   reconcile?: boolean;
+  /** The identity the form showed (see `LiveEditRow.guard`); absent = not checked. */
+  guard?: string;
 }
 
 /** Form field names of a row. */
@@ -587,7 +680,14 @@ export function parseSubmission(
       errors.push(to.error);
       continue;
     }
-    entries.push({ rowId: row.id, to: to.value, base: base.value });
+    entries.push({
+      rowId: row.id,
+      to: to.value,
+      base: base.value,
+      ...("guard" in collected && typeof collected.guard === "string"
+        ? { guard: collected.guard }
+        : {}),
+    });
   }
   return { entries, errors };
 }
@@ -662,7 +762,10 @@ export function planLiveEdit(input: {
       }
       continue;
     }
-    if (same(entry.to, stored)) {
+    if (
+      same(entry.to, stored) ||
+      (row.satisfied?.(input.event, entry.to) ?? false)
+    ) {
       // Stored already. A follow-up owed is finished, EVEN WHEN the form's
       // base equals it (a refreshed form after a partial save shows the stored
       // value as both value and base: that is the normal retry, and
@@ -677,7 +780,12 @@ export function planLiveEdit(input: {
     }
     // Untouched, and somebody else changed it meanwhile: never written.
     if (same(entry.to, entry.base)) continue;
-    if (!same(stored, entry.base)) {
+    if (
+      !same(stored, entry.base) ||
+      (entry.guard !== undefined &&
+        row.guard !== undefined &&
+        entry.guard !== row.guard(input.event))
+    ) {
       plan.conflicts.push({
         rowId: row.id,
         label: row.label,

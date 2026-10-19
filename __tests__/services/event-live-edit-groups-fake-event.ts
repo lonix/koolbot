@@ -5,11 +5,14 @@
  * write that changes shape cannot pass silently:
  *
  * - filters: equality (a missing field equals null; an array field equals a
- *   scalar it contains), `$in`, `$ne`, `$elemMatch`, `$size`, `$and`, `$type`;
+ *   scalar it contains, and an array equals an array of the same elements in
+ *   the same order), `$in`, `$ne`, `$elemMatch`, `$size`, `$and`, `$type`, and
+ *   the dotted path `groups.key` (any element, or with `$ne` no element);
  * - updates: `$set` and `$unset` on top-level fields and on
  *   `groups.$[<id>].<field>` selected by `arrayFilters` (every identifier must
  *   have exactly one filter and every filter must be used, as MongoDB demands),
- *   and `$inc` of `liveEditRevision`.
+ *   `$inc` of `liveEditRevision`, `$push` of one group and `$pull` of the groups
+ *   matching `{ key, channelId }` (the group set rows, #1242).
  *
  * Only fields of the schema are accepted (`SETTABLE`, `GROUP_FIELDS`), so a
  * misspelt field fails here instead of being dropped by Mongoose's strict mode
@@ -57,6 +60,9 @@ function opMatch(val: unknown, cond: unknown): boolean {
     });
   }
   if (cond === null) return val === null || val === undefined;
+  if (Array.isArray(val) && Array.isArray(cond)) {
+    return JSON.stringify(val) === JSON.stringify(cond);
+  }
   if (Array.isArray(val) && !Array.isArray(cond)) return val.includes(cond);
   return val === cond;
 }
@@ -65,6 +71,14 @@ export function matchDoc(doc: Json, filter: unknown): boolean {
   return Object.entries(filter as Json).every(([k, v]) => {
     if (k === "$and") return (v as Json[]).every((f) => matchDoc(doc, f));
     if (k.startsWith("$")) throw new Error(`unsupported operator ${k}`);
+    if (k === "groups.key") {
+      const keys = ((doc.groups as Json[] | undefined) ?? []).map((g) => g.key);
+      if (v !== null && typeof v === "object" && "$ne" in (v as Json)) {
+        return keys.every((x) => x !== (v as Json).$ne);
+      }
+      return keys.some((x) => opMatch(x, v));
+    }
+    if (k.includes(".")) throw new Error(`unsupported path ${k}`);
     return opMatch(doc[k], v);
   });
 }
@@ -86,17 +100,40 @@ export const GROUP_FIELDS = new Set([
   "originalTag",
   "nameSyncPending",
   "sizeSyncPending",
+  "memberIds",
 ]);
 
 function applyUpdate(
   doc: Json,
-  update: { $set?: Json; $unset?: Json; $inc?: Json },
+  update: {
+    $set?: Json;
+    $unset?: Json;
+    $inc?: Json;
+    $push?: Json;
+    $pull?: Json;
+  },
   arrayFilters: Array<Record<string, unknown>>,
 ): void {
   for (const op of Object.keys(update)) {
-    if (!["$set", "$unset", "$inc"].includes(op)) {
+    if (!["$set", "$unset", "$inc", "$push", "$pull"].includes(op)) {
       throw new Error(`unsupported update operator ${op}`);
     }
+  }
+  for (const [p, v] of Object.entries(update.$push ?? {})) {
+    if (p !== "groups") throw new Error(`unexpected $push ${p}`);
+    for (const f of Object.keys(v as Json)) {
+      if (!["$each", "$position"].includes(f) && f.startsWith("$")) {
+        throw new Error(`unsupported $push modifier ${f}`);
+      }
+    }
+    (doc.groups as Json[]).push(clone(v as Json));
+  }
+  for (const [p, cond] of Object.entries(update.$pull ?? {})) {
+    if (p !== "groups") throw new Error(`unexpected $pull ${p}`);
+    doc.groups = (doc.groups as Json[]).filter(
+      (g) =>
+        !Object.entries(cond as Json).every(([k, want]) => opMatch(g[k], want)),
+    );
   }
   const used = new Set<string>();
   const pathOf = (
@@ -181,7 +218,13 @@ export const EventMock = {
   }),
   updateOne: async (
     filter: Json,
-    update: { $set?: Json; $unset?: Json; $inc?: Json },
+    update: {
+      $set?: Json;
+      $unset?: Json;
+      $inc?: Json;
+      $push?: Json;
+      $pull?: Json;
+    },
     options: { arrayFilters?: Array<Record<string, unknown>> } = {},
   ) => {
     await fake.beforeWrite?.();

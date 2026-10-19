@@ -174,7 +174,7 @@ async function leadersFollowUp(ctx: AfterSaveContext): Promise<void> {
  * Nicknames follow the switches: `restore` when tagging is off now (read fresh),
  * else `sync`. Started and not waited for.
  */
-async function tagsFollowUp(ctx: AfterSaveContext): Promise<void> {
+export async function tagsFollowUp(ctx: AfterSaveContext): Promise<void> {
   const fresh = (await Event.findOne({
     _id: ctx.eventId,
     guildId: ctx.guildId,

@@ -466,6 +466,52 @@ export async function writeGroupsLocked(opts: {
   return (result?.matchedCount ?? 0) === 1 ? "applied" : "lost";
 }
 
+/**
+ * Take every member out of ONE group because the group is being removed (the
+ * host's live edit, #1242). Like `writeGroupsLocked` the caller ALREADY HOLDS
+ * `withGroupLock` for the event; the lock is never taken here. `memberIds` is
+ * the list the caller decided from, in its stored order: the write matches only
+ * while the group still holds exactly that list under that key, so a change
+ * that landed meanwhile is `"lost"`, never half applied. Writes
+ * `groups.$[g].memberIds` of that one group and nothing else. Every member
+ * counts as unassigned afterwards: `onGroupAssignmentChange` fires once per
+ * member (the clan tags restore the nickname, the leader cleanup runs), exactly
+ * as for a host unassign.
+ */
+export async function removeGroupMembersLocked(opts: {
+  guildId: string;
+  eventId: string;
+  groupKey: string;
+  memberIds: readonly string[];
+}): Promise<"applied" | "lost"> {
+  const { guildId, eventId, groupKey } = opts;
+  const members = [...opts.memberIds];
+  if (members.length === 0) return "applied";
+  const result = await Event.updateOne(
+    {
+      _id: eventId,
+      guildId,
+      groupsEnabled: true,
+      state: { $in: [...OPEN_STATES] },
+      groups: { $elemMatch: { key: groupKey, memberIds: members } },
+    },
+    { $set: { "groups.$[g].memberIds": [] } },
+    { arrayFilters: [{ "g.key": groupKey }] },
+  );
+  if ((result?.matchedCount ?? 0) !== 1) return "lost";
+  emit(
+    members.map((userId) => ({
+      eventId,
+      guildId,
+      userId,
+      fromKey: groupKey,
+      toKey: null,
+      source: "host" as const,
+    })),
+  );
+  return "applied";
+}
+
 export type SelfJoinOutcome =
   | "recorded"
   | "unchanged"

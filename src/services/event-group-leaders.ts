@@ -119,6 +119,16 @@ function emitLeaderChanges(changes: LeaderChange[]): void {
   }
 }
 
+/**
+ * Announce leader changes written by another module: the host's live edit
+ * (#1242) removes a whole group, and with it the leader of that group, whose
+ * access to the leads-only channel the subscribers must take away. Fires the
+ * same listeners as every other change; the write already happened.
+ */
+export function announceLeaderChanges(changes: LeaderChange[]): void {
+  emitLeaderChanges(changes);
+}
+
 // ---------------------------------------------------------------------
 // Pure reads
 // ---------------------------------------------------------------------
