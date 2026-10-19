@@ -30,6 +30,13 @@ export const fake = {
   failReads: false,
   /** Runs after each `findOne().lean()` has read (to simulate a hold taken meanwhile). */
   afterFind: null as (() => void) | null,
+  /**
+   * Group fields a test of the GROUP SET rows (#1242) also lets through
+   * `groups.$[id].<field>`: `memberIds`, which the removal's unassign writes (it
+   * is the assignment module's write). Empty by default, so a names, sizes or
+   * leaders row that started writing members would still fail its suite.
+   */
+  extraGroupFields: new Set<string>(),
 };
 export const clone = <T>(v: T): T => globalThis.structuredClone(v);
 
@@ -100,8 +107,6 @@ export const GROUP_FIELDS = new Set([
   "originalTag",
   "nameSyncPending",
   "sizeSyncPending",
-  "memberIds",
-  "channelId",
 ]);
 
 function applyUpdate(
@@ -143,14 +148,18 @@ function applyUpdate(
   ): { group: string; field: string } | { field: string } => {
     const m = /^groups\.\$\[(\w+)\]\.(\w+)$/.exec(path);
     if (m) {
-      if (!GROUP_FIELDS.has(m[2])) throw new Error(`unexpected field ${path}`);
+      if (!GROUP_FIELDS.has(m[2]) && !fake.extraGroupFields.has(m[2])) {
+        throw new Error(`unexpected field ${path}`);
+      }
       return { group: m[1], field: m[2] };
     }
     // The positional operator: the first group the filter's `$elemMatch`
-    // matched (`groups.$.channelId`, as the channel pass writes it).
+    // matched. Only `groups.$.channelId` (the shape the channel pass records and
+    // clears a channel id with); a live-edit row never writes `channelId`, so it
+    // is accepted on no other path.
     const positional = /^groups\.\$\.(\w+)$/.exec(path);
     if (positional) {
-      if (!GROUP_FIELDS.has(positional[1])) {
+      if (positional[1] !== "channelId") {
         throw new Error(`unexpected field ${path}`);
       }
       return { group: "$", field: positional[1] };

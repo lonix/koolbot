@@ -595,6 +595,11 @@ async function removeOne(
     : unfinished("the group changed meanwhile");
 }
 
+// `apply` can return `partial` (members unassigned, channel not yet deleted) but
+// this row has no `owed` / `reconcile`: its stored value is always `[]`, never
+// equal to the posted keys while the group exists, so posting the same removal
+// again simply plans (and, as every removal, confirms) a normal change from the
+// fresh row, and `removeOne` finishes whatever step is left.
 export const groupRemoveRow: LiveEditRow = asRow<string[]>({
   id: GROUP_REMOVE_ROW_ID,
   label: "Group removal",

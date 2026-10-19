@@ -233,6 +233,7 @@ beforeEach(async () => {
   writes.length = 0;
   fake.beforeWrite = null;
   fake.afterFind = null;
+  fake.extraGroupFields = new Set(["memberIds"]);
   fake.failReads = false;
   resetMoveGuardForTests();
   removeResult = () => ({ status: "removed" });

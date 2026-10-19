@@ -191,6 +191,7 @@ beforeEach(() => {
   for (const k of Object.keys(atEmpty)) delete atEmpty[k];
   fake.beforeWrite = null;
   fake.afterFind = null;
+  fake.extraGroupFields = new Set(["memberIds"]);
   fake.failReads = false;
   enabled = true;
   ending = false;

@@ -244,6 +244,7 @@ beforeEach(() => {
   store.set(EVENT_ID, makeEvent());
   writes.length = 0;
   fake.beforeWrite = null;
+  fake.extraGroupFields = new Set(["memberIds"]);
   fake.failReads = false;
   auditRows = [];
   eventsEnabled = true;
