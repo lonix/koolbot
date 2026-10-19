@@ -444,6 +444,13 @@ export async function checkBotPermissions(
         why = "The bot's own membership could not be read.";
       } else if (r.scope !== "guild" && !channel) {
         why = `The configured ${r.scope} could not be found.`;
+      } else if (
+        r.scope === "category" &&
+        channel?.type !== ChannelType.GuildCategory
+      ) {
+        // The services only accept a real category here (a text or voice
+        // channel id is ignored), so it cannot be reported as in place.
+        why = "The configured channel is not a category.";
       } else {
         try {
           const perms =

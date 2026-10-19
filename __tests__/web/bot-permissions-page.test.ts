@@ -12,6 +12,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import {
+  ChannelType,
   PermissionFlagsBits,
   PermissionsBitField,
   type Client,
@@ -96,6 +97,7 @@ function clientWith(opts: {
       "cat",
       {
         id: "cat",
+        type: ChannelType.GuildCategory,
         name: opts.categoryName ?? "Events",
         bits: opts.categoryBits ?? opts.serverBits,
       },

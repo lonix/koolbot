@@ -202,7 +202,14 @@ describe("what is missing and where", () => {
       "events.category_id": "cat-ev",
     };
     const report = await run({
-      channels: [{ id: "cat-ev", name: "Events", bits: ALL }],
+      channels: [
+        {
+          id: "cat-ev",
+          type: ChannelType.GuildCategory,
+          name: "Events",
+          bits: ALL,
+        },
+      ],
     });
     expect(report.available).toBe(true);
     expect(report.problems).toEqual([]);
@@ -221,6 +228,7 @@ describe("what is missing and where", () => {
       channels: [
         {
           id: "cat-ev",
+          type: ChannelType.GuildCategory,
           name: "Events",
           bits: without(ALL, P.ManageChannels),
         },
@@ -246,7 +254,14 @@ describe("what is missing and where", () => {
     // Not held server-wide, but the category's overwrite grants it.
     const report = await run({
       serverBits: without(ALL, P.ManageChannels),
-      channels: [{ id: "cat-ev", name: "Events", bits: ALL }],
+      channels: [
+        {
+          id: "cat-ev",
+          type: ChannelType.GuildCategory,
+          name: "Events",
+          bits: ALL,
+        },
+      ],
     });
     expect(
       report.problems.find((p) => p.permission === "Manage Channels"),
@@ -324,7 +339,12 @@ describe("what is missing and where", () => {
     };
     const report = await run({
       channels: [
-        { id: "cat-vc", name: "Voice", bits: ALL },
+        {
+          id: "cat-vc",
+          type: ChannelType.GuildCategory,
+          name: "Voice",
+          bits: ALL,
+        },
         {
           id: "lobby",
           name: "Lobby",
@@ -425,7 +445,12 @@ describe("what is missing and where", () => {
     };
     const report = await run({
       channels: [
-        { id: "cat-vc", name: "Voice", bits: ALL },
+        {
+          id: "cat-vc",
+          type: ChannelType.GuildCategory,
+          name: "Voice",
+          bits: ALL,
+        },
         {
           id: "l1",
           name: "Lobby",
@@ -455,7 +480,14 @@ describe("what is missing and where", () => {
       "voicechannels.lobby.channel_id": "not-here",
     };
     const report = await run({
-      channels: [{ id: "cat-vc", name: "Voice", bits: ALL }],
+      channels: [
+        {
+          id: "cat-vc",
+          type: ChannelType.GuildCategory,
+          name: "Voice",
+          bits: ALL,
+        },
+      ],
     });
     expect(report.unknown.map((u) => u.feature.id)).toEqual(["voice-lobby"]);
     expect(report.okFeatures.map((f) => f.id)).not.toContain("voice-lobby");
@@ -470,6 +502,7 @@ describe("what is missing and where", () => {
       channels: [
         {
           id: "cat-vc",
+          type: ChannelType.GuildCategory,
           name: "Voice",
           bits: without(ALL, P.SetVoiceChannelStatus),
         },
@@ -525,6 +558,7 @@ describe("enabled and configured features only", () => {
       channels: [
         {
           id: "cat-vc",
+          type: ChannelType.GuildCategory,
           name: "Voice",
           bits: without(ALL, P.SetVoiceChannelStatus),
         },
@@ -537,6 +571,7 @@ describe("enabled and configured features only", () => {
       channels: [
         {
           id: "cat-vc",
+          type: ChannelType.GuildCategory,
           name: "Voice",
           bits: without(ALL, P.SetVoiceChannelStatus),
         },
@@ -645,10 +680,45 @@ describe("a read that outlasts the TTL", () => {
   });
 });
 
+describe("a configured category must be a category", () => {
+  it("is not in place when the id belongs to a text channel that grants everything", async () => {
+    settings = { "events.enabled": true, "events.category_id": "txt" };
+    const report = await run({
+      channels: [
+        { id: "txt", name: "general", bits: ALL, type: ChannelType.GuildText },
+      ],
+    });
+    expect(report.unknown.map((u) => u.feature.id)).toContain("event-channels");
+    expect(
+      report.unknown.find((u) => u.feature.id === "event-channels")?.note,
+    ).toContain("not a category");
+    expect(report.okFeatures.map((f) => f.id)).not.toContain("event-channels");
+  });
+
+  it("is not in place when the voice category id belongs to a voice channel", async () => {
+    settings = {
+      "voicechannels.enabled": true,
+      "voicechannels.category_id": "vc",
+    };
+    const report = await run({
+      channels: [
+        { id: "vc", name: "Lounge", bits: ALL, type: ChannelType.GuildVoice },
+      ],
+    });
+    expect(report.unknown.map((u) => u.feature.id)).toContain("voice-rooms");
+    expect(report.okFeatures.map((f) => f.id)).not.toContain("voice-rooms");
+  });
+});
+
 describe("what Discord just returned wins over the gateway cache", () => {
   it("does not report healthy for a category the fetch no longer returns", async () => {
     settings = { "events.enabled": true, "events.category_id": "cat-ev" };
-    const stale = { id: "cat-ev", name: "Events", bits: ALL };
+    const stale = {
+      id: "cat-ev",
+      type: ChannelType.GuildCategory,
+      name: "Events",
+      bits: ALL,
+    };
     const report = await run({ channels: [stale], fetchedChannels: [] });
     expect(report.fresh).toBe(true);
     expect(report.unknown.map((u) => u.feature.id)).toContain("event-channels");
