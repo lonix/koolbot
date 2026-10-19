@@ -78,6 +78,28 @@ export interface IEventGroup {
    * resets their data (see the registry entry `event-group-member`).
    */
   memberIds: string[];
+  /**
+   * What the host (or the preset) set before a leader first customised the
+   * group (#1196): the values "reset" goes back to, and what a recurring
+   * series' next occurrence starts with. Absent until the first leader edit.
+   * Written only by `event-leader-customise.ts`. Not user ids.
+   */
+  originalName?: string;
+  originalTag?: string;
+  /**
+   * True while the group's stored name has not been confirmed on its channel
+   * (a leader or host rename whose channel rename was refused, rate limited or
+   * unconfirmed). Set in the same write that changes the name; cleared only
+   * after a confirmed channel rename of that same name. A pass finishes it.
+   */
+  nameSyncPending?: boolean;
+  /**
+   * The control message (button) of the leader customiser in this group's
+   * channel (#1196): its message id and the channel it was posted in, so a
+   * re-created channel never trusts an id from the old one.
+   */
+  controlMessageId?: string | null;
+  controlChannelId?: string | null;
 }
 
 export interface IEventRsvp {
@@ -225,7 +247,10 @@ export interface IEvent extends Document {
   groupsLocked: boolean;
   /** Group leaders on for this event (#1195); set on the event form. */
   captainsEnabled: boolean;
-  /** Used by later issues (#1196, #1194); stored, never read yet. */
+  /**
+   * Leaders may rename their own group and set its tag from Discord (#1196).
+   * Only effective while `captainsEnabled` is on; stored as both on.
+   */
   captainCustomisationEnabled: boolean;
   /**
    * Temporary clan tags on the members' server nicknames while the event is
@@ -264,6 +289,11 @@ const EventGroupSchema = new Schema<IEventGroup>(
     channelId: { type: String, default: null },
     captainId: { type: String, default: null },
     memberIds: { type: [String], default: [] },
+    originalName: { type: String, maxlength: 50 },
+    originalTag: { type: String, maxlength: 8 },
+    nameSyncPending: { type: Boolean, default: false },
+    controlMessageId: { type: String, default: null },
+    controlChannelId: { type: String, default: null },
   },
   { _id: false },
 );

@@ -547,7 +547,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "discordUserId",
     exportable: false,
     guildScoped: true,
-    note: "Admin audit trail, not member data. (The export itself writes a row here.)",
+    note: "Admin audit trail, not member data. (The export itself writes a row here, and so does a team leader's rename or tag change from Discord, `event.leader.customise` (#1196): the leader's id, the team's key and the old and new team name and tag, so the host can see who changed what.)",
     onDelete: "retain",
     subject: "self",
     deleteNote:

@@ -1047,6 +1047,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleEventRsvpButton } =
           await import("./handlers/event-rsvp-handler.js");
         await handleEventRsvpButton(interaction);
+      } else if (interaction.customId.startsWith("evcust:")) {
+        const { handleCustomiseButton } =
+          await import("./handlers/event-customise-handler.js");
+        await handleCustomiseButton(interaction);
       } else if (interaction.customId.startsWith("lfg_")) {
         const { handleLfgButton } =
           await import("./handlers/lfg-button-handler.js");
@@ -1115,6 +1119,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleVCModal } =
           await import("./handlers/vc-modal-handler.js");
         await handleVCModal(interaction);
+      } else if (interaction.customId.startsWith("evcust:")) {
+        const { handleCustomiseModal } =
+          await import("./handlers/event-customise-handler.js");
+        await handleCustomiseModal(interaction);
       } else {
         audit.unrecognised();
         logger.debug(

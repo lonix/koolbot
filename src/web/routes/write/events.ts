@@ -198,6 +198,8 @@ export function createEventsRouter(client: Client): Router {
                   groupPreset: groups.presetId,
                   channelLeadMinutes: groups.channelLeadMinutes,
                   captainsEnabled: groups.captainsEnabled,
+                  captainCustomisationEnabled:
+                    groups.captainCustomisationEnabled,
                   tagsEnabled: groups.tagsEnabled,
                   tagsSuffix: groups.tagsSuffix,
                 }

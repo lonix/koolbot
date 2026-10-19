@@ -631,6 +631,14 @@ For a recurring event, step 5 also creates the **next occurrence** (new
 announcement, new Discord event, new channel) at the same wall-clock time; future occurrences are
 never pre-created.
 
+**Team leaders customise from a button, not a command (#1196).** When an event
+uses groups with leaders and the host ticked **Leaders can customise**, the bot
+posts a **Customise team** button in each team channel's chat. The team's
+current leader (and nobody else) can press it to rename the team and set its
+clan tag; everyone else gets a private refusal. There is no slash command for
+this: setup and the host's reset live in the Web UI, under the host panel's
+**Team names and tags** section (see [WEBUI.md](WEBUI.md)).
+
 Every event is also a Discord **scheduled event** that shows in the server's
 Events list; cancel and end are mirrored too, and a recurring series is mirrored
 as one one-off Discord event per occurrence. The bot needs the Create Events (or

@@ -50,13 +50,17 @@ export const COMPONENT_AUDIT_PREFIXES: Record<
     ["lfg_", "component:lfg"],
     ["rules:accept", "component:rules_accept"],
     ["reactrole:btn:", "component:reactrole_button"],
+    ["evcust:", "component:event_customise"],
   ],
   select: [
     ["vc_transfer_select_", "component:vc_transfer_select"],
     ["vc_preset_", "component:vc_preset_select"],
     ["reactrole:sel", "component:reactrole_select"],
   ],
-  modal: [["vc_modal_", "component:vc_modal"]],
+  modal: [
+    ["vc_modal_", "component:vc_modal"],
+    ["evcust:", "component:event_customise_modal"],
+  ],
 };
 
 export const COMPONENT_AUDIT_UNKNOWN = "component:unknown";
