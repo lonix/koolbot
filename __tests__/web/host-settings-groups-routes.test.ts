@@ -576,6 +576,19 @@ describe("switching the preset", () => {
       action: "event.host.settings-confirm",
       result: "success",
     });
+    // The persisted details keep the old and new names, sizes and tags (the
+    // audit bound would have replaced a nested group list with "[truncated]").
+    expect(auditRows[0].details).toMatchObject({
+      outcome: "applied",
+      changes: [
+        {
+          row: "groupPreset",
+          from: { id: "", g1: "Heli <b>x</b> | team | size 2 | no tag" },
+          to: { id: "builtin:pair", g1: "Pair One | team | size 6 | tag T" },
+        },
+      ],
+    });
+    expect(JSON.stringify(auditRows[0].details)).not.toContain("[truncated]");
     writes.length = 0;
     auditRows = [];
     const replay = await post("settings-confirm", { token });

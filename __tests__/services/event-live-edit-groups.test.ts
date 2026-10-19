@@ -63,6 +63,7 @@ const { planAssign, planRandomise, seededRandom } =
   await import("../../src/services/event-group-plan.js");
 const { resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
+const { boundAuditEntry } = await import("../../src/web/audit.js");
 
 const GUILD = "guild-1";
 const EV = "65a000000000000000000001";
@@ -168,6 +169,7 @@ beforeEach(() => {
   calls.length = 0;
   retagCalls.length = 0;
   fake.beforeWrite = null;
+  fake.afterFind = null;
   fake.failReads = false;
   enabled = true;
   ending = false;
@@ -1071,5 +1073,123 @@ describe("the group limit cap and the size of a confirmation", () => {
         userId: "111111111111111111",
       }).ok,
     ).toBe(true);
+  });
+});
+
+describe("an end or cancel that takes its hold during the rename's own read", () => {
+  it("is asked again right before the write: nothing is saved and Discord is not called", async () => {
+    let finds = 0;
+    fake.afterFind = () => {
+      // The first read is the core's; the second is the rename's own.
+      if (++finds === 2) ending = true;
+    };
+    const out = await run([entry(NAME_A, "Apex", "Alpha")]);
+    const result = done(out);
+    expect(result.applied).toEqual([]);
+    expect(result.notApplied).toEqual([
+      {
+        rowId: NAME_A,
+        label: "Name of group 1",
+        reason: "was not saved because the event is being ended",
+      },
+    ]);
+    expect(group(A).name).toBe("Alpha");
+    expect(rowWrites()).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("the audit row of a preset switch keeps the names, sizes and tags", () => {
+  it("survives the audit bound as flat strings, for the confirmation and for the applied save", async () => {
+    const first = await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
+    const asked = boundAuditEntry({
+      action: "event.host.settings",
+      result: "success",
+      details: describeLiveEditOutcome(first).details,
+    });
+    const change = (
+      (asked.details as { changes: Array<Record<string, unknown>> }).changes
+    )[0];
+    expect(change).toEqual({
+      row: "groupPreset",
+      from: {
+        id: "",
+        g1: "Alpha | team | size 3 | tag A",
+        g2: "Bravo | team | no limit | no tag",
+        g3: "Charlie | team | size 2 | no tag",
+      },
+      to: {
+        id: "builtin:squads",
+        g1: "Squad 1 | team | size 4 | tag S1",
+        g2: "Squad 2 | team | size 4 | tag S2",
+        g3: "Squad 3 | team | size 4 | tag S3",
+      },
+    });
+    const applied = boundAuditEntry({
+      action: "event.host.settings-confirm",
+      result: "success",
+      details: describeLiveEditOutcome(await confirmed(first)).details,
+    });
+    const after = (
+      (applied.details as { changes: Array<{ to: Record<string, string> }> })
+        .changes
+    )[0];
+    expect(after.to.g1).toBe("Squad 1 | team | size 4 | tag S1");
+    expect(JSON.stringify(applied.details)).not.toContain("[truncated]");
+  });
+});
+
+describe("a preset switch finishes and reports channel work still owed", () => {
+  it("a rename the budget held back is retried by a switch that only changes sizes, and the result is partial while it stays held", async () => {
+    nameResult = (key) => ({
+      groupKey: key,
+      status: "limited",
+      retryAfterMs: 5 * 60_000,
+    });
+    await run([entry(NAME_A, "Apex", "Alpha")]);
+    expect(group(A)).toMatchObject({ name: "Apex", nameSyncPending: true });
+    calls.length = 0;
+    const sizesOnly = {
+      id: "builtin:sizes",
+      groups: [
+        { name: "Apex", kind: "team", size: 8, tag: "A" },
+        { name: "Bravo", kind: "team", size: null, tag: "" },
+        { name: "Charlie", kind: "team", size: 2, tag: "" },
+      ],
+    };
+    const out = done(
+      await run([entry(GROUP_PRESET_ROW_ID, sizesOnly, baseOf())]),
+    );
+    expect(out.applied).toEqual([]);
+    expect(out.partial).toHaveLength(1);
+    expect(out.partial[0].owed).toContain("Group 1: the channel is not renamed yet");
+    expect(calls.sort()).toEqual([`limit:${A}`, `name:${A}`].sort());
+    expect(group(A)).toMatchObject({ size: 8, nameSyncPending: true });
+  });
+
+  it("also for a group whose values the preset leaves as they are", async () => {
+    nameResult = (key) => ({
+      groupKey: key,
+      status: "limited",
+      retryAfterMs: 60_000,
+    });
+    await run([entry(NAME_A, "Apex", "Alpha")]);
+    calls.length = 0;
+    const same = {
+      id: "builtin:same",
+      groups: [
+        { name: "Apex", kind: "team", size: 3, tag: "A" },
+        { name: "Bravo", kind: "team", size: null, tag: "" },
+        { name: "Charlie", kind: "team", size: 2, tag: "" },
+      ],
+    };
+    const out = done(await run([entry(GROUP_PRESET_ROW_ID, same, baseOf())]));
+    expect(out.partial).toHaveLength(1);
+    expect(calls).toEqual([`name:${A}`]);
+    // Once the budget is back the same switch is applied and finishes it.
+    nameResult = (key) => ({ groupKey: key, status: "applied" });
+    const again = done(await run([entry(GROUP_PRESET_ROW_ID, same, baseOf())]));
+    expect(again.applied).toHaveLength(1);
+    expect("nameSyncPending" in group(A)).toBe(false);
   });
 });

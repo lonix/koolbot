@@ -388,6 +388,15 @@ function nameRow(index: number): LiveEditRow {
           message: `"${ctx.to}" is now used by another group, so this group was not renamed`,
         };
       }
+      // The fresh read above was awaited after the executor's last hold check:
+      // an end or cancel may have taken its hold meanwhile. Asked again here,
+      // synchronously, right before the write (nothing awaited in between).
+      if (ctx.ending()) {
+        return {
+          status: "failed",
+          message: "was not saved because the event is being ended",
+        };
+      }
       const original = group.originalName ?? "";
       const result = await Event.updateOne(
         {
@@ -598,6 +607,22 @@ function describePreset(v: PresetValue): string {
     .join(", ");
 }
 
+/**
+ * The preset value as it goes into the audit row: one flat string per group
+ * (`g1`: "Squad 1 | team | size 4 | tag S1"). The audit bound replaces any
+ * object or array nested deeper than four levels with "[truncated]", which
+ * would drop every name, size and tag of the nested group list; this keeps
+ * them, within the bound's key and string limits (25 groups, short strings).
+ */
+function presetAuditValue(v: PresetValue): JsonValue {
+  const out: { [key: string]: JsonValue } = { id: v.id };
+  v.groups.forEach((g, i) => {
+    out[`g${i + 1}`] =
+      `${g.name} | ${g.kind} | ${g.size === null ? "no limit" : `size ${g.size}`} | ${g.tag === "" ? "no tag" : `tag ${g.tag}`}`;
+  });
+  return out;
+}
+
 /** The groups a switch would change, by position. */
 function presetDiff(
   event: IEvent,
@@ -743,6 +768,7 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
     return `Switching the preset replaces the name${count === 1 ? "" : "s"} of ${count} group${count === 1 ? "" : "s"}, whoever set them.${leaders}`;
   },
   describe: (v) => describePreset(v),
+  auditValue: (v) => presetAuditValue(v),
   owed: (e) => pendingChannelWork(e),
   async apply(ctx) {
     const { event, to, from } = ctx;
@@ -780,6 +806,24 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
     const retagNow = event.tagsEnabled === true && event.state === "active";
     for (const d of diff) {
       const customised = !!d.group.originalName;
+      // Channel work still owed from an earlier save (a rename the budget held
+      // back, a limit Discord refused) is retried and reported by this switch
+      // too, also for a group whose values the preset leaves as they are.
+      const owesChannel =
+        !!d.group.channelId &&
+        (d.group.nameSyncPending === true || d.group.sizeSyncPending === true);
+      if (owesChannel) {
+        work.push({
+          key: d.group.key,
+          channelId: d.group.channelId,
+          name: d.name || d.group.nameSyncPending === true,
+          size: d.size || d.group.sizeSyncPending === true,
+          retag:
+            d.tag && retagNow && (d.group.memberIds ?? []).length > 0
+              ? [...d.group.memberIds]
+              : null,
+        });
+      }
       if (!d.name && !d.size && !d.tag && !customised) continue;
       const id = `g${d.index}`;
       arrayFilters.push({ [`${id}.key`]: d.group.key });
@@ -798,16 +842,18 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
         $unset[`groups.$[${id}].originalName`] = "";
         $unset[`groups.$[${id}].originalTag`] = "";
       }
-      work.push({
-        key: d.group.key,
-        channelId: d.group.channelId,
-        name: d.name,
-        size: d.size,
-        retag:
-          d.tag && retagNow && (d.group.memberIds ?? []).length > 0
-            ? [...d.group.memberIds]
-            : null,
-      });
+      if (!owesChannel) {
+        work.push({
+          key: d.group.key,
+          channelId: d.group.channelId,
+          name: d.name,
+          size: d.size,
+          retag:
+            d.tag && retagNow && (d.group.memberIds ?? []).length > 0
+              ? [...d.group.memberIds]
+              : null,
+        });
+      }
     }
     const result = await Event.updateOne(
       {

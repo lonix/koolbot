@@ -107,6 +107,8 @@ const NAME_ALLOWLIST: Record<string, string> = {
     "`p` is a built-in achievement definition, not a member-controlled name",
   "services/event-live-edit-groups.ts:` [${g.tag}]`":
     "a preset's own default tag in the host panel's confirmation text and result, escaped as HTML there; never a Discord message",
+  "services/event-live-edit-groups.ts:`tag ${g.tag}`":
+    "a preset's own default tag in the host panel's audit row, never a Discord message",
   "services/server-scan-service.ts:`missing-${p.name}`":
     "`p` is a Discord permission name, used as a Web UI issue code",
   "services/server-scan-service.ts:`KoolBot is missing the ${p.name} permission (${p.purpose}). Grant it to the KoolBot role in Server Settings → Roles.`":

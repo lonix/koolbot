@@ -25,6 +25,8 @@ export const fake = {
   /** Runs before each write is matched (to simulate a concurrent writer). */
   beforeWrite: null as (() => void | Promise<void>) | null,
   failReads: false,
+  /** Runs after each `findOne().lean()` has read (to simulate a hold taken meanwhile). */
+  afterFind: null as (() => void) | null,
 };
 export const clone = <T>(v: T): T => globalThis.structuredClone(v);
 
@@ -151,10 +153,16 @@ export const EventMock = {
       lean: async () => {
         await Promise.resolve();
         if (fake.failReads) throw new Error("db down");
+        let found: Json | null = null;
         for (const doc of store.values()) {
-          if (matchDoc(doc, filter)) return clone(doc);
+          if (matchDoc(doc, filter)) {
+            found = clone(doc);
+            break;
+          }
         }
-        return null;
+        await Promise.resolve();
+        fake.afterFind?.();
+        return found;
       },
     };
     return query;

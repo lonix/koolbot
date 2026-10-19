@@ -297,6 +297,13 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
    */
   reconcile?(ctx: ApplyContext<V>): Promise<RowOutcome>;
   describe(value: V): string;
+  /**
+   * The value as it is written into the audit row, when `read`'s shape is too
+   * deep for the audit bound (`boundAuditEntry` replaces anything nested deeper
+   * than four levels with "[truncated]"; a value sits at level three). Flat
+   * strings and numbers only. Absent: the value itself.
+   */
+  auditValue?(value: V): JsonValue;
 }
 
 /** Type-erase a row for the registry (rows are typed where they are written). */
@@ -1051,6 +1058,10 @@ export function describeLiveEditOutcome(
 ): LiveEditResult {
   const rowOf = (id: string): LiveEditRow | undefined =>
     rows.find((r) => r.id === id);
+  const auditOf = (id: string, value: JsonValue): JsonValue => {
+    const row = rowOf(id);
+    return row?.auditValue ? row.auditValue(value) : value;
+  };
   switch (outcome.status) {
     case "refused":
       return {
@@ -1081,8 +1092,8 @@ export function describeLiveEditOutcome(
           outcome: "needs-confirmation",
           changes: outcome.changes.map((c) => ({
             row: c.rowId,
-            from: c.from,
-            to: c.to,
+            from: auditOf(c.rowId, c.from),
+            to: auditOf(c.rowId, c.to),
           })),
         },
       };
@@ -1099,15 +1110,15 @@ export function describeLiveEditOutcome(
               : "nothing-to-do",
         changes: outcome.applied.map((c) => ({
           row: c.rowId,
-          from: c.from,
-          to: c.to,
+          from: auditOf(c.rowId, c.from),
+          to: auditOf(c.rowId, c.to),
           ...(c.reconcile === true ? { reconcile: true } : {}),
         })),
         // Stored but not finished, with what is still owed.
         stored: outcome.partial.map((c) => ({
           row: c.rowId,
-          from: c.from,
-          to: c.to,
+          from: auditOf(c.rowId, c.from),
+          to: auditOf(c.rowId, c.to),
           owed: c.owed,
           ...(c.reconcile ? { reconcile: true } : {}),
         })),
