@@ -145,7 +145,11 @@ const SNOWFLAKE = /^\d{16,20}$/;
 
 /** Thrown inside a delete attempt when someone has joined the channel. */
 class ChannelOccupiedError extends Error {
-  constructor(readonly count: number = 0) {
+  constructor(
+    readonly count: number = 0,
+    /** The group whose channel is occupied, when it is not the one being deleted. */
+    readonly groupKey?: string,
+  ) {
     super("Group channel is occupied");
     this.name = "ChannelOccupiedError";
   }
@@ -3056,19 +3060,28 @@ export class EventGroupChannels {
     }
 
     // 3. Delete each channel and clear its recorded id.
-    for (const item of plan) {
+    for (const [index, item] of plan.entries()) {
       if (item.ours) {
         try {
           await this.renameCall((signal) => {
-            // Synchronous, in the same tick as the request.
+            // Synchronous, in the same tick as the request (the caller may
+            // await a limiter or an import before this runs, and the looks of
+            // step 1 are separated by awaited reads): an end taking its hold, or
+            // somebody in THIS channel or in any channel still to be deleted,
+            // stops the request. Looking at the later channels too is what keeps
+            // every channel when somebody joined one of them meanwhile.
             if (opts.ending?.()) throw new RemovalEndingError();
-            const live = guild.channels.cache.get(item.channelId) as
-              VoiceChannel | undefined;
-            if (live?.type === ChannelType.GuildVoice) {
+            for (const next of plan.slice(index)) {
+              if (!next.ours) continue;
+              const live = guild.channels.cache.get(next.channelId) as
+                VoiceChannel | undefined;
+              if (live?.type !== ChannelType.GuildVoice) continue;
               const stay = [...(live.members?.keys() ?? [])].filter(
                 (id) => !ignore.has(id),
               );
-              if (stay.length > 0) throw new ChannelOccupiedError(stay.length);
+              if (stay.length > 0) {
+                throw new ChannelOccupiedError(stay.length, next.key);
+              }
             }
             return this.failFastRest().delete(Routes.channel(item.channelId), {
               reason: "Event groups switched off",
@@ -3088,7 +3101,7 @@ export class EventGroupChannels {
               ? {
                   status: "occupied",
                   remaining: error.count,
-                  groupKey: item.key,
+                  groupKey: error.groupKey ?? item.key,
                 }
               : {
                   status: "failed",

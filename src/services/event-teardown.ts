@@ -259,6 +259,11 @@ export class EventTeardown {
         await sleep(this.deps.settleMs ?? DEFAULT_SETTLE_MS);
       }
       push(await this.groupChannels(event, guild, input.now));
+    }
+    // Leaders are not needed once the event is over, whether its groups are on
+    // or were switched off while it ran (a switch-off keeps the groups, and their
+    // stored leaders, as history; #1243).
+    if (event.groupsEnabled === true || (event.groups ?? []).length > 0) {
       push(await this.captains(event));
     }
 
