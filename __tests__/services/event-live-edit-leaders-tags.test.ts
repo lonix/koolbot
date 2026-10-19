@@ -240,6 +240,8 @@ describe("registration", () => {
       // Removing and adding groups (#1242), then the groups switch (#1243).
       "groupRemove",
       "groupAdd",
+      // The Captains lobby switch (#1251), then the groups switch (#1243).
+      "captainsLobby",
       "groupsEnabled",
     ]);
   });

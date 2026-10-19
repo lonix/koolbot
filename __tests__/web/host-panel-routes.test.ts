@@ -355,6 +355,96 @@ describe("host panel page", () => {
     expect(r.text).toContain("30 minutes before the start");
   });
 
+  it("shows the Captains lobby as one line, never as a row of the group table (#1251)", async () => {
+    const group = (
+      key: string,
+      name: string,
+      kind: string,
+      channelId = null,
+    ) => ({
+      key,
+      name,
+      kind,
+      size: null,
+      tag: "",
+      marker: "",
+      channelId,
+      captainId: null,
+      memberIds: [],
+    });
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      captainsEnabled: true,
+      groups: [
+        group("g_1", "Reds", "team"),
+        group("g_2", "Hidden command room", "leads"),
+      ],
+    } as never);
+    const r = await call(url(PANEL));
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("Reds");
+    expect(r.text).not.toContain("Hidden command room");
+    expect(r.text).not.toContain("Leaders only");
+    expect(r.text).toContain(
+      "Captains lobby:</strong> on, only you and the current leaders can join; its channel is not created yet.",
+    );
+    // With leaders off the line says who can really join.
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      captainsEnabled: false,
+      groups: [
+        group("g_1", "Reds", "team"),
+        group("g_2", "Hidden command room", "leads", "c-lobby" as never),
+      ],
+    } as never);
+    const off = await call(url(PANEL));
+    expect(off.text).toContain(
+      "on, leaders are off, so only you can join; its channel is created.",
+    );
+    // No lobby, no line.
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      groups: [group("g_1", "Reds", "team")],
+    } as never);
+    expect((await call(url(PANEL))).text).not.toContain("Captains lobby:");
+  });
+
+  it("a legacy event with only a leads group still shows the lobby's status and the channel warnings, not 'no groups' (#1251)", async () => {
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      captainsEnabled: true,
+      groups: [
+        {
+          key: "g_1",
+          name: "Hidden command room",
+          kind: "leads",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    } as never);
+    groupReport = {
+      warnings: [],
+      failures: [
+        { key: "g_1", name: "Hidden command room", reason: "Discord refused" },
+      ],
+    };
+    const r = await call(url(PANEL));
+    expect(r.status).toBe(200);
+    expect(r.text).not.toContain("This event has no groups.");
+    expect(r.text).toContain("Captains lobby:</strong> on");
+    expect(r.text).toContain("its channel is not created yet");
+    expect(r.text).toContain("Some group channels could not be set up");
+    expect(r.text).toContain("Discord refused");
+    // No group is listed, so no empty table.
+    expect(r.text).not.toContain('<thead><tr><th scope="col">Group</th>');
+    groupReport = null;
+  });
+
   it("shows only the sections that apply to a plain event", async () => {
     const r = await call(url(PANEL));
     expect(r.text).toContain("This event has no groups.");

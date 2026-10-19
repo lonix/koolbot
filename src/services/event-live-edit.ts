@@ -9,7 +9,8 @@
  * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
  * leaders, leader customisation, the leader label, tagging, the tag position
  * and each team's tag (`event-live-edit-leaders-tags.ts`). #1242 adds and
- * removes groups (`event-live-edit-group-set.ts`). All are listed in
+ * removes groups (`event-live-edit-group-set.ts`). #1251 adds the Captains lobby
+ * switch (`event-live-edit-captains-lobby.ts`). All are listed in
  * `LIVE_EDIT_ROWS` below. #1243 switches groups on and off
  * (`event-live-edit-groups-switch.ts`). A later step (a group's kind) only ADDS
  * ROWS (see "Extension contract").
@@ -170,6 +171,7 @@ import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
 import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import { groupSetRows } from "./event-live-edit-group-set.js";
+import { captainsLobbyRow } from "./event-live-edit-captains-lobby.js";
 import { groupsSwitchRows } from "./event-live-edit-groups-switch.js";
 import {
   checkChannelLead,
@@ -287,9 +289,25 @@ export type RowOutcome =
   /** Stored, but a follow-up part did not happen; a re-save reconciles. */
   | { status: "partial"; message: string };
 
+/** What the plan knows about the world beyond the event row. */
+export interface PlanEnv {
+  /**
+   * Anyone is connected to any of the event's voice channels (main or group,
+   * the captains lobby included), read from the gateway cache inside the locks.
+   * Unknown counts as in use (the safe answer: ask).
+   */
+  voiceInUse: boolean;
+}
+
 export interface ValidateContext {
   /** The fresh row. */
   event: IEvent;
+  /**
+   * The value an EARLIER row of this same save (registry order) is changing to,
+   * or undefined when it does not change. Lets a row judge itself against what
+   * the save leaves behind: "leaders on and the lobby on" is one valid save.
+   */
+  planned(rowId: string): JsonValue | undefined;
   /** Rule 8 for rows that change the group list; `[]` means valid. */
   validateSetup(mutate: (input: GroupSetupInput) => void): string[];
 }
@@ -303,6 +321,20 @@ export interface ApplyContext<V extends JsonValue = JsonValue> {
   to: V;
   /** Synchronous: an end or cancel holds the event. Ask before every outward write. */
   ending(): boolean;
+  /**
+   * Somebody connected to the event's voice channels was shown to the host and
+   * confirmed (a confirmed run whose token says people were connected). When
+   * false, a row that moves people out of a channel must look again right before
+   * it moves them, and keep what it would have removed if somebody has joined
+   * since the plan found the channels empty.
+   */
+  occupantsConfirmed: boolean;
+  /**
+   * `events.groups.max_count` read now (null: unreadable). For a row that adds a
+   * group and must hold the limit against what an earlier row of the same save
+   * already added: the plan judged the count it started from.
+   */
+  maxGroups(): Promise<number | null>;
   /**
    * The outward effects (`deps.effects`), for a row whose `apply` or `reconcile`
    * follows its stored change with a Discord call and reports it as `partial`
@@ -318,7 +350,12 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
   parse(raw: string): { ok: true; value: V } | { ok: false; error: string };
   applicable(event: IEvent): string | null;
   validate?(to: V, ctx: ValidateContext): string | null;
-  needsConfirmation?(from: V, to: V, event: IEvent): string | null;
+  needsConfirmation?(
+    from: V,
+    to: V,
+    event: IEvent,
+    env: PlanEnv,
+  ): string | null;
   apply(ctx: ApplyContext<V>): Promise<RowOutcome>;
   /**
    * Only for a row whose `apply` can return `partial` (the target is stored,
@@ -389,6 +426,11 @@ export interface LiveEditEffects {
     eventId: string,
     revoked?: readonly string[],
   ): Promise<void>;
+  /**
+   * Whether anybody is connected to any of these voice channels, from the
+   * gateway voice-state cache (no REST). True when the server cannot be shown.
+   */
+  eventVoiceInUse(guildId: string, channelIds: readonly string[]): boolean;
   /** Post or remove the "Customise team" messages (`EventService.syncGroupControls`). */
   syncGroupControls(eventId: string): Promise<void>;
   /**
@@ -624,6 +666,9 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   ...leadersTagsRows,
   // Removing and adding groups (#1242): `event-live-edit-group-set.ts`.
   ...groupSetRows,
+  // The Captains lobby switch (#1251): it adds or removes a group, so the
+  // positional name and size writes land before it can shift a position.
+  captainsLobbyRow,
   // Groups on or off (#1243): last, so the other rows of a save apply first.
   ...groupsSwitchRows,
 ];
@@ -752,6 +797,13 @@ export interface PlannedChange {
   confirm: string | null;
   /** The target is already stored; only its owed follow-up is run. */
   reconcile?: boolean;
+  /**
+   * The row's `guard` identity of what the plan was made for (see
+   * `LiveEditRow.guard`), when it has one. It travels in the confirmation token,
+   * so a confirmed run for something else (a channel recorded between the page
+   * and the confirmation) is a conflict, and nothing is applied.
+   */
+  guard?: string;
 }
 
 export interface PlanProblem {
@@ -776,6 +828,8 @@ export function planLiveEdit(input: {
   entries: readonly SubmittedEntry[];
   rows?: readonly LiveEditRow[];
   maxGroups: number | null;
+  /** Default: in use (ask). */
+  voiceInUse?: boolean;
 }): LiveEditPlan {
   const rows = input.rows ?? LIVE_EDIT_ROWS;
   const plan: LiveEditPlan = {
@@ -784,8 +838,11 @@ export function planLiveEdit(input: {
     alreadyApplied: [],
     errors: [],
   };
+  const env: PlanEnv = { voiceInUse: input.voiceInUse ?? true };
+  const plannedTo = new Map<string, JsonValue>();
   const ctx: ValidateContext = {
     event: input.event,
+    planned: (rowId) => plannedTo.get(rowId),
     validateSetup: (mutate) =>
       validateEditedSetup(input.event, input.maxGroups, mutate),
   };
@@ -802,7 +859,8 @@ export function planLiveEdit(input: {
       label: row.label,
       from: stored,
       to: stored,
-      confirm: row.needsConfirmation?.(stored, stored, input.event) ?? null,
+      confirm:
+        row.needsConfirmation?.(stored, stored, input.event, env) ?? null,
       reconcile: true,
     });
     if (entry.reconcile === true) {
@@ -855,12 +913,16 @@ export function planLiveEdit(input: {
       plan.errors.push(`${row.label}: ${invalid}`);
       continue;
     }
+    plannedTo.set(row.id, entry.to);
+    const guard = row.guard?.(input.event);
     plan.changes.push({
       rowId: row.id,
       label: row.label,
       from: stored,
       to: entry.to,
-      confirm: row.needsConfirmation?.(stored, entry.to, input.event) ?? null,
+      ...(guard !== undefined ? { guard } : {}),
+      confirm:
+        row.needsConfirmation?.(stored, entry.to, input.event, env) ?? null,
     });
   }
   return plan;
@@ -875,6 +937,8 @@ export interface ConfirmedChange {
   from: JsonValue;
   to: JsonValue;
   reconcile?: boolean;
+  /** `PlannedChange.guard` of the page the host confirmed. */
+  guard?: string;
 }
 
 /** Hash of a change set (rows with their from and to), order-independent. */
@@ -897,7 +961,16 @@ interface TokenPayload {
   h: string;
   /** The event's `liveEditRevision` when the page was shown. */
   n: number;
-  c: Array<{ r: string; f: JsonValue; t: JsonValue; k?: boolean }>;
+  /** Somebody was connected to an event voice channel when the page was shown. */
+  i?: boolean;
+  c: Array<{
+    r: string;
+    f: JsonValue;
+    t: JsonValue;
+    k?: boolean;
+    /** The row's guard identity the page was planned with. */
+    g?: string;
+  }>;
 }
 
 function tokenMac(payload: string): string | null {
@@ -919,6 +992,8 @@ export function signConfirmation(input: {
   changes: readonly ConfirmedChange[];
   /** `revision` of the `needs-confirmation` outcome the changes came from. */
   revision: number;
+  /** `voiceInUse` of the `needs-confirmation` outcome the changes came from. */
+  voiceInUse?: boolean;
   now?: number;
 }): string | null {
   const payload: TokenPayload = {
@@ -929,11 +1004,13 @@ export function signConfirmation(input: {
     x: (input.now ?? Date.now()) + CONFIRM_TTL_MS,
     h: changeSetHash(input.changes),
     n: input.revision,
+    ...(input.voiceInUse === true ? { i: true } : {}),
     c: input.changes.map((c) => ({
       r: c.rowId,
       f: c.from,
       t: c.to,
       ...(c.reconcile === true ? { k: true } : {}),
+      ...(typeof c.guard === "string" ? { g: c.guard } : {}),
     })),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -942,7 +1019,12 @@ export function signConfirmation(input: {
 }
 
 export type ConfirmationCheck =
-  | { ok: true; changes: ConfirmedChange[]; revision: number }
+  | {
+      ok: true;
+      changes: ConfirmedChange[];
+      revision: number;
+      voiceInUse: boolean;
+    }
   | { ok: false; reason: "invalid" | "expired" | "mismatch" | "no-secret" };
 
 /**
@@ -994,6 +1076,7 @@ export function verifyConfirmation(
     from: c.f,
     to: c.t,
     ...(c.k === true ? { reconcile: true } : {}),
+    ...(typeof c.g === "string" ? { guard: c.g } : {}),
   }));
   if (changeSetHash(changes) !== payload.h) {
     return { ok: false, reason: "invalid" };
@@ -1008,7 +1091,12 @@ export function verifyConfirmation(
   if (payload.x <= (expect.now ?? Date.now())) {
     return { ok: false, reason: "expired" };
   }
-  return { ok: true, changes, revision: payload.n };
+  return {
+    ok: true,
+    changes,
+    revision: payload.n,
+    voiceInUse: payload.i === true,
+  };
 }
 
 // ---------------------------------------------------------------
@@ -1052,6 +1140,8 @@ export type LiveEditOutcome =
       reasons: string[];
       /** The event's `liveEditRevision` the plan was made at: goes into the token. */
       revision: number;
+      /** Whether anyone was connected to an event voice channel: goes into the token. */
+      voiceInUse: boolean;
     }
   | { status: "stale"; message: string }
   | {
@@ -1062,6 +1152,30 @@ export type LiveEditOutcome =
       notApplied: NotApplied[];
       alreadyApplied: string[];
     };
+
+/**
+ * Whether anyone is connected to any voice channel of the event (the main
+ * channel or any group channel, the captains lobby included), from the gateway
+ * cache. No effect, or a server the cache cannot show: in use (ask).
+ */
+function eventVoiceInUse(
+  deps: LiveEditDeps,
+  guildId: string,
+  event: IEvent,
+): boolean {
+  const effects = deps.effects;
+  if (!effects) return true;
+  const ids = [
+    event.channelId,
+    ...(event.groups ?? []).map((g) => g.channelId),
+  ].filter((id): id is string => typeof id === "string" && id !== "");
+  try {
+    return effects.eventVoiceInUse(guildId, ids);
+  } catch (err) {
+    logger.warn("Could not read who is connected for a live edit:", err);
+    return true;
+  }
+}
 
 /** The saves counted so far; a row from before the field reads as 0. */
 function revisionOf(event: { liveEditRevision?: number | null }): number {
@@ -1087,6 +1201,8 @@ export async function runLiveEdit(opts: {
   confirmed?: readonly ConfirmedChange[];
   /** The token's `revision`; required with `confirmed`. */
   confirmedRevision?: number;
+  /** The token's `voiceInUse`; with `confirmed`. */
+  confirmedVoiceInUse?: boolean;
 }): Promise<LiveEditOutcome> {
   const rows = opts.rows ?? LIVE_EDIT_ROWS;
   const { guildId, deps } = opts;
@@ -1151,12 +1267,15 @@ export async function runLiveEdit(opts: {
             to: c.to,
             base: c.from,
             reconcile: c.reconcile,
+            ...(c.guard !== undefined ? { guard: c.guard } : {}),
           }))
         : [...(opts.submission ?? [])];
     if (entries.some((e) => !rows.some((r) => r.id === e.rowId))) {
       return { status: "stale", message: STALE_MESSAGE };
     }
-    const plan = planLiveEdit({ event, entries, rows, maxGroups });
+    // Who is connected is read now, inside the locks, from the gateway cache.
+    const voiceInUse = eventVoiceInUse(deps, guildId, event);
+    const plan = planLiveEdit({ event, entries, rows, maxGroups, voiceInUse });
     if (plan.errors.length > 0) {
       return { status: "invalid", errors: plan.errors };
     }
@@ -1170,6 +1289,22 @@ export async function runLiveEdit(opts: {
         opts.confirmedRevision !== revisionOf(event) ||
         plan.conflicts.length > 0 ||
         changeSetHash(plan.changes) !== changeSetHash(opts.confirmed)
+      ) {
+        return { status: "stale", message: STALE_MESSAGE };
+      }
+      // Somebody connected since the page was shown: a change that needed no
+      // confirmation then (nobody in the way) needs one now.
+      if (
+        voiceInUse &&
+        opts.confirmedVoiceInUse !== true &&
+        plan.changes.some((c) => {
+          const row = rows.find((r) => r.id === c.rowId);
+          const ask = (inUse: boolean): string | null =>
+            row?.needsConfirmation?.(c.from, c.to, event as IEvent, {
+              voiceInUse: inUse,
+            }) ?? null;
+          return ask(true) !== null && ask(false) === null;
+        })
       ) {
         return { status: "stale", message: STALE_MESSAGE };
       }
@@ -1188,6 +1323,7 @@ export async function runLiveEdit(opts: {
           changes: plan.changes,
           reasons,
           revision: revisionOf(event),
+          voiceInUse,
         };
       }
     }
@@ -1247,6 +1383,10 @@ export async function runLiveEdit(opts: {
           from: change.from,
           to: change.to,
           ending: (): boolean => deps.isEnding(eventId),
+          occupantsConfirmed:
+            opts.confirmed !== undefined && opts.confirmedVoiceInUse === true,
+          maxGroups: (): Promise<number | null> =>
+            deps.maxGroups().catch(() => null),
           effects: deps.effects,
         };
         outcome =

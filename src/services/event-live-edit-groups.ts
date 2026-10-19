@@ -110,9 +110,11 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   GROUP_COUNT_HARD_MAX,
+  captainsLobbyNameTaken,
   checkGroupName,
   checkGroupSize,
   checkGroupTag,
+  clashesWithCaptainsLobby,
 } from "./event-groups.js";
 import { OPEN_STATES, nameTakenByOther } from "./event-customise-rules.js";
 import { describeRetryIn } from "./event-rename-queue.js";
@@ -318,6 +320,9 @@ function nameRow(index: number): LiveEditRow {
     validate: (to, ctx) => {
       const group = groupAt(ctx.event, index);
       if (!group) return `Group ${n} does not exist.`;
+      if (clashesWithCaptainsLobby(ctx.event.groups, group.key, to)) {
+        return captainsLobbyNameTaken(to);
+      }
       if (nameTakenByOther(ctx.event.groups, group.key, to)) {
         return `"${to}" is already used by another group, or is the name another group goes back to when it is reset. Pick a different name.`;
       }

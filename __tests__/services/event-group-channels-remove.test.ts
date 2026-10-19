@@ -275,6 +275,25 @@ describe("removeGroup deletes the channel and the record together", () => {
     expect(groupKeys()).toEqual([A, B]);
   });
 
+  it("an end or cancel that takes its hold during the delete stops the record's pull too (#1251)", async () => {
+    const env = makeEnv();
+    // Not ending when the request is sent (the first ask), ending once it is
+    // done: the record must not be pulled under the end.
+    let asked = 0;
+    const out = await env.channels.removeGroup(EV, env.guild, {
+      groupKey: A,
+      channelId: A_CH,
+      ending: () => ++asked > 1,
+    });
+    expect(out).toEqual({
+      status: "failed",
+      reason: "the event is being ended",
+    });
+    expect(env.rest.delete).toHaveBeenCalledTimes(1);
+    expect(groupKeys()).toEqual([A, B]);
+    expect(writes).toEqual([]);
+  });
+
   it("a channel that is already gone (10003) counts as deleted and the record goes", async () => {
     const env = makeEnv();
     env.gone.add(A_CH);

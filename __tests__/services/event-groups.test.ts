@@ -7,9 +7,11 @@ import {
   MIN_NICKNAME_ROOM,
   NICKNAME_MAX,
   TAG_DECORATION_LENGTH,
+  captainsLobbyName,
   copyGroupSetup,
   effectiveChannelLeadMinutes,
   emptyGroupSetup,
+  hasCaptainsLobby,
   parseGroupForm,
   resolveGroupCountLimits,
   validateGroupSetup,
@@ -607,5 +609,145 @@ describe("resolveGroupCountLimits", () => {
       defaultCount: 2,
       maxCount: 15,
     });
+  });
+});
+
+describe("the Captains lobby switch (#1251)", () => {
+  const setup = (i: GroupSetupInput, maxCount = 15) => {
+    const result = validateGroupSetup(i, { maxCount });
+    if (!result.ok) throw new Error(`unexpected errors: ${result.errors}`);
+    return result.setup;
+  };
+
+  it("adds one hidden leads group after the typed rows, with every field explicit, while leaders are on", () => {
+    const groups = setup(
+      input({ captainsEnabled: true, captainsLobby: true }),
+    ).groups;
+    expect(groups.map((g) => [g.name, g.kind])).toEqual([
+      ["Group 1", "team"],
+      ["Group 2", "team"],
+      ["Leader lobby", "leads"],
+    ]);
+    expect(groups[2]).toEqual({
+      key: expect.stringMatching(/^g_[0-9a-f]{8}$/),
+      name: "Leader lobby",
+      kind: "leads",
+      size: null,
+      tag: "",
+      marker: "",
+      channelId: null,
+      captainId: null,
+      memberIds: [],
+    });
+  });
+
+  it("is named after the leader label", () => {
+    const groups = setup(
+      input({
+        captainsEnabled: true,
+        captainsLobby: true,
+        leaderLabel: "Squad Lead",
+      }),
+    ).groups;
+    expect(groups[2].name).toBe("Squad Lead lobby");
+  });
+
+  it("is ignored while leaders are off, like leader customisation", () => {
+    for (const captainsEnabled of [false, undefined]) {
+      const groups = setup(
+        input({ captainsEnabled, captainsLobby: true }),
+      ).groups;
+      expect(groups.map((g) => g.kind)).toEqual(["team", "team"]);
+    }
+  });
+
+  it("is off unless asked for", () => {
+    const groups = setup(input({ captainsEnabled: true })).groups;
+    expect(groups.map((g) => g.kind)).toEqual(["team", "team"]);
+  });
+
+  it("never makes a second leads group: a leads row among the rows is the lobby already", () => {
+    const groups = setup(
+      input({
+        captainsEnabled: true,
+        captainsLobby: true,
+        rows: [row(1), row(2, { name: "Command", kind: "leads" })],
+      }),
+    ).groups;
+    expect(groups.map((g) => [g.name, g.kind])).toEqual([
+      ["Group 1", "team"],
+      ["Command", "leads"],
+    ]);
+  });
+
+  it("is not a group to run an event with: it does not satisfy 'add at least one group'", () => {
+    const errors = errorsOf(
+      input({ captainsEnabled: true, captainsLobby: true, rows: [] }),
+    );
+    expect(errors).toEqual([
+      "Add at least one group, or switch groups off. Give each group a name.",
+    ]);
+  });
+
+  it("counts toward the group limit and says so", () => {
+    const errors = errorsOf(
+      input({ captainsEnabled: true, captainsLobby: true }),
+      2,
+    );
+    expect(errors).toEqual([
+      "An event can have at most 2 groups (events.groups.max_count); this has 3, counting the captains lobby.",
+    ]);
+    expect(() =>
+      setup(input({ captainsEnabled: true, captainsLobby: true }), 3),
+    ).not.toThrow();
+  });
+
+  it("takes a name no typed group has", () => {
+    const groups = setup(
+      input({
+        captainsEnabled: true,
+        captainsLobby: true,
+        rows: [row(1, { name: "leader LOBBY" }), row(2)],
+      }),
+    ).groups;
+    expect(groups[2].name).toBe("Leader lobby 2");
+  });
+
+  it("is read from the form, and a preset's leads row stays a row", () => {
+    expect(
+      parseGroupForm({ groups_captains: "1", groups_captains_lobby: "1" })
+        .captainsLobby,
+    ).toBe(true);
+    expect(parseGroupForm({ groups_captains: "1" }).captainsLobby).toBe(false);
+    const result = validateGroupSetup(
+      input({ presetId: "custom", rows: [row(1), row(2, { kind: "leads" })] }),
+      { maxCount: 15 },
+    );
+    expect(result.ok && result.setup.groups.map((g) => g.kind)).toEqual([
+      "team",
+      "leads",
+    ]);
+  });
+});
+
+describe("captainsLobbyName and hasCaptainsLobby", () => {
+  it("truncates a long label so the whole name fits, and numbers past a clash", () => {
+    const name = captainsLobbyName("L".repeat(60), []);
+    expect(name.length).toBeLessThanOrEqual(GROUP_NAME_MAX);
+    expect(name.endsWith(" lobby")).toBe(true);
+    const next = captainsLobbyName("L".repeat(60), [name]);
+    expect(next).not.toBe(name);
+    expect(next.length).toBeLessThanOrEqual(GROUP_NAME_MAX);
+    expect(next.endsWith(" lobby 2")).toBe(true);
+  });
+
+  it("falls back to the default label", () => {
+    expect(captainsLobbyName("  ", [])).toBe("Leader lobby");
+  });
+
+  it("reads the presence of a leads group", () => {
+    expect(hasCaptainsLobby(undefined)).toBe(false);
+    expect(hasCaptainsLobby([{ kind: "team" }, { kind: "open" }])).toBe(false);
+    expect(hasCaptainsLobby([{ kind: "team" }, { kind: "leads" }])).toBe(true);
   });
 });

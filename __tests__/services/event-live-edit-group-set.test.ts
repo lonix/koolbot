@@ -325,9 +325,13 @@ async function removeConfirmed(
 }
 
 describe("registration", () => {
-  it("lists remove then add, just before the groups switch (#1243), with letters-only ids and no duplicates", () => {
+  it("lists remove then add, then the lobby switch, just before the groups switch (#1243), with letters-only ids and no duplicates", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids.slice(-3, -1)).toEqual(["groupRemove", "groupAdd"]);
+    expect(ids.slice(-4, -1)).toEqual([
+      "groupRemove",
+      "groupAdd",
+      "captainsLobby",
+    ]);
     expect(groupSetRows.map((r) => r.id)).toEqual(["groupRemove", "groupAdd"]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const row of groupSetRows) expect(row.id).toMatch(/^[A-Za-z]+$/);
@@ -482,9 +486,17 @@ describe("add a group", () => {
   });
 
   it("creates the channel through the group pass, then follows up with the leaders channel and the controls", async () => {
-    await addForm({ kind: "leads" });
+    await addForm({ kind: "open" });
     expect(calls).toEqual(["create", "leads", "controls"]);
     expect(group(NEW).channelId).toBe("made-g_0000abcd");
+  });
+
+  it("refuses the leads kind: the leaders-only channel is the Captains lobby switch (#1251)", async () => {
+    const out = await addForm({ kind: "leads" });
+    expect(out).toMatchObject({ status: "invalid" });
+    expect(text(out)).toContain("Captains lobby switch");
+    expect(keysOf()).toEqual([A, B, C]);
+    expect(writes).toEqual([]);
   });
 
   it("an event whose channels do not exist yet owes nothing: no pass is asked for", async () => {
@@ -571,14 +583,6 @@ describe("add a group", () => {
       const out = await addForm({ name: "BRAVO" });
       expect(out).toMatchObject({ status: "invalid" });
       expect(writes).toEqual([]);
-    });
-
-    it("allows only one leads group", async () => {
-      group(C).kind = "leads";
-      const out = await addForm({ kind: "leads" });
-      expect(out).toMatchObject({ status: "invalid" });
-      expect(text(out)).toContain("only one leads group is allowed");
-      expect(keysOf()).toEqual([A, B, C]);
     });
 
     it("respects events.groups.max_count", async () => {

@@ -130,6 +130,14 @@ export interface GroupSetupInput {
   tagsEnabled?: boolean;
   /** The tag goes after the name (#1194); only meaningful with `tagsEnabled`. */
   tagsSuffix?: boolean;
+  /**
+   * The "Captains lobby" switch (#1251): a leaders-only voice channel, stored as
+   * a hidden `leads` group (the stored shape is unchanged). Only effective while
+   * `captainsEnabled` is on, so only stored that way; ignored otherwise (like
+   * `captainCustomisationEnabled`). A `leads` row already among `rows` (an old
+   * preset, a draft) is the lobby already: the switch then adds nothing.
+   */
+  captainsLobby?: boolean;
   /** `""` falls back to the global lead time. */
   channelLeadMinutes: string;
   rows: RawGroupRow[];
@@ -187,6 +195,7 @@ export const GROUP_FORM_FIELDS = {
   captainCustom: "groups_captain_custom",
   tags: "groups_tags",
   tagsSuffix: "groups_tags_suffix",
+  captainsLobby: "groups_captains_lobby",
   leadMinutes: "groups_lead_minutes",
 } as const;
 
@@ -227,6 +236,7 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
       str(GROUP_FORM_FIELDS.captainCustom).length > 0,
     tagsEnabled: str(GROUP_FORM_FIELDS.tags).length > 0,
     tagsSuffix: str(GROUP_FORM_FIELDS.tagsSuffix).length > 0,
+    captainsLobby: str(GROUP_FORM_FIELDS.captainsLobby).length > 0,
     channelLeadMinutes: str(GROUP_FORM_FIELDS.leadMinutes),
     rows,
   };
@@ -343,6 +353,66 @@ export function newGroupKey(taken: ReadonlySet<string>): string {
   return key;
 }
 
+/** Name stem of the captains lobby's channel: "<leader label> lobby" ("Captain lobby"). */
+const LOBBY_SUFFIX = " lobby";
+
+/**
+ * The name the captains lobby's hidden `leads` group gets (#1251): the leader
+ * label and "lobby", made unique among `taken` (names and the names groups go
+ * back to, compared case-insensitively) with a number, and kept within
+ * `GROUP_NAME_MAX`. Pure, so the event form, the live-edit validation and the
+ * write all derive the same name from the same state.
+ */
+export function captainsLobbyName(
+  leaderLabel: string,
+  taken: Iterable<string>,
+): string {
+  const used = new Set<string>();
+  for (const name of taken) used.add(name.toLowerCase());
+  const label = normalizeGroupText(leaderLabel) || DEFAULT_LEADER_LABEL;
+  const make = (n: number): string => {
+    const tail = `${LOBBY_SUFFIX}${n === 1 ? "" : ` ${n}`}`;
+    return `${label.slice(0, GROUP_NAME_MAX - tail.length)}${tail}`.trim();
+  };
+  for (let n = 1; ; n++) {
+    const candidate = make(n);
+    if (!used.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/**
+ * A name a host typed for another group is the captains lobby's own name. The
+ * lobby is hidden from the lists, so the generic "already used by another group"
+ * would name a group the host cannot see: callers use this to say what it is.
+ */
+export function clashesWithCaptainsLobby(
+  groups:
+    | ReadonlyArray<{ key: string; kind?: string; name?: string }>
+    | null
+    | undefined,
+  groupKey: string,
+  name: string,
+): boolean {
+  const folded = normalizeGroupText(name).toLowerCase();
+  return (groups ?? []).some(
+    (g) =>
+      g.kind === "leads" &&
+      g.key !== groupKey &&
+      (g.name ?? "").toLowerCase() === folded,
+  );
+}
+
+/** The refusal text for {@link clashesWithCaptainsLobby}. */
+export const captainsLobbyNameTaken = (name: string): string =>
+  `"${name}" is the name of the captains lobby, which is not listed here. Pick a different name.`;
+
+/** Whether an event's groups hold the captains lobby (a `leads` group). */
+export function hasCaptainsLobby(
+  groups: ReadonlyArray<{ kind?: string }> | null | undefined,
+): boolean {
+  return (groups ?? []).some((g) => g.kind === "leads");
+}
+
 /** Clamp the two config values to a usable pair: 1 <= default <= max <= hard max. */
 export function resolveGroupCountLimits(
   defaultCount: number,
@@ -445,9 +515,37 @@ export function validateGroupSetup(
     errors.push(
       "Add at least one group, or switch groups off. Give each group a name.",
     );
-  } else if (rows.length > maxCount) {
+  }
+  // The captains lobby (#1251) is a hidden `leads` group the switch adds. It is
+  // added AFTER the "at least one group" check (a lobby alone is no event setup),
+  // only while leaders are on, and never twice (a `leads` row among the rows
+  // already is the lobby). It counts toward the limit: it is a channel.
+  let lobbyAdded = false;
+  if (
+    rows.length > 0 &&
+    input.captainsLobby === true &&
+    input.captainsEnabled === true &&
+    !rows.some((r) => r.kind === "leads")
+  ) {
+    rows = [
+      ...rows,
+      {
+        position: rows.length + 1,
+        name: captainsLobbyName(
+          leaderLabel,
+          rows.map((r) => normalizeGroupText(r.name)),
+        ),
+        kind: "leads",
+        size: "",
+        tag: "",
+        marker: "",
+      },
+    ];
+    lobbyAdded = true;
+  }
+  if (rows.length > maxCount) {
     errors.push(
-      `An event can have at most ${maxCount} groups (events.groups.max_count); this has ${rows.length}.`,
+      `An event can have at most ${maxCount} groups (events.groups.max_count); this has ${rows.length}${lobbyAdded ? ", counting the captains lobby" : ""}.`,
     );
   }
 

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
-import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderEventsPage, renderGroupRow } from "../../src/web/admin-views.js";
 import { validateGroupSetup } from "../../src/services/event-groups.js";
 
 const COMMON = {
@@ -19,10 +19,11 @@ const COMMON = {
   rows: [],
 };
 
-function page(maxCount = 15, defaultCount = 2): string {
+function page(maxCount = 15, defaultCount = 2, presets?: unknown): string {
   return renderEventsPage({
     ...COMMON,
     groupLimits: { defaultCount, maxCount },
+    ...(presets ? { groupPresets: presets } : {}),
   } as never);
 }
 
@@ -31,8 +32,9 @@ function boot(
   maxCount = 15,
   defaultCount = 2,
   restore?: Record<string, unknown>,
+  presets?: unknown,
 ): JSDOM {
-  let html = page(maxCount, defaultCount);
+  let html = page(maxCount, defaultCount, presets);
   if (restore) {
     // The page as it comes back after a refused submit.
     html = html.replace(
@@ -371,5 +373,142 @@ describe("restoring a draft after a refused submit (#1188)", () => {
       .find((c) => c.includes("koolbot-event-form-draft"));
     dom.window.eval(code as string);
     expect(field(dom, "group_0_name").value).toBe("");
+  });
+});
+
+describe("the Captains lobby switch of the event form (#1251)", () => {
+  const OLD_PRESET = {
+    id: "lib:old-command",
+    label: "Command and squads",
+    description: "saved before the switch",
+    groupLabel: "Squad",
+    groups: [
+      { name: "Alpha", kind: "team", size: 4, tag: "", marker: "" },
+      { name: "Command", kind: "leads", size: null, tag: "", marker: "" },
+      { name: "Bravo", kind: "team", size: 4, tag: "", marker: "" },
+    ],
+  };
+  const PLAIN_PRESET = {
+    id: "lib:plain",
+    label: "Two teams",
+    description: "",
+    groupLabel: "Team",
+    groups: [
+      { name: "Red", kind: "team", size: null, tag: "", marker: "" },
+      { name: "Blue", kind: "team", size: null, tag: "", marker: "" },
+    ],
+  };
+  const choose = (dom: JSDOM, id: string): void => {
+    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
+    select.value = id;
+    select.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const captains = (dom: JSDOM, on: boolean): void => {
+    const box = field(dom, "groups_captains");
+    box.checked = on;
+    box.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+
+  it("is a checkbox, off by default, that says it needs leaders", () => {
+    const dom = boot();
+    const lobby = field(dom, "groups_captains_lobby");
+    expect(lobby.type).toBe("checkbox");
+    expect(lobby.checked).toBe(false);
+    expect(
+      dom.window.document.body.textContent?.includes("Captains lobby"),
+    ).toBe(true);
+  });
+
+  it("is disabled (so not posted) until group leaders is ticked, and follows it", () => {
+    const dom = boot();
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+    captains(dom, true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    captains(dom, false);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+  });
+
+  it("a preset with a leads row ticks the switch and does not put that row in the list", () => {
+    const dom = boot(15, 2, undefined, [OLD_PRESET, PLAIN_PRESET]);
+    choose(dom, "lib:old-command");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(field(dom, "group_0_name").value).toBe("Alpha");
+    expect(field(dom, "group_1_name").value).toBe("Bravo");
+    expect(field(dom, "group_1_kind").value).toBe("team");
+    // The kind select offers no leads choice for a new row.
+    const kinds = [
+      ...dom.window.document.querySelectorAll(
+        'select[name="group_0_kind"] option',
+      ),
+    ].map((o) => (o as HTMLOptionElement).value);
+    expect(kinds).toEqual(["team", "open"]);
+  });
+
+  it("a preset without a leads row unticks it again", () => {
+    const dom = boot(15, 2, undefined, [OLD_PRESET, PLAIN_PRESET]);
+    choose(dom, "lib:old-command");
+    choose(dom, "lib:plain");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+    expect(field(dom, "group_0_name").value).toBe("Red");
+  });
+
+  it("a preset that fits only without its lobby row is refused at the cap, like the server does", () => {
+    // Three rows including the lobby row: a cap of 2 refuses it.
+    const dom = boot(2, 2, undefined, [OLD_PRESET]);
+    field(dom, "group_0_name").value = "Mine";
+    choose(dom, "lib:old-command");
+    expect(field(dom, "group_0_name").value).toBe("Mine");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+  });
+
+  it("is put back from a kept draft, with its disabled state following the leaders box", () => {
+    const dom = boot(15, 2, {
+      groups_enabled: true,
+      groups_captains: true,
+      groups_captains_lobby: true,
+    });
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    const off = boot(15, 2, {
+      groups_enabled: true,
+      groups_captains: false,
+      groups_captains_lobby: true,
+    });
+    expect(field(off, "groups_captains_lobby").disabled).toBe(true);
+  });
+
+  it("a draft from before the switch that holds a leads row ticks the lobby box and does not restore that row as a team", () => {
+    const dom = boot(15, 3, {
+      groups_enabled: true,
+      groups_captains: true,
+      group_0_name: "Alpha",
+      group_0_kind: "team",
+      group_0_size: "4",
+      group_1_name: "Command",
+      group_1_kind: "leads",
+      group_1_tag: "C",
+      group_2_name: "Bravo",
+      group_2_kind: "open",
+    });
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    // The leads row is gone from the list; the other rows are intact.
+    expect(field(dom, "group_1_name").value).toBe("");
+    expect(field(dom, "group_1_tag").value).toBe("");
+    expect(field(dom, "group_0_name").value).toBe("Alpha");
+    expect(field(dom, "group_0_size").value).toBe("4");
+    expect(field(dom, "group_2_name").value).toBe("Bravo");
+    expect(field(dom, "group_2_kind").value).toBe("open");
+  });
+
+  it("a row that is already a leads group (an old preset in the preset editor) keeps its own option, so saving never turns it into a team", () => {
+    const html = renderGroupRow("0", "1", { name: "Command", kind: "leads" });
+    expect(html).toContain('<option value="leads" selected>');
+    const fresh = renderGroupRow("0", "1", { name: "Red", kind: "team" });
+    expect(fresh).not.toContain('value="leads"');
   });
 });

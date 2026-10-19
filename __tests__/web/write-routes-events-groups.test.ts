@@ -220,6 +220,48 @@ describe("POST /events/create with groups (#1188)", () => {
     });
   });
 
+  it("stores the Captains lobby as a hidden leads group when leaders and the switch are ticked (#1251)", async () => {
+    const flash = await create({
+      groups_enabled: "1",
+      groups_captains: "1",
+      groups_captains_lobby: "1",
+      group_0_name: "Alpha",
+      group_1_name: "Bravo",
+    });
+    expect(flash.type).toBe("ok");
+    const arg = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect(arg.groups?.groups.map((g) => [g.name, g.kind, g.size])).toEqual([
+      ["Alpha", "team", null],
+      ["Bravo", "team", null],
+      ["Leader lobby", "leads", null],
+    ]);
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      details: { groups: 3, captainsEnabled: true, captainsLobby: true },
+    });
+  });
+
+  it("ignores the Captains lobby while leaders are off, and without the switch (#1251)", async () => {
+    const off = await create({
+      groups_enabled: "1",
+      groups_captains_lobby: "1",
+      group_0_name: "Alpha",
+    });
+    expect(off.type).toBe("ok");
+    const none = await create({
+      groups_enabled: "1",
+      groups_captains: "1",
+      group_0_name: "Alpha",
+    });
+    expect(none.type).toBe("ok");
+    for (const call of mockCreateEvent.mock.calls) {
+      const arg = call[0] as CreateInput;
+      expect(arg.groups?.groups.map((g) => g.kind)).toEqual(["team"]);
+    }
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      details: { captainsLobby: false },
+    });
+  });
+
   it("uses a preset's groups when no rows were filled in", async () => {
     const flash = await create({
       groups_enabled: "1",

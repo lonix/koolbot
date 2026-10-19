@@ -7,7 +7,8 @@
  * - filters: equality (a missing field equals null; an array field equals a
  *   scalar it contains, and an array equals an array of the same elements in
  *   the same order), `$in`, `$ne`, `$elemMatch`, `$size`, `$and`, `$type`, and
- *   the dotted path `groups.key` (any element, or with `$ne` no element);
+ *   the dotted paths `groups.key` and `groups.kind` (any element, or with `$ne`
+ *   no element);
  * - updates: `$set` and `$unset` on top-level fields and on
  *   `groups.$[<id>].<field>` selected by `arrayFilters` (every identifier must
  *   have exactly one filter and every filter must be used, as MongoDB demands),
@@ -90,12 +91,16 @@ export function matchDoc(doc: Json, filter: unknown): boolean {
     if (k === "$or") return (v as Json[]).some((f) => matchDoc(doc, f));
     if (k === "$nor") return (v as Json[]).every((f) => !matchDoc(doc, f));
     if (k.startsWith("$")) throw new Error(`unsupported operator ${k}`);
-    if (k === "groups.key") {
-      const keys = ((doc.groups as Json[] | undefined) ?? []).map((g) => g.key);
+    // `groups.key` and `groups.kind`: any element, or with `$ne` no element.
+    const groupPath = /^groups\.(key|kind)$/.exec(k);
+    if (groupPath) {
+      const vals = ((doc.groups as Json[] | undefined) ?? []).map(
+        (g) => g[groupPath[1]],
+      );
       if (v !== null && typeof v === "object" && "$ne" in (v as Json)) {
-        return keys.every((x) => x !== (v as Json).$ne);
+        return vals.every((x) => x !== (v as Json).$ne);
       }
-      return keys.some((x) => opMatch(x, v));
+      return vals.some((x) => opMatch(x, v));
     }
     if (k.includes(".")) throw new Error(`unsupported path ${k}`);
     return opMatch(doc[k], v);

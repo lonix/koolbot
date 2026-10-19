@@ -260,6 +260,14 @@ export const EVENT_PRESETS_SCRIPT =
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el)return;" +
+  // A copied preset (?from=, ?fromEvent=) that is refused comes back as a blank
+  // editor whose kind selects have no leads option; a leads row of the draft
+  // (the Captains lobby of an older preset or event) gets its option back, so
+  // the retry keeps it instead of defaulting to a team.
+  "if(el.tagName==='SELECT'&&/^group_\\d+_kind$/.test(k)&&d[k]==='leads'){var has=false;" +
+  "Array.prototype.forEach.call(el.options,function(o){if(o.value==='leads')has=true});" +
+  "if(!has){var lo=document.createElement('option');lo.value='leads';" +
+  "lo.textContent='Leads (leaders and host only; use the Captains lobby switch instead)';el.appendChild(lo)}}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 
@@ -340,7 +348,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     </div>
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
-    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>), at most one of kind Leads. Rows left completely empty are ignored.</p>
+    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). A row of kind Leads is the Captains lobby of a preset saved earlier (at most one): it is kept as it is, and choosing the preset on the event form ticks Captains lobby instead of adding a row. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
     ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
   </form>`;

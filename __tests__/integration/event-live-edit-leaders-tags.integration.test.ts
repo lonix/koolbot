@@ -34,6 +34,7 @@ describeWithMongo(
     const GUILD = "guild-1";
     let calls: string[] = [];
     const effects: LiveEditEffects = {
+      eventVoiceInUse: () => true,
       syncLeadsAccess: async (_g, e) => {
         calls.push(`leads:${e}`);
       },
