@@ -1,0 +1,75 @@
+name: Stale Branch Report (dry run)
+
+# Lists remote branches that are candidates for cleanup. It is a DRY RUN ONLY:
+# `dry-run: 'true'` is hardcoded below, there is no input that can change it, and the
+# token is read-only, so even a bug could not delete a branch.
+#
+# Tool: cbrgm/cleanup-stale-branches-action v1.2.14. The candidate list is written to the
+# 'Run cleanup' step log (the action does not write a job summary and a later step cannot
+# read another step's log).
+#
+# What the tool skips (read from its source, main.go at the pinned commit): the default
+# branch, protected branches, any branch that is the head of an open PR (all open PRs are
+# fetched once, 100 per page, every page; an API error aborts with exit 1) and any branch
+# that is the base of an open PR (one query per branch).
+#
+# Known limits, verified from that source. Read the step log; do not trust an empty list:
+#   (a) action.yml runs the floating image `docker://ghcr.io/cbrgm/cleanup-stale-branches-action:v1`,
+#       so the commit-SHA pin freezes the action definition but NOT the binary that runs.
+#   (b) The rate-limit guard exits 0 (no error) with a truncated or empty list once 95% of the
+#       API rate limit is used (roughly 2 core calls per branch; GITHUB_TOKEN has a low hourly
+#       limit, so a repository with many branches can reach it).
+#   (c) If a branch's commit lookup or base-PR lookup fails, the tool logs "- Skipping ..." and
+#       continues, still exiting 0; a failed branch listing logs "Error listing branches" and
+#       returns a partial list with exit 0. Check the step log for these lines.
+#
+# Real deletion is a separate, explicit decision and is NOT part of this workflow. It would
+# need `contents: write` on the job (DeleteRef) and `dry-run: 'false'`.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 04:17 UTC (off the hour to avoid the scheduler's top-of-hour load).
+    - cron: '17 4 * * 1'
+
+permissions: {}
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Stale branch report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # list branches and commits
+      pull-requests: read # list open PRs (head and base protection)
+    steps:
+      - name: Run cleanup
+        uses: cbrgm/cleanup-stale-branches-action@d38074fb45d1898a14c03e2bc32a05e9161a5823 # v1.2.14
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          # Comma separated WITHOUT spaces (the tool does not trim). Plain prefix
+          # matches, not globs. The default and protected branches are skipped by the tool.
+          ignored-prefixes: 'release-please--,dependabot/'
+          last-commit-age-days: '60'
+          dry-run: 'true'
+          rate-limit: 'true'
+
+      - name: Job summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo '## Stale branch report (dry run, nothing was deleted)'
+            echo
+            echo 'This was a dry run only. The list of branches that would be deleted is in the **Run cleanup** step log.'
+            echo
+            echo 'No branch with an open PR (head or base) is ever listed.'
+            echo
+            echo 'Read the step log rather than trusting an empty list: the rate-limit guard and lookup errors'
+            echo 'end the run early or skip branches while still exiting 0 (search the log for "rate limit",'
+            echo '"Error listing branches" and "- Skipping" lines with an error text).'
+          } >> "$GITHUB_STEP_SUMMARY"
