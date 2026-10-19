@@ -506,7 +506,11 @@ describe("validatePresetForm", () => {
 
     it("a lobby alone is no preset", () => {
       const r = svc.validatePresetForm(
-        { preset_name: "Only lobby", groups_captains_lobby: "1" },
+        {
+          preset_name: "Only lobby",
+          groups_captains_lobby: "1",
+          lobby_name: "War room",
+        },
         { maxCount: 15 },
       );
       expect(!r.ok && r.errors[0]).toBe(

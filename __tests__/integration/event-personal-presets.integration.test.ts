@@ -75,6 +75,7 @@ describeWithMongo("event personal presets (#1216)", () => {
         group_0_marker: "🟢",
         group_1_name: "Command",
         group_1_kind: "leads",
+        groups_captains_lobby: "1",
       },
       { maxCount: 15 },
     );
