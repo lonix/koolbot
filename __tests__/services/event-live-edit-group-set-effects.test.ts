@@ -424,6 +424,47 @@ describe("emptyGroupChannel", () => {
     expect(second.status).toBe("empty");
   });
 
+  it("emptyGroupChannels: several channels share ONE run, so one budget of 60 moves, and the rest is reported by channel", async () => {
+    const w = makeWorld();
+    for (let i = 0; i < 40; i++) w.place(`a${i}`, CH_A);
+    for (let i = 0; i < 40; i++) w.place(`b${i}`, CH_B);
+    const fx = createLiveEditEffects(w.client);
+    const targets = [
+      { groupKey: A, channelId: CH_A },
+      { groupKey: "g_00000002", channelId: CH_B },
+    ];
+    const first = await fx.emptyGroupChannels(GUILD, EV, targets, () => false);
+    // 80 people, 60 attempts for the whole call (not 60 per channel).
+    expect(w.patch).toHaveBeenCalledTimes(60);
+    expect(first).toEqual({
+      status: "done",
+      moved: expect.any(Array),
+      occupied: [{ groupKey: "g_00000002", remaining: 20 }],
+      unconfirmed: 0,
+      detail: "20 not attempted (over the limit of 60 per run)",
+    });
+    const second = await fx.emptyGroupChannels(GUILD, EV, targets, () => false);
+    expect(second).toMatchObject({ status: "done", occupied: [] });
+  });
+
+  it("emptyGroupChannels: a refusal, and a group that changed, move nobody", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_A);
+    const fx = createLiveEditEffects(w.client);
+    expect(
+      await fx.emptyGroupChannels(
+        GUILD,
+        EV,
+        [{ groupKey: A, channelId: "ch-other" }],
+        () => false,
+      ),
+    ).toEqual({
+      status: "failed",
+      reason: "The group changed, so nobody was moved.",
+    });
+    expect(w.patch).not.toHaveBeenCalled();
+  });
+
   it("a bot sitting in the channel keeps it occupied", async () => {
     const w = makeWorld();
     w.place("music-bot", CH_A);

@@ -385,13 +385,29 @@ describe("the switch on the page", () => {
     expect(r.text).not.toContain("s_groupsEnabled");
   });
 
-  it("says so when no preset is available, and when the library could not be read", async () => {
+  it("with no preset available (or an unreadable library) the host can still set up groups of their own", async () => {
     catalog.entries = [];
     catalog.state = "all-unreadable";
     const r = await call(panel());
-    expect(r.text).toContain("no preset is available on this server right now");
+    expect(r.text).toContain("No preset is available on this server right now");
     expect(r.text).toContain("The preset library could not be read");
     expect(r.text).not.toContain('name="groups_pick"');
+    expect(r.text).toContain('name="custom_name_1"');
+    expect(r.text).toContain('name="custom_name_6"');
+    expect(r.text).not.toContain('name="custom_name_7"');
+  });
+
+  it("offers the own-groups rows next to the preset select", async () => {
+    const r = await call(panel());
+    // Unused rows must not block the submit in the browser (the server checks
+    // the rows it uses): only this form skips the browser's field checks.
+    expect(r.text).toContain(
+      '<button type="submit" formnovalidate>Switch groups on</button>',
+    );
+    expect(r.text).toContain('name="groups_pick"');
+    expect(r.text).toContain('name="custom_kind_1"');
+    expect(r.text).toContain('name="custom_size_1"');
+    expect(r.text).toContain('name="custom_tag_1"');
   });
 
   it("an event with kept groups lists them and offers to bring them back", async () => {
@@ -410,6 +426,7 @@ describe("the switch on the page", () => {
   it("an event with groups on offers the switch-off, and the retry of a missing channel", async () => {
     store.set(EVENT_ID, withGroups("c1"));
     const r = await call(panel());
+    expect(r.text).not.toContain("formnovalidate");
     expect(r.text).toContain("Groups are on");
     expect(r.text).toContain("2 team");
     expect(r.text).toContain("1 with a voice channel");
@@ -540,6 +557,82 @@ describe("switching on", () => {
         ],
       },
     });
+  });
+
+  it("switches on with the host's own groups: names, kinds, sizes and tags, blank rows skipped, no preset", async () => {
+    const r = await post("settings", {
+      b_groupsEnabled: '{"on":false}',
+      groups_pick: "",
+      custom_name_1: "  Alpha  ",
+      custom_kind_1: "team",
+      custom_size_1: "4",
+      custom_tag_1: "AL",
+      custom_name_2: "",
+      custom_size_2: "7",
+      custom_name_3: "Command",
+      custom_kind_3: "leads",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(doc().groupsEnabled).toBe(true);
+    expect(doc().presetId).toBeNull();
+    expect(doc().groupLabel).toBe("Team");
+    expect(doc().tagsEnabled).toBe(false);
+    expect(
+      groups().map((g) => [g.name, g.kind, g.size, g.tag, g.memberIds]),
+    ).toEqual([
+      ["Alpha", "team", 4, "AL", []],
+      ["Command", "leads", null, "", []],
+    ]);
+    expect(groups().every((g) => !!g.channelId)).toBe(true);
+    expect(passes).toEqual(["create", "leads", "controls"]);
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it("own groups are checked with the event form's rules, naming the row and field, and nothing is saved", async () => {
+    const bad = async (extra: Json): Promise<string> => {
+      const r = await post("settings", {
+        b_groupsEnabled: '{"on":false}',
+        custom_name_1: "Alpha",
+        ...extra,
+      });
+      expect(doc().groupsEnabled).toBe(false);
+      return flashOf(r.location).msg;
+    };
+    expect(await bad({ custom_size_1: "100" })).toContain("Group 1 size:");
+    expect(await bad({ custom_tag_1: "WAYTOOLONGTAG" })).toContain(
+      "Group 1 tag:",
+    );
+    expect(await bad({ custom_name_2: "x", custom_kind_2: "boss" })).toContain(
+      "Group 2 kind: must be team, open or leads.",
+    );
+    expect(await bad({ custom_name_2: "alpha" })).toContain("already used by");
+    expect(
+      await bad({
+        custom_name_2: "L1",
+        custom_kind_2: "leads",
+        custom_name_3: "L2",
+        custom_kind_3: "leads",
+      }),
+    ).toContain("only one leads group");
+    expect(writes).toEqual([]);
+  });
+
+  it("a chosen preset wins over the own-groups rows", async () => {
+    const r = await post("settings", {
+      b_groupsEnabled: '{"on":false}',
+      groups_pick: "lib:red-blue",
+      custom_name_1: "Mine",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(groups().map((g) => g.name)).toEqual(["Red", "Blue"]);
+  });
+
+  it("the own-groups rows are refused for an event that has kept groups (the page was out of date)", async () => {
+    store.set(EVENT_ID, kept());
+    const r = await post("settings", onForm({ custom_name_1: "Mine" }));
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("kept from before");
+    expect(doc().groupsEnabled).toBe(false);
   });
 
   it("a posted group setup is never believed: only the server's preset or none", async () => {

@@ -144,6 +144,13 @@ describeWithMongo(
         return { failures: [] };
       },
       emptyGroupChannel: async () => ({ status: "empty", moved: [] }),
+      emptyGroupChannels: async () => ({
+        status: "done",
+        moved: [],
+        occupied: [],
+        unconfirmed: 0,
+        detail: "",
+      }),
       removeGroupChannel: async () => ({ status: "removed" }),
       removeAllGroupChannels: async (guildId, eventId, opts) => {
         const { channels, guild } = realChannels(guildId);
