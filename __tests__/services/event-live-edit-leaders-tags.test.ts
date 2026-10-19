@@ -240,6 +240,8 @@ describe("registration", () => {
       // Removing and adding groups (#1242) come last.
       "groupRemove",
       "groupAdd",
+      // The Captains lobby switch (#1251) is the very last row.
+      "captainsLobby",
     ]);
   });
 });

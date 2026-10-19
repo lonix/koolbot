@@ -9,7 +9,11 @@
  */
 
 import { escapeHtml } from "./html.js";
-import { GROUP_LABEL_MAX, GROUP_TAG_MAX } from "../services/event-groups.js";
+import {
+  GROUP_LABEL_MAX,
+  GROUP_TAG_MAX,
+  hasCaptainsLobby,
+} from "../services/event-groups.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
 import {
   groupTagBaseField,
@@ -30,6 +34,8 @@ export interface LeadersTagsView {
   leaderLabel: string;
   tags: boolean;
   tagsSuffix: boolean;
+  /** The Captains lobby switch (#1251): the event has a leads group. */
+  lobby: boolean;
   teams: LeadersTagsTeamView[];
 }
 
@@ -63,6 +69,7 @@ export function leadersTagsViewOf(
     leaderLabel: event.leaderLabel ? event.leaderLabel : "Leader",
     tags: event.tagsEnabled === true,
     tagsSuffix: event.tagsSuffix === true,
+    lobby: hasCaptainsLobby(event.groups),
     teams: (event.groups ?? [])
       .filter((g) => g.kind === "team")
       .map((g) => ({
@@ -92,6 +99,27 @@ function onOff(
 <option value="0"${on ? "" : " selected"}>${escapeHtml(texts.off)}</option>
 </select>
 ${hidden(baseField(rowId), on ? "1" : "0")}
+<p class="muted">${escapeHtml(hint)}</p></div>`;
+}
+
+/**
+ * The Captains lobby switch (#1251). It follows the leaders switch: with leaders
+ * off and no lobby it is disabled (a disabled field is not posted, so the row is
+ * untouched); a lobby that exists can always be turned off.
+ */
+function renderLobby(d: LeadersTagsView): string {
+  const disabled = !d.leaders && !d.lobby;
+  const hint = disabled
+    ? "Turn leaders on and save first: the lobby is for the host and the current leaders."
+    : !d.leaders
+      ? "Leaders are off, so only you can join the lobby now. Turn it off to remove its channel, or turn leaders on to let the current leaders in."
+      : "A separate voice channel that only you and the current leaders can join; nobody is assigned to it. Off by default: leaders then talk in the main channel. Turning it on creates the channel (at once while the event runs). Turning it off moves everybody in it to the main channel, you included, and deletes it; you are asked to confirm first when the channel exists.";
+  return `<div class="field"><label for="host-settings-lobby">Captains lobby</label>
+<select id="host-settings-lobby" name="${escapeHtml(valueField("captainsLobby"))}"${disabled ? " disabled" : ""}>
+<option value="1"${d.lobby ? " selected" : ""}>On: a leaders-only voice channel</option>
+<option value="0"${d.lobby ? "" : " selected"}>Off: leaders talk in the main channel</option>
+</select>
+${hidden(baseField("captainsLobby"), d.lobby ? "1" : "0")}
 <p class="muted">${escapeHtml(hint)}</p></div>`;
 }
 
@@ -136,6 +164,7 @@ ${onOff(
   { on: "On", off: "Off" },
   "Only has an effect while leaders are on. Turning it off removes the Customise button at once and refuses a form that is already open. The names and tags leaders chose are kept; reset a team in the Customise section to put the originals back.",
 )}
+${renderLobby(d)}
 </fieldset>
 <fieldset class="field"><legend>Clan tags</legend>
 ${onOff(

@@ -55,6 +55,7 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
   groups: [
     {
       key: "g_00000001",
+      kind: "team",
       hasChannel: true,
       name: 'Heli <b>"x"</b>',
       marker: "<i>",
@@ -66,6 +67,7 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
     },
     {
       key: "g_00000002",
+      kind: "open",
       hasChannel: false,
       name: "Logi",
       marker: "",
@@ -399,7 +401,7 @@ describe("renderGroupSetForms (#1242)", () => {
     expect(out).toContain("you included");
   });
 
-  it("the add form carries the minted key and the empty base, and the three kinds", () => {
+  it("the add form carries the minted key and the empty base, and the two kinds (leads is the Captains lobby switch)", () => {
     const out = html();
     expect(out).toContain('name="s_groupAdd_key" value="g_0000abcd"');
     expect(out).toContain('name="b_groupAdd" value="[]"');
@@ -407,9 +409,10 @@ describe("renderGroupSetForms (#1242)", () => {
     expect(out).toContain('maxlength="50"');
     expect(out).toContain('name="s_groupAdd_tag"');
     expect(out).toContain('maxlength="8"');
-    for (const kind of ["team", "open", "leads"]) {
+    for (const kind of ["team", "open"]) {
       expect(out).toContain(`<option value="${kind}">`);
     }
+    expect(out).not.toContain('<option value="leads"');
     expect(out).toContain("Add a squad");
   });
 

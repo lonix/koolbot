@@ -9,7 +9,8 @@
  * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
  * leaders, leader customisation, the leader label, tagging, the tag position
  * and each team's tag (`event-live-edit-leaders-tags.ts`). #1242 adds and
- * removes groups (`event-live-edit-group-set.ts`). All are listed in
+ * removes groups (`event-live-edit-group-set.ts`). #1251 adds the Captains lobby
+ * switch (`event-live-edit-captains-lobby.ts`). All are listed in
  * `LIVE_EDIT_ROWS` below. Later steps (a group's kind, #1243 groups on/off) only
  * ADD ROWS (see "Extension contract").
  *
@@ -169,6 +170,7 @@ import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
 import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import { groupSetRows } from "./event-live-edit-group-set.js";
+import { captainsLobbyRow } from "./event-live-edit-captains-lobby.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -580,6 +582,9 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   ...leadersTagsRows,
   // Removing and adding groups (#1242): `event-live-edit-group-set.ts`.
   ...groupSetRows,
+  // The Captains lobby switch (#1251), last: it adds or removes a group, so the
+  // positional name and size writes land before it can shift a position.
+  captainsLobbyRow,
 ];
 
 // ---------------------------------------------------------------

@@ -2468,10 +2468,22 @@ function renderCoverCell(
 
 // ---------- Event groups form section (#1188) ----------
 
+/**
+ * The kinds a host can pick for a group. `leads` is not one of them (#1251): the
+ * leaders-only channel is the "Captains lobby" switch. It stays valid in stored
+ * data and in presets saved before, so a row that already IS `leads` is still
+ * rendered with its own option (`LEADS_KIND_OPTION`) and is never turned into a
+ * team by opening and saving it.
+ */
 export const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
   ["team", "Team (members belong to it)"],
   ["open", "Open (anyone can join, e.g. spectators)"],
-  ["leads", "Leads (leaders and host only, at most one)"],
+];
+
+/** The option of a row that is already a leads group (an old preset). */
+const LEADS_KIND_OPTION: [string, string] = [
+  "leads",
+  "Leads (leaders and host only; use the Captains lobby switch instead)",
 ];
 
 /**
@@ -2490,10 +2502,16 @@ export function renderGroupRow(
   },
 ): string {
   const field = (f: string): string => `group_${index}_${f}`;
-  const kinds = GROUP_KIND_OPTIONS.map(
-    ([value, label]) =>
-      `<option value="${value}"${group?.kind === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
-  ).join("");
+  const kinds = (
+    group?.kind === "leads"
+      ? [...GROUP_KIND_OPTIONS, LEADS_KIND_OPTION]
+      : GROUP_KIND_OPTIONS
+  )
+    .map(
+      ([value, label]) =>
+        `<option value="${value}"${group?.kind === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
+    )
+    .join("");
   return `<fieldset data-group-row>
         <legend>Group ${position}</legend>
         <label>Group ${position} name
@@ -2581,6 +2599,7 @@ function renderGroupsSection(
       </label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainCustom}" value="1"> Leaders can customise: each leader may rename their own team and set its tag from a button in the team's channel chat. Only used when group leaders is ticked. The host can reset any team from the host panel.</label>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"> Captains lobby: a separate voice channel that only you and the current leaders can join. Nobody is assigned to it. Only used when group leaders is ticked; leave it off and leaders talk in the main channel. You can switch it on or off from the host panel while the event runs.</label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"> Clan tags: while the event runs, put each team's tag on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.</label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tagsSuffix}" value="1"> Put the tag after the name (Alice [RED]) instead of before it</label>
       <label>Create channels this many minutes before the start (empty = server default)
@@ -2633,6 +2652,11 @@ const EVENT_GROUPS_SCRIPT =
   "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
   "form.elements['groups_enabled'].addEventListener('change',validity);" +
   "validity();" +
+  // The captains lobby needs group leaders: the box is disabled (and so not
+  // posted) while leaders are unticked, the server ignores it then too.
+  "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked}" +
+  "if(form.elements['groups_captains'])form.elements['groups_captains'].addEventListener('change',lobby);" +
+  "lobby();" +
   "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
   "form.elements['group_'+i+'_name'].value=g.name||'';" +
   "form.elements['group_'+i+'_kind'].value=g.kind||'team';" +
@@ -2644,7 +2668,11 @@ const EVENT_GROUPS_SCRIPT =
   "if(preset)preset.addEventListener('change',function(){" +
   "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
   "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
-  "if(g.length>max){preset.value='';return}" +
+  // A preset's leads row (an old preset) is the captains lobby: it ticks the
+  // switch instead of becoming a row of the list. It still counts toward the cap.
+  "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
+  "if(g.length+(hadLobby?1:0)>max){preset.value='';return}" +
+  "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
   "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
   "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
   "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
@@ -2683,7 +2711,7 @@ const EVENT_GROUPS_SCRIPT =
   "if(el.tagName==='SELECT'){var ok=false;Array.prototype.forEach.call(el.options,function(o){if(o.value===d[k]&&!o.disabled)ok=true});if(!ok)return}" +
   "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
   // Setting `checked` fires no change event, so reapply the number limits by hand.
-  "validity()}}catch(x){}" +
+  "validity();lobby()}}catch(x){}" +
   "})();";
 
 export function renderEventsPage(props: EventsProps): string {

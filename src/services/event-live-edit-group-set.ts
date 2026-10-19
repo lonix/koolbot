@@ -92,7 +92,9 @@ import { Event, type IEvent } from "../models/event.js";
 import { EVENT_GROUP_KINDS } from "../models/event-group-kinds.js";
 import {
   GROUP_KEY_PATTERN,
+  captainsLobbyNameTaken,
   checkGroupName,
+  clashesWithCaptainsLobby,
   checkGroupSize,
   checkGroupTag,
   GROUP_COUNT_HARD_MAX,
@@ -141,6 +143,27 @@ export type NewGroupValue = {
 const OPEN = [...OPEN_STATES];
 const NO_GROUPS = "This event has no groups.";
 
+/**
+ * The kinds the add row accepts. `leads` is not one of them (#1251): the
+ * leaders-only channel is the Captains lobby switch (`event-live-edit-captains-lobby.ts`),
+ * which is the only writer of a `leads` group, so there can never be two.
+ */
+const ADD_KINDS = EVENT_GROUP_KINDS.filter((k) => k !== "leads");
+
+/**
+ * What the group rows of this module need of a row's context: the lobby row
+ * (#1251) reuses the add and remove steps with its own value type.
+ */
+export type GroupSetContext = Pick<
+  ApplyContext,
+  "eventId" | "guildId" | "ending" | "effects"
+>;
+
+/** Groups the host sees and counts: every one but the hidden captains lobby. */
+const visibleGroups = <G extends { kind?: string }>(
+  groups: readonly G[] | null | undefined,
+): G[] => (groups ?? []).filter((g) => g.kind !== "leads");
+
 function asRow<V extends JsonValue>(row: LiveEditRow<V>): LiveEditRow {
   return row as unknown as LiveEditRow;
 }
@@ -185,7 +208,7 @@ function parseAddValue(raw: string): NewGroupValue[] | null {
     if (typeof key !== "string" || !GROUP_KEY_PATTERN.test(key)) return null;
     if (typeof name !== "string" || typeof tag !== "string") return null;
     if (typeof kind !== "string") return null;
-    if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) return null;
+    if (!(ADD_KINDS as readonly string[]).includes(kind)) return null;
     if (size !== null && typeof size !== "number" && typeof size !== "string") {
       return null;
     }
@@ -214,9 +237,16 @@ function addFieldError(value: Record<string, unknown>): string | null {
   if (!size.ok) return `New group size: ${size.error}`;
   const tag = checkGroupTag(String(value.tag ?? ""));
   if (!tag.ok) return `New group tag: ${tag.error}`;
-  const kind = String(value.kind ?? "");
-  if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) {
-    return "New group kind: must be team, open or leads.";
+  return kindError(String(value.kind ?? ""));
+}
+
+/** The refusal of a kind the add row does not take, or null. */
+function kindError(kind: string): string | null {
+  if (kind === "leads") {
+    return "New group kind: the leaders-only channel is the Captains lobby switch in the leader settings, not a group to add.";
+  }
+  if (!(ADD_KINDS as readonly string[]).includes(kind)) {
+    return "New group kind: must be team or open.";
   }
   return null;
 }
@@ -286,8 +316,15 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
     const g = to[0];
     if (!g) return null;
     const groups = ctx.event.groups ?? [];
+    // `parse` refuses it already; this also covers a value that did not come
+    // through `parse` (a signed change set).
+    const badKind = kindError(g.kind);
+    if (badKind) return badKind;
     if (groups.length >= GROUP_COUNT_HARD_MAX) {
       return `An event can have at most ${GROUP_COUNT_HARD_MAX} groups.`;
+    }
+    if (clashesWithCaptainsLobby(groups, g.key, g.name)) {
+      return captainsLobbyNameTaken(g.name);
     }
     if (nameTakenByOther(groups, g.key, g.name)) {
       return `"${g.name}" is already used by another group, or is the name another group goes back to when it is reset. Pick a different name.`;
@@ -320,52 +357,7 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
   async apply(ctx) {
     const g = ctx.to[0];
     if (!g) return { status: "applied" };
-    // A second fresh read: an earlier row of this save may have changed the
-    // groups, and the write is conditional on exactly the count read here.
-    const fresh = await readFresh(ctx.eventId, ctx.guildId);
-    if (!fresh) return { status: "lost" };
-    const groups = fresh.groups ?? [];
-    if (groups.some((x) => x.key === g.key)) return { status: "applied" };
-    if (nameTakenByOther(groups, g.key, g.name)) {
-      return {
-        status: "failed",
-        message: `"${g.name}" is now used by another group, so no group was added`,
-      };
-    }
-    // Synchronous check, then the write: nothing is awaited in between.
-    if (ctx.ending()) {
-      return {
-        status: "failed",
-        message: `was not saved because ${ENDING_TEXT}`,
-      };
-    }
-    const result = await Event.updateOne(
-      {
-        _id: ctx.eventId,
-        guildId: ctx.guildId,
-        state: { $in: OPEN },
-        groupsEnabled: true,
-        groups: { $size: groups.length },
-        "groups.key": { $ne: g.key },
-      },
-      {
-        $push: {
-          groups: {
-            key: g.key,
-            name: g.name,
-            kind: g.kind,
-            size: g.size,
-            tag: g.tag,
-            marker: "",
-            channelId: null,
-            captainId: null,
-            memberIds: [],
-          },
-        },
-      },
-    );
-    if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
-    return createChannels(ctx, [g.key]);
+    return addGroupLocked(ctx, g);
   },
   // A re-posted add (the group is stored) finishes a channel that is still
   // owed: the same pass, judged by every group that has none.
@@ -379,13 +371,75 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
 });
 
 /**
+ * Append one group with one conditional `$push` and make its channel (the add
+ * row's apply, and the captains lobby's turning on, #1251). Runs with both
+ * locks held. A `leads` group is only pushed while the event has none (the
+ * one-leads-group rule is part of the write's condition, not only of the plan).
+ */
+export async function addGroupLocked(
+  ctx: GroupSetContext,
+  g: NewGroupValue,
+  /** Further conditions of the write (the lobby: leaders still on). */
+  mustHold: Record<string, unknown> = {},
+): Promise<RowOutcome> {
+  // A second fresh read: an earlier row of this save may have changed the
+  // groups, and the write is conditional on exactly the count read here.
+  const fresh = await readFresh(ctx.eventId, ctx.guildId);
+  if (!fresh) return { status: "lost" };
+  const groups = fresh.groups ?? [];
+  if (groups.some((x) => x.key === g.key)) return { status: "applied" };
+  if (nameTakenByOther(groups, g.key, g.name)) {
+    return {
+      status: "failed",
+      message: `"${g.name}" is now used by another group, so no group was added`,
+    };
+  }
+  // Synchronous check, then the write: nothing is awaited in between.
+  if (ctx.ending()) {
+    return {
+      status: "failed",
+      message: `was not saved because ${ENDING_TEXT}`,
+    };
+  }
+  const result = await Event.updateOne(
+    {
+      _id: ctx.eventId,
+      guildId: ctx.guildId,
+      state: { $in: OPEN },
+      groupsEnabled: true,
+      groups: { $size: groups.length },
+      "groups.key": { $ne: g.key },
+      ...(g.kind === "leads" ? { "groups.kind": { $ne: "leads" } } : {}),
+      ...mustHold,
+    },
+    {
+      $push: {
+        groups: {
+          key: g.key,
+          name: g.name,
+          kind: g.kind,
+          size: g.size,
+          tag: g.tag,
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      },
+    },
+  );
+  if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
+  return createChannels(ctx, [g.key]);
+}
+
+/**
  * Make the channels the event's groups lack, and judge the outcome by `keys`
  * (the group just added, or every group without one when a re-save finishes
  * it). Nothing is owed while the event has no main channel (the channels are
  * made together later) or when those groups have one already.
  */
-async function createChannels(
-  ctx: ApplyContext<NewGroupValue[]>,
+export async function createChannels(
+  ctx: GroupSetContext,
   keys: readonly string[] | null,
 ): Promise<RowOutcome> {
   // The group is already stored when this runs: a failed read here must not
@@ -406,7 +460,7 @@ async function createChannels(
 }
 
 async function createChannelsUnguarded(
-  ctx: ApplyContext<NewGroupValue[]>,
+  ctx: GroupSetContext,
   keys: readonly string[] | null,
 ): Promise<RowOutcome> {
   const lacking = (fresh: IEvent): string[] =>
@@ -467,7 +521,7 @@ const memberCountText = (n: number): string =>
     : `${n} ${n === 1 ? "person" : "people"} assigned`;
 
 /** What one group's removal did. */
-type RemoveStep =
+export type RemoveStep =
   /** Gone from the event (the channel deleted first). */
   | { kind: "removed" }
   /** Already gone before this save: nothing to do. */
@@ -492,8 +546,8 @@ function rememberRevoked(eventId: string, userId: string): void {
   revokedLeaders.set(eventId, set);
 }
 
-async function removeOne(
-  ctx: ApplyContext<string[]>,
+export async function removeOne(
+  ctx: GroupSetContext,
   key: string,
   /** Set once a write of this group landed (the members were unassigned). */
   mark: { committed: boolean },
@@ -504,7 +558,10 @@ async function removeOne(
   const group = groups.find((g) => g.key === key);
   if (!group) return { kind: "gone" };
   const name = `"${group.name}"`;
-  if (groups.length <= 1) {
+  // An event keeps at least one group the host can see: the hidden captains
+  // lobby (#1251) is not one, so it never counts as the group that is left.
+  const lobby = group.kind === "leads";
+  if (visibleGroups(groups).length <= (lobby ? 0 : 1)) {
     return {
       kind: "refused",
       reason: `${name} is the last group of the event, and an event keeps at least one`,
@@ -567,7 +624,10 @@ async function removeOne(
   // 3. The channel and the record, together.
   const unfinished = (reason: string): RemoveStep => ({
     kind: "unfinished",
-    reason: `${name}: its members were unassigned, but ${reason}. Save again to finish`,
+    // The captains lobby has no members: nothing was unassigned (#1251).
+    reason: lobby
+      ? `${name}: ${reason}. Save again to retry`
+      : `${name}: its members were unassigned, but ${reason}. Save again to finish`,
   });
   if (channelId) {
     if (ctx.ending())
@@ -668,7 +728,11 @@ export const groupRemoveRow: LiveEditRow = asRow<string[]>({
     const groups = ctx.event.groups ?? [];
     const present = to.filter((k) => groups.some((g) => g.key === k));
     if (present.length === 0) return null;
-    if (present.length >= groups.length) {
+    // The hidden captains lobby is not a group that is left (#1251).
+    const leaving = present.filter((k) =>
+      visibleGroups(groups).some((g) => g.key === k),
+    );
+    if (leaving.length >= visibleGroups(groups).length) {
       return "an event keeps at least one group. Add another group first, or leave one in place.";
     }
     const errors = ctx.validateSetup((input) => {

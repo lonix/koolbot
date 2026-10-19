@@ -114,7 +114,10 @@ import {
   PULL_HERE,
   PULL_MAIN,
 } from "../../services/event-group-leaders.js";
-import { validateLeaderLabel } from "../../services/event-groups.js";
+import {
+  hasCaptainsLobby,
+  validateLeaderLabel,
+} from "../../services/event-groups.js";
 import { customisationOn } from "../../services/event-customise-rules.js";
 import {
   LEADER_AUDIT_ACTION,
@@ -1214,13 +1217,15 @@ function createSettingsSection(client: Client): HostSectionRenderer {
       groupLabel: fresh.groupLabel || "Group",
       leadersTags: leadersTagsViewOf(fresh),
       groups: hasGroups
-        ? (fresh.groups ?? []).map((g) => ({
-            name: g.name,
-            marker: g.marker ?? "",
-            size: g.size ?? null,
-            memberCount: (g.memberIds ?? []).length,
-            overSize: isGroupOverSize(g),
-          }))
+        ? (fresh.groups ?? [])
+            .filter((g) => g.kind !== "leads")
+            .map((g) => ({
+              name: g.name,
+              marker: g.marker ?? "",
+              size: g.size ?? null,
+              memberCount: (g.memberIds ?? []).length,
+              overSize: isGroupOverSize(g),
+            }))
         : [],
       // Names, sizes and the preset switch (#1241).
       groupEdit: hasGroups ? await buildGroupEditView(fresh) : undefined,
@@ -1431,27 +1436,39 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     leaderLabel: event.leaderLabel || "Leader",
     captainsEnabled,
     channelLeadMinutes: event.channelLeadMinutes ?? null,
+    // The hidden captains lobby (#1251) is not listed as a group.
+    captainsLobby: groupsEnabled
+      ? hasCaptainsLobby(event.groups)
+        ? {
+            hasChannel: (event.groups ?? []).some(
+              (g) => g.kind === "leads" && !!g.channelId,
+            ),
+          }
+        : null
+      : null,
     groups: groupsEnabled
-      ? (event.groups ?? []).map((g) => ({
-          leaderName: leaderOf.has(g.key)
-            ? cachedMemberName(
-                client,
-                event.guildId,
-                leaderOf.get(g.key) as string,
-              )
-            : null,
-          name: g.name,
-          marker: g.marker ?? "",
-          kind: g.kind,
-          size: g.size ?? null,
-          tag: g.tag ?? "",
-          hasChannel: !!g.channelId,
-          memberCount: (g.memberIds ?? []).length,
-          fill: groupFill({
+      ? (event.groups ?? [])
+          .filter((g) => g.kind !== "leads")
+          .map((g) => ({
+            leaderName: leaderOf.has(g.key)
+              ? cachedMemberName(
+                  client,
+                  event.guildId,
+                  leaderOf.get(g.key) as string,
+                )
+              : null,
+            name: g.name,
+            marker: g.marker ?? "",
+            kind: g.kind,
             size: g.size ?? null,
+            tag: g.tag ?? "",
+            hasChannel: !!g.channelId,
             memberCount: (g.memberIds ?? []).length,
-          }),
-        }))
+            fill: groupFill({
+              size: g.size ?? null,
+              memberCount: (g.memberIds ?? []).length,
+            }),
+          }))
       : [],
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
     ...tagStatusFor(client, event, groupsEnabled),

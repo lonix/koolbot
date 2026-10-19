@@ -45,6 +45,7 @@ describe("leadersTagsViewOf", () => {
       leaderLabel: "Leader",
       tags: true,
       tagsSuffix: true,
+      lobby: false,
       teams: [
         {
           key: "g_00000001",
@@ -115,6 +116,63 @@ describe("renderLeadersTagsFields", () => {
       "R&amp;B Red &lt;img src=x onerror=&quot;1&quot;&gt;",
     );
     expect(html).toContain('value="Cap&quot;tain"');
+  });
+
+  describe("the Captains lobby switch (#1251)", () => {
+    const viewWith = (
+      over: Record<string, unknown>,
+      lobby: boolean,
+    ): ReturnType<typeof leadersTagsViewOf> =>
+      leadersTagsViewOf({
+        groupsEnabled: true,
+        captainsEnabled: true,
+        groups: lobby
+          ? [...groups, { key: "g_000000a1", name: "Command", kind: "leads" }]
+          : groups,
+        ...over,
+      });
+
+    it("is derived from a leads group and posts its value with the value it showed", () => {
+      expect(viewWith({}, false)?.lobby).toBe(false);
+      expect(viewWith({}, true)?.lobby).toBe(true);
+      const off = renderLeadersTagsFields(viewWith({}, false));
+      expect(off).toContain('name="s_captainsLobby"');
+      expect(off).toContain(
+        '<input type="hidden" name="b_captainsLobby" value="0">',
+      );
+      expect(off).toContain(
+        '<option value="0" selected>Off: leaders talk in the main channel</option>',
+      );
+      const on = renderLeadersTagsFields(viewWith({}, true));
+      expect(on).toContain(
+        '<input type="hidden" name="b_captainsLobby" value="1">',
+      );
+      expect(on).toContain(
+        '<option value="1" selected>On: a leaders-only voice channel</option>',
+      );
+    });
+
+    it("is disabled while leaders are off and there is no lobby", () => {
+      const html = renderLeadersTagsFields(
+        viewWith({ captainsEnabled: false }, false),
+      );
+      expect(html).toContain('name="s_captainsLobby" disabled>');
+      expect(html).toContain("Turn leaders on and save first");
+    });
+
+    it("can still be turned off while leaders are off", () => {
+      const html = renderLeadersTagsFields(
+        viewWith({ captainsEnabled: false }, true),
+      );
+      expect(html).not.toContain('name="s_captainsLobby" disabled');
+      expect(html).toContain("Leaders are off, so only you can join");
+    });
+
+    it("never lists the lobby's group name or makes a tag field for it", () => {
+      const html = renderLeadersTagsFields(viewWith({}, true));
+      expect(html).not.toContain("Command");
+      expect(html).not.toContain("s_groupTags_g_000000a1");
+    });
   });
 
   it("limits the tag input to the tag maximum and has no input for a non-team group", () => {

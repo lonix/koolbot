@@ -150,8 +150,12 @@ describe("the event form's preset picker (#1200)", () => {
     expect(field(dom, "group_0_size").value).toBe("8");
     expect(field(dom, "group_0_tag").value).toBe("AS");
     expect(field(dom, "group_0_marker").value).toBe("🟢");
-    expect(field(dom, "group_2_name").value).toBe("Command");
-    expect(field(dom, "group_2_kind").value).toBe("leads");
+    // The preset's leads group ("Command") is the Captains lobby now (#1251):
+    // it ticks the switch instead of becoming a row.
+    expect(
+      dom.window.document.querySelector('[name="group_2_name"]'),
+    ).toBeNull();
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
     expect(field(dom, "groups_label").value).toBe("Squad");
     expect(field(dom, "groups_leader_label").value).toBe("Lead");
     expect(field(dom, "groups_lead_minutes").value).toBe("30");
@@ -310,6 +314,30 @@ describe("the presets admin page (#1200)", () => {
     expect(val("group_2_name")).toBe("Third");
     expect(doc.querySelector('[name="preset_id"]')).toBeNull();
     expect(html).toContain("Prefilled from x");
+  });
+
+  it("a saved preset's leads row keeps its own kind option, so saving never turns it into a team; no other row can pick it (#1251)", () => {
+    const html = adminPage({
+      values: {
+        preset_name: "Old command preset",
+        group_0_name: "Alpha",
+        group_0_kind: "team",
+        group_1_name: "Command",
+        group_1_kind: "leads",
+      },
+    });
+    const doc = new JSDOM(html).window.document;
+    const kinds = (name: string): string[] =>
+      Array.from(
+        doc.querySelectorAll<HTMLOptionElement>(`[name="${name}"] option`),
+      ).map((o) => o.value);
+    const selected = (name: string): string =>
+      (doc.querySelector(`[name="${name}"]`) as HTMLSelectElement).value;
+    expect(kinds("group_1_kind")).toEqual(["team", "open", "leads"]);
+    expect(selected("group_1_kind")).toBe("leads");
+    expect(kinds("group_0_kind")).toEqual(["team", "open"]);
+    const template = doc.querySelector("template[data-group-row-template]");
+    expect(template?.innerHTML.includes('value="leads"')).toBe(false);
   });
 
   it("an edit carries the preset's id and the unreadable notice shows", () => {

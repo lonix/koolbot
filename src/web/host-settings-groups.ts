@@ -58,6 +58,8 @@ export const PRESET_PICK_FIELD = "preset_pick";
 export interface GroupEditGroupView {
   /** The group's key: the identity the size field is guarded by, and the remove checkbox's name. */
   key: string;
+  /** `team`, `open` or `leads` (the hidden captains lobby: not listed or editable here). */
+  kind: string;
   name: string;
   marker: string;
   /** Stored size, null = no limit. */
@@ -97,9 +99,14 @@ function hidden(name: string, value: string): string {
 /** Names and sizes, one row per group; goes INSIDE the settings form. */
 export function renderGroupEditor(d: GroupEditViewData): string {
   if (d.groups.length === 0) return "";
+  // The hidden captains lobby (#1251) has no row here. The row ids are the
+  // STORED positions (`groupNameC` names the third stored group), so the lobby
+  // is skipped, never renumbered around: the groups after it keep their ids.
+  let shown = 0;
   const rows = d.groups
     .map((g, i) => {
-      const n = i + 1;
+      if (g.kind === "leads") return "";
+      const n = ++shown;
       const nameId = groupNameRowId(i);
       const sizeId = groupSizeRowId(i);
       const sizeText = g.size === null ? "" : String(g.size);
@@ -140,7 +147,9 @@ export function renderPresetForm(
     ? `<p class="muted">${escapeHtml(d.presetNotice)}</p>`
     : "";
   if (d.presets.length === 0) {
-    return `<div class="field"><p class="muted">No preset on this server fits this event's ${escapeHtml(d.groups.length)} groups.</p>${notice}</div>`;
+    // The hidden captains lobby is not counted: the host sees no such group.
+    const listed = d.groups.filter((g) => g.kind !== "leads").length;
+    return `<div class="field"><p class="muted">No preset on this server fits this event's ${escapeHtml(listed)} groups.</p>${notice}</div>`;
   }
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 <div class="field"><label for="host-settings-preset">Switch preset</label>
@@ -166,7 +175,9 @@ export function renderGroupSetForms(
 ): string {
   if (d.groups.length === 0) return "";
   const label = d.groupLabel.toLowerCase();
-  const boxes = d.groups
+  // The captains lobby is a switch, not a group to tick or add (#1251).
+  const listed = d.groups.filter((g) => g.kind !== "leads");
+  const boxes = listed
     .map((g) => {
       const facts = [
         g.memberCount === 0
@@ -178,7 +189,7 @@ export function renderGroupSetForms(
     })
     .join("\n");
   const remove =
-    d.groups.length <= 1
+    listed.length <= 1
       ? `<div class="field"><p class="muted">An event keeps at least one ${escapeHtml(label)}, so the last one cannot be removed.</p></div>`
       : `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 <fieldset class="field"><legend>Remove ${escapeHtml(label)}s</legend>
@@ -202,7 +213,7 @@ ${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
 <label for="host-settings-add-tag">Tag</label>
 <input id="host-settings-add-tag" type="text" maxlength="${GROUP_TAG_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.tag)}">
 ${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
-<p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others (a leaders-only one is created restricted). Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
+<p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others. Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
 <button type="submit">Add ${escapeHtml(label)}</button>
 </form>`;
   return `${remove}\n${add}`;
@@ -222,6 +233,7 @@ export async function buildGroupEditView(
     addKey: newGroupKey(new Set(groups.map((g) => g.key))),
     groups: groups.map((g) => ({
       key: g.key,
+      kind: g.kind,
       hasChannel: !!g.channelId,
       name: g.name,
       marker: g.marker ?? "",

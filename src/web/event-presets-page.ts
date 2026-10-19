@@ -279,7 +279,7 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     </div>
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
-    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>), at most one of kind Leads. Rows left completely empty are ignored.</p>
+    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). A row of kind Leads is the Captains lobby of a preset saved earlier (at most one): it is kept as it is, and choosing the preset on the event form ticks Captains lobby instead of adding a row. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : "Add preset"}</button>
     ${props.editing ? '<a class="btn" href="/admin/events/presets">Cancel</a>' : ""}
   </form>`;

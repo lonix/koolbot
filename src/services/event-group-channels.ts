@@ -2877,7 +2877,13 @@ export class EventGroupChannels {
     }
 
     // The channel is gone (or was never ours): take the record with it, only
-    // while the group still holds the id it was deleted under.
+    // while the group still holds the id it was deleted under. Synchronous check,
+    // then the write: an end or cancel that took its hold during the delete above
+    // must not see the record pulled under it (the next pass finds the channel
+    // gone and finishes the record).
+    if (opts.ending?.()) {
+      return { status: "failed", reason: "the event is being ended" };
+    }
     const result = await Event.updateOne(
       {
         _id: eventId,

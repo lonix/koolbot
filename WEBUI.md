@@ -1414,14 +1414,18 @@ breakout rooms or raid parties: a **preset** (Red vs Blue, EVE factions or Wardo
 or Custom), what a group and a leader are called (Team, Squad, Room, Party;
 Leader, Captain), a **channel creation time** in minutes before the start (empty
 uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: members
-belong to it; **open**: anyone can join, such as spectators; **leads**: leaders and
-host only, at most one), an optional size (1 to 99, the voice user limit), an
+belong to it; **open**: anyone can join, such as spectators), an optional size (1 to 99, the voice user limit), an
 optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
 an optional colour marker such as a coloured circle. A separate tick box, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
 **Leaders** below), **Leaders can customise** (#1196, off by default, only used while
-Group leaders is ticked; see **Team names and tags** below), and **Clan tags** (#1194) puts each team's tag on its members'
+Group leaders is ticked; see **Team names and tags** below), **Captains lobby** (#1251, off by
+default, only used while Group leaders is ticked; see **Captains lobby** below) is a
+separate voice channel that only the host and the current leaders can join, and **Clan tags** (#1194) puts each team's tag on its members'
 server nicknames while the event runs (off by default; see **Clan tags** below).
+The leaders-only channel is no longer a kind of group in the list: a preset (or a
+draft) that still has a `leads` group ticks the **Captains lobby** box instead of
+adding a row, and an event or preset saved before keeps its `leads` group as it is.
 Names must be unique within an
 event and the number of groups is capped by `events.groups.max_count`; a preset with
 more groups than the cap is greyed out in the picker and refused by the server
@@ -1557,7 +1561,7 @@ later channels, and nothing is created if that cannot be verified), in the group
 limit. The event's host (its creator) gets View, Connect and Move Members on the main
 channel and on every group channel, on top of whatever the category already grants (the
 category's own permissions are copied, so a private category stays private). The channel
-of a `leads` group is created restricted (see **Leaders-only channel** below). The channels
+of the **Captains lobby** (a hidden `leads` group) is created restricted (see **Leaders-only channel** below). The channels
 go when the event does: right away on cancel, and as soon as they are empty once it has ended
 (through **End event now** or the scheduled end, both of which record when the event ended, see
 "End the event" below); the main channel keeps `events.channel_grace_minutes` after that end. An
@@ -2049,11 +2053,12 @@ group they were shown for: a size form that was open while a group was added or 
 position now holds another group, is reported as changed by someone else instead of resizing the group
 that moved there.
 
-- **Add a group.** Give it a name, a kind (team, open or leaders only; at most one leaders-only group),
-  a size and a tag, with the same limits as when the event was made (a name another group has, or goes
-  back to when its leader's rename is reset, is refused; `events.groups.max_count` applies). It goes
+- **Add a group.** Give it a name, a kind (team or open; the leaders-only channel is the **Captains
+  lobby** switch below), a size and a tag, with the same limits as when the event was made (a name
+  another group has, or goes back to when its leader's rename is reset, is refused;
+  `events.groups.max_count` applies). It goes
   last. Its voice channel is made by the same pass as the other group channels, next to them and in
-  order (a leaders-only group's channel is created restricted), and every other group, every
+  order, and every other group, every
   assignment and every leader stays exactly as it was. Nothing is confirmed: it destroys nothing. Each
   page load mints the new group's key, so posting the same form twice is one group: the second post
   says "Nothing to change" (or finishes a channel that was still owed). If the channel could not be made
@@ -2092,8 +2097,56 @@ that moved there.
   the member data export and reset already cover the member lists and leaders of the groups that
   remain.
 
-**Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
-command channel for the host and the leaders of the team groups, which everyone else can
+**Captains lobby** (#1251) is one switch, off by default, on the schedule form (a tick box next
+to **Group leaders**) and in **Live settings** (next to the leader settings). It is the
+leaders-only channel of the next section, set up as what it is: an automatic lobby for the host and
+the captains, not a team that people join. Nobody is assigned to it: who may join is always derived
+from the host and the current leaders.
+
+- **Needs leaders.** The switch is only used while **Group leaders** is on. On the schedule form the
+  box is disabled until leaders is ticked, and the server ignores it without leaders. In Live
+  settings turning it **on** is refused while leaders are off (the control is disabled with the
+  reason, and a save that turns leaders on and the lobby on together is two saves: leaders first).
+  Turning it **off** is always possible.
+- **Nothing to configure, nothing visible in the group list.** The lobby is stored as a hidden group
+  of kind `leads` in the event's groups (so the channel pass, the cleanup and the repeating series
+  keep working unchanged), and the switch is read from the presence of that group: there is no
+  separate stored flag and no setting. The group is not listed in the Groups card of the host
+  panel (one line under it says whether the lobby is on and whether its channel exists), has no name or
+  size field in Live settings, no remove tick box, no kind choice, and does not count as the group
+  an event keeps. It is named after what leaders are called ("Leader lobby", "Captain lobby"), and
+  counts toward `events.groups.max_count` because it is a channel.
+- **On** creates the restricted channel at once on a running event, through the same pass as every
+  group channel (with one conditional write that also holds "leaders still on", "this many groups"
+  and "no leaders-only group yet", so there can never be two), and then brings the channel's access
+  in line: only the host and the current leaders can join. An event that has not started makes it
+  with the other channels later. If the channel could not be made (a full category, a missing
+  permission) the result says "Saved but not finished" and the same form saved again finishes it.
+- **Off** moves everybody connected to the lobby, you included, to the main channel (the same mover
+  as **Remove groups**), then deletes the channel and the group in one step. You are asked to confirm
+  first when the lobby has a channel; with no channel yet it is removed without asking. Whether
+  anybody is in it right now cannot be seen when the page is built, so the question is asked
+  whenever the channel exists. If somebody cannot be moved, or the channel cannot be deleted, **nothing
+  is removed**: the lobby stays, the result says why, and saving again plans the removal again. Turning
+  it on again later makes a new, empty channel. If an end or cancel takes hold of the event during the
+  removal, the group's record is left for the end to clean up.
+- **Leaders turned off while the lobby exists.** The lobby is kept (stored data is kept, the
+  switches hide it), but with leaders off nobody but you is let in, and any leader connected to it
+  is moved out by the usual pass. Turn leaders on again and the current leaders get access again;
+  turn the lobby off to remove its channel.
+- **Presets and old events.** A preset or event that already has a `leads` group keeps working
+  unchanged: the switch shows on, the group is the lobby, and at most one `leads` group is allowed
+  (the form, the add-group form and the write itself all refuse a second). Choosing such a preset on
+  the schedule form ticks **Captains lobby** instead of adding a row for it. Presets that contain a
+  `leads` row only fit a running event that has the lobby when applied in Live settings (a preset is
+  applied to the existing groups by position and kind).
+- **Same rules as the rest of Live settings.** The event is read again inside the locks, the switch
+  is written conditionally on what it was decided from with an explicit outcome, a re-save is
+  "nothing to change", one result and one `event.host.settings` audit entry per save, and nothing
+  changes while `events.enabled` is off.
+
+**Leaders-only channel** (#1199) is the voice channel of the **Captains lobby** (the event's `leads`
+group): a command channel for the host and the leaders of the team groups, which everyone else can
 see but not join. It is made with the other group channels (#1190) and removed with them.
 
 - **Who gets what.** @everyone is denied **Connect**; **View** is allowed so people can

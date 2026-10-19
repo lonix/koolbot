@@ -23,6 +23,7 @@ import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { loadPresetResolver } from "../../../services/event-group-preset-service.js";
 import {
+  hasCaptainsLobby,
   parseGroupForm,
   resolveGroupCountLimits,
   validateGroupSetup,
@@ -198,6 +199,7 @@ export function createEventsRouter(client: Client): Router {
                   groupPreset: groups.presetId,
                   channelLeadMinutes: groups.channelLeadMinutes,
                   captainsEnabled: groups.captainsEnabled,
+                  captainsLobby: hasCaptainsLobby(groups.groups),
                   captainCustomisationEnabled:
                     groups.captainCustomisationEnabled,
                   tagsEnabled: groups.tagsEnabled,
