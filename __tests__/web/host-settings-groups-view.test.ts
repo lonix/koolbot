@@ -161,8 +161,7 @@ describe("the section puts the editor inside the settings form and the preset in
       ],
     };
     const withEditor = renderSettingsSection({ ...base, groupEdit: view() });
-    const forms = withEditor.match(/<form /g) ?? [];
-    expect(forms).toHaveLength(2);
+    expect(withEditor.split("<form ").length - 1).toBe(2);
     const first = withEditor.slice(0, withEditor.indexOf("</form>"));
     expect(first).toContain('name="s_groupNameA"');
     expect(first).not.toContain("preset_pick");

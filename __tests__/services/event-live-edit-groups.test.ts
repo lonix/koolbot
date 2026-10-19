@@ -1013,3 +1013,63 @@ describe("gating and one result per save", () => {
     expect(clone(store.get(EV)?.liveEditRevision)).toBe(1);
   });
 });
+
+describe("the group limit cap and the size of a confirmation", () => {
+  it("name rows and the preset validate the edited setup, so an unreadable group cap fails them closed; size rows do not need the cap", async () => {
+    const unreadable: LiveEditDeps = { ...deps, maxGroups: async () => null };
+    const run2 = (entries: Array<{ rowId: string; to: unknown; base: unknown }>) =>
+      runLiveEdit({
+        guildId: GUILD,
+        eventId: EV,
+        deps: unreadable,
+        submission: entries as never,
+      });
+    const rename = await run2([entry(NAME_A, "Apex", "Alpha")]);
+    expect(rename).toMatchObject({ status: "invalid" });
+    expect(text(rename)).toContain("The group limit could not be read");
+    const preset = await run2([
+      entry(GROUP_PRESET_ROW_ID, squads(), baseOf()),
+    ]);
+    expect(preset).toMatchObject({ status: "invalid" });
+    expect(group(A).name).toBe("Alpha");
+    // A size is checked by its own rule only: it saves.
+    const size = await run2([entry(SIZE_A, 5, 3)]);
+    expect(done(size).applied).toHaveLength(1);
+  });
+
+  it("a signed confirmation of a preset switch of 25 groups with the longest names and tags still verifies", () => {
+    // Worst case for the token: 25 groups, 50-character names and 8-character
+    // tags of 3-byte characters, in both the stored (from) and chosen (to) value.
+    const groups = Array.from({ length: 25 }, (_, i) => ({
+      name: `${String.fromCharCode(0x4e00 + i)}`.repeat(50),
+      kind: "team",
+      size: 99,
+      tag: "\u6f22".repeat(8),
+    }));
+    const other = groups.map((g, i) => ({
+      ...g,
+      name: `${String.fromCharCode(0x4f00 + i)}`.repeat(50),
+    }));
+    const token = signConfirmation({
+      eventId: EV,
+      guildId: GUILD,
+      userId: "111111111111111111",
+      changes: [
+        {
+          rowId: GROUP_PRESET_ROW_ID,
+          from: { id: "lib:65a000000000000000000001", groups },
+          to: { id: "lib:65a000000000000000000002", groups: other },
+        },
+      ],
+      revision: 12345,
+    }) as string;
+    expect(token.length).toBeLessThan(16_384);
+    expect(
+      verifyConfirmation(token, {
+        eventId: EV,
+        guildId: GUILD,
+        userId: "111111111111111111",
+      }).ok,
+    ).toBe(true);
+  });
+});
