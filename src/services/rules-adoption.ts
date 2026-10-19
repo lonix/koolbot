@@ -20,6 +20,7 @@ import {
   planAdoption,
   type AdoptionPlan,
   type ChannelKind,
+  channelKindOf,
   type ChannelState,
   type DesiredState,
   type OverwriteState,
@@ -77,22 +78,6 @@ export interface RulesPlan {
   options: RulesPlanOptions;
   membersUnavailable: boolean;
 }
-
-const kindOf = (c: GuildBasedChannel): ChannelKind => {
-  if (c.type === ChannelType.GuildCategory) return "category";
-  if (
-    c.type === ChannelType.GuildVoice ||
-    c.type === ChannelType.GuildStageVoice
-  )
-    return "voice";
-  if (
-    c.type === ChannelType.GuildText ||
-    c.type === ChannelType.GuildAnnouncement ||
-    c.type === ChannelType.GuildForum
-  )
-    return "text";
-  return "other";
-};
 
 /** Channel types the rules form offers as gate targets. */
 const GATEABLE_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -310,7 +295,7 @@ export async function planRulesGate(
     channels.push({
       id: c.id,
       name: c.name,
-      kind: kindOf(c),
+      kind: channelKindOf(c.type),
       rawType: c.type,
       parentId: c.parentId,
       position: "rawPosition" in c ? c.rawPosition : 0,
@@ -325,7 +310,7 @@ export async function planRulesGate(
             }))
           : [],
       voiceMemberCount:
-        "members" in c && kindOf(c) === "voice"
+        "members" in c && channelKindOf(c.type) === "voice"
           ? (c.members as { size: number }).size
           : 0,
     });
