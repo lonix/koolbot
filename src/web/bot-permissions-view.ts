@@ -96,7 +96,7 @@ export function renderBotPermissionsPage(
     const quiet =
       report.quiet.length > 0
         ? `<div class="card"><h2>Not needed right now</h2>
-  <p class="muted">The bot lacks these, but only for features that are switched off, so nothing is broken today.</p><ul>${report.quiet
+  <p class="muted">These features are switched off. If you switch them on, they would need the permissions below. A permission listed above as missing stays missing whatever is switched on.</p><ul>${report.quiet
     .map(
       (q) =>
         `<li><strong>${escapeHtml(q.feature.area)}</strong>: ${escapeHtml(q.feature.feature)} would need ${q.missing.map((m) => escapeHtml(m)).join(", ")} ${describeTarget(q.target)}.</li>`,

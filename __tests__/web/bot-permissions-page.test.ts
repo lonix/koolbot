@@ -84,6 +84,7 @@ function clientWith(opts: {
   serverBits: bigint;
   categoryName?: string;
   categoryBits?: bigint;
+  roles?: Array<{ id: string; name: string; position: number }>;
 }): Client {
   const me = {
     permissions: new PermissionsBitField(opts.serverBits),
@@ -100,10 +101,11 @@ function clientWith(opts: {
       },
     ],
   ]);
+  const roles = new Map((opts.roles ?? []).map((r) => [r.id, r] as const));
   const guild = {
     id: "guild-1",
     members: { me, fetchMe: async () => me },
-    roles: { cache: new Map(), fetch: async () => new Map() },
+    roles: { cache: roles, fetch: async () => roles },
     channels: { cache: channels, fetch: async () => channels },
   };
   return {
@@ -179,6 +181,8 @@ describe("GET /bot-permissions", () => {
     expect(html).not.toContain("Missing permissions</h2>");
     expect(html).toContain("Not needed right now");
     expect(html).toContain("Handing out roles");
+    expect(html).toContain("stays missing whatever is switched on");
+    expect(html).not.toContain("nothing is broken today");
   });
 
   it("says the check is unavailable when the server cannot be read", async () => {
@@ -194,6 +198,46 @@ describe("GET /bot-permissions", () => {
     } as unknown as Client);
     const html = await (await harness.get("/bot-permissions")).text();
     expect(html).toContain("could not read this server from Discord");
+  });
+});
+
+describe("a role the bot cannot hand out is not shown as in place", () => {
+  const inPlace =
+    "<li><strong>Rules</strong>: Granting the acceptance role</li>";
+
+  it("lists the feature under Missing, not In place, when the role is above the bot", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "55" };
+    await start(
+      clientWith({
+        serverBits: ALL,
+        roles: [{ id: "55", name: "Staff", position: 20 }],
+      }),
+    );
+    const html = await (await harness.get("/bot-permissions")).text();
+    expect(html).toContain("Role above the bot");
+    expect(html).toContain("for the role \u201cStaff\u201d");
+    expect(html).not.toContain(inPlace);
+  });
+
+  it("lists it under Could not be checked, not In place, when the role is not found", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "55" };
+    await start(clientWith({ serverBits: ALL, roles: [] }));
+    const html = await (await harness.get("/bot-permissions")).text();
+    expect(html).toContain("Could not be checked");
+    expect(html).toContain("The configured role could not be found.");
+    expect(html).not.toContain(inPlace);
+  });
+
+  it("lists it under In place when the role is below the bot", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "55" };
+    await start(
+      clientWith({
+        serverBits: ALL,
+        roles: [{ id: "55", name: "Fans", position: 2 }],
+      }),
+    );
+    const html = await (await harness.get("/bot-permissions")).text();
+    expect(html).toContain(inPlace);
   });
 });
 

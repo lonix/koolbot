@@ -281,6 +281,8 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
  */
 export interface RoleHierarchyRequirement {
   id: string;
+  /** The `FEATURE_REQUIREMENTS` entry this extends: it is not "in place" while this fails. */
+  forFeature: string;
   area: string;
   feature: string;
   enabledKey: keyof ConfigSchema;
@@ -299,6 +301,7 @@ export const ROLE_HIERARCHY_REQUIREMENTS: readonly RoleHierarchyRequirement[] =
   [
     {
       id: "rules-role-hierarchy",
+      forFeature: "rules-role",
       area: "Rules",
       feature: "Granting the acceptance role",
       enabledKey: "rules.enabled",
@@ -308,6 +311,7 @@ export const ROLE_HIERARCHY_REQUIREMENTS: readonly RoleHierarchyRequirement[] =
     },
     {
       id: "leaderboard-roles-hierarchy",
+      forFeature: "leaderboard-roles",
       area: "Leaderboard roles",
       feature: "Handing out leaderboard roles",
       enabledKey: "leaderboard_roles.enabled",

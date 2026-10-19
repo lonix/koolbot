@@ -83,6 +83,9 @@ function makeClient(opts: {
   serverBits?: bigint;
   channels?: FakeChannel[];
   roles?: Array<{ id: string; name: string; position: number }>;
+  /** What Discord returns for a bulk fetch, when it differs from the gateway cache. */
+  fetchedChannels?: FakeChannel[];
+  fetchedRoles?: Array<{ id: string; name: string; position: number }>;
   botPosition?: number;
   noMe?: boolean;
 }): {
@@ -93,6 +96,12 @@ function makeClient(opts: {
     (opts.channels ?? []).map((c) => [c.id, c] as const),
   );
   const roles = new Map((opts.roles ?? []).map((r) => [r.id, r] as const));
+  const fetchedChannels = opts.fetchedChannels
+    ? new Map(opts.fetchedChannels.map((c) => [c.id, c] as const))
+    : channels;
+  const fetchedRoles = opts.fetchedRoles
+    ? new Map(opts.fetchedRoles.map((r) => [r.id, r] as const))
+    : roles;
   const me = {
     permissions: new PermissionsBitField(opts.serverBits ?? ALL),
     permissionsIn: jest.fn((c: FakeChannel) => new PermissionsBitField(c.bits)),
@@ -102,10 +111,16 @@ function makeClient(opts: {
     id: "guild-1",
     members: {
       me: opts.noMe ? null : me,
-      fetchMe: jest.fn(async () => me),
+      fetchMe: jest.fn(async () => {
+        if (opts.noMe) throw new Error("unknown member");
+        return me;
+      }),
     },
-    roles: { cache: roles, fetch: jest.fn(async () => roles) },
-    channels: { cache: channels, fetch: jest.fn(async () => channels) },
+    roles: { cache: roles, fetch: jest.fn(async () => fetchedRoles) },
+    channels: {
+      cache: channels,
+      fetch: jest.fn(async () => fetchedChannels),
+    },
   };
   const client = {
     guilds: {
@@ -350,6 +365,36 @@ describe("what is missing and where", () => {
     expect(
       above.find((a) => a.target.name === "Top fans")?.features[0].id,
     ).toBe("leaderboard-roles-hierarchy");
+  });
+
+  it("does not list a feature as in place while its role cannot be handed out", async () => {
+    settings = {
+      "rules.enabled": true,
+      "rules.role_id": "r-high",
+      "leaderboard_roles.enabled": true,
+      "leaderboard_roles.tiers": "1:9404",
+    };
+    const report = await run({
+      botPosition: 5,
+      // The rules role is above the bot; the tier role does not exist.
+      roles: [{ id: "r-high", name: "Admins", position: 9 }],
+    });
+    const ok = report.okFeatures.map((f) => f.id);
+    expect(ok).not.toContain("rules-role");
+    expect(ok).not.toContain("leaderboard-roles");
+    expect(report.problems.some((p) => p.target.name === "Admins")).toBe(true);
+    expect(report.unknown.map((u) => u.feature.id)).toContain(
+      "leaderboard-roles-hierarchy",
+    );
+  });
+
+  it("still lists them as in place when the roles are below the bot", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "r-low" };
+    const report = await run({
+      botPosition: 5,
+      roles: [{ id: "r-low", name: "Fans", position: 2 }],
+    });
+    expect(report.okFeatures.map((f) => f.id)).toContain("rules-role");
   });
 
   it("only checks the tier roles the leaderboard service would act on", async () => {
@@ -597,6 +642,68 @@ describe("a read that outlasts the TTL", () => {
     now += check.SNAPSHOT_TTL_MS + 1;
     await check.checkBotPermissions(client, "guild-1", deps);
     expect(calls).toBe(6);
+  });
+});
+
+describe("what Discord just returned wins over the gateway cache", () => {
+  it("does not report healthy for a category the fetch no longer returns", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+    const stale = { id: "cat-ev", name: "Events", bits: ALL };
+    const report = await run({ channels: [stale], fetchedChannels: [] });
+    expect(report.fresh).toBe(true);
+    expect(report.unknown.map((u) => u.feature.id)).toContain("event-channels");
+    expect(report.okFeatures.map((f) => f.id)).not.toContain("event-channels");
+  });
+
+  it("does not check a role the fetch no longer returns as if it existed", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "777" };
+    const report = await run({
+      botPosition: 5,
+      roles: [{ id: "777", name: "Gone", position: 1 }],
+      fetchedRoles: [],
+    });
+    expect(report.unknown.map((u) => u.feature.id)).toContain(
+      "rules-role-hierarchy",
+    );
+  });
+});
+
+describe("a read with one failure and one still pending", () => {
+  it("settles, and starts its TTL, only when every read has settled", async () => {
+    settings = { "reactionroles.enabled": true };
+    const { client } = makeClient({});
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    let now = 1_000;
+    const deps = {
+      ...direct,
+      call: async <T>(fn: () => Promise<T>, name: string): Promise<T> => {
+        calls += 1;
+        if (name === "perm-roles") throw new Error("429");
+        if (name === "perm-channels") await gate;
+        return fn();
+      },
+      now: () => now,
+    };
+    let done = false;
+    const first = check
+      .checkBotPermissions(client, "guild-1", deps)
+      .then(() => {
+        done = true;
+      });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(done).toBe(false);
+    now += check.SNAPSHOT_TTL_MS * 2;
+    release();
+    await first;
+    expect(calls).toBe(3);
+    // The TTL runs from when the last read settled, so this reuses the result.
+    const again = await check.checkBotPermissions(client, "guild-1", deps);
+    expect(calls).toBe(3);
+    expect(again.fresh).toBe(false);
   });
 });
 

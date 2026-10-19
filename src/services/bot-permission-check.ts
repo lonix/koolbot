@@ -27,6 +27,7 @@ import {
   type Guild,
   type GuildBasedChannel,
   type GuildMember,
+  type Role,
 } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import { defaultConfig } from "./config-schema.js";
@@ -107,10 +108,24 @@ export interface CheckDeps {
   now?: () => number;
 }
 
+/** The few things the check needs from a collection of channels or roles. */
+interface Lookup<T> {
+  get(id: string): T | null | undefined;
+  values(): Iterable<T | null>;
+}
+
 interface Snapshot {
   guild: Guild;
   me: GuildMember | null;
   fresh: boolean;
+  /**
+   * The channels and roles Discord just returned. A bulk fetch does not evict
+   * what the gateway cache still holds, so a deletion the gateway missed would
+   * still resolve from the cache; targets are looked up here when the read was
+   * fresh (the gateway cache is only the labelled fallback).
+   */
+  channels: Lookup<GuildBasedChannel>;
+  roles: Lookup<Role>;
 }
 
 const snapshots = new Map<
@@ -161,21 +176,40 @@ async function loadSnapshot(
     }
   }
   const server = guild;
-  let fresh = true;
-  try {
-    await Promise.all([
-      call(() => server.roles.fetch(), "perm-roles"),
-      call(() => server.channels.fetch(), "perm-channels"),
-      call(() => server.members.fetchMe({ force: true }), "perm-me"),
-    ]);
-  } catch (err) {
-    fresh = false;
+  // Wait for all three reads to settle (not just the first failure), so the
+  // snapshot, and with it the reuse TTL, is not settled while reads still run.
+  const [roles, channels, member] = await Promise.allSettled([
+    call(() => server.roles.fetch(), "perm-roles"),
+    call(() => server.channels.fetch(), "perm-channels"),
+    call(() => server.members.fetchMe({ force: true }), "perm-me"),
+  ]);
+  const failed = [roles, channels, member].find(
+    (r): r is PromiseRejectedResult => r.status === "rejected",
+  );
+  if (failed) {
     logger.warn(
       "Bot permission check: Discord could not be reached, using the gateway cache:",
-      err,
+      failed.reason,
     );
+    return {
+      guild: server,
+      me: server.members?.me ?? null,
+      fresh: false,
+      channels: server.channels?.cache as Lookup<GuildBasedChannel>,
+      roles: server.roles?.cache as Lookup<Role>,
+    };
   }
-  return { guild: server, me: server.members?.me ?? null, fresh };
+  return {
+    guild: server,
+    me:
+      (member.status === "fulfilled" ? member.value : null) ??
+      server.members?.me ??
+      null,
+    fresh: true,
+    channels: (channels as PromiseFulfilledResult<unknown>)
+      .value as Lookup<GuildBasedChannel>,
+    roles: (roles as PromiseFulfilledResult<unknown>).value as Lookup<Role>,
+  };
 }
 
 function getSnapshot(
@@ -270,14 +304,13 @@ async function readFeatureState(
  * channel there with the lobby's (legacy-aware) name.
  */
 async function resolveVoiceLobby(
-  guild: Guild,
+  channels: Lookup<GuildBasedChannel>,
   config: ConfigService,
 ): Promise<{ categorySet: boolean; id: string }> {
   const categoryId = (
     await config.getStringStrict("voicechannels.category_id", "")
   ).trim();
   if (!categoryId) return { categorySet: false, id: "" };
-  const channels = guild.channels?.cache;
   const lobbyId = (
     await config.getStringStrict("voicechannels.lobby.channel_id", "")
   ).trim();
@@ -298,6 +331,7 @@ async function resolveVoiceLobby(
   );
   for (const c of channels?.values() ?? []) {
     if (
+      c &&
       c.type === ChannelType.GuildVoice &&
       c.parentId === categoryId &&
       c.name === name
@@ -339,13 +373,17 @@ export async function checkBotPermissions(
       false,
     );
   }
-  const { guild, me } = snapshot;
+  const { me } = snapshot;
   const config = ConfigService.getInstance();
   // Read once per check, and only if a feature without a switch asks.
   let groupCount: Promise<number> | null = null;
   const roleGroupsConfigured = async (): Promise<boolean> => {
     groupCount ??= (deps.roleGroupCount ?? defaultRoleGroupCount)(guildId);
     return (await groupCount) > 0;
+  };
+  const dropOk = (id: string): void => {
+    const at = okFeatures.findIndex((f) => f.id === id);
+    if (at >= 0) okFeatures.splice(at, 1);
   };
   const problems = new Map<string, MissingPermission>();
   const unknown: UnknownCheck[] = [];
@@ -367,7 +405,7 @@ export async function checkBotPermissions(
       let lobbyMissing = false;
       if (r.targetResolver === "voice-lobby") {
         setting = "voicechannels.category_id";
-        const lobby = await resolveVoiceLobby(guild, config);
+        const lobby = await resolveVoiceLobby(snapshot.channels, config);
         targetId = lobby.id;
         lobbyMissing = lobby.categorySet && !lobby.id;
         if (!lobby.categorySet) targetId = "";
@@ -392,7 +430,7 @@ export async function checkBotPermissions(
       let target: PermissionTarget = SERVER;
       let channel: GuildBasedChannel | null = null;
       if (r.scope !== "guild") {
-        channel = guild.channels?.cache?.get(targetId) ?? null;
+        channel = snapshot.channels?.get(targetId) ?? null;
         target = {
           kind: r.scope,
           id: targetId,
@@ -447,13 +485,17 @@ export async function checkBotPermissions(
       );
       const feature = ref(r);
       for (const id of ids) {
-        const role = guild.roles?.cache?.get(id);
+        const role = snapshot.roles?.get(id);
         const target: PermissionTarget = {
           kind: "role",
           id,
           name: role?.name ?? id,
         };
         const botHighest = me?.roles?.highest?.position;
+        if (!role || botHighest === undefined || role.position >= botHighest) {
+          // Not fine, so not "in place" either, whatever Manage Roles says.
+          dropOk(r.forFeature);
+        }
         if (!role || botHighest === undefined) {
           unknown.push({
             feature,
