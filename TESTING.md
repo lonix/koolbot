@@ -146,9 +146,11 @@ docker stop koolbot-it-mongo
 ```
 
 Each run creates its own throwaway database (`koolbot_it_*`) on that server and drops it afterwards. CI
-runs the same script in the `integration` job against a `mongo:8.0` service container on Node 22. The
-supported range matches what the shipped Compose files run (MongoDB 8); a regression on a different
-major is not covered. Keep this suite small: add a test only for behaviour a mock cannot prove.
+runs the same script in the `integration` job against a `mongo:7.0.45` service container on Node 22.
+CI runs on MongoDB 7.0 temporarily while the app and Compose files target MongoDB 8: `mongo:8.0` cannot
+start on Linux kernel 6.19 and newer (SERVER-121912). The job logs the image and server version it ran;
+the pin goes back to `mongo:8.0.x` once that is fixed (lonix/koolbot#1269). Until then a regression
+that only appears on MongoDB 8 is not covered. Keep this suite small: add a test only for behaviour a mock cannot prove.
 
 ### Generating sample data for manual testing
 
@@ -360,8 +362,8 @@ and `typecheck` jobs:
 - The `test` job runs `npm run test:ci` on a Node 22, 24 and 26 matrix (`fail-fast: false`, so all
   legs always report, and all three must pass).
 - The `coverage:drift` check and the `coverage-report` artifact upload only run on the Node 22 leg.
-- The `integration` job runs `npm run test:integration` on Node 22 against a `mongo:8.0` service
-  container (see [Real-MongoDB integration tests](#real-mongodb-integration-tests)).
+- The `integration` job runs `npm run test:integration` on Node 22 against a `mongo:7.0.45` service
+  container (temporary, see [Real-MongoDB integration tests](#real-mongodb-integration-tests)).
 - `ci-success` aggregates `lint`, `typecheck`, `test` and `integration`, and is the single required status check for
   branch protection — it fails if any job failed or was cancelled.
 
