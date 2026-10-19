@@ -86,7 +86,7 @@ jobs:
           echo "Matrix: $matrix"
 
   probe:
-    name: ${{ matrix.tag }} #${{ matrix.repeat }}
+    name: 'probe ${{ matrix.tag }} (repeat ${{ matrix.repeat }})'
     needs: matrix
     runs-on: ubuntu-latest
     timeout-minutes: 10
