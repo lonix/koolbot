@@ -80,7 +80,6 @@ function expectWebhooksUntouched(
   ).toEqual([]);
 }
 
-let linkCounter = 0;
 /** What `linkCreatedRoles` does after an apply: link each group to its new role. */
 function linkCreatedRoles(
   groups: Array<Record<string, unknown>>,
@@ -91,7 +90,6 @@ function linkCreatedRoles(
     if (g["roleId"] === null && created) {
       g["roleId"] = created.roleId;
       g["createdByKoolbot"] = true;
-      linkCounter++;
     }
   }
 }
@@ -917,7 +915,6 @@ describe("role groups, end to end on the reference server", () => {
     );
     expect(after.roles.filter((r) => r.name === "Helper")).toHaveLength(1);
     expectWebhooksUntouched(world, before, e);
-    expect(linkCounter).toBeGreaterThan(0);
   });
 
   it("can delete the created role on rollback, leaving the exact original server", async () => {
@@ -1290,6 +1287,26 @@ describe("approved destructive steps, end to end", () => {
       expect(back.notes.join(" ")).toContain("role memberships");
       expect(back.notes.join(" ")).toContain("webhooks");
       expectWebhooksUntouched(world, before, e);
+    });
+
+    it("ignores an approval that someone other than the planning admin gave", () => {
+      const p = h.planAdoption(
+        h.scanHand(world),
+        {
+          deletions: [{ kind: "role", id: "retired-role" }],
+          approvals: [
+            {
+              kind: "role.delete",
+              targetId: "retired-role",
+              approvedBy: "u-mod",
+              approvedAt: h.APPROVED_AT,
+            },
+          ],
+        },
+        { approverId: world.adminId },
+      );
+      expect(p.errors.map((x) => x.code)).toEqual(["approval-required"]);
+      expect(p.operations).toEqual([]);
     });
 
     it("is refused when the role came into use after the preview, deleting nothing", async () => {

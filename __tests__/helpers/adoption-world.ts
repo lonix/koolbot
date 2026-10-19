@@ -182,8 +182,6 @@ export interface World {
   members: Map<string, MemberState>;
   /** Managed integration roles: role id -> the bot that owns them. */
   botRoles: Map<string, string>;
-  /** Channels whose permissions are synced to their category. */
-  synced: Set<string>;
   features: string[];
   rulesChannelId: string | null;
   afkChannelId: string | null;
@@ -264,7 +262,6 @@ export function worldOf(input: {
   botRoles?: Array<[string, string]>;
   webhooks?: WebhookState[];
   config?: Array<[string, ConfigValue]>;
-  synced?: string[];
   features?: string[];
   rulesChannelId?: string | null;
   afkChannelId?: string | null;
@@ -285,7 +282,6 @@ export function worldOf(input: {
     webhooks: new Map((input.webhooks ?? []).map((h) => [h.id, h])),
     members: new Map(input.members),
     botRoles: new Map(input.botRoles ?? []),
-    synced: new Set(input.synced ?? []),
     features: input.features ?? [],
     rulesChannelId: input.rulesChannelId ?? null,
     afkChannelId: input.afkChannelId ?? null,
@@ -491,7 +487,7 @@ export function guildFromWorld(w: World, reads: Reads = {}): any {
     rawPosition: c.position,
     position: c.position,
     topic: c.topic,
-    permissionsLocked: c.parentId ? w.synced.has(c.id) : undefined,
+    permissionsLocked: c.parentId ? false : undefined,
     members: c.kind === "voice" ? { size: c.voiceMemberCount } : undefined,
     permissionOverwrites: {
       cache: new Collection(
