@@ -208,6 +208,14 @@ const EVENT_PRESETS_SCRIPT =
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el)return;" +
+  // A copied preset (?from=, ?fromEvent=) that is refused comes back as a blank
+  // editor whose kind selects have no leads option; a leads row of the draft
+  // (the Captains lobby of an older preset or event) gets its option back, so
+  // the retry keeps it instead of defaulting to a team.
+  "if(el.tagName==='SELECT'&&/^group_\\d+_kind$/.test(k)&&d[k]==='leads'){var has=false;" +
+  "Array.prototype.forEach.call(el.options,function(o){if(o.value==='leads')has=true});" +
+  "if(!has){var lo=document.createElement('option');lo.value='leads';" +
+  "lo.textContent='Leads (leaders and host only; use the Captains lobby switch instead)';el.appendChild(lo)}}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 

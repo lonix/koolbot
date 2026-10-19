@@ -173,7 +173,9 @@ ${description}<table class="prefs-table"><tbody>${rows}</tbody></table>
 }
 
 function renderGroups(e: HostPanelEvent): string {
-  if (!e.groupsEnabled || e.groups.length === 0) {
+  // A legacy event with only a leaders-only group has no listed group but still
+  // has the lobby's status line and the channel warnings to show (#1251).
+  if (!e.groupsEnabled || (e.groups.length === 0 && !e.captainsLobby)) {
     return `<section class="card" id="host-groups" aria-labelledby="host-groups-h">
 <h2 id="host-groups-h">Groups</h2>
 <p class="muted">This event has no groups.</p>
@@ -207,7 +209,7 @@ function renderGroups(e: HostPanelEvent): string {
 <p class="muted">Set up when the event was created. Channels are created ${lead}.</p>
 ${notices}
 ${renderTags(e)}
-<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>
+${e.groups.length > 0 ? `<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>` : ""}
 ${renderLobbyLine(e)}
 </section>`;
 }

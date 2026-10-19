@@ -127,6 +127,8 @@ export function renderGroupEditor(d: GroupEditViewData): string {
       );
     })
     .join("");
+  // Only the hidden lobby: nothing to edit here.
+  if (shown === 0) return "";
   return `<div class="field"><table class="prefs-table"><thead><tr><th scope="col">#</th><th scope="col">${escapeHtml(d.groupLabel)} name</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${rows}</tbody></table>
 <p class="muted">A name another ${escapeHtml(d.groupLabel.toLowerCase())} has, or goes back to when a leader's rename is reset, is refused. A rename changes the channel in place (Discord allows about 2 renames per channel every 10 minutes: if it is used up, the name is saved and the channel follows by itself). A size is the most people a group takes and the channel's user limit; lowering it below the number of people moves nobody, the group is marked over size and takes nobody new until it is below its size again. Leave a size empty for no limit.</p></div>`;
 }

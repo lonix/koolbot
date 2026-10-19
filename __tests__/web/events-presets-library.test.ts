@@ -340,6 +340,46 @@ describe("the presets admin page (#1200)", () => {
     expect(template?.innerHTML.includes('value="leads"')).toBe(false);
   });
 
+  it("a refused copy of a preset with a leads row comes back with that row still a leads row, so the retry never turns it into a team (#1251)", () => {
+    // After a refused save the page is the blank editor: no kind select has a
+    // leads option. The draft the script restores holds the leads value.
+    const html = adminPage().replace(
+      "<h1>Group presets</h1>",
+      '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+    );
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-preset-draft",
+      JSON.stringify({
+        preset_name: "Copy",
+        group_0_name: "Alpha",
+        group_0_kind: "team",
+        group_1_name: "Command",
+        group_1_kind: "leads",
+      }),
+    );
+    const code = [
+      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ]
+      .map((m) => m[1])
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    const kind = (n: number): HTMLSelectElement =>
+      dom.window.document.querySelector(
+        `[name="group_${n}_kind"]`,
+      ) as HTMLSelectElement;
+    expect(kind(1).value).toBe("leads");
+    expect(kind(0).value).toBe("team");
+    // Only the row that was a leads row gets the option.
+    expect(Array.from(kind(0).options).map((o) => o.value)).toEqual([
+      "team",
+      "open",
+    ]);
+  });
+
   it("an edit carries the preset's id and the unreadable notice shows", () => {
     const html = adminPage({
       editing: { id: LIB_ID, label: "Mine" },

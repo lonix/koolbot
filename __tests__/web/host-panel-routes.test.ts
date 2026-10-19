@@ -409,6 +409,42 @@ describe("host panel page", () => {
     expect((await call(url(PANEL))).text).not.toContain("Captains lobby:");
   });
 
+  it("a legacy event with only a leads group still shows the lobby's status and the channel warnings, not 'no groups' (#1251)", async () => {
+    events[EVENT_ID] = makeEvent({
+      groupsEnabled: true,
+      captainsEnabled: true,
+      groups: [
+        {
+          key: "g_1",
+          name: "Hidden command room",
+          kind: "leads",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    } as never);
+    groupReport = {
+      warnings: [],
+      failures: [
+        { key: "g_1", name: "Hidden command room", reason: "Discord refused" },
+      ],
+    };
+    const r = await call(url(PANEL));
+    expect(r.status).toBe(200);
+    expect(r.text).not.toContain("This event has no groups.");
+    expect(r.text).toContain("Captains lobby:</strong> on");
+    expect(r.text).toContain("its channel is not created yet");
+    expect(r.text).toContain("Some group channels could not be set up");
+    expect(r.text).toContain("Discord refused");
+    // No group is listed, so no empty table.
+    expect(r.text).not.toContain('<thead><tr><th scope="col">Group</th>');
+    groupReport = null;
+  });
+
   it("shows only the sections that apply to a plain event", async () => {
     const r = await call(url(PANEL));
     expect(r.text).toContain("This event has no groups.");
