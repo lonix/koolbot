@@ -252,6 +252,7 @@ async function confirmed(
       rowId: c.rowId,
       from: c.from,
       to: c.to,
+      guard: c.guard,
     })),
     revision: first.revision,
     voiceInUse: first.voiceInUse,
@@ -274,9 +275,10 @@ async function confirmed(
 }
 
 describe("registration and reading", () => {
-  it("is the last row, with a letters-only id", () => {
+  it("is the row before the groups switch (#1243), with a letters-only id", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids[ids.length - 1]).toBe("captainsLobby");
+    expect(ids[ids.length - 2]).toBe("captainsLobby");
+    expect(ids[ids.length - 1]).toBe("groupsEnabled");
     expect(CAPTAINS_LOBBY_ROW_ID).toMatch(/^[A-Za-z]+$/);
   });
 
@@ -666,6 +668,7 @@ describe("turning it off", () => {
         rowId: c.rowId,
         from: c.from,
         to: c.to,
+        guard: c.guard,
       })),
       revision: first.revision,
       voiceInUse: first.voiceInUse,
@@ -750,6 +753,7 @@ describe("turning it off", () => {
         rowId: c.rowId,
         from: c.from,
         to: c.to,
+        guard: c.guard,
       })),
       revision: first.revision,
       voiceInUse: first.voiceInUse,
@@ -791,6 +795,7 @@ describe("turning it off", () => {
         rowId: c.rowId,
         from: c.from,
         to: c.to,
+        guard: c.guard,
       })),
       revision: first.revision,
       voiceInUse: first.voiceInUse,
@@ -834,6 +839,71 @@ describe("turning it off", () => {
     expect(calls).toEqual([]);
     expect(leadsRows()).toHaveLength(1);
     expect(leadsRows()[0].channelId).toBe("c-late");
+    // Saved again, it is planned from the new state and asks.
+    expect((await lobbyOff()).status).toBe("needs-confirmation");
+  });
+
+  it("the confirmation is for the lobby and channel the host was shown: a channel recorded between the page and the confirmation is not deleted", async () => {
+    seed([
+      teamGroup(A, "Alpha"),
+      teamGroup(B, "Bravo"),
+      lobbyGroup({ channelId: null }),
+    ]);
+    // Somebody is in the main channel, so the page asks (the lobby has no
+    // channel yet).
+    connected = new Set(["c-main"]);
+    const first = await lobbyOff();
+    if (first.status !== "needs-confirmation") throw new Error("expected");
+    const token = live.signConfirmation({
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+      changes: first.changes.map((c) => ({
+        rowId: c.rowId,
+        from: c.from,
+        to: c.to,
+        guard: c.guard,
+      })),
+      revision: first.revision,
+      voiceInUse: first.voiceInUse,
+    });
+    const check = live.verifyConfirmation(token, {
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+    });
+    if (!check.ok) throw new Error("token refused");
+    // The channel pass (own lock, no revision) records the lobby's channel, and
+    // somebody is in it, before the host confirms.
+    groupsOf()[2].channelId = "c-new";
+    connected = new Set(["c-main", "c-new"]);
+    const out = await live.runLiveEdit({
+      guildId: GUILD,
+      eventId: EV,
+      deps,
+      confirmed: check.changes,
+      confirmedRevision: check.revision,
+      confirmedVoiceInUse: check.voiceInUse,
+    });
+    expect(out.status).toBe("stale");
+    expect(calls).toEqual([]);
+    expect(leadsRows()).toHaveLength(1);
+    expect(leadsRows()[0].channelId).toBe("c-new");
+  });
+
+  it("nobody was connected at the plan, so nobody was confirmed: somebody who joins the lobby before the move is not moved", async () => {
+    connected = new Set();
+    // The plan sees every channel empty and asks nothing. Somebody joins the
+    // lobby before the row runs (at the save's claim).
+    fake.beforeWrite = () => {
+      fake.beforeWrite = null;
+      connected = new Set(["c-lobby"]);
+    };
+    const out = done(await lobbyOff());
+    expect(out.applied).toEqual([]);
+    expect(text(out)).toContain("somebody joined its channel");
+    expect(calls).toEqual([]);
+    expect(leadsRows()).toHaveLength(1);
     // Saved again, it is planned from the new state and asks.
     expect((await lobbyOff()).status).toBe("needs-confirmation");
   });

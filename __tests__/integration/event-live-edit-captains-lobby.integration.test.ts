@@ -234,6 +234,7 @@ describeWithMongo(
           rowId: c.rowId,
           from: c.from,
           to: c.to,
+          guard: c.guard,
         })),
         revision: first.revision,
         voiceInUse: first.voiceInUse,

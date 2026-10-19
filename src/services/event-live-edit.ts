@@ -322,6 +322,14 @@ export interface ApplyContext<V extends JsonValue = JsonValue> {
   /** Synchronous: an end or cancel holds the event. Ask before every outward write. */
   ending(): boolean;
   /**
+   * Somebody connected to the event's voice channels was shown to the host and
+   * confirmed (a confirmed run whose token says people were connected). When
+   * false, a row that moves people out of a channel must look again right before
+   * it moves them, and keep what it would have removed if somebody has joined
+   * since the plan found the channels empty.
+   */
+  occupantsConfirmed: boolean;
+  /**
    * `events.groups.max_count` read now (null: unreadable). For a row that adds a
    * group and must hold the limit against what an earlier row of the same save
    * already added: the plan judged the count it started from.
@@ -764,6 +772,13 @@ export interface PlannedChange {
   confirm: string | null;
   /** The target is already stored; only its owed follow-up is run. */
   reconcile?: boolean;
+  /**
+   * The row's `guard` identity of what the plan was made for (see
+   * `LiveEditRow.guard`), when it has one. It travels in the confirmation token,
+   * so a confirmed run for something else (a channel recorded between the page
+   * and the confirmation) is a conflict, and nothing is applied.
+   */
+  guard?: string;
 }
 
 export interface PlanProblem {
@@ -874,11 +889,13 @@ export function planLiveEdit(input: {
       continue;
     }
     plannedTo.set(row.id, entry.to);
+    const guard = row.guard?.(input.event);
     plan.changes.push({
       rowId: row.id,
       label: row.label,
       from: stored,
       to: entry.to,
+      ...(guard !== undefined ? { guard } : {}),
       confirm:
         row.needsConfirmation?.(stored, entry.to, input.event, env) ?? null,
     });
@@ -895,6 +912,8 @@ export interface ConfirmedChange {
   from: JsonValue;
   to: JsonValue;
   reconcile?: boolean;
+  /** `PlannedChange.guard` of the page the host confirmed. */
+  guard?: string;
 }
 
 /** Hash of a change set (rows with their from and to), order-independent. */
@@ -919,7 +938,14 @@ interface TokenPayload {
   n: number;
   /** Somebody was connected to an event voice channel when the page was shown. */
   i?: boolean;
-  c: Array<{ r: string; f: JsonValue; t: JsonValue; k?: boolean }>;
+  c: Array<{
+    r: string;
+    f: JsonValue;
+    t: JsonValue;
+    k?: boolean;
+    /** The row's guard identity the page was planned with. */
+    g?: string;
+  }>;
 }
 
 function tokenMac(payload: string): string | null {
@@ -959,6 +985,7 @@ export function signConfirmation(input: {
       f: c.from,
       t: c.to,
       ...(c.reconcile === true ? { k: true } : {}),
+      ...(typeof c.guard === "string" ? { g: c.guard } : {}),
     })),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -1024,6 +1051,7 @@ export function verifyConfirmation(
     from: c.f,
     to: c.t,
     ...(c.k === true ? { reconcile: true } : {}),
+    ...(typeof c.g === "string" ? { guard: c.g } : {}),
   }));
   if (changeSetHash(changes) !== payload.h) {
     return { ok: false, reason: "invalid" };
@@ -1214,6 +1242,7 @@ export async function runLiveEdit(opts: {
             to: c.to,
             base: c.from,
             reconcile: c.reconcile,
+            ...(c.guard !== undefined ? { guard: c.guard } : {}),
           }))
         : [...(opts.submission ?? [])];
     if (entries.some((e) => !rows.some((r) => r.id === e.rowId))) {
@@ -1329,6 +1358,8 @@ export async function runLiveEdit(opts: {
           from: change.from,
           to: change.to,
           ending: (): boolean => deps.isEnding(eventId),
+          occupantsConfirmed:
+            opts.confirmed !== undefined && opts.confirmedVoiceInUse === true,
           maxGroups: (): Promise<number | null> =>
             deps.maxGroups().catch(() => null),
           effects: deps.effects,

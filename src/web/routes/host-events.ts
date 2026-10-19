@@ -1358,6 +1358,7 @@ function registerSettingsActions(router: Router, client: Client): void {
           from: c.from,
           to: c.to,
           reconcile: c.reconcile,
+          guard: c.guard,
         })),
         revision: outcome.revision,
         voiceInUse: outcome.voiceInUse,

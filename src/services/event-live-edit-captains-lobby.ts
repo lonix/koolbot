@@ -187,7 +187,13 @@ async function turnOff(ctx: ApplyContext<boolean>): Promise<RowOutcome> {
     // The channel the plan and the confirmation saw: a channel the pass records
     // meanwhile (it has its own lock and does not move the revision) was not
     // part of what the host was asked about, so nothing is moved or deleted.
-    step = await removeOne(ctx, lobby.key, mark, lobby.channelId ?? null);
+    step = await removeOne(
+      ctx,
+      lobby.key,
+      mark,
+      lobby.channelId ?? null,
+      ctx.occupantsConfirmed,
+    );
   } catch (err) {
     logger.error(
       `Event ${sanitizeForLog(ctx.eventId)}: turning off the captains lobby failed:`,
@@ -250,6 +256,13 @@ export const captainsLobbyRow: LiveEditRow = asRow<boolean>({
     return errors.length > 0
       ? `the captains lobby counts as a group. ${errors.join(" ")}`
       : null;
+  },
+  // What the host was shown: the lobby and its channel. A channel recorded
+  // between the page and the confirmation (the channel pass has its own lock and
+  // does not move the revision) makes the confirmed run a conflict, not a removal.
+  guard: (e) => {
+    const lobby = lobbyOf(e);
+    return `${lobby?.key ?? ""}|${lobby?.channelId ?? ""}`;
   },
   needsConfirmation: (from, to, _event, env) => {
     if (!from || to) return null;

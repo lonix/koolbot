@@ -573,6 +573,11 @@ export async function removeOne(
    * asked, from the new state. `undefined`: not checked.
    */
   expectChannel?: string | null,
+  /**
+   * People in the channel were shown to the host and confirmed (the default: a
+   * group removal is always confirmed). False: look again right before moving.
+   */
+  occupantsConfirmed = true,
 ): Promise<RemoveStep> {
   const fresh = await readFresh(ctx.eventId, ctx.guildId);
   if (!fresh) return { kind: "lost" };
@@ -610,6 +615,23 @@ export async function removeOne(
         kind: "refused",
         reason: `${name}: the people in its channel could not be moved, so nothing was removed`,
       };
+    }
+    // Moving people was not part of what the host confirmed (the plan found the
+    // event's channels empty): somebody who joined since is not moved. The group
+    // is kept and the next save is planned, and asked, from the new state.
+    if (!occupantsConfirmed) {
+      let joined = true;
+      try {
+        joined = fx.eventVoiceInUse(ctx.guildId, [channelId]);
+      } catch {
+        // Unreadable: treated as somebody being there.
+      }
+      if (joined) {
+        return {
+          kind: "refused",
+          reason: `${name}: somebody joined its channel since you reviewed it, so nobody was moved and nothing was removed. Save again (you are asked first when anybody is connected)`,
+        };
+      }
     }
     const emptied = await fx.emptyGroupChannel(
       ctx.guildId,
