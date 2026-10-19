@@ -2194,15 +2194,19 @@ event, which KoolBot only reads, never gets groups). The row is applied after th
   channels, next to the main channel and in order (a leaders-only channel is created restricted). When
   tagging is on and the event is running the nicknames are tagged again in the background, and the
   leaders-only channel's access and the "Customise team" messages follow.
-- **Groups on, an event that never had groups.** Groups are switched on from a **preset**: the page
-  offers the presets that are on for the server, and the server turns the chosen id into the preset's
-  groups (names, kinds, sizes, tags, markers, labels and its default for clan tags) at the moment you
-  save; nothing about the groups is taken from the browser. The groups are stored with new keys and
-  nobody assigned. Leaders, leader customisation, the tag position and the lock stay at their stored
-  values (off for an event made without groups): switch them on afterwards with the other rows. A preset's
-  channel creation time is not applied (the event keeps its own), and there is no "Custom" setup here:
-  choose the closest preset, then rename, add or remove groups. A preset with more groups than
-  `events.groups.max_count` is refused. Nothing is confirmed: it destroys nothing.
+- **Groups on, an event that never had groups.** Pick a **preset** or set up **your own groups**.
+  A preset is chosen by id: the page offers the presets that are on for the server, and the server turns
+  the id into the preset's groups (names, kinds, sizes, tags, markers, labels and its default for clan
+  tags) at the moment you save; nothing about a preset's groups is taken from the browser. Your own groups
+  are up to six starter rows (name, kind, size, tag; a row with no name is skipped) checked with the
+  event form's rules (name rules, size 1 to 99, tag length, at most one leaders-only group,
+  `events.groups.max_count`), and the whole result is validated again as the edited setup; a chosen
+  preset wins over the rows, and the rows are the way in when no preset is available. Add, rename,
+  resize or remove groups afterwards with the other forms. The groups are stored with new keys and nobody
+  assigned. Leaders, leader customisation, the tag position and the lock stay at their stored values (off
+  for an event made without groups): switch them on afterwards with the other rows. Clan tags follow the
+  preset's default (off for your own groups). A preset's channel creation time is not applied (the
+  event keeps its own). Nothing is confirmed: it destroys nothing.
 - **Channels, partial results and posting again.** With no main channel yet nothing is owed: the channels
   are made together when it exists. If a channel could not be made (a full category, a missing
   permission) the groups are on and the result says "Saved but not finished: ... a group's channel is not
@@ -2213,6 +2217,9 @@ event, which KoolBot only reads, never gets groups). The row is applied after th
   the moment the occurrence ends, as with every Live settings change. Groups switched off here
   therefore start the later occurrences without groups, and groups switched on start them with the
   preset's groups. The confirmation page says so for a repeating event.
+- **When the event ends** the group leaders are cleared whether the groups are on or were switched off
+  (the kept groups keep their member lists as history until a member resets their data, as for any
+  ended event), and the next occurrence of a repeating event is made without members or leaders.
 - **Known limits.** The main channel of an event made without groups has no host overwrites (they are
   added only when a group event's main channel is created); switching groups on later does not add
   them.

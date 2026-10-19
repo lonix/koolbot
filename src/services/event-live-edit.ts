@@ -492,6 +492,17 @@ export interface LiveEditEffects {
     ending: () => boolean,
   ): Promise<EmptyChannelOutcome>;
   /**
+   * Move everyone out of SEVERAL group channels to the main channel in ONE mover
+   * run (one attempt budget and one pacing for the whole call, #1243), inside the
+   * live edit's own move lock. Used by the switch-off of all groups. Never throws.
+   */
+  emptyGroupChannels(
+    guildId: string,
+    eventId: string,
+    targets: ReadonlyArray<{ groupKey: string; channelId: string }>,
+    ending: () => boolean,
+  ): Promise<EmptyChannelsOutcome>;
+  /**
    * Delete one group's channel and the group's record in one step under the
    * channel lock (`EventGroupChannels.removeGroup`). Null when the server
    * cannot be found. Never throws.
@@ -528,6 +539,20 @@ export type EmptyChannelOutcome =
   | { status: "empty"; moved: string[] }
   /** Somebody still is (or may be): `detail` says who could not be moved and why. */
   | { status: "occupied"; moved: string[]; remaining: number; detail: string }
+  /** The move could not be tried at all (a refusal of the mover). */
+  | { status: "failed"; reason: string };
+
+/** What emptying several group channels in one run did. */
+export type EmptyChannelsOutcome =
+  /** The run happened: who is still shown in which channel, and why people could not be moved. */
+  | {
+      status: "done";
+      moved: string[];
+      occupied: Array<{ groupKey: string; remaining: number }>;
+      /** People whose move Discord did not confirm (check Discord). */
+      unconfirmed: number;
+      detail: string;
+    }
   /** The move could not be tried at all (a refusal of the mover). */
   | { status: "failed"; reason: string };
 
