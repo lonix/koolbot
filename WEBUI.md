@@ -844,6 +844,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**           | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
 | **Quotes**            | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
+| **Bot Permissions**   | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
 | **Bot Status**        | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
@@ -862,7 +863,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
 
 The sidebar groups the pages under three headings, in this order: **Info**
-(Dashboard, Bot Status, Database, Command Audit, Command Metrics, Moderation,
+(Dashboard, Bot Status, Bot Permissions, Database, Command Audit, Command Metrics, Moderation,
 Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
 (Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
 Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature pages that
@@ -1097,6 +1098,42 @@ only as monospace helper text. The cascade-disable behaviour and the
 _"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
+
+The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
+permissions the bot is missing for the features you have switched on, so you do
+not have to guess why a feature does nothing. It is read-only and writes nothing
+to Discord. For each missing permission it shows where it is missing (server-wide,
+or in the configured category or channel), which enabled features it affects, what
+stops working and how to fix it. What each feature needs is listed in one place in
+the code (`src/services/bot-permission-registry.ts`), and the services that act
+(event group channels, clan tags, Events list sync, member moves, voice rooms) take
+their permission bits and warning texts from the same list. It covers voice
+channels and temporary rooms, events (channels, host access, the leaders-only
+channel, moves, clan tags, the Events list), reaction roles, leaderboard roles,
+role groups and the rules role (including a role that sits above the bot's
+highest role). The channel-posting features (View Channel, Send Messages, Embed
+Links) are not covered yet.
+
+- **Effective permissions.** A category or channel is checked with the bot's
+  permissions _in that channel_, so an overwrite that denies a permission the bot's
+  role has server-wide shows as missing. Permissions a channel cannot grant (Manage
+  Roles, Manage Nicknames, Create Events) are checked server-wide and shown as such.
+- **Only features in use count.** A feature is listed as affected only while its
+  `*.enabled` setting is on and its category or channel is set. A permission that
+  only a switched-off feature would need is shown under _Not needed right now_,
+  not as a problem. An enabled feature with no category set is skipped with a note.
+  Role groups have no switch of their own, so they count as in use when the server
+  has at least one role group. If a setting cannot be read, the page says the check
+  is unavailable instead of treating features as off.
+- **Fresh, with a short cache.** The bot's member, roles and channels are re-read
+  from Discord when the page opens (through the same timeout and rate-limit helpers
+  as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
+  be reached the page says it is using the bot's cached view; a feature that cannot
+  be checked is listed as _could not be checked_, never as fine.
+- **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
+  with the number of missing permissions that affect enabled features. It comes from
+  the last check (any admin page load refreshes it in the background), so a page is
+  never held up for it.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users

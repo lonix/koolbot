@@ -28,6 +28,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
+import { PERM } from "./bot-permission-registry.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Event } from "../models/event.js";
 import { eventChannelProtectionFilter } from "./event-group-channels.js";
@@ -1131,7 +1132,7 @@ export class VoiceChannelManager {
       typeof scope?.permissionsFor === "function"
         ? scope.permissionsFor(me)
         : me.permissions;
-    return !!perms?.has(PermissionFlagsBits.SetVoiceChannelStatus);
+    return !!perms?.has(PERM.setVoiceStatus.bit);
   }
 
   /**
