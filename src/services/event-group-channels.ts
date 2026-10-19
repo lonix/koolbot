@@ -3044,6 +3044,24 @@ export class EventGroupChannels {
       plan.push({ key: group.key, kind: group.kind, channelId, ours });
     }
 
+    // The looks above are separated by awaited reads: somebody may have joined a
+    // channel that was looked at earlier while a later one was being read. One
+    // synchronous look at every planned channel, right before the first delete,
+    // so a join that already shows keeps ALL of them (the per-delete checks below
+    // still catch a later one).
+    for (const item of plan) {
+      if (!item.ours) continue;
+      const live = guild.channels.cache.get(item.channelId) as
+        VoiceChannel | undefined;
+      if (live?.type !== ChannelType.GuildVoice) continue;
+      const remaining = [...(live.members?.keys() ?? [])].filter(
+        (id) => !ignore.has(id),
+      ).length;
+      if (remaining > 0) {
+        return { status: "occupied", remaining, groupKey: item.key };
+      }
+    }
+
     // 2. Keep the scan from re-creating a channel deleted below while the flag
     // is still on (only if a delete fails halfway; see the method comment).
     const until = Date.now() + SWITCH_OFF_HOLD_MS;

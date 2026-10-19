@@ -52,8 +52,11 @@
  *   truth, nothing was destroyed on the way off. Tags (when tagging is on and
  *   the event is active) and the leaders-only channel's access follow in
  *   `afterSave`.
- * - **The event never had groups** (a plain event): the host picks a PRESET. The
- *   route resolves its id against the server's catalog and the row's value
+ * - **The event never had groups** (a plain event): the host picks a PRESET or
+ *   defines OWN starter groups (the route reads the `custom_*` rows with the event
+ *   form's rules; the row validates the whole edited setup again, so the one
+ *   leads group, the name rules and the group cap hold). The route resolves a
+ *   preset's id against the server's catalog and the row's value
  *   carries the content (names, kinds, sizes, tags, markers, labels and the
  *   preset's tagging default). One conditional write stores `groupsEnabled`, the
  *   preset id, the labels, the tagging default and the groups (keys minted
@@ -61,9 +64,8 @@
  *   still has no groups. Leaders, leader customisation, the tag position and the
  *   lock stay at their stored values (off for a plain event); the host switches
  *   them on with the existing rows afterwards. A preset's channel lead time is
- *   not applied (the event keeps its own). "Custom" setups (own names and
- *   count) are not offered here: pick the closest preset, then rename, add and
- *   remove groups with the other rows.
+ *   not applied (the event keeps its own). The host then renames, adds and
+ *   removes groups with the other rows (the same planners, no second editor).
  * - Either way the channels are then made by the existing group pass
  *   (`createMissingChannels` of `event-live-edit-group-set.ts`: the pass creates
  *   them next to the main channel, a `leads` group restricted). Without a main
@@ -350,41 +352,46 @@ async function applyOff(
       "could not be switched off: the people in the group channels could not be moved, so nothing was changed",
     );
   }
-  // 1. Everyone out of every group channel.
+  // 1. Everyone out of every group channel, in ONE mover run: one attempt
+  // budget (60 moves) and one pacing for the whole save, so many populated groups
+  // cannot multiply the bound that keeps the request short. Whoever the budget
+  // did not reach is reported by group and a re-save moves the next batch.
   // Nobody is exempted from the occupancy checks of the delete: a person moved
-  // early may have walked back into an earlier channel while later groups were
-  // emptied, and `emptyGroupChannel` already waits for the cache to show the
-  // confirmed moves. Whoever is shown present keeps the channels (save again).
+  // early may have walked back into an earlier channel while later ones were
+  // emptied, and the run waits for the cache to show the confirmed moves.
+  const targets = (fresh.groups ?? []).flatMap((g) =>
+    g.channelId ? [{ groupKey: g.key, channelId: g.channelId }] : [],
+  );
   const ignore = new Set<string>();
-  const problems: string[] = [];
-  for (const group of fresh.groups ?? []) {
-    const channelId = group.channelId ?? null;
-    if (!channelId) continue;
+  if (targets.length > 0) {
     if (ctx.ending()) {
       return fail(`could not be switched off because ${ENDING_TEXT}`);
     }
-    const emptied = await fx.emptyGroupChannel(
+    const emptied = await fx.emptyGroupChannels(
       ctx.guildId,
       ctx.eventId,
-      group.key,
-      channelId,
+      targets,
       ctx.ending,
     );
     if (emptied.status === "failed") {
-      // A refusal of the mover applies to every group: stop here.
-      problems.push(`"${group.name}": nobody was moved (${emptied.reason})`);
-      break;
-    }
-    if (emptied.status === "occupied") {
-      problems.push(
-        `"${group.name}": ${peopleText(emptied.remaining)} still in its channel (${emptied.detail})`,
+      return fail(
+        `could not be switched off: nobody was moved (${emptied.reason}). Nothing was deleted and the groups are still on`,
       );
     }
-  }
-  if (problems.length > 0) {
-    return fail(
-      `could not be switched off: ${problems.join("; ")}. Nothing was deleted and the groups are still on`,
+    const problems = emptied.occupied.map(
+      (o) =>
+        `"${nameOf(fresh, o.groupKey)}": ${peopleText(o.remaining)} still in its channel (${emptied.detail})`,
     );
+    if (problems.length === 0 && emptied.unconfirmed > 0) {
+      problems.push(
+        `${emptied.unconfirmed} move${emptied.unconfirmed === 1 ? " is" : "s are"} not confirmed by Discord (${emptied.detail})`,
+      );
+    }
+    if (problems.length > 0) {
+      return fail(
+        `could not be switched off: ${problems.join("; ")}. Nothing was deleted and the groups are still on`,
+      );
+    }
   }
   // 2. Delete the channels and switch off, in one step.
   if (ctx.ending()) {

@@ -674,6 +674,20 @@ describe("what runs for which event", () => {
     expect(EventMock.updateOne).not.toHaveBeenCalled();
   });
 
+  it("groups switched off and kept as history (#1243): the leaders are still cleared, and no channel pass or pull-back runs", async () => {
+    const kept = (row().groups as Row[]).map((g) => ({
+      ...g,
+      channelId: null,
+    }));
+    rows.set(ID, row({ groupsEnabled: false, groups: kept }));
+    const { teardown } = make();
+    const outcome = await teardown.run(manual());
+    expect(outcome.status).toBe("ended");
+    expect(moveEventMembers).not.toHaveBeenCalled();
+    expect(calls).not.toContain("cleanup");
+    expect(calls).toContain("captains");
+  });
+
   it("the pull-back is only for a manual end that asked for it, and an event with group channels", async () => {
     const a = make().teardown;
     await a.run(manual({ pullBack: false }));

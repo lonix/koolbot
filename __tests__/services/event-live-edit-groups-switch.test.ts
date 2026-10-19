@@ -184,6 +184,8 @@ let createResult: () => {
 /** What the event looked like when the nicknames were asked to be put back. */
 const atRestore: Array<{ groupsEnabled: unknown }> = [];
 const atEmpty: Array<{ key: string; groupsEnabled: unknown }> = [];
+/** How many channels each mover run was asked to empty. */
+const emptyRuns: number[] = [];
 const created: string[][] = [];
 
 beforeEach(() => {
@@ -192,6 +194,7 @@ beforeEach(() => {
   calls.length = 0;
   atRestore.length = 0;
   atEmpty.length = 0;
+  emptyRuns.length = 0;
   created.length = 0;
   fake.beforeWrite = null;
   fake.afterFind = null;
@@ -235,10 +238,25 @@ beforeEach(() => {
       }
       return result;
     },
-    async emptyGroupChannel(_g, _e, key, channelId) {
-      calls.push(`empty:${key}:${channelId}`);
-      atEmpty.push({ key, groupsEnabled: doc().groupsEnabled });
-      return emptyResult(key);
+    // One mover run over every target (the real effect runs one pass, so one
+    // attempt budget): the per-group answers of `emptyResult` are combined.
+    async emptyGroupChannels(_g, _e, targets) {
+      emptyRuns.push(targets.length);
+      const moved: string[] = [];
+      const occupied: Array<{ groupKey: string; remaining: number }> = [];
+      let detail = "";
+      for (const t of targets) {
+        calls.push(`empty:${t.groupKey}:${t.channelId}`);
+        atEmpty.push({ key: t.groupKey, groupsEnabled: doc().groupsEnabled });
+        const r = emptyResult(t.groupKey);
+        if (r.status === "failed") return r;
+        moved.push(...r.moved);
+        if (r.status === "occupied") {
+          occupied.push({ groupKey: t.groupKey, remaining: r.remaining });
+          detail = r.detail;
+        }
+      }
+      return { status: "done", moved, occupied, unconfirmed: 0, detail };
     },
     async removeAllGroupChannels(_g, _e, opts) {
       calls.push(`removeAll:${[...opts.ignore].join("+")}`);
@@ -745,6 +763,11 @@ describe("groups turned off", () => {
     expect(calls.some((c) => c.startsWith("removeAll:u"))).toBe(false);
   });
 
+  it("asks for ONE mover run over every group channel, not one per group (one attempt budget for the save)", async () => {
+    await offConfirmed();
+    expect(emptyRuns).toEqual([2]);
+  });
+
   it("an event whose channels do not exist yet is switched off without moving anybody", async () => {
     seed({ groups: seedGroups().map((g) => ({ ...g, channelId: null })) });
     done(await offConfirmed());
@@ -783,7 +806,7 @@ describe("groups turned off", () => {
       const out = done(await offConfirmed());
       expect(calls).toEqual([`empty:${A}:c1`]);
       expect(text(out)).toBe(
-        'Not saved: Groups could not be switched off: "Alpha": nobody was moved (a move is already running). Nothing was deleted and the groups are still on. Save again to retry.',
+        "Not saved: Groups could not be switched off: nobody was moved (a move is already running). Nothing was deleted and the groups are still on. Save again to retry.",
       );
       expect(doc().groupsEnabled).toBe(true);
     });
