@@ -13,10 +13,11 @@
  *   conflict, of a `partial` and of `owed`. A row names a position, not a key:
  *   the write is selected by the group's `key` read from the fresh row, so a
  *   reorder never renames another group. A name row has the base-value
- *   protection of its own text (a reorder shows as a conflict); a SIZE row has
- *   none against a reorder, which a later step that adds or removes groups
- *   (#1242) must account for (give the size rows a key check) before it moves
- *   positions.
+ *   protection of its own text (a reorder shows as a conflict); a SIZE row
+ *   cannot tell groups apart by its value (sizes are often equal), so the form
+ *   also posts the key of the group it showed and the row's `guard` makes
+ *   another group at that position a conflict (#1242: removing or adding a
+ *   group moves positions).
  * - `groupSizeA`, ...: the size (max members and the channel's user limit,
  *   1 to 99, empty for no limit) of the group at that position.
  * - `groupPreset`: switch the preset, applying names, sizes and default tags to
@@ -140,6 +141,12 @@ export const groupNameRowId = (index: number): string =>
 export const groupSizeRowId = (index: number): string =>
   `groupSize${POSITION_LETTERS[index]}`;
 export const GROUP_PRESET_ROW_ID = "groupPreset";
+/**
+ * The form field that carries the KEY of the group a size field was shown for
+ * (`k_groupSizeA`): the identity the size row's guard compares (#1242).
+ */
+export const groupSizeKeyField = (index: number): string =>
+  `k_${groupSizeRowId(index)}`;
 
 // ---------------------------------------------------------------
 // Helpers
@@ -422,6 +429,25 @@ function sizeRow(index: number): LiveEditRow {
     },
     applicable: (e) =>
       hasGroups(e) && groupAt(e, index) ? null : `Group ${n} does not exist.`,
+    // The row names a POSITION, and sizes are often equal: after a group was
+    // removed or added, position 2 may hold another group whose size equals the
+    // one the form showed, which the base value rule cannot tell. The form posts
+    // the key of the group it showed (`k_groupSizeA`); another group there now
+    // is a conflict (#1242, the note in the header of this file).
+    guard: (e) => groupAt(e, index)?.key ?? "",
+    collect: (body) => {
+      const id = groupSizeRowId(index);
+      const raw = body[`s_${id}`];
+      if (typeof raw !== "string") return null;
+      const base = body[`b_${id}`];
+      const shown = body[groupSizeKeyField(index)];
+      return {
+        raw,
+        // A missing base must still fail `parse` (an empty size is valid).
+        base: typeof base === "string" ? base : "?",
+        ...(typeof shown === "string" ? { guard: shown } : {}),
+      };
+    },
     describe: (v) => (v === null ? "no limit" : String(v)),
     owed: (e) => {
       const g = groupAt(e, index);

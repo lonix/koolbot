@@ -10,9 +10,7 @@ type Catalog =
   import("../../src/services/event-group-preset-service.js").PresetCatalog;
 
 let catalog: Catalog = { entries: [], state: "ok" };
-const actual = await import(
-  "../../src/services/event-group-preset-service.js"
-);
+const actual = await import("../../src/services/event-group-preset-service.js");
 jest.unstable_mockModule(
   "../../src/services/event-group-preset-service.js",
   () => ({
@@ -24,13 +22,13 @@ jest.unstable_mockModule(
 const {
   renderGroupEditor,
   renderPresetForm,
+  renderGroupSetForms,
   buildGroupEditView,
   prepareGroupEditBody,
   PRESET_PICK_FIELD,
 } = await import("../../src/web/host-settings-groups.js");
-const { renderSettingsSection } = await import(
-  "../../src/web/host-settings-view.js"
-);
+const { renderSettingsSection } =
+  await import("../../src/web/host-settings-view.js");
 type GroupEditViewData =
   import("../../src/web/host-settings-groups.js").GroupEditViewData;
 
@@ -56,6 +54,8 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
   groupLabel: "Squad",
   groups: [
     {
+      key: "g_00000001",
+      hasChannel: true,
       name: 'Heli <b>"x"</b>',
       marker: "<i>",
       size: 2,
@@ -65,6 +65,8 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
       sizePending: false,
     },
     {
+      key: "g_00000002",
+      hasChannel: false,
       name: "Logi",
       marker: "",
       size: null,
@@ -77,6 +79,7 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
   presets: [{ id: "builtin:a", label: "A <script>" }],
   presetNotice: null,
   presetBase: '{"id":"","groups":[{"name":"<x>"}]}',
+  addKey: "g_0000abcd",
   ...over,
 });
 
@@ -121,11 +124,15 @@ describe("renderGroupEditor", () => {
 describe("renderPresetForm", () => {
   it("is its own form with the csrf token, the base and only the offered presets", () => {
     const html = renderPresetForm(view(), "/me/events/e/host/settings", "tok");
-    expect(html).toContain('<form method="POST" action="/me/events/e/host/settings">');
+    expect(html).toContain(
+      '<form method="POST" action="/me/events/e/host/settings">',
+    );
     expect(html).toContain('name="_csrf" value="tok"');
     expect(html).toContain(`name="${PRESET_PICK_FIELD}"`);
     expect(html).toContain('<option value="">Keep the current groups</option>');
-    expect(html).toContain('<option value="builtin:a">A &lt;script&gt;</option>');
+    expect(html).toContain(
+      '<option value="builtin:a">A &lt;script&gt;</option>',
+    );
     expect(html).toContain(
       'name="b_groupPreset" value="{&quot;id&quot;:&quot;&quot;,&quot;groups&quot;:[{&quot;name&quot;:&quot;&lt;x&gt;&quot;}]}"',
     );
@@ -140,7 +147,9 @@ describe("renderPresetForm", () => {
       "/x",
       "t",
     );
-    expect(html).toContain("No preset on this server fits this event's 2 groups.");
+    expect(html).toContain(
+      "No preset on this server fits this event's 2 groups.",
+    );
     expect(html).toContain("The library could not be read.");
     expect(html).not.toContain("<form");
   });
@@ -161,7 +170,8 @@ describe("the section puts the editor inside the settings form and the preset in
       ],
     };
     const withEditor = renderSettingsSection({ ...base, groupEdit: view() });
-    expect(withEditor.split("<form ").length - 1).toBe(2);
+    // The settings form, the preset form, and the remove and add forms (#1242).
+    expect(withEditor.split("<form ").length - 1).toBe(4);
     const first = withEditor.slice(0, withEditor.indexOf("</form>"));
     expect(first).toContain('name="s_groupNameA"');
     expect(first).not.toContain("preset_pick");
@@ -221,8 +231,21 @@ describe("buildGroupEditView", () => {
   it("derives over size from members and size and reports pending channel work", async () => {
     const data = await buildGroupEditView(event());
     expect(data.groups).toMatchObject([
-      { name: "A", size: 1, memberCount: 2, overSize: true, namePending: true, sizePending: false },
-      { name: "B", size: null, memberCount: 0, overSize: false, namePending: false },
+      {
+        name: "A",
+        size: 1,
+        memberCount: 2,
+        overSize: true,
+        namePending: true,
+        sizePending: false,
+      },
+      {
+        name: "B",
+        size: null,
+        memberCount: 0,
+        overSize: false,
+        namePending: false,
+      },
     ]);
     expect(JSON.parse(data.presetBase)).toEqual({
       id: "",
@@ -313,7 +336,11 @@ describe("prepareGroupEditBody: a preset's content comes from the server's catal
 
   it("no pick leaves the other fields alone", async () => {
     const out = await prepareGroupEditBody(
-      { s_channelLeadMinutes: "5", b_channelLeadMinutes: "", [PRESET_PICK_FIELD]: "" },
+      {
+        s_channelLeadMinutes: "5",
+        b_channelLeadMinutes: "",
+        [PRESET_PICK_FIELD]: "",
+      },
       "g",
     );
     expect(out).toEqual({
@@ -346,5 +373,96 @@ describe("prepareGroupEditBody: a preset's content comes from the server's catal
       ok: false,
       error: expect.stringContaining("could not be read"),
     });
+  });
+});
+
+describe("renderGroupSetForms (#1242)", () => {
+  const html = (over: Partial<GroupEditViewData> = {}): string =>
+    renderGroupSetForms(view(over), "/p/settings", "tok");
+
+  it("is two forms of their own, each with the csrf token", () => {
+    const out = html();
+    expect(out.split("<form ").length - 1).toBe(2);
+    expect(out.split('name="_csrf" value="tok"').length - 1).toBe(2);
+    expect(out.split('action="/p/settings"').length - 1).toBe(2);
+  });
+
+  it("lists a checkbox per group named by its KEY, with what removal does, escaped", () => {
+    const out = html();
+    expect(out).toContain('name="s_groupRemove_g_00000001" value="1"');
+    expect(out).toContain('name="s_groupRemove_g_00000002" value="1"');
+    expect(out).toContain("3 people assigned, has a voice channel");
+    expect(out).toContain("nobody assigned, no channel yet");
+    expect(out).toContain('name="b_groupRemove" value="[]"');
+    expect(out).toContain("Heli &lt;b&gt;&quot;x&quot;&lt;/b&gt;");
+    expect(out).not.toContain("<b>");
+    expect(out).toContain("you included");
+  });
+
+  it("the add form carries the minted key and the empty base, and the three kinds", () => {
+    const out = html();
+    expect(out).toContain('name="s_groupAdd_key" value="g_0000abcd"');
+    expect(out).toContain('name="b_groupAdd" value="[]"');
+    expect(out).toContain('name="s_groupAdd_name"');
+    expect(out).toContain('maxlength="50"');
+    expect(out).toContain('name="s_groupAdd_tag"');
+    expect(out).toContain('maxlength="8"');
+    for (const kind of ["team", "open", "leads"]) {
+      expect(out).toContain(`<option value="${kind}">`);
+    }
+    expect(out).toContain("Add a squad");
+  });
+
+  it("escapes a hostile key and label", () => {
+    const out = html({ addKey: '"><script>x</script>', groupLabel: "<i>Crew" });
+    expect(out).not.toContain("<script>");
+    expect(out).not.toContain("<i>");
+    expect(out).toContain("&lt;script&gt;");
+  });
+
+  it("offers no removal for the last group, but still the add form", () => {
+    const one = html({ groups: view().groups.slice(0, 1) });
+    expect(one).not.toContain("s_groupRemove_");
+    expect(one).toContain("An event keeps at least one");
+    expect(one.split("<form ").length - 1).toBe(1);
+    expect(one).toContain("s_groupAdd_name");
+  });
+
+  it("is nothing without groups", () => {
+    expect(html({ groups: [] })).toBe("");
+  });
+});
+
+describe("the size fields carry the key of the group they show (#1242)", () => {
+  it("one hidden key per size field", () => {
+    const out = renderGroupEditor(view());
+    expect(out).toContain('name="k_groupSizeA" value="g_00000001"');
+    expect(out).toContain('name="k_groupSizeB" value="g_00000002"');
+  });
+});
+
+describe("buildGroupEditView gives the group set forms their data (#1242)", () => {
+  it("keys, channels and a minted key that no group has", async () => {
+    const data = await buildGroupEditView({
+      guildId: "g",
+      groupLabel: "Squad",
+      presetId: null,
+      groups: [
+        {
+          key: "g_00000001",
+          name: "A",
+          kind: "team",
+          channelId: "c",
+          memberIds: [],
+        },
+        { key: "g_00000002", name: "B", kind: "open", memberIds: [] },
+      ],
+    } as never);
+    expect(data.groups.map((g) => [g.key, g.hasChannel])).toEqual([
+      ["g_00000001", true],
+      ["g_00000002", false],
+    ]);
+    expect(data.addKey).toMatch(/^g_[0-9a-f]{8}$/);
+    expect(["g_00000001", "g_00000002"]).not.toContain(data.addKey);
   });
 });

@@ -16,14 +16,23 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { GROUP_KIND_OPTIONS } from "./admin-views.js";
 import {
   GROUP_NAME_MAX,
   GROUP_SIZE_MAX,
   GROUP_SIZE_MIN,
+  GROUP_TAG_MAX,
+  newGroupKey,
 } from "../services/event-groups.js";
+import {
+  GROUP_ADD_FIELDS,
+  GROUP_REMOVE_BASE_FIELD,
+  groupRemoveField,
+} from "../services/event-live-edit-group-set.js";
 import {
   GROUP_PRESET_ROW_ID,
   groupNameRowId,
+  groupSizeKeyField,
   groupSizeRowId,
   presetToValue,
   readPresetValue,
@@ -47,6 +56,8 @@ import type { EventGroupPreset } from "../content/event-group-presets.js";
 export const PRESET_PICK_FIELD = "preset_pick";
 
 export interface GroupEditGroupView {
+  /** The group's key: the identity the size field is guarded by, and the remove checkbox's name. */
+  key: string;
   name: string;
   marker: string;
   /** Stored size, null = no limit. */
@@ -58,6 +69,8 @@ export interface GroupEditGroupView {
   namePending: boolean;
   /** The channel still has the old user limit (a size change is owed). */
   sizePending: boolean;
+  /** The group has a voice channel (removing it deletes the channel). */
+  hasChannel: boolean;
 }
 
 export interface GroupEditViewData {
@@ -69,6 +82,12 @@ export interface GroupEditViewData {
   /** The stored setup in the preset row's shape: the form's base value. */
   presetBase: string;
   groupLabel: string;
+  /**
+   * The key the "add a group" form would give a new group, minted when the page
+   * is built: posting the same form twice is the same request (the second finds
+   * the key stored and adds nothing).
+   */
+  addKey: string;
 }
 
 function hidden(name: string, value: string): string {
@@ -95,7 +114,7 @@ export function renderGroupEditor(d: GroupEditViewData): string {
       return (
         `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(n)}</td>` +
         `<td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(valueField(nameId))}" value="${escapeHtml(g.name)}" aria-label="Name of group ${n}">${hidden(baseField(nameId), g.name)}</td>` +
-        `<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(valueField(sizeId))}" value="${escapeHtml(sizeText)}" placeholder="No limit" aria-label="Size of group ${n}">${hidden(baseField(sizeId), sizeText)}</td>` +
+        `<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(valueField(sizeId))}" value="${escapeHtml(sizeText)}" placeholder="No limit" aria-label="Size of group ${n}">${hidden(baseField(sizeId), sizeText)}${hidden(groupSizeKeyField(i), g.key)}</td>` +
         `<td><span class="mono">${escapeHtml(g.memberCount)}</span> ${notes.join(" ")}</td></tr>`
       );
     })
@@ -134,6 +153,61 @@ ${hidden(baseField(GROUP_PRESET_ROW_ID), d.presetBase)}
 </form>`;
 }
 
+/**
+ * Removing and adding groups (#1242): two forms of their own, so that neither
+ * ever shares a save with the positional name and size fields (the groups they
+ * address are named by key, never by position). Removal always goes through the
+ * confirmation page.
+ */
+export function renderGroupSetForms(
+  d: GroupEditViewData,
+  actionPath: string,
+  csrfToken: string,
+): string {
+  if (d.groups.length === 0) return "";
+  const label = d.groupLabel.toLowerCase();
+  const boxes = d.groups
+    .map((g) => {
+      const facts = [
+        g.memberCount === 0
+          ? "nobody assigned"
+          : `${g.memberCount} ${g.memberCount === 1 ? "person" : "people"} assigned`,
+        g.hasChannel ? "has a voice channel" : "no channel yet",
+      ].join(", ");
+      return `<label class="check"><input type="checkbox" name="${escapeHtml(groupRemoveField(g.key))}" value="1"> ${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)} <span class="muted">(${escapeHtml(facts)})</span></label>`;
+    })
+    .join("\n");
+  const remove =
+    d.groups.length <= 1
+      ? `<div class="field"><p class="muted">An event keeps at least one ${escapeHtml(label)}, so the last one cannot be removed.</p></div>`
+      : `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
+<fieldset class="field"><legend>Remove ${escapeHtml(label)}s</legend>
+${boxes}
+${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
+<p class="muted">Tick the ${escapeHtml(label)}s to remove. You are asked to confirm first. Everybody in a removed ${escapeHtml(label)}'s channel, you included, is moved to the main channel, its members are unassigned (their clan tags come off), and then the channel is deleted. If somebody cannot be moved, that ${escapeHtml(label)} is kept and the result says why: save again to move the rest.</p></fieldset>
+<button type="submit">Remove selected</button>
+</form>`;
+  const kinds = GROUP_KIND_OPTIONS.map(
+    ([value, text]) =>
+      `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`,
+  ).join("");
+  const add = `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
+<fieldset class="field"><legend>Add a ${escapeHtml(label)}</legend>
+<label for="host-settings-add-name">Name</label>
+<input id="host-settings-add-name" type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.name)}" required>
+<label for="host-settings-add-kind">Kind</label>
+<select id="host-settings-add-kind" name="${escapeHtml(GROUP_ADD_FIELDS.kind)}">${kinds}</select>
+<label for="host-settings-add-size">Size</label>
+<input id="host-settings-add-size" type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(GROUP_ADD_FIELDS.size)}" placeholder="No limit">
+<label for="host-settings-add-tag">Tag</label>
+<input id="host-settings-add-tag" type="text" maxlength="${GROUP_TAG_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.tag)}">
+${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
+<p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others (a leaders-only one is created restricted). Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
+<button type="submit">Add ${escapeHtml(label)}</button>
+</form>`;
+  return `${remove}\n${add}`;
+}
+
 /** The group editor's data for one event (the fresh row) and the server's presets. */
 export async function buildGroupEditView(
   event: IEvent,
@@ -145,7 +219,10 @@ export async function buildGroupEditView(
     preset.groups.every((g, i) => g.kind === groups[i].kind);
   return {
     groupLabel: event.groupLabel || "Group",
+    addKey: newGroupKey(new Set(groups.map((g) => g.key))),
     groups: groups.map((g) => ({
+      key: g.key,
+      hasChannel: !!g.channelId,
       name: g.name,
       marker: g.marker ?? "",
       size: typeof g.size === "number" ? g.size : null,

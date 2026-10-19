@@ -145,11 +145,30 @@ const SNOWFLAKE = /^\d{16,20}$/;
 
 /** Thrown inside a delete attempt when someone has joined the channel. */
 class ChannelOccupiedError extends Error {
-  constructor() {
+  constructor(readonly count: number = 0) {
     super("Group channel is occupied");
     this.name = "ChannelOccupiedError";
   }
 }
+
+/** Thrown inside the delete of a removed group's channel when an end holds the event. */
+class RemovalEndingError extends Error {
+  constructor() {
+    super("The event is being ended");
+    this.name = "RemovalEndingError";
+  }
+}
+
+/** What `EventGroupChannels.removeGroup` did. */
+export type GroupRemoveOutcome =
+  /** The channel is gone (deleted, or already was) and so is the group's record. */
+  | { status: "removed" }
+  /** Somebody is still connected: the channel and the record are kept. */
+  | { status: "occupied"; remaining: number }
+  /** The group (or its channel id) changed meanwhile, or the event is no longer open: nothing was removed. */
+  | { status: "lost" }
+  /** Discord or the database refused or could not be reached: kept, safe to repeat. */
+  | { status: "failed"; reason: string };
 
 /**
  * Which event rows own channels the voice sweeps must leave alone: any row with
@@ -2709,6 +2728,195 @@ export class EventGroupChannels {
       this.forget(eventId);
     }
     return report;
+  }
+
+  // -------------------------------------------------------------
+  // Removing one group of a running event (#1242)
+  // -------------------------------------------------------------
+
+  /**
+   * Delete ONE group's channel and take the group out of the event, as one step
+   * under the per-event channel lock (the live edit's removal of a group).
+   *
+   * Why both here: the group record is the only place the channel id is
+   * recorded, and only a recorded channel is ever deleted. Deleting under this
+   * lock, and removing the record under it right after, means the scan's pass
+   * (which takes the same lock) can never see "recorded channel gone" in
+   * between and create a replacement that the removal would then orphan. The
+   * record goes only with the id the channel was deleted under (`$pull` of
+   * `{ key, channelId }`), so a replacement recorded by an earlier pass makes
+   * this `lost` and the next attempt deletes that one instead.
+   *
+   * Order and guards, each decided from a fresh read inside the lock:
+   * the channel is read from Discord (not the cache); one that is not a voice
+   * channel of this server is not ours to delete (only the record goes); one
+   * with anybody connected is kept (`ignore` are people just moved out whom the
+   * gateway cache may still show), and that is re-checked, together with the
+   * event's end hold, synchronously inside the request. One attempt on the
+   * fail-fast client: a rate limit is `failed`, never slept on. A channel that
+   * is already gone (10003) counts as deleted. Never throws.
+   */
+  public removeGroup(
+    eventId: string,
+    guild: Guild,
+    opts: {
+      groupKey: string;
+      channelId: string;
+      /** People known to have left the channel, whom the cache may still show. */
+      ignore?: ReadonlySet<string>;
+      /** Synchronous: an end or cancel holds the event. */
+      ending?: () => boolean;
+    },
+  ): Promise<GroupRemoveOutcome> {
+    return this.lock.run(eventId, () =>
+      this.removeGroupLocked(eventId, guild, opts).catch(
+        (error: unknown): GroupRemoveOutcome => {
+          logger.error(
+            `Event ${sanitizeForLog(eventId)}: removing group ${sanitizeForLog(opts.groupKey)} failed:`,
+            error,
+          );
+          return {
+            status: "failed",
+            reason: describeWriteFailure(error),
+          };
+        },
+      ),
+    );
+  }
+
+  private async removeGroupLocked(
+    eventId: string,
+    guild: Guild,
+    opts: {
+      groupKey: string;
+      channelId: string;
+      ignore?: ReadonlySet<string>;
+      ending?: () => boolean;
+    },
+  ): Promise<GroupRemoveOutcome> {
+    const { groupKey, channelId } = opts;
+    const ignore = opts.ignore ?? new Set<string>();
+    const report = emptyReport();
+    const row = await this.readFresh(eventId, report);
+    if (!row) {
+      return { status: "failed", reason: "the event could not be read" };
+    }
+    if (
+      row.groupsEnabled !== true ||
+      !isOpenState(row.state) ||
+      row.seriesCancelled === true ||
+      !(await this.eventsOn())
+    ) {
+      return { status: "lost" };
+    }
+    const group = (row.groups ?? []).find((g) => g.key === groupKey);
+    if (!group || (group.channelId ?? null) !== channelId) {
+      return { status: "lost" };
+    }
+
+    const state = await this.readChannel(guild, channelId);
+    let ours = false;
+    if (state.status === "error") {
+      return {
+        status: "failed",
+        reason: `the channel could not be checked: ${describeWriteFailure(state.error)}`,
+      };
+    }
+    if (state.status === "ok") {
+      const channel = state.channel;
+      ours =
+        channel.type === ChannelType.GuildVoice && channel.guildId === guild.id;
+      if (!ours) {
+        logger.warn(
+          `Event ${sanitizeForLog(eventId)}: recorded group channel ${sanitizeForLog(channelId)} is not a voice channel; leaving it alone`,
+        );
+      } else {
+        const remaining = [
+          ...((channel as VoiceChannel).members?.keys() ?? []),
+        ].filter((id) => !ignore.has(id)).length;
+        if (remaining > 0) return { status: "occupied", remaining };
+      }
+    }
+
+    if (ours) {
+      try {
+        await this.renameCall((signal) => {
+          // Synchronous, in the same tick as the request: somebody joined, or
+          // an end or cancel took its hold, since the reads above.
+          if (opts.ending?.()) throw new RemovalEndingError();
+          const live = guild.channels.cache.get(channelId) as
+            VoiceChannel | undefined;
+          if (live?.type === ChannelType.GuildVoice) {
+            const stay = [...(live.members?.keys() ?? [])].filter(
+              (id) => !ignore.has(id),
+            );
+            if (stay.length > 0) throw new ChannelOccupiedError(stay.length);
+          }
+          return this.failFastRest().delete(Routes.channel(channelId), {
+            reason: "Event group removed",
+            signal,
+          });
+        }, "delete event group channel");
+      } catch (error) {
+        if (error instanceof RemovalEndingError) {
+          return {
+            status: "failed",
+            reason: "the event is being ended",
+          };
+        }
+        if (error instanceof ChannelOccupiedError) {
+          return { status: "occupied", remaining: error.count };
+        }
+        if (!(
+          error instanceof DiscordAPIError &&
+          error.code === DISCORD_UNKNOWN_CHANNEL
+        )) {
+          return { status: "failed", reason: describeWriteFailure(error) };
+        }
+      }
+    }
+
+    // The channel is gone (or was never ours): take the record with it, only
+    // while the group still holds the id it was deleted under.
+    const result = await Event.updateOne(
+      {
+        _id: eventId,
+        state: { $in: ["scheduled", "active"] },
+        groups: { $elemMatch: { key: groupKey, channelId } },
+      },
+      { $pull: { groups: { key: groupKey, channelId } } },
+    );
+    if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
+    this.forgetGroup(eventId, groupKey, channelId, group.kind);
+    logger.info(
+      `Removed group ${sanitizeForLog(groupKey)} and its channel ${sanitizeForLog(channelId)} of event ${sanitizeForLog(eventId)}`,
+    );
+    return { status: "removed" };
+  }
+
+  /** Forget what this process kept about a group that is gone. */
+  private forgetGroup(
+    eventId: string,
+    groupKey: string,
+    channelId: string,
+    kind: string | undefined,
+  ): void {
+    this.channelWarnings.get(eventId)?.delete(channelId);
+    this.channelWarnings
+      .get(eventId)
+      ?.delete(`${channelId}${ACCESS_WARNING_SUFFIX}`);
+    getRenameQueue().forget(channelId);
+    for (const key of [...this.holds.keys()]) {
+      if (key.startsWith(`${eventId}:${groupKey}`)) this.holds.delete(key);
+    }
+    this.setLeadsProblem(eventId, `${CONTROL_HOLD}:${groupKey}`, null);
+    if (kind === "leads") {
+      this.leadsChecked.delete(eventId);
+      this.leadsWritten.delete(eventId);
+      this.leadsEvict.delete(eventId);
+      this.holds.delete(`${eventId}:${LEADS_HOLD}`);
+      this.setLeadsProblem(eventId, LEADS_HOLD, null);
+    }
   }
 
   // -------------------------------------------------------------

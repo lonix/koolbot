@@ -31,6 +31,7 @@ import { EventNicknameTags } from "./event-nickname-tags.js";
 import {
   EventGroupChannels,
   type GroupChannelReport,
+  type GroupRemoveOutcome,
   type NameSyncOutcome,
 } from "./event-group-channels.js";
 import {
@@ -968,6 +969,26 @@ export class EventService extends ScheduledService {
    */
   public async syncGroupControls(eventId: string): Promise<void> {
     await this.groupChannels.syncControls(eventId);
+  }
+
+  /**
+   * Delete one group's channel and take the group out of the event (the host's
+   * live removal of a group, #1242): one step under the channel lock, see
+   * `EventGroupChannels.removeGroup`. Null when the server cannot be found.
+   */
+  public async removeGroupChannel(
+    eventId: string,
+    guildId: string,
+    opts: {
+      groupKey: string;
+      channelId: string;
+      ignore?: ReadonlySet<string>;
+      ending?: () => boolean;
+    },
+  ): Promise<GroupRemoveOutcome | null> {
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return null;
+    return this.groupChannels.removeGroup(eventId, guild, opts);
   }
 
   /** What the last group-channel pass did for an event (host panel, #1189). */

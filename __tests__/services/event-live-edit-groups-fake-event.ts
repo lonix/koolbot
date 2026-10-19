@@ -5,11 +5,14 @@
  * write that changes shape cannot pass silently:
  *
  * - filters: equality (a missing field equals null; an array field equals a
- *   scalar it contains), `$in`, `$ne`, `$elemMatch`, `$size`, `$and`, `$type`;
+ *   scalar it contains, and an array equals an array of the same elements in
+ *   the same order), `$in`, `$ne`, `$elemMatch`, `$size`, `$and`, `$type`, and
+ *   the dotted path `groups.key` (any element, or with `$ne` no element);
  * - updates: `$set` and `$unset` on top-level fields and on
  *   `groups.$[<id>].<field>` selected by `arrayFilters` (every identifier must
  *   have exactly one filter and every filter must be used, as MongoDB demands),
- *   and `$inc` of `liveEditRevision`.
+ *   `$inc` of `liveEditRevision`, `$push` of one group and `$pull` of the groups
+ *   matching `{ key, channelId }` (the group set rows, #1242).
  *
  * Only fields of the schema are accepted (`SETTABLE`, `GROUP_FIELDS`), so a
  * misspelt field fails here instead of being dropped by Mongoose's strict mode
@@ -27,6 +30,13 @@ export const fake = {
   failReads: false,
   /** Runs after each `findOne().lean()` has read (to simulate a hold taken meanwhile). */
   afterFind: null as (() => void) | null,
+  /**
+   * Group fields a test of the GROUP SET rows (#1242) also lets through
+   * `groups.$[id].<field>`: `memberIds`, which the removal's unassign writes (it
+   * is the assignment module's write). Empty by default, so a names, sizes or
+   * leaders row that started writing members would still fail its suite.
+   */
+  extraGroupFields: new Set<string>(),
 };
 export const clone = <T>(v: T): T => globalThis.structuredClone(v);
 
@@ -57,6 +67,9 @@ function opMatch(val: unknown, cond: unknown): boolean {
     });
   }
   if (cond === null) return val === null || val === undefined;
+  if (Array.isArray(val) && Array.isArray(cond)) {
+    return JSON.stringify(val) === JSON.stringify(cond);
+  }
   if (Array.isArray(val) && !Array.isArray(cond)) return val.includes(cond);
   return val === cond;
 }
@@ -65,6 +78,14 @@ export function matchDoc(doc: Json, filter: unknown): boolean {
   return Object.entries(filter as Json).every(([k, v]) => {
     if (k === "$and") return (v as Json[]).every((f) => matchDoc(doc, f));
     if (k.startsWith("$")) throw new Error(`unsupported operator ${k}`);
+    if (k === "groups.key") {
+      const keys = ((doc.groups as Json[] | undefined) ?? []).map((g) => g.key);
+      if (v !== null && typeof v === "object" && "$ne" in (v as Json)) {
+        return keys.every((x) => x !== (v as Json).$ne);
+      }
+      return keys.some((x) => opMatch(x, v));
+    }
+    if (k.includes(".")) throw new Error(`unsupported path ${k}`);
     return opMatch(doc[k], v);
   });
 }
@@ -90,13 +111,36 @@ export const GROUP_FIELDS = new Set([
 
 function applyUpdate(
   doc: Json,
-  update: { $set?: Json; $unset?: Json; $inc?: Json },
+  update: {
+    $set?: Json;
+    $unset?: Json;
+    $inc?: Json;
+    $push?: Json;
+    $pull?: Json;
+  },
   arrayFilters: Array<Record<string, unknown>>,
+  filter: Json = {},
 ): void {
   for (const op of Object.keys(update)) {
-    if (!["$set", "$unset", "$inc"].includes(op)) {
+    if (!["$set", "$unset", "$inc", "$push", "$pull"].includes(op)) {
       throw new Error(`unsupported update operator ${op}`);
     }
+  }
+  for (const [p, v] of Object.entries(update.$push ?? {})) {
+    if (p !== "groups") throw new Error(`unexpected $push ${p}`);
+    for (const f of Object.keys(v as Json)) {
+      if (!["$each", "$position"].includes(f) && f.startsWith("$")) {
+        throw new Error(`unsupported $push modifier ${f}`);
+      }
+    }
+    (doc.groups as Json[]).push(clone(v as Json));
+  }
+  for (const [p, cond] of Object.entries(update.$pull ?? {})) {
+    if (p !== "groups") throw new Error(`unexpected $pull ${p}`);
+    doc.groups = (doc.groups as Json[]).filter(
+      (g) =>
+        !Object.entries(cond as Json).every(([k, want]) => opMatch(g[k], want)),
+    );
   }
   const used = new Set<string>();
   const pathOf = (
@@ -104,13 +148,33 @@ function applyUpdate(
   ): { group: string; field: string } | { field: string } => {
     const m = /^groups\.\$\[(\w+)\]\.(\w+)$/.exec(path);
     if (m) {
-      if (!GROUP_FIELDS.has(m[2])) throw new Error(`unexpected field ${path}`);
+      if (!GROUP_FIELDS.has(m[2]) && !fake.extraGroupFields.has(m[2])) {
+        throw new Error(`unexpected field ${path}`);
+      }
       return { group: m[1], field: m[2] };
+    }
+    // The positional operator: the first group the filter's `$elemMatch`
+    // matched. Only `groups.$.channelId` (the shape the channel pass records and
+    // clears a channel id with); a live-edit row never writes `channelId`, so it
+    // is accepted on no other path.
+    const positional = /^groups\.\$\.(\w+)$/.exec(path);
+    if (positional) {
+      if (positional[1] !== "channelId") {
+        throw new Error(`unexpected field ${path}`);
+      }
+      return { group: "$", field: positional[1] };
     }
     if (!SETTABLE.has(path)) throw new Error(`unexpected field ${path}`);
     return { field: path };
   };
   const targets = (id: string): Json[] => {
+    if (id === "$") {
+      const em = (filter.groups as { $elemMatch?: Json } | undefined)
+        ?.$elemMatch;
+      if (!em) throw new Error("the positional operator needs an $elemMatch");
+      const first = (doc.groups as Json[]).find((g) => matchDoc(g, em));
+      return first ? [first] : [];
+    }
     const filters = arrayFilters.filter((f) =>
       Object.keys(f).every((k) => k.startsWith(`${id}.`)),
     );
@@ -181,7 +245,13 @@ export const EventMock = {
   }),
   updateOne: async (
     filter: Json,
-    update: { $set?: Json; $unset?: Json; $inc?: Json },
+    update: {
+      $set?: Json;
+      $unset?: Json;
+      $inc?: Json;
+      $push?: Json;
+      $pull?: Json;
+    },
     options: { arrayFilters?: Array<Record<string, unknown>> } = {},
   ) => {
     await fake.beforeWrite?.();
@@ -193,7 +263,7 @@ export const EventMock = {
     });
     const doc = [...store.values()].find((d) => matchDoc(d, filter));
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-    applyUpdate(doc, update, options.arrayFilters ?? []);
+    applyUpdate(doc, update, options.arrayFilters ?? [], filter);
     return { matchedCount: 1, modifiedCount: 1 };
   },
 };

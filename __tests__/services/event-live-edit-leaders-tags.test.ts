@@ -237,6 +237,9 @@ describe("registration", () => {
       "tagsEnabled",
       "tagsSuffix",
       "groupTags",
+      // Removing and adding groups (#1242) come last.
+      "groupRemove",
+      "groupAdd",
     ]);
   });
 });

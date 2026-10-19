@@ -333,9 +333,9 @@ export function checkGroupSize(
 }
 
 /** A group key: `g_` and eight hex digits. */
-const GROUP_KEY_PATTERN = /^g_[0-9a-f]{8}$/;
+export const GROUP_KEY_PATTERN = /^g_[0-9a-f]{8}$/;
 
-function newGroupKey(taken: ReadonlySet<string>): string {
+export function newGroupKey(taken: ReadonlySet<string>): string {
   let key: string;
   do {
     key = `g_${randomBytes(4).toString("hex")}`;

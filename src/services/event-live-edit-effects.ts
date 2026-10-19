@@ -12,10 +12,128 @@ import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { EventNicknameTags } from "./event-nickname-tags.js";
+import type { MoveSkipReason } from "./event-member-moves.js";
 import type {
+  EmptyChannelOutcome,
   GroupChannelSyncOutcome,
+  GroupRemoveResult,
   LiveEditEffects,
 } from "./event-live-edit.js";
+
+/**
+ * Move everyone connected to one group's channel to the main channel, inside
+ * the live edit's move lock, and say whether the channel is empty afterwards.
+ * The host is not spared (the channel is going: they would be stranded as much
+ * as anyone, the rule of the end teardown's pull-back). Who is still there is
+ * read from the gateway cache after a short wait (at most `MOVE_SETTLE_MS`) for
+ * it to show the confirmed moves, which it can lag by a moment; everybody the
+ * cache then still shows counts as present, so a person who moved back in is
+ * never taken for one who left (the host saves again). Bots count as present.
+ */
+export const MOVE_SETTLE_MS = 1500;
+const MOVE_SETTLE_STEP_MS = 100;
+
+async function emptyGroupChannelOf(
+  client: Client,
+  guildId: string,
+  eventId: string,
+  groupKey: string,
+  channelId: string,
+  ending: () => boolean,
+): Promise<EmptyChannelOutcome> {
+  // Loaded on first use, like `EventService`: the mover pulls in the Discord
+  // write client, which a live edit that never removes a group does not need.
+  const { MOVE_SKIP_LABEL, moveEventMembersHoldingLock } =
+    await import("./event-member-moves.js");
+  const outcome = await moveEventMembersHoldingLock({
+    client,
+    guildId,
+    eventId,
+    excludeUserIds: [],
+    // The bot's Move Members may be granted in the events category only: the
+    // per-move checks decide.
+    channelScopedPermissions: true,
+    plan: ({ event, presence }) => {
+      const group = (event.groups ?? []).find((g) => g.key === groupKey);
+      if (!group || group.channelId !== channelId) {
+        return { refuse: "The group changed, so nobody was moved." };
+      }
+      const inside = presence.members.filter((m) => m.channelId === channelId);
+      if (inside.length === 0) return [];
+      const main = event.channelId;
+      if (!main) {
+        return {
+          refuse:
+            "The event's main channel does not exist, so nobody was moved.",
+        };
+      }
+      return inside.map((m) => ({
+        userId: m.id,
+        toChannelId: main,
+        // Only out of THIS channel: somebody who walked elsewhere is left be.
+        fromChannelId: channelId,
+        // Asked right before each request: the batch stops once an end or
+        // cancel holds the event.
+        skipIf: ending,
+      }));
+    },
+  });
+  if (outcome.status === "busy") {
+    return { status: "failed", reason: "a move is already running" };
+  }
+  if (outcome.status === "refused") {
+    return { status: "failed", reason: outcome.message };
+  }
+  const moved = outcome.report.moved;
+  const channel = client.guilds?.cache
+    ?.get(guildId)
+    ?.channels?.cache?.get(channelId);
+  const presentNow = (): string[] =>
+    channel && channel.isVoiceBased() ? [...channel.members.keys()] : [];
+  // Give the gateway a moment to show the moves Discord confirmed.
+  for (
+    let waited = 0;
+    waited < MOVE_SETTLE_MS && presentNow().some((id) => moved.includes(id));
+    waited += MOVE_SETTLE_STEP_MS
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, MOVE_SETTLE_STEP_MS));
+  }
+  const remaining = presentNow();
+  if (remaining.length === 0 && outcome.report.unconfirmed.length === 0) {
+    return { status: "empty", moved: [...moved] };
+  }
+  const reasons = new Map<MoveSkipReason, number>();
+  for (const skip of outcome.report.skipped) {
+    // "Not connected", "elsewhere" and "moved on" mean they are not in it.
+    if (
+      skip.reason === "not-connected" ||
+      skip.reason === "elsewhere" ||
+      skip.reason === "moved-on" ||
+      skip.reason === "already-there"
+    ) {
+      continue;
+    }
+    reasons.set(skip.reason, (reasons.get(skip.reason) ?? 0) + 1);
+  }
+  const parts = [...reasons.entries()].map(
+    ([reason, n]) => `${n} ${MOVE_SKIP_LABEL[reason]}`,
+  );
+  if (outcome.report.unconfirmed.length > 0) {
+    parts.push(
+      `${outcome.report.unconfirmed.length} not confirmed by Discord (check Discord)`,
+    );
+  }
+  const left = Math.max(remaining.length, outcome.report.unconfirmed.length, 1);
+  return {
+    status: "occupied",
+    moved: [...moved],
+    remaining: left,
+    detail:
+      parts.length > 0
+        ? parts.join("; ")
+        : "somebody is still connected, perhaps a bot",
+  };
+}
 
 export function createLiveEditEffects(client: Client): LiveEditEffects {
   return {
@@ -70,6 +188,80 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
             err,
           ),
         );
+    },
+    async createGroupChannels(
+      guildId,
+      eventId,
+    ): Promise<{ failures: Array<{ key: string; reason: string }> } | null> {
+      try {
+        const { EventService } = await import("./event-service.js");
+        const report = await EventService.getInstance(
+          client,
+        ).reconcileGroupChannels(eventId, guildId);
+        return report
+          ? {
+              failures: report.failures.map((f) => ({
+                key: f.key,
+                reason: f.reason,
+              })),
+            }
+          : null;
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: creating the group channels after a live edit failed:`,
+          err,
+        );
+        return null;
+      }
+    },
+    async emptyGroupChannel(
+      guildId,
+      eventId,
+      groupKey,
+      channelId,
+      ending,
+    ): Promise<EmptyChannelOutcome> {
+      try {
+        return await emptyGroupChannelOf(
+          client,
+          guildId,
+          eventId,
+          groupKey,
+          channelId,
+          ending,
+        );
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: moving people out of a group channel failed:`,
+          err,
+        );
+        return {
+          status: "failed",
+          reason: "the people in its channel could not be moved (see the log)",
+        };
+      }
+    },
+    async removeGroupChannel(
+      guildId,
+      eventId,
+      groupKey,
+      channelId,
+      opts,
+    ): Promise<GroupRemoveResult | null> {
+      try {
+        const { EventService } = await import("./event-service.js");
+        return await EventService.getInstance(client).removeGroupChannel(
+          eventId,
+          guildId,
+          { groupKey, channelId, ignore: opts.ignore, ending: opts.ending },
+        );
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: removing a group channel failed:`,
+          err,
+        );
+        return { status: "failed", reason: "see the log" };
+      }
     },
     async syncTags(guildId, eventId, mode): Promise<void> {
       try {
