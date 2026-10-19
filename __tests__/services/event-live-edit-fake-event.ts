@@ -11,6 +11,8 @@ export type Json = Record<string, unknown>;
 
 export const store = new Map<string, Json>();
 export const writes: Array<{ filter: Json; set: Json }> = [];
+/** Filters of the save claims (`$inc` of the live edit revision). */
+export const claims: Json[] = [];
 export const fake = {
   /** Runs before each write is matched (to simulate a concurrent writer). */
   beforeWrite: null as (() => void | Promise<void>) | null,
@@ -26,7 +28,11 @@ function opMatch(val: unknown, cond: unknown): boolean {
     !(cond instanceof Date)
   ) {
     return Object.entries(cond as Json).every(([op, arg]) => {
-      if (op === "$in") return (arg as unknown[]).includes(val);
+      if (op === "$in") {
+        const list = arg as unknown[];
+        // null in the list also matches a missing field, as in MongoDB.
+        return list.includes(val) || (val === undefined && list.includes(null));
+      }
       if (op === "$ne") return val !== arg;
       if (op === "$type") {
         if (arg !== "string") throw new Error(`unsupported $type ${arg}`);
@@ -71,8 +77,27 @@ export const EventMock = {
       return null;
     },
   }),
-  updateOne: async (filter: Json, update: { $set: Json }) => {
-    for (const k of Object.keys(update.$set)) {
+  updateOne: async (filter: Json, update: { $set?: Json; $inc?: Json }) => {
+    if (update.$inc) {
+      // The save's revision claim (not a row write: kept apart from `writes`).
+      if (Object.keys(update).some((k) => k !== "$inc")) {
+        throw new Error("unexpected update operator");
+      }
+      if (Object.keys(update.$inc).some((k) => k !== "liveEditRevision")) {
+        throw new Error("unexpected $inc");
+      }
+      await Promise.resolve();
+      claims.push(clone(filter));
+      const claimed = [...store.values()].find((d) => matchDoc(d, filter));
+      if (!claimed) return { matchedCount: 0, modifiedCount: 0 };
+      claimed.liveEditRevision =
+        (typeof claimed.liveEditRevision === "number"
+          ? claimed.liveEditRevision
+          : 0) + 1;
+      return { matchedCount: 1, modifiedCount: 1 };
+    }
+    const set = update.$set ?? {};
+    for (const k of Object.keys(set)) {
       if (!SETTABLE.has(k)) throw new Error(`unexpected $set ${k}`);
     }
     if (Object.keys(update).some((k) => k !== "$set")) {
@@ -80,10 +105,10 @@ export const EventMock = {
     }
     await fake.beforeWrite?.();
     await Promise.resolve();
-    writes.push({ filter: clone(filter), set: clone(update.$set) });
+    writes.push({ filter: clone(filter), set: clone(set) });
     const doc = [...store.values()].find((d) => matchDoc(d, filter));
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-    Object.assign(doc, update.$set);
+    Object.assign(doc, set);
     return { matchedCount: 1, modifiedCount: 1 };
   },
 };

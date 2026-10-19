@@ -16,6 +16,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   store,
   writes,
+  claims,
   fake,
   EventMock,
   type Json,
@@ -165,6 +166,7 @@ beforeEach(() => {
   process.env.WEBUI_SESSION_SECRET = SECRET;
   store.clear();
   writes.length = 0;
+  claims.length = 0;
   fake.beforeWrite = null;
   fake.failReads = false;
   enabled = true;
@@ -577,8 +579,8 @@ describe("the executor: fresh read, conditional writes, one result", () => {
       deps({
         isEnding: () => {
           calls += 1;
-          // 1: after the read; 2: before row 1; 3: before row 2.
-          return calls >= 3;
+          // 1: after the read; 2: before the claim; 3: before row 1; 4: before row 2.
+          return calls >= 4;
         },
       }),
     );
@@ -681,8 +683,8 @@ describe("the executor: fresh read, conditional writes, one result", () => {
     const real = Event.updateOne.bind(Event);
     let n = 0;
     jest.spyOn(Event, "updateOne").mockImplementation(((...a: unknown[]) => {
-      n += 1;
-      if (n === 1) throw new Error("write conflict");
+      n += 1; // 1 is the save claim; 2 is the first row write
+      if (n === 2) throw new Error("write conflict");
       return (real as (...x: unknown[]) => unknown)(...a);
     }) as never);
     const out = await run([lead(45), lock(true)]);
@@ -815,6 +817,7 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
       guildId: GUILD,
       userId: HOST,
       changes: p.changes,
+      revision: p.revision,
       ...over,
     });
     if (!token) throw new Error("no token");
@@ -839,6 +842,7 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
       deps: d,
       rows: ROWS,
       confirmed: v.changes,
+      confirmedRevision: v.revision,
     });
   };
 
@@ -884,6 +888,68 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
     writes.length = 0;
     expect(await confirm(token)).toMatchObject({ status: "stale" });
     expect(writes).toEqual([]);
+  });
+
+  it("a used token cannot be replayed after the value was reversed (A to B, B to A, token again)", async () => {
+    seed();
+    const token = await sign();
+    // A to B, confirmed.
+    expect(await confirm(token)).toMatchObject({ status: "done" });
+    expect(store.get(EV)?.testName).toBe("danger");
+    // B to A, a plain save (needs no confirmation).
+    expect(
+      await run([{ rowId: "testName", to: "a", base: "danger" }], deps(), ROWS),
+    ).toMatchObject({ status: "done", applied: [{ rowId: "testName" }] });
+    expect(store.get(EV)?.testName).toBe("a");
+    writes.length = 0;
+    // The fresh plan is A to B again, exactly the confirmed change set, but the
+    // token was issued at an older revision: nothing is applied.
+    expect(await confirm(token)).toMatchObject({ status: "stale" });
+    expect(store.get(EV)?.testName).toBe("a");
+    expect(writes).toEqual([]);
+  });
+
+  it("every save that applies something moves the revision on once; asking, refusing and nothing-to-do do not", async () => {
+    seed();
+    const rev = (): unknown => store.get(EV)?.liveEditRevision;
+    await run([dangerous], deps(), ROWS); // needs confirmation
+    await run([lead(30, 30)]); // untouched
+    expect(rev()).toBeUndefined();
+    expect(claims).toEqual([]);
+    await run([lead(45)]);
+    expect(rev()).toBe(1);
+    await run([lead(45)]); // already applied
+    expect(rev()).toBe(1);
+    ending = true;
+    await run([lead(50, 45)]); // refused
+    ending = false;
+    expect(rev()).toBe(1);
+    await run([lead(50, 45)]);
+    expect(rev()).toBe(2);
+    // The claim is conditional on the revision the plan was made at.
+    expect(claims[0]).toMatchObject({
+      liveEditRevision: { $in: [0, null] },
+    });
+    expect(claims[1]).toMatchObject({ liveEditRevision: 1 });
+  });
+
+  it("a save whose revision claim is lost applies nothing", async () => {
+    seed();
+    const { Event } = await import("../../src/models/event.js");
+    const real = Event.updateOne.bind(Event);
+    jest.spyOn(Event, "updateOne").mockImplementation(((
+      filter: Json,
+      update: Json,
+    ) => {
+      // Someone else's save lands between our read and our claim.
+      if (update.$inc) (store.get(EV) as Json).liveEditRevision = 7;
+      return (real as (...x: unknown[]) => unknown)(filter, update);
+    }) as never);
+    const out = await run([lead(45)]);
+    jest.restoreAllMocks();
+    expect(out).toMatchObject({ status: "stale" });
+    expect(writes).toEqual([]);
+    expect(store.get(EV)?.channelLeadMinutes).toBe(30);
   });
 
   it("a stale token (the event changed since the page was shown) applies nothing", async () => {
@@ -989,6 +1055,7 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
         u: HOST,
         x: Date.now() + 60_000,
         h: changeSetHash([{ rowId: "testName", from: "a", to: "safe" }]),
+        n: 0,
         c: [{ r: "testName", f: "a", t: "danger" }],
       }),
     ).toString("base64url");
@@ -1019,6 +1086,7 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
         guildId: GUILD,
         userId: HOST,
         changes: [],
+        revision: 0,
       }),
     ).toBeNull();
     expect(verify(token)).toEqual({ ok: false, reason: "no-secret" });
@@ -1061,6 +1129,7 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
         eventId: EV,
         deps: deps(),
         confirmed: [{ rowId: "nope", from: 1, to: 2 }],
+        confirmedRevision: 0,
       }),
     ).toMatchObject({ status: "stale" });
   });
@@ -1224,6 +1293,7 @@ describe("a row that stores its target and owes a follow-up (partial), then conv
       guildId: GUILD,
       userId: HOST,
       changes: asked.changes,
+      revision: asked.revision,
     });
     const verified = verifyConfirmation(token, {
       eventId: EV,
@@ -1238,6 +1308,7 @@ describe("a row that stores its target and owes a follow-up (partial), then conv
         deps: deps(),
         rows,
         confirmed: verified.changes,
+        confirmedRevision: verified.revision,
       });
     expect(await confirmed()).toMatchObject({
       status: "done",

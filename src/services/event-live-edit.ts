@@ -47,16 +47,23 @@
  *    planned change needs confirmation nothing is applied; the caller gets the
  *    change set and signs it (`signConfirmation`). The token binds the event
  *    id, the guild, the host's user id, an expiry and the exact change set
- *    (rows with their `from` and `to` values, plus a hash of them), under HMAC
- *    with the Web UI session secret (a missing secret fails closed). A
- *    confirmed run plans again from the fresh read INSIDE the locks and
- *    applies only when that fresh change set equals the token's, so a stale
+ *    (rows with their `from` and `to` values, plus a hash of them) and the
+ *    event's `liveEditRevision` when the page was shown, under HMAC with the
+ *    Web UI session secret (a missing secret fails closed). A confirmed run
+ *    plans again from the fresh read INSIDE the locks and applies only when
+ *    that fresh change set equals the token's AND the revision is still the
+ *    token's. Every save that applies something first claims the save by
+ *    moving the revision on (`$inc`, conditional on the revision it planned
+ *    at, before any row is written), so a token can be used once: a stale
  *    token (the event changed since), a token for another event, user or
- *    change set, an expired one and a replay after the change was applied all
- *    end in "nothing applied". Because `from` is part of the change set, a
- *    replay needs no server-side nonce store: there is no per-user and no
- *    per-event state kept in memory for it, so nothing needs clearing when a
- *    member's data is reset.
+ *    change set, an expired one, a replay after the change was applied and a
+ *    replay after the value was reversed (A to B confirmed, B to A saved, the
+ *    same change set A to B planned again) all end in "nothing applied". The
+ *    revision is one durable counter on the event: no per-user and no
+ *    per-event state is kept in memory, so nothing needs clearing when a
+ *    member's data is reset. Another writer of a field that a
+ *    confirmation-gated row owns must `$inc` the revision too (as the claim
+ *    does), or a reversal through that writer is not seen.
  * 7. **Derived values stay derived.** A group's "over size" state (members
  *    above its size, `isGroupOverSize`) is computed on read and never stored;
  *    stored group fields get no schema default.
@@ -620,6 +627,8 @@ interface TokenPayload {
   u: string;
   x: number;
   h: string;
+  /** The event's `liveEditRevision` when the page was shown. */
+  n: number;
   c: Array<{ r: string; f: JsonValue; t: JsonValue; k?: boolean }>;
 }
 
@@ -640,6 +649,8 @@ export function signConfirmation(input: {
   guildId: string;
   userId: string;
   changes: readonly ConfirmedChange[];
+  /** `revision` of the `needs-confirmation` outcome the changes came from. */
+  revision: number;
   now?: number;
 }): string | null {
   const payload: TokenPayload = {
@@ -649,6 +660,7 @@ export function signConfirmation(input: {
     u: input.userId,
     x: (input.now ?? Date.now()) + CONFIRM_TTL_MS,
     h: changeSetHash(input.changes),
+    n: input.revision,
     c: input.changes.map((c) => ({
       r: c.rowId,
       f: c.from,
@@ -662,7 +674,7 @@ export function signConfirmation(input: {
 }
 
 export type ConfirmationCheck =
-  | { ok: true; changes: ConfirmedChange[] }
+  | { ok: true; changes: ConfirmedChange[]; revision: number }
   | { ok: false; reason: "invalid" | "expired" | "mismatch" | "no-secret" };
 
 /**
@@ -703,6 +715,7 @@ export function verifyConfirmation(
     typeof payload.u !== "string" ||
     typeof payload.x !== "number" ||
     typeof payload.h !== "string" ||
+    typeof payload.n !== "number" ||
     !Array.isArray(payload.c) ||
     !payload.c.every((c) => c && typeof c.r === "string")
   ) {
@@ -727,7 +740,7 @@ export function verifyConfirmation(
   if (payload.x <= (expect.now ?? Date.now())) {
     return { ok: false, reason: "expired" };
   }
-  return { ok: true, changes };
+  return { ok: true, changes, revision: payload.n };
 }
 
 // ---------------------------------------------------------------
@@ -767,6 +780,8 @@ export type LiveEditOutcome =
       status: "needs-confirmation";
       changes: PlannedChange[];
       reasons: string[];
+      /** The event's `liveEditRevision` the plan was made at: goes into the token. */
+      revision: number;
     }
   | { status: "stale"; message: string }
   | {
@@ -777,6 +792,13 @@ export type LiveEditOutcome =
       notApplied: NotApplied[];
       alreadyApplied: string[];
     };
+
+/** The saves counted so far; a row from before the field reads as 0. */
+function revisionOf(event: { liveEditRevision?: number | null }): number {
+  return typeof event.liveEditRevision === "number"
+    ? event.liveEditRevision
+    : 0;
+}
 
 const STALE_MESSAGE =
   "The settings changed since you reviewed them, so nothing was applied. Review the form again.";
@@ -793,6 +815,8 @@ export async function runLiveEdit(opts: {
   rows?: readonly LiveEditRow[];
   submission?: readonly SubmittedEntry[];
   confirmed?: readonly ConfirmedChange[];
+  /** The token's `revision`; required with `confirmed`. */
+  confirmedRevision?: number;
 }): Promise<LiveEditOutcome> {
   const rows = opts.rows ?? LIVE_EDIT_ROWS;
   const { guildId, deps } = opts;
@@ -858,7 +882,11 @@ export async function runLiveEdit(opts: {
 
     if (opts.confirmed !== undefined) {
       // The fresh change set must be exactly the one that was confirmed.
+      // And the event must not have been saved through the live edit since the
+      // page was shown: the same change set can come round again after a
+      // reversal (A to B, B to A), and a used token must not apply it.
       if (
+        opts.confirmedRevision !== revisionOf(event) ||
         plan.conflicts.length > 0 ||
         changeSetHash(plan.changes) !== changeSetHash(opts.confirmed)
       ) {
@@ -874,8 +902,41 @@ export async function runLiveEdit(opts: {
         if (plan.conflicts.length > 0) {
           return { status: "stale", message: STALE_MESSAGE };
         }
-        return { status: "needs-confirmation", changes: plan.changes, reasons };
+        return {
+          status: "needs-confirmation",
+          changes: plan.changes,
+          reasons,
+          revision: revisionOf(event),
+        };
       }
+    }
+
+    // Claim the save (rule 6): the revision moves on BEFORE any row is written,
+    // conditional on the one this plan was made at. A token issued at an older
+    // revision can therefore never apply again, however the values moved since
+    // (A to B, B to A). A failed save still consumes it (the safe direction).
+    if (plan.changes.length > 0) {
+      const revision = revisionOf(event);
+      if (deps.isEnding(eventId)) return refuse("ending");
+      let claimed = false;
+      try {
+        const result = await Event.updateOne(
+          {
+            _id: eventId,
+            guildId,
+            state: { $in: [...OPEN_STATES] },
+            liveEditRevision: revision === 0 ? { $in: [0, null] } : revision,
+          } as never,
+          { $inc: { liveEditRevision: 1 } },
+        );
+        claimed = (result?.matchedCount ?? 0) === 1;
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: could not claim a live edit:`,
+          err,
+        );
+      }
+      if (!claimed) return { status: "stale", message: STALE_MESSAGE };
     }
 
     const applied: PlannedChange[] = [];

@@ -1916,7 +1916,9 @@ removing groups, and groups on or off, each as another row of the same form.
   Web UI session secret, that binds the event, the server, your sign-in, a ten minute expiry
   and the exact set of changes. Confirming plans again from the event as it is then and applies
   only when that is exactly the confirmed set: a token for another event, another person or
-  another change, an expired one, one used a second time, and one for an event that changed
+  another change, an expired one, one used a second time (also after the value was changed back
+  in between: every save through Live settings counts on a revision number stored on the event,
+  and a token only works at the revision it was issued at), and one for an event that changed
   since the page was shown all apply nothing. Without a session secret a change that needs
   confirmation is refused. There is no browser-only confirm dialog.
 - **Groups over their size** (more people than the size, after a later step lowers a size) are
@@ -1927,8 +1929,9 @@ removing groups, and groups on or off, each as another row of the same form.
   and the changed fields with their old and new values; confirming is one entry,
   `event.host.settings-confirm`. A repeating event's next occurrence starts from the creation
   time saved here (with or without groups), like the rest of the group setup.
-- **Nothing new is stored per member**, and the confirmation needs no server-side record: the
-  token is checked and then compared with the event itself.
+- **Nothing new is stored per member.** The only new stored value is that revision counter on the
+  event itself; the confirmation token is checked and then compared with the event.
+- **While an end or cancel holds the event** the section shows that instead of the form.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can

@@ -98,6 +98,39 @@ describeWithMongo("event live edit against a real MongoDB (#1239)", () => {
     }
   });
 
+  it("counts each applying save in liveEditRevision, from a row that has none, conditional on the revision it planned at", async () => {
+    const id = await makeEvent();
+    expect((await raw(id)).liveEditRevision).toBeUndefined();
+    await run(id, [{ rowId: "channelLeadMinutes", to: 45, base: 30 }]);
+    expect((await raw(id)).liveEditRevision).toBe(1);
+    // Nothing to do: the revision does not move.
+    await run(id, [{ rowId: "channelLeadMinutes", to: 45, base: 30 }]);
+    expect((await raw(id)).liveEditRevision).toBe(1);
+    await run(id, [{ rowId: "groupsLocked", to: true, base: false }]);
+    expect((await raw(id)).liveEditRevision).toBe(2);
+  });
+
+  it("a token issued at an older revision cannot apply again after the value went back (real MongoDB)", async () => {
+    const id = await makeEvent();
+    const confirmedChanges = [
+      { rowId: "channelLeadMinutes", from: 30, to: 45 },
+    ];
+    const replay = () =>
+      runLiveEdit({
+        guildId: GUILD,
+        eventId: id,
+        deps,
+        rows: LIVE_EDIT_ROWS,
+        confirmed: confirmedChanges,
+        confirmedRevision: 0,
+      });
+    expect(await replay()).toMatchObject({ status: "done" });
+    await run(id, [{ rowId: "channelLeadMinutes", to: 30, base: 45 }]);
+    expect((await raw(id)).channelLeadMinutes).toBe(30);
+    expect(await replay()).toMatchObject({ status: "stale" });
+    expect((await raw(id)).channelLeadMinutes).toBe(30);
+  });
+
   it("the lead time is refused once the main channel exists, and a write racing it is lost", async () => {
     const id = await makeEvent({ channelId: "c-main" });
     expect(

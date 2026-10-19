@@ -340,6 +340,20 @@ describe("the Live settings section", () => {
     }
   });
 
+  it("shows the refusal and no form while an end or cancel holds the event (every save would be refused)", async () => {
+    ending = true;
+    const r = await call(panel());
+    expect(r.status).toBe(200);
+    expect(r.text).toContain(
+      "This event is being ended, so nothing was changed.",
+    );
+    expect(r.text).not.toContain('name="s_channelLeadMinutes"');
+    expect(r.text).not.toContain('name="s_groupsLocked"');
+    // The same page with no hold offers the form again.
+    ending = false;
+    expect((await call(panel())).text).toContain('name="s_channelLeadMinutes"');
+  });
+
   it("is a read-only summary for an ended event (no settings section)", async () => {
     (store.get(EVENT_ID) as Json).state = "ended";
     const r = await call(panel());

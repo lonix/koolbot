@@ -403,6 +403,7 @@ beforeEach(() => {
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => (store.get(id) as unknown) ?? null,
     getGroupChannelReport: () => null,
+    isEventBeingEnded: () => false,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async (key: string) =>

@@ -1174,6 +1174,13 @@ function createSettingsSection(client: Client): HostSectionRenderer {
         blocker: REFUSAL_MESSAGE["not-open"],
       });
     }
+    // Every save is refused while an end or cancel holds the event, so no form.
+    if (EventService.getInstance(client).isEventBeingEnded(String(fresh._id))) {
+      return renderSettingsSection({
+        ...empty,
+        blocker: REFUSAL_MESSAGE.ending,
+      });
+    }
     if ((await createLiveEditDeps(client).isEventsEnabled()) !== true) {
       return renderSettingsSection({
         ...empty,
@@ -1253,6 +1260,7 @@ function registerSettingsActions(router: Router, client: Client): void {
           to: c.to,
           reconcile: c.reconcile,
         })),
+        revision: outcome.revision,
       });
       if (!token) {
         return {
@@ -1315,6 +1323,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         eventId,
         deps: createLiveEditDeps(client),
         confirmed: check.changes,
+        confirmedRevision: check.revision,
       });
       return describeLiveEditOutcome(outcome);
     },

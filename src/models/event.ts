@@ -260,6 +260,13 @@ export interface IEvent extends Document {
   tagsEnabled: boolean;
   /** The tag goes after the name ("Alice [RED]") instead of before it ("[RED] Alice"). */
   tagsSuffix: boolean;
+  /**
+   * Counts the saves of the host panel's live edit (#1239). A confirmation
+   * token is bound to the value it was issued at, so it can be used once: any
+   * later save moves the counter on. Deliberately no schema default: a row
+   * without it reads as 0.
+   */
+  liveEditRevision?: number;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -353,6 +360,7 @@ const EventSchema = new Schema<IEvent>(
     captainCustomisationEnabled: { type: Boolean, default: false },
     tagsEnabled: { type: Boolean, default: false },
     tagsSuffix: { type: Boolean, default: false },
+    liveEditRevision: { type: Number },
     createdBy: { type: String, required: true },
   },
   {
