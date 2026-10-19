@@ -1484,7 +1484,10 @@ Only the event's host can prefill from an event (its creator, or an admin, the s
 the host panel). The page also lists the host's presets with **Edit** and **Delete**, and the
 editor is the same as the server library's, so the same validation applies. A host keeps at
 most 10 presets and a name is unique among their own (ignoring case); a built-in's name is
-refused. A host sees only their own: another host's preset is "not found" on this page, in the
+refused. Other hosts cannot see a host's presets, but server admins can see every host's
+unpublished presets (name, description and groups) on the Hosts' presets card, because they need
+that to publish one; the page tells the host so. A host sees only their own: another host's
+preset is "not found" on this page, in the
 panel's **Switch preset** list and in a posted preset id. Their own presets are offered next to
 the server's, marked **(yours)**, in the host panel's preset switch (the same fit rules as
 before) and, for an admin, in the schedule form's picker. Saving, editing and deleting are

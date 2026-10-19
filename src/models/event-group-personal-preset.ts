@@ -4,7 +4,8 @@ import { EVENT_GROUP_KINDS, type EventGroupKind } from "./event-group-kinds.js";
 /**
  * A host's personal event group presets (#1216, part of the event groups epic
  * #1187): the same preset shape as the server-wide library
- * (`event-group-preset.ts`), but owned by one member and visible only to them.
+ * (`event-group-preset.ts`), but owned by one member and not visible to other hosts (admins can see
+ * them, to publish).
  *
  * Why a model of its own and not a flag on the library: the library is guild
  * configuration with no member data in it, and keeping it that way is what

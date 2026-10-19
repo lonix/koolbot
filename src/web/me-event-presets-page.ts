@@ -79,7 +79,7 @@ export function renderMyEventPresetsBody(
     ? `Edit "${escapeHtml(props.editing.label)}"`
     : "Add a preset";
   return `${EDITOR_STYLE}<h1>My event presets</h1>
-<p class="subtitle">Presets fill in the groups of an event in one click. These are yours: nobody else can see or use them, unless an admin publishes one to the server's presets (that makes a copy, and your own preset stays). Changing or deleting a preset never changes events that already used it. <a href="/me/">Back to overview</a></p>
+<p class="subtitle">Presets fill in the groups of an event in one click. These are yours: other hosts cannot see or use them. Server admins can see them (the admin needs that to publish one) and may publish one to the server's presets, which makes a copy for everyone while your own preset stays. Changing or deleting a preset never changes events that already used it. <a href="/me/">Back to overview</a></p>
 <div class="card">
   <h2>Your presets</h2>
   ${list}

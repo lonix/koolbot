@@ -8,6 +8,7 @@ import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import { renderEventsPage } from "../../src/web/admin-views.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import {
   EVENT_GROUP_PRESETS,
   type EventGroupPreset,
@@ -371,6 +372,25 @@ describe("the presets admin page (#1200)", () => {
         adminPage({ hostPresets: { page: 0, hasMore: false, rows } }),
       ).window.document;
       expect(single.querySelector("a[href*='hostPage=']")).toBeNull();
+    });
+
+    it("tells hosts on their own page that admins can see unpublished presets, and only other hosts cannot", () => {
+      const doc = new JSDOM(
+        renderMyEventPresetsBody({
+          csrfToken: "t",
+          presets: [],
+          editing: null,
+          editUnavailable: false,
+          values: {},
+          prefillNote: null,
+          maxCount: 15,
+          defaultCount: 2,
+        }),
+      ).window.document;
+      const text = doc.querySelector(".subtitle")?.textContent ?? "";
+      expect(text).toContain("other hosts cannot see or use them");
+      expect(text).toContain("Server admins can see them");
+      expect(text).not.toContain("nobody else");
     });
 
     it("escapes host-supplied names and shows empty and unreadable states", () => {
