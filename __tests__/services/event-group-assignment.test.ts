@@ -74,6 +74,8 @@ const {
   assignMember: assignMemberReal,
   randomiseMembers: randomiseMembersReal,
   setGroupsLocked,
+  writeGroupsLocked,
+  withGroupLock,
   handleGroupSelfJoin,
   removeMemberFromEvents,
   onGroupAssignmentChange,
@@ -531,6 +533,70 @@ describe("setGroupsLocked", () => {
     expect(
       await setGroupsLocked({ guildId: GUILD, eventId: EV, locked: true }),
     ).toMatchObject({ ok: false, code: "closed" });
+  });
+});
+
+describe("writeGroupsLocked (the lock-free writer the live edit uses, #1239)", () => {
+  it("writes when the stored value is the one decided from, and reports a lost condition instead of success", async () => {
+    seed();
+    expect(
+      await writeGroupsLocked({
+        guildId: GUILD,
+        eventId: EV,
+        from: false,
+        to: true,
+      }),
+    ).toBe("applied");
+    expect(store.get(EV)!.groupsLocked).toBe(true);
+    // Decided from "unlocked", but it is locked now: nothing is written.
+    expect(
+      await writeGroupsLocked({
+        guildId: GUILD,
+        eventId: EV,
+        from: false,
+        to: true,
+      }),
+    ).toBe("lost");
+    store.get(EV)!.groupsLocked = false;
+    expect(
+      await writeGroupsLocked({
+        guildId: GUILD,
+        eventId: EV,
+        from: true,
+        to: false,
+      }),
+    ).toBe("lost");
+    expect(store.get(EV)!.groupsLocked).toBe(false);
+  });
+
+  it("treats a row without the field as unlocked, and refuses a finished or group-less event", async () => {
+    seed();
+    delete (store.get(EV) as Partial<Doc>).groupsLocked;
+    expect(
+      await writeGroupsLocked({
+        guildId: GUILD,
+        eventId: EV,
+        from: false,
+        to: true,
+      }),
+    ).toBe("applied");
+    store.get(EV)!.state = "ended";
+    expect(
+      await writeGroupsLocked({ guildId: GUILD, eventId: EV, to: false }),
+    ).toBe("lost");
+    store.get(EV)!.state = "active";
+    store.get(EV)!.groupsEnabled = false;
+    expect(
+      await writeGroupsLocked({ guildId: GUILD, eventId: EV, to: false }),
+    ).toBe("lost");
+  });
+
+  it("is not wrapped in the group lock: it can run inside withGroupLock without waiting on itself", async () => {
+    seed();
+    const result = await withGroupLock(GUILD, EV, () =>
+      writeGroupsLocked({ guildId: GUILD, eventId: EV, to: true }),
+    );
+    expect(result).toBe("applied");
   });
 });
 

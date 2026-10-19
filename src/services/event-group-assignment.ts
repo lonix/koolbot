@@ -423,17 +423,47 @@ export async function setGroupsLocked(opts: {
     const row = await readRow(guildId, eventId);
     const bad = rowFailure(row);
     if (bad) return fail(bad);
-    const result = await Event.updateOne(
-      {
-        _id: eventId,
-        groupsEnabled: true,
-        state: { $in: [...OPEN_STATES] },
-      },
-      { $set: { groupsLocked: opts.locked } },
-    );
-    if ((result?.matchedCount ?? 0) !== 1) return fail("write-failed");
-    return { ok: true };
+    const written = await writeGroupsLocked({
+      guildId,
+      eventId,
+      to: opts.locked,
+    });
+    return written === "applied" ? { ok: true } : fail("write-failed");
   });
+}
+
+/**
+ * Write the lock switch. The caller ALREADY HOLDS `withGroupLock` for this
+ * event (this function never takes it: the lock is a promise chain, so taking
+ * it again from inside would wait on itself forever). `setGroupsLocked` is the
+ * locked wrapper; the live edit (#1239) calls this from its own locked section.
+ *
+ * With `from`, the write is conditional on the stored value being the one the
+ * caller decided from (`$ne: true` stands for false, because a row from before
+ * the field existed has none), so a change that landed meanwhile is reported
+ * as `"lost"`, never as applied. The write is also conditional on the event
+ * having groups and being open. Without `from` the value is set whatever it
+ * was.
+ */
+export async function writeGroupsLocked(opts: {
+  guildId: string;
+  eventId: string;
+  to: boolean;
+  from?: boolean;
+}): Promise<"applied" | "lost"> {
+  const filter: Record<string, unknown> = {
+    _id: opts.eventId,
+    guildId: opts.guildId,
+    groupsEnabled: true,
+    state: { $in: [...OPEN_STATES] },
+  };
+  if (opts.from !== undefined) {
+    filter.groupsLocked = opts.from ? true : { $ne: true };
+  }
+  const result = await Event.updateOne(filter, {
+    $set: { groupsLocked: opts.to },
+  });
+  return (result?.matchedCount ?? 0) === 1 ? "applied" : "lost";
 }
 
 export type SelfJoinOutcome =

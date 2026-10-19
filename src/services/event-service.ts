@@ -768,6 +768,19 @@ export class EventService extends ScheduledService {
   }
 
   /**
+   * Whether an end or cancel holds this event right now (a hold that has not
+   * lapsed, or a teardown still running). Read-only and synchronous, for
+   * writers that must not touch an event while it is being ended (the live edit
+   * of the host panel, #1239: it asks before every write). Fails closed: an id
+   * that is not an event id counts as held.
+   */
+  public isEventBeingEnded(eventId: string): boolean {
+    const id = canonicalEventId(eventId);
+    if (!id) return true;
+    return this.endsInProgress.has(id) || this.isBeingEnded(id);
+  }
+
+  /**
    * "End event now" (#1193): run the shared teardown for a running event. The
    * state is decided from the atomic claim inside the teardown, never from a
    * copy the caller read earlier. Only an `active` event can be ended; an

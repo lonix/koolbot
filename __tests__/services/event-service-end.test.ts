@@ -1597,6 +1597,28 @@ describe("the hold does not depend on a timeout while an older scan runs", () =>
     }
   });
 
+  it("isEventBeingEnded (read by the live edit, #1239) is true while a hold or a teardown is running, and fails closed for a bad id", () => {
+    const { service } = setup();
+    const svc = service as unknown as {
+      beginEnding: (id: string) => number;
+      abortEnding: (id: string, hold: number) => void;
+      endsInProgress: Map<string, Set<number>>;
+    };
+    expect(service.isEventBeingEnded(ID)).toBe(false);
+    const hold = svc.beginEnding(ID);
+    expect(service.isEventBeingEnded(ID)).toBe(true);
+    // An id posted in upper case is the same event.
+    expect(service.isEventBeingEnded(ID.toUpperCase())).toBe(true);
+    svc.abortEnding(ID, hold);
+    expect(service.isEventBeingEnded(ID)).toBe(false);
+    // A teardown in progress counts even without a hold.
+    svc.endsInProgress.set(ID, new Set([1]));
+    expect(service.isEventBeingEnded(ID)).toBe(true);
+    svc.endsInProgress.delete(ID);
+    // Not an event id: held, so nothing is written.
+    expect(service.isEventBeingEnded("not-an-id")).toBe(true);
+  });
+
   it("once no older scan is running the hold expires by time as before", async () => {
     const { service } = setup();
     const svc = service as unknown as {

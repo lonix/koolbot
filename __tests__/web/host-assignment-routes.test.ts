@@ -34,6 +34,8 @@ jest.unstable_mockModule(
     assignMember: (o: Json) => assignMember(o),
     randomiseMembers: (o: Json) => randomiseMembers(o),
     setGroupsLocked: (o: Json) => setGroupsLocked(o),
+    // Imported by the live edit (#1239), which the same router now loads.
+    writeGroupsLocked: async () => "applied",
     // Imported by modules on the same import path; not used by these routes.
     removeMemberFromEvents: async () => ({ matched: 0, removed: 0, failed: 0 }),
     handleGroupSelfJoin: async () => "no-event",

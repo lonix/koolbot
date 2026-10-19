@@ -118,6 +118,25 @@ import {
 } from "../../services/event-leader-customise.js";
 import { WebAuditLog } from "../../models/web-audit-log.js";
 import {
+  channelsExist,
+  describeLiveEditOutcome,
+  describeRowValue,
+  isGroupOverSize,
+  leadTimeRow,
+  lockGroupsRow,
+  parseSubmission,
+  REFUSAL_MESSAGE,
+  runLiveEdit,
+  signConfirmation,
+  verifyConfirmation,
+  type ConfirmationCheck,
+  type LiveEditDeps,
+} from "../../services/event-live-edit.js";
+import {
+  renderConfirmBody,
+  renderSettingsSection,
+} from "../host-settings-view.js";
+import {
   renderCustomiseSection,
   type CustomiseEditView,
 } from "../host-customise-view.js";
@@ -218,6 +237,12 @@ export interface HostActionResult {
   details?: Record<string, unknown>;
   /** Audit error text when `ok` is false. */
   errorMessage?: string | null;
+  /**
+   * A full HTML page to answer with instead of the flash redirect (the live
+   * edit's confirmation page, #1239). The audit row is still written once,
+   * here, before the page is sent. The page is never cached (it has a token).
+   */
+  page?: string;
 }
 
 export interface HostActionOptions {
@@ -287,6 +312,14 @@ export function hostAction(
           ? null
           : (result.errorMessage ?? result.message),
       });
+      if (result.page !== undefined) {
+        res
+          .status(200)
+          .set("Cache-Control", "no-store")
+          .type("text/html")
+          .send(result.page);
+        return;
+      }
       hostPanelRedirect(res, eventId, {
         type: result.ok ? "ok" : "err",
         text: result.message,
@@ -1074,6 +1107,219 @@ function registerLeaderActions(router: Router, client: Client): void {
   );
 }
 
+/** What the live edit asks of the world (#1239): config and the end hold. */
+function createLiveEditDeps(client: Client): LiveEditDeps {
+  return {
+    isEventsEnabled: async (): Promise<boolean | null> => {
+      try {
+        return await ConfigService.getInstance().getBoolean(
+          "events.enabled",
+          false,
+        );
+      } catch (err) {
+        logger.warn("Could not read events.enabled for a live edit:", err);
+        return null;
+      }
+    },
+    maxGroups: async (): Promise<number | null> => {
+      try {
+        return await ConfigService.getInstance().getNumber(
+          "events.groups.max_count",
+          15,
+        );
+      } catch (err) {
+        logger.warn("Could not read events.groups.max_count:", err);
+        return null;
+      }
+    },
+    isEnding: (eventId) =>
+      EventService.getInstance(client).isEventBeingEnded(eventId),
+  };
+}
+
+/**
+ * The "Live settings" section (#1239). It reads the event FRESH (the form's
+ * base values must be what is stored now, not the gate's copy) and fails
+ * closed: an unreadable event or a switched-off Events feature shows a notice
+ * and no form.
+ */
+function createSettingsSection(client: Client): HostSectionRenderer {
+  return async (ctx) => {
+    const empty = {
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      leadMinutes: null,
+      leadReadOnly: null,
+      locked: null,
+      groupLabel: ctx.event.groupLabel || "Group",
+      groups: [],
+    };
+    let fresh: IEvent | null = null;
+    try {
+      fresh = await EventService.getInstance(client).getEvent(
+        String(ctx.event._id),
+      );
+    } catch (err) {
+      logger.warn("Could not read the event for the settings section:", err);
+    }
+    if (!fresh || fresh.guildId !== ctx.event.guildId) {
+      return renderSettingsSection({
+        ...empty,
+        blocker: "The event could not be read, so it cannot be edited now.",
+      });
+    }
+    if (!hostControlsAvailable(fresh)) {
+      return renderSettingsSection({
+        ...empty,
+        blocker: REFUSAL_MESSAGE["not-open"],
+      });
+    }
+    if ((await createLiveEditDeps(client).isEventsEnabled()) !== true) {
+      return renderSettingsSection({
+        ...empty,
+        blocker: REFUSAL_MESSAGE["events-off"],
+      });
+    }
+    const hasGroups =
+      fresh.groupsEnabled === true && (fresh.groups ?? []).length > 0;
+    return renderSettingsSection({
+      ...empty,
+      blocker: null,
+      leadMinutes: leadTimeRow.read(fresh) as number | null,
+      leadReadOnly: channelsExist(fresh)
+        ? (leadTimeRow.applicable(fresh) ?? null)
+        : null,
+      locked: hasGroups ? (lockGroupsRow.read(fresh) as boolean) : null,
+      groupLabel: fresh.groupLabel || "Group",
+      groups: hasGroups
+        ? (fresh.groups ?? []).map((g) => ({
+            name: g.name,
+            marker: g.marker ?? "",
+            size: g.size ?? null,
+            memberCount: (g.memberIds ?? []).length,
+            overSize: isGroupOverSize(g),
+          }))
+        : [],
+    });
+  };
+}
+
+const CONFIRM_FAILURE: Record<
+  Extract<ConfirmationCheck, { ok: false }>["reason"],
+  string
+> = {
+  invalid: "That confirmation is not valid. Nothing was changed.",
+  mismatch:
+    "That confirmation was issued for something else. Nothing was changed.",
+  expired:
+    "That confirmation has expired. Nothing was changed; review the form again.",
+  "no-secret": REFUSAL_MESSAGE["no-secret"],
+};
+
+/** Save the Settings form, and confirm a change that needs it (#1239). */
+function registerSettingsActions(router: Router, client: Client): void {
+  hostAction(
+    router,
+    "settings",
+    "/settings",
+    async ({ req, event, session }) => {
+      // Everything taken from the request and the session before the first await.
+      const parsed = parseSubmission(req.body);
+      const csrfToken = getCsrfToken(req);
+      const eventId = String(event._id);
+      if (parsed.errors.length > 0) {
+        return {
+          ok: false,
+          message: `Nothing was changed. ${parsed.errors.join(" ")}`,
+          details: { outcome: "invalid", errors: parsed.errors },
+          errorMessage: "invalid",
+        };
+      }
+      const outcome = await runLiveEdit({
+        guildId: event.guildId,
+        eventId,
+        deps: createLiveEditDeps(client),
+        submission: parsed.entries,
+      });
+      const result = describeLiveEditOutcome(outcome);
+      if (outcome.status !== "needs-confirmation") return result;
+      const token = signConfirmation({
+        eventId,
+        guildId: event.guildId,
+        userId: session.discordUserId,
+        changes: outcome.changes.map((c) => ({
+          rowId: c.rowId,
+          from: c.from,
+          to: c.to,
+        })),
+      });
+      if (!token) {
+        return {
+          ok: false,
+          message: REFUSAL_MESSAGE["no-secret"],
+          details: { outcome: "no-secret" },
+          errorMessage: "no-secret",
+        };
+      }
+      const flags = await readMeSurfaceFlags();
+      return {
+        ...result,
+        page: renderUserPage({
+          title: `Confirm changes: ${event.title}`,
+          active: "/me/",
+          body: renderConfirmBody({
+            csrfToken,
+            actionPath: `${hostPanelPath(eventId)}/settings-confirm`,
+            panelPath: hostPanelPath(eventId),
+            token,
+            changes: outcome.changes.map((c) => ({
+              label: c.label,
+              from: describeRowValue(c.rowId, c.from),
+              to: describeRowValue(c.rowId, c.to),
+            })),
+            reasons: outcome.reasons,
+          }),
+          csrfToken,
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash: null,
+          ...flags,
+        }),
+      };
+    },
+  );
+
+  hostAction(
+    router,
+    "settings-confirm",
+    "/settings-confirm",
+    async ({ req, event, session }) => {
+      const token = bodyString(req, "token");
+      const eventId = String(event._id);
+      const check = verifyConfirmation(token, {
+        eventId,
+        guildId: event.guildId,
+        userId: session.discordUserId,
+      });
+      if (!check.ok) {
+        return {
+          ok: false,
+          message: CONFIRM_FAILURE[check.reason],
+          details: { outcome: `token-${check.reason}` },
+          errorMessage: `token ${check.reason}`,
+        };
+      }
+      const outcome = await runLiveEdit({
+        guildId: event.guildId,
+        eventId,
+        deps: createLiveEditDeps(client),
+        confirmed: check.changes,
+      });
+      return describeLiveEditOutcome(outcome);
+    },
+  );
+}
+
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channelName = channelId
@@ -1233,6 +1479,9 @@ export function createHostEventsRouter(client: Client): Router {
   // The "End the event" section and its action (#1193).
   HOST_SECTION_RENDERERS.end = createEndSection();
   registerEndAction(router, client);
+  // The "Live settings" section and its save and confirm actions (#1239).
+  HOST_SECTION_RENDERERS.settings = createSettingsSection(client);
+  registerSettingsActions(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
