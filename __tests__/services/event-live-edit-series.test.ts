@@ -128,6 +128,7 @@ beforeEach(() => {
   claims.length = 0;
   fake.beforeWrite = null;
   fake.failReads = false;
+  fake.afterFind = null;
   SETTABLE.add("seriesGroupSetup");
   ending = false;
   resetMoveGuardForTests();
@@ -278,6 +279,27 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
       notApplied: [{ rowId: SERIES_SETUP_ROW_ID }],
     });
     expect(store.get(EV)?.groupsLocked).toBe(true);
+    expect(store.get(EV)?.seriesGroupSetup).toBeUndefined();
+  });
+
+  it("a hold that begins while the row reads the event stops the write, even though the core's own check passed", async () => {
+    seed();
+    // The core asks isEnding before calling the row; the hold starts DURING the
+    // row's own read, after that check.
+    let reads = 0;
+    fake.afterFind = (): void => {
+      reads += 1;
+      // The first read is the core's fresh read; the second is the row's.
+      if (reads === 2) ending = true;
+    };
+    const out = await save([tick]);
+    expect(reads).toBe(2);
+    expect(out).toMatchObject({
+      status: "done",
+      applied: [],
+      notApplied: [{ rowId: SERIES_SETUP_ROW_ID }],
+    });
+    expect(writes).toEqual([]);
     expect(store.get(EV)?.seriesGroupSetup).toBeUndefined();
   });
 

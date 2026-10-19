@@ -21,8 +21,10 @@
  * 3. **One conditional write with an explicit outcome.** The write matches the
  *    event only while it is open and in this guild; an end or cancel that took
  *    the event meanwhile gives `lost`, never a success, because the successor
- *    is made from the stored value once the event has ended. (The core asks
- *    `deps.isEnding` before every row, so the row does not ask again.)
+ *    is made from the stored value once the event has ended. The core asks
+ *    `deps.isEnding` before it calls the row, but the row awaits a read of its
+ *    own after that, so it asks `ctx.ending()` again, synchronously, right
+ *    before the write (a hold that began during the read gives `lost`).
  * 4. **Only for an event that repeats** (`applicable`), and not for a series
  *    that was cancelled: its next occurrence will not be made.
  *
@@ -64,13 +66,15 @@ export const seriesSetupRow: LiveEditRow = asRow<boolean>({
             "Group setup of the next occurrences: the form is out of date.",
         },
   describe: (v) => (v ? "this event's group setup" : "unchanged"),
-  async apply({ eventId, guildId }) {
+  async apply({ eventId, guildId, ending }) {
     const fresh = (await Event.findOne({
       _id: eventId,
       guildId,
       state: { $in: [...OPEN] },
     }).lean()) as IEvent | null;
     if (!fresh) return { status: "lost" };
+    // No await between this check and the write.
+    if (ending()) return { status: "lost" };
     const result = await Event.updateOne(
       {
         _id: eventId,
