@@ -53,7 +53,12 @@ import {
   type HostPanelEvent,
   type HostSectionId,
 } from "../host-panel-view.js";
-import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
+import {
+  FLASH_MAX,
+  readSignedFlash,
+  signFlash,
+  truncateFlash,
+} from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
 import { randomBytes } from "node:crypto";
 import { ConfigService } from "../../services/config-service.js";
@@ -134,10 +139,15 @@ import {
 } from "../../services/event-live-edit.js";
 import {
   renderConfirmBody,
+  renderResultBody,
   renderSettingsSection,
 } from "../host-settings-view.js";
 import { leadersTagsViewOf } from "../host-settings-leaders-tags-view.js";
 import { createLiveEditEffects } from "../../services/event-live-edit-effects.js";
+import {
+  buildGroupEditView,
+  prepareGroupEditBody,
+} from "../host-settings-groups.js";
 import {
   renderCustomiseSection,
   type CustomiseEditView,
@@ -1212,6 +1222,8 @@ function createSettingsSection(client: Client): HostSectionRenderer {
             overSize: isGroupOverSize(g),
           }))
         : [],
+      // Names, sizes and the preset switch (#1241).
+      groupEdit: hasGroups ? await buildGroupEditView(fresh) : undefined,
     });
   };
 }
@@ -1228,17 +1240,74 @@ const CONFIRM_FAILURE: Record<
   "no-secret": REFUSAL_MESSAGE["no-secret"],
 };
 
+/**
+ * A save whose result is too long for the flash line (cut at `FLASH_MAX`) is
+ * answered with the full result page instead: otherwise the affected channels
+ * and retry times of a large partial save are cut off. The audit row is still
+ * written once, by `hostAction`.
+ */
+function withFullResult(
+  handler: (ctx: {
+    req: HostRequest;
+    event: IEvent;
+    session: WebSessionContext;
+  }) => Promise<HostActionResult>,
+): (ctx: {
+  req: HostRequest;
+  event: IEvent;
+  session: WebSessionContext;
+}) => Promise<HostActionResult> {
+  return async (ctx) => {
+    const result = await handler(ctx);
+    if (result.page !== undefined || result.message.length <= FLASH_MAX) {
+      return result;
+    }
+    const { req, event, session } = ctx;
+    const csrfToken = getCsrfToken(req);
+    const flags = await readMeSurfaceFlags();
+    return {
+      ...result,
+      page: renderUserPage({
+        title: `Settings: ${event.title}`,
+        active: "/me/",
+        body: renderResultBody({
+          ok: result.ok,
+          message: result.message,
+          panelPath: hostPanelPath(String(event._id)),
+        }),
+        csrfToken,
+        remainingMs: getDisplayedRemainingMs(session),
+        isAdmin: session.role === "admin",
+        flash: null,
+        ...flags,
+      }),
+    };
+  };
+}
+
 /** Save the Settings form, and confirm a change that needs it (#1239). */
 function registerSettingsActions(router: Router, client: Client): void {
   hostAction(
     router,
     "settings",
     "/settings",
-    async ({ req, event, session }) => {
+    withFullResult(async ({ req, event, session }) => {
       // Everything taken from the request and the session before the first await.
-      const parsed = parseSubmission(req.body);
+      const rawBody = req.body;
       const csrfToken = getCsrfToken(req);
       const eventId = String(event._id);
+      // A chosen preset is resolved from the server's catalog (#1241): the
+      // content of a preset is never taken from the client.
+      const prepared = await prepareGroupEditBody(rawBody, event.guildId);
+      if (!prepared.ok) {
+        return {
+          ok: false,
+          message: `Nothing was changed. ${prepared.error}`,
+          details: { outcome: "invalid", errors: [prepared.error] },
+          errorMessage: "invalid",
+        };
+      }
+      const parsed = parseSubmission(prepared.body);
       if (parsed.errors.length > 0) {
         return {
           ok: false,
@@ -1300,14 +1369,14 @@ function registerSettingsActions(router: Router, client: Client): void {
           ...flags,
         }),
       };
-    },
+    }),
   );
 
   hostAction(
     router,
     "settings-confirm",
     "/settings-confirm",
-    async ({ req, event, session }) => {
+    withFullResult(async ({ req, event, session }) => {
       const token = bodyString(req, "token");
       const eventId = String(event._id);
       const check = verifyConfirmation(token, {
@@ -1331,7 +1400,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         confirmedRevision: check.revision,
       });
       return describeLiveEditOutcome(outcome);
-    },
+    }),
   );
 }
 

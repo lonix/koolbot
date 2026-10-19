@@ -218,8 +218,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------
 
 describe("registration", () => {
-  it("adds the six rows after the core rows, in this order", () => {
-    expect(live.LIVE_EDIT_ROWS.map((r) => r.id)).toEqual([
+  it("adds the six rows after the core rows, in this order", async () => {
+    // The names, sizes and preset rows (#1241) are listed too; this is about
+    // the order of the rows of this step.
+    const groupRows = new Set(
+      (
+        await import("../../src/services/event-live-edit-groups.js")
+      ).GROUP_EDIT_ROWS.map((r) => r.id),
+    );
+    expect(
+      live.LIVE_EDIT_ROWS.map((r) => r.id).filter((id) => !groupRows.has(id)),
+    ).toEqual([
       "channelLeadMinutes",
       "groupsLocked",
       "captainsEnabled",

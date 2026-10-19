@@ -946,6 +946,22 @@ export class EventService extends ScheduledService {
   }
 
   /**
+   * Finish the pending channel user limits of an event (the host's live size
+   * change, #1241): the stored size is the truth and the channel follows, one
+   * attempt, never sleeping on a rate limit. `groupKey` limits it to one group.
+   * Null when the server cannot be found.
+   */
+  public async syncGroupUserLimits(
+    eventId: string,
+    guildId: string,
+    groupKey?: string,
+  ): Promise<NameSyncOutcome[] | null> {
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return null;
+    return this.groupChannels.syncUserLimits(eventId, guild, groupKey);
+  }
+
+  /**
    * Post, check or remove the "Customise team" message of every team channel so
    * it matches the event's switches now (#1196). The scan does this when it
    * sees a difference; #1197 calls it right after the host flips a switch.
@@ -1344,6 +1360,9 @@ export class EventService extends ScheduledService {
       const eventId = String(event._id);
       if (this.groupChannels.namesNeedAttention(event)) {
         await this.groupChannels.syncNames(eventId, guild);
+      }
+      if (this.groupChannels.sizesNeedAttention(event)) {
+        await this.groupChannels.syncUserLimits(eventId, guild);
       }
       if (this.groupChannels.controlsNeedAttention(event)) {
         await this.groupChannels.syncControls(eventId);

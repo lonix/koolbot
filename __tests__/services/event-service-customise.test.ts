@@ -59,11 +59,17 @@ interface Priv {
     reconcile: jest.Mock;
     cleanup: jest.Mock;
     syncNames: jest.Mock;
+    syncUserLimits: jest.Mock;
     syncControls: jest.Mock;
   };
 }
 type Service = Priv & {
   syncGroupNames: (e: string, g: string, k?: string) => Promise<unknown>;
+  syncGroupUserLimits: (
+    e: string,
+    g: string,
+    k?: string,
+  ) => Promise<unknown>;
   syncGroupControls: (e: string) => Promise<void>;
 };
 
@@ -98,6 +104,7 @@ function setup(guildFound = true): {
   service.groupChannels.reconcile = jest.fn(async () => empty);
   service.groupChannels.cleanup = jest.fn(async () => empty);
   service.groupChannels.syncNames = jest.fn(async () => []);
+  service.groupChannels.syncUserLimits = jest.fn(async () => []);
   service.groupChannels.syncControls = jest.fn(async () => undefined);
   return { service, guild, fetch };
 }
@@ -279,5 +286,84 @@ describe("the public passes for the host panel and #1197 (#1196)", () => {
     const gone = setup(false);
     expect(await gone.service.syncGroupNames("evt1", "guild-1")).toBeNull();
     expect(gone.service.groupChannels.syncNames).not.toHaveBeenCalled();
+  });
+});
+
+describe("the scan finishes pending channel user limits (#1241)", () => {
+  const sized = (over: Record<string, unknown> = {}) => [
+    {
+      key: "g_00000001",
+      name: "A",
+      kind: "team",
+      size: 4,
+      channelId: "c1",
+      sizeSyncPending: true,
+      ...over,
+    },
+  ];
+
+  it("runs the user limit pass for an open event with a group whose size is pending", async () => {
+    const { service, guild } = setup();
+    await service.processEvent(open({ groups: sized() }), guild, NOW, WINDOWS);
+    expect(service.groupChannels.syncUserLimits).toHaveBeenCalledWith(
+      "evt1",
+      guild,
+    );
+    expect(service.groupChannels.syncNames).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no size is pending or the group has no channel yet", async () => {
+    const { service, guild } = setup();
+    await service.processEvent(open(), guild, NOW, WINDOWS);
+    await service.processEvent(
+      open({ groups: sized({ channelId: null }) }),
+      guild,
+      NOW,
+      WINDOWS,
+    );
+    expect(service.groupChannels.syncUserLimits).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a plain event", { groupsEnabled: false }],
+    ["an adopted event", { nativeAdopted: true }],
+    ["an ended event", { state: "ended" }],
+    ["a cancelled event", { state: "cancelled" }],
+  ])("never touches %s", async (_n, over) => {
+    const { service, guild } = setup();
+    await service.processEvent(
+      open({ groups: sized(), ...over }),
+      guild,
+      NOW,
+      WINDOWS,
+    );
+    expect(service.groupChannels.syncUserLimits).not.toHaveBeenCalled();
+  });
+
+  it("syncGroupUserLimits fetches the server and finishes the limits, for one group when asked", async () => {
+    const { service, guild, fetch } = setup();
+    service.groupChannels.syncUserLimits.mockResolvedValue([
+      { groupKey: "g_00000001", status: "applied" },
+    ]);
+    const out = await service.syncGroupUserLimits(
+      "evt1",
+      "guild-1",
+      "g_00000001",
+    );
+    expect(fetch).toHaveBeenCalledWith("guild-1");
+    expect(service.groupChannels.syncUserLimits).toHaveBeenCalledWith(
+      "evt1",
+      guild,
+      "g_00000001",
+    );
+    expect(out).toEqual([{ groupKey: "g_00000001", status: "applied" }]);
+  });
+
+  it("syncGroupUserLimits answers null, and does nothing, when the server is gone", async () => {
+    const gone = setup(false);
+    expect(
+      await gone.service.syncGroupUserLimits("evt1", "guild-1"),
+    ).toBeNull();
+    expect(gone.service.groupChannels.syncUserLimits).not.toHaveBeenCalled();
   });
 });

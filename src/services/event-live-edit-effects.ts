@@ -12,7 +12,10 @@ import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { EventNicknameTags } from "./event-nickname-tags.js";
-import type { LiveEditEffects } from "./event-live-edit.js";
+import type {
+  GroupChannelSyncOutcome,
+  LiveEditEffects,
+} from "./event-live-edit.js";
 
 export function createLiveEditEffects(client: Client): LiveEditEffects {
   return {
@@ -29,6 +32,44 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
     async syncGroupControls(eventId): Promise<void> {
       const { EventService } = await import("./event-service.js");
       await EventService.getInstance(client).syncGroupControls(eventId);
+    },
+    async syncGroupName(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<GroupChannelSyncOutcome | null> {
+      const { EventService } = await import("./event-service.js");
+      const outcomes = await EventService.getInstance(client).syncGroupNames(
+        eventId,
+        guildId,
+        groupKey,
+      );
+      return outcomes?.find((o) => o.groupKey === groupKey) ?? null;
+    },
+    async syncGroupUserLimit(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<GroupChannelSyncOutcome | null> {
+      const { EventService } = await import("./event-service.js");
+      const outcomes = await EventService.getInstance(
+        client,
+      ).syncGroupUserLimits(eventId, guildId, groupKey);
+      return outcomes?.find((o) => o.groupKey === groupKey) ?? null;
+    },
+    retagMembers(guildId, eventId, memberIds): void {
+      // The one tag function, loaded on first use (the leader customiser's
+      // background path: paced per member, then a sweep as the backstop).
+      void import("./event-leader-customise.js")
+        .then((m) =>
+          m.createCustomiseDeps(client).retag(guildId, eventId, memberIds),
+        )
+        .catch((err: unknown) =>
+          logger.error(
+            `Event ${sanitizeForLog(eventId)}: the nickname update after a live edit failed:`,
+            err,
+          ),
+        );
     },
     async syncTags(guildId, eventId, mode): Promise<void> {
       try {

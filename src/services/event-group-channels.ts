@@ -21,7 +21,7 @@ import {
   describeWriteFailure,
   rateLimitWaitMs,
 } from "../web/channel-write-rest.js";
-import { getRenameQueue } from "./event-rename-queue.js";
+import { getRenameQueue, rateLimitWait } from "./event-rename-queue.js";
 import {
   isOpenState,
   controlWanted,
@@ -120,6 +120,7 @@ export const UNCONFIRMED_RENAME_HOLD_MS = MS_PER_MINUTE;
 const CONTROL_SEARCH_PAGE = 100;
 const CONTROL_SEARCH_PAGES = 5;
 const RENAME_HOLD = "#rename";
+const LIMIT_HOLD = "#limit";
 const CONTROL_HOLD = "#control";
 
 export type NameSyncStatus =
@@ -180,6 +181,8 @@ interface GroupRow {
   captainId?: string | null;
   /** Leader customiser (#1196). */
   nameSyncPending?: boolean;
+  /** Host's live size change (#1241): the channel's user limit is still owed. */
+  sizeSyncPending?: boolean;
   controlMessageId?: string | null;
   controlChannelId?: string | null;
 }
@@ -1994,6 +1997,192 @@ export class EventGroupChannels {
       });
     }
     return outcomes;
+  }
+
+  /**
+   * Does any group of this open event have a stored size its channel has not
+   * been confirmed to carry as its user limit (#1241)? Pure, on the scan's copy
+   * (a trigger only; the pass reads fresh). A pending update held back after a
+   * refusal waits for its hold, so a standing refusal is not retried every scan.
+   */
+  public sizesNeedAttention(event: {
+    _id: unknown;
+    state?: string;
+    groupsEnabled?: boolean;
+    groups?: GroupRow[];
+  }): boolean {
+    if (event.groupsEnabled !== true) return false;
+    if (!isOpenState(event.state ?? "")) return false;
+    const id = String(event._id);
+    return (event.groups ?? []).some((g) => {
+      if (g.sizeSyncPending !== true || !g.channelId) return false;
+      const hold = this.holds.get(`${id}:${g.key}${LIMIT_HOLD}`);
+      return !(hold && Date.now() < hold.until);
+    });
+  }
+
+  /**
+   * Finish the pending channel user limits of an event (all its groups, or just
+   * `onlyGroupKey`) after the host changed a group's size (#1241): the stored
+   * size is the truth, the channel follows. The same rules as `syncNames`:
+   * under the per-event channel lock, the event and the channel read FRESH, an
+   * event that is not open or whose `events.enabled` is off or unreadable is
+   * left alone, a channel that already carries the limit is settled without a
+   * write, and the flag is cleared only after a confirmed limit (a write
+   * conditional on the group still having that size and channel).
+   *
+   * The write is ONE attempt on the fail-fast client (never sleeps through a
+   * rate limit: `limited` with the time left). It does NOT go through the
+   * rename queue: a user limit is not part of Discord's rename budget, and a
+   * body that carries only `user_limit` cannot spend it. Nobody is moved or
+   * disconnected by a lower limit: Discord keeps those already in the channel.
+   */
+  public syncUserLimits(
+    eventId: string,
+    guild: Guild,
+    onlyGroupKey?: string,
+  ): Promise<NameSyncOutcome[]> {
+    return this.lock.run(eventId, () =>
+      this.syncUserLimitsLocked(eventId, guild, onlyGroupKey),
+    );
+  }
+
+  private async syncUserLimitsLocked(
+    eventId: string,
+    guild: Guild,
+    onlyGroupKey?: string,
+  ): Promise<NameSyncOutcome[]> {
+    const outcomes: NameSyncOutcome[] = [];
+    const report = emptyReport();
+    const row = await this.readFresh(eventId, report);
+    if (!row) {
+      return onlyGroupKey
+        ? [
+            {
+              groupKey: onlyGroupKey,
+              status: "failed",
+              reason: "The event could not be read.",
+            },
+          ]
+        : [];
+    }
+    if (
+      row.groupsEnabled !== true ||
+      !isOpenState(row.state) ||
+      !(await this.eventsOn())
+    ) {
+      return outcomes;
+    }
+    for (const group of row.groups ?? []) {
+      if (onlyGroupKey && group.key !== onlyGroupKey) continue;
+      if (group.sizeSyncPending !== true) continue;
+      const channelId = group.channelId ?? null;
+      if (!channelId) continue;
+      const holdKey = `${eventId}:${group.key}${LIMIT_HOLD}`;
+      const hold = this.holds.get(holdKey);
+      if (hold && Date.now() < hold.until) {
+        outcomes.push({
+          groupKey: group.key,
+          status: "failed",
+          reason: hold.reason,
+          retryAfterMs: hold.until - Date.now(),
+        });
+        continue;
+      }
+      const state = await this.readChannel(guild, channelId);
+      if (state.status === "gone") {
+        // The channel pass re-creates it with the stored size.
+        outcomes.push({ groupKey: group.key, status: "skipped" });
+        continue;
+      }
+      if (state.status === "error") {
+        outcomes.push({
+          groupKey: group.key,
+          status: "failed",
+          reason: `Could not check the group channel: ${describeWriteFailure(state.error)}`,
+        });
+        continue;
+      }
+      const wanted = group.size ?? 0;
+      const current = (state.channel as { userLimit?: number }).userLimit ?? 0;
+      if (current === wanted) {
+        await this.clearSizePending(eventId, group, channelId);
+        this.holds.delete(holdKey);
+        outcomes.push({ groupKey: group.key, status: "applied" });
+        continue;
+      }
+      try {
+        await this.renameCall(
+          (signal) =>
+            this.failFastRest().patch(Routes.channel(channelId), {
+              body: { user_limit: wanted },
+              reason: `Event group size changed (${sanitizeForLog(eventId)})`,
+              signal,
+            }),
+          "set event group channel user limit",
+        );
+      } catch (error) {
+        const wait = rateLimitWait(error);
+        if (wait !== null) {
+          outcomes.push({
+            groupKey: group.key,
+            status: "limited",
+            retryAfterMs: wait,
+          });
+          continue;
+        }
+        const reason = describeWriteFailure(error);
+        const refused = error instanceof DiscordAPIError;
+        logger.warn(
+          `Event ${sanitizeForLog(eventId)}: group channel ${sanitizeForLog(channelId)} user limit not set: ${sanitizeForLog(reason)}`,
+        );
+        const ms = refused
+          ? REFUSED_CREATE_BACKOFF_MS
+          : UNCONFIRMED_RENAME_HOLD_MS;
+        this.holds.set(holdKey, { until: Date.now() + ms, reason });
+        outcomes.push({
+          groupKey: group.key,
+          status: refused ? "failed" : "unconfirmed",
+          reason,
+          retryAfterMs: ms,
+        });
+        continue;
+      }
+      await this.clearSizePending(eventId, group, channelId);
+      this.holds.delete(holdKey);
+      outcomes.push({ groupKey: group.key, status: "applied" });
+    }
+    return outcomes;
+  }
+
+  /** Clear `sizeSyncPending` of a group that still has this size and channel. */
+  private async clearSizePending(
+    eventId: string,
+    group: GroupRow,
+    channelId: string,
+  ): Promise<void> {
+    try {
+      await Event.updateOne(
+        {
+          _id: eventId,
+          groups: {
+            $elemMatch: {
+              key: group.key,
+              size: group.size ?? null,
+              channelId,
+              sizeSyncPending: true,
+            },
+          },
+        },
+        { $set: { "groups.$[g].sizeSyncPending": false } },
+        { arrayFilters: [{ "g.key": group.key }] },
+      );
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(eventId)}: could not record a channel user limit:`,
+        error,
+      );
+    }
   }
 
   /** Clear `nameSyncPending` of a group that still has this name and channel. */

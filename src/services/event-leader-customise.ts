@@ -357,7 +357,10 @@ export async function customiseGroup(
             },
           },
         },
-        { $set },
+        // The name and tag belong to the host's live settings too (#1241): a
+        // confirmed change set there must not apply over this edit, so the
+        // revision moves on in the same write.
+        { $set, $inc: { liveEditRevision: 1 } },
         { arrayFilters: [{ "g.key": groupKey }] },
       );
       if ((result?.modifiedCount ?? 0) !== 1) {
@@ -636,6 +639,8 @@ export async function resetGroupCustomisation(
             "groups.$[g].originalName": "",
             "groups.$[g].originalTag": "",
           },
+          // See customiseGroup: the live settings' confirmation revision.
+          $inc: { liveEditRevision: 1 },
         },
         { arrayFilters: [{ "g.key": groupKey }] },
       );

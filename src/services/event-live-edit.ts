@@ -5,11 +5,12 @@
  * applies it under the per-event locks with ONE result (and, in the route, ONE
  * audit entry) per save.
  *
- * Rows delivered here: channel lead time and lock groups on/off. #1240 adds
+ * Rows delivered here: channel lead time and lock groups on/off. Names, sizes
+ * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
  * leaders, leader customisation, the leader label, tagging, the tag position
- * and each team's tag (`event-live-edit-leaders-tags.ts`). Later steps
- * (#1241 names, sizes and preset, #1242 kind and add/remove, #1243 groups
- * on/off) only ADD ROWS (see "Extension contract").
+ * and each team's tag (`event-live-edit-leaders-tags.ts`). Both are listed in
+ * `LIVE_EDIT_ROWS` below. Later steps (#1242 kind and add/remove, #1243
+ * groups on/off) only ADD ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`
  * has a table test over them)
@@ -152,6 +153,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { withEventMoveLock } from "./event-move-guard.js";
 import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
+import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import {
   checkChannelLead,
@@ -285,6 +287,12 @@ export interface ApplyContext<V extends JsonValue = JsonValue> {
   to: V;
   /** Synchronous: an end or cancel holds the event. Ask before every outward write. */
   ending(): boolean;
+  /**
+   * The outward effects (`deps.effects`), for a row whose `apply` or `reconcile`
+   * follows its stored change with a Discord call and reports it as `partial`
+   * (names and sizes, #1241). Absent: the row stores and reports it as owed.
+   */
+  effects?: LiveEditEffects;
 }
 
 export interface LiveEditRow<V extends JsonValue = JsonValue> {
@@ -312,6 +320,13 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
    */
   reconcile?(ctx: ApplyContext<V>): Promise<RowOutcome>;
   describe(value: V): string;
+  /**
+   * The value as it is written into the audit row, when `read`'s shape is too
+   * deep for the audit bound (`boundAuditEntry` replaces anything nested deeper
+   * than four levels with "[truncated]"; a value sits at level three). Flat
+   * strings and numbers only. Absent: the value itself.
+   */
+  auditValue?(value: V): JsonValue;
   /** See "Extension contract": follow-up run after the locks are released. */
   afterSave?(ctx: AfterSaveContext): Promise<void> | void;
   /** Rows with the same group share one `afterSave` run per save. */
@@ -346,6 +361,35 @@ export interface LiveEditEffects {
     eventId: string,
     mode: "sync" | "restore",
   ): Promise<void>;
+  /**
+   * Finish the pending channel rename of one group (the channel pass, through
+   * the shared rename queue). Null when the server cannot be found.
+   */
+  syncGroupName(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<GroupChannelSyncOutcome | null>;
+  /** Finish the pending channel user limit of one group. Null when the server cannot be found. */
+  syncGroupUserLimit(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<GroupChannelSyncOutcome | null>;
+  /**
+   * Bring these members' nicknames in line with their group's stored tag, in the
+   * background (paced; never awaited by the save).
+   */
+  retagMembers(guildId: string, eventId: string, memberIds: string[]): void;
+}
+
+/** What one channel pass did for one group (`NameSyncOutcome` of the channel pass). */
+export interface GroupChannelSyncOutcome {
+  groupKey: string;
+  status: "applied" | "limited" | "failed" | "unconfirmed" | "skipped";
+  /** For `limited` (and a held-back refusal): when it is worth trying again. */
+  retryAfterMs?: number;
+  reason?: string;
 }
 
 export interface AfterSaveContext {
@@ -437,6 +481,8 @@ export const lockGroupsRow = defineRow<boolean>({
 export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   leadTimeRow,
   lockGroupsRow,
+  // Names, sizes and preset of the groups (#1241): `event-live-edit-groups.ts`.
+  ...GROUP_EDIT_ROWS,
   ...leadersTagsRows,
 ];
 
@@ -1042,6 +1088,7 @@ export async function runLiveEdit(opts: {
           from: change.from,
           to: change.to,
           ending: (): boolean => deps.isEnding(eventId),
+          effects: deps.effects,
         };
         outcome =
           change.reconcile === true && row.reconcile
@@ -1153,6 +1200,31 @@ export function describeRowValue(
   return row ? row.describe(value) : String(value);
 }
 
+/** Most entries of one list in the audit details (the audit bound keeps 50 per array). */
+export const AUDIT_PAGE = 45;
+
+/**
+ * A list for the audit details that survives the audit bound: up to
+ * `AUDIT_PAGE` entries under `name`, and when there are more, the rest in
+ * `name2`, `name3`, ... with the full count under `nameTotal`. A save of every
+ * name and size of 25 groups is more than 50 rows; none may be dropped.
+ */
+export function pagedAudit(
+  name: string,
+  items: readonly unknown[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { [name]: items.slice(0, AUDIT_PAGE) };
+  if (items.length <= AUDIT_PAGE) return out;
+  out[`${name}Total`] = items.length;
+  for (let page = 2; (page - 1) * AUDIT_PAGE < items.length; page++) {
+    out[`${name}${page}`] = items.slice(
+      (page - 1) * AUDIT_PAGE,
+      page * AUDIT_PAGE,
+    );
+  }
+  return out;
+}
+
 /** The host-facing result and audit details of an outcome (one per save). */
 export function describeLiveEditOutcome(
   outcome: LiveEditOutcome,
@@ -1160,6 +1232,10 @@ export function describeLiveEditOutcome(
 ): LiveEditResult {
   const rowOf = (id: string): LiveEditRow | undefined =>
     rows.find((r) => r.id === id);
+  const auditOf = (id: string, value: JsonValue): JsonValue => {
+    const row = rowOf(id);
+    return row?.auditValue ? row.auditValue(value) : value;
+  };
   switch (outcome.status) {
     case "refused":
       return {
@@ -1188,11 +1264,14 @@ export function describeLiveEditOutcome(
         message: "Confirmation needed. Nothing was changed yet.",
         details: {
           outcome: "needs-confirmation",
-          changes: outcome.changes.map((c) => ({
-            row: c.rowId,
-            from: c.from,
-            to: c.to,
-          })),
+          ...pagedAudit(
+            "changes",
+            outcome.changes.map((c) => ({
+              row: c.rowId,
+              from: auditOf(c.rowId, c.from),
+              to: auditOf(c.rowId, c.to),
+            })),
+          ),
         },
       };
     case "done": {
@@ -1206,25 +1285,34 @@ export function describeLiveEditOutcome(
             : outcome.applied.length > 0
               ? "applied"
               : "nothing-to-do",
-        changes: outcome.applied.map((c) => ({
-          row: c.rowId,
-          from: c.from,
-          to: c.to,
-          ...(c.reconcile === true ? { reconcile: true } : {}),
-        })),
+        ...pagedAudit(
+          "changes",
+          outcome.applied.map((c) => ({
+            row: c.rowId,
+            from: auditOf(c.rowId, c.from),
+            to: auditOf(c.rowId, c.to),
+            ...(c.reconcile === true ? { reconcile: true } : {}),
+          })),
+        ),
         // Stored but not finished, with what is still owed.
-        stored: outcome.partial.map((c) => ({
-          row: c.rowId,
-          from: c.from,
-          to: c.to,
-          owed: c.owed,
-          ...(c.reconcile ? { reconcile: true } : {}),
-        })),
-        notApplied: outcome.notApplied.map((n) => ({
-          row: n.rowId,
-          reason: n.reason,
-        })),
-        alreadyApplied: outcome.alreadyApplied,
+        ...pagedAudit(
+          "stored",
+          outcome.partial.map((c) => ({
+            row: c.rowId,
+            from: auditOf(c.rowId, c.from),
+            to: auditOf(c.rowId, c.to),
+            owed: c.owed,
+            ...(c.reconcile ? { reconcile: true } : {}),
+          })),
+        ),
+        ...pagedAudit(
+          "notApplied",
+          outcome.notApplied.map((n) => ({
+            row: n.rowId,
+            reason: n.reason,
+          })),
+        ),
+        ...pagedAudit("alreadyApplied", outcome.alreadyApplied),
       };
       if (outcome.applied.length === 0 && unfinished === 0) {
         return {

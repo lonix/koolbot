@@ -78,7 +78,9 @@ export const LEventMock = {
     update: { $set?: Doc; $unset?: Doc; $inc?: Doc },
     options?: { arrayFilters?: Doc[] },
   ) => {
-    const isClaim = update.$inc !== undefined;
+    // The save's claim is an update of the counter alone; a writer that also
+    // sets fields and moves the counter (the leader customiser, #1241) is a write.
+    const isClaim = update.$inc !== undefined && !update.$set && !update.$unset;
     if (!isClaim) {
       lwrites.push({ filter: lclone(filter), update: lclone(update), options });
     }
@@ -144,6 +146,15 @@ export const LEventMock = {
     };
     for (const [p, v] of Object.entries(update.$set ?? {})) touch(p, v, false);
     for (const p of Object.keys(update.$unset ?? {})) touch(p, null, true);
+    if (update.$inc) {
+      if (Object.keys(update.$inc).some((k) => k !== "liveEditRevision")) {
+        throw new Error("unexpected $inc");
+      }
+      doc.liveEditRevision =
+        (typeof doc.liveEditRevision === "number" ? doc.liveEditRevision : 0) +
+        1;
+      modified = 1;
+    }
     return { matchedCount: 1, modifiedCount: modified };
   },
 };

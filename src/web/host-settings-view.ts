@@ -17,6 +17,11 @@ import {
 } from "../services/event-groups.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
 import {
+  renderGroupEditor,
+  renderPresetForm,
+  type GroupEditViewData,
+} from "./host-settings-groups.js";
+import {
   renderLeadersTagsFields,
   type LeadersTagsView,
 } from "./host-settings-leaders-tags-view.js";
@@ -43,6 +48,8 @@ export interface SettingsViewData {
   locked: boolean | null;
   groupLabel: string;
   groups: SettingsGroupView[];
+  /** Names, sizes and the preset switch (#1241); absent = the read-only table. */
+  groupEdit?: GroupEditViewData;
   /** Leaders and tags fields (#1240); null when the event has no groups. */
   leadersTags?: LeadersTagsView | null;
 }
@@ -101,10 +108,11 @@ export function renderSettingsSection(d: SettingsViewData): string {
 <form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderLead(d)}
 ${renderLock(d)}
+${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
 ${renderLeadersTagsFields(d.leadersTags ?? null)}
 <button type="submit">Save settings</button>
 </form>
-${renderGroups(d)}`;
+${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}`;
 }
 
 export interface ConfirmChangeView {
@@ -121,6 +129,30 @@ export interface ConfirmViewData {
   token: string;
   changes: ConfirmChangeView[];
   reasons: string[];
+}
+
+export interface ResultViewData {
+  ok: boolean;
+  /** Plain text; escaped here. */
+  message: string;
+  panelPath: string;
+}
+
+/**
+ * The full result of a save, for a result too long for the flash line (which
+ * is cut at 500 characters, and would hide which channels are unfinished and
+ * when to retry). One paragraph per sentence of the result, escaped.
+ */
+export function renderResultBody(d: ResultViewData): string {
+  const parts = d.message
+    .split(/(?<=\.) (?=[A-Z])/)
+    .map((p) => `<p>${escapeHtml(p)}</p>`)
+    .join("");
+  return `<section class="card" id="host-settings-result" aria-labelledby="host-settings-result-h">
+<h2 id="host-settings-result-h">${d.ok ? "Settings saved" : "Settings saved, with something left to do"}</h2>
+<div class="notice ${d.ok ? "ok" : "warn"}" role="status">${parts}</div>
+<p><a href="${escapeHtml(d.panelPath)}">Back to the host panel</a></p>
+</section>`;
 }
 
 /** The confirmation page body: what will change, why it needs a yes, and the signed token. */
