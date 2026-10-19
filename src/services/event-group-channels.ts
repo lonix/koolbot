@@ -145,7 +145,11 @@ const SNOWFLAKE = /^\d{16,20}$/;
 
 /** Thrown inside a delete attempt when someone has joined the channel. */
 class ChannelOccupiedError extends Error {
-  constructor(readonly count: number = 0) {
+  constructor(
+    readonly count: number = 0,
+    /** The group whose channel is occupied, when it is not the one being deleted. */
+    readonly groupKey?: string,
+  ) {
     super("Group channel is occupied");
     this.name = "ChannelOccupiedError";
   }
@@ -3044,24 +3048,6 @@ export class EventGroupChannels {
       plan.push({ key: group.key, kind: group.kind, channelId, ours });
     }
 
-    // The looks above are separated by awaited reads: somebody may have joined a
-    // channel that was looked at earlier while a later one was being read. One
-    // synchronous look at every planned channel, right before the first delete,
-    // so a join that already shows keeps ALL of them (the per-delete checks below
-    // still catch a later one).
-    for (const item of plan) {
-      if (!item.ours) continue;
-      const live = guild.channels.cache.get(item.channelId) as
-        VoiceChannel | undefined;
-      if (live?.type !== ChannelType.GuildVoice) continue;
-      const remaining = [...(live.members?.keys() ?? [])].filter(
-        (id) => !ignore.has(id),
-      ).length;
-      if (remaining > 0) {
-        return { status: "occupied", remaining, groupKey: item.key };
-      }
-    }
-
     // 2. Keep the scan from re-creating a channel deleted below while the flag
     // is still on (only if a delete fails halfway; see the method comment).
     const until = Date.now() + SWITCH_OFF_HOLD_MS;
@@ -3074,19 +3060,28 @@ export class EventGroupChannels {
     }
 
     // 3. Delete each channel and clear its recorded id.
-    for (const item of plan) {
+    for (const [index, item] of plan.entries()) {
       if (item.ours) {
         try {
           await this.renameCall((signal) => {
-            // Synchronous, in the same tick as the request.
+            // Synchronous, in the same tick as the request (the caller may
+            // await a limiter or an import before this runs, and the looks of
+            // step 1 are separated by awaited reads): an end taking its hold, or
+            // somebody in THIS channel or in any channel still to be deleted,
+            // stops the request. Looking at the later channels too is what keeps
+            // every channel when somebody joined one of them meanwhile.
             if (opts.ending?.()) throw new RemovalEndingError();
-            const live = guild.channels.cache.get(item.channelId) as
-              VoiceChannel | undefined;
-            if (live?.type === ChannelType.GuildVoice) {
+            for (const next of plan.slice(index)) {
+              if (!next.ours) continue;
+              const live = guild.channels.cache.get(next.channelId) as
+                VoiceChannel | undefined;
+              if (live?.type !== ChannelType.GuildVoice) continue;
               const stay = [...(live.members?.keys() ?? [])].filter(
                 (id) => !ignore.has(id),
               );
-              if (stay.length > 0) throw new ChannelOccupiedError(stay.length);
+              if (stay.length > 0) {
+                throw new ChannelOccupiedError(stay.length, next.key);
+              }
             }
             return this.failFastRest().delete(Routes.channel(item.channelId), {
               reason: "Event groups switched off",
@@ -3106,7 +3101,7 @@ export class EventGroupChannels {
               ? {
                   status: "occupied",
                   remaining: error.count,
-                  groupKey: item.key,
+                  groupKey: error.groupKey ?? item.key,
                 }
               : {
                   status: "failed",
