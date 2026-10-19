@@ -32,6 +32,7 @@ import {
 import {
   GROUP_PRESET_ROW_ID,
   groupNameRowId,
+  groupNameKeyField,
   groupSizeKeyField,
   groupSizeRowId,
   presetToValue,
@@ -56,7 +57,7 @@ import type { EventGroupPreset } from "../content/event-group-presets.js";
 export const PRESET_PICK_FIELD = "preset_pick";
 
 export interface GroupEditGroupView {
-  /** The group's key: the identity the size field is guarded by, and the remove checkbox's name. */
+  /** The group's key: the identity the name and size fields are guarded by, and the remove checkbox's name. */
   key: string;
   /** `team`, `open` or `leads` (the hidden captains lobby: not listed or editable here). */
   kind: string;
@@ -120,7 +121,7 @@ export function renderGroupEditor(d: GroupEditViewData): string {
       }
       return (
         `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(n)}</td>` +
-        `<td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(valueField(nameId))}" value="${escapeHtml(g.name)}" aria-label="Name of group ${n}">${hidden(baseField(nameId), g.name)}</td>` +
+        `<td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(valueField(nameId))}" value="${escapeHtml(g.name)}" aria-label="Name of group ${n}">${hidden(baseField(nameId), g.name)}${hidden(groupNameKeyField(i), g.key)}</td>` +
         `<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(valueField(sizeId))}" value="${escapeHtml(sizeText)}" placeholder="No limit" aria-label="Size of group ${n}">${hidden(baseField(sizeId), sizeText)}${hidden(groupSizeKeyField(i), g.key)}</td>` +
         `<td><span class="mono">${escapeHtml(g.memberCount)}</span> ${notes.join(" ")}</td></tr>`
       );

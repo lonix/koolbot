@@ -441,6 +441,8 @@ describe("the size fields carry the key of the group they show (#1242)", () => {
     const out = renderGroupEditor(view());
     expect(out).toContain('name="k_groupSizeA" value="g_00000001"');
     expect(out).toContain('name="k_groupSizeB" value="g_00000002"');
+    expect(out).toContain('name="k_groupNameA" value="g_00000001"');
+    expect(out).toContain('name="k_groupNameB" value="g_00000002"');
   });
 });
 
