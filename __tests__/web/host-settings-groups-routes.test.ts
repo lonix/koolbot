@@ -714,6 +714,23 @@ describe("personal presets on the host panel (#1216)", () => {
     expect(writes).toEqual([]);
   });
 
+  it("applies the host's own preset on confirm, with one success audit row", async () => {
+    const page = await post("settings", {
+      preset_pick: MINE,
+      b_groupPreset: BASE,
+    });
+    auditRows = [];
+    const r = await post("settings-confirm", { token: tokenOf(page.text) });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(store.get(EVENT_ID)?.groups).toMatchObject([
+      { name: "Mine One" },
+      { name: "Mine Two" },
+    ]);
+    expect(store.get(EVENT_ID)?.presetId).toBe(MINE);
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({ result: "success" });
+  });
+
   it("refuses another host's preset id as if it did not exist, with one failed audit row", async () => {
     const r = await post("settings", {
       preset_pick: THEIRS,
