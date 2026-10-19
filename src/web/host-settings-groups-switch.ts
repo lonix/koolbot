@@ -125,10 +125,12 @@ function form(
   csrfToken: string,
   body: string,
   button: string,
+  /** Skip the browser's own field checks (the server checks what is used). */
+  noValidate = false,
 ): string {
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 ${body}
-<button type="submit">${escapeHtml(button)}</button>
+<button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>
 </form>`;
 }
 
@@ -215,6 +217,11 @@ ${picker}
 ${hidden(base, OFF)}
 <p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
     "Switch groups on",
+    // Six rows, most of them blank or ignored (a chosen preset wins, a blank
+    // name skips its row): the browser must not refuse the submit over a size in
+    // a row the server does not use. Every row that IS used is checked by the
+    // server (name, size, tag, kind) and by the row's whole-setup validation.
+    true,
   );
 }
 

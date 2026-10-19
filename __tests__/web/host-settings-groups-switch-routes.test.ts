@@ -388,6 +388,11 @@ describe("the switch on the page", () => {
 
   it("offers the own-groups rows next to the preset select", async () => {
     const r = await call(panel());
+    // Unused rows must not block the submit in the browser (the server checks
+    // the rows it uses): only this form skips the browser's field checks.
+    expect(r.text).toContain(
+      '<button type="submit" formnovalidate>Switch groups on</button>',
+    );
     expect(r.text).toContain('name="groups_pick"');
     expect(r.text).toContain('name="custom_kind_1"');
     expect(r.text).toContain('name="custom_size_1"');
@@ -410,6 +415,7 @@ describe("the switch on the page", () => {
   it("an event with groups on offers the switch-off, and the retry of a missing channel", async () => {
     store.set(EVENT_ID, withGroups("c1"));
     const r = await call(panel());
+    expect(r.text).not.toContain("formnovalidate");
     expect(r.text).toContain("Groups are on");
     expect(r.text).toContain("2 team");
     expect(r.text).toContain("1 with a voice channel");
