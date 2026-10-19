@@ -137,7 +137,9 @@ describe("a rename through the production wrapper never waits on a rate limit (#
       throw err;
     });
     const out = await channels.syncNames(EV, guild);
-    expect(out[0].status).toBe("limited");
+    expect(out[0]).toMatchObject({ status: "limited", retryAfterMs: 30_000 });
+    // The channel stays blocked for what Discord said, not for a default.
+    expect(getRenameQueue().check(CH)).toMatchObject({ ok: false });
   });
 
   it("a plain failure is still an unconfirmed rename, not a rate limit", async () => {

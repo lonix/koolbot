@@ -69,7 +69,14 @@ export function rateLimitWait(err: unknown): number | null {
     if (e instanceof RateLimitError) {
       return Math.max(rateLimitWaitMs(e), 1000);
     }
-    if (e instanceof DiscordAPIError && e.status === 429) return 5000;
+    if (e instanceof DiscordAPIError && e.status === 429) {
+      // Discord says how long, in seconds; five seconds only when it did not.
+      const secs = (e.rawError as { retry_after?: unknown } | undefined)
+        ?.retry_after;
+      return typeof secs === "number" && Number.isFinite(secs) && secs > 0
+        ? Math.ceil(secs * 1000)
+        : 5000;
+    }
     const o = e as { name?: unknown; status?: unknown; cause?: unknown };
     if (o.name === "RateLimitError" || o.status === 429) {
       return Math.max(

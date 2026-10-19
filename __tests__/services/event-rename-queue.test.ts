@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { RateLimitError } from "discord.js";
+import { DiscordAPIError, RateLimitError } from "discord.js";
 import {
   CHANNEL_RENAME_LIMIT,
   CHANNEL_RENAME_WINDOW_MS,
@@ -151,5 +151,19 @@ describe("ChannelRenameQueue (#1196)", () => {
     );
     expect(rateLimitWait(new Error("boom"))).toBeNull();
     expect(rateLimitWait(null)).toBeNull();
+  });
+});
+
+describe("a 429 answered by Discord with retry_after (#1196)", () => {
+  it("is believed in seconds, with five seconds only as the fallback", () => {
+    const make = (raw: unknown): DiscordAPIError =>
+      new DiscordAPIError(raw as never, 0, 429, "PATCH", "/", {});
+    const body = (extra: object) => ({ code: 0, message: "x", ...extra });
+    expect(rateLimitWait(make(body({ retry_after: 30 })))).toBe(30_000);
+    expect(rateLimitWait(make(body({ retry_after: 0.5 })))).toBe(500);
+    expect(rateLimitWait(make(body({})))).toBe(5000);
+    expect(
+      rateLimitWait(new Error("w", { cause: make(body({ retry_after: 12 })) })),
+    ).toBe(12_000);
   });
 });
