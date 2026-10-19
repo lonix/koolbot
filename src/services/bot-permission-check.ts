@@ -94,6 +94,8 @@ type ApiCall = <T>(fn: () => Promise<T>, name: string) => Promise<T>;
 
 export interface CheckDeps {
   call?: ApiCall;
+  /** How many role groups the server has (a read that rejects when it fails). */
+  roleGroupCount?: (guildId: string) => Promise<number>;
   now?: () => number;
 }
 
@@ -152,7 +154,7 @@ async function loadSnapshot(
     await Promise.all([
       call(() => server.roles.fetch(), "perm-roles"),
       call(() => server.channels.fetch(), "perm-channels"),
-      call(() => server.members.fetchMe(), "perm-me"),
+      call(() => server.members.fetchMe({ force: true }), "perm-me"),
     ]);
   } catch (err) {
     fresh = false;
@@ -175,10 +177,8 @@ function getSnapshot(
   const entry = {
     at: now,
     promise: loadSnapshot(client, guildId, deps).then((s) => {
-      // A failed or cache-only read is not kept: the next request tries again.
-      if ((!s || !s.fresh) && snapshots.get(guildId) === entry) {
-        snapshots.delete(guildId);
-      }
+      // A failed or cache-only result is kept for the TTL like any other, so
+      // an outage cannot make every page load retry every read.
       return s;
     }),
   };
@@ -224,13 +224,29 @@ export function configuredRoleIds(
   return ids;
 }
 
+/**
+ * Whether a feature is in use. Strict reads: a setting that cannot be read
+ * rejects (the caller reports the check as unavailable) instead of looking
+ * like "off".
+ */
 async function readFeatureState(
   config: ConfigService,
-  r: Pick<FeatureRequirement, "enabledKey" | "alsoKey">,
+  r: Pick<FeatureRequirement, "enabledKey" | "alsoKey" | "usedWhen">,
+  roleGroupsConfigured: () => Promise<boolean>,
 ): Promise<boolean> {
-  if (!(await config.getBoolean(r.enabledKey, false))) return false;
-  if (r.alsoKey && !(await config.getBoolean(r.alsoKey, false))) return false;
+  if (r.usedWhen === "role-groups") return roleGroupsConfigured();
+  if (r.enabledKey && !(await config.getBooleanStrict(r.enabledKey, false))) {
+    return false;
+  }
+  if (r.alsoKey && !(await config.getBooleanStrict(r.alsoKey, false))) {
+    return false;
+  }
   return true;
+}
+
+async function defaultRoleGroupCount(guildId: string): Promise<number> {
+  const { RoleGroupService } = await import("./role-group-service.js");
+  return (await RoleGroupService.getInstance().list(guildId)).length;
 }
 
 /**
@@ -261,6 +277,12 @@ export async function checkBotPermissions(
   }
   const { guild, me } = snapshot;
   const config = ConfigService.getInstance();
+  // Read once per check, and only if a feature without a switch asks.
+  let groupCount: Promise<number> | null = null;
+  const roleGroupsConfigured = async (): Promise<boolean> => {
+    groupCount ??= (deps.roleGroupCount ?? defaultRoleGroupCount)(guildId);
+    return (await groupCount) > 0;
+  };
   const problems = new Map<string, MissingPermission>();
   const unknown: UnknownCheck[] = [];
   const quiet: QuietNote[] = [];
@@ -275,9 +297,9 @@ export async function checkBotPermissions(
 
   try {
     for (const r of FEATURE_REQUIREMENTS) {
-      const inUse = await readFeatureState(config, r);
+      const inUse = await readFeatureState(config, r, roleGroupsConfigured);
       const targetId = r.targetKey
-        ? (await config.getString(r.targetKey, "")).trim()
+        ? (await config.getStringStrict(r.targetKey, "")).trim()
         : "";
       if (r.scope !== "guild" && !targetId) {
         const note = `${r.area}: ${String(r.targetKey)} is not set, so ${r.feature.toLowerCase()} is not checked.`;
@@ -335,10 +357,10 @@ export async function checkBotPermissions(
 
     // Roles the bot must be able to hand out sit below its highest role.
     for (const r of ROLE_HIERARCHY_REQUIREMENTS) {
-      if (!(await config.getBoolean(r.enabledKey, false))) continue;
+      if (!(await config.getBooleanStrict(r.enabledKey, false))) continue;
       const ids = configuredRoleIds(
         r.roleSource,
-        await config.getString(r.roleSource.key, ""),
+        await config.getStringStrict(r.roleSource.key, ""),
       );
       const feature = ref(r);
       for (const id of ids) {

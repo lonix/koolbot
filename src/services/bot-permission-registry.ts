@@ -17,7 +17,8 @@
  *   so a channel overwrite that denies a permission the role has counts as
  *   missing.
  *
- * A feature counts as in use only while its `enabledKey` setting (and
+ * A feature counts as in use only while its `enabledKey` setting (or its
+ * `usedWhen` condition, for a feature without a switch) and
  * `alsoKey`, when set) is on and, for a category or channel scope, its
  * `targetKey` is configured.
  */
@@ -43,8 +44,13 @@ export interface FeatureRequirement {
   /** True: holding any one of `needs` is enough (Create Events or Manage Events). */
   anyOf?: boolean;
   needs: readonly PermissionNeed[];
-  /** The feature's `*.enabled` setting. */
-  enabledKey: keyof ConfigSchema;
+  /** The feature's `*.enabled` setting. Absent when `usedWhen` decides. */
+  enabledKey?: keyof ConfigSchema;
+  /**
+   * Some features have no switch: they are in use when something is configured.
+   * `role-groups`: the server has at least one role group.
+   */
+  usedWhen?: "role-groups";
   /** A second boolean setting that must also be on (an optional sub-feature). */
   alsoKey?: keyof ConfigSchema;
   /** The setting holding the category or channel id, for those scopes. */
@@ -248,7 +254,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
     feature: "Managing role groups",
     scope: "guild",
     needs: [PERM.manageRoles],
-    enabledKey: "core.role_groups.enabled",
+    usedWhen: "role-groups",
     effect: "Roles in a group are not created, updated or assigned.",
     fix: `Give the bot's role Manage Roles. ${ROLE_HIERARCHY_FIX}`,
   },

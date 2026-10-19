@@ -29,12 +29,14 @@ let settings: Record<string, string | boolean> = {};
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
-      getBoolean: jest.fn(async (key: string, d: boolean) =>
-        key in settings ? settings[key] === true : d,
-      ),
-      getString: jest.fn(async (key: string, d: string) =>
-        key in settings ? String(settings[key]) : d,
-      ),
+      getBooleanStrict: jest.fn(async (key: string, d: boolean) => {
+        if (settings.__unreadable === true) throw new Error("db down");
+        return key in settings ? settings[key] === true : d;
+      }),
+      getStringStrict: jest.fn(async (key: string, d: string) => {
+        if (settings.__unreadable === true) throw new Error("db down");
+        return key in settings ? String(settings[key]) : d;
+      }),
     }),
   },
 }));
@@ -108,8 +110,10 @@ function makeClient(opts: {
   return { client: client as never, me };
 }
 
+let roleGroups = 0;
 const direct = {
   call: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
+  roleGroupCount: async (): Promise<number> => roleGroups,
 };
 
 async function run(
@@ -123,6 +127,7 @@ async function run(
 
 beforeEach(() => {
   settings = {};
+  roleGroups = 0;
   check.resetBotPermissionCache();
   status.resetPermissionIssueCount();
 });
@@ -137,7 +142,11 @@ describe("registry", () => {
     for (const r of registry.FEATURE_REQUIREMENTS) {
       expect(ids.has(r.id)).toBe(false);
       ids.add(r.id);
-      expect(typeof defaultConfig[r.enabledKey]).toBe("boolean");
+      if (r.enabledKey) {
+        expect(typeof defaultConfig[r.enabledKey]).toBe("boolean");
+      } else {
+        expect(r.usedWhen).toBeDefined();
+      }
       if (r.alsoKey) expect(typeof defaultConfig[r.alsoKey]).toBe("boolean");
       if (r.scope !== "guild") {
         expect(r.targetKey).toBeDefined();
@@ -250,9 +259,9 @@ describe("what is missing and where", () => {
     settings = {
       "reactionroles.enabled": true,
       "leaderboard_roles.enabled": true,
-      "core.role_groups.enabled": true,
       "rules.enabled": true,
     };
+    roleGroups = 2;
     const report = await run({ serverBits: without(ALL, P.ManageRoles) });
     const roles = report.problems.filter(
       (p) => p.permission === "Manage Roles" && p.target.kind === "server",
@@ -264,6 +273,25 @@ describe("what is missing and where", () => {
       "role-groups",
       "rules-role",
     ]);
+  });
+
+  it("counts role groups as in use when the server has one, whatever the logging switch says", async () => {
+    settings = { "core.role_groups.enabled": false };
+    roleGroups = 1;
+    const report = await run({ serverBits: without(ALL, P.ManageRoles) });
+    expect(
+      report.problems
+        .find((p) => p.permission === "Manage Roles")
+        ?.features.map((f) => f.id),
+    ).toEqual(["role-groups"]);
+  });
+
+  it("does not count role groups as in use when the server has none", async () => {
+    settings = { "core.role_groups.enabled": true };
+    roleGroups = 0;
+    const report = await run({ serverBits: without(ALL, P.ManageRoles) });
+    expect(report.problems).toEqual([]);
+    expect(report.quiet.map((q) => q.feature.id)).toContain("role-groups");
   });
 
   it("checks the voice lobby in its own channel", async () => {
@@ -426,6 +454,7 @@ describe("failing clearly", () => {
     settings = { "reactionroles.enabled": true };
     const { client } = makeClient({ serverBits: without(ALL, P.ManageRoles) });
     const report = await check.checkBotPermissions(client, "guild-1", {
+      ...direct,
       call: async () => {
         throw new Error("timeout");
       },
@@ -434,6 +463,20 @@ describe("failing clearly", () => {
     expect(report.fresh).toBe(false);
     expect(report.notes.some((n) => n.includes("cached"))).toBe(true);
     expect(report.problems.map((p) => p.permission)).toEqual(["Manage Roles"]);
+  });
+});
+
+describe("unreadable settings", () => {
+  it("makes the check unavailable instead of treating features as off", async () => {
+    settings = { "reactionroles.enabled": true, __unreadable: true };
+    check.resetBotPermissionCache();
+    status.setPermissionIssueCount("guild-1", 4);
+    const report = await run({ serverBits: without(ALL, P.ManageRoles) });
+    expect(report.available).toBe(false);
+    expect(report.reason).toContain("settings could not be read");
+    expect(report.problems).toEqual([]);
+    // The badge keeps its last known count rather than being cleared.
+    expect(status.getPermissionIssueCount()).toBe(4);
   });
 });
 
@@ -464,6 +507,8 @@ describe("fresh reads with a short cache", () => {
     expect(guild?.roles.fetch).toHaveBeenCalledTimes(1);
     expect(guild?.channels.fetch).toHaveBeenCalledTimes(1);
     expect(guild?.members.fetchMe).toHaveBeenCalledTimes(1);
+    // The bot's own roles are re-read, not taken from the member cache.
+    expect(guild?.members.fetchMe).toHaveBeenCalledWith({ force: true });
     now += check.SNAPSHOT_TTL_MS - 1;
     await check.checkBotPermissions(client, "guild-1", deps);
     expect(guild?.channels.fetch).toHaveBeenCalledTimes(1);
@@ -472,7 +517,7 @@ describe("fresh reads with a short cache", () => {
     expect(guild?.channels.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("does not keep a failed read", async () => {
+  it("keeps a failed read for the TTL and retries after it", async () => {
     settings = { "reactionroles.enabled": true };
     const { client } = makeClient({});
     let fail = true;
@@ -483,11 +528,19 @@ describe("fresh reads with a short cache", () => {
       },
       now: () => 1,
     };
-    const first = await check.checkBotPermissions(client, "guild-1", deps);
+    let now = 1;
+    const timed = { ...deps, now: () => now };
+    const first = await check.checkBotPermissions(client, "guild-1", timed);
     expect(first.fresh).toBe(false);
+    // Discord recovers, but within the TTL the outage result is reused, so a
+    // stream of page loads cannot start new reads.
     fail = false;
-    const second = await check.checkBotPermissions(client, "guild-1", deps);
-    expect(second.fresh).toBe(true);
+    now += check.SNAPSHOT_TTL_MS - 1;
+    const within = await check.checkBotPermissions(client, "guild-1", timed);
+    expect(within.fresh).toBe(false);
+    now += 2;
+    const after = await check.checkBotPermissions(client, "guild-1", timed);
+    expect(after.fresh).toBe(true);
   });
 });
 

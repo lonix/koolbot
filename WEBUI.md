@@ -1122,6 +1122,9 @@ Links) are not covered yet.
   `*.enabled` setting is on and its category or channel is set. A permission that
   only a switched-off feature would need is shown under _Not needed right now_,
   not as a problem. An enabled feature with no category set is skipped with a note.
+  Role groups have no switch of their own, so they count as in use when the server
+  has at least one role group. If a setting cannot be read, the page says the check
+  is unavailable instead of treating features as off.
 - **Fresh, with a short cache.** The bot's member, roles and channels are re-read
   from Discord when the page opens (through the same timeout and rate-limit helpers
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot

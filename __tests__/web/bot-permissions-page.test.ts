@@ -43,6 +43,14 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getString: jest.fn(async (key: string, d: string) =>
         key in settings ? String(settings[key]) : d,
       ),
+      getBooleanStrict: jest.fn(async (key: string, d: boolean) => {
+        if (settings.__unreadable === true) throw new Error("db down");
+        return key in settings ? settings[key] === true : d;
+      }),
+      getStringStrict: jest.fn(async (key: string, d: string) => {
+        if (settings.__unreadable === true) throw new Error("db down");
+        return key in settings ? String(settings[key]) : d;
+      }),
       getNumber: jest.fn(async () => 0),
       getAll: jest.fn(async () => []),
       get: jest.fn(async () => null),
@@ -51,6 +59,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const { RoleGroupService } =
+  await import("../../src/services/role-group-service.js");
 const { createReadOnlyRouter } =
   await import("../../src/web/read-only-routes.js");
 const { renderBotPermissionsPage } =
@@ -115,6 +125,9 @@ async function start(client: Client): Promise<void> {
 }
 
 beforeEach(() => {
+  jest
+    .spyOn(RoleGroupService, "getInstance")
+    .mockReturnValue({ list: jest.fn(async () => []) } as never);
   settings = {};
   check.resetBotPermissionCache();
   status.resetPermissionIssueCount();
