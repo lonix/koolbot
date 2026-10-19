@@ -3,7 +3,8 @@
  * the names, sizes, preset and group set rows use are supplied by the test, the
  * leaders and tags methods (#1240) do nothing, and the channel methods of the
  * add and remove rows (#1242) default to "nothing to do" (a channel is made, a
- * channel is empty and removed).
+ * channel is empty and removed, every channel is removed and the groups are off,
+ * #1243).
  */
 
 import type { LiveEditEffects } from "../../src/services/event-live-edit.js";
@@ -21,6 +22,8 @@ export function makeEffects(handlers: {
   createGroupChannels?: LiveEditEffects["createGroupChannels"];
   emptyGroupChannel?: LiveEditEffects["emptyGroupChannel"];
   removeGroupChannel?: LiveEditEffects["removeGroupChannel"];
+  removeAllGroupChannels?: LiveEditEffects["removeAllGroupChannels"];
+  syncTags?: LiveEditEffects["syncTags"];
 }): LiveEditEffects {
   return {
     syncGroupName: handlers.syncGroupName,
@@ -28,7 +31,7 @@ export function makeEffects(handlers: {
     retagMembers: handlers.retagMembers ?? ((): void => undefined),
     syncLeadsAccess: async (): Promise<void> => undefined,
     syncGroupControls: async (): Promise<void> => undefined,
-    syncTags: async (): Promise<void> => undefined,
+    syncTags: handlers.syncTags ?? (async (): Promise<void> => undefined),
     createGroupChannels:
       handlers.createGroupChannels ?? (async () => ({ failures: [] })),
     emptyGroupChannel:
@@ -37,5 +40,8 @@ export function makeEffects(handlers: {
     removeGroupChannel:
       handlers.removeGroupChannel ??
       (async () => ({ status: "removed" as const })),
+    removeAllGroupChannels:
+      handlers.removeAllGroupChannels ??
+      (async () => ({ status: "off" as const, deleted: 0 })),
   };
 }

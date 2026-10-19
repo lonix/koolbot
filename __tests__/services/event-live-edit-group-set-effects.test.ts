@@ -40,6 +40,11 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 type ServiceStub = {
   reconcileGroupChannels: (e: string, g: string) => Promise<unknown>;
   removeGroupChannel: (e: string, g: string, o: unknown) => Promise<unknown>;
+  removeAllGroupChannels?: (
+    e: string,
+    g: string,
+    o: unknown,
+  ) => Promise<unknown>;
 };
 let service: ServiceStub;
 jest.unstable_mockModule("../../src/services/event-service.js", () => ({
@@ -599,5 +604,62 @@ describe("removeGroupChannel", () => {
         { ignore: new Set(), ending: () => false },
       ),
     ).toEqual({ status: "failed", reason: "see the log" });
+  });
+});
+
+describe("removeAllGroupChannels (#1243)", () => {
+  it("hands the event, the people just moved and the hold check to the channel pass", async () => {
+    let seen: unknown;
+    service = {
+      reconcileGroupChannels: async () => null,
+      removeGroupChannel: async () => null,
+      removeAllGroupChannels: async (eventId, guildId, opts) => {
+        seen = { eventId, guildId, opts };
+        return { status: "off", deleted: 2 };
+      },
+    };
+    const ignore = new Set(["u1"]);
+    const ending = (): boolean => false;
+    const out = await createLiveEditEffects({} as never).removeAllGroupChannels(
+      GUILD,
+      EV,
+      { ignore, ending },
+    );
+    expect(out).toEqual({ status: "off", deleted: 2 });
+    expect(seen).toEqual({
+      eventId: EV,
+      guildId: GUILD,
+      opts: { ignore, ending },
+    });
+  });
+
+  it("null when the server is not found, and a throw is a failure to try again", async () => {
+    service = {
+      reconcileGroupChannels: async () => null,
+      removeGroupChannel: async () => null,
+      removeAllGroupChannels: async () => null,
+    };
+    const opts = { ignore: new Set<string>(), ending: () => false };
+    expect(
+      await createLiveEditEffects({} as never).removeAllGroupChannels(
+        GUILD,
+        EV,
+        opts,
+      ),
+    ).toBeNull();
+    service = {
+      reconcileGroupChannels: async () => null,
+      removeGroupChannel: async () => null,
+      removeAllGroupChannels: async () => {
+        throw new Error("boom");
+      },
+    };
+    expect(
+      await createLiveEditEffects({} as never).removeAllGroupChannels(
+        GUILD,
+        EV,
+        opts,
+      ),
+    ).toEqual({ status: "failed", reason: "see the log", deleted: 0 });
   });
 });

@@ -17,6 +17,7 @@ import type {
   EmptyChannelOutcome,
   GroupChannelSyncOutcome,
   GroupRemoveResult,
+  GroupsOffResult,
   LiveEditEffects,
 } from "./event-live-edit.js";
 
@@ -261,6 +262,26 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
           err,
         );
         return { status: "failed", reason: "see the log" };
+      }
+    },
+    async removeAllGroupChannels(
+      guildId,
+      eventId,
+      opts,
+    ): Promise<GroupsOffResult | null> {
+      try {
+        const { EventService } = await import("./event-service.js");
+        return await EventService.getInstance(client).removeAllGroupChannels(
+          eventId,
+          guildId,
+          { ignore: opts.ignore, ending: opts.ending },
+        );
+      } catch (err) {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: switching the groups off failed:`,
+          err,
+        );
+        return { status: "failed", reason: "see the log", deleted: 0 };
       }
     },
     async syncTags(guildId, eventId, mode): Promise<void> {

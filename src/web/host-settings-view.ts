@@ -23,6 +23,10 @@ import {
   type GroupEditViewData,
 } from "./host-settings-groups.js";
 import {
+  renderGroupsSwitchForms,
+  type GroupsSwitchView,
+} from "./host-settings-groups-switch.js";
+import {
   renderLeadersTagsFields,
   type LeadersTagsView,
 } from "./host-settings-leaders-tags-view.js";
@@ -53,6 +57,8 @@ export interface SettingsViewData {
   groupEdit?: GroupEditViewData;
   /** Leaders and tags fields (#1240); null when the event has no groups. */
   leadersTags?: LeadersTagsView | null;
+  /** The groups on/off forms (#1243); absent = none shown. */
+  groupsSwitch?: GroupsSwitchView;
 }
 
 function hidden(name: string, value: string): string {
@@ -114,7 +120,8 @@ ${renderLeadersTagsFields(d.leadersTags ?? null)}
 <button type="submit">Save settings</button>
 </form>
 ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}
-${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken) : ""}`;
+${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken) : ""}
+${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken) : ""}`;
 }
 
 export interface ConfirmChangeView {
