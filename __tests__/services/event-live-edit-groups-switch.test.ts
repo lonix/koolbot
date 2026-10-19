@@ -735,13 +735,14 @@ describe("groups turned off", () => {
     expect(text(out)).toBe("Saved: Groups is now off.");
   });
 
-  it("hands the people just moved to the channel pass, so the cache lagging behind does not hold the channels", async () => {
+  it("exempts nobody from the delete's occupancy checks, not even people just moved (one may have walked back in)", async () => {
     emptyResult = (key) => ({
       status: "empty",
       moved: key === A ? ["u1", "u2"] : ["u9"],
     });
     await offConfirmed();
-    expect(calls).toContain("removeAll:u1+u2+u9");
+    expect(calls).toContain("removeAll:");
+    expect(calls.some((c) => c.startsWith("removeAll:u"))).toBe(false);
   });
 
   it("an event whose channels do not exist yet is switched off without moving anybody", async () => {
@@ -815,7 +816,7 @@ describe("groups turned off", () => {
       expect(calls).toEqual([
         `empty:${A}:c1`,
         `empty:${B}:c2`,
-        "removeAll:u1",
+        "removeAll:",
         "tags:restore",
       ]);
     });

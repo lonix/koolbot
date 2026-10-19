@@ -276,6 +276,17 @@ describe("removeAllGroupChannels switches the groups off", () => {
     expect(channelIds()).toEqual([A_CH, B_CH, null]);
   });
 
+  it("a member moved early who walked back into the FIRST channel keeps every channel (nobody is exempted when the caller passes no ignore set)", async () => {
+    const env = makeEnv({ members: { [A_CH]: ["u1"] } });
+    const out = await env.channels.removeAllGroupChannels(EV, env.guild, {
+      ignore: new Set(),
+    });
+    expect(out).toEqual({ status: "occupied", remaining: 1, groupKey: A });
+    expect(env.rest.delete).not.toHaveBeenCalled();
+    expect(doc().groupsEnabled).toBe(true);
+    expect(channelIds()).toEqual([A_CH, B_CH, null]);
+  });
+
   it("people known to have left (the cache may still show them) do not hold a channel", async () => {
     const env = makeEnv({ members: { [A_CH]: ["u1"], [B_CH]: ["u5"] } });
     const out = await env.channels.removeAllGroupChannels(EV, env.guild, {

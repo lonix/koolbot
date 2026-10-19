@@ -351,6 +351,10 @@ async function applyOff(
     );
   }
   // 1. Everyone out of every group channel.
+  // Nobody is exempted from the occupancy checks of the delete: a person moved
+  // early may have walked back into an earlier channel while later groups were
+  // emptied, and `emptyGroupChannel` already waits for the cache to show the
+  // confirmed moves. Whoever is shown present keeps the channels (save again).
   const ignore = new Set<string>();
   const problems: string[] = [];
   for (const group of fresh.groups ?? []) {
@@ -371,7 +375,6 @@ async function applyOff(
       problems.push(`"${group.name}": nobody was moved (${emptied.reason})`);
       break;
     }
-    for (const id of emptied.moved) ignore.add(id);
     if (emptied.status === "occupied") {
       problems.push(
         `"${group.name}": ${peopleText(emptied.remaining)} still in its channel (${emptied.detail})`,
