@@ -1,0 +1,215 @@
+# TEMPORARY EXPERIMENT for https://github.com/lonix/koolbot/issues/1269.
+# DELETE THIS FILE WHEN #1269 CLOSES.
+#
+# Question: does a recent mongo:8.0.x (or 8.3.x) image start on a GitHub-hosted
+# runner whose Linux kernel is >= 6.19? mongo:8.0 service containers were
+# refused there (SERVER-121912; fix tracked in SERVER-125742, said to land in
+# 8.0.30, 8.3.9 and 9.x). Whether a given runner has such a kernel depends on
+# which runner image the job lands on, so each tag is repeated on several
+# parallel jobs to sample different runners.
+#
+# Manual only (workflow_dispatch). The image is started with `docker run -d`
+# rather than as a service container, because a failed service container kills
+# the job before any step runs. The probe step never fails the job because
+# mongod failed to start: that outcome is the measurement, written to the job
+# summary. Read the "Probe" section of each job's summary (kernel, runner image
+# version, tag, digest, STARTED / FAILED with reason).
+
+name: MongoDB kernel probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_control:
+        description: Control tag (known to work, e.g. mongo:7.0.45)
+        type: string
+        default: 'mongo:7.0.45'
+      tag_fix:
+        description: First 8.0.x said to contain the fix (leave empty to skip)
+        type: string
+        default: 'mongo:8.0.30'
+      tag_latest_80:
+        description: Newest 8.0.x tag on Docker Hub (leave empty to skip)
+        type: string
+        default: 'mongo:8.0.34'
+      tag_latest_83:
+        description: Optional newest 8.3.x tag (leave empty to skip)
+        type: string
+        default: 'mongo:8.3.13'
+      repeats:
+        description: Parallel jobs per tag, to sample different runners (1-10)
+        type: string
+        default: '3'
+
+permissions: {}
+
+jobs:
+  matrix:
+    name: Build matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - name: Build matrix from inputs
+        id: build
+        env:
+          TAG_CONTROL: ${{ inputs.tag_control }}
+          TAG_FIX: ${{ inputs.tag_fix }}
+          TAG_LATEST_80: ${{ inputs.tag_latest_80 }}
+          TAG_LATEST_83: ${{ inputs.tag_latest_83 }}
+          REPEATS: ${{ inputs.repeats }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REPEATS" =~ ^([1-9]|10)$ ]]; then
+            echo "::error::repeats must be an integer from 1 to 10"
+            exit 1
+          fi
+          tags=()
+          for t in "$TAG_CONTROL" "$TAG_FIX" "$TAG_LATEST_80" "$TAG_LATEST_83"; do
+            [ -z "$t" ] && continue
+            if ! [[ "$t" =~ ^mongo:[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::tag must look like mongo:<tag> (got an invalid value)"
+              exit 1
+            fi
+            tags+=("$t")
+          done
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "::error::no tags given"
+            exit 1
+          fi
+          # De-duplicate while keeping order.
+          mapfile -t tags < <(printf '%s\n' "${tags[@]}" | awk '!seen[$0]++')
+          matrix=$(printf '%s\n' "${tags[@]}" | jq -R . | jq -sc --argjson n "$REPEATS" \
+            '{include: [ .[] as $t | range(1; $n + 1) as $r | {tag: $t, repeat: $r} ]}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Matrix: $matrix"
+
+  probe:
+    name: 'probe ${{ matrix.tag }} (repeat ${{ matrix.repeat }})'
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    steps:
+      - name: Runner info
+        env:
+          TAG: ${{ matrix.tag }}
+          REPEAT: ${{ matrix.repeat }}
+        run: |
+          {
+            echo "## Probe: ${TAG} (run ${REPEAT})"
+            echo
+            echo "### Runner"
+            echo '```'
+            echo "uname -r: $(uname -r)"
+            echo "ImageOS: ${ImageOS:-unset}"
+            echo "ImageVersion: ${ImageVersion:-unset}"
+            echo "RUNNER_OS: ${RUNNER_OS:-unset}"
+            echo "RUNNER_ARCH: ${RUNNER_ARCH:-unset}"
+            echo "RUNNER_NAME: ${RUNNER_NAME:-unset}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "uname -r: $(uname -r)"
+          cat /etc/os-release
+          echo "ImageOS=${ImageOS:-unset} ImageVersion=${ImageVersion:-unset}"
+          echo "RUNNER_OS=${RUNNER_OS:-unset} RUNNER_ARCH=${RUNNER_ARCH:-unset}"
+
+      - name: Start MongoDB and record result
+        env:
+          TAG: ${{ matrix.tag }}
+          REPEAT: ${{ matrix.repeat }}
+        run: |
+          # Deliberately no `set -e`: a mongod that fails to start is the
+          # result being measured and must never fail this job.
+          set -uo pipefail
+
+          KERNEL=$(uname -r)
+          RIMG="${ImageVersion:-unset}"
+          STATUS="FAILED"
+          REASON=""
+          VERSION="n/a"
+          DIGEST="n/a"
+          LOGS=""
+          NAME="mongoprobe"
+
+          if docker pull "$TAG" > /tmp/pull.log 2>&1; then
+            DIGEST=$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}none{{end}}' "$TAG" 2>/dev/null || echo "unknown")
+            if docker run -d --name "$NAME" "$TAG" > /tmp/run.log 2>&1; then
+              for i in $(seq 1 30); do
+                RUNNING=$(docker inspect --format '{{.State.Running}}' "$NAME" 2>/dev/null || echo "false")
+                if [ "$RUNNING" != "true" ]; then
+                  REASON="container exited (exit code $(docker inspect --format '{{.State.ExitCode}}' "$NAME" 2>/dev/null || echo '?'))"
+                  break
+                fi
+                PING=$(docker exec "$NAME" mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' 2>/dev/null | tail -n 1 || true)
+                if [ "$PING" = "1" ]; then
+                  STATUS="STARTED"
+                  VERSION=$(docker exec "$NAME" mongosh --quiet --eval 'db.version()' 2>/dev/null | tail -n 1 || true)
+                  [ -z "$VERSION" ] && VERSION="unknown"
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$STATUS" != "STARTED" ] && [ -z "$REASON" ]; then
+                REASON="no successful ping within about 60 s (container still running)"
+              fi
+              if [ "$STATUS" != "STARTED" ]; then
+                LOGS=$(docker logs --tail 30 "$NAME" 2>&1 || true)
+                if printf '%s\n' "$LOGS" | grep -qiE 'SERVER-121912|SERVER-125742'; then
+                  REASON="$REASON; log mentions SERVER-121912/125742 (kernel version check)"
+                elif printf '%s\n' "$LOGS" | grep -qi 'kernel'; then
+                  REASON="$REASON; log mentions the kernel"
+                fi
+              fi
+            else
+              REASON="docker run failed: $(tr '\n' ' ' < /tmp/run.log | cut -c1-300)"
+            fi
+          else
+            REASON="docker pull failed: $(tr '\n' ' ' < /tmp/pull.log | cut -c1-300)"
+          fi
+
+          if [ "$STATUS" = "STARTED" ]; then
+            LINE="STARTED  tag=${TAG} run=${REPEAT} kernel=${KERNEL} runner-image=${RIMG} mongod=${VERSION} digest=${DIGEST}"
+          else
+            LINE="FAILED   tag=${TAG} run=${REPEAT} kernel=${KERNEL} runner-image=${RIMG} digest=${DIGEST} reason=${REASON}"
+          fi
+          echo "$LINE"
+
+          {
+            echo
+            echo "### Result"
+            echo
+            echo "**${STATUS}** - \`${TAG}\` on kernel \`${KERNEL}\`, runner image \`${RIMG}\`"
+            echo
+            echo '```'
+            echo "$LINE"
+            echo '```'
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Tag | \`${TAG}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Kernel | \`${KERNEL}\` |"
+            echo "| Runner image version | \`${RIMG}\` |"
+            echo "| Result | ${STATUS} |"
+            echo "| db.version() | ${VERSION} |"
+            if [ "$STATUS" != "STARTED" ]; then
+              echo "| Reason | ${REASON} |"
+            fi
+            if [ -n "$LOGS" ]; then
+              echo
+              echo "<details open><summary>Last 30 log lines</summary>"
+              echo
+              echo '```'
+              echo "$LOGS"
+              echo '```'
+              echo
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          docker rm -f "$NAME" > /dev/null 2>&1 || true
+          exit 0
