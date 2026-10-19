@@ -52,6 +52,7 @@ import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { TrackingOptOut } from "../models/tracking-opt-out.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
 import { UserNameHistory } from "../models/user-name-history.js";
+import { EventGroupPersonalPreset } from "../models/event-group-personal-preset.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
@@ -273,6 +274,18 @@ const READERS: Record<string, CollectionReader> = {
   "user-voice-preferences": async ({ userId }) => {
     const doc = await UserVoicePreferences.findOne({ userId }).lean();
     return { value: doc ? toPlain(doc) : null };
+  },
+
+  "event-personal-preset": async ({ userId, guildId, maxItems }) => {
+    const rows = await EventGroupPersonalPreset.find({
+      ownerId: userId,
+      guildId,
+    })
+      .sort({ nameKey: 1 })
+      .limit(maxItems + 1)
+      .lean();
+    const { rows: kept, truncated } = capped(rows, maxItems);
+    return { value: kept.map(toPlain), truncated };
   },
 
   "rewind-snapshot": async ({ userId, guildId, maxItems }) => {

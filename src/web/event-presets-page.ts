@@ -25,6 +25,10 @@ import {
   type PresetEntry,
 } from "../services/event-group-preset-service.js";
 import {
+  listHostPresetsForAdmin,
+  type HostPresetListing,
+} from "../services/event-personal-preset-service.js";
+import {
   copyGroupSetup,
   DEFAULT_GROUP_LABEL,
   DEFAULT_LEADER_LABEL,
@@ -65,6 +69,16 @@ export interface EventPresetsPageProps {
   values: Record<string, string>;
   /** Why the editor is prefilled ("Copy of ..."), or null. */
   prefillNote: string | null;
+  /** The hosts' personal presets for the publish card (#1216); null = unreadable. */
+  hostPresets?: HostPresetsView | null;
+}
+
+/** The hosts' personal presets, with a name to show for each owner. */
+export interface HostPresetsView {
+  rows: Array<HostPresetListing & { ownerName: string }>;
+  /** Zero-based page shown, and whether a next page exists. */
+  page: number;
+  hasMore: boolean;
 }
 
 export interface EventPresetsPageData {
@@ -76,6 +90,7 @@ export interface EventPresetsPageData {
   editUnavailable: boolean;
   values: Record<string, string>;
   prefillNote: string | null;
+  hostPresets: HostPresetsView | null;
 }
 
 /**
@@ -139,6 +154,11 @@ export async function loadEventPresetsPage(
   return {
     entries: catalog.entries,
     state: catalog.state,
+    hostPresets: await loadHostPresets(
+      client,
+      guildId,
+      parseHostPage(query.hostPage),
+    ),
     maxCount: limits.maxCount,
     defaultCount: limits.defaultCount,
     editing,
@@ -148,7 +168,39 @@ export async function loadEventPresetsPage(
   };
 }
 
-function groupSummary(entry: PresetEntry): string {
+/** The card's page from `?hostPage=`: a small non-negative integer, else 0. */
+function parseHostPage(raw: unknown): number {
+  if (typeof raw !== "string" || !/^\d{1,6}$/.test(raw)) return 0;
+  return Number(raw);
+}
+
+/**
+ * The hosts' personal presets for the publish card. A display name comes from
+ * the member cache only (no fetch per row); the id is shown next to it. A read
+ * that fails yields null and the card says so.
+ */
+async function loadHostPresets(
+  client: Client,
+  guildId: string,
+  page: number,
+): Promise<HostPresetsView | null> {
+  try {
+    const { rows, hasMore } = await listHostPresetsForAdmin(guildId, page);
+    const members = client.guilds?.cache?.get(guildId)?.members?.cache;
+    return {
+      page,
+      hasMore,
+      rows: rows.map((r) => ({
+        ...r,
+        ownerName: members?.get(r.ownerId)?.displayName ?? "",
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function groupSummary(entry: PresetEntry): string {
   const names = entry.groups
     .map((g) => `${g.marker ? `${g.marker} ` : ""}${g.name}`)
     .join(", ");
@@ -185,7 +237,7 @@ function entryRow(entry: PresetEntry, csrfInput: string): string {
 // Progressive enhancement: "Add a group" clones the row template, and the
 // entered values survive a refused save (this tab's sessionStorage only; a
 // convenience, so every storage call is guarded).
-const EVENT_PRESETS_SCRIPT =
+export const EVENT_PRESETS_SCRIPT =
   "(function(){" +
   "var form=document.querySelector('form[data-preset-form]');if(!form)return;" +
   "var box=form.querySelector('[data-group-rows]');" +
@@ -219,22 +271,31 @@ const EVENT_PRESETS_SCRIPT =
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 
-export function renderEventPresetsPage(props: EventPresetsPageProps): string {
-  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+export interface PresetEditorFormProps {
+  csrfInput: string;
+  /** Where the form posts. */
+  action: string;
+  /** The preset being edited; null = adding a new one. */
+  editing: { id: string; label: string } | null;
+  editUnavailable?: boolean;
+  /** Prefill, keyed by form field name. */
+  values: Record<string, string>;
+  maxCount: number;
+  defaultCount: number;
+  /** Where "Cancel" goes while editing. */
+  cancelHref: string;
+  /** Wording of the submit button when adding. */
+  addLabel?: string;
+}
+
+/**
+ * The preset editor form, shared by the admin library page and the host's own
+ * presets page (#1216): the same fields, the same group rows, the same limits.
+ * Everything dynamic goes through `escapeHtml`.
+ */
+export function renderPresetEditorForm(props: PresetEditorFormProps): string {
+  const { csrfInput } = props;
   const v = props.values;
-  const notice = catalogNotice(props.state);
-
-  const libraryCount = props.entries.filter(
-    (e) => e.source === "library",
-  ).length;
-  const table =
-    props.entries.length > 0
-      ? `<table class="data">
-<thead><tr><th scope="col">Preset</th><th scope="col">Kind</th><th scope="col">Groups</th><th scope="col">Offered to hosts</th><th scope="col">Actions</th></tr></thead>
-<tbody>${props.entries.map((e) => entryRow(e, csrfInput)).join("\n")}</tbody>
-</table>`
-      : '<p class="muted">The presets could not be listed.</p>';
-
   // Rows to render: the prefilled groups, else the configured default count.
   const prefilled: Array<Record<string, string>> = [];
   // Every stored row is shown, even beyond the cap: the validator refuses an
@@ -262,7 +323,7 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
   const editorHtml = props.editUnavailable
     ? '<div class="notice err" role="status">This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.</div>'
     : `${oversize}
-  <form method="POST" action="/admin/events/presets/save" class="stack" data-preset-form>
+  <form method="POST" action="${escapeHtml(props.action)}" class="stack" data-preset-form>
     ${csrfInput}
     ${props.editing ? `<input type="hidden" name="${PRESET_FORM_FIELDS.id}" value="${escapeHtml(props.editing.id)}">` : ""}
     <label>Preset name (up to ${GROUP_NAME_MAX} characters, unique ignoring case)
@@ -288,10 +349,97 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
     <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). A row of kind Leads is the Captains lobby of a preset saved earlier (at most one): it is kept as it is, and choosing the preset on the event form ticks Captains lobby instead of adding a row. Rows left completely empty are ignored.</p>
-    <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : "Add preset"}</button>
-    ${props.editing ? '<a class="btn" href="/admin/events/presets">Cancel</a>' : ""}
+    <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
+    ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
   </form>`;
+  return editorHtml;
+}
 
+function hostPresetRow(
+  row: HostPresetsView["rows"][number],
+  csrfInput: string,
+): string {
+  const id = escapeHtml(row.entry.id);
+  const published = row.publishedAs !== null;
+  const owner = row.ownerName
+    ? `${escapeHtml(row.ownerName)} <span class="muted">(${escapeHtml(row.ownerId)})</span>`
+    : `<span class="mono">${escapeHtml(row.ownerId)}</span>`;
+  const action = published
+    ? `<form method="POST" action="/admin/events/presets/unpublish" class="inline" data-confirm="Remove the server copy of '${escapeHtml(row.entry.label)}'? Events that already used it keep their groups, and the host keeps their own preset.">${csrfInput}
+    <input type="hidden" name="id" value="${id}">
+    <button type="submit" class="btn btn-danger" aria-label="Unpublish ${escapeHtml(row.entry.label)}">Unpublish</button>
+  </form>`
+    : `<form method="POST" action="/admin/events/presets/publish" class="inline">${csrfInput}
+    <input type="hidden" name="id" value="${id}">
+    <button type="submit" class="btn" aria-label="Publish ${escapeHtml(row.entry.label)}">Publish</button>
+  </form>`;
+  return `<tr>
+<td>${escapeHtml(row.entry.label)}${row.entry.description ? `<br><span class="muted">${escapeHtml(row.entry.description)}</span>` : ""}</td>
+<td>${owner}</td>
+<td>${groupSummary(row.entry)}</td>
+<td>${published ? '<span class="tag tag-on">published</span>' : '<span class="tag tag-off">not published</span>'}</td>
+<td class="actions">${action}</td>
+</tr>`;
+}
+
+const HOST_PRESETS_INTRO =
+  '<p class="muted">Hosts can save their own presets from the host panel. Only admins see them all. Publishing copies one into the server\'s presets above, switched on, so every host can pick it; the host keeps their own preset, and the copy stays if they later delete it or reset their data. Unpublishing deletes the server copy (including any change you made to it).</p>';
+
+function hostPresetsPager(v: HostPresetsView): string {
+  const link = (page: number, text: string): string =>
+    `<a class="btn" href="/admin/events/presets?hostPage=${page}#host-presets">${text}</a>`;
+  const parts = [
+    v.page > 0 ? link(v.page - 1, "Previous") : "",
+    v.hasMore ? link(v.page + 1, "Next") : "",
+  ].filter(Boolean);
+  return parts.length > 0
+    ? `<p class="muted">Page ${v.page + 1}. ${parts.join(" ")}</p>`
+    : "";
+}
+
+function renderHostPresetsCard(
+  hostPresets: HostPresetsView | null | undefined,
+  csrfInput: string,
+): string {
+  if (hostPresets === undefined) return "";
+  if (hostPresets === null) {
+    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<div class="notice warn" role="status">The hosts' presets could not be read right now. Reload the page in a moment.</div></div>`;
+  }
+  if (hostPresets.rows.length === 0 && hostPresets.page === 0) {
+    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<p class="muted">No host has saved a preset yet.</p></div>`;
+  }
+  return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}
+<table class="data">
+<thead><tr><th scope="col">Preset</th><th scope="col">Host</th><th scope="col">Groups</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+<tbody>${hostPresets.rows.map((r) => hostPresetRow(r, csrfInput)).join("\n")}</tbody>
+</table>${hostPresetsPager(hostPresets)}</div>`;
+}
+
+export function renderEventPresetsPage(props: EventPresetsPageProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const notice = catalogNotice(props.state);
+
+  const libraryCount = props.entries.filter(
+    (e) => e.source === "library",
+  ).length;
+  const table =
+    props.entries.length > 0
+      ? `<table class="data">
+<thead><tr><th scope="col">Preset</th><th scope="col">Kind</th><th scope="col">Groups</th><th scope="col">Offered to hosts</th><th scope="col">Actions</th></tr></thead>
+<tbody>${props.entries.map((e) => entryRow(e, csrfInput)).join("\n")}</tbody>
+</table>`
+      : '<p class="muted">The presets could not be listed.</p>';
+
+  const editorHtml = renderPresetEditorForm({
+    csrfInput,
+    action: "/admin/events/presets/save",
+    editing: props.editing,
+    editUnavailable: props.editUnavailable,
+    values: props.values,
+    maxCount: props.maxCount,
+    defaultCount: props.defaultCount,
+    cancelHref: "/admin/events/presets",
+  });
   const heading = props.editing
     ? `Edit "${escapeHtml(props.editing.label)}"`
     : "Add a preset";
@@ -305,6 +453,7 @@ ${notice ? `<div class="notice warn" role="status">${escapeHtml(notice)}</div>` 
   ${table}
   <p class="muted">Turning a preset off hides it from the event form. The "Custom" choice is always available. Your presets: ${libraryCount} of ${MAX_LIBRARY_PRESETS}.</p>
 </div>
+${renderHostPresetsCard(props.hostPresets, csrfInput)}
 <div class="card" id="editor">
   <h2>${heading}</h2>
   ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}

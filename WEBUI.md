@@ -844,6 +844,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**           | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
 | **Quotes**            | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
+| **Bot Permissions**   | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
 | **Bot Status**        | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
@@ -862,7 +863,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
 
 The sidebar groups the pages under three headings, in this order: **Info**
-(Dashboard, Bot Status, Database, Command Audit, Command Metrics, Moderation,
+(Dashboard, Bot Status, Bot Permissions, Database, Command Audit, Command Metrics, Moderation,
 Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
 (Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
 Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature pages that
@@ -1097,6 +1098,42 @@ only as monospace helper text. The cascade-disable behaviour and the
 _"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
+
+The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
+permissions the bot is missing for the features you have switched on, so you do
+not have to guess why a feature does nothing. It is read-only and writes nothing
+to Discord. For each missing permission it shows where it is missing (server-wide,
+or in the configured category or channel), which enabled features it affects, what
+stops working and how to fix it. What each feature needs is listed in one place in
+the code (`src/services/bot-permission-registry.ts`), and the services that act
+(event group channels, clan tags, Events list sync, member moves, voice rooms) take
+their permission bits and warning texts from the same list. It covers voice
+channels and temporary rooms, events (channels, host access, the leaders-only
+channel, moves, clan tags, the Events list), reaction roles, leaderboard roles,
+role groups and the rules role (including a role that sits above the bot's
+highest role). The channel-posting features (View Channel, Send Messages, Embed
+Links) are not covered yet.
+
+- **Effective permissions.** A category or channel is checked with the bot's
+  permissions _in that channel_, so an overwrite that denies a permission the bot's
+  role has server-wide shows as missing. Permissions a channel cannot grant (Manage
+  Roles, Manage Nicknames, Create Events) are checked server-wide and shown as such.
+- **Only features in use count.** A feature is listed as affected only while its
+  `*.enabled` setting is on and its category or channel is set. A permission that
+  only a switched-off feature would need is shown under _Not needed right now_,
+  not as a problem. An enabled feature with no category set is skipped with a note.
+  Role groups have no switch of their own, so they count as in use when the server
+  has at least one role group. If a setting cannot be read, the page says the check
+  is unavailable instead of treating features as off.
+- **Fresh, with a short cache.** The bot's member, roles and channels are re-read
+  from Discord when the page opens (through the same timeout and rate-limit helpers
+  as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
+  be reached the page says it is using the bot's cached view; a feature that cannot
+  be checked is listed as _could not be checked_, never as fine.
+- **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
+  with the number of missing permissions that affect enabled features. It comes from
+  the last check (any admin page load refreshes it in the background), so a page is
+  never held up for it.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
@@ -1465,7 +1502,7 @@ without the field (every preset saved before it existed, and every built-in) mea
 and choosing one puts the box back to off. The tag format (before or after the name) is
 set per event, not on a preset. There is no default for the leaders switch (#1195), so
 a preset never turns leaders on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
-(`event-preset.create`, `.update`, `.delete`, `.toggle`).
+(`event-preset.create`, `.update`, `.delete`, `.toggle`, `.publish`, `.unpublish`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
 reference: editing, renaming, switching off or deleting a preset never changes an
@@ -1477,8 +1514,39 @@ message, never silently accepted. If the library cannot be read (database
 trouble), the form fails closed: when the switches cannot be read no preset is
 offered, when only the server's own presets cannot be read just the built-ins
 that are on are, with a notice either way; Custom always works. A server that
-never opens the page has every built-in on. Presets hold no member data, so they
-are not part of the member data export.
+never opens the page has every built-in on. The server's presets hold no member data, so
+they are not part of the member data export (a host's personal presets are, see below).
+
+**My event presets** (`/me/events/presets`, #1216) are a host's own pool of presets, next to
+the server's. The host panel's **Live settings** section has **Save these groups as my
+preset**, which opens the editor prefilled with the event's groups (names, kinds, sizes, tags,
+markers, labels, lead time and the clan tags default; never members, leaders or channel ids).
+Only the event's host can prefill from an event (its creator, or an admin, the same check as
+the host panel). The page also lists the host's presets with **Edit** and **Delete**, and the
+editor is the same as the server library's, so the same validation applies. A host keeps at
+most 10 presets and a name is unique among their own (ignoring case); a built-in's name is
+refused. Other hosts cannot see a host's presets, but server admins can see every host's
+unpublished presets (name, description and groups) on the Hosts' presets card, because they need
+that to publish one; the page tells the host so. A host sees only their own: another host's
+preset is "not found" on this page, in the
+panel's **Switch preset** list and in a posted preset id. Their own presets are offered next to
+the server's, marked **(yours)**, in the host panel's preset switch (the same fit rules as
+before) and, for an admin, in the schedule form's picker. Saving, editing and deleting are
+audited as `event-preset.create`, `.update` and `.delete` with `scope: personal`.
+
+An admin sees every host's presets under **Hosts' presets** on `/admin/events/presets` and can
+**Publish** one (the card shows 100 presets a page, with Previous and Next). Publishing **copies** it into the server's presets (on, so everyone can pick
+it), after the editor's validation is run again against the current group cap, and with the
+library's own limit of 50 and unique-name rule. The copy has no owner: it keeps working, and
+stays, when the host later deletes their preset or resets their data. A preset can have one
+copy at a time; **Unpublish** deletes the copy (and any change an admin made to it; events
+that used it keep their groups) and leaves the host's own preset alone. Both are audited
+(`event-preset.publish`, `.unpublish`).
+
+A host's personal presets are their own data: they are in the **member data export** and are
+deleted by a **reset** (`/me/privacy`), through the per-user data registry. A host's own presets
+are also offered where the host panel turns groups on for an event (**Groups**, under Live
+settings), so a host who is not an admin can start an event's groups from their own preset.
 
 **Clan tags** (#1194) are a per-event option on the schedule form (**Clan tags**, with an
 optional **Put the tag after the name**), off unless ticked, and only for an event with

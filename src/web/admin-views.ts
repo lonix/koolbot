@@ -42,6 +42,7 @@ import {
 } from "../services/event-groups.js";
 import {
   EVENT_GROUP_PRESETS,
+  PERSONAL_PRESET_PREFIX,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
 import { THEME } from "./theme.js";
@@ -2554,9 +2555,11 @@ function renderGroupsSection(
       // A preset bigger than the cap cannot be applied whole, so it is not offered
       // (the server refuses it too).
       const tooBig = preset.groups.length > limits.maxCount;
-      const note = tooBig
-        ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
-        : "";
+      const note =
+        (preset.id.startsWith(PERSONAL_PRESET_PREFIX) ? " (yours)" : "") +
+        (tooBig
+          ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
+          : "");
       // Library presets may carry a leader label and a lead time; the script
       // fills those fields only when the attribute is there. An explicit null
       // (a library preset that uses the server default) is an empty attribute,

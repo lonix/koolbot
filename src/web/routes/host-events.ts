@@ -1232,9 +1232,14 @@ function createSettingsSection(client: Client): HostSectionRenderer {
             }))
         : [],
       // Names, sizes and the preset switch (#1241).
-      groupEdit: hasGroups ? await buildGroupEditView(fresh) : undefined,
+      groupEdit: hasGroups
+        ? await buildGroupEditView(fresh, ctx.session.discordUserId)
+        : undefined,
       // Groups on or off (#1243): shown whether or not the event has groups.
-      groupsSwitch: await buildGroupsSwitchView(fresh),
+      groupsSwitch: await buildGroupsSwitchView(
+        fresh,
+        ctx.session.discordUserId,
+      ),
     });
   };
 }
@@ -1309,7 +1314,11 @@ function registerSettingsActions(router: Router, client: Client): void {
       const eventId = String(event._id);
       // A chosen preset is resolved from the server's catalog (#1241): the
       // content of a preset is never taken from the client.
-      const prepared = await prepareGroupEditBody(rawBody, event.guildId);
+      const prepared = await prepareGroupEditBody(
+        rawBody,
+        event.guildId,
+        session.discordUserId,
+      );
       if (!prepared.ok) {
         return {
           ok: false,
@@ -1323,6 +1332,7 @@ function registerSettingsActions(router: Router, client: Client): void {
       const switched = await prepareGroupsSwitchBody(
         prepared.body,
         event.guildId,
+        session.discordUserId,
       );
       if (!switched.ok) {
         return {

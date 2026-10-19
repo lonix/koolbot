@@ -296,6 +296,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Preferences the member set for their own channel; nothing else reads the row.",
   },
   {
+    source: "src/models/event-group-personal-preset.ts",
+    collection: "event-personal-preset",
+    field: "ownerId",
+    exportable: true,
+    guildScoped: true,
+    note: "The member's own saved event group presets (#1216): names, kinds, sizes, tags, markers, labels and lead time. Never members, leaders or channel ids.",
+    onDelete: "hard-delete",
+    subject: "self",
+    deleteNote:
+      "The member's own presets; every row is theirs, so the lot goes. A copy an admin published to the server library holds no owner id and stays: it is server configuration by then, and the reset does not reach into it.",
+  },
+  {
     source: "src/models/rewind-snapshot.ts",
     collection: "rewind-snapshot",
     field: "userId",

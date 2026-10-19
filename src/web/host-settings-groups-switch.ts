@@ -24,6 +24,7 @@ import {
   presetToSetup,
 } from "../services/event-live-edit-groups-switch.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
+import { PERSONAL_PRESET_PREFIX } from "../content/event-group-presets.js";
 import {
   catalogNotice,
   enabledPresets,
@@ -80,6 +81,7 @@ const OFF = JSON.stringify({ on: false });
 /** The data of the forms for one event (the fresh row) and the server's presets. */
 export async function buildGroupsSwitchView(
   event: IEvent,
+  viewerId?: string,
 ): Promise<GroupsSwitchView> {
   const groups = event.groups ?? [];
   const on = event.groupsEnabled === true;
@@ -107,16 +109,21 @@ export async function buildGroupsSwitchView(
       presetNotice: null,
     };
   }
-  const catalog = await loadPresetCatalog(event.guildId);
+  // The viewer's own presets are offered too (#1216).
+  const catalog = await loadPresetCatalog(event.guildId, {
+    ownerId: viewerId,
+  });
   return {
     ...base,
     kept: [],
     presets: enabledPresets(catalog).map((p) => ({
       id: p.id,
-      label: p.label,
+      label: p.id.startsWith(PERSONAL_PRESET_PREFIX)
+        ? `${p.label} (yours)`
+        : p.label,
       count: p.groups.length,
     })),
-    presetNotice: catalogNotice(catalog.state),
+    presetNotice: catalogNotice(catalog.state, catalog.personalUnreadable),
   };
 }
 
@@ -288,6 +295,7 @@ const REFUSED_TEXT = {
 export async function prepareGroupsSwitchBody(
   body: Record<string, unknown>,
   guildId: string,
+  viewerId?: string,
 ): Promise<PreparedBody> {
   const source = { ...body };
   const field = valueField(GROUPS_SWITCH_ROW_ID);
@@ -311,7 +319,8 @@ export async function prepareGroupsSwitchBody(
     source[field] = JSON.stringify({ on: true, setup: custom.setup });
     return { ok: true, body: source };
   }
-  const catalog = await loadPresetCatalog(guildId);
+  // Only the viewer's own personal presets resolve (#1216).
+  const catalog = await loadPresetCatalog(guildId, { ownerId: viewerId });
   const found = presetResolver(catalog)(pick);
   if (!("preset" in found)) {
     return { ok: false, error: REFUSED_TEXT[found.refused] };

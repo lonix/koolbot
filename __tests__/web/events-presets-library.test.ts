@@ -8,6 +8,7 @@ import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import { renderEventsPage } from "../../src/web/admin-views.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import {
   EVENT_GROUP_PRESETS,
   type EventGroupPreset,
@@ -125,6 +126,18 @@ describe("the event form's preset picker (#1200)", () => {
       "builtin:red-vs-blue",
       LIB_ID,
     ]);
+  });
+
+  it("marks the admin's own personal preset as theirs (#1216), since its name may match a library one", () => {
+    const mine = {
+      ...libraryPreset,
+      id: "my:0123456789abcdef01234599",
+    } as EventGroupPreset;
+    const doc = new JSDOM(page([libraryPreset, mine])).window.document;
+    const text = (id: string): string =>
+      doc.querySelector(`option[value="${id}"]`)?.textContent ?? "";
+    expect(text(mine.id)).toContain("(yours)");
+    expect(text(LIB_ID)).not.toContain("(yours)");
   });
 
   it("offers only Custom when nothing is enabled", () => {
@@ -287,6 +300,122 @@ describe("the presets admin page (#1200)", () => {
     const html = adminPage();
     expect(html).not.toContain('Mine "<x>"');
     expect(html).toContain("Mine &quot;&lt;x&gt;&quot;");
+  });
+
+  describe("the hosts' presets card (#1216)", () => {
+    const MY_A = "my:0123456789abcdef01234567";
+    const MY_B = "my:0123456789abcdef01234568";
+    const hostRow = (
+      id: string,
+      label: string,
+      publishedAs: string | null,
+      ownerName = "",
+    ) => ({
+      ownerId: "111111111111111111",
+      ownerName,
+      publishedAs,
+      entry: {
+        ...EVENT_GROUP_PRESETS[0],
+        id,
+        label,
+        source: "personal" as const,
+        enabled: true,
+      },
+    });
+
+    it("lists each host preset with Publish, or Unpublish when a copy exists, posting the personal id and a token", () => {
+      const doc = new JSDOM(
+        adminPage({
+          hostPresets: {
+            page: 0,
+            hasMore: false,
+            rows: [
+              hostRow(MY_A, "Night raid", null, "Ada"),
+              hostRow(MY_B, "Clan match", `lib:${"a".repeat(24)}`),
+            ],
+          },
+        }),
+      ).window.document;
+      const publish = doc.querySelectorAll<HTMLFormElement>(
+        'form[action="/admin/events/presets/publish"]',
+      );
+      const unpublish = doc.querySelectorAll<HTMLFormElement>(
+        'form[action="/admin/events/presets/unpublish"]',
+      );
+      expect(publish).toHaveLength(1);
+      expect(unpublish).toHaveLength(1);
+      expect(
+        (publish[0].querySelector('[name="id"]') as HTMLInputElement).value,
+      ).toBe(MY_A);
+      expect(
+        (unpublish[0].querySelector('[name="id"]') as HTMLInputElement).value,
+      ).toBe(MY_B);
+      expect(unpublish[0].getAttribute("data-confirm")).toContain(
+        "Events that already used it keep their groups",
+      );
+      for (const f of [publish[0], unpublish[0]]) {
+        expect(f.querySelector('[name="_csrf"]')).not.toBeNull();
+      }
+      expect(doc.body.textContent).toContain("Ada");
+      expect(doc.body.textContent).toContain("111111111111111111");
+    });
+
+    it("links to the previous and next page when there are more rows", () => {
+      const rows = [hostRow(MY_A, "Night raid", null)];
+      const doc = new JSDOM(
+        adminPage({ hostPresets: { page: 1, hasMore: true, rows } }),
+      ).window.document;
+      const hrefs = Array.from(
+        doc.querySelectorAll("a[href*='hostPage=']"),
+      ).map((a) => a.getAttribute("href"));
+      expect(hrefs).toEqual([
+        "/admin/events/presets?hostPage=0#host-presets",
+        "/admin/events/presets?hostPage=2#host-presets",
+      ]);
+      const single = new JSDOM(
+        adminPage({ hostPresets: { page: 0, hasMore: false, rows } }),
+      ).window.document;
+      expect(single.querySelector("a[href*='hostPage=']")).toBeNull();
+    });
+
+    it("tells hosts on their own page that admins can see unpublished presets, and only other hosts cannot", () => {
+      const doc = new JSDOM(
+        renderMyEventPresetsBody({
+          csrfToken: "t",
+          presets: [],
+          editing: null,
+          editUnavailable: false,
+          values: {},
+          prefillNote: null,
+          maxCount: 15,
+          defaultCount: 2,
+        }),
+      ).window.document;
+      const text = doc.querySelector(".subtitle")?.textContent ?? "";
+      expect(text).toContain("other hosts cannot see or use them");
+      expect(text).toContain("Server admins can see them");
+      expect(text).not.toContain("nobody else");
+    });
+
+    it("escapes host-supplied names and shows empty and unreadable states", () => {
+      const html = adminPage({
+        hostPresets: {
+          page: 0,
+          hasMore: false,
+          rows: [hostRow(MY_A, "<script>x</script>", null, "<b>Eve</b>")],
+        },
+      });
+      expect(html).not.toContain("<script>x</script>");
+      expect(html).not.toContain("<b>Eve</b>");
+      expect(html).toContain("&lt;b&gt;Eve&lt;/b&gt;");
+      expect(
+        adminPage({ hostPresets: { page: 0, hasMore: false, rows: [] } }),
+      ).toContain("No host has saved a preset yet");
+      expect(adminPage({ hostPresets: null })).toContain(
+        "hosts' presets could not be read",
+      );
+      expect(adminPage()).not.toContain("Hosts' presets");
+    });
   });
 
   it("prefills the editor from a copy and keeps the group rows", () => {

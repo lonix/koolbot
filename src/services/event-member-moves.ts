@@ -44,7 +44,6 @@ import {
   DefaultRestOptions,
   DiscordAPIError,
   HTTPError,
-  PermissionFlagsBits,
   RateLimitError,
   Routes,
   Events,
@@ -55,6 +54,7 @@ import {
   type RESTOptions,
   type VoiceChannel,
 } from "discord.js";
+import { PERM } from "./bot-permission-registry.js";
 import { Event, type IEvent } from "../models/event.js";
 import { leadsLeaderIds } from "./event-leads-access.js";
 
@@ -322,7 +322,7 @@ export function moveMembersBlocker(
   // per-channel checks allow: the caller then leaves the decision to them.
   if (channelScoped) return null;
   try {
-    return me.permissions.has(PermissionFlagsBits.MoveMembers)
+    return me.permissions.has(PERM.moveMembers.bit)
       ? null
       : REFUSAL_TEXT["no-permission"];
   } catch {
@@ -922,8 +922,8 @@ class Mover {
       const target = this.guild.channels.cache.get(to);
       if (!source || !target) return false;
       return (
-        me.permissionsIn(source).has(PermissionFlagsBits.MoveMembers) &&
-        me.permissionsIn(target).has(PermissionFlagsBits.Connect)
+        me.permissionsIn(source).has(PERM.moveMembers.bit) &&
+        me.permissionsIn(target).has(PERM.connect.bit)
       );
     } catch {
       return false;

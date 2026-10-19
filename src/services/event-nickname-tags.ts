@@ -178,13 +178,17 @@
  */
 
 import {
-  PermissionFlagsBits,
   Routes,
   type Client,
   type Guild,
   type GuildMember,
   type REST,
 } from "discord.js";
+import {
+  MANAGE_NICKNAMES_WARNING,
+  PERM,
+  RESTORE_PERMISSION_WARNING,
+} from "./bot-permission-registry.js";
 import { Event } from "../models/event.js";
 import { EventNicknameBackup } from "../models/event-nickname-backup.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
@@ -669,7 +673,7 @@ export function createClientDiscord(client: Client): TagDiscord {
     async canManageNicknames(guildId): Promise<boolean | null> {
       try {
         const me = await meOf(guildId);
-        return me.permissions.has(PermissionFlagsBits.ManageNicknames);
+        return me.permissions.has(PERM.manageNicknames.bit);
       } catch (err) {
         logger.warn("Could not read the bot's permissions for tags:", err);
         return null;
@@ -759,13 +763,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const RESTORE_PERMISSION_WARNING =
-  "The bot does not have the Manage Nicknames permission, so nicknames could not be restored yet. Give the bot that permission; KoolBot keeps trying every minute.";
 const WAITING_REASON =
   "Still carrying the tag of another event; tagged once that is restored.";
-
-const MANAGE_NICKNAMES_WARNING =
-  "The bot does not have the Manage Nicknames permission, so clan tags are not applied. Give the bot that permission and they will be applied within a minute.";
 
 export class EventNicknameTags {
   private static instance: EventNicknameTags | undefined;

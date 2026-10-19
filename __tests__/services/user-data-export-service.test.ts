@@ -120,6 +120,12 @@ jest.unstable_mockModule("../../src/models/user-name-history.js", () => ({
 jest.unstable_mockModule("../../src/models/user-voice-preferences.js", () => ({
   UserVoicePreferences: docModel("user-voice-preferences"),
 }));
+jest.unstable_mockModule(
+  "../../src/models/event-group-personal-preset.js",
+  () => ({
+    EventGroupPersonalPreset: listModel("event-personal-preset"),
+  }),
+);
 jest.unstable_mockModule("../../src/models/rewind-snapshot.js", () => ({
   RewindSnapshot: listModel("rewind-snapshot"),
 }));
@@ -292,6 +298,22 @@ describe("UserDataExportService", () => {
     expect(FILTERS["voice-channel-tracking"]).toEqual({ userId: USER });
     expect(FILTERS["user-achievements"]).toEqual({ userId: USER });
     expect(FILTERS["user-voice-preferences"]).toEqual({ userId: USER });
+  });
+
+  it("exports the member's personal event presets by owner and guild (#1216)", async () => {
+    DATA["event-personal-preset"] = [
+      { _id: "p1", ownerId: USER, guildId: GUILD, name: "Clan match" },
+    ];
+
+    const { payload } = await runExport();
+
+    expect(FILTERS["event-personal-preset"]).toEqual({
+      ownerId: USER,
+      guildId: GUILD,
+    });
+    expect(payload.data["event-personal-preset"]).toEqual([
+      expect.objectContaining({ ownerId: USER, name: "Clan match" }),
+    ]);
   });
 
   it("returns null for a collection the member has no row in", async () => {

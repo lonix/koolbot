@@ -53,7 +53,10 @@ const deps: LiveEditDeps = {
   maxGroups: async () => 15,
   isEnding: () => false,
   effects: {
-    syncGroupName: async (_g, _e, key) => ({ groupKey: key, status: "applied" }),
+    syncGroupName: async (_g, _e, key) => ({
+      groupKey: key,
+      status: "applied",
+    }),
     syncGroupUserLimit: async (_g, _e, key) => ({
       groupKey: key,
       status: "applied",
@@ -168,9 +171,7 @@ describeWithMongo(
     it("renames one group through arrayFilters and touches nothing else of it or of the other group", async () => {
       const id = await makeEvent();
       const before = await raw(id);
-      const out = await run(id, [
-        entry(groupNameRowId(0), "Apex", "Alpha"),
-      ]);
+      const out = await run(id, [entry(groupNameRowId(0), "Apex", "Alpha")]);
       expect(applied(out)).toEqual([groupNameRowId(0)]);
       const g = await rawGroup(id);
       expect(g).toMatchObject({
@@ -204,7 +205,10 @@ describeWithMongo(
         },
         {
           eventsEnabled: async () => true,
-          syncName: async (_g, _e, key) => ({ groupKey: key, status: "applied" }),
+          syncName: async (_g, _e, key) => ({
+            groupKey: key,
+            status: "applied",
+          }),
           retag: () => undefined,
         } as CustomiseDeps,
       );
@@ -214,9 +218,7 @@ describeWithMongo(
         originalName: "Alpha",
         originalTag: "A",
       });
-      const out = await run(id, [
-        entry(groupNameRowId(0), "Apex", "Crimson"),
-      ]);
+      const out = await run(id, [entry(groupNameRowId(0), "Apex", "Crimson")]);
       expect(applied(out)).toEqual([groupNameRowId(0)]);
       expect(await rawGroup(id)).toMatchObject({
         name: "Apex",
@@ -247,7 +249,13 @@ describeWithMongo(
         state: "active",
         groupsEnabled: true,
         groups: [
-          { key: A, name: "Solo", kind: "team", memberIds: [], channelId: null },
+          {
+            key: A,
+            name: "Solo",
+            kind: "team",
+            memberIds: [],
+            channelId: null,
+          },
         ],
       });
       const oldId = String(inserted.insertedId);
@@ -410,8 +418,20 @@ describeWithMongo(
           state: "active",
           groupsEnabled: true,
           groups: [
-            { key: A, name: "One", kind: "team", memberIds: [], channelId: null },
-            { key: B, name: "Two", kind: "team", memberIds: [], channelId: null },
+            {
+              key: A,
+              name: "One",
+              kind: "team",
+              memberIds: [],
+              channelId: null,
+            },
+            {
+              key: B,
+              name: "Two",
+              kind: "team",
+              memberIds: [],
+              channelId: null,
+            },
           ],
         });
         const id = String(inserted.insertedId);
@@ -464,7 +484,10 @@ describeWithMongo(
         sent: Array<Record<string, unknown>>,
       ): EventGroupChannels {
         const rest = {
-          patch: async (route: string, o: { body: Record<string, unknown> }) => {
+          patch: async (
+            route: string,
+            o: { body: Record<string, unknown> },
+          ) => {
             sent.push(o.body);
             limits.set(
               /channels\/(\d+)/.exec(route)![1],

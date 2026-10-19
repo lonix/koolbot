@@ -38,6 +38,7 @@ import {
   type SettingRow,
 } from "../../src/web/admin-views.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
@@ -995,7 +996,8 @@ export function adminPages(): A11yPage[] {
               kind: "ok",
               count: 4,
               names: ["Alice", "Bob"],
-              truncated: false,
+              page: 0,
+              hasMore: false,
             },
             legacyRsvps: { going: 4, maybe: 1, cant: 0 },
             channelId: "c1",
@@ -1096,6 +1098,67 @@ export function adminPages(): A11yPage[] {
         values: {},
         prefillNote: null,
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Group presets (hosts' presets card)",
+      html: renderEventPresetsPage({
+        ...COMMON,
+        entries: EVENT_GROUP_PRESETS.map((p) => ({
+          ...p,
+          source: "builtin" as const,
+          enabled: true,
+        })),
+        state: "ok",
+        maxCount: 15,
+        defaultCount: 2,
+        editing: null,
+        values: {},
+        prefillNote: null,
+        hostPresets: {
+          page: 0,
+          hasMore: false,
+          rows: [
+            {
+              ownerId: "111111111111111111",
+              ownerName: "Ada",
+              publishedAs: null,
+              entry: {
+                id: "my:0123456789abcdef01234567",
+                source: "personal" as const,
+                enabled: true,
+                label: "Night raid",
+                description: "Three squads",
+                groupLabel: "Squad",
+                groups: [
+                  { name: "Alpha", kind: "team", size: 6, tag: "", marker: "" },
+                ],
+              },
+            },
+            {
+              ownerId: "222222222222222222",
+              ownerName: "",
+              publishedAs: "lib:0123456789abcdef01234568",
+              entry: {
+                id: "my:0123456789abcdef01234569",
+                source: "personal" as const,
+                enabled: true,
+                label: "Clan match",
+                description: "",
+                groupLabel: "Team",
+                groups: [
+                  {
+                    name: "Red",
+                    kind: "team",
+                    size: null,
+                    tag: "",
+                    marker: "",
+                  },
+                ],
+              },
+            },
+          ],
+        },
       }),
     },
     {
@@ -2215,6 +2278,52 @@ export function userPages(): A11yPage[] {
               offerPullBack: true,
             }),
           },
+        }),
+      ),
+    },
+    {
+      name: "/me event presets (list and editor)",
+      html: shell(
+        "My event presets",
+        "/me/",
+        renderMyEventPresetsBody({
+          csrfToken: COMMON.csrfToken,
+          presets: [
+            {
+              id: "my:0123456789abcdef01234567",
+              source: "personal",
+              enabled: true,
+              label: "Night raid",
+              description: "Three squads",
+              groupLabel: "Squad",
+              groups: [
+                { name: "Alpha", kind: "team", size: 6, tag: "", marker: "" },
+              ],
+            },
+          ],
+          editing: null,
+          editUnavailable: false,
+          values: {},
+          prefillNote: 'Prefilled from the groups of your event "Quiz night".',
+          maxCount: 15,
+          defaultCount: 2,
+        }),
+      ),
+    },
+    {
+      name: "/me event presets (editing, read failed)",
+      html: shell(
+        "My event presets",
+        "/me/",
+        renderMyEventPresetsBody({
+          csrfToken: COMMON.csrfToken,
+          presets: null,
+          editing: null,
+          editUnavailable: true,
+          values: {},
+          prefillNote: null,
+          maxCount: 15,
+          defaultCount: 2,
         }),
       ),
     },
