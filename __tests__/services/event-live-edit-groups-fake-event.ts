@@ -13,7 +13,9 @@
  *   `groups.$[<id>].<field>` selected by `arrayFilters` (every identifier must
  *   have exactly one filter and every filter must be used, as MongoDB demands),
  *   `$inc` of `liveEditRevision`, `$push` of one group and `$pull` of the groups
- *   matching `{ key, channelId }` (the group set rows, #1242).
+ *   matching `{ key, channelId }` (the group set rows, #1242). The groups
+ *   on/off row (#1243) adds the `$or`, `$nor` and `$exists` filters, and a test
+ *   lets the top-level fields it writes through `fake.extraSettable`.
  *
  * Only fields of the schema are accepted (`SETTABLE`, `GROUP_FIELDS`), so a
  * misspelt field fails here instead of being dropped by Mongoose's strict mode
@@ -38,6 +40,13 @@ export const fake = {
    * leaders row that started writing members would still fail its suite.
    */
   extraGroupFields: new Set<string>(),
+  /**
+   * Top-level fields a test of the GROUPS ON/OFF row (#1243) also lets through
+   * `$set` (`groupsEnabled`, `groupLabel`, `leaderLabel`, `tagsEnabled`, `groups`).
+   * Empty by default, so any other row that started writing them would still
+   * fail its suite.
+   */
+  extraSettable: new Set<string>(),
 };
 export const clone = <T>(v: T): T => globalThis.structuredClone(v);
 
@@ -54,6 +63,7 @@ function opMatch(val: unknown, cond: unknown): boolean {
         return list.some((c) => opMatch(val, c));
       }
       if (op === "$ne") return val !== arg;
+      if (op === "$exists") return (val !== undefined) === arg;
       if (op === "$size") return Array.isArray(val) && val.length === arg;
       if (op === "$type") {
         if (arg !== "string") throw new Error(`unsupported $type ${arg}`);
@@ -78,6 +88,8 @@ function opMatch(val: unknown, cond: unknown): boolean {
 export function matchDoc(doc: Json, filter: unknown): boolean {
   return Object.entries(filter as Json).every(([k, v]) => {
     if (k === "$and") return (v as Json[]).every((f) => matchDoc(doc, f));
+    if (k === "$or") return (v as Json[]).some((f) => matchDoc(doc, f));
+    if (k === "$nor") return (v as Json[]).every((f) => !matchDoc(doc, f));
     if (k.startsWith("$")) throw new Error(`unsupported operator ${k}`);
     // `groups.key` and `groups.kind`: any element, or with `$ne` no element.
     const groupPath = /^groups\.(key|kind)$/.exec(k);
@@ -169,7 +181,9 @@ function applyUpdate(
       }
       return { group: "$", field: positional[1] };
     }
-    if (!SETTABLE.has(path)) throw new Error(`unexpected field ${path}`);
+    if (!SETTABLE.has(path) && !fake.extraSettable.has(path)) {
+      throw new Error(`unexpected field ${path}`);
+    }
     return { field: path };
   };
   const targets = (id: string): Json[] => {

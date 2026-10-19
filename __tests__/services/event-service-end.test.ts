@@ -306,6 +306,109 @@ describe("the scheduled end runs the shared teardown", () => {
     expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
   });
 
+  describe("groups switched off and kept as history (#1243)", () => {
+    // A switch-off keeps the groups with their members and clears every channel id.
+    const kept = [
+      {
+        key: "g_a",
+        name: "A",
+        kind: "team",
+        channelId: null,
+        memberIds: ["u1"],
+      },
+      { key: "g_b", name: "B", kind: "team", memberIds: [] },
+    ];
+
+    it("the scheduled end still claims the event (the snapshot is the stored groups, not an empty list)", async () => {
+      const { service, guild } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      await service.processEvent(
+        row({ groupsEnabled: false, groups: kept }),
+        guild,
+        AFTER_END,
+        WINDOWS,
+      );
+      expect(store.get(ID)?.state).toBe("ended");
+      // Groups are off: the group channel pass does not run for it.
+      expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
+    });
+
+    it("a scheduled end of a RECURRING event hands over to its successor, which keeps the setup with groups off", async () => {
+      const { service, guild } = setup();
+      const series = {
+        groupsEnabled: false,
+        groups: kept,
+        recurrence: "weekly",
+        seriesId: "series-1",
+        nextSpawned: false,
+      };
+      store.set(ID, stored(series));
+      const svc = service as unknown as {
+        spawnNextOccurrence: jest.Mock;
+        isSeriesCancelled: jest.Mock;
+      };
+      svc.spawnNextOccurrence = jest.fn();
+      svc.isSeriesCancelled = jest.fn(async () => false);
+      await service.processEvent(row(series), guild, AFTER_END, WINDOWS);
+      expect(store.get(ID)?.state).toBe("ended");
+      // The claim worked, so the scan went on to hand over to the next occurrence.
+      expect(svc.spawnNextOccurrence).toHaveBeenCalledTimes(1);
+      const handed = svc.spawnNextOccurrence.mock.calls[0][0] as Row;
+      expect(handed.state).toBe("ended");
+      expect(handed.groups).toEqual(kept);
+      // What the successor is made from (the existing rule): the kept setup is
+      // copied with groups still off, memberships and channels left behind.
+      const { copyGroupSetup } =
+        await import("../../src/services/event-groups.js");
+      expect(copyGroupSetup(handed as never)).toMatchObject({
+        groupsEnabled: false,
+        groups: [
+          { key: "g_a", channelId: null, memberIds: [] },
+          { key: "g_b", channelId: null, memberIds: [] },
+        ],
+      });
+    });
+
+    it("a channel recorded on a disabled group still stops the claim", async () => {
+      const { service, guild } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      let release!: () => void;
+      guild.channels.fetch = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(null);
+          }),
+      );
+      const scan = service.processEvent(
+        row({ groupsEnabled: false, groups: kept }),
+        guild,
+        AFTER_END,
+        WINDOWS,
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      store.set(
+        ID,
+        stored({
+          groupsEnabled: false,
+          groups: [{ ...kept[0], channelId: "c9" }, kept[1]],
+        }),
+      );
+      release();
+      await scan;
+      expect(store.get(ID)?.state).toBe("active");
+    });
+
+    it("End event now works", async () => {
+      const { service } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      const outcome = await service.endEventNow(ID, "guild-1", {
+        pullBack: true,
+      });
+      expect(outcome.status).toBe("ended");
+      expect(store.get(ID)?.state).toBe("ended");
+    });
+  });
+
   it("an end that was cancelled meanwhile is left alone: nothing saved, no native sync", async () => {
     const { service, guild } = setup();
     store.set(ID, stored({ state: "cancelled" }));

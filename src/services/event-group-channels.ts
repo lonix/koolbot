@@ -171,6 +171,23 @@ export type GroupRemoveOutcome =
   | { status: "failed"; reason: string };
 
 /**
+ * What `EventGroupChannels.removeAllGroupChannels` did (the host's live switch
+ * of groups to off, #1243).
+ */
+export type GroupsOffOutcome =
+  /** Every group channel is gone and the event's `groupsEnabled` is now false. */
+  | { status: "off"; deleted: number }
+  /** Somebody is connected to a group channel: nothing was deleted. */
+  | { status: "occupied"; remaining: number; groupKey: string }
+  /** The event changed meanwhile, or is no longer open: nothing was switched off. */
+  | { status: "lost" }
+  /**
+   * Discord or the database refused or could not be reached. `deleted` channels
+   * (and their recorded ids) are already gone; the switch was NOT made.
+   */
+  | { status: "failed"; reason: string; deleted: number };
+
+/**
  * Which event rows own channels the voice sweeps must leave alone: any row with
  * a recorded group channel, and any group event with a recorded main channel,
  * even before its first group channel exists (or when every create failed).
@@ -454,6 +471,12 @@ export interface LeadsSyncResult {
   /** Overwrite requests sent. */
   wrote: number;
 }
+
+/**
+ * How long the scan leaves the groups of an event alone after a switch-off that
+ * failed halfway (see `removeAllGroupChannels`). In memory only.
+ */
+const SWITCH_OFF_HOLD_MS = 10 * 60 * 1000;
 
 const LEADS_HOLD = "#leads";
 /** Start of the warning a leads channel created without its restriction leaves in the pass report. */
@@ -2877,10 +2900,9 @@ export class EventGroupChannels {
     }
 
     // The channel is gone (or was never ours): take the record with it, only
-    // while the group still holds the id it was deleted under. Synchronous check,
-    // then the write: an end or cancel that took its hold during the delete above
-    // must not see the record pulled under it (the next pass finds the channel
-    // gone and finishes the record).
+    // while the group still holds the id it was deleted under. Asked once more,
+    // synchronously, right before the write (an end or cancel may have taken its
+    // hold while the delete was in flight).
     if (opts.ending?.()) {
       return { status: "failed", reason: "the event is being ended" };
     }
@@ -2898,6 +2920,250 @@ export class EventGroupChannels {
       `Removed group ${sanitizeForLog(groupKey)} and its channel ${sanitizeForLog(channelId)} of event ${sanitizeForLog(eventId)}`,
     );
     return { status: "removed" };
+  }
+
+  // -------------------------------------------------------------
+  // Switching the groups of a running event off (#1243)
+  // -------------------------------------------------------------
+
+  /**
+   * Delete EVERY group channel of an event and switch its groups off, as one
+   * hold of the per-event channel lock (the live edit's "groups off"). The group
+   * records stay (their members are history), only their `channelId` is cleared.
+   *
+   * The invariant this protects: `groupsEnabled: false` is never stored while a
+   * group still has a recorded channel. Every pass that deletes or looks after
+   * group channels (the end teardown, the end deferral, the cleanup, the scan)
+   * only runs for an event whose groups are on, and only a RECORDED channel is
+   * ever deleted, so a channel left behind with the flag off would never be
+   * removed. Hence the order: look at every channel first (any of them occupied
+   * or unreadable stops the whole thing before anything is deleted), then
+   * delete each and clear its recorded id, and only when no group has a channel
+   * any more write `groupsEnabled: false`, conditional on exactly that.
+   *
+   * Everything runs under this pass's lock, so the scan cannot create a
+   * replacement for a channel just deleted. If a delete fails halfway the
+   * channels already gone stay unrecorded while the flag is still on, which a
+   * later scan would re-create; an in-memory hold on every group of the event
+   * keeps it from doing so for `SWITCH_OFF_HOLD_MS`, and a failed outcome says
+   * how many are gone. A restart, or the hold ending, only ever errs towards
+   * re-creating channels (groups still on), never towards leaving a channel
+   * nobody deletes.
+   *
+   * `ignore` are people known to have left the channels, whom the gateway cache
+   * may still show. One attempt per request on the fail-fast client: a rate
+   * limit is `failed`, never slept on. A channel that is already gone (10003)
+   * counts as deleted. Never throws.
+   */
+  public removeAllGroupChannels(
+    eventId: string,
+    guild: Guild,
+    opts: { ignore?: ReadonlySet<string>; ending?: () => boolean },
+  ): Promise<GroupsOffOutcome> {
+    const progress = { deleted: 0 };
+    return this.lock.run(eventId, () =>
+      this.removeAllLocked(eventId, guild, opts, progress).catch(
+        (error: unknown): GroupsOffOutcome => {
+          logger.error(
+            `Event ${sanitizeForLog(eventId)}: switching the groups off failed:`,
+            error,
+          );
+          return {
+            status: "failed",
+            reason: describeWriteFailure(error),
+            deleted: progress.deleted,
+          };
+        },
+      ),
+    );
+  }
+
+  private async removeAllLocked(
+    eventId: string,
+    guild: Guild,
+    opts: { ignore?: ReadonlySet<string>; ending?: () => boolean },
+    progress: { deleted: number },
+  ): Promise<GroupsOffOutcome> {
+    const ignore = opts.ignore ?? new Set<string>();
+    const report = emptyReport();
+    const row = await this.readFresh(eventId, report);
+    if (!row) {
+      return {
+        status: "failed",
+        reason: "the event could not be read",
+        deleted: 0,
+      };
+    }
+    if (
+      row.groupsEnabled !== true ||
+      !isOpenState(row.state) ||
+      row.seriesCancelled === true ||
+      !(await this.eventsOn())
+    ) {
+      return { status: "lost" };
+    }
+    const groups = row.groups ?? [];
+
+    // 1. Look at every channel before anything is deleted.
+    const plan: Array<{
+      key: string;
+      kind: string | undefined;
+      channelId: string;
+      ours: boolean;
+    }> = [];
+    for (const group of groups) {
+      const channelId = group.channelId ?? null;
+      if (!channelId) continue;
+      const state = await this.readChannel(guild, channelId);
+      if (state.status === "error") {
+        return {
+          status: "failed",
+          reason: `the channel of "${group.name}" could not be checked: ${describeWriteFailure(state.error)}`,
+          deleted: 0,
+        };
+      }
+      let ours = false;
+      if (state.status === "ok") {
+        const channel = state.channel;
+        ours =
+          channel.type === ChannelType.GuildVoice &&
+          channel.guildId === guild.id;
+        if (!ours) {
+          logger.warn(
+            `Event ${sanitizeForLog(eventId)}: recorded group channel ${sanitizeForLog(channelId)} is not a voice channel; leaving it alone`,
+          );
+        } else {
+          const remaining = [
+            ...((channel as VoiceChannel).members?.keys() ?? []),
+          ].filter((id) => !ignore.has(id)).length;
+          if (remaining > 0) {
+            return { status: "occupied", remaining, groupKey: group.key };
+          }
+        }
+      }
+      plan.push({ key: group.key, kind: group.kind, channelId, ours });
+    }
+
+    // 2. Keep the scan from re-creating a channel deleted below while the flag
+    // is still on (only if a delete fails halfway; see the method comment).
+    const until = Date.now() + SWITCH_OFF_HOLD_MS;
+    for (const group of groups) {
+      this.holds.set(`${eventId}:${group.key}`, {
+        until,
+        reason:
+          "The groups are being switched off. Save the switch again to finish.",
+      });
+    }
+
+    // 3. Delete each channel and clear its recorded id.
+    for (const item of plan) {
+      if (item.ours) {
+        try {
+          await this.renameCall((signal) => {
+            // Synchronous, in the same tick as the request.
+            if (opts.ending?.()) throw new RemovalEndingError();
+            const live = guild.channels.cache.get(item.channelId) as
+              VoiceChannel | undefined;
+            if (live?.type === ChannelType.GuildVoice) {
+              const stay = [...(live.members?.keys() ?? [])].filter(
+                (id) => !ignore.has(id),
+              );
+              if (stay.length > 0) throw new ChannelOccupiedError(stay.length);
+            }
+            return this.failFastRest().delete(Routes.channel(item.channelId), {
+              reason: "Event groups switched off",
+              signal,
+            });
+          }, "delete event group channel");
+        } catch (error) {
+          if (error instanceof RemovalEndingError) {
+            return {
+              status: "failed",
+              reason: "the event is being ended",
+              deleted: progress.deleted,
+            };
+          }
+          if (error instanceof ChannelOccupiedError) {
+            return progress.deleted === 0
+              ? {
+                  status: "occupied",
+                  remaining: error.count,
+                  groupKey: item.key,
+                }
+              : {
+                  status: "failed",
+                  reason: `${error.count} ${error.count === 1 ? "person" : "people"} joined a group channel`,
+                  deleted: progress.deleted,
+                };
+          }
+          if (!(
+            error instanceof DiscordAPIError &&
+            error.code === DISCORD_UNKNOWN_CHANNEL
+          )) {
+            return {
+              status: "failed",
+              reason: describeWriteFailure(error),
+              deleted: progress.deleted,
+            };
+          }
+        }
+      }
+      // The channel is gone now. A record that cannot be cleared stops the run
+      // here and is reported with the channel counted as deleted: going on would
+      // leave a recorded id that makes the final write fail as "changed
+      // meanwhile" instead of saying what happened.
+      const cleared = await this.clearRecordedChecked(
+        eventId,
+        item.key,
+        item.channelId,
+      );
+      progress.deleted += 1;
+      if (!cleared) {
+        return {
+          status: "failed",
+          reason: "the record of a deleted group channel could not be updated",
+          deleted: progress.deleted,
+        };
+      }
+    }
+
+    // 4. No group has a channel any more: switch the groups off, only while
+    // that is still true. Asked once more, synchronously, right before it.
+    if (opts.ending?.()) {
+      return {
+        status: "failed",
+        reason: "the event is being ended",
+        deleted: progress.deleted,
+      };
+    }
+    const result = await Event.updateOne(
+      {
+        _id: eventId,
+        state: { $in: ["scheduled", "active"] },
+        groupsEnabled: true,
+        // No group has a recorded channel (a real id: a string, not empty),
+        // the same test as `channelsExist` and the lead time row's write.
+        $nor: [
+          {
+            groups: {
+              $elemMatch: { channelId: { $type: "string", $ne: "" } },
+            },
+          },
+        ],
+      },
+      { $set: { groupsEnabled: false } },
+    );
+    if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
+    for (const item of plan) {
+      this.forgetGroup(eventId, item.key, item.channelId, item.kind);
+    }
+    // Nothing about this event's group channels is worth remembering now (this
+    // also drops the holds set above).
+    this.forget(eventId);
+    logger.info(
+      `Switched the groups of event ${sanitizeForLog(eventId)} off and removed ${progress.deleted} group channel(s)`,
+    );
+    return { status: "off", deleted: progress.deleted };
   }
 
   /** Forget what this process kept about a group that is gone. */
@@ -3021,6 +3287,15 @@ export class EventGroupChannels {
     groupKey: string,
     channelId: string,
   ): Promise<void> {
+    await this.clearRecordedChecked(eventId, groupKey, channelId);
+  }
+
+  /** `clearRecorded` that says whether the record really was cleared (one group matched). */
+  private async clearRecordedChecked(
+    eventId: string,
+    groupKey: string,
+    channelId: string,
+  ): Promise<boolean> {
     this.channelWarnings.get(eventId)?.delete(channelId);
     this.channelWarnings
       .get(eventId)
@@ -3028,18 +3303,20 @@ export class EventGroupChannels {
     // A deleted channel has no rename budget to remember (#1196).
     getRenameQueue().forget(channelId);
     try {
-      await Event.updateOne(
+      const result = await Event.updateOne(
         {
           _id: eventId,
           groups: { $elemMatch: { key: groupKey, channelId } },
         },
         { $set: { "groups.$.channelId": null } },
       );
+      return (result?.matchedCount ?? 0) === 1;
     } catch (error) {
       logger.error(
         `Event ${sanitizeForLog(eventId)}: could not clear group channel ${sanitizeForLog(channelId)}:`,
         error,
       );
+      return false;
     }
   }
 

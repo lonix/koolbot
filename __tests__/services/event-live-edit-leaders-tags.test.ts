@@ -237,11 +237,12 @@ describe("registration", () => {
       "tagsEnabled",
       "tagsSuffix",
       "groupTags",
-      // Removing and adding groups (#1242) come last.
+      // Removing and adding groups (#1242), then the groups switch (#1243).
       "groupRemove",
       "groupAdd",
-      // The Captains lobby switch (#1251) is the very last row.
+      // The Captains lobby switch (#1251), then the groups switch (#1243).
       "captainsLobby",
+      "groupsEnabled",
     ]);
   });
 });

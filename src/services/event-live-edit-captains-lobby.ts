@@ -96,7 +96,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   addGroupLocked,
-  createChannels,
+  createMissingChannels,
   removeOne,
 } from "./event-live-edit-group-set.js";
 import type {
@@ -275,7 +275,7 @@ export const captainsLobbyRow: LiveEditRow = asRow<boolean>({
   async reconcile(ctx) {
     const lobby = lobbyOf(ctx.event);
     if (!lobby) return { status: "applied" };
-    return createChannels(ctx, [lobby.key]);
+    return createMissingChannels(ctx, [lobby.key], "its channel");
   },
   afterSaveGroup: "captainsLobby",
   afterSave: lobbyFollowUp,

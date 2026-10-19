@@ -11,8 +11,9 @@
  * and each team's tag (`event-live-edit-leaders-tags.ts`). #1242 adds and
  * removes groups (`event-live-edit-group-set.ts`). #1251 adds the Captains lobby
  * switch (`event-live-edit-captains-lobby.ts`). All are listed in
- * `LIVE_EDIT_ROWS` below. Later steps (a group's kind, #1243 groups on/off) only
- * ADD ROWS (see "Extension contract").
+ * `LIVE_EDIT_ROWS` below. #1243 switches groups on and off
+ * (`event-live-edit-groups-switch.ts`). A later step (a group's kind) only ADDS
+ * ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`
  * has a table test over them)
@@ -171,6 +172,7 @@ import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import { groupSetRows } from "./event-live-edit-group-set.js";
 import { captainsLobbyRow } from "./event-live-edit-captains-lobby.js";
+import { groupsSwitchRows } from "./event-live-edit-groups-switch.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -493,7 +495,24 @@ export interface LiveEditEffects {
     channelId: string,
     opts: { ignore: ReadonlySet<string>; ending: () => boolean },
   ): Promise<GroupRemoveResult | null>;
+  /**
+   * Delete EVERY group channel and switch the event's groups off in one step
+   * under the channel lock (#1243, `EventGroupChannels.removeAllGroupChannels`).
+   * Null when the server cannot be found. Never throws.
+   */
+  removeAllGroupChannels(
+    guildId: string,
+    eventId: string,
+    opts: { ignore: ReadonlySet<string>; ending: () => boolean },
+  ): Promise<GroupsOffResult | null>;
 }
+
+/** What `EventGroupChannels.removeAllGroupChannels` did (same shape, no import cycle). */
+export type GroupsOffResult =
+  | { status: "off"; deleted: number }
+  | { status: "occupied"; remaining: number; groupKey: string }
+  | { status: "lost" }
+  | { status: "failed"; reason: string; deleted: number };
 
 /** What emptying a group's channel did. */
 export type EmptyChannelOutcome =
@@ -614,9 +633,11 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   ...leadersTagsRows,
   // Removing and adding groups (#1242): `event-live-edit-group-set.ts`.
   ...groupSetRows,
-  // The Captains lobby switch (#1251), last: it adds or removes a group, so the
+  // The Captains lobby switch (#1251): it adds or removes a group, so the
   // positional name and size writes land before it can shift a position.
   captainsLobbyRow,
+  // Groups on or off (#1243): last, so the other rows of a save apply first.
+  ...groupsSwitchRows,
 ];
 
 // ---------------------------------------------------------------
