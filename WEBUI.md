@@ -1862,8 +1862,9 @@ set its clan tag from Discord; the host can put any team back at any time.
   one), in the background; the leader is told it can take a little while. The server owner,
   and anyone whose top role is not below the bot's, can never be tagged by a bot.
 - **The host's reset.** The section lists each team with what the host set before a leader
-  changed it. **Reset** puts the original name and tag back (also with the switches off: the
-  host can always tidy up), renames the channel and moves the nicknames back. The original is
+  changed it. **Reset** puts the original name and tag back (also with the leader switches off, but
+  only while `events.enabled` is on, otherwise it refuses and changes nothing),
+  renames the channel and moves the nicknames back. The original is
   stored the first time a leader changes the team, so it works for Custom events as well as
   presets. A reset is refused when another team now has that name; reset that team first. A
   team nobody changed says so and writes nothing. Names and tags a leader chose are kept when

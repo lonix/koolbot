@@ -507,13 +507,14 @@ export type ResetResult =
  * The host puts a team's name and tag back to what they were before a leader
  * changed them. Works whatever the leaders' switches say (the host can always
  * tidy up), on an open event only. Same discipline as `customiseGroup`: a
- * fresh read inside the group lock, one conditional write, the channel and the
- * nicknames follow outside the lock. A team nobody customised answers "already
+ * fresh read inside the group lock (after `events.enabled`, which refuses when
+ * off or unreadable), one conditional write, the channel and the nicknames
+ * follow outside the lock. A team nobody customised answers "already
  * the default" and writes nothing.
  */
 export async function resetGroupCustomisation(
   opts: { guildId: string; eventId: string; groupKey: string },
-  deps: Pick<CustomiseDeps, "syncName" | "retag">,
+  deps: Pick<CustomiseDeps, "eventsEnabled" | "syncName" | "retag">,
 ): Promise<ResetResult> {
   const { guildId, eventId, groupKey } = opts;
   type Locked =
@@ -533,6 +534,20 @@ export async function resetGroupCustomisation(
     guildId,
     eventId,
     async (): Promise<Locked> => {
+      // The master switch, read inside the lock and before anything is
+      // written: with Events off (or unreadable) the channel rename and the
+      // nicknames are refused, so a reset that cleared the originals would
+      // leave the stored name and the channel disagreeing for good.
+      if ((await deps.eventsEnabled()) !== true) {
+        return {
+          done: {
+            ok: false,
+            code: "events-off",
+            message:
+              "Events are switched off (or could not be checked), so nothing was reset. Turn on events.enabled and try again.",
+          },
+        };
+      }
       let row: CustomiseRow | null;
       try {
         row = await readRow(guildId, eventId);

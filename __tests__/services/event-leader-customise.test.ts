@@ -483,6 +483,7 @@ describe("customiseGroup: the channel and the nicknames follow (#1196)", () => {
       ).ok,
     ).toBe(true);
     const resetDeps = {
+      eventsEnabled: async () => eventsEnabled,
       syncName: (g: string, e: string, k: string) => syncName(g, e, k),
       retag: (g: string, e: string, m: string[]) => retag(g, e, m),
     };
@@ -506,6 +507,7 @@ describe("customiseGroup: the channel and the nicknames follow (#1196)", () => {
     const r = await resetGroupCustomisation(
       { guildId: GUILD, eventId: EV, groupKey: RED },
       {
+        eventsEnabled: async () => true,
         syncName: (g, e, k) => syncName(g, e, k),
         retag: (g, e, m) => retag(g, e, m),
       },
@@ -704,6 +706,7 @@ describe("audit and the host reset (#1196)", () => {
   });
 
   const resetDeps = {
+    eventsEnabled: async () => eventsEnabled,
     syncName: (g: string, e: string, k: string) => syncName(g, e, k),
     retag: (g: string, e: string, m: string[]) => retag(g, e, m),
   };
@@ -738,6 +741,31 @@ describe("audit and the host reset (#1196)", () => {
     expect(r.ok).toBe(true);
     expect(stored().name).toBe("Red");
   });
+
+  it.each([
+    ["off", false],
+    ["unreadable", null],
+  ])(
+    "reset is refused before anything is written while events.enabled is %s",
+    async (_n, value) => {
+      await run();
+      eventsEnabled = value;
+      cupdates.length = 0;
+      const r = await resetGroupCustomisation(
+        { guildId: GUILD, eventId: EV, groupKey: RED },
+        resetDeps,
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.code).toBe("events-off");
+        expect(r.message).toContain("events.enabled");
+      }
+      expect(cupdates).toHaveLength(0);
+      // Nothing lost: the originals and the leader's name are still stored.
+      expect(stored().name).toBe("Crimson");
+      expect(stored().originalName).toBe("Red");
+    },
+  );
 
   it("reset of a team nobody changed is a no-op", async () => {
     const r = await resetGroupCustomisation(

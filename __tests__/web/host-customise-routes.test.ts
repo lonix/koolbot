@@ -126,6 +126,7 @@ const groupOf = (key: string): CGroup =>
 let auditRows: Array<Record<string, unknown>> = [];
 let leaderEditRows: Array<Record<string, unknown>> = [];
 let sessionUser = CREATOR;
+let eventsOn = true;
 let server: Server;
 let base = "";
 const syncGroupNames = jest.fn(async (_e: string, _g: string, key: string) => [
@@ -220,6 +221,7 @@ beforeEach(() => {
   auditRows = [];
   leaderEditRows = [];
   sessionUser = CREATOR;
+  eventsOn = true;
   syncGroupNames.mockClear();
   syncMember.mockClear();
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
@@ -246,7 +248,7 @@ beforeEach(() => {
     syncGroupNames,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async () => true,
+    getBoolean: async () => eventsOn,
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
   } as never);
@@ -368,6 +370,18 @@ describe("POST reset-team (#1196)", () => {
     const res = await reset({ group: RED });
     expect(flashOf(res.location).type).toBe("ok");
     expect(groupOf(RED).name).toBe("Red");
+  });
+
+  it("is refused, and writes nothing, while events.enabled is off", async () => {
+    customise();
+    eventsOn = false;
+    const res = await reset({ group: RED });
+    const flash = flashOf(res.location);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("events.enabled");
+    expect(groupOf(RED).name).toBe("Crimson");
+    expect(groupOf(RED).originalName).toBe("Red");
+    expect(syncGroupNames).not.toHaveBeenCalled();
   });
 
   it("a team nobody changed says so and writes nothing", async () => {
