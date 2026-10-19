@@ -76,7 +76,9 @@ export interface EventPresetsPageProps {
 /** The hosts' personal presets, with a name to show for each owner. */
 export interface HostPresetsView {
   rows: Array<HostPresetListing & { ownerName: string }>;
-  truncated: boolean;
+  /** Zero-based page shown, and whether a next page exists. */
+  page: number;
+  hasMore: boolean;
 }
 
 export interface EventPresetsPageData {
@@ -152,7 +154,11 @@ export async function loadEventPresetsPage(
   return {
     entries: catalog.entries,
     state: catalog.state,
-    hostPresets: await loadHostPresets(client, guildId),
+    hostPresets: await loadHostPresets(
+      client,
+      guildId,
+      parseHostPage(query.hostPage),
+    ),
     maxCount: limits.maxCount,
     defaultCount: limits.defaultCount,
     editing,
@@ -160,6 +166,12 @@ export async function loadEventPresetsPage(
     values,
     prefillNote,
   };
+}
+
+/** The card's page from `?hostPage=`: a small non-negative integer, else 0. */
+function parseHostPage(raw: unknown): number {
+  if (typeof raw !== "string" || !/^\d{1,6}$/.test(raw)) return 0;
+  return Number(raw);
 }
 
 /**
@@ -170,12 +182,14 @@ export async function loadEventPresetsPage(
 async function loadHostPresets(
   client: Client,
   guildId: string,
+  page: number,
 ): Promise<HostPresetsView | null> {
   try {
-    const { rows, truncated } = await listHostPresetsForAdmin(guildId);
+    const { rows, hasMore } = await listHostPresetsForAdmin(guildId, page);
     const members = client.guilds?.cache?.get(guildId)?.members?.cache;
     return {
-      truncated,
+      page,
+      hasMore,
       rows: rows.map((r) => ({
         ...r,
         ownerName: members?.get(r.ownerId)?.displayName ?? "",
@@ -363,22 +377,34 @@ function hostPresetRow(
 const HOST_PRESETS_INTRO =
   '<p class="muted">Hosts can save their own presets from the host panel. Only admins see them all. Publishing copies one into the server\'s presets above, switched on, so every host can pick it; the host keeps their own preset, and the copy stays if they later delete it or reset their data. Unpublishing deletes the server copy (including any change you made to it).</p>';
 
+function hostPresetsPager(v: HostPresetsView): string {
+  const link = (page: number, text: string): string =>
+    `<a class="btn" href="/admin/events/presets?hostPage=${page}#host-presets">${text}</a>`;
+  const parts = [
+    v.page > 0 ? link(v.page - 1, "Previous") : "",
+    v.hasMore ? link(v.page + 1, "Next") : "",
+  ].filter(Boolean);
+  return parts.length > 0
+    ? `<p class="muted">Page ${v.page + 1}. ${parts.join(" ")}</p>`
+    : "";
+}
+
 function renderHostPresetsCard(
   hostPresets: HostPresetsView | null | undefined,
   csrfInput: string,
 ): string {
   if (hostPresets === undefined) return "";
   if (hostPresets === null) {
-    return `<div class="card"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<div class="notice warn" role="status">The hosts' presets could not be read right now. Reload the page in a moment.</div></div>`;
+    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<div class="notice warn" role="status">The hosts' presets could not be read right now. Reload the page in a moment.</div></div>`;
   }
-  if (hostPresets.rows.length === 0) {
-    return `<div class="card"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<p class="muted">No host has saved a preset yet.</p></div>`;
+  if (hostPresets.rows.length === 0 && hostPresets.page === 0) {
+    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<p class="muted">No host has saved a preset yet.</p></div>`;
   }
-  return `<div class="card"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}
+  return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}
 <table class="data">
 <thead><tr><th scope="col">Preset</th><th scope="col">Host</th><th scope="col">Groups</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
 <tbody>${hostPresets.rows.map((r) => hostPresetRow(r, csrfInput)).join("\n")}</tbody>
-</table>${hostPresets.truncated ? '<p class="muted">Only the first presets are listed.</p>' : ""}</div>`;
+</table>${hostPresetsPager(hostPresets)}</div>`;
 }
 
 export function renderEventPresetsPage(props: EventPresetsPageProps): string {

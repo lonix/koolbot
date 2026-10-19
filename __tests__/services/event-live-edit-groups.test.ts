@@ -268,7 +268,11 @@ describe("rename a group", () => {
       guildId: GUILD,
       state: { $in: ["scheduled", "active"] },
       groups: {
-        $elemMatch: { key: A, name: "Alpha", originalName: { $in: [null, ""] } },
+        $elemMatch: {
+          key: A,
+          name: "Alpha",
+          originalName: { $in: [null, ""] },
+        },
       },
     });
     expect(text(out)).toBe('Saved: Name of group 1 is now "Apex".');
@@ -331,7 +335,8 @@ describe("rename a group", () => {
         {
           rowId: NAME_B,
           label: "Name of group 2",
-          reason: '"zulu" is now used by another group, so this group was not renamed',
+          reason:
+            '"zulu" is now used by another group, so this group was not renamed',
         },
       ]);
       expect(group(A).name).toBe("Zulu");
@@ -386,7 +391,9 @@ describe("rename a group", () => {
         tag: "CRM",
       });
       expect(rowWrites()[0].filter).toMatchObject({
-        groups: { $elemMatch: { key: A, name: "Crimson", originalName: "Alpha" } },
+        groups: {
+          $elemMatch: { key: A, name: "Crimson", originalName: "Alpha" },
+        },
       });
     });
 
@@ -521,7 +528,9 @@ describe("change a group's size", () => {
         [`b_${SIZE_A}`]: "3",
       });
       expect(parsed.entries).toEqual([]);
-      expect(parsed.errors[0]).toMatch(/^Group 1 size: a whole number from 1 to 99/);
+      expect(parsed.errors[0]).toMatch(
+        /^Group 1 size: a whole number from 1 to 99/,
+      );
     }
     expect(
       parseSubmission({ [`s_${SIZE_A}`]: "", [`b_${SIZE_A}`]: "3" }).entries,
@@ -694,8 +703,12 @@ describe("switch preset", () => {
     const out = await confirmed(
       await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]),
     );
-    expect(done(out).applied.map((c) => c.rowId)).toEqual([GROUP_PRESET_ROW_ID]);
-    expect(groupsOf().map((g) => [g.key, g.name, g.size, g.tag, g.kind])).toEqual([
+    expect(done(out).applied.map((c) => c.rowId)).toEqual([
+      GROUP_PRESET_ROW_ID,
+    ]);
+    expect(
+      groupsOf().map((g) => [g.key, g.name, g.size, g.tag, g.kind]),
+    ).toEqual([
       [A, "Squad 1", 4, "S1", "team"],
       [B, "Squad 2", 4, "S2", "team"],
       [C, "Squad 3", 4, "S3", "team"],
@@ -710,7 +723,9 @@ describe("switch preset", () => {
   });
 
   it("renames the channels that exist and sets their user limits; the group without a channel is left to the pass", async () => {
-    await confirmed(await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]));
+    await confirmed(
+      await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]),
+    );
     expect(calls.sort()).toEqual(
       [`name:${A}`, `name:${B}`, `limit:${A}`, `limit:${B}`].sort(),
     );
@@ -754,7 +769,9 @@ describe("switch preset", () => {
   });
 
   it("does not touch nicknames when tags are off", async () => {
-    await confirmed(await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]));
+    await confirmed(
+      await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]),
+    );
     expect(retagCalls).toEqual([]);
   });
 
@@ -775,7 +792,10 @@ describe("switch preset", () => {
 
   describe("refusals (nothing is written)", () => {
     it("a preset with another number of groups", async () => {
-      const two = { id: "builtin:two", groups: (squads().groups as Json[]).slice(0, 2) };
+      const two = {
+        id: "builtin:two",
+        groups: (squads().groups as Json[]).slice(0, 2),
+      };
       const out = await run([entry(GROUP_PRESET_ROW_ID, two, baseOf())]);
       expect(out).toMatchObject({ status: "invalid" });
       expect(text(out)).toContain("has 2 groups and this event has 3");
@@ -784,11 +804,7 @@ describe("switch preset", () => {
 
     it("a preset that would change a group's kind", async () => {
       const out = await run([
-        entry(
-          GROUP_PRESET_ROW_ID,
-          squads([{}, { kind: "open" }]),
-          baseOf(),
-        ),
+        entry(GROUP_PRESET_ROW_ID, squads([{}, { kind: "open" }]), baseOf()),
       ]);
       expect(out).toMatchObject({ status: "invalid" });
       expect(text(out)).toContain("change the kind of group 2 (team to open)");
@@ -797,11 +813,7 @@ describe("switch preset", () => {
 
     it("a preset with the same name twice", async () => {
       const out = await run([
-        entry(
-          GROUP_PRESET_ROW_ID,
-          squads([{}, { name: "squad 1" }]),
-          baseOf(),
-        ),
+        entry(GROUP_PRESET_ROW_ID, squads([{}, { name: "squad 1" }]), baseOf()),
       ]);
       expect(out).toMatchObject({ status: "invalid" });
       expect(text(out)).toContain("names must be unique");
@@ -925,16 +937,19 @@ describe("switch preset", () => {
       const result = done(out);
       expect(result.applied).toEqual([]);
       expect(result.partial).toHaveLength(1);
-      expect(result.partial[0].owed).toContain("Group 1: the channel is not renamed yet");
+      expect(result.partial[0].owed).toContain(
+        "Group 1: the channel is not renamed yet",
+      );
       expect(result.partial[0].owed).toContain("about 5 minutes");
       expect(store.get(EV)?.presetId).toBe("builtin:squads");
-      expect(group(A)).toMatchObject({ name: "Squad 1", nameSyncPending: true });
+      expect(group(A)).toMatchObject({
+        name: "Squad 1",
+        nameSyncPending: true,
+      });
 
       calls.length = 0;
       nameResult = (key) => ({ groupKey: key, status: "applied" });
-      const again = await run([
-        entry(GROUP_PRESET_ROW_ID, squads(), baseOf()),
-      ]);
+      const again = await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
       expect(done(again).applied).toMatchObject([
         { rowId: GROUP_PRESET_ROW_ID, reconcile: true },
       ]);
@@ -951,7 +966,9 @@ describe("switch preset", () => {
     const out = await confirmed(first);
     const result = done(out);
     expect(result.applied.map((c) => c.rowId)).toEqual([NAME_A]);
-    expect(result.notApplied.map((n) => n.rowId)).toEqual([GROUP_PRESET_ROW_ID]);
+    expect(result.notApplied.map((n) => n.rowId)).toEqual([
+      GROUP_PRESET_ROW_ID,
+    ]);
     expect(group(B).name).toBe("Bravo");
     expect(store.get(EV)?.presetId).toBeNull();
   });
@@ -1011,10 +1028,7 @@ describe("gating and one result per save", () => {
   });
 
   it("saving the same form again converges: already applied, nothing written", async () => {
-    const entries = [
-      entry(NAME_A, "Apex", "Alpha"),
-      entry(SIZE_A, 5, 3),
-    ];
+    const entries = [entry(NAME_A, "Apex", "Alpha"), entry(SIZE_A, 5, 3)];
     await run(entries);
     writes.length = 0;
     const again = await run(entries);
@@ -1027,7 +1041,9 @@ describe("gating and one result per save", () => {
 describe("the group limit cap and the size of a confirmation", () => {
   it("name rows and the preset validate the edited setup, so an unreadable group cap fails them closed; size rows do not need the cap", async () => {
     const unreadable: LiveEditDeps = { ...deps, maxGroups: async () => null };
-    const run2 = (entries: Array<{ rowId: string; to: unknown; base: unknown }>) =>
+    const run2 = (
+      entries: Array<{ rowId: string; to: unknown; base: unknown }>,
+    ) =>
       runLiveEdit({
         guildId: GUILD,
         eventId: EV,
@@ -1037,9 +1053,7 @@ describe("the group limit cap and the size of a confirmation", () => {
     const rename = await run2([entry(NAME_A, "Apex", "Alpha")]);
     expect(rename).toMatchObject({ status: "invalid" });
     expect(text(rename)).toContain("The group limit could not be read");
-    const preset = await run2([
-      entry(GROUP_PRESET_ROW_ID, squads(), baseOf()),
-    ]);
+    const preset = await run2([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
     expect(preset).toMatchObject({ status: "invalid" });
     expect(group(A).name).toBe("Alpha");
     // A size is checked by its own rule only: it saves.
@@ -1129,8 +1143,8 @@ describe("the audit row of a preset switch keeps the names, sizes and tags", () 
       details: describeLiveEditOutcome(first).details,
     });
     const change = (
-      (asked.details as { changes: Array<Record<string, unknown>> }).changes
-    )[0];
+      asked.details as { changes: Array<Record<string, unknown>> }
+    ).changes[0];
     expect(change).toEqual({
       row: "groupPreset",
       from: {
@@ -1152,9 +1166,8 @@ describe("the audit row of a preset switch keeps the names, sizes and tags", () 
       details: describeLiveEditOutcome(await confirmed(first)).details,
     });
     const after = (
-      (applied.details as { changes: Array<{ to: Record<string, string> }> })
-        .changes
-    )[0];
+      applied.details as { changes: Array<{ to: Record<string, string> }> }
+    ).changes[0];
     expect(after.to.g1).toBe("Squad 1 | team | size 4 | tag S1");
     expect(JSON.stringify(applied.details)).not.toContain("[truncated]");
   });
@@ -1183,7 +1196,9 @@ describe("a preset switch finishes and reports channel work still owed", () => {
     );
     expect(out.applied).toEqual([]);
     expect(out.partial).toHaveLength(1);
-    expect(out.partial[0].owed).toContain("Group 1: the channel is not renamed yet");
+    expect(out.partial[0].owed).toContain(
+      "Group 1: the channel is not renamed yet",
+    );
     expect(calls.sort()).toEqual([`limit:${A}`, `name:${A}`].sort());
     expect(group(A)).toMatchObject({ size: 8, nameSyncPending: true });
   });
@@ -1283,11 +1298,11 @@ describe("selecting the current preset again establishes the baseline", () => {
     group(C).name = "Squad 3";
     group(C).size = 4;
     group(C).tag = "S3";
-    const out = await run([
-      entry(GROUP_PRESET_ROW_ID, squads(), baseOf()),
-    ]);
+    const out = await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
     expect(done(out).alreadyApplied).toEqual([]);
-    expect(done(out).applied.map((c) => c.rowId)).toEqual([GROUP_PRESET_ROW_ID]);
+    expect(done(out).applied.map((c) => c.rowId)).toEqual([
+      GROUP_PRESET_ROW_ID,
+    ]);
     expect("originalName" in group(A)).toBe(false);
     expect("originalTag" in group(A)).toBe(false);
     expect(group(A)).toMatchObject({ name: "Squad 1", size: 4, tag: "S1" });

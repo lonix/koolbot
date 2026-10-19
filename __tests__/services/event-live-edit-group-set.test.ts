@@ -64,7 +64,7 @@ const {
   GROUP_REMOVE_BASE_FIELD,
   groupRemoveField,
 } = await import("../../src/services/event-live-edit-group-set.js");
-const { groupSizeRowId, groupSizeKeyField, groupNameRowId } =
+const { groupSizeRowId, groupSizeKeyField, groupNameKeyField, groupNameRowId } =
   await import("../../src/services/event-live-edit-groups.js");
 const { makeEffects } =
   await import("./event-live-edit-groups-effects-fake.js");
@@ -325,9 +325,9 @@ async function removeConfirmed(
 }
 
 describe("registration", () => {
-  it("lists remove then add, last, with letters-only ids and no duplicates", () => {
+  it("lists remove then add, just before the groups switch (#1243), with letters-only ids and no duplicates", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids.slice(-2)).toEqual(["groupRemove", "groupAdd"]);
+    expect(ids.slice(-3, -1)).toEqual(["groupRemove", "groupAdd"]);
     expect(groupSetRows.map((r) => r.id)).toEqual(["groupRemove", "groupAdd"]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const row of groupSetRows) expect(row.id).toMatch(/^[A-Za-z]+$/);
@@ -1319,7 +1319,7 @@ describe("remove a group", () => {
   });
 });
 
-describe("the size rows are guarded by the key of the group the form showed (#1242)", () => {
+describe("the name and size rows are guarded by the key of the group the form showed (#1242)", () => {
   const SIZE_B = groupSizeRowId(1);
 
   it("collects the posted key as the entry's guard", () => {
@@ -1395,7 +1395,84 @@ describe("the size rows are guarded by the key of the group the form showed (#12
     ]);
   });
 
-  it("a name row needs no key: names are unique, so a different group there is a different base", async () => {
+  it("collects the posted key of a name row as the entry's guard", () => {
+    const NAME_B = groupNameRowId(1);
+    const parsed = live.parseSubmission({
+      [`s_${NAME_B}`]: "Zulu",
+      [`b_${NAME_B}`]: "Bravo",
+      [groupNameKeyField(1)]: B,
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.entries).toEqual([
+      { rowId: NAME_B, to: "Zulu", base: "Bravo", guard: B },
+    ]);
+  });
+
+  it("a name post without a key (an older form) is not checked, and a missing base is out of date", async () => {
+    const NAME_B = groupNameRowId(1);
+    const parsed = live.parseSubmission({
+      [`s_${NAME_B}`]: "Zulu",
+      [`b_${NAME_B}`]: "Bravo",
+    });
+    expect(parsed.entries[0]).toEqual({
+      rowId: NAME_B,
+      to: "Zulu",
+      base: "Bravo",
+    });
+    expect(done(await run(parsed.entries)).applied).toHaveLength(1);
+    expect(group(B).name).toBe("Zulu");
+    expect(live.parseSubmission({ [`s_${NAME_B}`]: "Zulu" }).errors).toEqual([
+      "Name of group 2: the form is out of date. Reload the page.",
+    ]);
+  });
+
+  it("a stale rename form does not rename a different group that took the position with the same name", async () => {
+    // The form showed position 3 = Charlie (key C). Charlie was removed, then a
+    // DIFFERENT group also named Charlie was added at the same position: the
+    // base text matches, only the key differs.
+    const NAME_C = groupNameRowId(2);
+    const parsed = live.parseSubmission({
+      [`s_${NAME_C}`]: "Zulu",
+      [`b_${NAME_C}`]: "Charlie",
+      [groupNameKeyField(2)]: C,
+    });
+    expect(parsed.errors).toEqual([]);
+    const NEW_KEY = "g_0000beef";
+    store.get(EV)!.groups = [
+      ...groupsOf().filter((g) => g.key !== C),
+      { ...group(C), key: NEW_KEY, name: "Charlie" },
+    ];
+    const out = await run(parsed.entries);
+    const result = done(out);
+    expect(result.applied).toEqual([]);
+    expect(result.notApplied).toEqual([
+      {
+        rowId: NAME_C,
+        label: "Name of group 3",
+        reason:
+          "was changed by someone else while you were editing. Reload the page and try again",
+      },
+    ]);
+    expect(rowWrites()).toEqual([]);
+    expect(groupsOf().map((g) => g.name)).toEqual([
+      "Alpha",
+      "Bravo",
+      "Charlie",
+    ]);
+  });
+
+  it("a name form whose key is still at the position is applied as before", async () => {
+    const NAME_B = groupNameRowId(1);
+    const parsed = live.parseSubmission({
+      [`s_${NAME_B}`]: "Zulu",
+      [`b_${NAME_B}`]: "Bravo",
+      [groupNameKeyField(1)]: B,
+    });
+    expect(done(await run(parsed.entries)).applied).toHaveLength(1);
+    expect(group(B).name).toBe("Zulu");
+  });
+
+  it("a name row still conflicts on a different base text, key or not", async () => {
     store.get(EV)!.groups = groupsOf().filter((g) => g.key !== A);
     const out = await run([entry(groupNameRowId(1), "Zulu", "Bravo")]);
     // Position 2 is Charlie now: its name is not the base the form showed.

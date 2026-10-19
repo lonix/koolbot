@@ -149,8 +149,8 @@ export async function deletePersonalPreset(
 
 // ---------- Admin: all hosts' presets, publish and unpublish ----------
 
-/** Most rows the admin card lists (10 per host leaves room for 50 hosts). */
-export const ADMIN_PERSONAL_LIST_MAX = 500;
+/** Rows per page of the admin card; every host's presets are reachable by paging. */
+export const ADMIN_PERSONAL_PAGE_SIZE = 100;
 
 export interface HostPresetListing {
   entry: PresetEntry;
@@ -160,17 +160,21 @@ export interface HostPresetListing {
 }
 
 /**
- * Every host's presets for the admin's publish card, newest owner grouping by
- * owner id then name. Admin-only: the route that calls this is mounted behind
- * the admin check. Throws on a read failure (the caller says so).
+ * One page of every host's presets for the admin's publish card, ordered by
+ * owner id, name, then row id (a total order, so pages never repeat or skip).
+ * `page` is zero-based. Admin-only: the route that calls this is mounted
+ * behind the admin check. Throws on a read failure (the caller says so).
  */
 export async function listHostPresetsForAdmin(
   guildId: string,
-): Promise<{ rows: HostPresetListing[]; truncated: boolean }> {
+  page = 0,
+): Promise<{ rows: HostPresetListing[]; hasMore: boolean }> {
+  const safePage = Number.isInteger(page) && page > 0 ? page : 0;
   const [personal, copies] = await Promise.all([
     EventGroupPersonalPreset.find({ guildId })
-      .sort({ ownerId: 1, nameKey: 1 })
-      .limit(ADMIN_PERSONAL_LIST_MAX + 1)
+      .sort({ ownerId: 1, nameKey: 1, _id: 1 })
+      .skip(safePage * ADMIN_PERSONAL_PAGE_SIZE)
+      .limit(ADMIN_PERSONAL_PAGE_SIZE + 1)
       .lean(),
     EventGroupPresetModel.find({
       guildId,
@@ -188,8 +192,8 @@ export async function listHostPresetsForAdmin(
     Parameters<typeof rowToEntry>[0] & { ownerId: string }
   >;
   return {
-    truncated: list.length > ADMIN_PERSONAL_LIST_MAX,
-    rows: list.slice(0, ADMIN_PERSONAL_LIST_MAX).map((row) => ({
+    hasMore: list.length > ADMIN_PERSONAL_PAGE_SIZE,
+    rows: list.slice(0, ADMIN_PERSONAL_PAGE_SIZE).map((row) => ({
       entry: rowToEntry(row, "personal"),
       ownerId: row.ownerId,
       publishedAs: copyOf.get(String(row._id)) ?? null,

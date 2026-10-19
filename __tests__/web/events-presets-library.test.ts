@@ -322,7 +322,8 @@ describe("the presets admin page (#1200)", () => {
       const doc = new JSDOM(
         adminPage({
           hostPresets: {
-            truncated: false,
+            page: 0,
+            hasMore: false,
             rows: [
               hostRow(MY_A, "Night raid", null, "Ada"),
               hostRow(MY_B, "Clan match", `lib:${"a".repeat(24)}`),
@@ -354,10 +355,29 @@ describe("the presets admin page (#1200)", () => {
       expect(doc.body.textContent).toContain("111111111111111111");
     });
 
+    it("links to the previous and next page when there are more rows", () => {
+      const rows = [hostRow(MY_A, "Night raid", null)];
+      const doc = new JSDOM(
+        adminPage({ hostPresets: { page: 1, hasMore: true, rows } }),
+      ).window.document;
+      const hrefs = Array.from(
+        doc.querySelectorAll<HTMLAnchorElement>("a[href*='hostPage=']"),
+      ).map((a) => a.getAttribute("href"));
+      expect(hrefs).toEqual([
+        "/admin/events/presets?hostPage=0#host-presets",
+        "/admin/events/presets?hostPage=2#host-presets",
+      ]);
+      const single = new JSDOM(
+        adminPage({ hostPresets: { page: 0, hasMore: false, rows } }),
+      ).window.document;
+      expect(single.querySelector("a[href*='hostPage=']")).toBeNull();
+    });
+
     it("escapes host-supplied names and shows empty and unreadable states", () => {
       const html = adminPage({
         hostPresets: {
-          truncated: false,
+          page: 0,
+          hasMore: false,
           rows: [hostRow(MY_A, "<script>x</script>", null, "<b>Eve</b>")],
         },
       });
@@ -365,7 +385,7 @@ describe("the presets admin page (#1200)", () => {
       expect(html).not.toContain("<b>Eve</b>");
       expect(html).toContain("&lt;b&gt;Eve&lt;/b&gt;");
       expect(
-        adminPage({ hostPresets: { truncated: false, rows: [] } }),
+        adminPage({ hostPresets: { page: 0, hasMore: false, rows: [] } }),
       ).toContain("No host has saved a preset yet");
       expect(adminPage({ hostPresets: null })).toContain(
         "hosts' presets could not be read",

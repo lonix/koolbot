@@ -369,12 +369,41 @@ describe("publish and unpublish", () => {
     expect(personal.state.rows).toHaveLength(1);
   });
 
+  it("pages the admin list so every host's presets stay reachable past one page", async () => {
+    const total = svc.ADMIN_PERSONAL_PAGE_SIZE * 2 + 5;
+    for (let i = 0; i < total; i++) {
+      personal.state.rows.push({
+        _id: String(i + 1).padStart(24, "0"),
+        guildId: G,
+        ownerId: `owner-${String(i).padStart(4, "0")}`,
+        name: `Preset ${i}`,
+        nameKey: `preset ${i}`,
+        groups: [],
+      });
+    }
+    const seen: string[] = [];
+    for (let page = 0; ; page++) {
+      const out = await svc.listHostPresetsForAdmin(G, page);
+      seen.push(...out.rows.map((r) => r.ownerId));
+      expect(out.rows.length).toBeLessThanOrEqual(svc.ADMIN_PERSONAL_PAGE_SIZE);
+      if (!out.hasMore) break;
+      expect(page).toBeLessThan(10);
+    }
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size).toBe(total);
+    // An absurd page is read as the first, and a page past the end is empty.
+    expect((await svc.listHostPresetsForAdmin(G, -3)).rows[0].ownerId).toBe(
+      "owner-0000",
+    );
+    expect((await svc.listHostPresetsForAdmin(G, 50)).rows).toEqual([]);
+  });
+
   it("lists every host's presets for the admin with their published state", async () => {
     const idA = await seed();
     await svc.createPersonalPreset(G, B, data({ name: "Theirs" }));
     await svc.publishPersonalPreset(G, idA, { maxCount: 15 });
-    const { rows, truncated } = await svc.listHostPresetsForAdmin(G);
-    expect(truncated).toBe(false);
+    const { rows, hasMore } = await svc.listHostPresetsForAdmin(G);
+    expect(hasMore).toBe(false);
     expect(
       rows.map((r) => [r.entry.label, r.ownerId, r.publishedAs !== null]),
     ).toEqual([

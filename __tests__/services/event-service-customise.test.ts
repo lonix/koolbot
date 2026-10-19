@@ -65,11 +65,7 @@ interface Priv {
 }
 type Service = Priv & {
   syncGroupNames: (e: string, g: string, k?: string) => Promise<unknown>;
-  syncGroupUserLimits: (
-    e: string,
-    g: string,
-    k?: string,
-  ) => Promise<unknown>;
+  syncGroupUserLimits: (e: string, g: string, k?: string) => Promise<unknown>;
   syncGroupControls: (e: string) => Promise<void>;
 };
 

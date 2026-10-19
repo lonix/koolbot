@@ -26,11 +26,16 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 }));
 jest.unstable_mockModule(
   "../../src/services/tracking-opt-out-service.js",
-  () => ({ TrackingOptOutService: { getInstance: () => ({ admission: () => 1 }) } }),
+  () => ({
+    TrackingOptOutService: { getInstance: () => ({ admission: () => 1 }) },
+  }),
 );
 jest.unstable_mockModule("../../src/services/event-nickname-tags.js", () => ({
   EventNicknameTags: {
-    getInstance: () => ({ syncMember: async () => "none", requestSweep: () => {} }),
+    getInstance: () => ({
+      syncMember: async () => "none",
+      requestSweep: () => {},
+    }),
   },
 }));
 jest.unstable_mockModule("../../src/web/audit.js", () => ({

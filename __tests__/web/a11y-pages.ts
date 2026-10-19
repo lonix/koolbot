@@ -996,7 +996,8 @@ export function adminPages(): A11yPage[] {
               kind: "ok",
               count: 4,
               names: ["Alice", "Bob"],
-              truncated: false,
+              page: 0,
+              hasMore: false,
             },
             legacyRsvps: { going: 4, maybe: 1, cant: 0 },
             channelId: "c1",
@@ -1115,7 +1116,8 @@ export function adminPages(): A11yPage[] {
         values: {},
         prefillNote: null,
         hostPresets: {
-          truncated: false,
+          page: 0,
+          hasMore: false,
           rows: [
             {
               ownerId: "111111111111111111",

@@ -143,6 +143,10 @@ import {
   renderSettingsSection,
 } from "../host-settings-view.js";
 import { leadersTagsViewOf } from "../host-settings-leaders-tags-view.js";
+import {
+  buildGroupsSwitchView,
+  prepareGroupsSwitchBody,
+} from "../host-settings-groups-switch.js";
 import { createLiveEditEffects } from "../../services/event-live-edit-effects.js";
 import {
   buildGroupEditView,
@@ -1226,6 +1230,11 @@ function createSettingsSection(client: Client): HostSectionRenderer {
       groupEdit: hasGroups
         ? await buildGroupEditView(fresh, ctx.session.discordUserId)
         : undefined,
+      // Groups on or off (#1243): shown whether or not the event has groups.
+      groupsSwitch: await buildGroupsSwitchView(
+        fresh,
+        ctx.session.discordUserId,
+      ),
     });
   };
 }
@@ -1313,7 +1322,22 @@ function registerSettingsActions(router: Router, client: Client): void {
           errorMessage: "invalid",
         };
       }
-      const parsed = parseSubmission(prepared.body);
+      // The same for the groups switch (#1243): the content of a preset that
+      // creates groups is never taken from the client either.
+      const switched = await prepareGroupsSwitchBody(
+        prepared.body,
+        event.guildId,
+        session.discordUserId,
+      );
+      if (!switched.ok) {
+        return {
+          ok: false,
+          message: `Nothing was changed. ${switched.error}`,
+          details: { outcome: "invalid", errors: [switched.error] },
+          errorMessage: "invalid",
+        };
+      }
+      const parsed = parseSubmission(switched.body);
       if (parsed.errors.length > 0) {
         return {
           ok: false,

@@ -68,7 +68,10 @@ jest.unstable_mockModule(
 // The hosts' personal presets for the publish card (#1216).
 const mockListHostPresets =
   jest.fn<
-    (guildId: string) => Promise<{ rows: unknown[]; truncated: boolean }>
+    (
+      guildId: string,
+      page?: number,
+    ) => Promise<{ rows: unknown[]; hasMore: boolean }>
   >();
 const actualPersonal =
   await import("../../src/services/event-personal-preset-service.js");
@@ -85,7 +88,7 @@ const client = {} as Client;
 beforeEach(() => {
   jest.clearAllMocks();
   mockState = "ok";
-  mockListHostPresets.mockResolvedValue({ rows: [], truncated: false });
+  mockListHostPresets.mockResolvedValue({ rows: [], hasMore: false });
 });
 
 describe("loadEventPresetsPage: the hosts' presets (#1216)", () => {
@@ -98,7 +101,7 @@ describe("loadEventPresetsPage: the hosts' presets (#1216)", () => {
   it("adds a display name from the member cache only, and falls back to an empty name", async () => {
     mockListHostPresets.mockResolvedValue({
       rows: [row("u1"), row("u2")],
-      truncated: true,
+      hasMore: true,
     });
     const withCache = {
       guilds: {
@@ -115,14 +118,23 @@ describe("loadEventPresetsPage: the hosts' presets (#1216)", () => {
       },
     } as unknown as Client;
     const page = await loadEventPresetsPage(withCache, "g1", {});
-    expect(mockListHostPresets).toHaveBeenCalledWith("g1");
-    expect(page.hostPresets?.truncated).toBe(true);
+    expect(mockListHostPresets).toHaveBeenCalledWith("g1", 0);
+    expect(page.hostPresets?.hasMore).toBe(true);
     expect(page.hostPresets?.rows.map((r) => [r.ownerId, r.ownerName])).toEqual(
       [
         ["u1", "Ada"],
         ["u2", ""],
       ],
     );
+  });
+
+  it("reads the card's page from ?hostPage= and treats anything else as the first", async () => {
+    await loadEventPresetsPage(client, "g1", { hostPage: "3" });
+    expect(mockListHostPresets).toHaveBeenLastCalledWith("g1", 3);
+    for (const bad of ["-1", "x", "1.5", "9999999", ["2"], undefined]) {
+      await loadEventPresetsPage(client, "g1", { hostPage: bad });
+      expect(mockListHostPresets).toHaveBeenLastCalledWith("g1", 0);
+    }
   });
 
   it("reports an unreadable list as null, so the page says so instead of failing", async () => {

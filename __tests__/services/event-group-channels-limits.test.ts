@@ -135,7 +135,13 @@ function makeEnv(
       fetch: jest.fn(async (id: string) => {
         if (fail.fetch) throw fail.fetch;
         if (gone.has(id)) throw apiError(10003, 404);
-        return { id, name: "x", guildId: GUILD, type: 2, userLimit: limits.get(id) };
+        return {
+          id,
+          name: "x",
+          guildId: GUILD,
+          type: 2,
+          userLimit: limits.get(id),
+        };
       }),
     },
   };
@@ -371,7 +377,10 @@ describe("syncUserLimits: the stored size is the truth, the channel follows (#12
       env.channels.sizesNeedAttention({ ...doc, state: "ended" } as never),
     ).toBe(false);
     expect(
-      env.channels.sizesNeedAttention({ ...doc, groupsEnabled: false } as never),
+      env.channels.sizesNeedAttention({
+        ...doc,
+        groupsEnabled: false,
+      } as never),
     ).toBe(false);
     expect(
       env.channels.sizesNeedAttention({

@@ -14,6 +14,7 @@ import type { Client } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
 import {
   eventSetupToFormValues,
+  parsePersonalPresetId,
   PRESET_FORM_FIELDS,
   presetToFormValues,
   validatePresetForm,
@@ -31,7 +32,11 @@ import {
 } from "../../services/event-groups.js";
 import { EventService } from "../../services/event-service.js";
 import { isEventHost } from "../event-host.js";
-import { recordAudit } from "../audit.js";
+import {
+  boundAuditEntry,
+  recordAudit as recordAuditUnbounded,
+  type AuditEntry,
+} from "../audit.js";
 import { requireCsrf } from "../csrf.js";
 import { getDisplayedRemainingMs } from "../admin-layout.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
@@ -42,6 +47,13 @@ import type { AuthenticatedRequest } from "../session.js";
 import logger from "../../utils/logger.js";
 
 const PAGE = "/me/events/presets";
+
+// The ids come from the member, and failed requests are audited too, so every
+// row written here is bounded first (#1142).
+const recordAudit = (
+  session: Parameters<typeof recordAuditUnbounded>[0],
+  entry: AuditEntry,
+): Promise<void> => recordAuditUnbounded(session, boundAuditEntry(entry));
 
 function csrfOf(req: Request): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
@@ -73,7 +85,9 @@ function redirectWith(res: Response, path: string, flash: Flash): void {
 function backToEditor(res: Response, id: string, flash: Flash): void {
   redirectWith(
     res,
-    id ? `${PAGE}?edit=${encodeURIComponent(id)}` : PAGE,
+    // Only a well-formed id is echoed back into the URL; anything else (an
+    // oversized or forged value) goes to the plain page.
+    parsePersonalPresetId(id) ? `${PAGE}?edit=${encodeURIComponent(id)}` : PAGE,
     flash,
   );
 }

@@ -65,10 +65,8 @@ const { EventGroupChannels } =
 const { getRenameQueue } =
   await import("../../src/services/event-rename-queue.js");
 const { runLiveEdit } = await import("../../src/services/event-live-edit.js");
-const {
-  groupNameRowId,
-  groupSizeRowId,
-} = await import("../../src/services/event-live-edit-groups.js");
+const { groupNameRowId, groupSizeRowId } =
+  await import("../../src/services/event-live-edit-groups.js");
 const { createLiveEditEffects } =
   await import("../../src/services/event-live-edit-effects.js");
 const { resetMoveGuardForTests } =
@@ -363,10 +361,9 @@ describe("createLiveEditEffects (names, sizes, tags)", () => {
     effects().retagMembers(GUILD, EV, ["u1", "u2"]);
     await new Promise((r) => setTimeout(r, 20));
     expect(syncMember).toHaveBeenCalledTimes(2);
-    expect(syncMember.mock.calls.map((c) => (c[0] as { userId: string }).userId)).toEqual([
-      "u1",
-      "u2",
-    ]);
+    expect(
+      syncMember.mock.calls.map((c) => (c[0] as { userId: string }).userId),
+    ).toEqual(["u1", "u2"]);
     expect(requestSweep).toHaveBeenCalledWith(GUILD);
   });
 });

@@ -36,9 +36,11 @@ jest.unstable_mockModule(
   "../../src/models/event-group-personal-preset.js",
   () => ({ EventGroupPersonalPreset: personal.model }),
 );
+// The real bounding runs; only the write is replaced.
+const actualAudit = await import("../../src/web/audit.js");
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
-  boundAuditEntry: (e: unknown) => e,
+  boundAuditEntry: actualAudit.boundAuditEntry,
 }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -374,6 +376,21 @@ describe("prefilling from an event (the host panel's 'Save as my preset')", () =
     expect(await page("fromEvent=65a000000000000000000001")).toContain(
       'value="Heli"',
     );
+  });
+});
+
+describe("audit rows are bounded (#1142)", () => {
+  it("caps an oversized member-supplied id on a refused save and delete", async () => {
+    const huge = `my:${"f".repeat(50_000)}`;
+    await save({ ...good, preset_id: huge });
+    await harness.post("/delete", { id: huge });
+    expect(mockRecordAudit).toHaveBeenCalledTimes(2);
+    for (const call of mockRecordAudit.mock.calls) {
+      const entry = call[1] as { targetId: string; result: string };
+      expect(entry.result).toBe("failure");
+      expect(entry.targetId.length).toBeLessThan(1_000);
+      expect(entry.targetId.length).toBeGreaterThan(0);
+    }
   });
 });
 

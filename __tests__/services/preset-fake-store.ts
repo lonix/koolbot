@@ -31,6 +31,7 @@ export function makeStore(label: string) {
     });
   const cursor = (list: () => Row[]) => ({
     sort: () => cursor(list),
+    skip: (n: number) => cursor(() => list().slice(n)),
     limit: (n: number) => cursor(() => list().slice(0, n)),
     lean: async (): Promise<Row[]> => {
       if (state.failFind) throw new Error(`${label} read failed`);
