@@ -43,7 +43,7 @@ process.env.WEBUI_SESSION_SECRET = "live-edit-groups-revision-secret";
 const { runLiveEdit } = await import("../../src/services/event-live-edit.js");
 type LiveEditOutcome =
   import("../../src/services/event-live-edit.js").LiveEditOutcome;
-const { configureGroupEditEffects, readPresetValue, GROUP_PRESET_ROW_ID } =
+const { readPresetValue, GROUP_PRESET_ROW_ID } =
   await import("../../src/services/event-live-edit-groups.js");
 const { customiseGroup, resetGroupCustomisation } =
   await import("../../src/services/event-leader-customise.js");
@@ -55,10 +55,19 @@ const EV = "65a000000000000000000001";
 const RED = "g_00000001";
 const BLUE = "g_00000002";
 const LEADER = "100000000000000001";
+const { makeEffects } =
+  await import("./event-live-edit-groups-effects-fake.js");
 const deps = {
   isEventsEnabled: async (): Promise<boolean | null> => true,
   maxGroups: async (): Promise<number | null> => 15,
   isEnding: (): boolean => false,
+  effects: makeEffects({
+    syncGroupName: async (_g, _e, k) => ({ groupKey: k, status: "applied" }),
+    syncGroupUserLimit: async (_g, _e, k) => ({
+      groupKey: k,
+      status: "applied",
+    }),
+  }),
 };
 const customiseDeps = {
   eventsEnabled: async (): Promise<boolean | null> => true,
@@ -132,11 +141,6 @@ beforeEach(() => {
   fake.failReads = false;
   resetMoveGuardForTests();
   seed();
-  configureGroupEditEffects({
-    syncName: async (_g, _e, k) => ({ groupKey: k, status: "applied" }),
-    syncUserLimit: async (_g, _e, k) => ({ groupKey: k, status: "applied" }),
-    retag: () => {},
-  });
 });
 
 const revision = (): unknown => store.get(EV)?.liveEditRevision;

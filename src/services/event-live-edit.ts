@@ -6,9 +6,11 @@
  * audit entry) per save.
  *
  * Rows delivered here: channel lead time and lock groups on/off. Names, sizes
- * and the preset (#1241) are rows of `event-live-edit-groups.ts`, listed in
- * `LIVE_EDIT_ROWS` below. Later steps (#1240 leaders and tags, #1242 kind and
- * add/remove, #1243 groups on/off) only ADD ROWS (see "Extension contract").
+ * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
+ * leaders, leader customisation, the leader label, tagging, the tag position
+ * and each team's tag (`event-live-edit-leaders-tags.ts`). Both are listed in
+ * `LIVE_EDIT_ROWS` below. Later steps (#1242 kind and add/remove, #1243
+ * groups on/off) only ADD ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`
  * has a table test over them)
@@ -118,6 +120,20 @@
  *     `reconcile` instead of reporting "already applied"; it asks
  *     `needsConfirmation(stored, stored)` first like any change.
  *   - `describe(value)`: plain text for the result and the confirmation page.
+ *   - `afterSave?(ctx)` and `afterSaveGroup?` (#1240): follow-up work that must
+ *     NOT run inside `apply`, because it takes locks that `apply` already holds
+ *     or waits on Discord for long (a leads-channel pass moves people through the
+ *     move lock; a nickname pass is paced per member). The executor runs it
+ *     after BOTH locks are released, for every change that was stored (applied or
+ *     partial), once per save per `afterSaveGroup` (rows with the same group
+ *     share one run: the first row in registry order supplies it, and its
+ *     `ctx.saved` lists every row stored in this save). It never throws into the
+ *     result (an error is logged), so it must be idempotent and decide from a
+ *     fresh read: the periodic scan is the backstop that makes a lost follow-up
+ *     converge. It reaches the outside world only through `ctx.effects`.
+ *   - `collect?(body)` (#1240): for a row whose control is several inputs (one
+ *     per group). It returns the posted value and the shown base as the two
+ *     texts that `parse` reads, or null when the row was not posted.
  * Order of execution is the order of `LIVE_EDIT_ROWS`. Values must be JSON
  * (they travel in the token and the audit row).
  *
@@ -138,6 +154,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { withEventMoveLock } from "./event-move-guard.js";
 import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
 import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
+import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -270,6 +287,12 @@ export interface ApplyContext<V extends JsonValue = JsonValue> {
   to: V;
   /** Synchronous: an end or cancel holds the event. Ask before every outward write. */
   ending(): boolean;
+  /**
+   * The outward effects (`deps.effects`), for a row whose `apply` or `reconcile`
+   * follows its stored change with a Discord call and reports it as `partial`
+   * (names and sizes, #1241). Absent: the row stores and reports it as owed.
+   */
+  effects?: LiveEditEffects;
 }
 
 export interface LiveEditRow<V extends JsonValue = JsonValue> {
@@ -304,6 +327,77 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
    * strings and numbers only. Absent: the value itself.
    */
   auditValue?(value: V): JsonValue;
+  /** See "Extension contract": follow-up run after the locks are released. */
+  afterSave?(ctx: AfterSaveContext): Promise<void> | void;
+  /** Rows with the same group share one `afterSave` run per save. */
+  afterSaveGroup?: string;
+  /** See "Extension contract": a row posted as several inputs. */
+  collect?(body: Record<string, unknown>): { raw: string; base: string } | null;
+}
+
+/** What the follow-up of a stored change may touch. Set by the route; absent means none. */
+export interface LiveEditEffects {
+  /**
+   * One leads-channel pass (`EventService.syncLeadsAccess`); never throws.
+   * `revoked` are people who lost access with this save: they are moved out of
+   * the channel at once (without it only people the permission cache already
+   * shows as unable to connect are, which can lag a write by a moment).
+   */
+  syncLeadsAccess(
+    guildId: string,
+    eventId: string,
+    revoked?: readonly string[],
+  ): Promise<void>;
+  /** Post or remove the "Customise team" messages (`EventService.syncGroupControls`). */
+  syncGroupControls(eventId: string): Promise<void>;
+  /**
+   * Nickname tags (`EventNicknameTags`): `sync` tags and re-tags from the stored
+   * original, `restore` puts every original back. The returned promise settles
+   * when the work is done and never rejects; callers do not wait for it (a
+   * team is paced at about 0.6 s per member).
+   */
+  syncTags(
+    guildId: string,
+    eventId: string,
+    mode: "sync" | "restore",
+  ): Promise<void>;
+  /**
+   * Finish the pending channel rename of one group (the channel pass, through
+   * the shared rename queue). Null when the server cannot be found.
+   */
+  syncGroupName(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<GroupChannelSyncOutcome | null>;
+  /** Finish the pending channel user limit of one group. Null when the server cannot be found. */
+  syncGroupUserLimit(
+    guildId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<GroupChannelSyncOutcome | null>;
+  /**
+   * Bring these members' nicknames in line with their group's stored tag, in the
+   * background (paced; never awaited by the save).
+   */
+  retagMembers(guildId: string, eventId: string, memberIds: string[]): void;
+}
+
+/** What one channel pass did for one group (`NameSyncOutcome` of the channel pass). */
+export interface GroupChannelSyncOutcome {
+  groupKey: string;
+  status: "applied" | "limited" | "failed" | "unconfirmed" | "skipped";
+  /** For `limited` (and a held-back refusal): when it is worth trying again. */
+  retryAfterMs?: number;
+  reason?: string;
+}
+
+export interface AfterSaveContext {
+  eventId: string;
+  guildId: string;
+  /** Every row stored in this save (applied or partial), by id. */
+  saved: ReadonlySet<string>;
+  effects: LiveEditEffects;
 }
 
 /** Type-erase a row for the registry (rows are typed where they are written). */
@@ -389,6 +483,7 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   lockGroupsRow,
   // Names, sizes and preset of the groups (#1241): `event-live-edit-groups.ts`.
   ...GROUP_EDIT_ROWS,
+  ...leadersTagsRows,
 ];
 
 // ---------------------------------------------------------------
@@ -476,9 +571,12 @@ export function parseSubmission(
   const entries: SubmittedEntry[] = [];
   const errors: string[] = [];
   for (const row of rows) {
-    const raw = source[valueField(row.id)];
-    if (typeof raw !== "string") continue;
-    const rawBase = source[baseField(row.id)];
+    const collected = row.collect
+      ? row.collect(source)
+      : { raw: source[valueField(row.id)], base: source[baseField(row.id)] };
+    if (!collected || typeof collected.raw !== "string") continue;
+    const raw = collected.raw;
+    const rawBase = collected.base;
     const base = typeof rawBase === "string" ? row.parse(rawBase) : null;
     if (!base || !base.ok) {
       errors.push(`${row.label}: the form is out of date. Reload the page.`);
@@ -765,6 +863,8 @@ export interface LiveEditDeps {
   maxGroups(): Promise<number | null>;
   /** Synchronous: an end or cancel holds this event (`EventService.isEventBeingEnded`). */
   isEnding(eventId: string): boolean;
+  /** What a row's `afterSave` may do (#1240). Without it follow-ups are skipped. */
+  effects?: LiveEditEffects;
 }
 
 export interface NotApplied {
@@ -839,10 +939,21 @@ export async function runLiveEdit(opts: {
   if (!OBJECT_ID_RE.test(opts.eventId)) return refuse("no-event");
   const eventId = canonicalId(opts.eventId);
 
+  /** Rows stored in this save (applied or partial): their follow-ups run below. */
+  const savedRows = new Set<string>();
   const locked = await withEventMoveLock(eventId, () =>
     withGroupLock(guildId, eventId, () => runLocked()),
   );
   if (locked.busy) return refuse("busy");
+  // Both locks are released here. Follow-ups (leads access, controls, nicknames)
+  // take locks of their own or wait on Discord, so they never run inside `apply`.
+  await runAfterSave({
+    rows,
+    savedRows,
+    guildId,
+    eventId,
+    effects: deps.effects,
+  });
   return locked.value;
 
   async function runLocked(): Promise<LiveEditOutcome> {
@@ -977,6 +1088,7 @@ export async function runLiveEdit(opts: {
           from: change.from,
           to: change.to,
           ending: (): boolean => deps.isEnding(eventId),
+          effects: deps.effects,
         };
         outcome =
           change.reconcile === true && row.reconcile
@@ -991,7 +1103,9 @@ export async function runLiveEdit(opts: {
       }
       if (outcome.status === "applied") {
         applied.push(change);
+        savedRows.add(change.rowId);
       } else if (outcome.status === "partial") {
+        savedRows.add(change.rowId);
         // Stored, but not finished: kept in the result and the audit with
         // what is owed, never folded into "not applied".
         partial.push({
@@ -1026,6 +1140,41 @@ export async function runLiveEdit(opts: {
       notApplied,
       alreadyApplied: plan.alreadyApplied,
     };
+  }
+}
+
+/**
+ * Run the follow-ups of the rows stored in this save, once per `afterSaveGroup`,
+ * in registry order, with no lock held. An error is logged and never reaches the
+ * result: the follow-up decides from a fresh read and the scan repeats it.
+ */
+async function runAfterSave(opts: {
+  rows: readonly LiveEditRow[];
+  savedRows: ReadonlySet<string>;
+  guildId: string;
+  eventId: string;
+  effects: LiveEditEffects | undefined;
+}): Promise<void> {
+  if (!opts.effects || opts.savedRows.size === 0) return;
+  const ranGroups = new Set<string>();
+  for (const row of opts.rows) {
+    if (!opts.savedRows.has(row.id) || !row.afterSave) continue;
+    const group = row.afterSaveGroup ?? row.id;
+    if (ranGroups.has(group)) continue;
+    ranGroups.add(group);
+    try {
+      await row.afterSave({
+        eventId: opts.eventId,
+        guildId: opts.guildId,
+        saved: opts.savedRows,
+        effects: opts.effects,
+      });
+    } catch (err) {
+      logger.error(
+        `Event ${sanitizeForLog(opts.eventId)}: the follow-up of live edit ${row.id} failed:`,
+        err,
+      );
+    }
   }
 }
 

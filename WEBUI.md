@@ -1760,8 +1760,8 @@ event is scheduled or active.
 **Leaders** (#1195) is a section of the host panel, and a column of the Groups card, only while
 the event has groups and **Group leaders** was ticked on the schedule form. With it off
 nothing about leaders shows, and setting a leader, renaming the label and pulling leaders
-refuse. (An event cannot switch leaders on or off after it is created until live settings (#1197)
-land. A repeating event's next occurrence keeps the switch, never the leaders.) It
+refuse. (Leaders can be switched on or off at any time in **Live settings** below. A repeating
+event's next occurrence keeps the switch, never the leaders.) It
 also needs `events.enabled`: setting a leader and pulling leaders refuse while it is off.
 
 - **Set the leader:** each team group has a picker of the people assigned to it, with a
@@ -1877,21 +1877,24 @@ set its clan tag from Discord; the host can put any team back at any time.
 - **Member data.** Nothing new is stored per member: the name and tag belong to the team. The
   audit entry carries the leader's id like any other audit entry (the audit log is kept; see
   the data registry note on `web-audit-log`).
-- **Changing the switches after creation** comes with live settings (#1197). The checks above
-  already read both switches at the moment of use, so flipping them while a form is open is safe.
+- **Changing the switches after creation** is done in **Live settings** (#1240, see **Leaders
+  and tags in Live settings** below). The checks above already read both switches at the moment
+  of use, so flipping them while a form is open is safe.
 
 **Live settings** (#1239) is the section of the host panel where the host changes the settings of
 a running event and saves once. It is the first step of live editing (#1197); the rows below work
-today, and later steps add leaders and tags, kind and adding or removing groups, and groups on or
-off, each as another row of the same form. Names, sizes and presets are described below
-(#1241).
+today, and later steps add kind and adding or removing groups, and groups on or
+off, each as another row of the same form. Leaders and clan tags are described under
+**Leaders and tags in Live settings** below, names, sizes and presets under
+**Group names, sizes and presets** (#1241).
 
 - **What can be changed now.** The **channel creation time** (minutes before the start, empty
   for the server default) while no channel of the event exists yet; once the main channel or any
   group channel exists it is shown as text and cannot be changed. **Lock groups** on or off (the
-  same switch as in Assign people), for an event with groups. The **name** and the **size** of each
-  group, and a **preset switch**, are described under "Group names, sizes and presets" below. Kinds,
-  tags and the group list are not editable here yet.
+  same switch as in Assign people), for an event with groups. The leaders and tag fields are
+  described under **Leaders and tags in Live settings**; the **name** and the **size** of each
+  group, and a **preset switch**, under **Group names, sizes and presets** below. Kinds and the
+  group list are not editable here yet.
 - **One save, one result.** Save plans from the event as it is at that moment, inside the same
   per-event lock as host moves and membership changes, so a save and a bulk move never run at
   the same time (the second answers that one is already in progress). Only the fields you
@@ -1934,6 +1937,56 @@ off, each as another row of the same form. Names, sizes and presets are describe
 - **Nothing new is stored per member.** The only new stored value is that revision counter on the
   event itself; the confirmation token is checked and then compared with the event.
 - **While an end or cancel holds the event** the section shows that instead of the form.
+
+**Leaders and tags in Live settings** (#1240) are six more fields of the Live settings form,
+shown for an event with groups. They can be changed at any time while the event is scheduled or
+active, by the host, and none of them asks for a confirmation (they are switches, and each can be
+switched back).
+
+- **Leaders** on or off. On makes the Leaders section and the leaders column appear and leaders
+  appointable. Off hides all of that, removes the leaders-only channel access at once (the same
+  pass the scan runs: overwrites first, then anyone who must leave is moved out) and removes the
+  Customise buttons. **Who was chosen is kept** and comes back when leaders are switched on again;
+  nothing is cleared. **What leaders are called** ("Captain", "Squad Lead") is a field of its
+  own; it can be set in the same save that turns leaders on.
+- **Leaders may rename their team and set its tag** (customisation) on or off. Off removes the
+  Customise button at once, and a form a leader already has open is refused when it is
+  submitted ("customisation is off", checked from the event as it is then, see **Team names and
+  tags**). The names and tags leaders chose are **kept**; the host's reset in the Customise
+  section is what puts the originals back. The switch only has an effect while leaders are on, so
+  it can be set before or together with leaders (a save that turns both on is valid in any
+  order, and one that turns leaders off ends customisation too without changing its stored
+  value).
+- **Clan tags on server nicknames** on or off, **where the tag goes** (before or after the name)
+  and **the tag of each team** (empty means none). Turning tags on backs up each member's original
+  nickname and then tags them; turning them off restores the originals now; changing a tag or the
+  position re-tags from the stored original, so a name is `[SKY] Alice` and never
+  `[SKY] [RED] Alice`. This is the one nickname logic of **Clan tags** (it never builds a name
+  from the current nickname). A tag edited here on a team a leader customised also becomes that
+  team's original tag, so the host's reset does not bring back a tag the host has replaced.
+- **Nicknames follow in the background.** The save stores the switch or tag and answers; the
+  nickname work then runs on its own, paced at about two edits per second, so a big team takes a
+  moment and the result text says "nicknames follow in the background". No lock is held while
+  it runs, so a bulk move or a membership change never waits for it. A member whose last edit
+  has an unknown outcome stays untouched for a minute (the **Clan tags** settle window) and is
+  finished by the next pass, which the Events scan also requests every minute: a switch flipped
+  back and forth, or a tag changed twice in a minute, ends with the right tag, once. Tag edits
+  never use the channel rename queue (that is for channel names only).
+- **The Discord passes follow the save, after its locks are released.** A leaders save asks for one
+  leaders-only channel pass and one pass over the Customise buttons; a customisation save asks
+  for the buttons pass. They decide from the event as it is then, not from what changed, and a
+  pass that fails is logged and repeated by the scan (it never turns a stored switch into a
+  failed save).
+- **Same rules as the rest of Live settings.** Each field posts the value it showed with the new
+  one and only changes when the host changed it; the write is conditional on that value, on the
+  event being open and on its server, from a fresh read inside the locks; saving the same form
+  again says "already applied"; one save is one result and one `event.host.settings` audit
+  entry; everything is refused while `events.enabled` is off or while the event is being ended.
+  The team tags of one save are written together or not at all (a tag somebody changed while
+  the form was open is reported and none of the save's tags is written).
+- **Nothing new is stored per member.** The fields already existed on the event; there is no new
+  member data (nicknames are backed up in the existing nickname backup, which the data export and
+  reset already cover).
 
 **Group names, sizes and presets** (#1241) are rows of the Live settings form. The form shows one
 name field and one size field per group, with the people count next to them, and a separate **Switch

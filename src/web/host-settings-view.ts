@@ -21,6 +21,10 @@ import {
   renderPresetForm,
   type GroupEditViewData,
 } from "./host-settings-groups.js";
+import {
+  renderLeadersTagsFields,
+  type LeadersTagsView,
+} from "./host-settings-leaders-tags-view.js";
 
 export interface SettingsGroupView {
   name: string;
@@ -46,6 +50,8 @@ export interface SettingsViewData {
   groups: SettingsGroupView[];
   /** Names, sizes and the preset switch (#1241); absent = the read-only table. */
   groupEdit?: GroupEditViewData;
+  /** Leaders and tags fields (#1240); null when the event has no groups. */
+  leadersTags?: LeadersTagsView | null;
 }
 
 function hidden(name: string, value: string): string {
@@ -103,6 +109,7 @@ export function renderSettingsSection(d: SettingsViewData): string {
 ${renderLead(d)}
 ${renderLock(d)}
 ${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
+${renderLeadersTagsFields(d.leadersTags ?? null)}
 <button type="submit">Save settings</button>
 </form>
 ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}`;

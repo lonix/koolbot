@@ -82,7 +82,9 @@ export interface IEventGroup {
    * What the host (or the preset) set before a leader first customised the
    * group (#1196): the values "reset" goes back to, and what a recurring
    * series' next occurrence starts with. Absent until the first leader edit.
-   * Written only by `event-leader-customise.ts`. Not user ids.
+   * Written by `event-leader-customise.ts`; the host's live edit of a team's
+   * tag also writes `originalTag` for a customised group (the host's tag is
+   * the new original, `event-live-edit-leaders-tags.ts`). Not user ids.
    */
   originalName?: string;
   originalTag?: string;

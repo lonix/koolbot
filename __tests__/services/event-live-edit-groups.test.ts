@@ -48,7 +48,6 @@ type LiveEditDeps =
 type LiveEditOutcome =
   import("../../src/services/event-live-edit.js").LiveEditOutcome;
 const {
-  configureGroupEditEffects,
   groupNameRowId,
   groupSizeRowId,
   groupPresetRow,
@@ -61,6 +60,10 @@ type NameSyncOutcome =
   import("../../src/services/event-group-channels.js").NameSyncOutcome;
 const { planAssign, planRandomise, seededRandom } =
   await import("../../src/services/event-group-plan.js");
+const { makeEffects } =
+  await import("./event-live-edit-groups-effects-fake.js");
+type LiveEditEffects =
+  import("../../src/services/event-live-edit.js").LiveEditEffects;
 const { resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
 const { boundAuditEntry } = await import("../../src/web/audit.js");
@@ -140,10 +143,15 @@ let enabled: boolean | null = true;
 let ending = false;
 /** The ending hold turns on once a row's own write has landed. */
 let endAfterRowWrite = false;
+/** The effects the rows get; undefined = no Discord wired. */
+let effects: LiveEditEffects | undefined;
 const deps: LiveEditDeps = {
   isEventsEnabled: async () => enabled,
   maxGroups: async () => 15,
   isEnding: () => ending || (endAfterRowWrite && rowWrites().length > 0),
+  get effects(): LiveEditEffects | undefined {
+    return effects;
+  },
 };
 
 const calls: string[] = [];
@@ -179,22 +187,22 @@ beforeEach(() => {
   limitResult = (key) => ({ groupKey: key, status: "applied" });
   resetMoveGuardForTests();
   seed();
-  configureGroupEditEffects({
-    async syncName(_g, _e, key) {
+  effects = makeEffects({
+    async syncGroupName(_g, _e, key) {
       calls.push(`name:${key}`);
       if (throwInEffects) throw new Error("gateway down");
       const out = nameResult(key);
       if (out?.status === "applied") clearFlag(key, "nameSyncPending");
       return out;
     },
-    async syncUserLimit(_g, _e, key) {
+    async syncGroupUserLimit(_g, _e, key) {
       calls.push(`limit:${key}`);
       if (throwInEffects) throw new Error("gateway down");
       const out = limitResult(key);
       if (out?.status === "applied") clearFlag(key, "sizeSyncPending");
       return out;
     },
-    retag(_g, _e, memberIds) {
+    retagMembers(_g, _e, memberIds) {
       retagCalls.push({ memberIds });
     },
   });
@@ -450,7 +458,7 @@ describe("rename a group", () => {
     });
 
     it("without effects wired (no Discord) the name is saved and the channel is owed", async () => {
-      configureGroupEditEffects(null);
+      effects = undefined;
       const out = await run([entry(NAME_A, "Apex", "Alpha")]);
       expect(done(out).partial[0].owed).toContain("could not be reached");
       expect(group(A).nameSyncPending).toBe(true);

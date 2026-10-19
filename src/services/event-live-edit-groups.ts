@@ -91,16 +91,16 @@
  *
  * ## Dependencies on the world
  *
- * Rows have no client. The channel and nickname effects are injected once at
- * startup (`configureGroupEditEffects`, called where the host panel's Settings
- * section is wired) and replaced in tests. Without them a row still stores its
- * value and reports the channel as owed.
+ * Rows have no client. The channel and nickname effects come in through
+ * `ctx.effects` (`deps.effects`, built by `createLiveEditEffects` in
+ * `event-live-edit-effects.ts`, the one mechanism of the core) and are replaced
+ * in tests. Without them a row still stores its value and reports the channel
+ * as owed.
  *
  * This module imports only TYPES from the core, so the core can list its rows in
  * `LIVE_EDIT_ROWS` without an import cycle.
  */
 
-import type { Client } from "discord.js";
 import { Event, type IEvent } from "../models/event.js";
 import { EVENT_GROUP_KINDS } from "../models/event-group-kinds.js";
 import type { EventGroupPreset } from "../content/event-group-presets.js";
@@ -121,73 +121,6 @@ import type {
   LiveEditRow,
   RowOutcome,
 } from "./event-live-edit.js";
-
-// ---------------------------------------------------------------
-// Effects (the Discord side), injected
-// ---------------------------------------------------------------
-
-export interface GroupEditEffects {
-  /** Finish the pending channel rename of one group (the channel pass). */
-  syncName(
-    guildId: string,
-    eventId: string,
-    groupKey: string,
-  ): Promise<NameSyncOutcome | null>;
-  /** Finish the pending channel user limit of one group (the channel pass). */
-  syncUserLimit(
-    guildId: string,
-    eventId: string,
-    groupKey: string,
-  ): Promise<NameSyncOutcome | null>;
-  /** Bring these members' nicknames in line; must not block the caller. */
-  retag(guildId: string, eventId: string, memberIds: string[]): void;
-}
-
-let effects: GroupEditEffects | null = null;
-
-/** Set (or, with null, clear) the effects the rows use. Called at startup and by tests. */
-export function configureGroupEditEffects(next: GroupEditEffects | null): void {
-  effects = next;
-}
-
-/**
- * The real effects: the channel passes of the event service and the one tag
- * function. The modules behind them are loaded on first use, so listing these
- * rows in the core's registry does not pull the whole Discord layer into it.
- */
-export function createGroupEditEffects(client: Client): GroupEditEffects {
-  const customise = async (): Promise<
-    ReturnType<typeof import("./event-leader-customise.js").createCustomiseDeps>
-  > =>
-    (await import("./event-leader-customise.js")).createCustomiseDeps(client);
-  return {
-    async syncName(
-      guildId,
-      eventId,
-      groupKey,
-    ): Promise<NameSyncOutcome | null> {
-      return (await customise()).syncName(guildId, eventId, groupKey);
-    },
-    async syncUserLimit(
-      guildId,
-      eventId,
-      groupKey,
-    ): Promise<NameSyncOutcome | null> {
-      const { EventService } = await import("./event-service.js");
-      const outcomes = await EventService.getInstance(
-        client,
-      ).syncGroupUserLimits(eventId, guildId, groupKey);
-      return outcomes?.find((o) => o.groupKey === groupKey) ?? null;
-    },
-    retag(guildId, eventId, memberIds): void {
-      void customise()
-        .then((deps) => deps.retag(guildId, eventId, memberIds))
-        .catch((err: unknown) =>
-          logger.error("Live edit: the nickname update failed:", err),
-        );
-    },
-  };
-}
 
 // ---------------------------------------------------------------
 // Row ids
@@ -290,26 +223,25 @@ const OPEN = [...OPEN_STATES];
 
 /** The rename of one group's channel as a thunk, or null without effects. */
 function renameThunk(
-  guildId: string,
-  eventId: string,
+  ctx: ApplyContext<JsonValue>,
   key: string,
 ): (() => Promise<NameSyncOutcome | null>) | null {
-  const fx = effects;
+  const fx = ctx.effects;
   return fx
-    ? (): Promise<NameSyncOutcome | null> => fx.syncName(guildId, eventId, key)
+    ? (): Promise<NameSyncOutcome | null> =>
+        fx.syncGroupName(ctx.guildId, ctx.eventId, key)
     : null;
 }
 
 /** The user limit of one group's channel as a thunk, or null without effects. */
 function limitThunk(
-  guildId: string,
-  eventId: string,
+  ctx: ApplyContext<JsonValue>,
   key: string,
 ): (() => Promise<NameSyncOutcome | null>) | null {
-  const fx = effects;
+  const fx = ctx.effects;
   return fx
     ? (): Promise<NameSyncOutcome | null> =>
-        fx.syncUserLimit(guildId, eventId, key)
+        fx.syncGroupUserLimit(ctx.guildId, ctx.eventId, key)
     : null;
 }
 
@@ -332,11 +264,7 @@ function nameRow(index: number): LiveEditRow {
         message: "the channel was not renamed because the event is being ended",
       };
     }
-    const outcome = await attempt(
-      renameThunk(ctx.guildId, ctx.eventId, key),
-      "channel rename",
-      key,
-    );
+    const outcome = await attempt(renameThunk(ctx, key), "channel rename", key);
     const owed = renameOwed(outcome);
     return owed === null
       ? { status: "applied" }
@@ -452,7 +380,7 @@ function sizeRow(index: number): LiveEditRow {
       };
     }
     const outcome = await attempt(
-      limitThunk(ctx.guildId, ctx.eventId, key),
+      limitThunk(ctx, key),
       "channel user limit",
       key,
     );
@@ -686,7 +614,7 @@ async function runFollowUps(
         } else {
           const text = renameOwed(
             await attempt(
-              renameThunk(ctx.guildId, ctx.eventId, item.key),
+              renameThunk(ctx, item.key),
               "channel rename",
               item.key,
             ),
@@ -700,7 +628,7 @@ async function runFollowUps(
         } else {
           const text = limitOwed(
             await attempt(
-              limitThunk(ctx.guildId, ctx.eventId, item.key),
+              limitThunk(ctx, item.key),
               "channel user limit",
               item.key,
             ),
@@ -711,7 +639,7 @@ async function runFollowUps(
     }
     if (item.retag && item.retag.length > 0) {
       try {
-        effects?.retag(ctx.guildId, ctx.eventId, item.retag);
+        ctx.effects?.retagMembers(ctx.guildId, ctx.eventId, item.retag);
       } catch (err) {
         logger.error("Live edit: could not start the nickname update:", err);
       }

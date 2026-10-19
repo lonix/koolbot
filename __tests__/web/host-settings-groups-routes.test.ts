@@ -64,7 +64,6 @@ const { ConfigService } = await import("../../src/services/config-service.js");
 const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
 const { resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
-const groupEdit = await import("../../src/services/event-live-edit-groups.js");
 
 const SECRET = "test-secret-for-host-settings-groups";
 const GUILD = "guild-1";
@@ -270,22 +269,6 @@ beforeEach(() => {
     entries: [preset("builtin:pair", ["Pair One", "Pair Two"])],
   };
   resetMoveGuardForTests();
-  groupEdit.configureGroupEditEffects({
-    async syncName(_g, _e, key) {
-      effectCalls.push(`name:${key}`);
-      if (nameStatus === "limited") {
-        return { groupKey: key, status: "limited", retryAfterMs: 420_000 };
-      }
-      delete group(key).nameSyncPending;
-      return { groupKey: key, status: "applied" };
-    },
-    async syncUserLimit(_g, _e, key) {
-      effectCalls.push(`limit:${key}`);
-      delete group(key).sizeSyncPending;
-      return { groupKey: key, status: "applied" };
-    },
-    retag: () => {},
-  });
 
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
     async () =>
@@ -309,6 +292,20 @@ beforeEach(() => {
     },
     getGroupChannelReport: () => null,
     isEventBeingEnded: () => false,
+    // The channel passes the names and sizes rows reach through the effects.
+    syncGroupNames: async (_e: string, _g: string, key: string) => {
+      effectCalls.push(`name:${key}`);
+      if (nameStatus === "limited") {
+        return [{ groupKey: key, status: "limited", retryAfterMs: 420_000 }];
+      }
+      delete group(key).nameSyncPending;
+      return [{ groupKey: key, status: "applied" }];
+    },
+    syncGroupUserLimits: async (_e: string, _g: string, key: string) => {
+      effectCalls.push(`limit:${key}`);
+      delete group(key).sizeSyncPending;
+      return [{ groupKey: key, status: "applied" }];
+    },
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async (key: string) => key === "events.enabled" && eventsEnabled,
@@ -324,7 +321,6 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
-  groupEdit.configureGroupEditEffects(null);
 });
 
 describe("the group editor on the page", () => {

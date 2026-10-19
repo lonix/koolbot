@@ -17,7 +17,6 @@ import {
   type LiveEditOutcome,
 } from "../../src/services/event-live-edit.js";
 import {
-  configureGroupEditEffects,
   groupNameRowId,
   groupPresetRow,
   groupSizeRowId,
@@ -53,6 +52,17 @@ const deps: LiveEditDeps = {
   isEventsEnabled: async () => true,
   maxGroups: async () => 15,
   isEnding: () => false,
+  effects: {
+    syncGroupName: async (_g, _e, key) => ({ groupKey: key, status: "applied" }),
+    syncGroupUserLimit: async (_g, _e, key) => ({
+      groupKey: key,
+      status: "applied",
+    }),
+    retagMembers: () => undefined,
+    syncLeadsAccess: async () => undefined,
+    syncGroupControls: async () => undefined,
+    syncTags: async () => undefined,
+  },
 };
 
 type Raw = Record<string, unknown>;
@@ -67,20 +77,11 @@ describeWithMongo(
     });
     beforeEach(async () => {
       await Event.deleteMany({});
-      configureGroupEditEffects({
-        syncName: async (_g, _e, key) => ({ groupKey: key, status: "applied" }),
-        syncUserLimit: async (_g, _e, key) => ({
-          groupKey: key,
-          status: "applied",
-        }),
-        retag: () => undefined,
-      });
       jest
         .spyOn(ConfigService.getInstance(), "getBoolean")
         .mockImplementation(async (key: string) => key === "events.enabled");
     });
     afterEach(() => {
-      configureGroupEditEffects(null);
       jest.restoreAllMocks();
     });
 

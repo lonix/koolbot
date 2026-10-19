@@ -11,7 +11,7 @@ import { DiscordAPIError, RateLimitError } from "discord.js";
 /**
  * The rows of names and sizes (#1241) driven through the REAL channel passes
  * (`EventGroupChannels.syncNames` / `syncUserLimits`), the REAL shared rename
- * queue and the REAL `createGroupEditEffects`, with a fake Discord REST client
+ * queue and the REAL `createLiveEditEffects`, with a fake Discord REST client
  * and the in-memory Event stand-in. This is the evidence for the acceptance
  * criteria that a rename waits on Discord's budget without sleeping, is
  * reported, and is finished later, and that a lower size moves nobody.
@@ -66,11 +66,11 @@ const { getRenameQueue } =
   await import("../../src/services/event-rename-queue.js");
 const { runLiveEdit } = await import("../../src/services/event-live-edit.js");
 const {
-  configureGroupEditEffects,
-  createGroupEditEffects,
   groupNameRowId,
   groupSizeRowId,
 } = await import("../../src/services/event-live-edit-groups.js");
+const { createLiveEditEffects } =
+  await import("../../src/services/event-live-edit-effects.js");
 const { resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
 
@@ -112,6 +112,7 @@ const deps = {
   isEventsEnabled: async (): Promise<boolean | null> => true,
   maxGroups: async (): Promise<number | null> => 15,
   isEnding: (): boolean => false,
+  effects: createLiveEditEffects({} as never),
 };
 
 let guildFound = true;
@@ -202,7 +203,6 @@ function wire(): void {
     syncGroupUserLimits: async (e, _g, k) =>
       guildFound ? channels.syncUserLimits(e, guild as never, k) : null,
   };
-  configureGroupEditEffects(createGroupEditEffects({} as never));
 }
 
 const entry = (rowId: string, to: unknown, base: unknown) => ({
@@ -245,7 +245,6 @@ beforeEach(() => {
   wire();
 });
 afterEach(() => {
-  configureGroupEditEffects(null);
   jest.restoreAllMocks();
 });
 
@@ -336,32 +335,32 @@ describe("a size change through the real channel pass", () => {
   });
 });
 
-describe("createGroupEditEffects", () => {
-  const effects = (): ReturnType<typeof createGroupEditEffects> =>
-    createGroupEditEffects({} as never);
+describe("createLiveEditEffects (names, sizes, tags)", () => {
+  const effects = (): ReturnType<typeof createLiveEditEffects> =>
+    createLiveEditEffects({} as never);
 
   it("finds the outcome of the asked group, and answers null when the pass has none or the server is gone", async () => {
     stored().nameSyncPending = true;
-    expect(await effects().syncName(GUILD, EV, A)).toEqual({
+    expect(await effects().syncGroupName(GUILD, EV, A)).toEqual({
       groupKey: A,
       status: "applied",
     });
     // Nothing pending for B: the pass answers no outcome for it.
-    expect(await effects().syncName(GUILD, EV, B)).toBeNull();
+    expect(await effects().syncGroupName(GUILD, EV, B)).toBeNull();
     stored().sizeSyncPending = true;
     limits.set(A_CH, 0);
-    expect(await effects().syncUserLimit(GUILD, EV, A)).toEqual({
+    expect(await effects().syncGroupUserLimit(GUILD, EV, A)).toEqual({
       groupKey: A,
       status: "applied",
     });
-    expect(await effects().syncUserLimit(GUILD, EV, B)).toBeNull();
+    expect(await effects().syncGroupUserLimit(GUILD, EV, B)).toBeNull();
     guildFound = false;
-    expect(await effects().syncName(GUILD, EV, A)).toBeNull();
-    expect(await effects().syncUserLimit(GUILD, EV, A)).toBeNull();
+    expect(await effects().syncGroupName(GUILD, EV, A)).toBeNull();
+    expect(await effects().syncGroupUserLimit(GUILD, EV, A)).toBeNull();
   });
 
   it("retag brings each member in line with the one tag function and asks for a sweep, in the background", async () => {
-    effects().retag(GUILD, EV, ["u1", "u2"]);
+    effects().retagMembers(GUILD, EV, ["u1", "u2"]);
     await new Promise((r) => setTimeout(r, 20));
     expect(syncMember).toHaveBeenCalledTimes(2);
     expect(syncMember.mock.calls.map((c) => (c[0] as { userId: string }).userId)).toEqual([
