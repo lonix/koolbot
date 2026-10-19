@@ -131,7 +131,12 @@ jobs:
     timeout-minutes: 15
     services:
       mongo:
-        image: mongo:8.0
+        # TEMPORARY pin to MongoDB 7.0 (the app and Compose stay on 8). mongo:8.0 refuses to
+        # start on Linux kernel >= 6.19 (SERVER-121912,
+        # https://jira.mongodb.org/browse/SERVER-121912), which some GitHub-hosted runners
+        # now ship. Return to an exact mongo:8.0.x tag once MongoDB ships a fix or runners
+        # reach kernel >= 7.0.14. Tracked in lonix/koolbot#1269 (see #1264).
+        image: mongo:7.0.45
         ports:
           - 127.0.0.1:27017:27017
         options: >-
@@ -155,6 +160,25 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Log MongoDB image and server version
+        run: |
+          set -euo pipefail
+          cid="$(docker ps --filter 'publish=27017' --format '{{.ID}}' | head -n 1)"
+          image_ref="$(docker inspect --format '{{.Config.Image}}' "$cid")"
+          image_id="$(docker inspect --format '{{.Image}}' "$cid")"
+          repo_digest="$(docker image inspect --format '{{join .RepoDigests ", "}}' "$image_id" || true)"
+          server_version="$(docker exec "$cid" mongosh --quiet --eval 'db.version()')"
+          echo "MongoDB image: ${image_ref}"
+          echo "MongoDB image id: ${image_id}"
+          echo "MongoDB image digest: ${repo_digest:-n/a}"
+          echo "MongoDB server version: ${server_version}"
+          {
+            echo "Integration MongoDB: ${server_version} (temporary pin, see #1269)"
+            echo ""
+            echo "- Image: \`${image_ref}\`"
+            echo "- Digest: \`${repo_digest:-n/a}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run integration tests
         run: npm run test:integration
