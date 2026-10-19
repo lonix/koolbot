@@ -684,10 +684,14 @@ function presetDiff(
   return out;
 }
 
-/** What is still owed to the channels of a group (names and user limits), as text. */
+/**
+ * What is still owed to the channels of a group (names and user limits), as text.
+ * The captains lobby is not looked at (#1263): a preset switch never touches it,
+ * so work owed to its channel is not this row's to retry or report.
+ */
 function pendingChannelWork(event: IEvent): string | null {
   const parts: string[] = [];
-  (event.groups ?? []).forEach((g, i) => {
+  visibleGroups(event).forEach(({ group: g }, i) => {
     if (!g.channelId) return;
     if (g.nameSyncPending === true) {
       parts.push(`group ${i + 1}'s channel still has the old name`);
@@ -712,7 +716,7 @@ async function runFollowUps(
 ): Promise<string[]> {
   const owed: string[] = [];
   for (const item of work) {
-    const where = `Group ${(ctx.event.groups ?? []).findIndex((g) => g.key === item.key) + 1}`;
+    const where = `Group ${visibleGroups(ctx.event).findIndex(({ group }) => group.key === item.key) + 1}`;
     if (item.channelId) {
       if (item.name) {
         if (ctx.ending()) {
@@ -906,7 +910,7 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
       : { status: "partial", message: owed.join("; ") };
   },
   async reconcile(ctx) {
-    const work = (ctx.event.groups ?? []).flatMap((g) =>
+    const work = visibleGroups(ctx.event).flatMap(({ group: g }) =>
       g.channelId && (g.nameSyncPending === true || g.sizeSyncPending === true)
         ? [
             {

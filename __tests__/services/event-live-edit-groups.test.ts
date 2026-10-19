@@ -1438,6 +1438,81 @@ describe("switch preset and the captains lobby (#1263)", () => {
     expect(writes).toEqual([]);
   });
 
+  describe("work owed to the lobby's channel is never retried or reported by a preset switch", () => {
+    const owingLobby = (): void => {
+      seedWithLobby();
+      Object.assign(group(L), {
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    };
+    const matching = {
+      id: "",
+      groups: [
+        { name: "Alpha", kind: "team", size: 3, tag: "A" },
+        { name: "Bravo", kind: "team", size: null, tag: "" },
+        { name: "Charlie", kind: "team", size: 2, tag: "" },
+      ],
+    };
+
+    it("reselecting a preset that already matches the visible groups makes no call for the lobby and owes nothing", async () => {
+      owingLobby();
+      const out = done(
+        await run([entry(GROUP_PRESET_ROW_ID, matching, baseOf())]),
+      );
+      expect(calls).toEqual([]);
+      expect(out.partial).toEqual([]);
+      expect(out.applied).toEqual([]);
+      expect(group(L)).toMatchObject({
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    });
+
+    it("a switch that changes a size renames and resizes only its own groups, and is not partial because of the lobby", async () => {
+      owingLobby();
+      const out = done(
+        await run([
+          entry(
+            GROUP_PRESET_ROW_ID,
+            {
+              ...matching,
+              groups: [
+                { name: "Alpha", kind: "team", size: 8, tag: "A" },
+                ...matching.groups.slice(1),
+              ],
+            },
+            baseOf(),
+          ),
+        ]),
+      );
+      expect(out.applied).toHaveLength(1);
+      expect(out.partial).toEqual([]);
+      expect(calls).toEqual([`limit:${A}`]);
+      expect(group(L)).toMatchObject({
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    });
+
+    it("an owed group's own channel work is still retried, numbered as the host sees the groups", async () => {
+      owingLobby();
+      Object.assign(group(B), { nameSyncPending: true });
+      nameResult = (key) => ({
+        groupKey: key,
+        status: "limited",
+        retryAfterMs: 60_000,
+      });
+      const out = done(
+        await run([entry(GROUP_PRESET_ROW_ID, matching, baseOf())]),
+      );
+      expect(calls).toEqual([`name:${B}`]);
+      expect(out.partial[0].owed).toContain(
+        "Group 2: the channel is not renamed yet",
+      );
+    });
+  });
+
   it("a preset name is checked against the whole setup by the group's own place: a visible group cannot take the lobby's name", async () => {
     seedWithLobby();
     const out = await run([
