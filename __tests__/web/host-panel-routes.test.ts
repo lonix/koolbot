@@ -197,6 +197,7 @@ beforeEach(() => {
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => events[id] ?? null,
     getGroupChannelReport: () => groupReport,
+    isEventBeingEnded: () => false,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async () => false,

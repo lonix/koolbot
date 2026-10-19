@@ -245,6 +245,7 @@ beforeEach(() => {
       return d ? (JSON.parse(JSON.stringify(d)) as unknown) : null;
     },
     getGroupChannelReport: () => null,
+    isEventBeingEnded: () => false,
     syncGroupNames,
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({

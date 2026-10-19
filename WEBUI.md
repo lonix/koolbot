@@ -1624,9 +1624,8 @@ under Events you host, and the panel never changes the Discord event itself.
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
 event's groups. Scheduled and active events also show a section for each control:
 **Assign people**, **Move people**, **End the event**, **Team names and tags** (below) and, when
-the event has leaders switched on, **Leaders** (below) work today; live settings are added by a later update, and
-until then it says it is not available yet. Ended and cancelled events
-show the read-only summary only. Each action a host takes is recorded in the audit
+the event has leaders switched on, **Leaders** (below) and **Live settings** (below) work today.
+Ended and cancelled events show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.
 
@@ -1880,6 +1879,59 @@ set its clan tag from Discord; the host can put any team back at any time.
   the data registry note on `web-audit-log`).
 - **Changing the switches after creation** comes with live settings (#1197). The checks above
   already read both switches at the moment of use, so flipping them while a form is open is safe.
+
+**Live settings** (#1239) is the section of the host panel where the host changes the settings of
+a running event and saves once. It is the first step of live editing (#1197); the rows below work
+today, and later steps add leaders and tags, names, sizes and presets, kind and adding or
+removing groups, and groups on or off, each as another row of the same form.
+
+- **What can be changed now.** The **channel creation time** (minutes before the start, empty
+  for the server default) while no channel of the event exists yet; once the main channel or any
+  group channel exists it is shown as text and cannot be changed. **Lock groups** on or off (the
+  same switch as in Assign people), for an event with groups. Names, sizes, kinds, tags and the
+  group list are not editable here yet.
+- **One save, one result.** Save plans from the event as it is at that moment, inside the same
+  per-event lock as host moves and membership changes, so a save and a bulk move never run at
+  the same time (the second answers that one is already in progress). Only the fields you
+  changed are written: each field of the form carries the value it showed, so saving an
+  unrelated field never puts back a value somebody else changed meanwhile. A field somebody
+  else changed while the form was open is reported ("was changed by someone else") and left
+  alone; the other fields still save. The result lists what was saved and anything that was
+  not, and saving the same form again converges: what is already applied reads "already
+  applied", and a form with nothing to change says so. A change that is stored but whose
+  follow-up is not finished (a later step's channel rename that Discord refused, for example)
+  is listed as "saved but not finished" with what is still owed, and saving the same form
+  again finishes it.
+- **The channel creation time and channel creation.** The save is refused once a channel
+  exists. A channel that is being created at that very moment is handled too: the scan only
+  records a new channel when the creation time is still the one it decided from, so a shorter
+  or longer time you saved meanwhile wins, the new channel is removed again and the next scan
+  decides from the saved time.
+- **Refused, and nothing changed,** while `events.enabled` is off (or cannot be read), for an
+  ended or cancelled event, and for an event that is being ended. The section then shows why
+  instead of the form.
+- **Confirmation.** A change that needs confirmation (none of the rows above does; the later
+  steps use it) is answered with a confirmation page that lists exactly what will change and
+  why, and nothing is applied until you confirm. The page carries a signed token, made with the
+  Web UI session secret, that binds the event, the server, your sign-in, a ten minute expiry
+  and the exact set of changes. Confirming plans again from the event as it is then and applies
+  only when that is exactly the confirmed set: a token for another event, another person or
+  another change, an expired one, one used a second time (also after the value was changed back
+  in between: every save through Live settings counts on a revision number stored on the event,
+  and a token only works at the revision it was issued at), and one for an event that changed
+  since the page was shown all apply nothing. Without a session secret a change that needs
+  confirmation is refused. There is no browser-only confirm dialog.
+- **Groups over their size** (more people than the size, after a later step lowers a size) are
+  shown with an "over size" mark in the section's table. That state is worked out each time from
+  the member count and the size; it is never stored.
+- **Audit.** Each save is one audit entry, `event.host.settings`, with the outcome (`applied`,
+  `partial`, `not-applied`, `nothing-to-do`, `invalid`, a refusal code or `needs-confirmation`)
+  and the changed fields with their old and new values; confirming is one entry,
+  `event.host.settings-confirm`. A repeating event's next occurrence starts from the creation
+  time saved here (with or without groups), like the rest of the group setup.
+- **Nothing new is stored per member.** The only new stored value is that revision counter on the
+  event itself; the confirmation token is checked and then compared with the event.
+- **While an end or cancel holds the event** the section shows that instead of the form.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can

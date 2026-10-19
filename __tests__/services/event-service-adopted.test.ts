@@ -133,6 +133,12 @@ describe("adopted native events in the event scan (#1034)", () => {
     const service = svc();
     await service.processEvent(adopted(), {}, NOW, windows);
     expect(service.claimEventChannel).toHaveBeenCalledTimes(1);
+    // The scan's claim is held to the lead time it decided from (#1239).
+    expect(service.claimEventChannel).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { enforceLead: true },
+    );
     expect(service.postReminder).toHaveBeenCalledTimes(1);
   });
 

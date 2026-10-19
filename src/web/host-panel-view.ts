@@ -67,8 +67,10 @@ export const HOST_SECTIONS: readonly HostSectionDef[] = [
   {
     id: "settings",
     title: "Live settings",
-    placeholder: "Change names, sizes and tags while the event runs.",
-    needsGroups: true,
+    placeholder: "Change the settings of the event while it runs.",
+    // The channel creation time applies to every event; the lock row appears
+    // only while the event has groups (and #1243 switches groups on from here).
+    needsGroups: false,
   },
 ];
 

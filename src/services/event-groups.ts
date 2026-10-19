@@ -240,6 +240,26 @@ function isBlankRow(row: RawGroupRow): boolean {
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
+/**
+ * The one rule for the per-event channel lead time (the event form, the host
+ * panel's live edit #1239): empty is "use the server default" (null), else a
+ * whole number of minutes from `CHANNEL_LEAD_MIN` to `CHANNEL_LEAD_MAX`.
+ */
+export function checkChannelLead(
+  raw: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const text = raw.trim();
+  if (!text) return { ok: true, value: null };
+  const lead = /^\d{1,5}$/.test(text) ? Number(text) : NaN;
+  if (!(lead >= CHANNEL_LEAD_MIN && lead <= CHANNEL_LEAD_MAX)) {
+    return {
+      ok: false,
+      error: `Channel creation time must be a whole number of minutes from ${CHANNEL_LEAD_MIN} to ${CHANNEL_LEAD_MAX}, or empty to use the server default.`,
+    };
+  }
+  return { ok: true, value: lead };
+}
+
 /** Collapse runs of whitespace and trim, so "  Red   Team " is "Red Team". */
 export function normalizeGroupText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -384,18 +404,9 @@ export function validateGroupSetup(
     errors,
   );
 
-  let channelLeadMinutes: number | null = null;
-  const leadRaw = input.channelLeadMinutes.trim();
-  if (leadRaw) {
-    const lead = /^\d{1,5}$/.test(leadRaw) ? Number(leadRaw) : NaN;
-    if (!(lead >= CHANNEL_LEAD_MIN && lead <= CHANNEL_LEAD_MAX)) {
-      errors.push(
-        `Channel creation time must be a whole number of minutes from ${CHANNEL_LEAD_MIN} to ${CHANNEL_LEAD_MAX}, or empty to use the server default.`,
-      );
-    } else {
-      channelLeadMinutes = lead;
-    }
-  }
+  const lead = checkChannelLead(input.channelLeadMinutes);
+  if (!lead.ok) errors.push(lead.error);
+  const channelLeadMinutes = lead.ok ? lead.value : null;
 
   // No rows typed in and a preset chosen: use the preset's groups (this is
   // what a browser without scripts posts).

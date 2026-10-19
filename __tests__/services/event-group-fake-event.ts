@@ -58,6 +58,11 @@ function matches(doc: Doc, filter: Record<string, unknown>): boolean {
       }
     } else if (k === "groups.captainId") {
       if (!doc.groups.some((g) => g.captainId === v)) return false;
+    } else if (k === "groupsLocked") {
+      // `true`, or `{ $ne: true }` for "not locked" (a row without the field).
+      const locked = doc.groupsLocked === true;
+      const want = typeof v === "object" ? !(v as { $ne: boolean }).$ne : v;
+      if (locked !== want) return false;
     } else if (k === "captainsEnabled") {
       if ((doc.captainsEnabled ?? false) !== v) return false;
     } else if (k === "groups") {
