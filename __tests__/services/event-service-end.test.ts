@@ -306,6 +306,88 @@ describe("the scheduled end runs the shared teardown", () => {
     expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
   });
 
+  describe("groups switched off and kept as history (#1243)", () => {
+    // A switch-off keeps the groups with their members and clears every channel id.
+    const kept = [
+      {
+        key: "g_a",
+        name: "A",
+        kind: "team",
+        channelId: null,
+        memberIds: ["u1"],
+      },
+      { key: "g_b", name: "B", kind: "team", memberIds: [] },
+    ];
+
+    it("the scheduled end still claims the event (the snapshot is the stored groups, not an empty list)", async () => {
+      const { service, guild } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      await service.processEvent(
+        row({ groupsEnabled: false, groups: kept }),
+        guild,
+        AFTER_END,
+        WINDOWS,
+      );
+      expect(store.get(ID)?.state).toBe("ended");
+      // Groups are off: the group channel pass does not run for it.
+      expect(service.groupChannels.cleanup).not.toHaveBeenCalled();
+    });
+
+    it("a scheduled end of a RECURRING event claims it too (the successor is made from an ended row)", async () => {
+      const { service, guild } = setup();
+      store.set(
+        ID,
+        stored({ groupsEnabled: false, groups: kept, recurrence: "weekly" }),
+      );
+      await service.processEvent(
+        row({ groupsEnabled: false, groups: kept, recurrence: "weekly" }),
+        guild,
+        AFTER_END,
+        WINDOWS,
+      );
+      expect(store.get(ID)?.state).toBe("ended");
+    });
+
+    it("a channel recorded on a disabled group still stops the claim", async () => {
+      const { service, guild } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      let release!: () => void;
+      guild.channels.fetch = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(null);
+          }),
+      );
+      const scan = service.processEvent(
+        row({ groupsEnabled: false, groups: kept }),
+        guild,
+        AFTER_END,
+        WINDOWS,
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      store.set(
+        ID,
+        stored({
+          groupsEnabled: false,
+          groups: [{ ...kept[0], channelId: "c9" }, kept[1]],
+        }),
+      );
+      release();
+      await scan;
+      expect(store.get(ID)?.state).toBe("active");
+    });
+
+    it("End event now works", async () => {
+      const { service } = setup();
+      store.set(ID, stored({ groupsEnabled: false, groups: kept }));
+      const outcome = await service.endEventNow(ID, "guild-1", {
+        pullBack: true,
+      });
+      expect(outcome.status).toBe("ended");
+      expect(store.get(ID)?.state).toBe("ended");
+    });
+  });
+
   it("an end that was cancelled meanwhile is left alone: nothing saved, no native sync", async () => {
     const { service, guild } = setup();
     store.set(ID, stored({ state: "cancelled" }));

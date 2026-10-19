@@ -366,6 +366,36 @@ describe("removeAllGroupChannels switches the groups off", () => {
       ]);
     });
 
+    it("a record that cannot be cleared stops the run and counts the channel that is gone; later database calls work, and a second try finishes", async () => {
+      const env = makeEnv();
+      let failClear = true;
+      fake.beforeWrite = () => {
+        const last = failClear;
+        if (last) {
+          failClear = false;
+          throw new Error("db blip");
+        }
+      };
+      const out = await env.channels.removeAllGroupChannels(EV, env.guild, {});
+      // A's channel was deleted but its id could not be cleared: reported as
+      // failed with that channel counted, never as "changed meanwhile".
+      expect(out).toEqual({
+        status: "failed",
+        reason: "the record of a deleted group channel could not be updated",
+        deleted: 1,
+      });
+      expect(env.rest.delete).toHaveBeenCalledTimes(1);
+      expect(doc().groupsEnabled).toBe(true);
+      expect(channelIds()).toEqual([A_CH, B_CH, null]);
+      const again = await env.channels.removeAllGroupChannels(
+        EV,
+        env.guild,
+        {},
+      );
+      expect(again).toEqual({ status: "off", deleted: 2 });
+      expect(doc().groupsEnabled).toBe(false);
+    });
+
     it("a second try finishes the job", async () => {
       const env = makeEnv();
       let failB = true;

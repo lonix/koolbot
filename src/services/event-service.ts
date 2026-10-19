@@ -559,13 +559,14 @@ export class EventService extends ScheduledService {
     }
     if (!row) return defer();
     const main = row.channelId ?? null;
-    const groups =
-      row.groupsEnabled === true
-        ? (row.groups ?? []).map((g) => ({
-            key: g.key,
-            channelId: g.channelId ?? null,
-          }))
-        : [];
+    // The stored groups as they are, whether or not they are switched on: a
+    // switch-off keeps them as history (channel ids cleared), and the claim
+    // compares the stored array with this snapshot (a recorded channel of a
+    // disabled group is also looked at below).
+    const groups = (row.groups ?? []).map((g) => ({
+      key: g.key,
+      channelId: g.channelId ?? null,
+    }));
     const ids = [main, ...groups.map((g) => g.channelId)].filter(
       (cid): cid is string => !!cid,
     );

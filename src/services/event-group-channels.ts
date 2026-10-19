@@ -3108,8 +3108,23 @@ export class EventGroupChannels {
           }
         }
       }
-      await this.clearRecorded(eventId, item.key, item.channelId);
+      // The channel is gone now. A record that cannot be cleared stops the run
+      // here and is reported with the channel counted as deleted: going on would
+      // leave a recorded id that makes the final write fail as "changed
+      // meanwhile" instead of saying what happened.
+      const cleared = await this.clearRecordedChecked(
+        eventId,
+        item.key,
+        item.channelId,
+      );
       progress.deleted += 1;
+      if (!cleared) {
+        return {
+          status: "failed",
+          reason: "the record of a deleted group channel could not be updated",
+          deleted: progress.deleted,
+        };
+      }
     }
 
     // 4. No group has a channel any more: switch the groups off, only while
@@ -3272,6 +3287,15 @@ export class EventGroupChannels {
     groupKey: string,
     channelId: string,
   ): Promise<void> {
+    await this.clearRecordedChecked(eventId, groupKey, channelId);
+  }
+
+  /** `clearRecorded` that says whether the record really was cleared (one group matched). */
+  private async clearRecordedChecked(
+    eventId: string,
+    groupKey: string,
+    channelId: string,
+  ): Promise<boolean> {
     this.channelWarnings.get(eventId)?.delete(channelId);
     this.channelWarnings
       .get(eventId)
@@ -3279,18 +3303,20 @@ export class EventGroupChannels {
     // A deleted channel has no rename budget to remember (#1196).
     getRenameQueue().forget(channelId);
     try {
-      await Event.updateOne(
+      const result = await Event.updateOne(
         {
           _id: eventId,
           groups: { $elemMatch: { key: groupKey, channelId } },
         },
         { $set: { "groups.$.channelId": null } },
       );
+      return (result?.matchedCount ?? 0) === 1;
     } catch (error) {
       logger.error(
         `Event ${sanitizeForLog(eventId)}: could not clear group channel ${sanitizeForLog(channelId)}:`,
         error,
       );
+      return false;
     }
   }
 
