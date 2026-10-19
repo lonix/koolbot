@@ -616,7 +616,10 @@ describe("the confirmation round trip", () => {
   it("a missing, forged or tampered token changes nothing", async () => {
     const page = await post("settings", dangerous());
     const token = tokenOf(page.text);
-    for (const bad of ["", "abc", `${token}x`, token.replace(/.$/, "A")]) {
+    // The last character is flipped to one that is certainly different.
+    const flipped = `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
+    expect(flipped).not.toBe(token);
+    for (const bad of ["", "abc", `${token}x`, flipped]) {
       auditRows = [];
       const r = await post("settings-confirm", { token: bad });
       expect(flashOf(r.location).msg).toBe(

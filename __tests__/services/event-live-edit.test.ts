@@ -146,6 +146,10 @@ const run = (
     submission: submission as never,
   });
 
+/** The text with its last character changed to one that is certainly different. */
+const flip = (text: string): string =>
+  `${text.slice(0, -1)}${text.endsWith("A") ? "B" : "A"}`;
+
 const lead = (to: number | null, base: number | null = 30) => ({
   rowId: "channelLeadMinutes",
   to,
@@ -957,7 +961,8 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
     ).toString("base64url");
     for (const bad of [
       `${forged}.${mac}`,
-      `${body}.${mac.slice(0, -2)}AA`,
+      // Last character flipped to one that is certainly different.
+      `${body}.${flip(mac)}`,
       `${body}.`,
       body,
       "",
@@ -967,6 +972,8 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
       undefined,
       `${"x".repeat(20_000)}.${mac}`,
     ]) {
+      // Every variant really differs from the valid token before it is tried.
+      expect(bad).not.toBe(token);
       expect(verify(bad)).toEqual({ ok: false, reason: "invalid" });
     }
   });
@@ -1176,6 +1183,29 @@ describe("a row that stores its target and owes a follow-up (partial), then conv
       partial: [],
       alreadyApplied: ["testPartial"],
     });
+  });
+
+  it("the normal browser retry converges: the REFRESHED form shows the stored value as both value and base", async () => {
+    seed({ testPartial: "a" });
+    const rows = [...LIVE_EDIT_ROWS, makeRow(false)];
+    await runWith(rows);
+    // After the redirect the form is rendered from the stored row: b / b.
+    const refreshed = { rowId: "testPartial", to: "b", base: "b" };
+    const retry = await runWith(rows, [refreshed]);
+    expect(retry).toMatchObject({
+      status: "done",
+      applied: [{ rowId: "testPartial", reconcile: true }],
+    });
+    expect(store.get(EV)).toMatchObject({ testPartial: "b", testOwed: false });
+    // Once nothing is owed, the refreshed form is untouched: nothing to do.
+    expect(await runWith(rows, [refreshed])).toMatchObject({
+      applied: [],
+      partial: [],
+      alreadyApplied: [],
+    });
+    expect(describeLiveEditOutcome(retry, rows).message).toBe(
+      "Saved: Test partial is finished.",
+    );
   });
 
   it("a reconcile asks for confirmation like any change, and the confirmed run still reconciles", async () => {

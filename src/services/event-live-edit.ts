@@ -546,17 +546,21 @@ export function planLiveEdit(input: {
       }
       continue;
     }
-    if (same(entry.to, entry.base)) continue;
     if (same(entry.to, stored)) {
-      // Stored already, but a follow-up is owed: finish it (a re-save
-      // converges); otherwise already applied.
+      // Stored already. A follow-up owed is finished, EVEN WHEN the form's
+      // base equals it (a refreshed form after a partial save shows the stored
+      // value as both value and base: that is the normal retry, and
+      // reconciling writes no field). Otherwise it is already applied, or
+      // untouched when the host did not change it.
       if (owed !== null && row.reconcile) {
         plan.changes.push(reconcileChange());
-      } else {
+      } else if (!same(entry.to, entry.base)) {
         plan.alreadyApplied.push(row.id);
       }
       continue;
     }
+    // Untouched, and somebody else changed it meanwhile: never written.
+    if (same(entry.to, entry.base)) continue;
     if (!same(stored, entry.base)) {
       plan.conflicts.push({
         rowId: row.id,
