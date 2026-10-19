@@ -2031,8 +2031,15 @@ preset** form under it.
   move the event's revision number, so a confirmation page shown before such a change can never be
   used afterwards (not even when the leader's change was reversed in between).
 - **Audit.** One entry per save (`event.host.settings`, or `event.host.settings-confirm`), with the
-  changed names, sizes and the preset content as old and new values, and what is still owed to a
-  channel.
+  changed names, sizes and the preset content as old and new values (one flat line per group), and
+  what is still owed to a channel. A save of more than 45 rows (every name and size of 25 groups)
+  continues its lists in `changes2`, `stored2` and so on, with the full count in `changesTotal`:
+  nothing is dropped by the audit bound.
+- **Long results.** A result too long for the one-line message after a save (a large preset
+  switch with channels still to finish) is shown on a full result page, with every unfinished
+  channel and when to retry, and a link back to the panel.
+- **A scan that finishes first.** If the scan renames a channel or sets its user limit between
+  your save and the follow-up, the save reports it as done, not as unfinished.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can

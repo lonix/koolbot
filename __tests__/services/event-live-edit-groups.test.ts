@@ -1201,3 +1201,52 @@ describe("a preset switch finishes and reports channel work still owed", () => {
     expect("nameSyncPending" in group(A)).toBe(false);
   });
 });
+
+describe("the audit row of the largest combined save keeps every change", () => {
+  it("25 names, 25 sizes and Lock groups (51 rows) survive the audit bound across pages, none dropped", async () => {
+    const groups = Array.from({ length: 25 }, (_, i) => ({
+      key: `g_${String(i + 1).padStart(8, "0")}`,
+      name: `Group ${i + 1}`,
+      kind: "team",
+      size: 3,
+      tag: "",
+      marker: "",
+      channelId: null,
+      captainId: null,
+      memberIds: [],
+    }));
+    seed({ groups, groupsLocked: false });
+    const entries = [
+      ...groups.map((g, i) =>
+        entry(groupNameRowId(i), `Renamed ${i + 1}`, g.name),
+      ),
+      ...groups.map((_, i) => entry(groupSizeRowId(i), 5, 3)),
+      entry("groupsLocked", true, false),
+    ];
+    const out = await run(entries);
+    expect(done(out).applied).toHaveLength(51);
+    const bound = boundAuditEntry({
+      action: "event.host.settings",
+      result: "success",
+      details: describeLiveEditOutcome(out).details,
+    });
+    const d = bound.details as Record<string, unknown>;
+    const rows = [
+      ...(d.changes as Array<{ row: string }>),
+      ...(d.changes2 as Array<{ row: string }>),
+    ].map((c) => c.row);
+    expect(d.changesTotal).toBe(51);
+    expect(rows).toHaveLength(51);
+    expect(new Set(rows).size).toBe(51);
+    expect(rows).toContain(groupSizeRowId(24));
+    expect(rows).toContain("groupsLocked");
+    expect(d.changes3).toBeUndefined();
+  });
+
+  it("a small save keeps the plain shape (no pages)", async () => {
+    const out = await run([entry(NAME_A, "Apex", "Alpha")]);
+    const d = describeLiveEditOutcome(out).details;
+    expect(d).not.toHaveProperty("changesTotal");
+    expect(d).not.toHaveProperty("changes2");
+  });
+});

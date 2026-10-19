@@ -131,6 +131,30 @@ export interface ConfirmViewData {
   reasons: string[];
 }
 
+export interface ResultViewData {
+  ok: boolean;
+  /** Plain text; escaped here. */
+  message: string;
+  panelPath: string;
+}
+
+/**
+ * The full result of a save, for a result too long for the flash line (which
+ * is cut at 500 characters, and would hide which channels are unfinished and
+ * when to retry). One paragraph per sentence of the result, escaped.
+ */
+export function renderResultBody(d: ResultViewData): string {
+  const parts = d.message
+    .split(/(?<=\.) (?=[A-Z])/)
+    .map((p) => `<p>${escapeHtml(p)}</p>`)
+    .join("");
+  return `<section class="card" id="host-settings-result" aria-labelledby="host-settings-result-h">
+<h2 id="host-settings-result-h">${d.ok ? "Settings saved" : "Settings saved, with something left to do"}</h2>
+<div class="notice ${d.ok ? "ok" : "warn"}" role="status">${parts}</div>
+<p><a href="${escapeHtml(d.panelPath)}">Back to the host panel</a></p>
+</section>`;
+}
+
 /** The confirmation page body: what will change, why it needs a yes, and the signed token. */
 export function renderConfirmBody(d: ConfirmViewData): string {
   const changes = d.changes

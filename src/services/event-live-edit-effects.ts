@@ -12,7 +12,10 @@ import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { EventNicknameTags } from "./event-nickname-tags.js";
-import type { LiveEditEffects } from "./event-live-edit.js";
+import type {
+  GroupChannelSyncOutcome,
+  LiveEditEffects,
+} from "./event-live-edit.js";
 
 export function createLiveEditEffects(client: Client): LiveEditEffects {
   return {
@@ -30,7 +33,11 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
       const { EventService } = await import("./event-service.js");
       await EventService.getInstance(client).syncGroupControls(eventId);
     },
-    async syncGroupName(guildId, eventId, groupKey) {
+    async syncGroupName(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<GroupChannelSyncOutcome | null> {
       const { EventService } = await import("./event-service.js");
       const outcomes = await EventService.getInstance(client).syncGroupNames(
         eventId,
@@ -39,7 +46,11 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
       );
       return outcomes?.find((o) => o.groupKey === groupKey) ?? null;
     },
-    async syncGroupUserLimit(guildId, eventId, groupKey) {
+    async syncGroupUserLimit(
+      guildId,
+      eventId,
+      groupKey,
+    ): Promise<GroupChannelSyncOutcome | null> {
       const { EventService } = await import("./event-service.js");
       const outcomes = await EventService.getInstance(
         client,

@@ -201,49 +201,70 @@ function limitOwed(outcome: NameSyncOutcome | null): string | null {
   }
 }
 
-/** One outward call: never throws, a throw is an unknown outcome. */
-async function attempt(
-  work: (() => Promise<NameSyncOutcome | null>) | null,
-  what: string,
-  groupKey: string,
-): Promise<NameSyncOutcome | null> {
-  if (!work) return null;
+/**
+ * A pass that answered no outcome for a group either could not run (the server
+ * is gone, events are off, the event ended) or had nothing to do because the
+ * group's marker was already cleared: the scan can finish a rename or limit
+ * between the row's write and its own follow-up. Only the fresh marker tells
+ * them apart, so a missing outcome counts as settled only when the group is
+ * there and the marker is no longer set.
+ */
+async function markerSettled(
+  ctx: ApplyContext<JsonValue>,
+  key: string,
+  flag: "nameSyncPending" | "sizeSyncPending",
+): Promise<boolean> {
   try {
-    return await work();
-  } catch (err) {
-    logger.error(
-      `Live edit: ${what} of group ${sanitizeForLog(groupKey)} failed:`,
-      err,
-    );
-    return { groupKey, status: "unconfirmed" };
+    const fresh = await readFresh(ctx.eventId, ctx.guildId);
+    const group = (fresh?.groups ?? []).find((g) => g.key === key);
+    return !!group && group[flag] !== true;
+  } catch {
+    return false;
   }
 }
 
+/**
+ * One outward call (the channel pass for one group's name or user limit): never
+ * throws, a throw is an unknown outcome, and a missing outcome is settled when
+ * the fresh marker says so (see `markerSettled`).
+ */
+async function attempt(
+  ctx: ApplyContext<JsonValue>,
+  kind: "name" | "limit",
+  groupKey: string,
+): Promise<NameSyncOutcome | null> {
+  const fx = ctx.effects;
+  const what = kind === "name" ? "channel rename" : "channel user limit";
+  let outcome: NameSyncOutcome | null = null;
+  if (fx) {
+    try {
+      outcome =
+        kind === "name"
+          ? await fx.syncGroupName(ctx.guildId, ctx.eventId, groupKey)
+          : await fx.syncGroupUserLimit(ctx.guildId, ctx.eventId, groupKey);
+    } catch (err) {
+      logger.error(
+        `Live edit: ${what} of group ${sanitizeForLog(groupKey)} failed:`,
+        err,
+      );
+      return { groupKey, status: "unconfirmed" };
+    }
+  }
+  if (
+    outcome === null &&
+    fx &&
+    (await markerSettled(
+      ctx,
+      groupKey,
+      kind === "name" ? "nameSyncPending" : "sizeSyncPending",
+    ))
+  ) {
+    return { groupKey, status: "applied" };
+  }
+  return outcome;
+}
+
 const OPEN = [...OPEN_STATES];
-
-/** The rename of one group's channel as a thunk, or null without effects. */
-function renameThunk(
-  ctx: ApplyContext<JsonValue>,
-  key: string,
-): (() => Promise<NameSyncOutcome | null>) | null {
-  const fx = ctx.effects;
-  return fx
-    ? (): Promise<NameSyncOutcome | null> =>
-        fx.syncGroupName(ctx.guildId, ctx.eventId, key)
-    : null;
-}
-
-/** The user limit of one group's channel as a thunk, or null without effects. */
-function limitThunk(
-  ctx: ApplyContext<JsonValue>,
-  key: string,
-): (() => Promise<NameSyncOutcome | null>) | null {
-  const fx = ctx.effects;
-  return fx
-    ? (): Promise<NameSyncOutcome | null> =>
-        fx.syncGroupUserLimit(ctx.guildId, ctx.eventId, key)
-    : null;
-}
 
 // ---------------------------------------------------------------
 // Name rows
@@ -264,7 +285,7 @@ function nameRow(index: number): LiveEditRow {
         message: "the channel was not renamed because the event is being ended",
       };
     }
-    const outcome = await attempt(renameThunk(ctx, key), "channel rename", key);
+    const outcome = await attempt(ctx, "name", key);
     const owed = renameOwed(outcome);
     return owed === null
       ? { status: "applied" }
@@ -379,11 +400,7 @@ function sizeRow(index: number): LiveEditRow {
           "the channel's user limit was not changed because the event is being ended",
       };
     }
-    const outcome = await attempt(
-      limitThunk(ctx, key),
-      "channel user limit",
-      key,
-    );
+    const outcome = await attempt(ctx, "limit", key);
     const owed = limitOwed(outcome);
     return owed === null
       ? { status: "applied" }
@@ -612,13 +629,7 @@ async function runFollowUps(
         if (ctx.ending()) {
           owed.push(`${where}: the channel was not renamed (event ending)`);
         } else {
-          const text = renameOwed(
-            await attempt(
-              renameThunk(ctx, item.key),
-              "channel rename",
-              item.key,
-            ),
-          );
+          const text = renameOwed(await attempt(ctx, "name", item.key));
           if (text) owed.push(`${where}: ${text}`);
         }
       }
@@ -626,13 +637,7 @@ async function runFollowUps(
         if (ctx.ending()) {
           owed.push(`${where}: the user limit was not changed (event ending)`);
         } else {
-          const text = limitOwed(
-            await attempt(
-              limitThunk(ctx, item.key),
-              "channel user limit",
-              item.key,
-            ),
-          );
+          const text = limitOwed(await attempt(ctx, "limit", item.key));
           if (text) owed.push(`${where}: ${text}`);
         }
       }

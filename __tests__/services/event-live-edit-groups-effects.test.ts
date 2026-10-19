@@ -370,3 +370,69 @@ describe("createLiveEditEffects (names, sizes, tags)", () => {
     expect(requestSweep).toHaveBeenCalledWith(GUILD);
   });
 });
+
+describe("the scan finishes the channel between the row's write and its follow-up", () => {
+  /** Effects whose follow-up runs only after the scan has already done the work. */
+  function scanFirst(): typeof deps {
+    const real = createLiveEditEffects({} as never);
+    return {
+      ...deps,
+      effects: {
+        ...real,
+        syncGroupName: async (g, e, k) => {
+          await eventService.syncGroupNames(e, g, k); // the scan
+          return real.syncGroupName(g, e, k);
+        },
+        syncGroupUserLimit: async (g, e, k) => {
+          await eventService.syncGroupUserLimits(e, g, k); // the scan
+          return real.syncGroupUserLimit(g, e, k);
+        },
+      },
+    };
+  }
+  const runWith = (
+    d: typeof deps,
+    entries: Array<{ rowId: string; to: unknown; base: unknown }>,
+  ) =>
+    runLiveEdit({
+      guildId: GUILD,
+      eventId: EV,
+      deps: d,
+      submission: entries as never,
+    });
+
+  it("a rename the scan already finished is applied, not reported as Discord being unreachable", async () => {
+    const out = done(
+      await runWith(scanFirst(), [entry(groupNameRowId(0), "Apex", "Alpha")]),
+    );
+    expect(out.partial).toEqual([]);
+    expect(out.applied).toHaveLength(1);
+    // The scan renamed once; the follow-up found nothing left to do.
+    expect(patches).toHaveLength(1);
+    expect(stored().nameSyncPending).toBe(false);
+  });
+
+  it("a user limit the scan already finished is applied, not reported as Discord being unreachable", async () => {
+    const out = done(
+      await runWith(scanFirst(), [entry(groupSizeRowId(0), 1, 3)]),
+    );
+    expect(out.partial).toEqual([]);
+    expect(out.applied).toHaveLength(1);
+    expect(patches).toEqual([
+      { route: `/channels/${A_CH}`, body: { user_limit: 1 } },
+    ]);
+  });
+
+  it("an unavailable pass (events turned off) with the marker still set stays partial", async () => {
+    const real = createLiveEditEffects({} as never);
+    const off = {
+      ...deps,
+      effects: { ...real, syncGroupName: async () => null },
+    };
+    const out = done(
+      await runWith(off, [entry(groupNameRowId(0), "Apex", "Alpha")]),
+    );
+    expect(out.partial[0].owed).toContain("could not be reached");
+    expect(stored().nameSyncPending).toBe(true);
+  });
+});

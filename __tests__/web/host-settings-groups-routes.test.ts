@@ -62,6 +62,8 @@ const { PermissionsService } =
 const { EventService } = await import("../../src/services/event-service.js");
 const { ConfigService } = await import("../../src/services/config-service.js");
 const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+const { readPresetValue } =
+  await import("../../src/services/event-live-edit-groups.js");
 const { resetMoveGuardForTests } =
   await import("../../src/services/event-move-guard.js");
 
@@ -637,5 +639,54 @@ describe("switching the preset", () => {
       "has 3 groups and this event has 2",
     );
     expect(writes).toEqual([]);
+  });
+});
+
+describe("a large partial save is shown in full", () => {
+  it("a 12-group preset switch with every rename held back answers with the full result page, not a cut flash line", async () => {
+    const groups = Array.from({ length: 12 }, (_, i) => ({
+      key: `g_${String(i + 1).padStart(8, "0")}`,
+      name: `${"Original name ".repeat(3)}${i + 1}`,
+      kind: "team",
+      size: 2,
+      tag: "",
+      marker: "",
+      channelId: `c${i + 1}`,
+      captainId: null,
+      memberIds: [],
+    }));
+    store.set(EVENT_ID, makeEvent({ groups }));
+    const names = groups.map((_, i) => `${"Preset group ".repeat(3)}${i + 1}`);
+    catalog = {
+      state: "ok",
+      entries: [preset("builtin:big", names)],
+    };
+    nameStatus = "limited";
+    const stored = readPresetValue(store.get(EVENT_ID) as never);
+    const page = await post("settings", {
+      preset_pick: "builtin:big",
+      b_groupPreset: JSON.stringify(stored),
+    });
+    expect(page.status).toBe(200);
+    auditRows = [];
+    const r = await post("settings-confirm", { token: tokenOf(page.text) });
+    // A page, not a 303 whose flash line is cut at 500 characters.
+    expect(r.status).toBe(200);
+    expect(r.location).toBeNull();
+    expect(r.text).toContain("Settings saved, with something left to do");
+    expect(r.text).toContain("Group 1: the channel is not renamed yet");
+    expect(r.text).toContain("Group 12: the channel is not renamed yet");
+    expect(r.text).toContain("about 7 minutes");
+    expect(r.text).toContain('Back to the host panel');
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0].details).toMatchObject({ outcome: "partial" });
+  });
+
+  it("a short result stays a flash redirect", async () => {
+    const r = await post("settings", {
+      s_groupNameB: "Logistics",
+      b_groupNameB: "Logi",
+    });
+    expect(r.status).toBe(303);
   });
 });

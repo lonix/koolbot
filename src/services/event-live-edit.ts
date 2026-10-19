@@ -1200,6 +1200,31 @@ export function describeRowValue(
   return row ? row.describe(value) : String(value);
 }
 
+/** Most entries of one list in the audit details (the audit bound keeps 50 per array). */
+export const AUDIT_PAGE = 45;
+
+/**
+ * A list for the audit details that survives the audit bound: up to
+ * `AUDIT_PAGE` entries under `name`, and when there are more, the rest in
+ * `name2`, `name3`, ... with the full count under `nameTotal`. A save of every
+ * name and size of 25 groups is more than 50 rows; none may be dropped.
+ */
+export function pagedAudit(
+  name: string,
+  items: readonly unknown[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { [name]: items.slice(0, AUDIT_PAGE) };
+  if (items.length <= AUDIT_PAGE) return out;
+  out[`${name}Total`] = items.length;
+  for (let page = 2; (page - 1) * AUDIT_PAGE < items.length; page++) {
+    out[`${name}${page}`] = items.slice(
+      (page - 1) * AUDIT_PAGE,
+      page * AUDIT_PAGE,
+    );
+  }
+  return out;
+}
+
 /** The host-facing result and audit details of an outcome (one per save). */
 export function describeLiveEditOutcome(
   outcome: LiveEditOutcome,
@@ -1239,11 +1264,14 @@ export function describeLiveEditOutcome(
         message: "Confirmation needed. Nothing was changed yet.",
         details: {
           outcome: "needs-confirmation",
-          changes: outcome.changes.map((c) => ({
-            row: c.rowId,
-            from: auditOf(c.rowId, c.from),
-            to: auditOf(c.rowId, c.to),
-          })),
+          ...pagedAudit(
+            "changes",
+            outcome.changes.map((c) => ({
+              row: c.rowId,
+              from: auditOf(c.rowId, c.from),
+              to: auditOf(c.rowId, c.to),
+            })),
+          ),
         },
       };
     case "done": {
@@ -1257,25 +1285,34 @@ export function describeLiveEditOutcome(
             : outcome.applied.length > 0
               ? "applied"
               : "nothing-to-do",
-        changes: outcome.applied.map((c) => ({
-          row: c.rowId,
-          from: auditOf(c.rowId, c.from),
-          to: auditOf(c.rowId, c.to),
-          ...(c.reconcile === true ? { reconcile: true } : {}),
-        })),
+        ...pagedAudit(
+          "changes",
+          outcome.applied.map((c) => ({
+            row: c.rowId,
+            from: auditOf(c.rowId, c.from),
+            to: auditOf(c.rowId, c.to),
+            ...(c.reconcile === true ? { reconcile: true } : {}),
+          })),
+        ),
         // Stored but not finished, with what is still owed.
-        stored: outcome.partial.map((c) => ({
-          row: c.rowId,
-          from: auditOf(c.rowId, c.from),
-          to: auditOf(c.rowId, c.to),
-          owed: c.owed,
-          ...(c.reconcile ? { reconcile: true } : {}),
-        })),
-        notApplied: outcome.notApplied.map((n) => ({
-          row: n.rowId,
-          reason: n.reason,
-        })),
-        alreadyApplied: outcome.alreadyApplied,
+        ...pagedAudit(
+          "stored",
+          outcome.partial.map((c) => ({
+            row: c.rowId,
+            from: auditOf(c.rowId, c.from),
+            to: auditOf(c.rowId, c.to),
+            owed: c.owed,
+            ...(c.reconcile ? { reconcile: true } : {}),
+          })),
+        ),
+        ...pagedAudit(
+          "notApplied",
+          outcome.notApplied.map((n) => ({
+            row: n.rowId,
+            reason: n.reason,
+          })),
+        ),
+        ...pagedAudit("alreadyApplied", outcome.alreadyApplied),
       };
       if (outcome.applied.length === 0 && unfinished === 0) {
         return {

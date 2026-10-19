@@ -70,7 +70,11 @@ export function matchDoc(doc: Json, filter: unknown): boolean {
 }
 
 /** Top-level fields an update may `$set` or `$unset`. */
-export const SETTABLE = new Set(["presetId", "channelLeadMinutes"]);
+export const SETTABLE = new Set([
+  "presetId",
+  "channelLeadMinutes",
+  "groupsLocked",
+]);
 /** Group fields an update may touch through `groups.$[id].<field>`. */
 export const GROUP_FIELDS = new Set([
   "name",
