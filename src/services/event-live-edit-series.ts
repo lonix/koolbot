@@ -44,7 +44,7 @@ function asRow<V extends JsonValue>(row: LiveEditRow<V>): LiveEditRow {
 
 export const seriesSetupRow: LiveEditRow = asRow<boolean>({
   id: SERIES_SETUP_ROW_ID,
-  label: "Next occurrences",
+  label: "Group setup of the next occurrences",
   read: () => false,
   applicable: (e) => {
     if (!e.recurrence || e.recurrence === "none" || !e.seriesId) {
@@ -58,11 +58,12 @@ export const seriesSetupRow: LiveEditRow = asRow<boolean>({
   parse: (raw) =>
     raw === "1" || raw === "0"
       ? { ok: true, value: raw === "1" }
-      : { ok: false, error: "Next occurrences: the form is out of date." },
-  describe: (v) =>
-    v
-      ? "use this group setup for the next occurrences"
-      : "this occurrence only",
+      : {
+          ok: false,
+          error:
+            "Group setup of the next occurrences: the form is out of date.",
+        },
+  describe: (v) => (v ? "this event's group setup" : "unchanged"),
   async apply({ eventId, guildId }) {
     const fresh = (await Event.findOne({
       _id: eventId,

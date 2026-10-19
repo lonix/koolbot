@@ -239,7 +239,11 @@ describeWithMongo("series group setup against a real MongoDB (#1266)", () => {
       }),
     ).toMatchObject({ status: "refused", code: "not-open" });
 
-    const cancelled = await makeRecurring({ seriesCancelled: true });
+    // Its own series: the unique key is (guild, series, occurrence).
+    const cancelled = await makeRecurring({
+      seriesCancelled: true,
+      seriesId: "series-2",
+    });
     const out = await runLiveEdit({
       guildId: GUILD,
       eventId: cancelled,

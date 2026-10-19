@@ -769,7 +769,10 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
       s_seriesSetup: "1",
       b_seriesSetup: "0",
     });
-    expect(flashOf(r.location).type).toBe("ok");
+    expect(flashOf(r.location)).toEqual({
+      type: "ok",
+      msg: "Saved: Lock groups is now locked; Group setup of the next occurrences is now this event's group setup.",
+    });
     expect(store.get(EVENT_ID)?.seriesGroupSetup).toMatchObject({
       groupsEnabled: true,
       groupsLocked: true,

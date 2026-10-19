@@ -1833,7 +1833,8 @@ event is scheduled or active.
 the event has groups and **Group leaders** was ticked on the schedule form. With it off
 nothing about leaders shows, and setting a leader, renaming the label and pulling leaders
 refuse. (Leaders can be switched on or off at any time in **Live settings** below. A repeating
-event's next occurrence keeps the switch, never the leaders.) It
+event's next occurrences keep the switch the series was made with, or the one saved with the tick
+**Also for the next occurrences** (see **Repeating events keep the group setup**), never the leaders.) It
 also needs `events.enabled`: setting a leader and pulling leaders refuse while it is off.
 
 - **Set the leader:** each team group has a picker of the people assigned to it, with a
@@ -1941,7 +1942,7 @@ set its clan tag from Discord; the host can put any team back at any time.
   team nobody changed says so and writes nothing. Names and tags a leader chose are kept when
   leaders or customising are switched off.
 - **A repeating event's next occurrence** starts from the names and tags the host set, not from
-  a leader's changes, and keeps the switch.
+  a leader's changes (see **Repeating events keep the group setup**).
 - **Who changed what.** Each change a leader makes from Discord is one audit entry
   (`event.leader.customise`, under the leader's own id, with the team's key and the old and new
   name and tag), and the section lists the ten most recent. The host's reset is
@@ -2006,7 +2007,8 @@ groups under **Adding and removing groups** (#1242), and switching groups on or 
   `partial`, `not-applied`, `nothing-to-do`, `invalid`, a refusal code or `needs-confirmation`)
   and the changed fields with their old and new values; confirming is one entry,
   `event.host.settings-confirm`. A repeating event's next occurrence starts from the creation
-  time saved here (with or without groups), like the rest of the group setup.
+  time saved here (with or without groups); unlike the rest of the group setup, that time is not
+  part of the tick **Also for the next occurrences**.
 - **Nothing new is stored per member.** The only new stored value is that revision counter on the
   event itself; the confirmation token is checked and then compared with the event.
 - **While an end or cancel holds the event** the section shows that instead of the form.
@@ -2079,7 +2081,8 @@ preset** form under it.
   original: when a leader had renamed the group (it has an original name), the original name is set
   to the name you typed and the original tag is kept, so the host's "Reset" of that team goes back
   to your name; when nobody had renamed it, there is no original and the stored name is the
-  original, which is also what a repeating event's next occurrence starts from.
+  original, which is the name a repeating event's next occurrences get once the setup is saved for
+  them with the tick **Also for the next occurrences**.
 - **Change a size.** The size is the most people the group takes and its channel's user limit (1 to
   99, empty for no limit). The channel's limit follows through the same kind of pass as the rename
   (one attempt, never waiting on a rate limit, finished by the scan if Discord refused). Lowering
@@ -2313,7 +2316,7 @@ it is the tick **Also for the next occurrences** on the forms of the host panel'
   stores the group setup of this event, as that save leaves it, as the series' setup: it is the whole
   setup the page shows, not only the field you just changed. Saving with the tick alone stores the
   setup as it is now. The tick is part of the save: one result, one audit entry (`event.host.settings`,
-  the row **Next occurrences**), and when another change of the same save needs confirmation the tick
+  the row **Group setup of the next occurrences**), and when another change of the same save needs confirmation the tick
   is part of the confirmed change set.
 - **Where it can be set.** On the running occurrence, or on an upcoming one (the next occurrence is
   created when the running one ends or is cancelled, from the setup the series has at that moment). A

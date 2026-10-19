@@ -230,7 +230,9 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
     const out = await save([tick]);
     expect(out).toMatchObject({
       status: "invalid",
-      errors: ["Next occurrences: This event does not repeat."],
+      errors: [
+        "Group setup of the next occurrences: This event does not repeat.",
+      ],
     });
     expect(writes).toEqual([]);
   });
