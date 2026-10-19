@@ -905,7 +905,7 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
       url: "http://localhost/admin/events/presets",
       runScripts: "outside-only",
     });
-    const code = renderEventPresetsPage({
+    const pageHtml = renderEventPresetsPage({
       csrfToken: "t",
       remainingMs: 1,
       entries: [],
@@ -915,9 +915,11 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
       editing: null,
       values: {},
       prefillNote: null,
-    })
-      .match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g)
-      ?.map((m) => m.replace(/<\/?script[^>]*>/g, ""))
+    });
+    const code = Array.from(
+      new JSDOM(pageHtml).window.document.querySelectorAll("script"),
+    )
+      .map((el) => el.textContent ?? "")
       .find((c) => c.includes("koolbot-event-preset-draft"));
     dom.window.eval(code as string);
     const add = dom.window.document.querySelector(
