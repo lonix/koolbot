@@ -86,6 +86,13 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
 });
 
 describe("renderGroupEditor", () => {
+  it("renders nothing for an event whose only group is the hidden lobby (#1251)", () => {
+    const only = view().groups[0];
+    expect(
+      renderGroupEditor(view({ groups: [{ ...only, kind: "leads" }] })),
+    ).toBe("");
+  });
+
   it("renders one name and one size field per group with the value it shows as the base", () => {
     const html = renderGroupEditor(view());
     expect(html).toContain('name="s_groupNameA"');
