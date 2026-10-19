@@ -256,7 +256,9 @@ export const EVENT_PRESETS_SCRIPT =
   "function rows(){return box.querySelectorAll('[data-group-row]')}" +
   // The Captains lobby is a channel too, so a ticked box counts toward the cap.
   "var lobby=form.elements['groups_captains_lobby'];" +
-  "function used(){return rows().length+(lobby&&lobby.checked?1:0)}" +
+  // A leads row restored from an older draft is the lobby itself (the server
+  // keeps one lobby, and none when the box is off), so it is not counted as a row.
+  "function used(){var n=0;Array.prototype.forEach.call(rows(),function(r){var k=r.querySelector('select');if(!k||k.value!=='leads')n++});return n+(lobby&&lobby.checked?1:0)}" +
   // `force` is only for putting back rows that were submitted before (the cap
   // applies to a person adding rows, not to restoring what they had entered).
   "function addRow(force){var n=rows().length;if(used()>=max&&!force)return false;" +
@@ -265,6 +267,8 @@ export const EVENT_PRESETS_SCRIPT =
   "box.appendChild(d.firstElementChild);if(add)add.hidden=used()>=max;return true}" +
   "if(add){add.hidden=used()>=max;add.addEventListener('click',function(){addRow()})}" +
   "if(lobby&&add)lobby.addEventListener('change',function(){add.hidden=used()>=max});" +
+  // Changing a row's kind (a restored leads row) changes the count too.
+  "if(add)box.addEventListener('change',function(){add.hidden=used()>=max});" +
   "form.addEventListener('submit',function(){try{var d={};" +
   "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +

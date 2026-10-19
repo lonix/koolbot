@@ -504,6 +504,39 @@ describe("validatePresetForm", () => {
       );
     });
 
+    it("the lobby is counted once: a legacy leads row with the box ticked, a carried row, or a generated one each take one slot", () => {
+      const two = { preset_name: "P", group_0_name: "A", group_1_name: "B" };
+      const ok = (extra: Record<string, string>): boolean =>
+        svc.validatePresetForm(
+          { ...two, groups_captains_lobby: "1", ...extra },
+          { maxCount: 3 },
+        ).ok;
+      expect(ok({})).toBe(true);
+      expect(ok({ group_2_name: "L", group_2_kind: "leads" })).toBe(true);
+      expect(ok({ lobby_index: "0", lobby_name: "L" })).toBe(true);
+      // Both a posted leads row and a carried row are one lobby, not two.
+      expect(
+        ok({
+          group_2_name: "L",
+          group_2_kind: "leads",
+          lobby_index: "0",
+          lobby_name: "M",
+        }),
+      ).toBe(true);
+      // Unticked, nothing is counted, so a third team fits too.
+      expect(
+        svc.validatePresetForm(
+          {
+            ...two,
+            group_2_name: "C",
+            group_3_name: "L",
+            group_3_kind: "leads",
+          },
+          { maxCount: 3 },
+        ).ok,
+      ).toBe(true);
+    });
+
     it("a lobby alone is no preset", () => {
       const r = svc.validatePresetForm(
         {

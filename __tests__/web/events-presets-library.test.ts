@@ -612,6 +612,53 @@ describe("the presets admin page (#1200)", () => {
     expect(restore(false).hidden).toBe(false);
   });
 
+  it("a restored older draft counts its leads row once, as the lobby: the free slot stays usable, and changing the row's kind recounts (#1263)", () => {
+    const html = adminPage({ maxCount: 4 }).replace(
+      "<h1>Group presets</h1>",
+      '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+    );
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-preset-draft",
+      JSON.stringify({
+        group_0_name: "A",
+        group_0_kind: "team",
+        group_1_name: "B",
+        group_1_kind: "team",
+        group_2_name: "Command",
+        group_2_kind: "leads",
+      }),
+    );
+    const code = Array.from(
+      new JSDOM(html).window.document.querySelectorAll("script"),
+    )
+      .map((el) => el.textContent ?? "")
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    const doc = dom.window.document;
+    const add = doc.querySelector("[data-add-group]") as HTMLElement;
+    // A, B and the lobby are three of four slots.
+    expect(add.hidden).toBe(false);
+    const kind = doc.querySelector(
+      '[name="group_2_kind"]',
+    ) as HTMLSelectElement;
+    const changeKind = (value: string): void => {
+      kind.value = value;
+      kind.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    };
+    // The restored row turned into a team is a third group next to the lobby.
+    changeKind("team");
+    expect(add.hidden).toBe(true);
+    changeKind("leads");
+    expect(add.hidden).toBe(false);
+    add.click();
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(4);
+    expect(add.hidden).toBe(true);
+  });
+
   it("an ordinary leads row is no preset on its own, even with the box ticked (a restored older draft)", () => {
     const r = validatePresetForm(
       {
