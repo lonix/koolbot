@@ -327,6 +327,47 @@ describe("validatePresetForm", () => {
     ).not.toHaveProperty("groups_tags");
   });
 
+  it("'Save as server preset' keeps what the host set, not what a leader renamed a team to (#1196)", () => {
+    const values = svc.eventSetupToFormValues({
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      channelLeadMinutes: null,
+      tagsEnabled: true,
+      groups: [
+        {
+          key: "g_00000001",
+          name: "Crimson",
+          kind: "team",
+          size: null,
+          tag: "CRM",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+          originalName: "Red",
+          originalTag: "RED",
+        },
+        {
+          key: "g_00000002",
+          name: "Blue",
+          kind: "team",
+          size: null,
+          tag: "BLU",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    expect(values).toMatchObject({
+      group_0_name: "Red",
+      group_0_tag: "RED",
+      group_1_name: "Blue",
+      group_1_tag: "BLU",
+    });
+  });
+
   it("runs the event form's own rules on the groups", () => {
     const r = svc.validatePresetForm(
       body({

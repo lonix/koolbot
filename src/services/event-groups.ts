@@ -116,6 +116,12 @@ export interface GroupSetupInput {
    */
   captainsEnabled?: boolean;
   /**
+   * Leaders may rename their group and set its tag from Discord (#1196). Only
+   * stored as on while `captainsEnabled` is on. Optional like the other
+   * toggles; the preset library never posts it.
+   */
+  captainCustomisationEnabled?: boolean;
+  /**
    * Temporary clan tags on nicknames for this event (#1194). Optional: the
    * event form posts it (a chosen preset only pre-ticks the box in the browser,
    * the host's final choice is what arrives here); the preset editor posts it
@@ -178,6 +184,7 @@ export const GROUP_FORM_FIELDS = {
   label: "groups_label",
   leaderLabel: "groups_leader_label",
   captains: "groups_captains",
+  captainCustom: "groups_captain_custom",
   tags: "groups_tags",
   tagsSuffix: "groups_tags_suffix",
   leadMinutes: "groups_lead_minutes",
@@ -216,6 +223,8 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
     groupLabel: str(GROUP_FORM_FIELDS.label),
     leaderLabel: str(GROUP_FORM_FIELDS.leaderLabel),
     captainsEnabled: str(GROUP_FORM_FIELDS.captains).length > 0,
+    captainCustomisationEnabled:
+      str(GROUP_FORM_FIELDS.captainCustom).length > 0,
     tagsEnabled: str(GROUP_FORM_FIELDS.tags).length > 0,
     tagsSuffix: str(GROUP_FORM_FIELDS.tagsSuffix).length > 0,
     channelLeadMinutes: str(GROUP_FORM_FIELDS.leadMinutes),
@@ -234,6 +243,53 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 /** Collapse runs of whitespace and trim, so "  Red   Team " is "Red Team". */
 export function normalizeGroupText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** A checked piece of group text: the normalised value, and why it is refused if it is. */
+export type GroupTextCheck =
+  { ok: true; value: string } | { ok: false; value: string; error: string };
+
+/**
+ * The one rule for a group's name (the event form, a leader's edit in Discord
+ * #1196, the host panel's reset): whitespace collapsed, 1 to `GROUP_NAME_MAX`
+ * characters, no control characters. Uniqueness among the groups of an event is
+ * the caller's check (it needs the other groups). `error` reads after
+ * "Group 3 name: ".
+ */
+export function checkGroupName(raw: string): GroupTextCheck {
+  const value = normalizeGroupText(raw);
+  if (!value) return { ok: false, value, error: "a name is required." };
+  if (value.length > GROUP_NAME_MAX) {
+    return {
+      ok: false,
+      value,
+      error: `at most ${GROUP_NAME_MAX} characters (got ${value.length}).`,
+    };
+  }
+  if (CONTROL_CHARS.test(value)) {
+    return { ok: false, value, error: "control characters are not allowed." };
+  }
+  return { ok: true, value };
+}
+
+/**
+ * The one rule for a group's clan tag: whitespace collapsed, empty (no tag) up
+ * to `GROUP_TAG_MAX` characters, no control characters. `error` reads after
+ * "Group 3 tag: ".
+ */
+export function checkGroupTag(raw: string): GroupTextCheck {
+  const value = normalizeGroupText(raw);
+  if (value.length > GROUP_TAG_MAX) {
+    return {
+      ok: false,
+      value,
+      error: `at most ${GROUP_TAG_MAX} characters, so a nickname keeps ${MIN_NICKNAME_ROOM} of Discord's ${NICKNAME_MAX} (got ${value.length}).`,
+    };
+  }
+  if (CONTROL_CHARS.test(value)) {
+    return { ok: false, value, error: "control characters are not allowed." };
+  }
+  return { ok: true, value };
 }
 
 /** A group key: `g_` and eight hex digits. */
@@ -377,15 +433,10 @@ export function validateGroupSetup(
   let leadsRow: number | null = null;
   for (const row of rows) {
     const where = `Group ${row.position}`;
-    const name = normalizeGroupText(row.name);
-    if (!name) {
-      errors.push(`${where} name: a name is required.`);
-    } else if (name.length > GROUP_NAME_MAX) {
-      errors.push(
-        `${where} name: at most ${GROUP_NAME_MAX} characters (got ${name.length}).`,
-      );
-    } else if (CONTROL_CHARS.test(name)) {
-      errors.push(`${where} name: control characters are not allowed.`);
+    const nameCheck = checkGroupName(row.name);
+    const name = nameCheck.value;
+    if (!nameCheck.ok) {
+      errors.push(`${where} name: ${nameCheck.error}`);
     } else {
       const folded = name.toLowerCase();
       const earlier = seenNames.get(folded);
@@ -426,14 +477,9 @@ export function validateGroupSetup(
       }
     }
 
-    const tag = normalizeGroupText(row.tag);
-    if (tag.length > GROUP_TAG_MAX) {
-      errors.push(
-        `${where} tag: at most ${GROUP_TAG_MAX} characters, so a nickname keeps ${MIN_NICKNAME_ROOM} of Discord's ${NICKNAME_MAX} (got ${tag.length}).`,
-      );
-    } else if (CONTROL_CHARS.test(tag)) {
-      errors.push(`${where} tag: control characters are not allowed.`);
-    }
+    const tagCheck = checkGroupTag(row.tag);
+    const tag = tagCheck.value;
+    if (!tagCheck.ok) errors.push(`${where} tag: ${tagCheck.error}`);
 
     const marker = normalizeGroupText(row.marker);
     if (Array.from(marker).length > GROUP_MARKER_MAX_CHARS) {
@@ -474,7 +520,11 @@ export function validateGroupSetup(
       channelLeadMinutes,
       groups,
       captainsEnabled: input.captainsEnabled === true,
-      captainCustomisationEnabled: false,
+      // Only effective with leaders on, so only stored that way (like the tag
+      // position below).
+      captainCustomisationEnabled:
+        input.captainsEnabled === true &&
+        input.captainCustomisationEnabled === true,
       tagsEnabled: input.tagsEnabled === true,
       tagsSuffix: input.tagsEnabled === true && input.tagsSuffix === true,
     },
@@ -541,12 +591,14 @@ export interface GroupSetupSource {
 export function copyGroupSetup(source: GroupSetupSource): EventGroupSetup {
   const groups: IEventGroup[] = (source.groups ?? []).map((group) => ({
     key: String(group.key ?? ""),
-    name: String(group.name ?? ""),
+    // A leader's rename (#1196) belongs to one occurrence: the next one starts
+    // from what the host set (`originalName` is set with `originalTag`).
+    name: String(group.originalName || (group.name ?? "")),
     kind: (EVENT_GROUP_KINDS as readonly string[]).includes(group.kind ?? "")
       ? (group.kind as EventGroupKind)
       : "team",
     size: typeof group.size === "number" ? group.size : null,
-    tag: group.tag ?? "",
+    tag: group.originalName ? (group.originalTag ?? "") : (group.tag ?? ""),
     marker: group.marker ?? "",
     channelId: null,
     captainId: null,

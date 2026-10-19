@@ -31,6 +31,7 @@ import { EventNicknameTags } from "./event-nickname-tags.js";
 import {
   EventGroupChannels,
   type GroupChannelReport,
+  type NameSyncOutcome,
 } from "./event-group-channels.js";
 import {
   EventTeardown,
@@ -914,6 +915,32 @@ export class EventService extends ScheduledService {
     return report;
   }
 
+  /**
+   * Finish the pending channel renames of an event (the leader customiser,
+   * #1196; the host's live rename, #1197, shares it): the stored group name is
+   * the truth and the channel follows, through the shared rename queue (a rate
+   * limit is reported, never slept on). `groupKey` limits it to one group.
+   * Null when the server cannot be found.
+   */
+  public async syncGroupNames(
+    eventId: string,
+    guildId: string,
+    groupKey?: string,
+  ): Promise<NameSyncOutcome[] | null> {
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return null;
+    return this.groupChannels.syncNames(eventId, guild, groupKey);
+  }
+
+  /**
+   * Post, check or remove the "Customise team" message of every team channel so
+   * it matches the event's switches now (#1196). The scan does this when it
+   * sees a difference; #1197 calls it right after the host flips a switch.
+   */
+  public async syncGroupControls(eventId: string): Promise<void> {
+    await this.groupChannels.syncControls(eventId);
+  }
+
   /** What the last group-channel pass did for an event (host panel, #1189). */
   public getGroupChannelReport(eventId: string): GroupChannelReport | null {
     return this.groupChannels.getReport(eventId);
@@ -1285,6 +1312,27 @@ export class EventService extends ScheduledService {
       (await this.leadsAdminsChanged(event, guild))
     ) {
       await this.syncLeadsAccess(event.guildId, String(event._id));
+    }
+
+    // 2d. The leader customiser (#1196): a stored team name whose channel has
+    // not been confirmed to carry it, and the "Customise team" message of each
+    // team channel (posted, checked or taken away to match the switches). Both
+    // triggers are pure reads of this copy; the passes read the event fresh
+    // inside the channel lock and refuse one that is not open.
+    if (
+      event.groupsEnabled === true &&
+      !event.nativeAdopted &&
+      !teardownRan &&
+      (event.state === "scheduled" || event.state === "active") &&
+      !this.mustSkipScan(event)
+    ) {
+      const eventId = String(event._id);
+      if (this.groupChannels.namesNeedAttention(event)) {
+        await this.groupChannels.syncNames(eventId, guild);
+      }
+      if (this.groupChannels.controlsNeedAttention(event)) {
+        await this.groupChannels.syncControls(eventId);
+      }
     }
 
     // 4b. Group channels of a finished event go with the main channel (#1190),

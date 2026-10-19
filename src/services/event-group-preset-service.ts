@@ -392,7 +392,12 @@ export function eventSetupToFormValues(
     leaderLabel: event.leaderLabel,
     channelLeadMinutes: event.channelLeadMinutes,
     tagsEnabled: event.tagsEnabled,
-    groups: event.groups,
+    // What the host set, not what a leader renamed a team to (#1196).
+    groups: event.groups.map((g) =>
+      g.originalName
+        ? { ...g, name: g.originalName, tag: g.originalTag ?? "" }
+        : g,
+    ),
   });
 }
 

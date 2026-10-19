@@ -2580,6 +2580,7 @@ function renderGroupsSection(
         <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
       </label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
+      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainCustom}" value="1"> Leaders can customise: each leader may rename their own team and set its tag from a button in the team's channel chat. Only used when group leaders is ticked. The host can reset any team from the host panel.</label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"> Clan tags: while the event runs, put each team's tag on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.</label>
       <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tagsSuffix}" value="1"> Put the tag after the name (Alice [RED]) instead of before it</label>
       <label>Create channels this many minutes before the start (empty = server default)

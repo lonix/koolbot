@@ -1419,7 +1419,8 @@ host only, at most one), an optional size (1 to 99, the voice user limit), an
 optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
 an optional colour marker such as a coloured circle. A separate tick box, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
-**Leaders** below), and **Clan tags** (#1194) puts each team's tag on its members'
+**Leaders** below), **Leaders can customise** (#1196, off by default, only used while
+Group leaders is ticked; see **Team names and tags** below), and **Clan tags** (#1194) puts each team's tag on its members'
 server nicknames while the event runs (off by default; see **Clan tags** below).
 Names must be unique within an
 event and the number of groups is capped by `events.groups.max_count`; a preset with
@@ -1622,8 +1623,8 @@ under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
 event's groups. Scheduled and active events also show a section for each control:
-**Assign people**, **Move people**, **End the event** and, when the event has leaders
-switched on, **Leaders** (below) work today; live settings are added by a later update, and
+**Assign people**, **Move people**, **End the event**, **Team names and tags** (below) and, when
+the event has leaders switched on, **Leaders** (below) work today; live settings are added by a later update, and
 until then it says it is not available yet. Ended and cancelled events
 show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
@@ -1819,6 +1820,66 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   `event.host.leader-label` and `event.host.pull-leaders` (counts and the destination
   word, no names). The step that ends a role after an unassign is not audited on its own;
   it follows an audited unassign, an audited randomise, an unaudited self-join or a reset.
+
+**Team names and tags** (#1196) is a section of the host panel for every event with groups. It
+is about the **Leaders can customise** switch of the schedule form (off by default, and only
+used while **Group leaders** is on). With it on, each team's own leader can rename the team and
+set its clan tag from Discord; the host can put any team back at any time.
+
+- **The button.** While the event is open and both switches are on, the bot posts one
+  **Customise team** message in the chat of each team group's voice channel. It names nobody
+  and pings nobody. The bot finds its own message again after a restart instead of posting a
+  second one, and removes it (and forgets it) when leaders or customising are switched off, so
+  no button is left behind (switches can only be changed after creation once live settings,
+  #1197, land; until then this happens when the event ends and its channels go). The scan posts
+  a missing message and removes an extra one; it checks that a recorded message still exists
+  once per run of the bot, so a message a moderator deletes by hand comes back after the next
+  restart. While `events.enabled` is off the scan does not run, so a button stays but only
+  answers that events are off. A post Discord refuses (the bot cannot send messages in that
+  channel) is shown in the group notices and tried again later.
+- **Who may use it.** Only that team's current leader, for that team only. Anyone else (another
+  team's leader, a team member, a stranger, a host who is not the leader) gets a private
+  message saying so. The check made when the button is pressed is only a courtesy: it is made
+  again when the form is **sent**, from the event as it is then, inside the same per-event lock
+  as every leader and membership change, and the database write carries the same conditions
+  (this team, this leader a member of it, leaders on, customising on, event open). A leader
+  removed, a switch turned off or an event that ended while the form was open is refused, and
+  nothing is stored.
+- **What can be changed.** The team's name and, while the event uses **Clan tags**, its tag.
+  Same rules as the schedule form: names 1 to 50 characters and unique within the event
+  (case does not matter), tags up to 8 characters or empty, no control characters, spaces
+  collapsed. A team a leader renamed keeps its original name reserved, so no other team can take
+  it (a reset can then always go back). Mistakes are explained privately and nothing is stored.
+- **Renaming the channel.** The stored name is what counts; the team's channel is renamed after
+  it. Discord allows about 2 renames per channel every 10 minutes, so a leader who has used
+  them is told when to try again ("about 7 minutes") and nothing is stored; if only the tag
+  changed too, the tag still applies. Nothing ever waits for the limit inside the form. If the
+  rename itself fails (Discord refuses, or does not answer), the name stays stored, the host
+  panel shows "channel rename pending" and every scan tries again; a rename that did go
+  through is recognised by reading the channel, not by renaming it twice.
+- **Tags.** A changed tag moves the nicknames of the team's members through the same step as
+  every other tag change (always from the stored original nickname, never from the current
+  one), in the background; the leader is told it can take a little while. The server owner,
+  and anyone whose top role is not below the bot's, can never be tagged by a bot.
+- **The host's reset.** The section lists each team with what the host set before a leader
+  changed it. **Reset** puts the original name and tag back (also with the leader switches off, but
+  only while `events.enabled` is on, otherwise it refuses and changes nothing),
+  renames the channel and moves the nicknames back. The original is
+  stored the first time a leader changes the team, so it works for Custom events as well as
+  presets. A reset is refused when another team now has that name; reset that team first. A
+  team nobody changed says so and writes nothing. Names and tags a leader chose are kept when
+  leaders or customising are switched off.
+- **A repeating event's next occurrence** starts from the names and tags the host set, not from
+  a leader's changes, and keeps the switch.
+- **Who changed what.** Each change a leader makes from Discord is one audit entry
+  (`event.leader.customise`, under the leader's own id, with the team's key and the old and new
+  name and tag), and the section lists the ten most recent. The host's reset is
+  `event.host.reset-team`.
+- **Member data.** Nothing new is stored per member: the name and tag belong to the team. The
+  audit entry carries the leader's id like any other audit entry (the audit log is kept; see
+  the data registry note on `web-audit-log`).
+- **Changing the switches after creation** comes with live settings (#1197). The checks above
+  already read both switches at the moment of use, so flipping them while a form is open is safe.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can

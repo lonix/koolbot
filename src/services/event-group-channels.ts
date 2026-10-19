@@ -16,10 +16,17 @@ import {
 import { Event } from "../models/event.js";
 import {
   cancellableCall,
+  createFailFastRest,
   createWriteRest,
   describeWriteFailure,
   rateLimitWaitMs,
 } from "../web/channel-write-rest.js";
+import { getRenameQueue } from "./event-rename-queue.js";
+import {
+  isOpenState,
+  controlWanted,
+  customiseCustomId,
+} from "./event-customise-rules.js";
 import { compareIds } from "../web/channel-manager.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
@@ -77,9 +84,16 @@ export type { OverwriteSpec } from "./event-leads-access.js";
  *   request (revokes first), paced, and writes nothing when the channel cannot
  *   be read. A channel that could not be restricted is created without the
  *   restriction and the host panel says so until it is.
+ * - The leader customiser (#1196) goes through the same lock: `syncNames`
+ *   finishes a pending channel rename (the stored name is the truth, the
+ *   channel follows; one attempt on the fail-fast client through the shared
+ *   rename queue, a rate limit is reported never slept on) and `syncControls`
+ *   posts, adopts or removes each team channel's "Customise team" message. Both
+ *   read fresh inside the lock and refuse an event that is not open.
  */
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
+const DISCORD_UNKNOWN_MESSAGE = 10008;
 const DISCORD_MISSING_PERMISSIONS = 50013;
 const MS_PER_MINUTE = 60 * 1000;
 
@@ -99,6 +113,26 @@ const ORDER_HOLD = "#order";
 const ORDER_FAILURE_NAME = "Group channel order";
 /** Never retry a rate-limited create sooner than this. */
 const MIN_RATE_LIMIT_BACKOFF_MS = MS_PER_MINUTE;
+/** After a rename whose outcome is unknown, look again (by reading) after this. */
+export const UNCONFIRMED_RENAME_HOLD_MS = MS_PER_MINUTE;
+/** Key suffixes in `holds` for a pending rename and a control message. */
+/** History searched for an existing control message: pages of 100, at most 5. */
+const CONTROL_SEARCH_PAGE = 100;
+const CONTROL_SEARCH_PAGES = 5;
+const RENAME_HOLD = "#rename";
+const CONTROL_HOLD = "#control";
+
+export type NameSyncStatus =
+  "applied" | "limited" | "failed" | "unconfirmed" | "skipped";
+
+/** What finishing one group's pending rename did. */
+export interface NameSyncOutcome {
+  groupKey: string;
+  status: NameSyncStatus;
+  /** For `limited` (and a held-back refusal): when it is worth trying again. */
+  retryAfterMs?: number;
+  reason?: string;
+}
 
 /** What the host gets on the main channel and on every group channel. */
 export const HOST_CHANNEL_PERMISSIONS =
@@ -144,6 +178,10 @@ interface GroupRow {
   channelId?: string | null;
   memberIds?: string[];
   captainId?: string | null;
+  /** Leader customiser (#1196). */
+  nameSyncPending?: boolean;
+  controlMessageId?: string | null;
+  controlChannelId?: string | null;
 }
 
 interface EventRow {
@@ -160,6 +198,7 @@ interface EventRow {
   endedAt?: Date | null;
   groupsEnabled?: boolean;
   captainsEnabled?: boolean;
+  captainCustomisationEnabled?: boolean;
   groups?: GroupRow[];
 }
 
@@ -470,7 +509,11 @@ export class EventGroupChannels {
     string,
     Map<string, GroupChannelFailure>
   >();
+  /** Control messages (`channelId:messageId`) seen to exist in this process. */
+  private readonly controlVerified = new Set<string>();
   private restClient: REST | null;
+  private failFastClient: REST | null = null;
+  private readonly injectedRest: boolean;
   private readonly callOverride?: ApiCaller;
   private readonly paceMs: number;
 
@@ -480,6 +523,7 @@ export class EventGroupChannels {
     options: GroupChannelOptions = {},
   ) {
     this.restClient = options.rest ?? null;
+    this.injectedRest = options.rest !== undefined;
     this.callOverride = options.call;
     this.paceMs = options.paceMs ?? GROUP_WRITE_PACE_MS;
   }
@@ -1761,6 +1805,569 @@ export class EventGroupChannels {
   }
 
   // -------------------------------------------------------------
+  // Leader customiser (#1196): channel names and control messages
+  // -------------------------------------------------------------
+
+  /**
+   * Does any group of this open event have a stored name its channel has not
+   * been confirmed to carry? Pure, on the scan's copy (a trigger only; the
+   * pass reads fresh). A pending rename held back after a refusal waits for
+   * its hold, so a standing refusal is not retried every scan.
+   */
+  public namesNeedAttention(event: {
+    _id: unknown;
+    state?: string;
+    groupsEnabled?: boolean;
+    groups?: GroupRow[];
+  }): boolean {
+    if (event.groupsEnabled !== true) return false;
+    if (!isOpenState(event.state ?? "")) return false;
+    const id = String(event._id);
+    return (event.groups ?? []).some((g) => {
+      if (g.nameSyncPending !== true || !g.channelId) return false;
+      const hold = this.holds.get(`${id}:${g.key}${RENAME_HOLD}`);
+      return !(hold && Date.now() < hold.until);
+    });
+  }
+
+  /**
+   * Finish the pending channel renames of an event (all its groups, or just
+   * `onlyGroupKey`): the stored name is the truth, the channel follows.
+   *
+   * ## Order, and why (decided in #1196)
+   *
+   * The caller writes the NAME first (one conditional write that is also the
+   * authorisation: the leader, both switches and the open state are in its
+   * filter) and sets `nameSyncPending`; this pass renames the CHANNEL after.
+   * The other order would decide "may this person rename" from a read, then
+   * wait on Discord (up to 30 s) before the write, and a leader removed
+   * meanwhile would still have renamed the channel. With this order a failed
+   * or unconfirmed rename never leaves a silent mismatch: the flag stays set,
+   * the host panel and the scan see it, and every pass tries again.
+   *
+   * Under the per-event channel lock. Reads the event and the channel FRESH,
+   * refuses an event that is not open or whose `events.enabled` is off or
+   * unreadable, and settles a group whose channel already carries the stored
+   * name (a timed-out rename that did land, a re-created channel) without
+   * spending the rename budget. The PATCH goes through the shared rename queue
+   * (`event-rename-queue.ts`) on the fail-fast client with ONE attempt: a rate
+   * limit is reported (`limited`, with the time left), never slept on. The flag
+   * is cleared only after a CONFIRMED rename (or the equality read above), by a
+   * write conditional on the group still having that name and channel.
+   */
+  public syncNames(
+    eventId: string,
+    guild: Guild,
+    onlyGroupKey?: string,
+  ): Promise<NameSyncOutcome[]> {
+    return this.lock.run(eventId, () =>
+      this.syncNamesLocked(eventId, guild, onlyGroupKey),
+    );
+  }
+
+  private async syncNamesLocked(
+    eventId: string,
+    guild: Guild,
+    onlyGroupKey?: string,
+  ): Promise<NameSyncOutcome[]> {
+    const outcomes: NameSyncOutcome[] = [];
+    const report = emptyReport();
+    const row = await this.readFresh(eventId, report);
+    if (!row) {
+      return onlyGroupKey
+        ? [
+            {
+              groupKey: onlyGroupKey,
+              status: "failed",
+              reason: "The event could not be read.",
+            },
+          ]
+        : [];
+    }
+    if (
+      row.groupsEnabled !== true ||
+      !isOpenState(row.state) ||
+      !(await this.eventsOn())
+    ) {
+      return outcomes;
+    }
+    let prefix: string | null = null;
+    for (const group of row.groups ?? []) {
+      if (onlyGroupKey && group.key !== onlyGroupKey) continue;
+      if (group.nameSyncPending !== true) continue;
+      const channelId = group.channelId ?? null;
+      if (!channelId) continue;
+      const holdKey = `${eventId}:${group.key}${RENAME_HOLD}`;
+      const hold = this.holds.get(holdKey);
+      if (hold && Date.now() < hold.until) {
+        outcomes.push({
+          groupKey: group.key,
+          status: "failed",
+          reason: hold.reason,
+          retryAfterMs: hold.until - Date.now(),
+        });
+        continue;
+      }
+      const state = await this.readChannel(guild, channelId);
+      if (state.status === "gone") {
+        // The channel pass re-creates it with the stored name.
+        outcomes.push({ groupKey: group.key, status: "skipped" });
+        continue;
+      }
+      if (state.status === "error") {
+        outcomes.push({
+          groupKey: group.key,
+          status: "failed",
+          reason: `Could not check the group channel: ${describeWriteFailure(state.error)}`,
+        });
+        continue;
+      }
+      if (prefix === null) {
+        try {
+          prefix = await this.deps.getPrefix();
+        } catch (error) {
+          logger.warn("Could not read the channel prefix for a rename:", error);
+          outcomes.push({
+            groupKey: group.key,
+            status: "failed",
+            reason: "The channel prefix could not be read.",
+          });
+          continue;
+        }
+      }
+      const wanted = groupChannelName(prefix, group);
+      if (state.channel.name === wanted) {
+        await this.clearNamePending(eventId, group, channelId);
+        this.holds.delete(holdKey);
+        outcomes.push({ groupKey: group.key, status: "applied" });
+        continue;
+      }
+      const run = await getRenameQueue().run(channelId, () =>
+        this.renameCall(
+          (signal) =>
+            this.failFastRest().patch(Routes.channel(channelId), {
+              body: { name: wanted },
+              reason: `Event group renamed (${sanitizeForLog(eventId)})`,
+              signal,
+            }),
+          "rename event group channel",
+        ),
+      );
+      if (run.status === "done") {
+        await this.clearNamePending(eventId, group, channelId);
+        this.holds.delete(holdKey);
+        outcomes.push({ groupKey: group.key, status: "applied" });
+        continue;
+      }
+      if (run.status === "limited") {
+        outcomes.push({
+          groupKey: group.key,
+          status: "limited",
+          retryAfterMs: run.retryAfterMs,
+        });
+        continue;
+      }
+      if (run.rateLimited) {
+        outcomes.push({
+          groupKey: group.key,
+          status: "limited",
+          retryAfterMs: run.retryAfterMs ?? MIN_RATE_LIMIT_BACKOFF_MS,
+        });
+        continue;
+      }
+      const reason = describeWriteFailure(run.error);
+      const refused = run.error instanceof DiscordAPIError;
+      logger.warn(
+        `Event ${sanitizeForLog(eventId)}: group channel ${sanitizeForLog(channelId)} not renamed: ${sanitizeForLog(reason)}`,
+      );
+      // A refusal repeats until someone fixes it; an unknown outcome is
+      // settled by the equality read of the next pass.
+      const ms = refused
+        ? REFUSED_CREATE_BACKOFF_MS
+        : UNCONFIRMED_RENAME_HOLD_MS;
+      this.holds.set(holdKey, { until: Date.now() + ms, reason });
+      outcomes.push({
+        groupKey: group.key,
+        status: refused ? "failed" : "unconfirmed",
+        reason,
+        retryAfterMs: ms,
+      });
+    }
+    return outcomes;
+  }
+
+  /** Clear `nameSyncPending` of a group that still has this name and channel. */
+  private async clearNamePending(
+    eventId: string,
+    group: GroupRow,
+    channelId: string,
+  ): Promise<void> {
+    try {
+      await Event.updateOne(
+        {
+          _id: eventId,
+          groups: {
+            $elemMatch: {
+              key: group.key,
+              name: group.name,
+              channelId,
+              nameSyncPending: true,
+            },
+          },
+        },
+        { $set: { "groups.$[g].nameSyncPending": false } },
+        { arrayFilters: [{ "g.key": group.key, "g.name": group.name }] },
+      );
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(eventId)}: could not record a channel rename:`,
+        error,
+      );
+    }
+  }
+
+  private async eventsOn(): Promise<boolean> {
+    if (!this.deps.isEnabled) return true;
+    try {
+      return await this.deps.isEnabled();
+    } catch (error) {
+      logger.warn("Could not read events.enabled for a group pass:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Does a group need its control message posted or taken away? Pure, on the
+   * scan's copy (a trigger only: the pass reads fresh and decides again). A
+   * recorded message that this process has not yet seen exist counts, once.
+   */
+  public controlsNeedAttention(event: {
+    _id: unknown;
+    state?: string;
+    groupsEnabled?: boolean;
+    captainsEnabled?: boolean;
+    captainCustomisationEnabled?: boolean;
+    groups?: GroupRow[];
+  }): boolean {
+    const id = String(event._id);
+    return (event.groups ?? []).some((g) => {
+      const recorded = !!g.controlMessageId;
+      const wanted = controlWanted(event, g, true);
+      if (wanted !== recorded) {
+        const hold = this.holds.get(`${id}:${g.key}${CONTROL_HOLD}`);
+        return !(hold && Date.now() < hold.until);
+      }
+      return (
+        wanted &&
+        !!g.controlMessageId &&
+        (g.controlChannelId !== g.channelId ||
+          !this.controlVerified.has(`${g.channelId}:${g.controlMessageId}`))
+      );
+    });
+  }
+
+  /**
+   * Post, check or remove the control message (the "Customise team" button) of
+   * every team group's channel so it matches the event NOW. Idempotent and
+   * restart-safe:
+   *
+   * - the message id is recorded on the group together with the channel it was
+   *   posted in, so a re-created channel never trusts the old id;
+   * - before posting, the channel's recent messages are searched for the bot's
+   *   own control message of that group (a crash between the post and its
+   *   record, or a post whose answer was lost, is adopted, never duplicated);
+   * - a recorded message is read once per process to see it still exists;
+   * - when the customiser is off (or the event is over, or events are off) the
+   *   message is deleted and the record cleared, so no button is left behind;
+   * - the content is static (no names) and carries `allowed_mentions: none`;
+   * - a refusal or failure is held back (5 or 10 minutes) and shown as a
+   *   problem on the host panel; one failed group never stops the others.
+   *
+   * Under the per-event channel lock, from a fresh read. Never throws.
+   */
+  public syncControls(eventId: string): Promise<void> {
+    return this.lock.run(eventId, () =>
+      this.syncControlsLocked(eventId).catch((error: unknown) => {
+        logger.error(
+          `Event ${sanitizeForLog(eventId)}: control message pass failed:`,
+          error,
+        );
+      }),
+    );
+  }
+
+  private async syncControlsLocked(eventId: string): Promise<void> {
+    const report = emptyReport();
+    const row = await this.readFresh(eventId, report);
+    if (!row || row.groupsEnabled !== true) return;
+    // An event that is over keeps no button (its channels are going), but the
+    // pass only touches an open one: the end teardown owns the rest.
+    if (!isOpenState(row.state)) return;
+    const eventsEnabled = await this.eventsOn();
+    for (const group of row.groups ?? []) {
+      const problemKey = `${CONTROL_HOLD}:${group.key}`;
+      const holdKey = `${eventId}:${group.key}${CONTROL_HOLD}`;
+      const hold = this.holds.get(holdKey);
+      if (hold && Date.now() < hold.until) continue;
+      const channelId = group.channelId ?? null;
+      let recordedId = group.controlMessageId ?? null;
+      // A record from another channel is stale: its channel is gone.
+      if (recordedId && group.controlChannelId !== channelId) {
+        await this.recordControl(eventId, group, recordedId, null, null);
+        recordedId = null;
+      }
+      const wanted = controlWanted(row, group, eventsEnabled);
+      try {
+        if (!wanted) {
+          if (recordedId && channelId) {
+            await this.deleteControl(channelId, recordedId);
+            this.controlVerified.delete(`${channelId}:${recordedId}`);
+          }
+          if (recordedId) {
+            await this.recordControl(eventId, group, recordedId, null, null);
+          }
+          this.setLeadsProblem(eventId, problemKey, null);
+          continue;
+        }
+        const channel = channelId as string;
+        if (recordedId) {
+          const key = `${channel}:${recordedId}`;
+          // A message seen to exist is a working button: whatever was reported
+          // or held back about it earlier no longer applies.
+          if (
+            this.controlVerified.has(key) ||
+            (await this.controlExists(channel, recordedId))
+          ) {
+            this.controlVerified.add(key);
+            this.holds.delete(holdKey);
+            this.setLeadsProblem(eventId, problemKey, null);
+            continue;
+          }
+          await this.recordControl(eventId, group, recordedId, null, null);
+          recordedId = null;
+        }
+        const adopted = await this.findControl(channel, eventId, group.key);
+        const messageId =
+          adopted ?? (await this.postControl(channel, eventId, group.key));
+        const recorded = await this.recordControl(
+          eventId,
+          group,
+          null,
+          messageId,
+          channel,
+        );
+        if (!recorded && !adopted) {
+          // Ours (just posted) and unrecorded: nothing may point at it.
+          await this.deleteControl(channel, messageId);
+        } else if (recorded) {
+          this.controlVerified.add(`${channel}:${messageId}`);
+        }
+        this.setLeadsProblem(eventId, problemKey, null);
+      } catch (error) {
+        const reason = describeWriteFailure(error);
+        const refused = error instanceof DiscordAPIError;
+        logger.warn(
+          `Event ${sanitizeForLog(eventId)}: control message of group ${sanitizeForLog(group.key)}: ${sanitizeForLog(reason)}`,
+        );
+        this.holds.set(holdKey, {
+          until:
+            Date.now() +
+            (refused
+              ? REFUSED_CREATE_BACKOFF_MS
+              : UNCONFIRMED_CREATE_BACKOFF_MS),
+          reason,
+        });
+        this.setLeadsProblem(eventId, problemKey, {
+          name: `${group.name}: customise button`,
+          reason: `${reason} Tried again later.`,
+        });
+      }
+    }
+  }
+
+  /**
+   * Record (or clear) a group's control message. Conditional on the group still
+   * holding what the decision was made from, with an outcome: false means it
+   * changed meanwhile and nothing was written.
+   */
+  private async recordControl(
+    eventId: string,
+    group: GroupRow,
+    fromId: string | null,
+    toId: string | null,
+    toChannelId: string | null,
+  ): Promise<boolean> {
+    const result = await Event.updateOne(
+      {
+        _id: eventId,
+        groups: {
+          $elemMatch: {
+            key: group.key,
+            controlMessageId: fromId,
+            ...(toId ? { channelId: toChannelId } : {}),
+          },
+        },
+      },
+      {
+        $set: {
+          "groups.$[g].controlMessageId": toId,
+          "groups.$[g].controlChannelId": toChannelId,
+        },
+      },
+      { arrayFilters: [{ "g.key": group.key }] },
+    );
+    return (result?.modifiedCount ?? 0) === 1;
+  }
+
+  private controlContent(): string {
+    return (
+      "**Customise your team**\n" +
+      "The current team leader can rename the team and set its tag with the button below. " +
+      "It only works for the leader of this team, and only while the host allows it."
+    );
+  }
+
+  private async postControl(
+    channelId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<string> {
+    const created = (await this.call(
+      (signal) =>
+        this.rest().post(Routes.channelMessages(channelId), {
+          body: {
+            content: this.controlContent(),
+            allowed_mentions: { parse: [] },
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 2,
+                    style: 1,
+                    label: "Customise team",
+                    custom_id: customiseCustomId("btn", eventId, groupKey),
+                  },
+                ],
+              },
+            ],
+          },
+          reason: `Event group customise button (${sanitizeForLog(eventId)})`,
+          signal,
+        }),
+      "post event group control message",
+      // A post is not idempotent: never replay it after a timeout.
+      false,
+    )) as { id: string };
+    return created.id;
+  }
+
+  /** The bot's own control message of this group among the recent messages. */
+  /**
+   * The bot's own control message of this group in the channel's history, or
+   * null when the WHOLE history was read and there is none. History is read in
+   * pages of `CONTROL_SEARCH_PAGE` up to `CONTROL_SEARCH_PAGES` pages; a search
+   * that cannot rule the message out (the bot's own id unknown, or the cap
+   * reached with older messages left) throws, and the caller holds back and
+   * reports instead of posting a second button.
+   */
+  private async findControl(
+    channelId: string,
+    eventId: string,
+    groupKey: string,
+  ): Promise<string | null> {
+    const me = this.client.user?.id;
+    if (!me) throw new Error("The bot's own id is unknown");
+    const wantedId = customiseCustomId("btn", eventId, groupKey);
+    type Raw = {
+      id: string;
+      author?: { id?: string };
+      components?: Array<{ components?: Array<{ custom_id?: string }> }>;
+    };
+    let before: string | null = null;
+    for (let page = 0; page < CONTROL_SEARCH_PAGES; page++) {
+      const query = new globalThis.URLSearchParams({
+        limit: String(CONTROL_SEARCH_PAGE),
+      });
+      if (before) query.set("before", before);
+      const messages = ((await this.call(
+        (signal) =>
+          this.rest().get(Routes.channelMessages(channelId), {
+            query,
+            signal,
+          }),
+        "look for the event group control message",
+        true,
+      )) ?? []) as Raw[];
+      for (const m of messages) {
+        if (m.author?.id !== me) continue;
+        const has = (m.components ?? []).some((row) =>
+          (row.components ?? []).some((c) => c.custom_id === wantedId),
+        );
+        if (has) return m.id;
+      }
+      // A short page is the start of the channel: nothing older exists.
+      if (messages.length < CONTROL_SEARCH_PAGE) return null;
+      before = messages[messages.length - 1].id;
+    }
+    throw new Error(
+      "The channel history is too long to rule out an earlier button message",
+    );
+  }
+
+  private async controlExists(
+    channelId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    try {
+      await this.call(
+        (signal) =>
+          this.rest().get(Routes.channelMessage(channelId, messageId), {
+            signal,
+          }),
+        "check the event group control message",
+        true,
+      );
+      return true;
+    } catch (error) {
+      if (
+        error instanceof DiscordAPIError &&
+        (error.code === DISCORD_UNKNOWN_MESSAGE ||
+          error.code === DISCORD_UNKNOWN_CHANNEL)
+      ) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private async deleteControl(
+    channelId: string,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      await this.call(
+        (signal) =>
+          this.rest().delete(Routes.channelMessage(channelId, messageId), {
+            reason: "Event group customise button removed",
+            signal,
+          }),
+        "delete event group control message",
+        true,
+      );
+    } catch (error) {
+      if (
+        error instanceof DiscordAPIError &&
+        (error.code === DISCORD_UNKNOWN_MESSAGE ||
+          error.code === DISCORD_UNKNOWN_CHANNEL)
+      ) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  // -------------------------------------------------------------
   // Cleanup
   // -------------------------------------------------------------
 
@@ -2015,6 +2622,8 @@ export class EventGroupChannels {
     this.channelWarnings
       .get(eventId)
       ?.delete(`${channelId}${ACCESS_WARNING_SUFFIX}`);
+    // A deleted channel has no rename budget to remember (#1196).
+    getRenameQueue().forget(channelId);
     try {
       await Event.updateOne(
         {
@@ -2063,6 +2672,36 @@ export class EventGroupChannels {
       this.restClient = createWriteRest(this.client.token);
     }
     return this.restClient;
+  }
+
+  /**
+   * The client a rename goes out on: no retries, and every rate-limit wait is
+   * rejected instead of slept on (`createFailFastRest`). Tests that pass `rest`
+   * use it for both.
+   */
+  private failFastRest(): REST {
+    if (this.injectedRest && this.restClient) return this.restClient;
+    if (!this.failFastClient) {
+      if (!this.client.token) throw new Error("The bot is not logged in");
+      this.failFastClient = createFailFastRest(this.client.token);
+    }
+    return this.failFastClient;
+  }
+
+  /** One attempt, no automatic retry, no waiting on a rate limit. */
+  private async renameCall<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    name: string,
+  ): Promise<T> {
+    if (this.callOverride) return this.callOverride(fn, name, false);
+    const { CommandManager } = await import("./command-manager.js");
+    return cancellableCall(
+      CommandManager.getInstance(this.client),
+      fn,
+      name,
+      false,
+      1,
+    );
   }
 
   private async call<T>(

@@ -12,7 +12,7 @@ import { hostControlsAvailable } from "./host-panel-shared.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 
 export type HostSectionId =
-  "assignment" | "moves" | "leaders" | "end" | "settings";
+  "assignment" | "moves" | "leaders" | "customise" | "end" | "settings";
 
 export interface HostSectionDef {
   id: HostSectionId;
@@ -27,8 +27,9 @@ export interface HostSectionDef {
 
 /**
  * The control sections, in page order. Anchors are `#host-<id>`. Owners:
- * `assignment` #1191, `moves` #1192, `leaders` #1195, `end` #1193,
- * `settings` #1197.
+ * `assignment` #1191, `moves` #1192, `leaders` #1195, `customise` #1196
+ * (shown whatever the leaders' switches say: the host can always reset),
+ * `end` #1193, `settings` #1197.
  */
 export const HOST_SECTIONS: readonly HostSectionDef[] = [
   {
@@ -50,6 +51,12 @@ export const HOST_SECTIONS: readonly HostSectionDef[] = [
     placeholder: "Pick a leader for each group and pull just the leaders.",
     needsGroups: true,
     needsLeaders: true,
+  },
+  {
+    id: "customise",
+    title: "Team names and tags",
+    placeholder: "See what leaders changed and put any team back.",
+    needsGroups: true,
   },
   {
     id: "end",

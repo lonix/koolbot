@@ -110,6 +110,17 @@ import {
   PULL_MAIN,
 } from "../../services/event-group-leaders.js";
 import { validateLeaderLabel } from "../../services/event-groups.js";
+import { customisationOn } from "../../services/event-customise-rules.js";
+import {
+  LEADER_AUDIT_ACTION,
+  createCustomiseDeps,
+  resetGroupCustomisation,
+} from "../../services/event-leader-customise.js";
+import { WebAuditLog } from "../../models/web-audit-log.js";
+import {
+  renderCustomiseSection,
+  type CustomiseEditView,
+} from "../host-customise-view.js";
 import {
   renderLeadersSection,
   type LeaderDestinationView,
@@ -865,6 +876,97 @@ function createLeadersSection(client: Client): HostSectionRenderer {
   };
 }
 
+/** How many recent leader edits the panel lists. */
+const RECENT_EDITS = 10;
+
+function quoted(value: unknown): string {
+  return `"${String(value ?? "")}"`;
+}
+
+/** One audited leader edit as a line of text (plain; the view escapes it). */
+function describeEdit(details: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (details.nameTo !== undefined) {
+    parts.push(`name ${quoted(details.nameFrom)} to ${quoted(details.nameTo)}`);
+  }
+  if (details.tagTo !== undefined) {
+    parts.push(`tag ${quoted(details.tagFrom)} to ${quoted(details.tagTo)}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : "no change";
+}
+
+/** The "Team names and tags" section (#1196). */
+function createCustomiseSectionRenderer(client: Client): HostSectionRenderer {
+  return async (ctx) => {
+    const { event } = ctx;
+    if (event.groupsEnabled !== true) return undefined;
+    const teams = (event.groups ?? [])
+      .filter((g) => g.kind === "team")
+      .map((g) => ({
+        key: g.key,
+        name: g.name,
+        marker: g.marker ?? "",
+        tag: g.tag ?? "",
+        originalName: g.originalName ? g.originalName : null,
+        originalTag: g.originalTag ?? "",
+        renamePending: g.nameSyncPending === true,
+      }));
+    const edits: CustomiseEditView[] = [];
+    try {
+      const rows = await WebAuditLog.find({
+        guildId: event.guildId,
+        targetId: String(event._id),
+        action: LEADER_AUDIT_ACTION,
+        result: "success",
+      })
+        .sort({ createdAt: -1 })
+        .limit(RECENT_EDITS)
+        .lean();
+      for (const r of rows) {
+        edits.push({
+          at: new Date(r.createdAt).toISOString(),
+          who: cachedMemberName(client, event.guildId, r.discordUserId),
+          text: describeEdit((r.details ?? {}) as Record<string, unknown>),
+        });
+      }
+    } catch (err) {
+      logger.warn("Could not read the leader edits for the host panel:", err);
+    }
+    return renderCustomiseSection({
+      csrfToken: ctx.csrfToken,
+      actionPath: ctx.actionPath,
+      on: customisationOn(event),
+      groupLabel: event.groupLabel || "Group",
+      leaderLabel: event.leaderLabel || "Leader",
+      teams,
+      edits,
+    });
+  };
+}
+
+/** The host puts a team's name and tag back (#1196). */
+function registerCustomiseActions(router: Router, client: Client): void {
+  hostAction(router, "reset-team", "/reset-team", async ({ req, event }) => {
+    const group = bodyString(req, "group");
+    if (!/^g_[0-9a-f]{8}$/.test(group)) {
+      return { ok: false, message: "Choose a team." };
+    }
+    const result = await resetGroupCustomisation(
+      { guildId: event.guildId, eventId: String(event._id), groupKey: group },
+      createCustomiseDeps(client),
+    );
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+        details: { group },
+        errorMessage: result.code,
+      };
+    }
+    return { ok: true, message: result.message, details: result.details };
+  });
+}
+
 /** Set a leader, rename the label and pull the leaders (#1195). */
 function registerLeaderActions(router: Router, client: Client): void {
   hostAction(router, "set-leader", "/set-leader", async ({ req, event }) => {
@@ -1125,6 +1227,9 @@ export function createHostEventsRouter(client: Client): Router {
   // The "Leaders" section and its actions (#1195).
   HOST_SECTION_RENDERERS.leaders = createLeadersSection(client);
   registerLeaderActions(router, client);
+  // The "Team names and tags" section and the host's reset (#1196).
+  HOST_SECTION_RENDERERS.customise = createCustomiseSectionRenderer(client);
+  registerCustomiseActions(router, client);
   // The "End the event" section and its action (#1193).
   HOST_SECTION_RENDERERS.end = createEndSection();
   registerEndAction(router, client);
