@@ -15,6 +15,10 @@ import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
 import { automaticGrantBlockReason } from "../utils/role-safety.js";
 import { RoleGroupService } from "./role-group-service.js";
+import {
+  parseLeaderboardTiers,
+  type ParsedTier,
+} from "./leaderboard-tier-parse.js";
 
 /** Discord's Unknown Role error: the role was deleted. */
 const UNKNOWN_ROLE = 10011;
@@ -74,11 +78,6 @@ export function formatMentionLine(
 
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
-
-interface ParsedTier {
-  topN: number;
-  roleId: string;
-}
 
 export interface LeaderboardRoleRunSummary {
   ranAt: Date;
@@ -172,38 +171,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * Invalid entries are skipped with a warning. Duplicate topNs: last one wins.
    */
   private parseTiers(raw: string): ParsedTier[] {
-    if (!raw || raw.trim().length === 0) return [];
-
-    const tiers: Map<number, string> = new Map();
-    const entries = raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s);
-
-    for (const entry of entries) {
-      const parts = entry.split(":").map((p) => p.trim());
-      if (parts.length !== 2) {
-        logger.warn(`Skipping malformed leaderboard tier entry: "${entry}"`);
-        continue;
-      }
-      const topN = Number(parts[0]);
-      const roleId = parts[1];
-      if (!Number.isInteger(topN) || topN <= 0) {
-        logger.warn(
-          `Skipping tier with invalid topN (must be positive integer): "${entry}"`,
-        );
-        continue;
-      }
-      if (!roleId || !/^\d+$/.test(roleId)) {
-        logger.warn(`Skipping tier with invalid Discord role ID: "${entry}"`);
-        continue;
-      }
-      tiers.set(topN, roleId);
-    }
-
-    return Array.from(tiers.entries())
-      .map(([topN, roleId]) => ({ topN, roleId }))
-      .sort((a, b) => a.topN - b.topN);
+    return parseLeaderboardTiers(raw, (message) => logger.warn(message));
   }
 
   private normalizePeriod(value: string): TimePeriod {
