@@ -79,10 +79,10 @@
  *
  * - The main channel of an event made without groups has no host overwrites
  *   (they are added only when a group event's main channel is created).
- * - A repeating event's next occurrence is created from the CURRENT setup (the
- *   existing rule for every live edit), so groups turned off here also start the
- *   later occurrences without groups, and groups turned on start them with the
- *   preset's groups. The confirmation says so for a repeating event.
+ * - A repeating event's next occurrence starts from the SERIES' setup (#1266),
+ *   not from this occurrence: groups switched off or on here change only this
+ *   occurrence unless the same save carries the tick "also for the next
+ *   occurrences". The confirmation says so for a repeating event.
  *
  * ## Locks and the one revision
  *
@@ -522,7 +522,7 @@ export const groupsSwitchRow: LiveEditRow = asRow<GroupsSwitchValue>({
       .join("; ");
     const repeats =
       event.recurrence && event.recurrence !== "none"
-        ? " This event repeats, and the next one is made from the settings it has now, so it starts without groups too."
+        ? ' This event repeats: the next one starts with the group setup of the series. Tick "Also for the next occurrences" in the same save to make "groups off" the setup of the series too.'
         : "";
     const tags =
       event.tagsEnabled === true

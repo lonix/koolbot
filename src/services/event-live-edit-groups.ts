@@ -48,7 +48,7 @@
  *    new original: when the group has an `originalName` (a leader renamed it
  *    first) it is set to the host's new name, and `originalTag` is kept; when it
  *    has none it stays absent (the stored name is then the original, which is
- *    what a repeating event's next occurrence starts from). A leader's reset
+ *    what a series' stored setup takes for the next occurrence, #1266). A leader's reset
  *    therefore goes back to the host's latest name, never to a name the host
  *    replaced.
  * 4. **A size is a cap on joins, never a removal.** Lowering a size below the

@@ -3,7 +3,7 @@ import {
   EVENT_GROUP_KINDS,
   type EventGroupKind,
 } from "../models/event-group-kinds.js";
-import type { IEventGroup } from "../models/event.js";
+import type { IEventGroup, ISeriesGroupSetup } from "../models/event.js";
 import {
   getEventGroupPreset,
   type EventGroupPreset,
@@ -744,6 +744,108 @@ export function copyGroupSetup(source: GroupSetupSource): EventGroupSetup {
     captainCustomisationEnabled: source.captainCustomisationEnabled === true,
     tagsEnabled: source.tagsEnabled === true,
     tagsSuffix: source.tagsSuffix === true,
+  };
+}
+
+/**
+ * The setup a series' next occurrences start with, taken from an event row as
+ * the host has it (#1266): `copyGroupSetup`'s host-only values (a leader's
+ * rename and tag customisation never get in) plus the lock. Nothing of a
+ * person, a membership or a channel. With groups off the groups are not kept:
+ * the successor of a series without groups has none.
+ */
+export function seriesGroupSetupOf(
+  source: GroupSetupSource & { groupsLocked?: boolean | null },
+): ISeriesGroupSetup {
+  const copy = copyGroupSetup(source);
+  return {
+    groupsEnabled: copy.groupsEnabled,
+    presetId: copy.presetId,
+    groupLabel: copy.groupLabel,
+    leaderLabel: copy.leaderLabel,
+    groupsLocked: copy.groupsEnabled && source.groupsLocked === true,
+    captainsEnabled: copy.captainsEnabled,
+    captainCustomisationEnabled: copy.captainCustomisationEnabled,
+    tagsEnabled: copy.tagsEnabled,
+    tagsSuffix: copy.tagsSuffix,
+    groups: copy.groupsEnabled
+      ? copy.groups.map((g) => ({
+          key: g.key,
+          name: g.name,
+          kind: g.kind,
+          size: g.size,
+          tag: g.tag,
+          marker: g.marker,
+        }))
+      : [],
+  };
+}
+
+/**
+ * The stored series setup of a row, read defensively (a lean row skips schema
+ * defaults, and the field is optional): null when the row has none, so the
+ * caller falls back to the row itself.
+ */
+export function readSeriesGroupSetup(
+  raw: Partial<ISeriesGroupSetup> | null | undefined,
+): ISeriesGroupSetup | null {
+  if (!raw || typeof raw.groupsEnabled !== "boolean") return null;
+  const empty = emptyGroupSetup();
+  return {
+    groupsEnabled: raw.groupsEnabled,
+    presetId: raw.presetId ?? null,
+    groupLabel: raw.groupLabel || empty.groupLabel,
+    leaderLabel: raw.leaderLabel || empty.leaderLabel,
+    groupsLocked: raw.groupsLocked === true,
+    captainsEnabled: raw.captainsEnabled === true,
+    captainCustomisationEnabled: raw.captainCustomisationEnabled === true,
+    tagsEnabled: raw.tagsEnabled === true,
+    tagsSuffix: raw.tagsSuffix === true,
+    groups: (raw.groups ?? []).map((g) => ({
+      key: String(g.key ?? ""),
+      name: String(g.name ?? ""),
+      kind: (EVENT_GROUP_KINDS as readonly string[]).includes(g.kind ?? "")
+        ? g.kind
+        : "team",
+      size: typeof g.size === "number" ? g.size : null,
+      tag: g.tag ?? "",
+      marker: g.marker ?? "",
+    })),
+  };
+}
+
+/**
+ * The group fields of a successor occurrence made from a series setup (#1266):
+ * the host's names, kinds, sizes and tags, with no memberships, no leaders and
+ * no channels. Fresh arrays and objects, so the successor never shares the
+ * stored setup.
+ */
+export function successorGroupFields(
+  series: ISeriesGroupSetup,
+  channelLeadMinutes: number | null,
+): EventGroupSetup & { groupsLocked: boolean } {
+  return {
+    groupsEnabled: series.groupsEnabled,
+    presetId: series.presetId,
+    groupLabel: series.groupLabel,
+    leaderLabel: series.leaderLabel,
+    channelLeadMinutes,
+    groupsLocked: series.groupsLocked,
+    groups: series.groups.map((g) => ({
+      key: g.key,
+      name: g.name,
+      kind: g.kind,
+      size: g.size,
+      tag: g.tag,
+      marker: g.marker,
+      channelId: null,
+      captainId: null,
+      memberIds: [],
+    })),
+    captainsEnabled: series.captainsEnabled,
+    captainCustomisationEnabled: series.captainCustomisationEnabled,
+    tagsEnabled: series.tagsEnabled,
+    tagsSuffix: series.tagsSuffix,
   };
 }
 

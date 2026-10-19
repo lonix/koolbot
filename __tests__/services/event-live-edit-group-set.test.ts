@@ -327,7 +327,8 @@ async function removeConfirmed(
 describe("registration", () => {
   it("lists remove then add, then the lobby switch, just before the groups switch (#1243), with letters-only ids and no duplicates", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids.slice(-4, -1)).toEqual([
+    // The tick "also for the next occurrences" (#1266) is the very last row.
+    expect(ids.slice(-5, -2)).toEqual([
       "groupRemove",
       "groupAdd",
       "captainsLobby",

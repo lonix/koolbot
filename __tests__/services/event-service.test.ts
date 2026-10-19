@@ -1212,7 +1212,8 @@ describe("recurring event lifecycle", () => {
       nextSpawned: false,
       seriesCancelled: false,
       groupsEnabled: true,
-      // The host's lock belongs to one occurrence (#1191).
+      // A row from before the series setup existed (#1266): its lock is not
+      // carried, as before.
       groupsLocked: true,
       presetId: "builtin:wardogs",
       groupLabel: "Squad",
@@ -1240,8 +1241,7 @@ describe("recurring event lifecycle", () => {
       tagsEnabled: true,
       tagsSuffix: true,
     });
-    // The successor starts unlocked: the field is not carried at all.
-    expect(created[0].groupsLocked).toBeUndefined();
+    expect(created[0].groupsLocked).toBe(false);
     expect(created[0].groups).toEqual([
       {
         key: "g_a",
@@ -1266,6 +1266,239 @@ describe("recurring event lifecycle", () => {
         memberIds: [],
       },
     ]);
+  });
+
+  describe("the series' group setup (#1266)", () => {
+    const stored = (extra: Record<string, unknown> = {}) => ({
+      groupsEnabled: true,
+      presetId: "builtin:eve",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      groupsLocked: true,
+      captainsEnabled: true,
+      captainCustomisationEnabled: true,
+      tagsEnabled: true,
+      tagsSuffix: true,
+      groups: [
+        {
+          key: "g_a",
+          name: "Caldari",
+          kind: "team",
+          size: 6,
+          tag: "CAL",
+          marker: "",
+        },
+        {
+          key: "g_b",
+          name: "Gallente",
+          kind: "open",
+          size: null,
+          tag: "",
+          marker: "",
+        },
+      ],
+      ...extra,
+    });
+    const liveGroup = (extra: Record<string, unknown>) => ({
+      key: "g_a",
+      name: "Caldari",
+      kind: "team",
+      size: 6,
+      tag: "CAL",
+      marker: "",
+      channelId: "chan-live",
+      captainId: "u-cap",
+      memberIds: ["u1", "u2"],
+      ...extra,
+    });
+
+    it("starts the next occurrence from the series setup, not from this occurrence's own edits", async () => {
+      // The host switched groups OFF and renamed a group on the running
+      // occurrence without the tick: the series setup is untouched.
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        groupsEnabled: false,
+        groups: [liveGroup({ name: "Edited for tonight" })],
+        seriesGroupSetup: stored(),
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      expect(created[0]).toMatchObject({
+        groupsEnabled: true,
+        presetId: "builtin:eve",
+        groupLabel: "Squad",
+        leaderLabel: "Captain",
+        groupsLocked: true,
+        captainsEnabled: true,
+        captainCustomisationEnabled: true,
+        tagsEnabled: true,
+        tagsSuffix: true,
+      });
+      expect(created[0].groups).toEqual([
+        {
+          key: "g_a",
+          name: "Caldari",
+          kind: "team",
+          size: 6,
+          tag: "CAL",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+        {
+          key: "g_b",
+          name: "Gallente",
+          kind: "open",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: null,
+          captainId: null,
+          memberIds: [],
+        },
+      ]);
+    });
+
+    it("keeps a series without groups free of groups even when this occurrence got some", async () => {
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        groupsEnabled: true,
+        groups: [liveGroup({})],
+        seriesGroupSetup: stored({ groupsEnabled: false, groups: [] }),
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      expect(created[0].groupsEnabled).toBeUndefined();
+      expect(created[0].groups).toBeUndefined();
+    });
+
+    it("carries the series setup on to the successor, a copy of it", async () => {
+      const series = stored();
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        groupsEnabled: false,
+        seriesGroupSetup: series,
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      expect(created[0].seriesGroupSetup).toEqual(series);
+      expect(created[0].seriesGroupSetup).not.toBe(series);
+    });
+
+    it("gives the host's names back when only a leader's rename is stored (row without a series setup)", async () => {
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        groupsEnabled: true,
+        groups: [
+          liveGroup({
+            name: "Quizzzzbois",
+            tag: "QZ",
+            originalName: "Caldari",
+            originalTag: "CAL",
+          }),
+        ],
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      const groups = created[0].groups as Array<Record<string, unknown>>;
+      expect(groups[0]).toMatchObject({ name: "Caldari", tag: "CAL" });
+      // ... and the setup it carries on holds the host's name too.
+      const carried = created[0].seriesGroupSetup as {
+        groups: Array<Record<string, unknown>>;
+      };
+      expect(carried.groups[0]).toMatchObject({ name: "Caldari", tag: "CAL" });
+      expect(JSON.stringify(carried)).not.toContain("Quizzzzbois");
+    });
+
+    it("stores no member, leader or channel in the carried setup", async () => {
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        groupsEnabled: true,
+        groups: [liveGroup({})],
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      const text = JSON.stringify(created[0].seriesGroupSetup);
+      for (const forbidden of ["u1", "u-cap", "chan-live", "memberIds"]) {
+        expect(text).not.toContain(forbidden);
+      }
+    });
+
+    it("still takes the channel lead time from the freshest row", async () => {
+      EventMock.findById = jest.fn(async () => ({
+        nextSpawned: false,
+        seriesCancelled: false,
+        channelLeadMinutes: 40,
+        seriesGroupSetup: stored(),
+      }));
+      const { service } = buildService();
+      await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+      expect(created[0].channelLeadMinutes).toBe(40);
+    });
+
+    it("createEvent stores the form's setup as the series setup of a recurring event only", async () => {
+      const { service } = buildService();
+      const base = {
+        guildId: "guild-1",
+        title: "Quiz",
+        description: "",
+        startTime: new Date("2026-07-10T20:00:00Z"),
+        timezone: "UTC",
+        durationMinutes: 60,
+        createdBy: "admin-1",
+      };
+      const setup = {
+        groupsEnabled: true,
+        presetId: null,
+        groupLabel: "Team",
+        leaderLabel: "Leader",
+        channelLeadMinutes: null,
+        groups: [
+          {
+            key: "g_a",
+            name: "Caldari",
+            kind: "team" as const,
+            size: 4,
+            tag: "",
+            marker: "",
+            channelId: null,
+            captainId: null,
+            memberIds: [],
+          },
+        ],
+        captainsEnabled: false,
+        captainCustomisationEnabled: false,
+        tagsEnabled: false,
+        tagsSuffix: false,
+      };
+      await service.createEvent({
+        ...base,
+        recurrence: "weekly",
+        groups: setup,
+      });
+      expect(created[0].seriesGroupSetup).toMatchObject({
+        groupsEnabled: true,
+        groupsLocked: false,
+        groups: [{ key: "g_a", name: "Caldari", size: 4 }],
+      });
+
+      // A recurring event without groups still records "no groups", so a
+      // later un-ticked switch-on of one occurrence cannot leak into the series.
+      await service.createEvent({ ...base, recurrence: "weekly" });
+      expect(created[1].seriesGroupSetup).toMatchObject({
+        groupsEnabled: false,
+        groups: [],
+      });
+
+      await service.createEvent({ ...base, groups: setup });
+      expect(created[2].seriesGroupSetup).toBeUndefined();
+    });
   });
 
   it("gives a series without groups the exact successor it always had (#1188)", async () => {

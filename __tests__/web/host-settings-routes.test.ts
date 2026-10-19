@@ -29,6 +29,7 @@ import {
   writes,
   fake,
   clone,
+  SETTABLE,
   EventMock,
   type Json,
 } from "../services/event-live-edit-fake-event.js";
@@ -231,6 +232,7 @@ beforeEach(() => {
   process.env.WEBUI_SESSION_SECRET = SECRET;
   process.env.GUILD_ID = GUILD;
   (WebSessionService as unknown as { instance: unknown }).instance = null;
+  SETTABLE.add("seriesGroupSetup");
   store.clear();
   store.set(EVENT_ID, makeEvent());
   writes.length = 0;
@@ -711,5 +713,78 @@ describe("the confirmation round trip", () => {
       "This event is ended, so it can no longer be changed.",
     );
     expect(store.get(EVENT_ID)?.testName).toBe("a");
+  });
+});
+
+describe("the tick 'also for the next occurrences' (#1266)", () => {
+  const recurring = (over: Json = {}): void => {
+    store.set(
+      EVENT_ID,
+      makeEvent({ recurrence: "weekly", seriesId: "series-1", ...over }),
+    );
+  };
+  const TICK = 'name="s_seriesSetup" value="1"';
+
+  it("is offered, unticked, in every group form of an event that repeats, with the base 'off'", async () => {
+    recurring();
+    const r = await call(panel());
+    expect(r.text).toContain(TICK);
+    expect(r.text).not.toMatch(/name="s_seriesSetup" value="1" checked/);
+    expect(r.text).toContain('name="b_seriesSetup" value="0"');
+    // The settings form, the preset, remove and add forms and the switch form each carry it.
+    const forms = r.text
+      .split("<form ")
+      .slice(1)
+      .map((f) => f.split("</form>")[0])
+      .filter((f) => f.includes(`action="${panel()}/settings"`));
+    // Every form that changes the group setup (the save form, add a group, switch
+    // groups off) carries the tick; nothing else on the page posts it.
+    expect(forms.length).toBeGreaterThanOrEqual(3);
+    expect(forms.filter((f) => f.includes(TICK))).toHaveLength(forms.length);
+  });
+
+  it("is not offered for a one-off event", async () => {
+    const r = await call(panel());
+    expect(r.text).not.toContain("s_seriesSetup");
+    expect(r.text).not.toContain("Also for the next occurrences");
+  });
+
+  it("without the tick a save changes this occurrence only and stores no series setup", async () => {
+    recurring();
+    const r = await post("settings", {
+      s_groupsLocked: "1",
+      b_groupsLocked: "0",
+      b_seriesSetup: "0",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(store.get(EVENT_ID)?.groupsLocked).toBe(true);
+    expect(store.get(EVENT_ID)?.seriesGroupSetup).toBeUndefined();
+  });
+
+  it("with the tick the same save also stores the setup for the next occurrences, in one audit row", async () => {
+    recurring();
+    const r = await post("settings", {
+      s_groupsLocked: "1",
+      b_groupsLocked: "0",
+      s_seriesSetup: "1",
+      b_seriesSetup: "0",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(store.get(EVENT_ID)?.seriesGroupSetup).toMatchObject({
+      groupsEnabled: true,
+      groupsLocked: true,
+      groupLabel: "Squad",
+      groups: [{ key: "g_00000001", name: "Heli <b>x</b>", size: 2 }],
+    });
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it("a one-off event refuses the tick and changes nothing", async () => {
+    const r = await post("settings", {
+      s_seriesSetup: "1",
+      b_seriesSetup: "0",
+    });
+    expect(flashOf(r.location).type).not.toBe("ok");
+    expect(store.get(EVENT_ID)?.seriesGroupSetup).toBeUndefined();
   });
 });

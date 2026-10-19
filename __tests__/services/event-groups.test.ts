@@ -13,7 +13,10 @@ import {
   emptyGroupSetup,
   hasCaptainsLobby,
   parseGroupForm,
+  readSeriesGroupSetup,
   resolveGroupCountLimits,
+  seriesGroupSetupOf,
+  successorGroupFields,
   validateGroupSetup,
   type GroupSetupInput,
   type RawGroupRow,
@@ -749,5 +752,154 @@ describe("captainsLobbyName and hasCaptainsLobby", () => {
     expect(hasCaptainsLobby(undefined)).toBe(false);
     expect(hasCaptainsLobby([{ kind: "team" }, { kind: "open" }])).toBe(false);
     expect(hasCaptainsLobby([{ kind: "team" }, { kind: "leads" }])).toBe(true);
+  });
+});
+
+describe("the series group setup (#1266)", () => {
+  const liveRow = {
+    groupsEnabled: true,
+    groupsLocked: true,
+    presetId: "builtin:eve",
+    groupLabel: "Squad",
+    leaderLabel: "Captain",
+    captainsEnabled: true,
+    captainCustomisationEnabled: true,
+    tagsEnabled: true,
+    tagsSuffix: true,
+    groups: [
+      {
+        key: "g_a",
+        // A leader renamed and retagged it; the host's values are the originals.
+        name: "Quizzzzbois",
+        tag: "QZ",
+        originalName: "Caldari",
+        originalTag: "CAL",
+        kind: "team" as const,
+        size: 6,
+        marker: "x",
+        channelId: "c-a",
+        captainId: "u-leader",
+        memberIds: ["u1", "u2"],
+      },
+      {
+        key: "g_b",
+        name: "Gallente",
+        tag: "GAL",
+        kind: "open" as const,
+        size: null,
+        marker: "",
+        channelId: "c-b",
+        captainId: null,
+        memberIds: [],
+      },
+    ],
+  };
+
+  it("takes the host's names and tags, the lock and the switches, and no person or channel", () => {
+    expect(seriesGroupSetupOf(liveRow)).toEqual({
+      groupsEnabled: true,
+      presetId: "builtin:eve",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      groupsLocked: true,
+      captainsEnabled: true,
+      captainCustomisationEnabled: true,
+      tagsEnabled: true,
+      tagsSuffix: true,
+      groups: [
+        {
+          key: "g_a",
+          name: "Caldari",
+          kind: "team",
+          size: 6,
+          tag: "CAL",
+          marker: "x",
+        },
+        {
+          key: "g_b",
+          name: "Gallente",
+          kind: "open",
+          size: null,
+          tag: "GAL",
+          marker: "",
+        },
+      ],
+    });
+  });
+
+  it("keeps no groups and no lock for a series with groups off", () => {
+    expect(seriesGroupSetupOf({ ...liveRow, groupsEnabled: false })).toEqual(
+      expect.objectContaining({
+        groupsEnabled: false,
+        groupsLocked: false,
+        groups: [],
+      }),
+    );
+    expect(seriesGroupSetupOf({})).toEqual({
+      groupsEnabled: false,
+      presetId: null,
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      groupsLocked: false,
+      captainsEnabled: false,
+      captainCustomisationEnabled: false,
+      tagsEnabled: false,
+      tagsSuffix: false,
+      groups: [],
+    });
+  });
+
+  it("reads a stored setup back with defaults for what a lean row lacks, and null for no setup", () => {
+    expect(readSeriesGroupSetup(null)).toBeNull();
+    expect(readSeriesGroupSetup(undefined)).toBeNull();
+    expect(readSeriesGroupSetup({})).toBeNull();
+    expect(readSeriesGroupSetup({ groupsEnabled: true })).toEqual({
+      groupsEnabled: true,
+      presetId: null,
+      groupLabel: "Team",
+      leaderLabel: "Leader",
+      groupsLocked: false,
+      captainsEnabled: false,
+      captainCustomisationEnabled: false,
+      tagsEnabled: false,
+      tagsSuffix: false,
+      groups: [],
+    });
+    const stored = seriesGroupSetupOf(liveRow);
+    expect(readSeriesGroupSetup(stored)).toEqual(stored);
+  });
+
+  it("builds a successor's fields from it without memberships, leaders or channels", () => {
+    const fields = successorGroupFields(seriesGroupSetupOf(liveRow), 25);
+    expect(fields).toMatchObject({
+      groupsEnabled: true,
+      groupsLocked: true,
+      channelLeadMinutes: 25,
+      groupLabel: "Squad",
+    });
+    expect(fields.groups).toEqual([
+      {
+        key: "g_a",
+        name: "Caldari",
+        kind: "team",
+        size: 6,
+        tag: "CAL",
+        marker: "x",
+        channelId: null,
+        captainId: null,
+        memberIds: [],
+      },
+      {
+        key: "g_b",
+        name: "Gallente",
+        kind: "open",
+        size: null,
+        tag: "GAL",
+        marker: "",
+        channelId: null,
+        captainId: null,
+        memberIds: [],
+      },
+    ]);
   });
 });
