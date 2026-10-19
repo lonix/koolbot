@@ -325,9 +325,9 @@ async function removeConfirmed(
 }
 
 describe("registration", () => {
-  it("lists remove then add, last, with letters-only ids and no duplicates", () => {
+  it("lists remove then add, just before the groups switch (#1243), with letters-only ids and no duplicates", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids.slice(-2)).toEqual(["groupRemove", "groupAdd"]);
+    expect(ids.slice(-3, -1)).toEqual(["groupRemove", "groupAdd"]);
     expect(groupSetRows.map((r) => r.id)).toEqual(["groupRemove", "groupAdd"]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const row of groupSetRows) expect(row.id).toMatch(/^[A-Za-z]+$/);

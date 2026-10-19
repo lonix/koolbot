@@ -32,6 +32,7 @@ import {
   EventGroupChannels,
   type GroupChannelReport,
   type GroupRemoveOutcome,
+  type GroupsOffOutcome,
   type NameSyncOutcome,
 } from "./event-group-channels.js";
 import {
@@ -989,6 +990,22 @@ export class EventService extends ScheduledService {
     const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) return null;
     return this.groupChannels.removeGroup(eventId, guild, opts);
+  }
+
+  /**
+   * Delete every group channel of an event and switch its groups off in one
+   * step under the channel lock (the host's live "groups off", #1243): see
+   * `EventGroupChannels.removeAllGroupChannels`. Null when the server cannot
+   * be found.
+   */
+  public async removeAllGroupChannels(
+    eventId: string,
+    guildId: string,
+    opts: { ignore?: ReadonlySet<string>; ending?: () => boolean },
+  ): Promise<GroupsOffOutcome | null> {
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return null;
+    return this.groupChannels.removeAllGroupChannels(eventId, guild, opts);
   }
 
   /** What the last group-channel pass did for an event (host panel, #1189). */

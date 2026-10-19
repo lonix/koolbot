@@ -225,12 +225,13 @@ function addFieldError(value: Record<string, unknown>): string | null {
 function channelOwed(
   failures: ReadonlyArray<{ key: string; reason: string }> | null,
   key: string,
+  subject: string,
 ): string {
   if (failures === null) {
-    return "its channel is not created yet: the server could not be reached, KoolBot keeps trying every minute";
+    return `${subject} is not created yet: the server could not be reached, KoolBot keeps trying every minute`;
   }
   const why = failures.find((f) => f.key === key)?.reason;
-  return `its channel is not created yet${why ? ` (${why})` : ""}: KoolBot keeps trying every minute`;
+  return `${subject} is not created yet${why ? ` (${why})` : ""}: KoolBot keeps trying every minute`;
 }
 
 export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
@@ -365,7 +366,7 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
       },
     );
     if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
-    return createChannels(ctx, [g.key]);
+    return createMissingChannels(ctx, [g.key], ADD_SUBJECT);
   },
   // A re-posted add (the group is stored) finishes a channel that is still
   // owed: the same pass, judged by every group that has none.
@@ -373,41 +374,53 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
     e.channelId && (e.groups ?? []).some((g) => !g.channelId)
       ? "a group's channel is not created yet"
       : null,
-  reconcile: (ctx) => createChannels(ctx, null),
+  reconcile: (ctx) => createMissingChannels(ctx, null, ADD_SUBJECT),
   afterSaveGroup: "groupSet",
   afterSave: groupSetFollowUp,
 });
+
+/** How the add row's messages name the channel that is owed. */
+const ADD_SUBJECT = "its channel";
+
+/** What the channel pass needs of a row's context. */
+type ChannelPassContext = Pick<
+  ApplyContext,
+  "eventId" | "guildId" | "ending" | "effects"
+>;
 
 /**
  * Make the channels the event's groups lack, and judge the outcome by `keys`
  * (the group just added, or every group without one when a re-save finishes
  * it). Nothing is owed while the event has no main channel (the channels are
- * made together later) or when those groups have one already.
+ * made together later) or when those groups have one already. Shared with the
+ * groups on/off row (#1243), which names the owed channel its own way
+ * (`subject`, for example "its channel").
  */
-async function createChannels(
-  ctx: ApplyContext<NewGroupValue[]>,
+export async function createMissingChannels(
+  ctx: ChannelPassContext,
   keys: readonly string[] | null,
+  subject: string,
 ): Promise<RowOutcome> {
   // The group is already stored when this runs: a failed read here must not
   // turn the save into "not saved" (the core would), it is owed work.
   try {
-    return await createChannelsUnguarded(ctx, keys);
+    return await createChannelsUnguarded(ctx, keys, subject);
   } catch (err) {
     logger.error(
-      `Event ${sanitizeForLog(ctx.eventId)}: the channel of a new group could not be checked after saving it:`,
+      `Event ${sanitizeForLog(ctx.eventId)}: the group channels could not be checked after saving:`,
       err,
     );
     return {
       status: "partial",
-      message:
-        "its channel could not be checked after saving (see the log); KoolBot keeps trying every minute",
+      message: `${subject} could not be checked after saving (see the log); KoolBot keeps trying every minute`,
     };
   }
 }
 
 async function createChannelsUnguarded(
-  ctx: ApplyContext<NewGroupValue[]>,
+  ctx: ChannelPassContext,
   keys: readonly string[] | null,
+  subject: string,
 ): Promise<RowOutcome> {
   const lacking = (fresh: IEvent): string[] =>
     (fresh.groups ?? [])
@@ -427,14 +440,14 @@ async function createChannelsUnguarded(
   if (ctx.ending()) {
     return {
       status: "partial",
-      message: `its channel is not created because ${ENDING_TEXT}`,
+      message: `${subject} is not created because ${ENDING_TEXT}`,
     };
   }
   const fx = ctx.effects;
   if (!fx) {
     return {
       status: "partial",
-      message: "its channel is created by the next scan",
+      message: `${subject} is created by the next scan`,
     };
   }
   let failures: Array<{ key: string; reason: string }> | null;
@@ -449,7 +462,10 @@ async function createChannelsUnguarded(
   const still = after ? lacking(after) : [];
   return still.length === 0
     ? { status: "applied" }
-    : { status: "partial", message: channelOwed(failures, still[0]) };
+    : {
+        status: "partial",
+        message: channelOwed(failures, still[0], subject),
+      };
 }
 
 // ---------------------------------------------------------------
