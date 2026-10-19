@@ -1250,3 +1250,40 @@ describe("the audit row of the largest combined save keeps every change", () => 
     expect(d).not.toHaveProperty("changes2");
   });
 });
+
+describe("selecting the current preset again establishes the baseline", () => {
+  it("clears a leader's originals even when every visible value already matches the preset", async () => {
+    // The host renamed Alpha to Manual (original kept as Manual), the leader
+    // renamed it back to Alpha: id, names, sizes and tags all match the preset.
+    store.set(EV, {
+      ...(store.get(EV) as Json),
+      presetId: "builtin:squads",
+    });
+    group(A).name = "Squad 1";
+    group(A).size = 4;
+    group(A).tag = "S1";
+    group(A).originalName = "Manual";
+    group(A).originalTag = "";
+    group(B).name = "Squad 2";
+    group(B).size = 4;
+    group(B).tag = "S2";
+    group(C).name = "Squad 3";
+    group(C).size = 4;
+    group(C).tag = "S3";
+    const out = await run([
+      entry(GROUP_PRESET_ROW_ID, squads(), baseOf()),
+    ]);
+    expect(done(out).alreadyApplied).toEqual([]);
+    expect(done(out).applied.map((c) => c.rowId)).toEqual([GROUP_PRESET_ROW_ID]);
+    expect("originalName" in group(A)).toBe(false);
+    expect("originalTag" in group(A)).toBe(false);
+    expect(group(A)).toMatchObject({ name: "Squad 1", size: 4, tag: "S1" });
+    // Nothing visible changed, so the channels are not touched.
+    expect(calls).toEqual([]);
+    // And it is idempotent: a second selection changes nothing.
+    const before = rowWrites().length;
+    const again = await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
+    expect(done(again).applied).toEqual([]);
+    expect(rowWrites()).toHaveLength(before);
+  });
+});

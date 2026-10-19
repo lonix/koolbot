@@ -470,6 +470,14 @@ export type PresetGroupValue = {
   kind: string;
   size: number | null;
   tag: string;
+  /**
+   * The name a leader's rename of this group goes back to (`originalName`), only
+   * when the group has one. A preset never has it, so a stored value with it
+   * never equals the chosen preset: selecting the preset establishes the
+   * baseline (clears the leader's originals) even when every visible value
+   * already matches.
+   */
+  original?: string;
 };
 
 /** The row's value: a preset id (`""` = Custom) and its groups by position. */
@@ -484,6 +492,7 @@ export function readPresetValue(event: IEvent): PresetValue {
       kind: g.kind,
       size: typeof g.size === "number" ? g.size : null,
       tag: g.tag ?? "",
+      ...(g.originalName ? { original: g.originalName } : {}),
     })),
   };
 }
@@ -524,7 +533,8 @@ function parsePresetValue(raw: string): PresetValue | null {
   const out: PresetGroupValue[] = [];
   for (const g of groups) {
     if (!g || typeof g !== "object") return null;
-    const { name, kind, size, tag } = g as Record<string, unknown>;
+    const { name, kind, size, tag, original } = g as Record<string, unknown>;
+    if (original !== undefined && typeof original !== "string") return null;
     if (typeof name !== "string" || typeof tag !== "string") return null;
     if (typeof kind !== "string") return null;
     if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) return null;
@@ -533,11 +543,17 @@ function parsePresetValue(raw: string): PresetValue | null {
     const tagCheck = checkGroupTag(tag);
     const sizeCheck = checkGroupSize(size === null ? "" : String(size));
     if (!nameCheck.ok || !tagCheck.ok || !sizeCheck.ok) return null;
+    const originalCheck =
+      typeof original === "string" && original !== ""
+        ? checkGroupName(original)
+        : null;
+    if (originalCheck && !originalCheck.ok) return null;
     out.push({
       name: nameCheck.value,
       kind,
       size: sizeCheck.value,
       tag: tagCheck.value,
+      ...(originalCheck ? { original: originalCheck.value } : {}),
     });
   }
   return { id, groups: out };
@@ -563,7 +579,7 @@ function presetAuditValue(v: PresetValue): JsonValue {
   const out: { [key: string]: JsonValue } = { id: v.id };
   v.groups.forEach((g, i) => {
     out[`g${i + 1}`] =
-      `${g.name} | ${g.kind} | ${g.size === null ? "no limit" : `size ${g.size}`} | ${g.tag === "" ? "no tag" : `tag ${g.tag}`}`;
+      `${g.name} | ${g.kind} | ${g.size === null ? "no limit" : `size ${g.size}`} | ${g.tag === "" ? "no tag" : `tag ${g.tag}`}${g.original ? ` | goes back to ${g.original}` : ""}`;
   });
   return out;
 }
