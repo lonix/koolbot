@@ -17,7 +17,8 @@ import { EVENT_GROUP_KINDS, type EventGroupKind } from "./event-group-kinds.js";
  *   behaving exactly as it did before the library existed.
  *
  * Neither holds member data: the actor of a change is in the Web UI audit log,
- * so no user-id field is stored here.
+ * so no user-id field is stored here. A host's personal presets are a separate
+ * model (`event-group-personal-preset.ts`, #1216).
  */
 
 export interface IEventGroupPresetGroup {
@@ -42,6 +43,13 @@ export interface IEventGroupPreset extends Document {
   tagsEnabled: boolean;
   groups: IEventGroupPresetGroup[];
   enabled: boolean;
+  /**
+   * Set when an admin published a host's personal preset (#1216): the id of the
+   * personal row this copy was made from. A pointer to a preset, never to a
+   * person, so the copy keeps working (and stays) when its author resets their
+   * data. A row an admin wrote directly has none.
+   */
+  publishedFrom?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -71,6 +79,8 @@ const eventGroupPresetSchema = new Schema<IEventGroupPreset>(
     tagsEnabled: { type: Boolean, default: false },
     groups: { type: [groupSchema], default: [] },
     enabled: { type: Boolean, default: true },
+    // No default: only a published copy has it.
+    publishedFrom: { type: String },
   },
   { timestamps: true },
 );

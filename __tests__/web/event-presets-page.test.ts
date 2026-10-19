@@ -65,6 +65,18 @@ jest.unstable_mockModule(
   }),
 );
 
+// The hosts' personal presets for the publish card (#1216).
+const mockListHostPresets =
+  jest.fn<
+    (guildId: string) => Promise<{ rows: unknown[]; truncated: boolean }>
+  >();
+const actualPersonal =
+  await import("../../src/services/event-personal-preset-service.js");
+jest.unstable_mockModule(
+  "../../src/services/event-personal-preset-service.js",
+  () => ({ ...actualPersonal, listHostPresetsForAdmin: mockListHostPresets }),
+);
+
 const { loadEventPresetsPage } =
   await import("../../src/web/event-presets-page.js");
 
@@ -73,6 +85,52 @@ const client = {} as Client;
 beforeEach(() => {
   jest.clearAllMocks();
   mockState = "ok";
+  mockListHostPresets.mockResolvedValue({ rows: [], truncated: false });
+});
+
+describe("loadEventPresetsPage: the hosts' presets (#1216)", () => {
+  const row = (ownerId: string): unknown => ({
+    ownerId,
+    publishedAs: null,
+    entry: { id: `my:${"a".repeat(24)}`, label: "Night raid", groups: [] },
+  });
+
+  it("adds a display name from the member cache only, and falls back to an empty name", async () => {
+    mockListHostPresets.mockResolvedValue({
+      rows: [row("u1"), row("u2")],
+      truncated: true,
+    });
+    const withCache = {
+      guilds: {
+        cache: {
+          get: () => ({
+            members: {
+              cache: {
+                get: (id: string) =>
+                  id === "u1" ? { displayName: "Ada" } : undefined,
+              },
+            },
+          }),
+        },
+      },
+    } as unknown as Client;
+    const page = await loadEventPresetsPage(withCache, "g1", {});
+    expect(mockListHostPresets).toHaveBeenCalledWith("g1");
+    expect(page.hostPresets?.truncated).toBe(true);
+    expect(page.hostPresets?.rows.map((r) => [r.ownerId, r.ownerName])).toEqual(
+      [
+        ["u1", "Ada"],
+        ["u2", ""],
+      ],
+    );
+  });
+
+  it("reports an unreadable list as null, so the page says so instead of failing", async () => {
+    mockListHostPresets.mockRejectedValue(new Error("down"));
+    const page = await loadEventPresetsPage(client, "g1", {});
+    expect(page.hostPresets).toBeNull();
+    expect(page.entries.length).toBeGreaterThan(0);
+  });
 });
 
 describe("loadEventPresetsPage", () => {

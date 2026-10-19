@@ -1461,7 +1461,7 @@ without the field (every preset saved before it existed, and every built-in) mea
 and choosing one puts the box back to off. The tag format (before or after the name) is
 set per event, not on a preset. There is no default for the leaders switch (#1195), so
 a preset never turns leaders on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
-(`event-preset.create`, `.update`, `.delete`, `.toggle`).
+(`event-preset.create`, `.update`, `.delete`, `.toggle`, `.publish`, `.unpublish`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
 reference: editing, renaming, switching off or deleting a preset never changes an
@@ -1473,8 +1473,37 @@ message, never silently accepted. If the library cannot be read (database
 trouble), the form fails closed: when the switches cannot be read no preset is
 offered, when only the server's own presets cannot be read just the built-ins
 that are on are, with a notice either way; Custom always works. A server that
-never opens the page has every built-in on. Presets hold no member data, so they
-are not part of the member data export.
+never opens the page has every built-in on. The server's presets hold no member data, so
+they are not part of the member data export (a host's personal presets are, see below).
+
+**My event presets** (`/me/events/presets`, #1216) are a host's own pool of presets, next to
+the server's. The host panel's **Live settings** section has **Save these groups as my
+preset**, which opens the editor prefilled with the event's groups (names, kinds, sizes, tags,
+markers, labels, lead time and the clan tags default; never members, leaders or channel ids).
+Only the event's host can prefill from an event (its creator, or an admin, the same check as
+the host panel). The page also lists the host's presets with **Edit** and **Delete**, and the
+editor is the same as the server library's, so the same validation applies. A host keeps at
+most 10 presets and a name is unique among their own (ignoring case); a built-in's name is
+refused. A host sees only their own: another host's preset is "not found" on this page, in the
+panel's **Switch preset** list and in a posted preset id. Their own presets are offered next to
+the server's, marked **(yours)**, in the host panel's preset switch (the same fit rules as
+before) and, for an admin, in the schedule form's picker. Saving, editing and deleting are
+audited as `event-preset.create`, `.update` and `.delete` with `scope: personal`.
+
+An admin sees every host's presets under **Hosts' presets** on `/admin/events/presets` and can
+**Publish** one. Publishing **copies** it into the server's presets (on, so everyone can pick
+it), after the editor's validation is run again against the current group cap, and with the
+library's own limit of 50 and unique-name rule. The copy has no owner: it keeps working, and
+stays, when the host later deletes their preset or resets their data. A preset can have one
+copy at a time; **Unpublish** deletes the copy (and any change an admin made to it; events
+that used it keep their groups) and leaves the host's own preset alone. Both are audited
+(`event-preset.publish`, `.unpublish`).
+
+A host's personal presets are their own data: they are in the **member data export** and are
+deleted by a **reset** (`/me/privacy`), through the per-user data registry. Today only an admin
+or the creator can reach the group tools of an event, and events made with `/event create`
+have no groups, so a host who is not an admin can manage presets but has an event to use them
+on only once groups can be added to their events.
 
 **Clan tags** (#1194) are a per-event option on the schedule form (**Clan tags**, with an
 optional **Put the tag after the name**), off unless ticked, and only for an event with

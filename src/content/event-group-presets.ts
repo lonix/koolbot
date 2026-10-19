@@ -53,6 +53,11 @@ export const BUILTIN_PRESET_PREFIX = "builtin:";
  * literal "custom" already means "no preset".
  */
 export const LIBRARY_PRESET_PREFIX = "lib:";
+/**
+ * Id prefix of a host's personal preset (#1216): `my:` plus the row's
+ * ObjectId. Only ever resolved for its owner.
+ */
+export const PERSONAL_PRESET_PREFIX = "my:";
 
 function team(name: string, marker = ""): EventGroupPresetGroup {
   return { name, kind: "team", size: null, tag: "", marker };

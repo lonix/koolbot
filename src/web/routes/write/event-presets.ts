@@ -18,6 +18,10 @@ import {
   updateLibraryPreset,
   validatePresetForm,
 } from "../../../services/event-group-preset-service.js";
+import {
+  publishPersonalPreset,
+  unpublishPersonalPreset,
+} from "../../../services/event-personal-preset-service.js";
 import { resolveGroupCountLimits } from "../../../services/event-groups.js";
 import { recordAudit } from "../../audit.js";
 import {
@@ -142,6 +146,74 @@ export function createEventPresetsRouter(): Router {
           ? {
               type: "ok",
               text: `Preset "${result.label}" is now ${enabled ? "on" : "off"}. Events that already used it are unchanged.`,
+            }
+          : { type: "err", text: result.error },
+      );
+    }),
+  );
+
+  // Publish / unpublish a host's personal preset (#1216). Admin-only like the
+  // rest of this router. Publishing copies the preset into the library; the
+  // audit rows use the library's action names with `scope: "personal"` on the
+  // create/delete half and a `.publish` / `.unpublish` row of their own.
+  router.post(
+    "/events/presets/publish",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = getString(req, "id");
+      const config = ConfigService.getInstance();
+      const [defaultCount, configuredMax] = await Promise.all([
+        config.getNumber("events.groups.default_count", 2),
+        config.getNumber("events.groups.max_count", 15),
+      ]);
+      const { maxCount } = resolveGroupCountLimits(defaultCount, configuredMax);
+      const result = await publishPersonalPreset(session.guildId, id, {
+        maxCount,
+      });
+      await recordAudit(session, {
+        action: "event-preset.publish",
+        targetId: id,
+        details: result.ok
+          ? { scope: "personal", libraryId: result.id, name: result.name }
+          : { scope: "personal" },
+        result: result.ok ? "success" : "failure",
+        errorMessage: result.ok ? null : result.error,
+      });
+      flashRedirect(
+        res,
+        PAGE,
+        result.ok
+          ? {
+              type: "ok",
+              text: `Published "${result.name}". It is in the server's presets, switched on, so every host can pick it.`,
+            }
+          : { type: "err", text: `Not published. ${result.error}` },
+      );
+    }),
+  );
+
+  router.post(
+    "/events/presets/unpublish",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = getString(req, "id");
+      const result = await unpublishPersonalPreset(session.guildId, id);
+      await recordAudit(session, {
+        action: "event-preset.unpublish",
+        targetId: id,
+        details: result.ok
+          ? { scope: "personal", libraryId: result.libraryId }
+          : { scope: "personal" },
+        result: result.ok ? "success" : "failure",
+        errorMessage: result.ok ? null : result.error,
+      });
+      flashRedirect(
+        res,
+        PAGE,
+        result.ok
+          ? {
+              type: "ok",
+              text: "Unpublished. The server copy is deleted; events that already used it keep their groups, and the host keeps their own preset.",
             }
           : { type: "err", text: result.error },
       );

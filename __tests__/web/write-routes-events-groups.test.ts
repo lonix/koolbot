@@ -65,7 +65,10 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
 // and validator run, only the Mongo read is replaced (#1200).
 const mockLoadPresetResolver =
   jest.fn<
-    (guildId: string) => Promise<{ resolve: unknown; catalog: unknown }>
+    (
+      guildId: string,
+      options?: { ownerId?: string },
+    ) => Promise<{ resolve: unknown; catalog: unknown }>
   >();
 const actualPresetService =
   await import("../../src/services/event-group-preset-service.js");
@@ -471,5 +474,36 @@ describe("POST /events/create with the preset library (#1200)", () => {
   it("does not read the library for a plain event", async () => {
     await create({});
     expect(mockLoadPresetResolver).not.toHaveBeenCalled();
+  });
+
+  it("reads the creating admin's own presets (#1216): the resolver is asked for the session user, and a my: id is stored", async () => {
+    const MY_ID = "my:0123456789abcdef01234568";
+    useCatalog({
+      entries: [
+        ...builtinEntries(),
+        { ...libraryPreset, id: MY_ID, source: "personal" as const },
+      ],
+      state: "ok",
+    });
+    const flash = await create({
+      groups_enabled: "1",
+      groups_preset: MY_ID,
+    });
+    expect(flash.type).toBe("ok");
+    expect(mockLoadPresetResolver).toHaveBeenCalledWith(session.guildId, {
+      ownerId: session.discordUserId,
+    });
+    const arg = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect(arg.groups?.presetId).toBe(MY_ID);
+  });
+
+  it("refuses a my: id the resolver does not know for this admin (somebody else's preset)", async () => {
+    useCatalog({ entries: builtinEntries(), state: "ok" });
+    const refused = await create({
+      groups_enabled: "1",
+      groups_preset: "my:0123456789abcdef01234569",
+    });
+    expect(refused.type).toBe("err");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 });
