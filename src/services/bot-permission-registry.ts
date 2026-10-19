@@ -55,6 +55,11 @@ export interface FeatureRequirement {
   alsoKey?: keyof ConfigSchema;
   /** The setting holding the category or channel id, for those scopes. */
   targetKey?: keyof ConfigSchema;
+  /**
+   * A channel that is not a plain setting. `voice-lobby`: the lobby by id, or
+   * by name in the managed category, as the voice service finds it.
+   */
+  targetResolver?: "voice-lobby";
   /** What stops working while a permission is missing. */
   effect: string;
   /** How to put it right. */
@@ -138,7 +143,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
     scope: "channel",
     needs: [PERM.moveMembers],
     enabledKey: "voicechannels.enabled",
-    targetKey: "voicechannels.lobby.channel_id",
+    targetResolver: "voice-lobby",
     effect: "Members who join the lobby stay in it.",
     fix: "Give the bot's role Move Members, and make sure the lobby channel does not deny it.",
   },

@@ -21,8 +21,16 @@
  * `unknown`, which the UI never shows as fine.
  */
 
-import type { Client, Guild, GuildBasedChannel, GuildMember } from "discord.js";
+import {
+  ChannelType,
+  type Client,
+  type Guild,
+  type GuildBasedChannel,
+  type GuildMember,
+} from "discord.js";
 import { ConfigService } from "./config-service.js";
+import { defaultConfig } from "./config-schema.js";
+import { parseLeaderboardTiers } from "./leaderboard-tier-parse.js";
 import {
   FEATURE_REQUIREMENTS,
   missingNeeds,
@@ -107,7 +115,11 @@ interface Snapshot {
 
 const snapshots = new Map<
   string,
-  { at: number; promise: Promise<Snapshot | null> }
+  {
+    /** When the read settled; null while it is still running. */
+    settledAt: number | null;
+    promise: Promise<Snapshot | null>;
+  }
 >();
 
 /** Test hook: forget every cached read. */
@@ -173,12 +185,23 @@ function getSnapshot(
 ): Promise<Snapshot | null> {
   const now = (deps.now ?? Date.now)();
   const cached = snapshots.get(guildId);
-  if (cached && now - cached.at < SNAPSHOT_TTL_MS) return cached.promise;
-  const entry = {
-    at: now,
+  // A read that is still running is always shared (rate-limit backoff can
+  // outlast the TTL); a settled one is reused for the TTL from when it settled.
+  if (
+    cached &&
+    (cached.settledAt === null || now - cached.settledAt < SNAPSHOT_TTL_MS)
+  ) {
+    return cached.promise;
+  }
+  // A failed or cache-only result is kept for the TTL like any other, so an
+  // outage cannot make every page load retry every read.
+  const entry: {
+    settledAt: number | null;
+    promise: Promise<Snapshot | null>;
+  } = {
+    settledAt: null,
     promise: loadSnapshot(client, guildId, deps).then((s) => {
-      // A failed or cache-only result is kept for the TTL like any other, so
-      // an outage cannot make every page load retry every read.
+      entry.settledAt = (deps.now ?? Date.now)();
       return s;
     }),
   };
@@ -216,12 +239,9 @@ export function configuredRoleIds(
   const value = raw.trim();
   if (!value) return [];
   if (source.kind === "id") return [value];
-  const ids: string[] = [];
-  for (const part of value.split(",")) {
-    const id = part.slice(part.lastIndexOf(":") + 1).trim();
-    if (id && !ids.includes(id)) ids.push(id);
-  }
-  return ids;
+  // The tiers the leaderboard service acts on: malformed entries are ignored
+  // and a repeated Top N keeps its last role.
+  return [...new Set(parseLeaderboardTiers(value).map((t) => t.roleId))];
 }
 
 /**
@@ -235,13 +255,57 @@ async function readFeatureState(
   roleGroupsConfigured: () => Promise<boolean>,
 ): Promise<boolean> {
   if (r.usedWhen === "role-groups") return roleGroupsConfigured();
-  if (r.enabledKey && !(await config.getBooleanStrict(r.enabledKey, false))) {
-    return false;
-  }
-  if (r.alsoKey && !(await config.getBooleanStrict(r.alsoKey, false))) {
-    return false;
-  }
+  // An absent setting reads as its schema default, as the services read it
+  // (the room-status grant defaults to on).
+  const on = (key: keyof typeof defaultConfig): Promise<boolean> =>
+    config.getBooleanStrict(key, defaultConfig[key] === true);
+  if (r.enabledKey && !(await on(r.enabledKey))) return false;
+  if (r.alsoKey && !(await on(r.alsoKey))) return false;
   return true;
+}
+
+/**
+ * The voice lobby the way the voice service finds it: the configured channel id
+ * when it is a voice channel in the managed category, otherwise the voice
+ * channel there with the lobby's (legacy-aware) name.
+ */
+async function resolveVoiceLobby(
+  guild: Guild,
+  config: ConfigService,
+): Promise<{ categorySet: boolean; id: string }> {
+  const categoryId = (
+    await config.getStringStrict("voicechannels.category_id", "")
+  ).trim();
+  if (!categoryId) return { categorySet: false, id: "" };
+  const channels = guild.channels?.cache;
+  const lobbyId = (
+    await config.getStringStrict("voicechannels.lobby.channel_id", "")
+  ).trim();
+  if (lobbyId) {
+    const byId = channels?.get(lobbyId);
+    if (
+      byId &&
+      byId.type === ChannelType.GuildVoice &&
+      byId.parentId === categoryId
+    ) {
+      return { categorySet: true, id: lobbyId };
+    }
+  }
+  const { resolveLobbyChannelName } =
+    await import("./voice-channel-manager.js");
+  const name = await resolveLobbyChannelName((key, d) =>
+    config.getStringStrict(key, d),
+  );
+  for (const c of channels?.values() ?? []) {
+    if (
+      c.type === ChannelType.GuildVoice &&
+      c.parentId === categoryId &&
+      c.name === name
+    ) {
+      return { categorySet: true, id: c.id };
+    }
+  }
+  return { categorySet: true, id: "" };
 }
 
 async function defaultRoleGroupCount(guildId: string): Promise<number> {
@@ -298,11 +362,30 @@ export async function checkBotPermissions(
   try {
     for (const r of FEATURE_REQUIREMENTS) {
       const inUse = await readFeatureState(config, r, roleGroupsConfigured);
-      const targetId = r.targetKey
-        ? (await config.getStringStrict(r.targetKey, "")).trim()
-        : "";
+      let targetId = "";
+      let setting = String(r.targetKey);
+      let lobbyMissing = false;
+      if (r.targetResolver === "voice-lobby") {
+        setting = "voicechannels.category_id";
+        const lobby = await resolveVoiceLobby(guild, config);
+        targetId = lobby.id;
+        lobbyMissing = lobby.categorySet && !lobby.id;
+        if (!lobby.categorySet) targetId = "";
+      } else if (r.targetKey) {
+        targetId = (await config.getStringStrict(r.targetKey, "")).trim();
+      }
+      if (lobbyMissing) {
+        if (inUse) {
+          unknown.push({
+            feature: ref(r),
+            target: { kind: "channel", id: null, name: "the lobby" },
+            note: "The lobby was not found in the managed voice category (by id or by name), so it could not be checked.",
+          });
+        }
+        continue;
+      }
       if (r.scope !== "guild" && !targetId) {
-        const note = `${r.area}: ${String(r.targetKey)} is not set, so ${r.feature.toLowerCase()} is not checked.`;
+        const note = `${r.area}: ${setting} is not set, so ${r.feature.toLowerCase()} is not checked.`;
         if (inUse && !notes.includes(note)) notes.push(note);
         continue;
       }

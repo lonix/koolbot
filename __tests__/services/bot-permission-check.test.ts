@@ -13,7 +13,11 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { PermissionFlagsBits, PermissionsBitField } from "discord.js";
+import {
+  ChannelType,
+  PermissionFlagsBits,
+  PermissionsBitField,
+} from "discord.js";
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -63,6 +67,8 @@ interface FakeChannel {
   name: string;
   /** What the bot effectively holds here (the server-wide bits after overwrites). */
   bits: bigint;
+  type?: number;
+  parentId?: string;
 }
 
 function bits(...p: bigint[]): bigint {
@@ -148,12 +154,13 @@ describe("registry", () => {
         expect(r.usedWhen).toBeDefined();
       }
       if (r.alsoKey) expect(typeof defaultConfig[r.alsoKey]).toBe("boolean");
-      if (r.scope !== "guild") {
+      if (r.scope !== "guild" && !r.targetResolver) {
         expect(r.targetKey).toBeDefined();
         expect(
           typeof defaultConfig[r.targetKey as keyof typeof defaultConfig],
         ).toBe("string");
       }
+      if (r.targetResolver) expect(r.scope).toBe("channel");
       expect(r.needs.length).toBeGreaterThan(0);
     }
     for (const r of registry.ROLE_HIERARCHY_REQUIREMENTS) {
@@ -303,7 +310,13 @@ describe("what is missing and where", () => {
     const report = await run({
       channels: [
         { id: "cat-vc", name: "Voice", bits: ALL },
-        { id: "lobby", name: "Lobby", bits: without(ALL, P.MoveMembers) },
+        {
+          id: "lobby",
+          name: "Lobby",
+          bits: without(ALL, P.MoveMembers),
+          type: ChannelType.GuildVoice,
+          parentId: "cat-vc",
+        },
       ],
     });
     expect(report.problems).toHaveLength(1);
@@ -319,22 +332,107 @@ describe("what is missing and where", () => {
       "rules.enabled": true,
       "rules.role_id": "r-high",
       "leaderboard_roles.enabled": true,
-      "leaderboard_roles.tiers": "1:r-high, 3:r-low",
+      "leaderboard_roles.tiers": "1:9001, 3:9002,",
     };
     const report = await run({
       botPosition: 5,
       roles: [
         { id: "r-high", name: "Admins", position: 9 },
-        { id: "r-low", name: "Fans", position: 2 },
+        { id: "9001", name: "Top fans", position: 9 },
+        { id: "9002", name: "Fans", position: 2 },
       ],
     });
     const above = report.problems.filter((p) => p.target.kind === "role");
-    expect(above).toHaveLength(1);
-    expect(above[0].target.name).toBe("Admins");
-    expect(above[0].features.map((f) => f.id).sort()).toEqual([
-      "leaderboard-roles-hierarchy",
-      "rules-role-hierarchy",
+    expect(above.map((a) => a.target.name).sort()).toEqual([
+      "Admins",
+      "Top fans",
     ]);
+    expect(
+      above.find((a) => a.target.name === "Top fans")?.features[0].id,
+    ).toBe("leaderboard-roles-hierarchy");
+  });
+
+  it("only checks the tier roles the leaderboard service would act on", async () => {
+    settings = {
+      "leaderboard_roles.enabled": true,
+      // Malformed entries are ignored, and a repeated Top N keeps its last role.
+      "leaderboard_roles.tiers": "1:9001,1:9002,x:9003,2:not-an-id",
+    };
+    const report = await run({
+      botPosition: 5,
+      roles: [
+        { id: "9001", name: "Replaced", position: 9 },
+        { id: "9002", name: "Kept", position: 9 },
+        { id: "9003", name: "Malformed", position: 9 },
+      ],
+    });
+    expect(
+      report.problems
+        .filter((p) => p.target.kind === "role")
+        .map((p) => p.target.name),
+    ).toEqual(["Kept"]);
+  });
+
+  it("finds the voice lobby by name when no lobby id is set", async () => {
+    settings = {
+      "voicechannels.enabled": true,
+      "voicechannels.category_id": "cat-vc",
+    };
+    const report = await run({
+      channels: [
+        { id: "cat-vc", name: "Voice", bits: ALL },
+        {
+          id: "l1",
+          name: "Lobby",
+          bits: without(ALL, P.MoveMembers),
+          type: ChannelType.GuildVoice,
+          parentId: "cat-vc",
+        },
+        // Same name outside the managed category: not the lobby.
+        {
+          id: "l2",
+          name: "Lobby",
+          bits: ALL,
+          type: ChannelType.GuildVoice,
+          parentId: "other",
+        },
+      ],
+    });
+    const lobby = report.problems.find((p) => p.target.id === "l1");
+    expect(lobby?.permission).toBe("Move Members");
+    expect(lobby?.features.map((f) => f.id)).toEqual(["voice-lobby"]);
+  });
+
+  it("says the lobby could not be checked, not fine, when it cannot be found", async () => {
+    settings = {
+      "voicechannels.enabled": true,
+      "voicechannels.category_id": "cat-vc",
+      "voicechannels.lobby.channel_id": "not-here",
+    };
+    const report = await run({
+      channels: [{ id: "cat-vc", name: "Voice", bits: ALL }],
+    });
+    expect(report.unknown.map((u) => u.feature.id)).toEqual(["voice-lobby"]);
+    expect(report.okFeatures.map((f) => f.id)).not.toContain("voice-lobby");
+  });
+
+  it("treats the room-status grant as on when its setting is absent, like the voice service", async () => {
+    settings = {
+      "voicechannels.enabled": true,
+      "voicechannels.category_id": "cat-vc",
+    };
+    const report = await run({
+      channels: [
+        {
+          id: "cat-vc",
+          name: "Voice",
+          bits: without(ALL, P.SetVoiceChannelStatus),
+        },
+      ],
+    });
+    expect(report.problems.map((p) => p.permission)).toContain(
+      "Set Voice Channel Status",
+    );
   });
 });
 
@@ -466,6 +564,42 @@ describe("failing clearly", () => {
   });
 });
 
+describe("a read that outlasts the TTL", () => {
+  it("is shared by a later request instead of starting another", async () => {
+    settings = { "reactionroles.enabled": true };
+    const { client } = makeClient({});
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    let now = 1_000;
+    const deps = {
+      ...direct,
+      call: async <T>(fn: () => Promise<T>): Promise<T> => {
+        calls += 1;
+        await gate;
+        return fn();
+      },
+      now: () => now,
+    };
+    const first = check.checkBotPermissions(client, "guild-1", deps);
+    // Rate-limit backoff keeps the first read going past the TTL.
+    now += check.SNAPSHOT_TTL_MS * 3;
+    const second = check.checkBotPermissions(client, "guild-1", deps);
+    release();
+    await Promise.all([first, second]);
+    // One read: roles, channels and the member, once.
+    expect(calls).toBe(3);
+    // The TTL runs from when the read settled.
+    await check.checkBotPermissions(client, "guild-1", deps);
+    expect(calls).toBe(3);
+    now += check.SNAPSHOT_TTL_MS + 1;
+    await check.checkBotPermissions(client, "guild-1", deps);
+    expect(calls).toBe(6);
+  });
+});
+
 describe("unreadable settings", () => {
   it("makes the check unavailable instead of treating features as off", async () => {
     settings = { "reactionroles.enabled": true, __unreadable: true };
@@ -552,9 +686,16 @@ describe("configuredRoleIds", () => {
     expect(
       check.configuredRoleIds(
         { kind: "tiers", key: "leaderboard_roles.tiers" },
-        "1:a, 3:b,10:a, ,",
+        "1:111, 3:222,10:111, ,",
       ),
-    ).toEqual(["a", "b"]);
+    ).toEqual(["111", "222"]);
+    // What the leaderboard service ignores is not checked either.
+    expect(
+      check.configuredRoleIds(
+        { kind: "tiers", key: "leaderboard_roles.tiers" },
+        "1:111,1:222,bad,2:abc,0:333",
+      ),
+    ).toEqual(["222"]);
     expect(
       check.configuredRoleIds({ kind: "id", key: "rules.role_id" }, ""),
     ).toEqual([]);
