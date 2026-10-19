@@ -32,6 +32,7 @@ import {
   EventGroupChannels,
   type GroupChannelReport,
   type GroupRemoveOutcome,
+  type GroupsOffOutcome,
   type NameSyncOutcome,
 } from "./event-group-channels.js";
 import {
@@ -558,13 +559,14 @@ export class EventService extends ScheduledService {
     }
     if (!row) return defer();
     const main = row.channelId ?? null;
-    const groups =
-      row.groupsEnabled === true
-        ? (row.groups ?? []).map((g) => ({
-            key: g.key,
-            channelId: g.channelId ?? null,
-          }))
-        : [];
+    // The stored groups as they are, whether or not they are switched on: a
+    // switch-off keeps them as history (channel ids cleared), and the claim
+    // compares the stored array with this snapshot (a recorded channel of a
+    // disabled group is also looked at below).
+    const groups = (row.groups ?? []).map((g) => ({
+      key: g.key,
+      channelId: g.channelId ?? null,
+    }));
     const ids = [main, ...groups.map((g) => g.channelId)].filter(
       (cid): cid is string => !!cid,
     );
@@ -989,6 +991,22 @@ export class EventService extends ScheduledService {
     const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) return null;
     return this.groupChannels.removeGroup(eventId, guild, opts);
+  }
+
+  /**
+   * Delete every group channel of an event and switch its groups off in one
+   * step under the channel lock (the host's live "groups off", #1243): see
+   * `EventGroupChannels.removeAllGroupChannels`. Null when the server cannot
+   * be found.
+   */
+  public async removeAllGroupChannels(
+    eventId: string,
+    guildId: string,
+    opts: { ignore?: ReadonlySet<string>; ending?: () => boolean },
+  ): Promise<GroupsOffOutcome | null> {
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return null;
+    return this.groupChannels.removeAllGroupChannels(eventId, guild, opts);
   }
 
   /** What the last group-channel pass did for an event (host panel, #1189). */

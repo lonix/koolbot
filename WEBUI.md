@@ -1920,10 +1920,10 @@ set its clan tag from Discord; the host can put any team back at any time.
 
 **Live settings** (#1239) is the section of the host panel where the host changes the settings of
 a running event and saves once. It is the first step of live editing (#1197); the rows below work
-today, and later steps add a group's kind and groups on or off, each as another row of the same
-form. Leaders and clan tags are described under **Leaders and tags in Live settings** below,
+today, and a later step adds a group's kind as another row of the same form. Leaders and clan tags are described under **Leaders and tags in Live settings** below,
 names, sizes and presets under **Group names, sizes and presets** (#1241), and adding and removing
-groups under **Adding and removing groups** (#1242).
+groups under **Adding and removing groups** (#1242), and switching groups on or off under
+**Groups on or off** (#1243).
 
 - **What can be changed now.** The **channel creation time** (minutes before the start, empty
   for the server default) while no channel of the event exists yet; once the main channel or any
@@ -1931,7 +1931,8 @@ groups under **Adding and removing groups** (#1242).
   same switch as in Assign people), for an event with groups. The leaders and tag fields are
   described under **Leaders and tags in Live settings**; the **name** and the **size** of each
   group, and a **preset switch**, under **Group names, sizes and presets** below, and **adding and
-  removing groups** under **Adding and removing groups**. A group's kind is not editable here yet.
+  removing groups** under **Adding and removing groups**, and **groups on or off** under **Groups on
+  or off**. A group's kind is not editable here yet.
 - **One save, one result.** Save plans from the event as it is at that moment, inside the same
   per-event lock as host moves and membership changes, so a save and a bulk move never run at
   the same time (the second answers that one is already in progress). Only the fields you
@@ -1952,8 +1953,8 @@ groups under **Adding and removing groups** (#1242).
 - **Refused, and nothing changed,** while `events.enabled` is off (or cannot be read), for an
   ended or cancelled event, and for an event that is being ended. The section then shows why
   instead of the form.
-- **Confirmation.** A change that needs confirmation (switching a preset that renames groups, and
-  removing a group) is answered with a confirmation page that lists exactly what will change and
+- **Confirmation.** A change that needs confirmation (switching a preset that renames groups,
+  removing a group, and switching groups off) is answered with a confirmation page that lists exactly what will change and
   why, and nothing is applied until you confirm. The page carries a signed token, made with the
   Web UI session secret, that binds the event, the server, your sign-in, a ten minute expiry
   and the exact set of changes. Confirming plans again from the event as it is then and applies
@@ -2119,8 +2120,8 @@ that moved there.
 - **If the channel cannot be deleted after the members were unassigned** the group stays, empty, and
   the result says "Saved but not finished"; posting the same removal again moves anyone who came back,
   announces nobody twice and finishes it. A group is never removed from the event before its channel
-  has been deleted, and the last group of an event is never removed (turning groups off is a separate
-  change).
+  has been deleted, and the last group of an event is never removed (turning groups off is **Groups on or
+  off**, below).
 - **Counted like every save, and one audit row.** The removal is confirmed through the signed token
   of the other confirmations, which names the group keys, and a replay applies nothing. One
   `event.host.settings` entry per post (`event.host.settings-confirm` for the confirmation) lists the
@@ -2128,6 +2129,69 @@ that moved there.
 - **Nothing new is stored per member.** A removed group takes its member list with it, like an unassign;
   the member data export and reset already cover the member lists and leaders of the groups that
   remain.
+
+**Groups on or off** (#1243) is the last step of live editing: the host switches the groups of a running
+event on or off. It has its own forms at the end of the Live settings section, so it never shares a save
+with the name and size fields, and it is shown whether or not the event has groups (an adopted Discord
+event, which KoolBot only reads, never gets groups). The row is applied after the other rows of a save.
+
+- **Groups off, always confirmed.** The confirmation page lists the groups, who is assigned and which
+  have a voice channel. Then, in this order: **(1)** everybody connected to any group channel, you
+  included, is moved to the main channel (the same mover as **Move people**, one at a time, never
+  replayed; Move Members in the events category is enough); **(2)** only when every group channel is
+  empty, all of them are deleted and the groups are stored as off, in one step under the channel lock,
+  each channel only with nobody connected and under the id that is recorded; **(3)** the clan tags come
+  off the nicknames, started in the background as soon as the groups are off (the tag function reads the
+  stored state, so it cannot restore before the switch, and it needs no channel). The issue words the
+  order as "return everyone, restore tags, delete the channels"; the tags follow the switch by a few
+  seconds because of this, and nothing depends on the channels.
+- **Assignments are kept as history.** The groups stay in the event with their members, leaders, names,
+  sizes, tags and markers; only the channel ids are cleared. While groups are off nobody counts as in a
+  group: no assignment, no tag, no leaders-only channel and no group channel pass looks at them. The
+  member data export and reset still cover those lists. The switch, the confirmation, the revision
+  count and the audit row work like every other Live settings save.
+- **If somebody cannot be moved, nothing is deleted and groups stay on.** This is the rule of removing a
+  group, applied to the whole event: a channel deleted while the groups are still on would be made again
+  by the next scan, and a channel left behind once the groups are off would never be deleted by
+  anything (every pass that removes group channels, including the end of the event, only runs for an
+  event with groups on, and only a channel that is recorded is ever deleted). The result names the
+  group and how many people could not be moved and why (missing permission, Discord rate limiting, more
+  than 60 in one run, a bot that is connected); everybody who could be moved has been. Save again to move
+  the rest, or ask them to leave. (The issue asked for a channel to stay "until empty"; the groups stay
+  on with it.)
+- **If a delete fails halfway** (Discord refuses or cannot be reached) the groups stay on, the channels
+  already deleted are not made again for ten minutes (the scan is held off; a restart or the end of
+  that time makes it create them again), and the result says how many are gone. Save again to finish.
+  The flag is stored off only once no group has a channel, so a channel is never left that nobody
+  would delete.
+- **Groups on, groups kept from before.** If the event was switched off earlier, the forms offer to
+  bring the groups back as they were, **with the people assigned to them and their leaders** (nothing was
+  destroyed on the way off). Their voice channels are made by the same pass as the other group
+  channels, next to the main channel and in order (a leaders-only channel is created restricted). When
+  tagging is on and the event is running the nicknames are tagged again in the background, and the
+  leaders-only channel's access and the "Customise team" messages follow.
+- **Groups on, an event that never had groups.** Groups are switched on from a **preset**: the page
+  offers the presets that are on for the server, and the server turns the chosen id into the preset's
+  groups (names, kinds, sizes, tags, markers, labels and its default for clan tags) at the moment you
+  save; nothing about the groups is taken from the browser. The groups are stored with new keys and
+  nobody assigned. Leaders, leader customisation, the tag position and the lock stay at their stored
+  values (off for an event made without groups): switch them on afterwards with the other rows. A preset's
+  channel creation time is not applied (the event keeps its own), and there is no "Custom" setup here:
+  choose the closest preset, then rename, add or remove groups. A preset with more groups than
+  `events.groups.max_count` is refused. Nothing is confirmed: it destroys nothing.
+- **Channels, partial results and posting again.** With no main channel yet nothing is owed: the channels
+  are made together when it exists. If a channel could not be made (a full category, a missing
+  permission) the groups are on and the result says "Saved but not finished: ... a group's channel is not
+  created yet ...": the scan keeps trying every minute, and **Create the missing channels** (or posting
+  the form again) tries at once. Posting the same switch-on twice is one switch (the second says
+  "Nothing to change"), and posting the switch-off again after it went through changes nothing.
+- **A repeating event.** The next occurrence of a repeating event is made from the event's settings at
+  the moment the occurrence ends, as with every Live settings change. Groups switched off here
+  therefore start the later occurrences without groups, and groups switched on start them with the
+  preset's groups. The confirmation page says so for a repeating event.
+- **Known limits.** The main channel of an event made without groups has no host overwrites (they are
+  added only when a group event's main channel is created); switching groups on later does not add
+  them.
 
 **Leaders-only channel** (#1199) is the voice channel of the event's `leads` group: a
 command channel for the host and the leaders of the team groups, which everyone else can
