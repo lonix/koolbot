@@ -137,6 +137,10 @@ const deps: LiveEditDeps = {
 };
 
 const calls: string[] = [];
+/** Channel ids somebody is connected to, as the gateway cache shows them. */
+let connected: Set<string>;
+/** The channel ids the core asked about, one entry per ask. */
+const asked: string[][] = [];
 let emptyResult: () => EmptyChannelOutcome;
 let removeResult: () => GroupRemoveResult | null;
 let createResult: () => {
@@ -156,12 +160,18 @@ beforeEach(() => {
   SETTABLE.add("captainsEnabled");
   enabled = true;
   ending = false;
+  connected = new Set(["c-lobby"]);
+  asked.length = 0;
   emptyResult = () => ({ status: "empty", moved: [] });
   removeResult = () => ({ status: "removed" });
   createResult = () => ({ failures: [] });
   resetMoveGuardForTests();
   seed([teamGroup(A, "Alpha"), teamGroup(B, "Bravo")]);
   effects = makeEffects({
+    eventVoiceInUse: (_g, ids) => {
+      asked.push([...ids]);
+      return ids.some((id) => connected.has(id));
+    },
     async syncGroupName(_g, _e, key) {
       return { groupKey: key, status: "applied" };
     },
@@ -243,6 +253,7 @@ async function confirmed(
       to: c.to,
     })),
     revision: first.revision,
+    voiceInUse: first.voiceInUse,
   });
   const check = live.verifyConfirmation(token, {
     eventId: EV,
@@ -256,6 +267,7 @@ async function confirmed(
     deps,
     confirmed: check.changes,
     confirmedRevision: check.revision,
+    confirmedVoiceInUse: check.voiceInUse,
   });
   return { first, second };
 }
@@ -333,7 +345,7 @@ describe("turning it on", () => {
     expect(leadsRows()[0].name).toBe("Captain lobby 2");
   });
 
-  it("needs leaders on, and says so; nothing is written", async () => {
+  it("needs leaders on (stored, or turned on by the same save), and says so; nothing is written", async () => {
     store.get(EV)!.captainsEnabled = false;
     const out = await lobbyOn();
     expect(out).toMatchObject({ status: "invalid" });
@@ -410,14 +422,70 @@ describe("turning it on", () => {
     expect(groupsOf()).toHaveLength(2);
   });
 
-  it("leaders turned off by an earlier row of the same save: the lobby is not made", async () => {
+  it("leaders on and the lobby on are ONE valid save, whatever order the form posts them in", async () => {
+    const posted = [
+      entry("captainsEnabled", true, false),
+      entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+    ];
+    for (const entries of [posted, [...posted].reverse()]) {
+      seed([teamGroup(A, "Alpha"), teamGroup(B, "Bravo")], {
+        captainsEnabled: false,
+      });
+      calls.length = 0;
+      const out = done(await run(entries));
+      // Executed in registry order: leaders first, then the lobby.
+      expect(out.applied.map((c) => c.rowId)).toEqual([
+        "captainsEnabled",
+        "captainsLobby",
+      ]);
+      expect(out.notApplied).toEqual([]);
+      expect(store.get(EV)!.captainsEnabled).toBe(true);
+      expect(leadsRows()).toHaveLength(1);
+      expect(leadsRows()[0].channelId).toMatch(/^made-/);
+      expect(calls).toContain("leads");
+    }
+  });
+
+  it("leaders off and the lobby on in one save is refused, and nothing at all is written", async () => {
+    const out = await run([
+      entry("captainsEnabled", false, true),
+      entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+    ]);
+    expect(out).toMatchObject({ status: "invalid" });
+    expect(text(out)).toContain("turn leaders on first");
+    expect(store.get(EV)!.captainsEnabled).toBe(true);
+    expect(leadsRows()).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it("leaders off and the lobby off in one save: both are applied", async () => {
+    seed([teamGroup(A, "Alpha"), teamGroup(B, "Bravo"), lobbyGroup()]);
+    connected = new Set();
     const out = done(
       await run([
         entry("captainsEnabled", false, true),
-        entry(CAPTAINS_LOBBY_ROW_ID, true, false),
+        entry(CAPTAINS_LOBBY_ROW_ID, false, true),
       ]),
     );
-    expect(out.applied.map((c) => c.rowId)).toEqual(["captainsEnabled"]);
+    expect(out.applied.map((c) => c.rowId)).toEqual([
+      "captainsEnabled",
+      "captainsLobby",
+    ]);
+    expect(store.get(EV)!.captainsEnabled).toBe(false);
+    expect(leadsRows()).toEqual([]);
+  });
+
+  it("leaders turned off by an earlier row after the plan: the lobby write holds leaders and is lost, never a lobby without leaders", async () => {
+    // The plan saw leaders on. Another writer turns them off right before the
+    // lobby's push (the second write: the first is the save's claim).
+    fake.beforeWrite = () => {
+      if (writes.length >= 1) {
+        fake.beforeWrite = null;
+        store.get(EV)!.captainsEnabled = false;
+      }
+    };
+    const out = done(await lobbyOn());
+    expect(out.applied).toEqual([]);
     expect(out.notApplied).toMatchObject([{ rowId: "captainsLobby" }]);
     expect(leadsRows()).toEqual([]);
   });
@@ -533,6 +601,7 @@ describe("turning it off", () => {
         to: c.to,
       })),
       revision: first.revision,
+      voiceInUse: first.voiceInUse,
     });
     const check = live.verifyConfirmation(token, {
       eventId: EV,
@@ -547,6 +616,7 @@ describe("turning it off", () => {
         deps,
         confirmed: check.changes,
         confirmedRevision: check.revision,
+        confirmedVoiceInUse: check.voiceInUse,
       });
     expect(done(await useIt()).applied).toHaveLength(1);
     // The lobby is turned on again, then the old token is replayed.
@@ -558,7 +628,127 @@ describe("turning it off", () => {
     expect(leadsRows()).toHaveLength(1);
   });
 
+  it("asks only when somebody is connected to a voice channel of the event: the main channel, a group's or the lobby's", async () => {
+    for (const where of ["c-main", `c-${A}`, "c-lobby"]) {
+      connected = new Set([where]);
+      const first = await lobbyOff();
+      expect(first.status).toBe("needs-confirmation");
+      if (first.status === "needs-confirmation") {
+        expect(first.voiceInUse).toBe(true);
+        expect(first.reasons[0]).toContain("Somebody is connected");
+      }
+    }
+    // Somebody in a voice channel that is not the event's does not count.
+    connected = new Set(["c-elsewhere"]);
+    expect(done(await lobbyOff()).applied).toHaveLength(1);
+    expect(asked[0]).toEqual(["c-main", `c-${A}`, `c-${B}`, "c-lobby"]);
+  });
+
+  it("nobody connected: no confirmation even though the lobby has a channel", async () => {
+    connected = new Set();
+    const out = done(await lobbyOff());
+    expect(out.applied).toHaveLength(1);
+    expect(calls).toEqual([
+      `empty:${LOBBY}:c-lobby`,
+      `remove:${LOBBY}:c-lobby`,
+    ]);
+    expect(leadsRows()).toEqual([]);
+  });
+
+  it("an unreadable cache is in use: it asks", async () => {
+    effects!.eventVoiceInUse = () => {
+      throw new Error("cache gone");
+    };
+    expect((await lobbyOff()).status).toBe("needs-confirmation");
+    effects = undefined;
+    expect((await lobbyOff()).status).toBe("needs-confirmation");
+  });
+
+  it("somebody connecting between the page and the confirmed run needs a fresh confirmation", async () => {
+    connected = new Set();
+    // Another row of the same save needs a confirmation, so a token exists
+    // while the lobby change itself needs none (nobody is connected).
+    const first = await run([
+      entry(CAPTAINS_LOBBY_ROW_ID, false, true),
+      entry(GROUP_REMOVE_ROW_ID, [B], []),
+    ]);
+    expect(first.status).toBe("needs-confirmation");
+    if (first.status !== "needs-confirmation") return;
+    expect(first.voiceInUse).toBe(false);
+    const token = live.signConfirmation({
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+      changes: first.changes.map((c) => ({
+        rowId: c.rowId,
+        from: c.from,
+        to: c.to,
+      })),
+      revision: first.revision,
+      voiceInUse: first.voiceInUse,
+    });
+    const check = live.verifyConfirmation(token, {
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+    });
+    if (!check.ok) throw new Error("token refused");
+    expect(check.voiceInUse).toBe(false);
+    const confirmRun = (): Promise<LiveEditOutcome> =>
+      live.runLiveEdit({
+        guildId: GUILD,
+        eventId: EV,
+        deps,
+        confirmed: check.changes,
+        confirmedRevision: check.revision,
+        confirmedVoiceInUse: check.voiceInUse,
+      });
+    // Somebody joins the lobby after the page was shown.
+    connected = new Set(["c-lobby"]);
+    const stale = await confirmRun();
+    expect(stale.status).toBe("stale");
+    expect(leadsRows()).toHaveLength(1);
+    expect(groupsOf()).toHaveLength(3);
+    expect(calls).toEqual([]);
+  });
+
+  it("everybody leaving between the page and the confirmed run is fine: the confirmation was for more", async () => {
+    connected = new Set(["c-lobby"]);
+    const first = await lobbyOff();
+    if (first.status !== "needs-confirmation") throw new Error("expected");
+    const token = live.signConfirmation({
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+      changes: first.changes.map((c) => ({
+        rowId: c.rowId,
+        from: c.from,
+        to: c.to,
+      })),
+      revision: first.revision,
+      voiceInUse: first.voiceInUse,
+    });
+    const check = live.verifyConfirmation(token, {
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+    });
+    if (!check.ok) throw new Error("token refused");
+    connected = new Set();
+    const out = await live.runLiveEdit({
+      guildId: GUILD,
+      eventId: EV,
+      deps,
+      confirmed: check.changes,
+      confirmedRevision: check.revision,
+      confirmedVoiceInUse: check.voiceInUse,
+    });
+    expect(done(out).applied).toHaveLength(1);
+    expect(leadsRows()).toEqual([]);
+  });
+
   it("a lobby that has no channel yet is removed without asking, by one conditional pull", async () => {
+    connected = new Set();
     seed([
       teamGroup(A, "Alpha"),
       teamGroup(B, "Bravo"),

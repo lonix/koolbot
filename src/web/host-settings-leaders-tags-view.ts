@@ -103,19 +103,18 @@ ${hidden(baseField(rowId), on ? "1" : "0")}
 }
 
 /**
- * The Captains lobby switch (#1251). It follows the leaders switch: with leaders
- * off and no lobby it is disabled (a disabled field is not posted, so the row is
- * untouched); a lobby that exists can always be turned off.
+ * The Captains lobby switch (#1251). Always usable: it can be turned on in the
+ * same save that turns leaders on (the server judges it against what the save
+ * leaves behind), and a lobby that exists can always be turned off.
  */
 function renderLobby(d: LeadersTagsView): string {
-  const disabled = !d.leaders && !d.lobby;
-  const hint = disabled
-    ? "Turn leaders on and save first: the lobby is for the host and the current leaders."
-    : !d.leaders
+  const hint = !d.leaders
+    ? d.lobby
       ? "Leaders are off, so only you can join the lobby now. Turn it off to remove its channel, or turn leaders on to let the current leaders in."
-      : "A separate voice channel that only you and the current leaders can join; nobody is assigned to it. Off by default: leaders then talk in the main channel. Turning it on creates the channel (at once while the event runs). Turning it off moves everybody in it to the main channel, you included, and deletes it; you are asked to confirm first when the channel exists.";
+      : "The lobby is for the host and the current leaders: turn leaders on (in this same save is fine) before turning it on."
+    : "A separate voice channel that only you and the current leaders can join; nobody is assigned to it. Off by default: leaders then talk in the main channel. Turning it on creates the channel (at once while the event runs). Turning it off moves everybody in it to the main channel, you included, and deletes it; you are asked to confirm first when anybody is connected to a voice channel of this event.";
   return `<div class="field"><label for="host-settings-lobby">Captains lobby</label>
-<select id="host-settings-lobby" name="${escapeHtml(valueField("captainsLobby"))}"${disabled ? " disabled" : ""}>
+<select id="host-settings-lobby" name="${escapeHtml(valueField("captainsLobby"))}">
 <option value="1"${d.lobby ? " selected" : ""}>On: a leaders-only voice channel</option>
 <option value="0"${d.lobby ? "" : " selected"}>Off: leaders talk in the main channel</option>
 </select>

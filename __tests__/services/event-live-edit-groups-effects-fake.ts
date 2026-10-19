@@ -21,8 +21,11 @@ export function makeEffects(handlers: {
   createGroupChannels?: LiveEditEffects["createGroupChannels"];
   emptyGroupChannel?: LiveEditEffects["emptyGroupChannel"];
   removeGroupChannel?: LiveEditEffects["removeGroupChannel"];
+  eventVoiceInUse?: LiveEditEffects["eventVoiceInUse"];
 }): LiveEditEffects {
   return {
+    // Unknown is "in use" (the core's own default without the effect).
+    eventVoiceInUse: handlers.eventVoiceInUse ?? ((): boolean => true),
     syncGroupName: handlers.syncGroupName,
     syncGroupUserLimit: handlers.syncGroupUserLimit,
     retagMembers: handlers.retagMembers ?? ((): void => undefined),

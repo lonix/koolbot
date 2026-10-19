@@ -55,6 +55,8 @@ describeWithMongo(
     const deleted = new Set<string>();
 
     const effects: LiveEditEffects = {
+      // Somebody is connected, so turning the lobby off asks first.
+      eventVoiceInUse: () => true,
       syncGroupName: async (_g, _e, key) => ({
         groupKey: key,
         status: "applied",
@@ -231,6 +233,7 @@ describeWithMongo(
           to: c.to,
         })),
         revision: first.revision,
+        voiceInUse: first.voiceInUse,
       });
       const check = verifyConfirmation(token, {
         eventId,
@@ -244,6 +247,7 @@ describeWithMongo(
         deps,
         confirmed: check.changes,
         confirmedRevision: check.revision,
+        confirmedVoiceInUse: check.voiceInUse,
       });
     }
 

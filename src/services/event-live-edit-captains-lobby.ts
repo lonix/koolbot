@@ -23,11 +23,13 @@
  *    The host does not see or edit that group in the group lists (`kind: "leads"`
  *    is skipped by the views, is no longer offered when a group is added, and never
  *    counts as "the group an event keeps").
- * 2. **On needs leaders on, off never does.** Turning it on is refused while the
- *    fresh `captainsEnabled` is off, and the write itself holds `captainsEnabled:
- *    true` (an earlier row of the same save may have turned leaders off). So
- *    "leaders on and lobby on" is two saves: the switch is disabled in the form
- *    until leaders are on. Turning it off is always allowed, so a lobby left
+ * 2. **On needs leaders on, off never does.** Turning it on is judged against
+ *    leaders as THIS SAVE leaves them (`ctx.planned("captainsEnabled")`, else the
+ *    fresh `captainsEnabled`), so "leaders on and lobby on" is one valid save
+ *    (the leaders row runs first, in registry order), and "leaders off and lobby
+ *    on" is refused. The write itself holds `captainsEnabled: true`, so a leaders
+ *    row that did not land (lost, failed) makes the lobby write `lost`, never a
+ *    lobby without leaders. Turning it off is always allowed, so a lobby left
  *    behind can always be removed.
  * 3. **Leaders switched off while the lobby exists.** Nothing is removed (rule 2 of
  *    `event-live-edit-leaders-tags.ts`: stored data is kept, the switches hide it).
@@ -53,11 +55,13 @@
  *    lobby) alive: the result is `failed` with who and why, nothing durable changed
  *    (the lobby is still there), and saving again plans the removal again from the
  *    fresh read.
- * 6. **Confirmation when the channel exists.** The planner is synchronous and
- *    cannot ask Discord who is connected, so "in use" is read as "the lobby has a
- *    channel": turning it off with a channel asks first, turning it off before the
- *    channel exists does not. The lobby's group is the only thing this row removes,
- *    and the confirmation token is bound to `liveEditRevision` like any other.
+ * 6. **Confirmation when somebody is connected.** Turning it off asks first only
+ *    when anyone is connected to ANY voice channel of the event (the main channel,
+ *    a group's or the lobby's), read by the core from the gateway voice-state cache
+ *    inside the locks (`PlanEnv.voiceInUse`, no REST). Nobody connected: no
+ *    confirmation, even when the lobby has a channel. The token is bound to
+ *    `liveEditRevision` and to that answer: somebody connecting after the page was
+ *    shown makes the confirmed run `stale`, so a fresh confirmation is asked.
  * 7. **Name.** The hidden group is named "<leader label> lobby" (`captainsLobbyName`),
  *    made unique among the names groups have or go back to. The host never types
  *    it. A name a host types for another group that is the lobby's name is
@@ -190,7 +194,15 @@ export const captainsLobbyRow: LiveEditRow = asRow<boolean>({
   validate: (to, ctx) => {
     // Only a change TO on is checked: it is the only one that needs leaders.
     if (!to) return null;
-    if (ctx.event.captainsEnabled !== true) return NEEDS_LEADERS;
+    // Leaders as this save leaves them: an earlier row of the same save (the
+    // leaders switch comes first) may be turning them on, which makes "leaders
+    // on and the lobby on" one valid save.
+    const leaders = ctx.planned("captainsEnabled");
+    const leadersOn =
+      typeof leaders === "boolean"
+        ? leaders
+        : ctx.event.captainsEnabled === true;
+    if (!leadersOn) return NEEDS_LEADERS;
     const name = captainsLobbyName(
       ctx.event.leaderLabel ?? "",
       takenNames(ctx.event),
@@ -209,10 +221,12 @@ export const captainsLobbyRow: LiveEditRow = asRow<boolean>({
       ? `the captains lobby counts as a group. ${errors.join(" ")}`
       : null;
   },
-  needsConfirmation: (from, to, event) => {
+  needsConfirmation: (from, to, _event, env) => {
     if (!from || to) return null;
-    if (!lobbyOf(event)?.channelId) return null;
-    return "Turning off the captains lobby moves everybody in its channel, you included, to the main channel, and then deletes the channel. If somebody cannot be moved the lobby is kept as it is. Turn it on again to get a new, empty channel.";
+    // Only when somebody is connected to a voice channel of this event (the
+    // main channel, a group's or the lobby's), read fresh from the gateway cache.
+    if (!env.voiceInUse) return null;
+    return "Somebody is connected to a voice channel of this event. Turning off the captains lobby moves everybody in its channel, you included, to the main channel, and then deletes the channel. If somebody cannot be moved the lobby is kept as it is. Turn it on again to get a new, empty channel.";
   },
   describe: (v) =>
     v

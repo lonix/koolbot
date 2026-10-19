@@ -1340,6 +1340,7 @@ function registerSettingsActions(router: Router, client: Client): void {
           reconcile: c.reconcile,
         })),
         revision: outcome.revision,
+        voiceInUse: outcome.voiceInUse,
       });
       if (!token) {
         return {
@@ -1403,6 +1404,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         deps: createLiveEditDeps(client),
         confirmed: check.changes,
         confirmedRevision: check.revision,
+        confirmedVoiceInUse: check.voiceInUse,
       });
       return describeLiveEditOutcome(outcome);
     }),

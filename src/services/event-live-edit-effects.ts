@@ -137,6 +137,15 @@ async function emptyGroupChannelOf(
 
 export function createLiveEditEffects(client: Client): LiveEditEffects {
   return {
+    eventVoiceInUse(guildId, channelIds): boolean {
+      const guild = client.guilds?.cache?.get(guildId);
+      // Not shown by the gateway: unknown, so treated as in use.
+      if (!guild) return true;
+      return channelIds.some((id) => {
+        const channel = guild.channels?.cache?.get(id);
+        return !!channel && channel.isVoiceBased() && channel.members.size > 0;
+      });
+    },
     async syncLeadsAccess(guildId, eventId, revoked): Promise<void> {
       const { EventService } = await import("./event-service.js");
       await EventService.getInstance(client).syncLeadsAccess(
