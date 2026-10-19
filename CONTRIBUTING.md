@@ -182,9 +182,10 @@ npm run seed-sample-data -- --yes  # Seed fake activity into a dev/test DB only
 5. **Open a Pull Request** on GitHub
 
 **Stale branch report.** The `Stale Branch Report (dry run)` workflow (`.github/workflows/branch-cleanup.yml`) runs weekly and on demand
-(Actions > Stale Branch Report > Run workflow). It only lists branches with no commits for 60 days in the job summary; it never deletes
-anything and skips branches with an open PR, protected branches, `release-please--*` and `dependabot/*`. Deleting branches is a separate,
-manual decision.
+(Actions > Stale Branch Report > Run workflow). It only lists branches with no commits for 60 days, in the `Run cleanup` step log (the job summary just points there); it never
+deletes anything and skips branches with an open PR, protected branches, `release-please--*` and `dependabot/*`. Read the step log
+rather than trusting an empty list: the rate-limit guard and lookup errors can truncate the list while the job still succeeds.
+Deleting branches is a separate, manual decision.
 
 ### Types of Contributions
 

@@ -1,28 +1,30 @@
 name: Stale Branch Report (dry run)
 
 # Lists remote branches that are candidates for cleanup. It is a DRY RUN ONLY:
-# `--dry-run=true` is hardcoded below, there is no input that can change it, and
-# the token is read-only, so even a bug could not delete a branch.
+# `dry-run: 'true'` is hardcoded below, there is no input that can change it, and the
+# token is read-only, so even a bug could not delete a branch.
 #
-# Tool: cbrgm/cleanup-stale-branches-action (v1.2.14, commit d38074fb45d1898a14c03e2bc32a05e9161a5823).
-# Its source was read before adoption (see the PR for #1272). Two deliberate
-# deviations from `uses: cbrgm/cleanup-stale-branches-action@<sha>`:
-#   1. The action only logs to the step log; it never writes GITHUB_STEP_SUMMARY and a
-#      later step cannot read another step's log. To put the candidate list in the job
-#      summary this workflow runs the action's container directly and tees its output.
-#   2. action.yml at that commit runs `docker://ghcr.io/cbrgm/cleanup-stale-branches-action:v1`,
-#      a floating tag, so a commit-SHA pin would not freeze the code that runs. The image
-#      is pinned by digest instead (the digest `v1` and `v1.2.14` both resolve to).
-# Dependabot's github-actions ecosystem will not bump this digest; update it by hand
-# when adopting a newer release, after re-reading the source.
+# Tool: cbrgm/cleanup-stale-branches-action v1.2.14. The candidate list is written to the
+# 'Run cleanup' step log (the action does not write a job summary and a later step cannot
+# read another step's log).
 #
-# What the tool skips (verified in main.go): the default branch, protected branches,
-# any branch that is the head of an open PR (all open PRs are fetched once, 100 per page,
-# every page; an API error aborts with exit 1) and any branch that is the base of an
-# open PR (one query per branch).
+# What the tool skips (read from its source, main.go at the pinned commit): the default
+# branch, protected branches, any branch that is the head of an open PR (all open PRs are
+# fetched once, 100 per page, every page; an API error aborts with exit 1) and any branch
+# that is the base of an open PR (one query per branch).
 #
-# Real deletion is a separate, explicit decision and is NOT part of this workflow. It
-# would need `contents: write` on the job (DeleteRef) and `--dry-run=false`.
+# Known limits, verified from that source. Read the step log; do not trust an empty list:
+#   (a) action.yml runs the floating image `docker://ghcr.io/cbrgm/cleanup-stale-branches-action:v1`,
+#       so the commit-SHA pin freezes the action definition but NOT the binary that runs.
+#   (b) The rate-limit guard exits 0 (no error) with a truncated or empty list once 95% of the
+#       API rate limit is used (roughly 2 core calls per branch; GITHUB_TOKEN has a low hourly
+#       limit, so a repository with many branches can reach it).
+#   (c) If a branch's commit lookup or base-PR lookup fails, the tool logs "- Skipping ..." and
+#       continues, still exiting 0; a failed branch listing logs "Error listing branches" and
+#       returns a partial list with exit 0. Check the step log for these lines.
+#
+# Real deletion is a separate, explicit decision and is NOT part of this workflow. It would
+# need `contents: write` on the job (DeleteRef) and `dry-run: 'false'`.
 
 on:
   workflow_dispatch:
@@ -45,82 +47,29 @@ jobs:
       contents: read # list branches and commits
       pull-requests: read # list open PRs (head and base protection)
     steps:
-      - name: List stale branches (dry run)
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          # Exclusions, comma separated WITHOUT spaces (the tool does not trim).
-          # Prefixes are plain prefix matches, not globs. The default branch and
-          # protected branches are skipped by the tool itself.
-          IGNORED_PREFIXES: 'release-please--,dependabot/'
-          LAST_COMMIT_AGE_DAYS: '60'
-          IMAGE: ghcr.io/cbrgm/cleanup-stale-branches-action@sha256:e0c9d2760d7ef3fa37768116552326a8797fac0e939aed1223d16e9882575a56 # v1.2.14
+      - name: Run cleanup
+        uses: cbrgm/cleanup-stale-branches-action@d38074fb45d1898a14c03e2bc32a05e9161a5823 # v1.2.14
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          # Comma separated WITHOUT spaces (the tool does not trim). Plain prefix
+          # matches, not globs. The default and protected branches are skipped by the tool.
+          ignored-prefixes: 'release-please--,dependabot/'
+          last-commit-age-days: '60'
+          dry-run: 'true'
+          rate-limit: 'true'
+
+      - name: Job summary
+        if: ${{ always() }}
         run: |
-          # Actions runs this step with `bash -e`. errexit is switched off for the whole
-          # step on purpose: a failing docker run (image pull, panic, API error) must
-          # still reach the summary logic below and produce the INCOMPLETE banner.
-          set +e
-          set -uo pipefail
-          LOG="$RUNNER_TEMP/cleanup.log"
-          : > "$LOG"
-
-          # Output is on stderr (Go `log`), so merge it. Keep the tool's exit code.
-          docker run --rm -e GITHUB_TOKEN -e GITHUB_REPOSITORY "$IMAGE" \
-            --ignored-prefixes="$IGNORED_PREFIXES" \
-            --last-commit-age-days="$LAST_COMMIT_AGE_DAYS" \
-            --dry-run=true \
-            --rate-limit=true 2>&1 | tee "$LOG"
-          rc="${PIPESTATUS[0]}"
-
-          # Strip the `YYYY/MM/DD HH:MM:SS ` prefix that Go's log package adds.
-          CLEAN="$RUNNER_TEMP/cleanup.clean.log"
-          sed -E 's#^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} ##' "$LOG" > "$CLEAN"
-
-          marker="$(grep -m1 -E '^Dry-run enabled, [0-9]+ branches would have been deleted' "$CLEAN" || true)"
-          incomplete=""
-          [ "$rc" -eq 0 ] || incomplete="the tool exited with code $rc"
-          [ -n "$marker" ] || incomplete="${incomplete:+$incomplete; }no 'Dry-run enabled' result line was printed"
-          if grep -q -F 'rate limit close to being exceeded' "$CLEAN"; then
-            incomplete="${incomplete:+$incomplete; }API rate limit guard stopped the run early (it exits 0 without a list)"
-          fi
-          if grep -q -F 'Error listing branches' "$CLEAN"; then
-            incomplete="${incomplete:+$incomplete; }branch listing failed part-way (partial list)"
-          fi
-          # The tool logs "- Skipping `<branch>`: <reason>" for every skipped branch. Reasons
-          # below are the tool's expected exclusions (main.go at the pinned commit). Any other
-          # reason is a failed commit or base-PR lookup: the branch was dropped, so candidates
-          # may be missing even though the tool exits 0 and prints its normal result line.
-          unexpected="$(grep -E '^- Skipping ' "$CLEAN" | grep -v -E ': (it is the default branch|it is a protected branch|it is in the list of ignored branches|does not match allowed prefixes|does match ignored prefixes|last commit is newer than [0-9]+ days|has open pull requests|is the base for a pull request)$' || true)"
-          if [ -n "$unexpected" ]; then
-            n_unexpected="$(printf '%s\n' "$unexpected" | wc -l | tr -d ' ')"
-            incomplete="${incomplete:+$incomplete; }${n_unexpected} branch(es) were skipped because of a lookup error (see the step log for lines starting '- Skipping')"
-          fi
-
           {
             echo '## Stale branch report (dry run, nothing was deleted)'
             echo
-            echo "Rules: age >= ${LAST_COMMIT_AGE_DAYS} days since last commit; ignored prefixes \`${IGNORED_PREFIXES}\`;"
-            echo 'default and protected branches, and branches that are the head or base of an open PR, are skipped.'
+            echo 'This was a dry run only. The list of branches that would be deleted is in the **Run cleanup** step log.'
             echo
-            if [ -n "$incomplete" ]; then
-              echo "> **INCOMPLETE REPORT:** ${incomplete}. Do not treat the list below as complete."
-              echo
-            fi
-            echo "**${marker:-No result line found}**"
+            echo 'No branch with an open PR (head or base) is ever listed.'
             echo
-            echo "Skipped because of an open PR (head): $(grep -c -F 'has open pull requests' "$CLEAN" || true)"
-            echo
-            echo "Skipped because they are the base of an open PR: $(grep -c -F 'is the base for a pull request' "$CLEAN" || true)"
-            echo
-            echo 'Candidates (spot-check each against the open PR list before any deletion):'
-            echo
-            echo '~~~text'
-            # Result lines come after the marker; skip lines are "- Skipping ..." and are excluded.
-            awk 'f && /^- / && !/^- Skipping / {print} /^Dry-run enabled,/ {f=1}' "$CLEAN"
-            echo '~~~'
+            echo 'Read the step log rather than trusting an empty list: the rate-limit guard and lookup errors'
+            echo 'end the run early or skip branches while still exiting 0 (search the log for "rate limit",'
+            echo '"Error listing branches" and "- Skipping" lines with an error text).'
           } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -n "$incomplete" ]; then
-            echo "::error::Incomplete report: ${incomplete}"
-            exit 1
-          fi
