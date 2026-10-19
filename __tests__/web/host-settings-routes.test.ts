@@ -130,6 +130,7 @@ const dangerRow = defineRow<string>({
 let auditRows: Array<Record<string, unknown>> = [];
 let eventsEnabled: boolean | "throw" = true;
 let ending = false;
+let groupCapUnreadable = false;
 let sessionUser = CREATOR;
 let server: Server;
 let base = "";
@@ -238,6 +239,7 @@ beforeEach(() => {
   auditRows = [];
   eventsEnabled = true;
   ending = false;
+  groupCapUnreadable = false;
   sessionUser = CREATOR;
   resetMoveGuardForTests();
   (LIVE_EDIT_ROWS as LiveEditRow[]).push(dangerRow);
@@ -270,6 +272,10 @@ beforeEach(() => {
       if (key !== "events.enabled") return false;
       if (eventsEnabled === "throw") throw new Error("config unreadable");
       return eventsEnabled;
+    },
+    getNumberStrict: async (_k: string, f: number) => {
+      if (groupCapUnreadable) throw new Error("db down");
+      return f;
     },
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
@@ -537,6 +543,47 @@ describe("saving the form: one result, one audit row", () => {
     expect(r.status).toBe(403);
     expect(writes).toEqual([]);
     expect(auditFor("event.host.denied")).toHaveLength(1);
+  });
+});
+
+describe("a row that validates the group list reads the cap strictly (fails closed)", () => {
+  const setupRow = defineRow<string>({
+    id: "testSetup",
+    label: "Test setup",
+    read: () => "a",
+    parse: (raw) => ({ ok: true, value: raw }),
+    applicable: () => null,
+    validate: (_to, ctx) => ctx.validateSetup(() => undefined)[0] ?? null,
+    describe: (v) => v,
+    apply: async () => ({ status: "applied" }),
+  });
+  const withRow = async (work: () => Promise<void>): Promise<void> => {
+    const rows = LIVE_EDIT_ROWS as LiveEditRow[];
+    rows.push(setupRow);
+    try {
+      await work();
+    } finally {
+      rows.splice(rows.indexOf(setupRow), 1);
+    }
+  };
+
+  it("refuses with the unreadable-limit message, changing nothing, when the cap lookup fails", async () => {
+    await withRow(async () => {
+      groupCapUnreadable = true;
+      const r = await post("settings", { s_testSetup: "b", b_testSetup: "a" });
+      expect(flashOf(r.location).msg).toContain(
+        "The group limit could not be read, so nothing was changed.",
+      );
+      expect(writes).toEqual([]);
+      expect(auditRows).toHaveLength(1);
+    });
+  });
+
+  it("accepts the same change while the cap is readable", async () => {
+    await withRow(async () => {
+      const r = await post("settings", { s_testSetup: "b", b_testSetup: "a" });
+      expect(flashOf(r.location).type).toBe("ok");
+    });
   });
 });
 

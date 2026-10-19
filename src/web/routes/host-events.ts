@@ -1123,7 +1123,8 @@ function createLiveEditDeps(client: Client): LiveEditDeps {
     },
     maxGroups: async (): Promise<number | null> => {
       try {
-        return await ConfigService.getInstance().getNumber(
+        // Strict: a failed read must be null (fail closed), not the default.
+        return await ConfigService.getInstance().getNumberStrict(
           "events.groups.max_count",
           15,
         );

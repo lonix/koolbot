@@ -413,6 +413,27 @@ describe("ConfigService - Methods", () => {
     });
   });
 
+  describe("getNumberStrict() (#1239)", () => {
+    it("coerces like getNumber and falls back to the default when unset", async () => {
+      mockFindOne.mockResolvedValue({ value: 7 });
+      expect(await service.getNumberStrict("nums.num", 15)).toBe(7);
+      mockFindOne.mockResolvedValue({ value: "9" });
+      expect(await service.getNumberStrict("nums.str", 15)).toBe(9);
+      mockFindOne.mockResolvedValue({ value: " " });
+      expect(await service.getNumberStrict("nums.blank", 15)).toBe(15);
+      mockFindOne.mockResolvedValue(null);
+      expect(await service.getNumberStrict("nums.unset", 15)).toBe(15);
+    });
+
+    it("rejects on a failed read where getNumber returns the default", async () => {
+      mockFindOne.mockRejectedValue(new Error("mongo down"));
+      expect(await service.getNumber("nums.cold", 15)).toBe(15);
+      await expect(service.getNumberStrict("nums.cold2", 15)).rejects.toThrow(
+        "mongo down",
+      );
+    });
+  });
+
   describe("getStringStrict() (#1023)", () => {
     it("coerces like getString and falls back to the default when unset", async () => {
       mockFindOne.mockResolvedValue({ value: 42 });

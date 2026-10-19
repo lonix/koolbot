@@ -16,6 +16,24 @@ import {
 } from "./config-schema.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
+function toNumber(value: unknown, defaultValue: number): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    // `Number("")` is 0, not NaN — a blank stored value must fall back to
+    // the default like any other unparsable string, not read as zero
+    // (which for a retention key meant "prune everything", #835).
+    if (value.trim() === "") return defaultValue;
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  return defaultValue;
+}
+
 function toBoolean(value: unknown, defaultValue: boolean): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -475,22 +493,20 @@ export class ConfigService {
     key: string,
     defaultValue: number = 0,
   ): Promise<number> {
-    const value = await this.get(key);
-    if (typeof value === "number") {
-      return value;
-    }
-    if (typeof value === "string") {
-      // `Number("")` is 0, not NaN — a blank stored value must fall back to
-      // the default like any other unparsable string, not read as zero
-      // (which for a retention key meant "prune everything", #835).
-      if (value.trim() === "") return defaultValue;
-      const num = Number(value);
-      return isNaN(num) ? defaultValue : num;
-    }
-    if (typeof value === "boolean") {
-      return value ? 1 : 0;
-    }
-    return defaultValue;
+    return toNumber(await this.get(key), defaultValue);
+  }
+
+  /**
+   * `getNumber` that rejects on a failed read instead of returning the
+   * default (as `getBooleanStrict` does for booleans). For a caller that must
+   * fail closed on an unreadable limit (the live edit's group cap, #1239); an
+   * absent setting still gives the default.
+   */
+  public async getNumberStrict(
+    key: string,
+    defaultValue: number = 0,
+  ): Promise<number> {
+    return toNumber(await this.readValue(key), defaultValue);
   }
 
   /**
