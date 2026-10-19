@@ -23,8 +23,12 @@
  * crash recovery (resume, reconcile).
  */
 
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { performance } from "node:perf_hooks";
+
+// The large fixtures build a 3000-member world and plan it more than once; give
+// every test the room that takes on a slow runner under coverage.
+jest.setTimeout(30000);
 
 const h = await import("../helpers/adoption-world.js");
 const fx = await import("../helpers/adoption-fixtures.js");
@@ -401,7 +405,7 @@ describe("server adoption, end to end on a small Community server", () => {
     expect(e.writeCalls()).toEqual([]);
   });
 
-  it("does not offer a second rules gate on a Community server", async () => {
+  it("flags the native rules gate and plans no rules gate by default on a Community server", async () => {
     const p = await h.planClaims(c.world, c.claims);
     expect(p.scan.community.community).toBe(true);
     expect(p.scan.community.rulesChannelId).toBe(c.ids.rules);
