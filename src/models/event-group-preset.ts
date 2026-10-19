@@ -38,6 +38,8 @@ export interface IEventGroupPreset extends Document {
   leaderLabel: string;
   /** Minutes before the start that channels are created; null = server default. */
   channelLeadMinutes: number | null;
+  /** Default for the event form's clan tags box (#1194); a row without it means off. */
+  tagsEnabled: boolean;
   groups: IEventGroupPresetGroup[];
   enabled: boolean;
   createdAt: Date;
@@ -66,6 +68,7 @@ const eventGroupPresetSchema = new Schema<IEventGroupPreset>(
     groupLabel: { type: String, default: "Team", maxlength: 20 },
     leaderLabel: { type: String, default: "Leader", maxlength: 20 },
     channelLeadMinutes: { type: Number, default: null, min: 0, max: 1440 },
+    tagsEnabled: { type: Boolean, default: false },
     groups: { type: [groupSchema], default: [] },
     enabled: { type: Boolean, default: true },
   },

@@ -34,6 +34,13 @@ export interface EventGroupPreset {
   leaderLabel?: string;
   /** Channel creation time in minutes before the start; absent = server default. Library presets only. */
   channelLeadMinutes?: number | null;
+  /**
+   * Default for the event form's "clan tags on nicknames" box (#1194); absent
+   * means off. Library presets only (no built-in sets it). A default only: the
+   * host can still change it for each event. There is deliberately no such
+   * default for leaders.
+   */
+  tagsEnabled?: boolean;
   groups: readonly EventGroupPresetGroup[];
 }
 

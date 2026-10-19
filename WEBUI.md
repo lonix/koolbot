@@ -1419,7 +1419,9 @@ host only, at most one), an optional size (1 to 99, the voice user limit), an
 optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
 an optional colour marker such as a coloured circle. A separate tick box, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
-**Leaders** below). Names must be unique within an
+**Leaders** below), and **Clan tags** (#1194) puts each team's tag on its members'
+server nicknames while the event runs (off by default; see **Clan tags** below).
+Names must be unique within an
 event and the number of groups is capped by `events.groups.max_count`; a preset with
 more groups than the cap is greyed out in the picker and refused by the server
 (choose Custom or raise the cap). While "Use groups" is off, the section's number
@@ -1450,9 +1452,14 @@ server preset** opens the editor prefilled with an event's groups (names, kinds,
 sizes, tags, markers, labels and lead time; never members, captains or channels);
 the event is not changed. Choosing a preset fills in its labels and channel
 creation time with scripts on; without scripts only the group and leader labels
-fall back to the preset's. The tag switch an event may get later (#1194) is not part of a preset yet,
-and neither is the leaders switch (#1195): there is no default for leaders, so a
-preset never turns them on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
+fall back to the preset's. A preset can carry a default for the **Clan tags** box
+(#1194): the editor has a tick box for it, **Save as server preset** copies the
+event's setting, and choosing the preset on the schedule form (with scripts on) sets the
+box to the preset's default, which the host can still change for that event. A preset
+without the field (every preset saved before it existed, and every built-in) means off,
+and choosing one puts the box back to off. The tag format (before or after the name) is
+set per event, not on a preset. There is no default for the leaders switch (#1195), so
+a preset never turns leaders on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
 (`event-preset.create`, `.update`, `.delete`, `.toggle`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
@@ -1467,6 +1474,77 @@ offered, when only the server's own presets cannot be read just the built-ins
 that are on are, with a notice either way; Custom always works. A server that
 never opens the page has every built-in on. Presets hold no member data, so they
 are not part of the member data export.
+
+**Clan tags** (#1194) are a per-event option on the schedule form (**Clan tags**, with an
+optional **Put the tag after the name**), off unless ticked, and only for an event with
+groups. While the event is **active**, each member of a **team** group that has a tag gets
+it on their **server nickname**: `[RED] Alice` by default, `Alice [RED]` with the suffix
+option. A team with no tag, and the open and leaders-only groups, are never tagged.
+Members cannot opt out. Nothing is a command: the host only ticks the box.
+
+- **When it applies:** when someone is assigned (Assign people, joining a group's channel,
+  Randomise), moved to another team (the tag follows, built from their original
+  nickname, never from the already tagged one), and when the event goes active with people
+  already assigned. A pass after every scan (about once a minute) tags anyone still
+  missing a tag. It needs `events.enabled`: with Events off nothing is tagged. That pass runs in
+  the background, never inside the Events scan, so a slow Discord cannot delay starts, reminders
+  or scheduled ends. Restoring runs on its own worker, once a minute, whether or not Events is on
+  (it never tags): switching Events off therefore takes the tags off within a minute, and they
+  come back when Events is switched on again. A tag typed with its own brackets (`[RED]`) is used
+  as it is, never wrapped twice.
+- **The original is always kept.** Before the first edit the bot stores the member's
+  nickname (or "none", meaning their display name shows) in its own `event-nickname-backups`
+  collection, and the tagged name is always built from that stored name. If the name is too
+  long, the **name** is shortened, never the tag, to fit Discord's 32 characters. The backup
+  also keeps every nickname the bot has set or may have set (a team move adds the new tag and
+  keeps the old one), so a tag whose edit was never confirmed is still recognised as the bot's.
+  A backup means the nickname may carry a tag; it is deleted as soon as the nickname is restored.
+  An edit that timed out is not assumed to have failed: for a minute after the request was
+  actually sent (not after it queued) the backup is left alone (it may still be in flight at
+  Discord), then the nickname is read again and decides. A restore is treated the same way, so a
+  restore whose answer was lost is never recorded as done.
+- **Who cannot be tagged:** the server owner and anyone whose highest role is at or above the
+  bot's role (Discord does not let a bot rename them). They are listed under **Clan tags**
+  in the Groups card of the host panel, with the reason, and are not retried more than every
+  ten minutes. Without the **Manage Nicknames** permission nothing is applied and the card
+  says so; it applies the tags within a minute of the permission being given. One person
+  can carry one event's tag at a time: someone still wearing another event's tag is listed
+  as waiting and is tagged once that is restored.
+- **When it is restored:** when the event ends (manual or scheduled; this is the
+  end-of-event hook), when it is cancelled, when the member is unassigned or leaves the
+  team (also after the event is over), and for a member data reset on `/me/privacy`. If the
+  bot crashes, a restore that failed, or an event that ended while the bot was down, the
+  startup reconcile and the pass after every scan restore every backup of an event that is
+  not running any more, whatever its state. A restore that is refused (missing permission)
+  or times out keeps the backup and is retried on every pass of the restore worker (a refused
+  one with no waiting; the 10-minute pause between tries applies to tagging only); a person who left the server just loses
+  the backup. The same happens when the group channels are cleaned up, because the scan
+  that removes them runs the restore pass too.
+- **A nickname the member changed themselves** is left alone: at restore, if the nickname is
+  neither the tag the bot set nor the original, the backup is dropped and nothing is edited.
+  The bot reads the member fresh from Discord for that decision, never from its cache. "The tag
+  the bot set" is compared after one conservative normalisation (Unicode NFC, trimmed, runs of
+  spaces collapsed; capital letters are never folded), because Discord may store a nickname in a
+  slightly different spelling than the one requested. When an edit was never confirmed and the
+  nickname then matches nothing the bot knows, it cannot tell a rename from a spelling it does
+  not know, so it keeps the backup and looks again on the next passes; after three such reads
+  (or a day) it treats the nickname as the member's own and leaves it alone. A stuck backup is
+  safer than a lost original.
+- **Pacing:** nickname edits go through `CommandManager.makeDiscordApiCall` and are queued
+  600 ms apart, so a team of forty takes about half a minute. The wait comes BEFORE the bot
+  reads the member's nickname, never between that read and the edit, so a nickname the member
+  changes while the edit is waiting is seen and left alone (restore) or tagged from the new
+  name (apply). The edit itself never waits either: if Discord rate-limits it, it is rejected
+  and the whole decision is taken again from a fresh read on the next pass. One edit runs at a
+  time, so a team cannot burst into Discord's limits. Once per pass the bot also checks that it
+  still has Manage Nicknames, so a permission revoked mid-event shows on the host panel even
+  when nobody needed an edit.
+- **Member data:** the backup is the member's own data (`event-nickname-backup` in the
+  member data export and reset). A reset restores the nickname first, then deletes the backup;
+  if Discord refuses, the backup is deleted anyway and the reset reports that a tag may
+  remain.
+- **No privileged intent is needed.** The bot reads a member with a single REST call; the
+  Server Members Intent is not used.
 
 **Group voice channels** (#1190). At the event's channel creation time (its own, else
 `events.create_lead_minutes`; "Start now" at once) the bot creates the main channel and
@@ -1883,9 +1961,11 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    connected to voice; the rest, and anything Discord did not confirm, are listed in the result.
    Without **Move Members**, or while another move runs, nobody is moved and the result says so;
    the group channels then stay until empty. The pull-back is not retried by the scan.
-4. **End-of-event hooks.** A list that features register work on; it is empty today (temporary
-   clan tags will restore nicknames here). A hook that fails or takes over a minute is reported
-   and the teardown goes on. Hooks run once, after the event is already saved as ended.
+4. **End-of-event hooks.** A list that features register work on; today it holds the clan
+   tags' nickname restore (#1194, see **Clan tags**). A hook that fails or takes over a minute
+   is reported and the teardown goes on. Hooks run once, after the event is already saved as
+   ended; a restore that did not finish is not lost, because the nickname backups stay until
+   they are restored and the scan finishes them.
 5. **Group channels** are removed now, empty ones only (each is read from Discord just before);
    one with people in it stays and the scan tries again every minute. The **main channel**
    stays for `events.channel_grace_minutes` after the end (counted from `endedAt`, so an event

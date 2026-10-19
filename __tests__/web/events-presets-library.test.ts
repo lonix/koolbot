@@ -417,3 +417,107 @@ describe("the presets admin page (#1200)", () => {
     expect(button.hidden).toBe(true);
   });
 });
+
+// ---------- Clan tags default (#1194) ----------
+
+describe("a preset's clan tags default (#1194)", () => {
+  const tagged: EventGroupPreset = {
+    ...libraryPreset,
+    id: "lib:bbbbbbbbbbbbbbbbbbbbbbbb",
+    label: "Quiz night",
+    tagsEnabled: true,
+  };
+
+  it("choosing a preset that defaults tags on ticks the box; one without the default unticks it; the host can still change it", () => {
+    const dom = boot(page([libraryPreset, tagged]));
+    const box = field(dom, "groups_tags");
+    expect(box.checked).toBe(false);
+    choose(dom, tagged.id);
+    expect(box.checked).toBe(true);
+    // The host's own choice after the preset stands.
+    box.checked = false;
+    expect(box.checked).toBe(false);
+    choose(dom, tagged.id);
+    expect(box.checked).toBe(true);
+    // A preset with no default (absent = off) puts the box back to off.
+    choose(dom, LIB_ID);
+    expect(box.checked).toBe(false);
+  });
+
+  it("a built-in preset has no default, so it leaves the box off", () => {
+    const dom = boot(page(undefined));
+    field(dom, "groups_tags").checked = true;
+    choose(dom, "builtin:red-vs-blue");
+    expect(field(dom, "groups_tags").checked).toBe(false);
+  });
+
+  it("the form offers the tags box and the suffix box, unticked", () => {
+    const doc = new JSDOM(page(undefined)).window.document;
+    for (const name of ["groups_tags", "groups_tags_suffix"]) {
+      const el = doc.querySelector(`[name="${name}"]`) as HTMLInputElement;
+      expect(el.type).toBe("checkbox");
+      expect(el.checked).toBe(false);
+    }
+  });
+
+  it("a restored draft keeps the host's tags choice", () => {
+    const dom = boot(page([libraryPreset]), {
+      groups_enabled: true,
+      groups_tags: true,
+      groups_tags_suffix: true,
+    });
+    expect(field(dom, "groups_tags").checked).toBe(true);
+    expect(field(dom, "groups_tags_suffix").checked).toBe(true);
+  });
+
+  it("the preset editor shows the box ticked only when the preset has the default, and lists it in the table", () => {
+    const on = new JSDOM(adminPage({ values: { groups_tags: "1" } })).window
+      .document;
+    expect(
+      (on.querySelector('[name="groups_tags"]') as HTMLInputElement).checked,
+    ).toBe(true);
+    const off = new JSDOM(adminPage({ values: {} })).window.document;
+    expect(
+      (off.querySelector('[name="groups_tags"]') as HTMLInputElement).checked,
+    ).toBe(false);
+    const listed = adminPage({
+      entries: [
+        entry({ source: "library", enabled: true, tagsEnabled: true }),
+        entry({
+          id: "lib:cccccccccccccccccccccccc",
+          source: "library",
+          enabled: true,
+        }),
+      ],
+    });
+    expect((listed.match(/clan tags on/g) ?? []).length).toBe(1);
+  });
+
+  it("after a refused save, the editor draft keeps the ticked box", () => {
+    const html = adminPage().replace(
+      "<h1>Group presets</h1>",
+      '<h1>Group presets</h1><div class="notice err" data-flash>Preset not saved.</div>',
+    );
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-preset-draft",
+      JSON.stringify({ preset_name: "Copy", groups_tags: true }),
+    );
+    const code = [
+      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ]
+      .map((m) => m[1])
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    expect(
+      (
+        dom.window.document.querySelector(
+          '[name="groups_tags"]',
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+});

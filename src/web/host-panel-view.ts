@@ -102,6 +102,16 @@ export interface HostPanelEvent {
   /** What the last group-channel pass could not do (#1190): warnings and
    * per-group failures, as plain text. Absent or empty when all is well. */
   groupNotices?: string[];
+  /** Clan tags on nicknames are switched on for this event (#1194). */
+  tagsEnabled?: boolean;
+  /** The tag goes after the name instead of before it. */
+  tagsSuffix?: boolean;
+  /** What the tag passes could not do (missing permission, a backup being
+   * retried), as plain text. */
+  tagNotices?: string[];
+  /** Members who are not tagged, and why (the server owner, a role above the
+   * bot's, a refused edit). Names come from the gateway cache. */
+  tagSkipped?: Array<{ name: string; reason: string }>;
   adopted: boolean;
 }
 
@@ -182,8 +192,28 @@ function renderGroups(e: HostPanelEvent): string {
 <h2 id="host-groups-h">Groups</h2>
 <p class="muted">Set up when the event was created. Channels are created ${lead}.</p>
 ${notices}
+${renderTags(e)}
 <table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>
 </section>`;
+}
+
+/**
+ * The clan tags status (#1194): how they are applied, who could not be tagged
+ * (the server owner and members whose top role is at or above the bot's can
+ * never be), and anything that needs the host's attention.
+ */
+function renderTags(e: HostPanelEvent): string {
+  if (e.tagsEnabled !== true) return "";
+  const where = e.tagsSuffix ? "after" : "before";
+  const notices = (e.tagNotices ?? []).length
+    ? `<div class="notice warn" role="status"><ul>${(e.tagNotices ?? []).map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`
+    : "";
+  const skipped = (e.tagSkipped ?? []).length
+    ? `<p>Not tagged:</p><ul>${(e.tagSkipped ?? []).map((s) => `<li>${escapeHtml(s.name)}: ${escapeHtml(s.reason)}</li>`).join("")}</ul>`
+    : "";
+  return `<h3>Clan tags</h3>
+<p class="muted">While the event runs, each member of a team with a tag gets that tag ${where} their server nickname. The original nickname is put back when the event ends or is cancelled, or when the member leaves the team.</p>
+${notices}${skipped}`;
 }
 
 function renderControls(

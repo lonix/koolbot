@@ -135,6 +135,9 @@ jest.unstable_mockModule("../../src/models/reminder.js", () => ({
 jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: listModel("event"),
 }));
+jest.unstable_mockModule("../../src/models/event-nickname-backup.js", () => ({
+  EventNicknameBackup: listModel("event-nickname-backup"),
+}));
 jest.unstable_mockModule(
   "../../src/models/leaderboard-role-assignment.js",
   () => ({
@@ -584,6 +587,40 @@ describe("UserDataExportService", () => {
     for (const leaked of ["other-member-7", "other-member-8", "organiser-9"]) {
       expect(raw).not.toContain(leaked);
     }
+  });
+
+  it("exports the member's nickname backup, scoped to them and the guild (#1194)", async () => {
+    const eventId = "65a000000000000000000001";
+    DATA.event = [{ _id: eventId, title: "Quiz night" }];
+    DATA["event-nickname-backup"] = [
+      {
+        eventId,
+        memberId: USER,
+        original: "Alice",
+        base: "Alice",
+        intended: "[RED] Alice",
+        owned: ["[RED] Alice"],
+        confirmedTarget: null,
+        guildId: GUILD,
+        createdAt: "2026-03-01T18:00:00.000Z",
+      },
+    ];
+
+    const { payload } = await runExport();
+
+    expect(FILTERS["event-nickname-backup"]).toEqual({
+      guildId: GUILD,
+      memberId: USER,
+    });
+    expect(payload.data["event-nickname-backup"]).toEqual([
+      {
+        event: "Quiz night",
+        originalNickname: "Alice",
+        // Not yet confirmed: what the bot meant to set.
+        taggedNickname: "[RED] Alice",
+        since: "2026-03-01T18:00:00.000Z",
+      },
+    ]);
   });
 
   it("returns only which reward roles list the member, not the roster", async () => {

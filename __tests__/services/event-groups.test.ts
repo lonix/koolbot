@@ -368,6 +368,71 @@ describe("group leaders on the event form (#1195)", () => {
   });
 });
 
+describe("clan tags on the event form (#1194)", () => {
+  it("are off unless the form switched them on, the suffix only with them, and only with groups on", () => {
+    const off = validateGroupSetup(input(), { maxCount: 15 });
+    expect(off.ok && [off.setup.tagsEnabled, off.setup.tagsSuffix]).toEqual([
+      false,
+      false,
+    ]);
+    const on = validateGroupSetup(input({ tagsEnabled: true }), {
+      maxCount: 15,
+    });
+    expect(on.ok && [on.setup.tagsEnabled, on.setup.tagsSuffix]).toEqual([
+      true,
+      false,
+    ]);
+    const suffix = validateGroupSetup(
+      input({ tagsEnabled: true, tagsSuffix: true }),
+      { maxCount: 15 },
+    );
+    expect(suffix.ok && suffix.setup.tagsSuffix).toBe(true);
+    // A suffix with tags off means nothing.
+    const stray = validateGroupSetup(input({ tagsSuffix: true }), {
+      maxCount: 15,
+    });
+    expect(stray.ok && stray.setup.tagsSuffix).toBe(false);
+    // Groups off: the empty setup, whatever else was posted.
+    const plain = validateGroupSetup(
+      input({ enabled: false, tagsEnabled: true, tagsSuffix: true }),
+      { maxCount: 15 },
+    );
+    expect(
+      plain.ok && [plain.setup.tagsEnabled, plain.setup.tagsSuffix],
+    ).toEqual([false, false]);
+  });
+
+  it("are read from the two checkboxes", () => {
+    const none = parseGroupForm({ groups_enabled: "1" });
+    expect([none.tagsEnabled, none.tagsSuffix]).toEqual([false, false]);
+    const both = parseGroupForm({
+      groups_enabled: "1",
+      groups_tags: "1",
+      groups_tags_suffix: "1",
+    });
+    expect([both.tagsEnabled, both.tagsSuffix]).toEqual([true, true]);
+  });
+
+  it("a preset chosen on the server never switches them on by itself", () => {
+    const result = validateGroupSetup(
+      input({ presetId: "builtin:wardogs", rows: [] }),
+      { maxCount: 15 },
+    );
+    expect(result.ok && result.setup.tagsEnabled).toBe(false);
+  });
+
+  it("the next occurrence of a series keeps the toggle and the format", () => {
+    const copy = copyGroupSetup({
+      groupsEnabled: true,
+      tagsEnabled: true,
+      tagsSuffix: true,
+      groups: [],
+    });
+    expect([copy.tagsEnabled, copy.tagsSuffix]).toEqual([true, true]);
+    expect(copyGroupSetup({ groupsEnabled: true }).tagsSuffix).toBe(false);
+  });
+});
+
 describe("validateLeaderLabel", () => {
   it("takes a name, collapses spaces, defaults an empty one and refuses a bad one", () => {
     expect(validateLeaderLabel("  Squad   Lead ")).toEqual({

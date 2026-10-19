@@ -152,7 +152,10 @@ function groupSummary(entry: PresetEntry): string {
   const names = entry.groups
     .map((g) => `${g.marker ? `${g.marker} ` : ""}${g.name}`)
     .join(", ");
-  return `<span class="muted">${entry.groups.length}:</span> ${escapeHtml(names)}`;
+  const tags = entry.tagsEnabled
+    ? ' <span class="tag" title="Pre-ticks the clan tags box on the event form">clan tags on</span>'
+    : "";
+  return `<span class="muted">${entry.groups.length}:</span> ${escapeHtml(names)}${tags}`;
 }
 
 function entryRow(entry: PresetEntry, csrfInput: string): string {
@@ -199,13 +202,13 @@ const EVENT_PRESETS_SCRIPT =
   "box.appendChild(d.firstElementChild);if(add)add.hidden=rows().length>=max;return true}" +
   "if(add){add.hidden=rows().length>=max;add.addEventListener('click',function(){addRow()})}" +
   "form.addEventListener('submit',function(){try{var d={};" +
-  "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.value});" +
+  "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
-  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||typeof d[k]!=='string')return;" +
-  "if(k==='preset_id')return;el.value=d[k]})}}catch(x){}" +
+  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el)return;" +
+  "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 
 export function renderEventPresetsPage(props: EventPresetsPageProps): string {
@@ -269,6 +272,8 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     <label>Create channels this many minutes before the start (empty = server default)
       <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leadMinutes] ?? "")}" placeholder="Server default">
     </label>
+    <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"${v[GROUP_FORM_FIELDS.tags] ? " checked" : ""}> Clan tags on nicknames: pre-tick this on the event form when the preset is chosen (the host can still change it for each event)</label>
+    <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
     <div data-group-rows data-max="${props.maxCount}" class="stack">
       ${rows}
     </div>

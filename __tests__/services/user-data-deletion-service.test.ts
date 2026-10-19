@@ -141,6 +141,13 @@ const removeLeaderFromEvents =
       userId: string,
     ) => Promise<{ matched: number; removed: number; failed: number }>
   >();
+const restoreForMember =
+  jest.fn<
+    (
+      guildId: string,
+      userId: string,
+    ) => Promise<{ matched: number; removed: number; failed: number }>
+  >();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -248,6 +255,17 @@ jest.unstable_mockModule("../../src/services/event-group-leaders.js", () => ({
   },
 }));
 
+jest.unstable_mockModule("../../src/services/event-nickname-tags.js", () => ({
+  EventNicknameTags: {
+    getInstance: () => ({
+      restoreForMember: async (guildId: string, userId: string) => {
+        CALLS.push("event.restoreForMember");
+        return restoreForMember(guildId, userId);
+      },
+    }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
   QuoteChannelManager: {
     getInstance: () => ({ deleteQuoteMessage: jest.fn() }),
@@ -334,6 +352,9 @@ describe("UserDataDeletionService.purge", () => {
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
     removeLeaderFromEvents
+      .mockReset()
+      .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
+    restoreForMember
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, failed: 0 });
     purgeForUser.mockReset().mockResolvedValue({
@@ -800,6 +821,37 @@ describe("UserDataDeletionService.purge", () => {
       });
       expect(step.error).toContain("group leader");
       expect(report.ok).toBe(false);
+    });
+
+    it("restores the member's nickname and deletes the backup, reporting a shortfall (#1194)", async () => {
+      restoreForMember.mockResolvedValue({ matched: 1, removed: 1, failed: 1 });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(restoreForMember).toHaveBeenCalledWith(GUILD, USER);
+      const step = stepsFor(report, "event-nickname-backup")[0];
+      expect(step).toMatchObject({
+        action: "hard-delete",
+        matched: 1,
+        removed: 1,
+      });
+      expect(step.error).toContain("tag may still be on it");
+      expect(report.ok).toBe(false);
+      // After the memberships it listens to, before everything inert.
+      const order = [...PURGE_ORDER];
+      expect(order.indexOf("event-nickname-backup")).toBeGreaterThan(
+        order.indexOf("event-group-member"),
+      );
+      expect(order.indexOf("event-nickname-backup")).toBeLessThan(
+        order.indexOf("voice-channel-tracking"),
+      );
+    });
+
+    it("is clean when the nickname was restored (#1194)", async () => {
+      restoreForMember.mockResolvedValue({ matched: 1, removed: 1, failed: 0 });
+      const report = await service().purge(USER, GUILD);
+      const step = stepsFor(report, "event-nickname-backup")[0];
+      expect(step.error).toBeUndefined();
     });
 
     it("fails the purge when an event announcement could not be refreshed", async () => {

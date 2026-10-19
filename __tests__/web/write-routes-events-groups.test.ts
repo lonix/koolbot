@@ -156,6 +156,8 @@ type CreateInput = {
     presetId: string | null;
     groupLabel: string;
     channelLeadMinutes: number | null;
+    tagsEnabled?: boolean;
+    tagsSuffix?: boolean;
     groups: Array<{ name: string; size: number | null; kind: string }>;
   };
 };
@@ -284,6 +286,38 @@ describe("POST /events/create with groups (#1188)", () => {
     expect(
       (mockCreateEvent.mock.calls[0][0] as CreateInput).groups?.captainsEnabled,
     ).toBe(true);
+  });
+
+  it("stores the clan tags switch and the suffix only when their boxes were ticked (#1194)", async () => {
+    await create({ groups_enabled: "1", group_0_name: "A" });
+    const plain = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect([plain.groups?.tagsEnabled, plain.groups?.tagsSuffix]).toEqual([
+      false,
+      false,
+    ]);
+    mockCreateEvent.mockClear();
+    await create({
+      groups_enabled: "1",
+      groups_tags: "1",
+      group_0_name: "A",
+    });
+    const on = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect([on.groups?.tagsEnabled, on.groups?.tagsSuffix]).toEqual([
+      true,
+      false,
+    ]);
+    mockCreateEvent.mockClear();
+    await create({
+      groups_enabled: "1",
+      groups_tags: "1",
+      groups_tags_suffix: "1",
+      group_0_name: "A",
+    });
+    const suffix = mockCreateEvent.mock.calls[0][0] as CreateInput;
+    expect([suffix.groups?.tagsEnabled, suffix.groups?.tagsSuffix]).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("refuses an out-of-range channel creation time", async () => {

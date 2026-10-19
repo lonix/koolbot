@@ -22,7 +22,7 @@
  * 3. **Pull back** (manual end, when asked): everyone connected to a group
  *    channel goes to the main channel, through `moveEventMembers`. Nobody is
  *    left out, the host included.
- * 4. **End-of-event hooks** (`event-end-hooks.ts`; none registered yet).
+ * 4. **End-of-event hooks** (`event-end-hooks.ts`; the clan tags' nickname restore, #1194).
  * 5. **Group channels** are deleted now (`EventGroupChannels.cleanup`: empty
  *    ones only; an occupied one stays and the scan retries it every minute).
  *    The **main channel** stays until `events.channel_grace_minutes` after

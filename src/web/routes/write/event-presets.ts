@@ -92,6 +92,7 @@ export function createEventPresetsRouter(): Router {
           groups: data.groups.length,
           groupLabel: data.groupLabel,
           channelLeadMinutes: data.channelLeadMinutes,
+          tagsEnabled: data.tagsEnabled,
         },
         result: result.ok ? "success" : "failure",
         errorMessage: result.ok ? null : result.error,

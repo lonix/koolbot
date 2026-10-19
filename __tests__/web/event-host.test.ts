@@ -225,6 +225,59 @@ describe("renderHostPanelBody", () => {
     expect(none).not.toContain("could not be set up");
   });
 
+  it("shows nothing about clan tags unless they are switched on (#1194)", () => {
+    const group = {
+      name: "A",
+      marker: "",
+      kind: "team" as const,
+      size: null,
+      tag: "A",
+      hasChannel: false,
+      memberCount: 0,
+      fill: "0",
+    };
+    const html = renderHostPanelBody({ event: { ...base, groups: [group] } });
+    expect(html).not.toContain("Clan tags");
+  });
+
+  it("lists who could not be tagged and why, and warnings, escaped (#1194)", () => {
+    const group = {
+      name: "A",
+      marker: "",
+      kind: "team" as const,
+      size: null,
+      tag: "A",
+      hasChannel: false,
+      memberCount: 0,
+      fill: "0",
+    };
+    const html = renderHostPanelBody({
+      event: {
+        ...base,
+        groups: [group],
+        tagsEnabled: true,
+        tagsSuffix: true,
+        tagNotices: ["No <b>Manage Nicknames</b>"],
+        tagSkipped: [
+          {
+            name: "Server <owner>",
+            reason: "The server owner's nickname cannot be changed by a bot.",
+          },
+        ],
+      },
+    });
+    expect(html).toContain("Clan tags");
+    expect(html).toContain("after their server nickname");
+    expect(html).toContain("No &lt;b&gt;Manage Nicknames&lt;/b&gt;");
+    expect(html).toContain("Server &lt;owner&gt;: The server owner");
+    expect(html).not.toContain("<b>Manage Nicknames</b>");
+    const prefix = renderHostPanelBody({
+      event: { ...base, groups: [group], tagsEnabled: true },
+    });
+    expect(prefix).toContain("before their server nickname");
+    expect(prefix).not.toContain("Not tagged:");
+  });
+
   it("shows how full each team group is, and n/a for groups that take no members", () => {
     const html = renderHostPanelBody({
       event: {

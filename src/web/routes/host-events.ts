@@ -57,6 +57,7 @@ import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
 import { randomBytes } from "node:crypto";
 import { ConfigService } from "../../services/config-service.js";
+import { EventNicknameTags } from "../../services/event-nickname-tags.js";
 import { TrackingOptOutService } from "../../services/tracking-opt-out-service.js";
 import {
   assignMember,
@@ -1021,7 +1022,32 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
         }))
       : [],
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
+    ...tagStatusFor(client, event, groupsEnabled),
     adopted: event.nativeAdopted === true,
+  };
+}
+
+/** The clan tags (#1194) as the panel shows them; nothing while they are off. */
+function tagStatusFor(
+  client: Client,
+  event: IEvent,
+  groupsEnabled: boolean,
+): Pick<
+  HostPanelEvent,
+  "tagsEnabled" | "tagsSuffix" | "tagNotices" | "tagSkipped"
+> {
+  if (!groupsEnabled || event.tagsEnabled !== true) return {};
+  const report = EventNicknameTags.getInstance(client).getReport(
+    String(event._id),
+  );
+  return {
+    tagsEnabled: true,
+    tagsSuffix: event.tagsSuffix === true,
+    tagNotices: report?.warnings ?? [],
+    tagSkipped: (report?.skipped ?? []).map((s) => ({
+      name: cachedMemberName(client, event.guildId, s.userId),
+      reason: s.reason,
+    })),
   };
 }
 

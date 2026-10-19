@@ -64,6 +64,7 @@ import { BirthdayService } from "./birthday-service.js";
 import { EventService } from "./event-service.js";
 import { removeMemberFromEvents } from "./event-group-assignment.js";
 import { removeLeaderFromEvents } from "./event-group-leaders.js";
+import { EventNicknameTags } from "./event-nickname-tags.js";
 import { LeaderboardRoleService } from "./leaderboard-role-service.js";
 import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
@@ -392,6 +393,29 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  // The nickname backup of an event's temporary clan tag (#1194). The nickname
+  // is put back first (the Discord side effect), under the per-member lock the
+  // tagging uses, and the row is deleted after. If Discord refuses the restore
+  // the row is deleted anyway (the reset owes the erasure) and the step reports
+  // a shortfall, so the member's tag may remain.
+  "event-nickname-backup": {
+    actions: ["hard-delete"],
+    run: async ({ userId, guildId, client }, emit) => {
+      const { matched, removed, failed } = await EventNicknameTags.getInstance(
+        client,
+      ).restoreForMember(guildId, userId);
+      emit({
+        action: "hard-delete",
+        matched,
+        removed,
+        error:
+          failed > 0
+            ? "The member's original nickname could not be restored (Discord refused or was unreachable), so an event tag may still be on it; the backup was deleted"
+            : undefined,
+      });
+    },
+  },
+
   // ---------------------------------------------------------------
   // Inert collections
   // ---------------------------------------------------------------
@@ -646,13 +670,18 @@ export const PURGE_ORDER: readonly string[] = [
   "user-birthday",
   // Then the owning-service call that edits an event announcement.
   "event-rsvp",
-  // Group memberships on the same event rows (no Discord side effect today;
-  // #1194 listens to the change it fires to restore a tagged nickname).
+  // Group memberships on the same event rows (the change it fires also lets
+  // the clan tags (#1194) restore a tagged nickname).
   "event-group-member",
   // Group leaders on the same rows (#1195). After the memberships: the unassign
   // cleanup (a listener on the change the membership purge fires) may already
   // have cleared it, which makes this step a no-op, never a conflict.
   "event-group-captain",
+  // The nickname backup (#1194): a Discord side effect (restoring the nickname),
+  // so before the inert collections. After the memberships: leaving the group
+  // already asks the tags to restore, which makes this step a no-op, never a
+  // conflict (both run under the same per-member lock).
+  "event-nickname-backup",
   // Then everything inert.
   "voice-channel-tracking",
   "message-activity-tracking",
