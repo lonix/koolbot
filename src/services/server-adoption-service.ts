@@ -33,6 +33,7 @@ import { ConfigService } from "./config-service.js";
 import { Config } from "../models/config.js";
 import { defaultConfig, settingsMetadata } from "./config-schema.js";
 import {
+  channelKindOf,
   computePlanId,
   isApplicable,
   type AdoptionPlan,
@@ -2192,11 +2193,7 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     return {
       id: channel.id,
       name: channel.name,
-      kind: channel.isVoiceBased()
-        ? "voice"
-        : channel.type === ChannelType.GuildCategory
-          ? "category"
-          : "text",
+      kind: channelKindOf(channel.type),
       rawType: channel.type,
       parentId: channel.parentId,
       position: channel.position,

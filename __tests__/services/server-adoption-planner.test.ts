@@ -1,7 +1,8 @@
 import { describe, it, expect } from "@jest/globals";
-import { PermissionsBitField } from "discord.js";
+import { ChannelType, PermissionsBitField } from "discord.js";
 import {
   planAdoption,
+  channelKindOf,
   isApplicable,
   type ScannedState,
   type ChannelState,
@@ -1187,5 +1188,43 @@ describe("planAdoption: round fifteen", () => {
       config: { "adoption.snapshot.retention_days": 10 },
     });
     expect(codes(plan)).toContain("feature-channel-unusable");
+  });
+});
+
+describe("channelKindOf (#1244)", () => {
+  // Every discord.js channel type has an explicit expectation, so a type added
+  // by a discord.js upgrade has to be classified on purpose.
+  const expected: Record<number, string> = {
+    [ChannelType.GuildText]: "text",
+    [ChannelType.DM]: "other",
+    [ChannelType.GuildVoice]: "voice",
+    [ChannelType.GroupDM]: "other",
+    [ChannelType.GuildCategory]: "category",
+    [ChannelType.GuildAnnouncement]: "text",
+    [ChannelType.AnnouncementThread]: "other",
+    [ChannelType.PublicThread]: "other",
+    [ChannelType.PrivateThread]: "other",
+    [ChannelType.GuildStageVoice]: "voice",
+    [ChannelType.GuildDirectory]: "other",
+    [ChannelType.GuildForum]: "other",
+    [ChannelType.GuildMedia]: "other",
+  };
+
+  it("classifies every discord.js channel type", () => {
+    const all = Object.values(ChannelType).filter(
+      (v): v is number => typeof v === "number",
+    );
+    expect([...new Set(all)].sort((a, b) => a - b)).toEqual(
+      Object.keys(expected)
+        .map(Number)
+        .sort((a, b) => a - b),
+    );
+    for (const type of all) {
+      expect([type, channelKindOf(type)]).toEqual([type, expected[type]]);
+    }
+  });
+
+  it("calls an unknown future type other", () => {
+    expect(channelKindOf(9999)).toBe("other");
   });
 });

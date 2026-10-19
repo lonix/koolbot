@@ -63,7 +63,7 @@ const { RoleGroupService } =
 const { defaultConfig } = await import("../../src/services/config-schema.js");
 const { ServerAdoptionService, DiscordAdoptionGateway } =
   await import("../../src/services/server-adoption-service.js");
-const { planAdoption } =
+const { planAdoption, channelKindOf } =
   await import("../../src/services/server-adoption-planner.js");
 const { ServerScanService, detectNamingConvention } =
   await import("../../src/services/server-scan-service.js");
@@ -207,16 +207,6 @@ export const T = {
   stage: ChannelType.GuildStageVoice,
 } as const;
 
-/** The kind the server scan reports for a channel type (forums are "other"). */
-const kindOfType = (type: number): ChannelState["kind"] =>
-  type === T.category
-    ? "category"
-    : type === T.text || type === T.announcement
-      ? "text"
-      : type === T.voice || type === T.stage
-        ? "voice"
-        : "other";
-
 /** Positions come from the order a fixture lists channels in (see `worldOf`). */
 export const channel = (
   id: string,
@@ -228,7 +218,7 @@ export const channel = (
 ): ChannelState => ({
   id,
   name,
-  kind: kindOfType(type),
+  kind: channelKindOf(type),
   rawType: type,
   parentId,
   position: 0,
@@ -745,15 +735,7 @@ const WRITE_METHODS = new Set<string>([
   "setChannelParent",
 ]);
 
-export function engine(
-  w: World,
-  opts: {
-    /** Test hook: report another `kind` for a live channel (see #1244). */
-    liveKind?: (
-      rawType: number | undefined,
-    ) => ChannelState["kind"] | undefined;
-  } = {},
-) {
+export function engine(w: World) {
   const writes: string[] = [];
   const calls: string[] = [];
   const audits: string[] = [];
@@ -842,11 +824,7 @@ export function engine(
     memberHasRole: (memberId: string, roleId: string) =>
       realReads.memberHasRole(memberId, roleId),
     readRole: (id: string) => realReads.readRole(id),
-    readChannel: async (id: string) => {
-      const live = await realReads.readChannel(id);
-      const kind = live ? opts.liveKind?.(live.rawType) : undefined;
-      return live && kind ? { ...live, kind } : live;
-    },
+    readChannel: (id: string) => realReads.readChannel(id),
     setChannelParent: async (id: string, parent: string) => {
       w.channels.get(id)!.parentId = parent;
       writes.push(`setChannelParent:${id}`);

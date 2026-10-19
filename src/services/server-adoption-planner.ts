@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PermissionsBitField } from "discord.js";
+import { ChannelType, PermissionsBitField } from "discord.js";
 import { defaultConfig } from "./config-schema.js";
 import { coerceConfigValue } from "../web/routes/write/helpers.js";
 import { forbiddenSelfAssignNames } from "../utils/role-safety.js";
@@ -51,6 +51,31 @@ export interface OverwriteState {
 }
 
 export type ChannelKind = "category" | "text" | "voice" | "other";
+
+/**
+ * The one classification of a Discord channel type into a `ChannelKind` (#1244).
+ *
+ * The scan (claims plan baseline), the rules plan baseline and the live read
+ * that `assertBaselineCurrent` compares them with must agree, or a plan on the
+ * affected channel reads as "changed since the plan was made" and can never be
+ * applied. Forum and media channels are "other": they are not a place to post
+ * a message, so features that need a text channel must not accept them. The
+ * raw type stays on `ChannelState.rawType` for anything that needs the family.
+ */
+export function channelKindOf(type: ChannelType | number): ChannelKind {
+  switch (type) {
+    case ChannelType.GuildCategory:
+      return "category";
+    case ChannelType.GuildText:
+    case ChannelType.GuildAnnouncement:
+      return "text";
+    case ChannelType.GuildVoice:
+    case ChannelType.GuildStageVoice:
+      return "voice";
+    default:
+      return "other";
+  }
+}
 
 export interface ChannelState {
   id: string;
