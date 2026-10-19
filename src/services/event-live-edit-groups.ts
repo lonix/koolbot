@@ -13,11 +13,12 @@
  *   conflict, of a `partial` and of `owed`. A row names a position, not a key:
  *   the write is selected by the group's `key` read from the fresh row, so a
  *   reorder never renames another group. A name row has the base-value
- *   protection of its own text (a reorder shows as a conflict); a SIZE row
- *   cannot tell groups apart by its value (sizes are often equal), so the form
- *   also posts the key of the group it showed and the row's `guard` makes
- *   another group at that position a conflict (#1242: removing or adding a
- *   group moves positions).
+ *   protection of its own text (a reorder shows as a conflict), but that text
+ *   cannot tell groups apart once a group was removed and another one with the
+ *   same name was added at its position, and a SIZE row's value never can
+ *   (sizes are often equal). So the form posts, for both kinds of row, the key
+ *   of the group it showed, and the row's `guard` makes another group at that
+ *   position a conflict (#1242: removing or adding a group moves positions).
  * - `groupSizeA`, ...: the size (max members and the channel's user limit,
  *   1 to 99, empty for no limit) of the group at that position.
  * - `groupPreset`: switch the preset, applying names, sizes and default tags to
@@ -147,6 +148,9 @@ export const GROUP_PRESET_ROW_ID = "groupPreset";
  */
 export const groupSizeKeyField = (index: number): string =>
   `k_${groupSizeRowId(index)}`;
+/** Same for a name field (`k_groupNameA`): the identity the name row's guard compares. */
+export const groupNameKeyField = (index: number): string =>
+  `k_${groupNameRowId(index)}`;
 
 // ---------------------------------------------------------------
 // Helpers
@@ -321,6 +325,23 @@ function nameRow(index: number): LiveEditRow {
         input.rows[index].name = to;
       });
       return errors.length > 0 ? errors.join(" ") : null;
+    },
+    // Same identity check as the size rows: the name text alone cannot tell
+    // the group the form showed from a different group with the same name that
+    // took its position after a removal.
+    guard: (e) => groupAt(e, index)?.key ?? "",
+    collect: (body) => {
+      const id = groupNameRowId(index);
+      const raw = body[`s_${id}`];
+      if (typeof raw !== "string") return null;
+      const base = body[`b_${id}`];
+      const shown = body[groupNameKeyField(index)];
+      return {
+        raw,
+        // A missing base must still fail `parse` (an empty name is invalid).
+        base: typeof base === "string" ? base : "",
+        ...(typeof shown === "string" ? { guard: shown } : {}),
+      };
     },
     describe: (v) => `"${v}"`,
     owed: (e) => {

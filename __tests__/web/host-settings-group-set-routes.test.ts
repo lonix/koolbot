@@ -350,6 +350,9 @@ describe("the add and remove forms on the page", () => {
     // The key a size field was shown for travels with it.
     expect(r.text).toContain(`name="k_groupSizeA" value="${A}"`);
     expect(r.text).toContain(`name="k_groupSizeB" value="${B}"`);
+    // The same for the name fields.
+    expect(r.text).toContain(`name="k_groupNameA" value="${A}"`);
+    expect(r.text).toContain(`name="k_groupNameB" value="${B}"`);
   });
 
   it("mints a different key for every page, so posting a page twice is the only way to repeat a request", async () => {
