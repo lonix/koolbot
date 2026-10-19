@@ -281,6 +281,16 @@ describe("isolation between hosts", () => {
 });
 
 describe("the page", () => {
+  it("the editor's Cancel link points at the presets page, with nothing left uninterpolated", async () => {
+    await save(good);
+    const id = presetIdOf(A, "Clan match");
+    const html = await page(`edit=${encodeURIComponent(id)}`);
+    expect(html).toContain(
+      '<a class="btn" href="/me/events/presets">Cancel</a>',
+    );
+    expect(html).not.toContain("${");
+  });
+
   it("escapes everything it prints and posts CSRF tokens with every form", async () => {
     await save({
       ...good,

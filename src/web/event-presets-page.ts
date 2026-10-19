@@ -328,7 +328,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
     <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>), at most one of kind Leads. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
-    ${props.editing ? '<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>' : ""}
+    ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
   </form>`;
   return editorHtml;
 }
