@@ -450,30 +450,33 @@ describe("removeGroup deletes the channel and the record together", () => {
     expect(getRenameQueue().check(A_CH).ok).toBe(true);
   });
 
-  it("the pass of the scan (same channel lock) cannot run between the delete and the pull", async () => {
+  it("the scan's pass (same channel lock) cannot run between the delete and the pull, so it cannot detach the id the pull needs", async () => {
     const env = makeEnv();
-    const order: string[] = [];
+    // The removal's pull (the first write) is slow, as a database round trip
+    // can be: whatever else may run during it gets its chance to.
+    let writesSeen = 0;
     fake.beforeWrite = async (): Promise<void> => {
-      order.push("pull");
+      if (writesSeen++ === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
     };
+    let scan: Promise<unknown> = Promise.resolve();
     env.rest.delete.mockImplementationOnce(async (route: string) => {
-      order.push("delete");
       const id = /channels\/(\d+)$/.exec(route)?.[1] ?? "";
       env.cache.delete(id);
       env.gone.add(id);
+      // The scan's pass starts the moment the channel is gone. Under the one
+      // channel lock it waits for the removal to finish; without it, it would
+      // see "recorded channel gone", clear the record and make a replacement.
+      scan = env.channels.reconcile({ _id: EV }, env.guild);
       return {};
     });
-    // A scan pass that starts while the removal runs queues behind it.
-    const removal = env.channels.removeGroup(EV, env.guild, {
+    const out = await env.channels.removeGroup(EV, env.guild, {
       groupKey: A,
       channelId: A_CH,
     });
-    const scan = env.channels
-      .reconcile({ _id: EV }, env.guild)
-      .then(() => order.push("scan"));
-    await Promise.all([removal, scan]);
-    expect(order.slice(0, 3)).toEqual(["delete", "pull", "scan"]);
-    // The scan found the group already gone: no replacement channel.
+    await scan;
+    expect(out).toEqual({ status: "removed" });
     expect(groupKeys()).toEqual([B]);
   });
 });

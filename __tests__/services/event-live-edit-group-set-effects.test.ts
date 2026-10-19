@@ -107,6 +107,10 @@ function makeWorld() {
   const patchBehaviour = new Map<string, unknown>();
   /** People whose move succeeds but whom the gateway cache keeps showing. */
   const lagging = new Set<string>();
+  /** Runs before the mover reads a person's voice state from Discord (an interleaving). */
+  const hooks: { beforeRead: ((user: string) => void) | null } = {
+    beforeRead: null,
+  };
   const membersOf = (channelId: string) =>
     new Map(
       [...inChannel.entries()]
@@ -160,9 +164,11 @@ function makeWorld() {
     },
     token: "t",
     rest: {
-      get: async (route: string) => ({
-        channel_id: inChannel.get(route.split("/").pop() as string) ?? null,
-      }),
+      get: async (route: string) => {
+        const user = route.split("/").pop() as string;
+        hooks.beforeRead?.(user);
+        return { channel_id: inChannel.get(user) ?? null };
+      },
     },
     on: () => undefined,
     off: () => undefined,
@@ -192,6 +198,7 @@ function makeWorld() {
     bots,
     patchBehaviour,
     lagging,
+    hooks,
   };
 }
 
@@ -240,6 +247,27 @@ describe("emptyGroupChannel", () => {
       CH_A,
     );
     expect(out).toEqual({ status: "empty", moved: ["u1"] });
+  });
+
+  it("somebody who walked into another event channel since the plan is left where they went", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_A);
+    w.place("u2", CH_A);
+    // Between the plan (the cache) and the move (Discord's own answer) u1
+    // joined Bravo's channel: they are not in the channel that is going.
+    w.hooks.beforeRead = (user): void => {
+      if (user === "u1") w.place("u1", CH_B);
+    };
+    const out = await createLiveEditEffects(w.client).emptyGroupChannel(
+      GUILD,
+      EV,
+      A,
+      CH_A,
+    );
+    expect(out).toEqual({ status: "empty", moved: ["u2"] });
+    expect(w.where("u1")).toBe(CH_B);
+    expect(w.where("u2")).toBe(MAIN);
+    expect(w.patch).toHaveBeenCalledTimes(1);
   });
 
   it("nobody connected: empty at once, with no main channel needed and no request", async () => {

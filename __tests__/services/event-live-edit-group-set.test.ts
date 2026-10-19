@@ -992,6 +992,28 @@ describe("remove a group", () => {
     });
   });
 
+  it("an end taking its hold while the people are being moved stops before anybody is unassigned", async () => {
+    const original = (effects as LiveEditEffects).emptyGroupChannel;
+    (effects as LiveEditEffects).emptyGroupChannel = async (...args) => {
+      const result = await original(...args);
+      // The hold is taken while the mover was busy.
+      ending = true;
+      return result;
+    };
+    const out = await removeConfirmed([A]);
+    expect(done(out).notApplied).toEqual([
+      {
+        rowId: "groupRemove",
+        label: "Group removal",
+        reason: '"Alpha": the event is being ended',
+      },
+    ]);
+    expect(rowWrites()).toEqual([]);
+    expect(group(A).memberIds).toEqual(["u1", "u2"]);
+    expect(assignments).toEqual([]);
+    expect(keysOf()).toEqual([A, B, C]);
+  });
+
   it("a membership that changed between the read and the unassign is lost: nothing is unassigned, deleted or announced", async () => {
     fake.beforeWrite = (): void => {
       if (writes.length === 1) group(A).memberIds = ["u1", "u2", "u7"];

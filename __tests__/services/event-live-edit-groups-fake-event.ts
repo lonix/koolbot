@@ -101,6 +101,7 @@ export const GROUP_FIELDS = new Set([
   "nameSyncPending",
   "sizeSyncPending",
   "memberIds",
+  "channelId",
 ]);
 
 function applyUpdate(
@@ -113,6 +114,7 @@ function applyUpdate(
     $pull?: Json;
   },
   arrayFilters: Array<Record<string, unknown>>,
+  filter: Json = {},
 ): void {
   for (const op of Object.keys(update)) {
     if (!["$set", "$unset", "$inc", "$push", "$pull"].includes(op)) {
@@ -144,10 +146,26 @@ function applyUpdate(
       if (!GROUP_FIELDS.has(m[2])) throw new Error(`unexpected field ${path}`);
       return { group: m[1], field: m[2] };
     }
+    // The positional operator: the first group the filter's `$elemMatch`
+    // matched (`groups.$.channelId`, as the channel pass writes it).
+    const positional = /^groups\.\$\.(\w+)$/.exec(path);
+    if (positional) {
+      if (!GROUP_FIELDS.has(positional[1])) {
+        throw new Error(`unexpected field ${path}`);
+      }
+      return { group: "$", field: positional[1] };
+    }
     if (!SETTABLE.has(path)) throw new Error(`unexpected field ${path}`);
     return { field: path };
   };
   const targets = (id: string): Json[] => {
+    if (id === "$") {
+      const em = (filter.groups as { $elemMatch?: Json } | undefined)
+        ?.$elemMatch;
+      if (!em) throw new Error("the positional operator needs an $elemMatch");
+      const first = (doc.groups as Json[]).find((g) => matchDoc(g, em));
+      return first ? [first] : [];
+    }
     const filters = arrayFilters.filter((f) =>
       Object.keys(f).every((k) => k.startsWith(`${id}.`)),
     );
@@ -236,7 +254,7 @@ export const EventMock = {
     });
     const doc = [...store.values()].find((d) => matchDoc(d, filter));
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-    applyUpdate(doc, update, options.arrayFilters ?? []);
+    applyUpdate(doc, update, options.arrayFilters ?? [], filter);
     return { matchedCount: 1, modifiedCount: 1 };
   },
 };
