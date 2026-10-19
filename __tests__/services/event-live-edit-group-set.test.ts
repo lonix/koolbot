@@ -72,8 +72,6 @@ const { resetMoveGuardForTests, withEventMoveLock } =
   await import("../../src/services/event-move-guard.js");
 const { onGroupAssignmentChange, assignMember } =
   await import("../../src/services/event-group-assignment.js");
-const { onLeaderChange } =
-  await import("../../src/services/event-group-leaders.js");
 const { boundAuditEntry } = await import("../../src/web/audit.js");
 type LiveEditDeps =
   import("../../src/services/event-live-edit.js").LiveEditDeps;
@@ -237,8 +235,11 @@ beforeEach(() => {
       return result;
     },
   });
-  effects.syncLeadsAccess = async (): Promise<void> => {
-    calls.push("leads");
+  // The leaders pass of the follow-up: the leaders who lost their group are
+  // named, and the pass runs after both locks are released.
+  effects.syncLeadsAccess = async (_g, _e, revoked): Promise<void> => {
+    calls.push(revoked?.length ? `leads:${revoked.join("+")}` : "leads");
+    for (const id of revoked ?? []) leaderChanges.push({ fromUserId: id });
   };
   effects.syncGroupControls = async (): Promise<void> => {
     calls.push("controls");
@@ -251,12 +252,8 @@ beforeEach(() => {
 const offAssign = onGroupAssignmentChange((c) => {
   assignments.push({ ...c });
 });
-const offLeader = onLeaderChange((c) => {
-  leaderChanges.push({ ...c });
-});
 afterAll(() => {
   offAssign();
-  offLeader();
 });
 
 const entry = (rowId: string, to: unknown, base: unknown) => ({
@@ -788,28 +785,118 @@ describe("remove a group", () => {
         source: "host",
       },
     ]);
-    expect(leaderChanges).toEqual([
-      {
-        eventId: EV,
-        guildId: GUILD,
-        groupKey: A,
-        fromUserId: "u1",
-        toUserId: null,
-        source: "unassigned",
-      },
-    ]);
+    expect(leaderChanges).toEqual([{ fromUserId: "u1" }]);
   });
 
-  it("no leader is announced while leaders are off", async () => {
+  it("the leader's access goes in the follow-up, after both locks are released, never inside the save", async () => {
+    let lockedDuring: boolean | null = null;
+    const original = (effects as LiveEditEffects).syncLeadsAccess;
+    (effects as LiveEditEffects).syncLeadsAccess = async (...args) => {
+      // The move lock is free again: a bulk move is not told busy.
+      const probe = await withEventMoveLock(EV, async () => "ran");
+      lockedDuring = probe.busy;
+      return original(...args);
+    };
+    await removeConfirmed([A]);
+    expect(lockedDuring).toBe(false);
+    expect(calls.indexOf("leads:u1")).toBeGreaterThan(
+      calls.indexOf("remove:g_00000001:c1:"),
+    );
+  });
+
+  it("no leader is passed on while leaders are off", async () => {
     store.get(EV)!.captainsEnabled = false;
     await removeConfirmed([A]);
     expect(leaderChanges).toEqual([]);
   });
 
-  it("passes the people who just left to the delete, so the cache lagging a confirmed move does not keep the channel", async () => {
+  it("exempts nobody from the delete's occupancy check, not even the people just moved: one who moved back in keeps the channel", async () => {
     emptyResult = () => ({ status: "empty", moved: ["u1", "u2"] });
     await removeConfirmed([A]);
-    expect(calls).toContain("remove:g_00000001:c1:u1+u2");
+    expect(calls).toContain("remove:g_00000001:c1:");
+  });
+
+  it("hands the event's end hold to the mover, so a long batch stops when the event is being ended", async () => {
+    let handed: (() => boolean) | null = null;
+    (effects as LiveEditEffects).emptyGroupChannel = async (
+      _g,
+      _e,
+      _k,
+      _c,
+      ending,
+    ) => {
+      handed = ending;
+      return { status: "empty", moved: [] };
+    };
+    await removeConfirmed([A]);
+    expect(handed).not.toBeNull();
+    ending = true;
+    expect((handed as unknown as () => boolean)()).toBe(true);
+    ending = false;
+    expect((handed as unknown as () => boolean)()).toBe(false);
+  });
+
+  it("a read that fails after the group was stored is owed work, not 'not saved'", async () => {
+    // The row's own read of the new group's channel throws once the push landed.
+    let pushed = false;
+    const original = EventMock.findOne;
+    EventMock.findOne = ((filter: Json) => {
+      if (pushed) throw new Error("db down");
+      return original(filter);
+    }) as never;
+    (effects as LiveEditEffects).createGroupChannels = async () => ({
+      failures: [],
+    });
+    fake.beforeWrite = (): void => {
+      if (writes.length === 1) pushed = true;
+    };
+    try {
+      const out = await addForm();
+      expect(done(out).partial).toHaveLength(1);
+      expect(done(out).notApplied).toEqual([]);
+      expect(text(out)).toContain("could not be checked after saving");
+      expect(keysOf()).toEqual([A, B, C, NEW]);
+      // The follow-up still runs for a stored change.
+      expect(calls).toContain("leads");
+    } finally {
+      EventMock.findOne = original;
+    }
+  });
+
+  it("a database error in a later step keeps what was already committed: partial, never 'not saved'", async () => {
+    // The channel-less group's final pull throws after its members went.
+    const original = EventMock.updateOne;
+    let seen = 0;
+    EventMock.updateOne = (async (...args: Parameters<typeof original>) => {
+      seen += 1;
+      // 1 claim, 2 unassign, 3 the pull.
+      if (seen === 3) throw new Error("db down");
+      return original(...args);
+    }) as never;
+    group(C).memberIds = ["u8"];
+    try {
+      const out = await removeConfirmed([C]);
+      expect(done(out).partial).toHaveLength(1);
+      expect(done(out).applied).toEqual([]);
+      expect(text(out)).toContain("its members were unassigned");
+      expect(group(C).memberIds).toEqual([]);
+      expect(keysOf()).toEqual([A, B, C]);
+      expect(calls).toContain("tags:restore");
+    } finally {
+      EventMock.updateOne = original;
+    }
+  });
+
+  it("an error before anything of a group was stored is reported as nothing stored, and the other groups still go", async () => {
+    const original = (effects as LiveEditEffects).emptyGroupChannel;
+    (effects as LiveEditEffects).emptyGroupChannel = async (...args) => {
+      if (args[2] === B) throw new Error("boom");
+      return original(...args);
+    };
+    const out = await removeConfirmed([A, B]);
+    expect(keysOf()).toEqual([B, C]);
+    expect(done(out).partial).toHaveLength(1);
+    expect(text(out)).toContain("stopped it before anything was stored");
   });
 
   it("a group with no channel yet is removed by one conditional pull, with no move and no delete", async () => {

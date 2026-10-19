@@ -25,16 +25,21 @@ import type {
  * the live edit's move lock, and say whether the channel is empty afterwards.
  * The host is not spared (the channel is going: they would be stranded as much
  * as anyone, the rule of the end teardown's pull-back). Who is still there is
- * read from the gateway cache minus the people Discord confirmed moving, since
- * the cache can lag a confirmed move by a moment; bots count as present (the
- * channel is only deleted when nothing is connected).
+ * read from the gateway cache after a short wait (at most `MOVE_SETTLE_MS`) for
+ * it to show the confirmed moves, which it can lag by a moment; everybody the
+ * cache then still shows counts as present, so a person who moved back in is
+ * never taken for one who left (the host saves again). Bots count as present.
  */
+export const MOVE_SETTLE_MS = 1500;
+const MOVE_SETTLE_STEP_MS = 100;
+
 async function emptyGroupChannelOf(
   client: Client,
   guildId: string,
   eventId: string,
   groupKey: string,
   channelId: string,
+  ending: () => boolean,
 ): Promise<EmptyChannelOutcome> {
   // Loaded on first use, like `EventService`: the mover pulls in the Discord
   // write client, which a live edit that never removes a group does not need.
@@ -67,6 +72,9 @@ async function emptyGroupChannelOf(
         toChannelId: main,
         // Only out of THIS channel: somebody who walked elsewhere is left be.
         fromChannelId: channelId,
+        // Asked right before each request: the batch stops once an end or
+        // cancel holds the event.
+        skipIf: ending,
       }));
     },
   });
@@ -80,9 +88,17 @@ async function emptyGroupChannelOf(
   const channel = client.guilds?.cache
     ?.get(guildId)
     ?.channels?.cache?.get(channelId);
-  const present =
+  const presentNow = (): string[] =>
     channel && channel.isVoiceBased() ? [...channel.members.keys()] : [];
-  const remaining = present.filter((id) => !moved.includes(id));
+  // Give the gateway a moment to show the moves Discord confirmed.
+  for (
+    let waited = 0;
+    waited < MOVE_SETTLE_MS && presentNow().some((id) => moved.includes(id));
+    waited += MOVE_SETTLE_STEP_MS
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, MOVE_SETTLE_STEP_MS));
+  }
+  const remaining = presentNow();
   if (remaining.length === 0 && outcome.report.unconfirmed.length === 0) {
     return { status: "empty", moved: [...moved] };
   }
@@ -203,6 +219,7 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
       eventId,
       groupKey,
       channelId,
+      ending,
     ): Promise<EmptyChannelOutcome> {
       try {
         return await emptyGroupChannelOf(
@@ -211,6 +228,7 @@ export function createLiveEditEffects(client: Client): LiveEditEffects {
           eventId,
           groupKey,
           channelId,
+          ending,
         );
       } catch (err) {
         logger.error(

@@ -441,6 +441,11 @@ export interface LiveEditEffects {
     eventId: string,
     groupKey: string,
     channelId: string,
+    /**
+     * Synchronous: an end or cancel holds the event. Each move asks it right
+     * before it is sent (a long batch stops when the event is being ended).
+     */
+    ending: () => boolean,
   ): Promise<EmptyChannelOutcome>;
   /**
    * Delete one group's channel and the group's record in one step under the

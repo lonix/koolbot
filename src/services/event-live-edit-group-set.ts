@@ -55,9 +55,10 @@
  *    write on exactly the member list read). `onGroupAssignmentChange` fires per
  *    member, which is what restores their nicknames: the tag module decides
  *    from the stored state and the stored original nickname, so a member is
- *    never tagged twice and an original is never lost. A leader is announced as
- *    leaving (`announceLeaderChanges`), so the leaders-only channel takes their
- *    access away.
+ *    never tagged twice and an original is never lost. A leader is remembered
+ *    as leaving and the leaders-only channel takes their access away in the
+ *    follow-up after both locks are released (a pass inside the save would find
+ *    the move lock taken by the save itself and defer the eviction).
  * 3. **Delete the channel and the group's record together**
  *    (`removeGroupChannel`, one step under the channel lock, deleting only with
  *    nobody connected and only under the id recorded). With no channel the
@@ -98,7 +99,8 @@ import {
 } from "./event-groups.js";
 import { OPEN_STATES, nameTakenByOther } from "./event-customise-rules.js";
 import { removeGroupMembersLocked } from "./event-group-assignment.js";
-import { announceLeaderChanges } from "./event-group-leaders.js";
+import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { effectiveLeaders } from "./event-leader-roles.js";
 import { tagsFollowUp } from "./event-live-edit-leaders-tags.js";
 import type {
@@ -386,6 +388,27 @@ async function createChannels(
   ctx: ApplyContext<NewGroupValue[]>,
   keys: readonly string[] | null,
 ): Promise<RowOutcome> {
+  // The group is already stored when this runs: a failed read here must not
+  // turn the save into "not saved" (the core would), it is owed work.
+  try {
+    return await createChannelsUnguarded(ctx, keys);
+  } catch (err) {
+    logger.error(
+      `Event ${sanitizeForLog(ctx.eventId)}: the channel of a new group could not be checked after saving it:`,
+      err,
+    );
+    return {
+      status: "partial",
+      message:
+        "its channel could not be checked after saving (see the log); KoolBot keeps trying every minute",
+    };
+  }
+}
+
+async function createChannelsUnguarded(
+  ctx: ApplyContext<NewGroupValue[]>,
+  keys: readonly string[] | null,
+): Promise<RowOutcome> {
   const lacking = (fresh: IEvent): string[] =>
     (fresh.groups ?? [])
       .filter((x) => !x.channelId && (keys === null || keys.includes(x.key)))
@@ -456,9 +479,24 @@ type RemoveStep =
   /** Something else changed it meanwhile: nothing further was done. */
   | { kind: "lost" };
 
+/**
+ * Leaders who lost their group in this save, by event, until the follow-up
+ * (after both locks are released) takes their access to the leaders-only
+ * channel away and moves them out. In memory only: an ids-only hint for one
+ * pass; the scan notices a leader without access anyway.
+ */
+const revokedLeaders = new Map<string, Set<string>>();
+function rememberRevoked(eventId: string, userId: string): void {
+  const set = revokedLeaders.get(eventId) ?? new Set<string>();
+  set.add(userId);
+  revokedLeaders.set(eventId, set);
+}
+
 async function removeOne(
   ctx: ApplyContext<string[]>,
   key: string,
+  /** Set once a write of this group landed (the members were unassigned). */
+  mark: { committed: boolean },
 ): Promise<RemoveStep> {
   const fresh = await readFresh(ctx.eventId, ctx.guildId);
   if (!fresh) return { kind: "lost" };
@@ -473,8 +511,6 @@ async function removeOne(
     };
   }
   const channelId = group.channelId ?? null;
-  let moved: string[] = [];
-
   // 1. Everyone out of its channel.
   if (channelId) {
     if (ctx.ending()) {
@@ -492,6 +528,7 @@ async function removeOne(
       ctx.eventId,
       key,
       channelId,
+      ctx.ending,
     );
     if (emptied.status === "failed") {
       return {
@@ -505,7 +542,6 @@ async function removeOne(
         reason: `${name}: ${emptied.remaining} ${emptied.remaining === 1 ? "person is" : "people are"} still in its channel (${emptied.detail}), so it was kept. Save again to move the rest, or let them leave first`,
       };
     }
-    moved = emptied.moved;
   }
 
   // 2. Unassign its members; the nicknames follow from the stored state.
@@ -525,18 +561,8 @@ async function removeOne(
     memberIds: members,
   });
   if (unassigned === "lost") return { kind: "lost" };
-  if (leader) {
-    announceLeaderChanges([
-      {
-        eventId: ctx.eventId,
-        guildId: ctx.guildId,
-        groupKey: key,
-        fromUserId: leader,
-        toUserId: null,
-        source: "unassigned",
-      },
-    ]);
-  }
+  mark.committed = true;
+  if (leader) rememberRevoked(ctx.eventId, leader);
 
   // 3. The channel and the record, together.
   const unfinished = (reason: string): RemoveStep => ({
@@ -553,7 +579,7 @@ async function removeOne(
       ctx.eventId,
       key,
       channelId,
-      { ignore: new Set(moved), ending: ctx.ending },
+      { ignore: new Set<string>(), ending: ctx.ending },
     );
     if (removed === null) {
       return unfinished(
@@ -664,7 +690,30 @@ export const groupRemoveRow: LiveEditRow = asRow<string[]>({
   describe: (v) => `done for ${v.length} group${v.length === 1 ? "" : "s"}`,
   async apply(ctx) {
     const steps: RemoveStep[] = [];
-    for (const key of ctx.to) steps.push(await removeOne(ctx, key));
+    for (const key of ctx.to) {
+      const mark = { committed: false };
+      try {
+        steps.push(await removeOne(ctx, key, mark));
+      } catch (err) {
+        // A database error after a write landed must not discard what was
+        // committed (the core would call the whole row not saved).
+        logger.error(
+          `Event ${sanitizeForLog(ctx.eventId)}: removing group ${sanitizeForLog(key)} failed:`,
+          err,
+        );
+        steps.push(
+          mark.committed
+            ? {
+                kind: "unfinished",
+                reason: `${key}: its members were unassigned, but an unexpected error stopped the rest (see the log). Save again to finish`,
+              }
+            : {
+                kind: "refused",
+                reason: `${key}: an unexpected error (see the log) stopped it before anything was stored`,
+              },
+        );
+      }
+    }
     const notes = steps.flatMap((s) =>
       s.kind === "refused" || s.kind === "unfinished" ? [s.reason] : [],
     );
@@ -687,8 +736,8 @@ export const groupRemoveRow: LiveEditRow = asRow<string[]>({
  * After both locks are released: the leaders-only channel's access and the
  * "Customise team" message follow a new group; the nicknames of removed
  * groups' members are brought in line once more (the unassign events already
- * did, this is the backstop; a removed leader's access goes through the leader
- * change the removal announced). Each part is its own try, the first error is
+ * did, this is the backstop; a removed leader's access is taken away by a
+ * leaders-only channel pass that names them). Each part is its own try, the first error is
  * rethrown after all ran (the executor logs it; the scan converges).
  */
 async function groupSetFollowUp(ctx: AfterSaveContext): Promise<void> {
@@ -705,6 +754,14 @@ async function groupSetFollowUp(ctx: AfterSaveContext): Promise<void> {
     await run(() => ctx.effects.syncGroupControls(ctx.eventId));
   }
   if (ctx.saved.has(GROUP_REMOVE_ROW_ID)) {
+    const revoked = [...(revokedLeaders.get(ctx.eventId) ?? [])];
+    revokedLeaders.delete(ctx.eventId);
+    // Both locks are released here: the pass can move the removed leaders out.
+    if (revoked.length > 0) {
+      await run(() =>
+        ctx.effects.syncLeadsAccess(ctx.guildId, ctx.eventId, revoked),
+      );
+    }
     await run(() => tagsFollowUp(ctx));
   }
   if (errors.length > 0) throw errors[0];

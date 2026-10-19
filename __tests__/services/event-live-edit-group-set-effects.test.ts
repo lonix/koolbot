@@ -108,8 +108,12 @@ function makeWorld() {
   /** People whose move succeeds but whom the gateway cache keeps showing. */
   const lagging = new Set<string>();
   /** Runs before the mover reads a person's voice state from Discord (an interleaving). */
-  const hooks: { beforeRead: ((user: string) => void) | null } = {
+  const hooks: {
+    beforeRead: ((user: string) => void) | null;
+    afterPatch: ((user: string) => void) | null;
+  } = {
     beforeRead: null,
+    afterPatch: null,
   };
   const membersOf = (channelId: string) =>
     new Map(
@@ -181,6 +185,7 @@ function makeWorld() {
       const user = route.split("/").pop() as string;
       if (patchBehaviour.has(user)) throw patchBehaviour.get(user);
       if (!lagging.has(user)) inChannel.set(user, o.body.channel_id);
+      hooks.afterPatch?.(user);
       return {};
     },
   );
@@ -222,6 +227,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out.status).toBe("empty");
     expect(out.status === "empty" && out.moved.sort()).toEqual([
@@ -236,17 +242,57 @@ describe("emptyGroupChannel", () => {
     expect(w.patch).toHaveBeenCalledTimes(2);
   });
 
-  it("is not fooled by the cache still showing someone Discord confirmed moving", async () => {
+  it("waits a moment for the cache to show a confirmed move, and then counts nobody who is not shown", async () => {
     const w = makeWorld();
     w.place("u1", CH_A);
     w.lagging.add("u1");
+    // The gateway shows the move 300 ms late.
+    setTimeout(() => w.place("u1", MAIN), 300);
     const out = await createLiveEditEffects(w.client).emptyGroupChannel(
       GUILD,
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({ status: "empty", moved: ["u1"] });
+  });
+
+  it("somebody who moved back in after being moved keeps the channel occupied: nobody is exempted for having been moved", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_A);
+    w.hooks.afterPatch = (user): void => {
+      // Moved, and straight back (the gateway shows the arrival back).
+      w.place(user, CH_A);
+    };
+    const out = await createLiveEditEffects(w.client).emptyGroupChannel(
+      GUILD,
+      EV,
+      A,
+      CH_A,
+      () => false,
+    );
+    expect(out.status).toBe("occupied");
+    expect(out.status === "occupied" && out.remaining).toBe(1);
+  });
+
+  it("an end holding the event withdraws every move still to be sent", async () => {
+    const w = makeWorld();
+    w.place("u1", CH_A);
+    w.place("u2", CH_A);
+    const out = await createLiveEditEffects(w.client).emptyGroupChannel(
+      GUILD,
+      EV,
+      A,
+      CH_A,
+      () => true,
+    );
+    expect(w.patch).not.toHaveBeenCalled();
+    expect(w.where("u1")).toBe(CH_A);
+    expect(out.status).toBe("occupied");
+    expect(out.status === "occupied" && out.detail).toBe(
+      "2 no longer to be moved",
+    );
   });
 
   it("somebody who walked into another event channel since the plan is left where they went", async () => {
@@ -263,6 +309,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({ status: "empty", moved: ["u2"] });
     expect(w.where("u1")).toBe(CH_B);
@@ -278,6 +325,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({ status: "empty", moved: [] });
     expect(w.patch).not.toHaveBeenCalled();
@@ -292,6 +340,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({
       status: "failed",
@@ -310,6 +359,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({
       status: "occupied",
@@ -346,6 +396,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out.status).toBe("occupied");
     expect(out.status === "occupied" && out.remaining).toBe(3);
@@ -358,13 +409,13 @@ describe("emptyGroupChannel", () => {
     const w = makeWorld();
     for (let i = 0; i < 65; i++) w.place(`p${i}`, CH_A);
     const fx = createLiveEditEffects(w.client);
-    const first = await fx.emptyGroupChannel(GUILD, EV, A, CH_A);
+    const first = await fx.emptyGroupChannel(GUILD, EV, A, CH_A, () => false);
     expect(first.status).toBe("occupied");
     expect(first.status === "occupied" && first.remaining).toBe(5);
     expect(first.status === "occupied" && first.detail).toBe(
       "5 not attempted (over the limit of 60 per run)",
     );
-    const second = await fx.emptyGroupChannel(GUILD, EV, A, CH_A);
+    const second = await fx.emptyGroupChannel(GUILD, EV, A, CH_A, () => false);
     expect(second.status).toBe("empty");
   });
 
@@ -377,6 +428,7 @@ describe("emptyGroupChannel", () => {
       EV,
       A,
       CH_A,
+      () => false,
     );
     expect(out).toEqual({
       status: "occupied",
@@ -391,18 +443,21 @@ describe("emptyGroupChannel", () => {
     w.place("u1", CH_A);
     eventsEnabled = false;
     const fx = createLiveEditEffects(w.client);
-    expect((await fx.emptyGroupChannel(GUILD, EV, A, CH_A)).status).toBe(
-      "failed",
-    );
+    expect(
+      (await fx.emptyGroupChannel(GUILD, EV, A, CH_A, () => false)).status,
+    ).toBe("failed");
     eventsEnabled = true;
     seed({ state: "ended" });
-    expect((await fx.emptyGroupChannel(GUILD, EV, A, CH_A)).status).toBe(
-      "failed",
-    );
+    expect(
+      (await fx.emptyGroupChannel(GUILD, EV, A, CH_A, () => false)).status,
+    ).toBe("failed");
     seed();
-    expect(await fx.emptyGroupChannel(GUILD, EV, A, "another-channel")).toEqual(
-      { status: "failed", reason: "The group changed, so nobody was moved." },
-    );
+    expect(
+      await fx.emptyGroupChannel(GUILD, EV, A, "another-channel", () => false),
+    ).toEqual({
+      status: "failed",
+      reason: "The group changed, so nobody was moved.",
+    });
     expect(w.patch).not.toHaveBeenCalled();
   });
 
@@ -427,6 +482,7 @@ describe("emptyGroupChannel", () => {
         EV,
         A,
         CH_A,
+        () => false,
       );
       return { busy, held, viaEffect };
     });
