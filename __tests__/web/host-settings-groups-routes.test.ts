@@ -42,12 +42,22 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
 type Catalog =
   import("../../src/services/event-group-preset-service.js").PresetCatalog;
 let catalog: Catalog = { entries: [], state: "ok" };
-const presetActual = await import(
-  "../../src/services/event-group-preset-service.js"
-);
+/** Personal presets by owner id (#1216): the stand-in honours the asking owner like the service. */
+let personalByOwner: Record<string, Catalog["entries"]> = {};
+const presetActual =
+  await import("../../src/services/event-group-preset-service.js");
 jest.unstable_mockModule(
   "../../src/services/event-group-preset-service.js",
-  () => ({ ...presetActual, loadPresetCatalog: async () => catalog }),
+  () => ({
+    ...presetActual,
+    loadPresetCatalog: async (_guild: string, opts?: { ownerId?: string }) => ({
+      ...catalog,
+      entries: [
+        ...catalog.entries,
+        ...(personalByOwner[opts?.ownerId ?? ""] ?? []),
+      ],
+    }),
+  }),
 );
 
 const { signValue } = await import("../../src/web/cookies.js");
@@ -270,6 +280,7 @@ beforeEach(() => {
     state: "ok",
     entries: [preset("builtin:pair", ["Pair One", "Pair Two"])],
   };
+  personalByOwner = {};
   resetMoveGuardForTests();
 
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
@@ -310,7 +321,8 @@ beforeEach(() => {
     },
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async (key: string) => key === "events.enabled" && eventsEnabled,
+    getBoolean: async (key: string) =>
+      key === "events.enabled" && eventsEnabled,
     getNumberStrict: async (_k: string, f: number) => f,
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
@@ -329,14 +341,20 @@ describe("the group editor on the page", () => {
   it("shows a name and size field per group with the stored values as the base, escaped, and the preset form", async () => {
     const r = await call(panel());
     expect(r.status).toBe(200);
-    expect(r.text).toContain('name="s_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"');
-    expect(r.text).toContain('name="b_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"');
+    expect(r.text).toContain(
+      'name="s_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"',
+    );
+    expect(r.text).toContain(
+      'name="b_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"',
+    );
     expect(r.text).not.toContain("Heli <b>x</b>");
     expect(r.text).toContain('name="s_groupSizeA" value="2"');
     expect(r.text).toContain('name="s_groupSizeB" value=""');
     expect(r.text).toContain("over size");
     expect(r.text).toContain('name="preset_pick"');
-    expect(r.text).toContain('<option value="builtin:pair">Preset builtin:pair</option>');
+    expect(r.text).toContain(
+      '<option value="builtin:pair">Preset builtin:pair</option>',
+    );
     expect(r.text).toContain('name="b_groupPreset"');
     expect(r.text).not.toContain('name="s_groupPreset"');
   });
@@ -384,7 +402,10 @@ describe("saving names and sizes: one result, one audit row", () => {
   });
 
   it("a refused (reserved) name changes nothing and is one failed audit row", async () => {
-    const r = await post("settings", form({ s_groupNameA: "LOGI", s_groupSizeA: "2" }));
+    const r = await post(
+      "settings",
+      form({ s_groupNameA: "LOGI", s_groupSizeA: "2" }),
+    );
     expect(flashOf(r.location).type).toBe("err");
     expect(flashOf(r.location).msg).toContain(
       '"LOGI" is already used by another group',
@@ -429,7 +450,10 @@ describe("saving names and sizes: one result, one audit row", () => {
       'Saved but not finished: Name of group 2 is now "Logistics"',
     );
     expect(flash.msg).toContain("about 7 minutes");
-    expect(group(B)).toMatchObject({ name: "Logistics", nameSyncPending: true });
+    expect(group(B)).toMatchObject({
+      name: "Logistics",
+      nameSyncPending: true,
+    });
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0].details).toMatchObject({
       outcome: "partial",
@@ -483,7 +507,9 @@ describe("switching the preset", () => {
     });
     expect(r.status).toBe(200);
     expect(r.text).toContain("Confirm these changes");
-    expect(r.text).toContain("Switching the preset replaces the names of 2 groups");
+    expect(r.text).toContain(
+      "Switching the preset replaces the names of 2 groups",
+    );
     expect(r.text).toContain("Pair One [T] (size 6), Pair Two [T] (size 6)");
     expect(group(A).name).toBe("Heli <b>x</b>");
     expect(writes).toEqual([]);
@@ -642,6 +668,84 @@ describe("switching the preset", () => {
   });
 });
 
+describe("personal presets on the host panel (#1216)", () => {
+  const MINE = "my:" + "a".repeat(24);
+  const THEIRS = "my:" + "b".repeat(24);
+  const mine = (id: string, label: string, names: string[]) =>
+    preset(id, names, { source: "personal", label });
+  const BASE = JSON.stringify({
+    id: "",
+    groups: [
+      { name: "Heli <b>x</b>", kind: "team", size: 2, tag: "" },
+      { name: "Logi", kind: "team", size: null, tag: "" },
+    ],
+  });
+
+  beforeEach(() => {
+    personalByOwner = {
+      [CREATOR]: [mine(MINE, "My night <i>plan</i>", ["Mine One", "Mine Two"])],
+      "999999999999999999": [mine(THEIRS, "Their secret", ["S1", "S2"])],
+    };
+  });
+
+  it("offers the viewer's own presets, marked as theirs and escaped, and never another host's", async () => {
+    const r = await call(panel());
+    expect(r.text).toContain(`value="${MINE}"`);
+    expect(r.text).toContain("My night &lt;i&gt;plan&lt;/i&gt; (yours)");
+    expect(r.text).not.toContain("My night <i>plan</i>");
+    expect(r.text).not.toContain(THEIRS);
+    expect(r.text).not.toContain("Their secret");
+  });
+
+  it("links to saving the groups as a preset and to the host's presets page", async () => {
+    const r = await call(panel());
+    expect(r.text).toContain(`href="/me/events/presets?fromEvent=${EVENT_ID}"`);
+    expect(r.text).toContain('href="/me/events/presets"');
+  });
+
+  it("confirms the host's own preset from the server's own data", async () => {
+    const r = await post("settings", {
+      preset_pick: MINE,
+      b_groupPreset: BASE,
+    });
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("Confirm these changes");
+    expect(r.text).toContain("Mine One");
+    expect(writes).toEqual([]);
+  });
+
+  it("applies the host's own preset on confirm, with one success audit row", async () => {
+    const page = await post("settings", {
+      preset_pick: MINE,
+      b_groupPreset: BASE,
+    });
+    auditRows = [];
+    const r = await post("settings-confirm", { token: tokenOf(page.text) });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(store.get(EVENT_ID)?.groups).toMatchObject([
+      { name: "Mine One" },
+      { name: "Mine Two" },
+    ]);
+    expect(store.get(EVENT_ID)?.presetId).toBe(MINE);
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({ result: "success" });
+  });
+
+  it("refuses another host's preset id as if it did not exist, with one failed audit row", async () => {
+    const r = await post("settings", {
+      preset_pick: THEIRS,
+      b_groupPreset: BASE,
+    });
+    expect(r.status).toBe(303);
+    expect(flashOf(r.location).msg).toContain(
+      "That preset does not exist (any more).",
+    );
+    expect(writes).toEqual([]);
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({ result: "failure" });
+  });
+});
+
 describe("a large partial save is shown in full", () => {
   it("a 12-group preset switch with every rename held back answers with the full result page, not a cut flash line", async () => {
     const groups = Array.from({ length: 12 }, (_, i) => ({
@@ -677,7 +781,7 @@ describe("a large partial save is shown in full", () => {
     expect(r.text).toContain("Group 1: the channel is not renamed yet");
     expect(r.text).toContain("Group 12: the channel is not renamed yet");
     expect(r.text).toContain("about 7 minutes");
-    expect(r.text).toContain('Back to the host panel');
+    expect(r.text).toContain("Back to the host panel");
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0].details).toMatchObject({ outcome: "partial" });
   });

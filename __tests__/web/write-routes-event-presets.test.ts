@@ -59,6 +59,22 @@ jest.unstable_mockModule(
   }),
 );
 
+const mockPublish =
+  jest.fn<
+    (g: string, id: string, o: { maxCount: number }) => Promise<unknown>
+  >();
+const mockUnpublish = jest.fn<(g: string, id: string) => Promise<unknown>>();
+const actualPersonal =
+  await import("../../src/services/event-personal-preset-service.js");
+jest.unstable_mockModule(
+  "../../src/services/event-personal-preset-service.js",
+  () => ({
+    ...actualPersonal,
+    publishPersonalPreset: mockPublish,
+    unpublishPersonalPreset: mockUnpublish,
+  }),
+);
+
 const { createEventPresetsRouter } =
   await import("../../src/web/routes/write/event-presets.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -287,6 +303,97 @@ describe("POST /events/presets/delete", () => {
     expect((await post("/events/presets/delete", { id: "x" })).type).toBe(
       "err",
     );
+  });
+});
+
+describe("POST /events/presets/publish and /unpublish (#1216)", () => {
+  const MY = "my:" + "b".repeat(24);
+
+  beforeEach(() => {
+    mockPublish.mockResolvedValue({
+      ok: true,
+      id: `lib:${OID}`,
+      name: "Clan match",
+    });
+    mockUnpublish.mockResolvedValue({ ok: true, libraryId: `lib:${OID}` });
+  });
+
+  it("publishes in the session's guild with the configured group cap, and audits it", async () => {
+    const flash = await post("/events/presets/publish", { id: MY });
+    expect(flash).toMatchObject({ path: "/admin/events/presets", type: "ok" });
+    expect(flash.msg).toContain("Clan match");
+    expect(mockPublish).toHaveBeenCalledWith("guild-1", MY, { maxCount: 4 });
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event-preset.publish",
+      targetId: MY,
+      result: "success",
+      details: { scope: "personal", libraryId: `lib:${OID}` },
+    });
+  });
+
+  it("reports and audits a refused publish", async () => {
+    mockPublish.mockResolvedValue({
+      ok: false,
+      error: "That preset is already published.",
+    });
+    const flash = await post("/events/presets/publish", { id: MY });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("already published");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event-preset.publish",
+      result: "failure",
+    });
+  });
+
+  it("unpublishes and audits it, and reports a preset that is not published", async () => {
+    const ok = await post("/events/presets/unpublish", { id: MY });
+    expect(ok.type).toBe("ok");
+    expect(mockUnpublish).toHaveBeenCalledWith("guild-1", MY);
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event-preset.unpublish",
+      targetId: MY,
+      result: "success",
+    });
+    mockUnpublish.mockResolvedValue({
+      ok: false,
+      error: "That preset is not published.",
+    });
+    const refused = await post("/events/presets/unpublish", { id: MY });
+    expect(refused.type).toBe("err");
+    expect(mockRecordAudit.mock.calls[1][1]).toMatchObject({
+      result: "failure",
+    });
+  });
+
+  it("is admin-only and behind the CSRF check", async () => {
+    const noToken = await harness.post(
+      "/events/presets/publish",
+      { id: MY },
+      { csrfField: null },
+    );
+    expect(noToken.status).toBe(403);
+    const hostHarness = await startAdminHarness([
+      stubRequireSession(
+        createTestSession({ role: "user", discordUserId: "host-1" }),
+      ),
+      requireAdminRoleMiddleware(),
+      requireCsrf,
+      createEventPresetsRouter(),
+    ]);
+    try {
+      for (const path of [
+        "/events/presets/publish",
+        "/events/presets/unpublish",
+      ]) {
+        const res = await hostHarness.post(path, { id: MY });
+        expect(res.status).toBe(403);
+      }
+    } finally {
+      await hostHarness.close();
+    }
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(mockUnpublish).not.toHaveBeenCalled();
   });
 });
 

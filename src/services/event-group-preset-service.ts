@@ -2,6 +2,7 @@ import {
   BUILTIN_PRESET_PREFIX,
   EVENT_GROUP_PRESETS,
   LIBRARY_PRESET_PREFIX,
+  PERSONAL_PRESET_PREFIX,
   getEventGroupPreset,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
@@ -10,6 +11,7 @@ import {
   EventGroupPresetToggle,
   type IEventGroupPreset,
 } from "../models/event-group-preset.js";
+import { EventGroupPersonalPreset } from "../models/event-group-personal-preset.js";
 import {
   GROUP_COUNT_HARD_MAX,
   GROUP_FORM_FIELDS,
@@ -40,6 +42,8 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
 
 /** Most presets a server's library may hold. */
 export const MAX_LIBRARY_PRESETS = 50;
+/** Most personal presets one host may keep (#1216). */
+export const MAX_PERSONAL_PRESETS = 10;
 /** Longest preset description. */
 export const PRESET_DESCRIPTION_MAX = 200;
 
@@ -52,7 +56,7 @@ export const PRESET_FORM_FIELDS = {
 
 /** One preset as the admin page lists it, built-in or from the library. */
 export interface PresetEntry extends EventGroupPreset {
-  source: "builtin" | "library";
+  source: "builtin" | "library" | "personal";
   enabled: boolean;
 }
 
@@ -63,6 +67,12 @@ export interface PresetCatalog {
   /** Every preset with its switch. Complete only when `state` is `ok`. */
   entries: PresetEntry[];
   state: CatalogReadState;
+  /**
+   * The asking host's personal presets could not be read (#1216). Independent
+   * of `state`: the built-ins and the library are still complete, only the
+   * personal ones are missing, and a `my:` id fails closed as unreadable.
+   */
+  personalUnreadable?: boolean;
 }
 
 /** Plain row shape read with `.lean()`. */
@@ -96,10 +106,28 @@ export function parseLibraryPresetId(id: string): string | null {
   return match ? (match[1] as string) : null;
 }
 
-function rowToEntry(row: PresetRow): PresetEntry {
+const PERSONAL_ID_PATTERN = /^my:([0-9a-f]{24})$/;
+
+export function personalPresetId(rowId: unknown): string {
+  return `${PERSONAL_PRESET_PREFIX}${String(rowId)}`;
+}
+
+/** The ObjectId string inside a personal preset id, or null. */
+export function parsePersonalPresetId(id: string): string | null {
+  const match = PERSONAL_ID_PATTERN.exec(id);
+  return match ? (match[1] as string) : null;
+}
+
+export function rowToEntry(
+  row: PresetRow,
+  source: "library" | "personal" = "library",
+): PresetEntry {
   return {
-    id: libraryPresetId(row._id),
-    source: "library",
+    id:
+      source === "personal"
+        ? personalPresetId(row._id)
+        : libraryPresetId(row._id),
+    source,
     label: row.name,
     description: row.description ?? "",
     groupLabel: row.groupLabel || "Team",
@@ -131,27 +159,49 @@ async function readLibrary(guildId: string): Promise<unknown[]> {
     .lean();
 }
 
+async function readPersonal(
+  guildId: string,
+  ownerId: string,
+): Promise<unknown[]> {
+  return await EventGroupPersonalPreset.find({ guildId, ownerId })
+    .sort({ nameKey: 1 })
+    .lean();
+}
+
+/** Who is asking: the host whose personal presets are included (#1216). */
+export interface CatalogOptions {
+  /** Discord id of the asking host. Absent = no personal presets at all. */
+  ownerId?: string;
+}
+
 /**
- * Read the built-in switches and the library for one server. Never throws: a
- * read that fails is reported in `state` and the entries are left out, so the
- * callers can fail closed (see {@link enabledPresets}).
+ * Read the built-in switches, the library and (when `ownerId` is given) that
+ * host's personal presets for one server. Never throws: a read that fails is
+ * reported in `state` / `personalUnreadable` and the entries are left out, so
+ * the callers can fail closed (see {@link enabledPresets}).
  *
  * A built-in with no switch row is ON, so a server that never used the library
- * (or whose database has no such collection yet) sees every built-in.
+ * (or whose database has no such collection yet) sees every built-in. Personal
+ * presets are always on: the host who made one chooses when to use it. Only the
+ * asking host's own rows are ever read, so no caller can list another host's.
  */
 export async function loadPresetCatalog(
   guildId: string,
+  options: CatalogOptions = {},
 ): Promise<PresetCatalog> {
-  const [toggleResult, libraryResult] = await Promise.allSettled([
-    // Async helpers, so a throw while building a query is a rejected read too.
-    readSwitches(guildId),
-    readLibrary(guildId),
-  ]);
+  const ownerId = options.ownerId ? options.ownerId : "";
+  const [toggleResult, libraryResult, personalResult] =
+    await Promise.allSettled([
+      // Async helpers, so a throw while building a query is a rejected read too.
+      readSwitches(guildId),
+      readLibrary(guildId),
+      ownerId ? readPersonal(guildId, ownerId) : Promise.resolve([]),
+    ]);
   if (toggleResult.status === "rejected") {
     logger.warn("event presets: reading the built-in switches failed", {
       error: toggleResult.reason,
     });
-    return { entries: [], state: "all-unreadable" };
+    return { entries: [], state: "all-unreadable", personalUnreadable: false };
   }
   const off = new Set<string>();
   for (const row of toggleResult.value as Array<{
@@ -165,16 +215,27 @@ export async function loadPresetCatalog(
     source: "builtin" as const,
     enabled: !off.has(preset.id),
   }));
+  const personalUnreadable = personalResult.status === "rejected";
+  if (personalResult.status === "rejected") {
+    logger.warn("event presets: reading personal presets failed", {
+      error: personalResult.reason,
+    });
+  }
   if (libraryResult.status === "rejected") {
     logger.warn("event presets: reading the preset library failed", {
       error: libraryResult.reason,
     });
-    return { entries, state: "library-unreadable" };
+    return { entries, state: "library-unreadable", personalUnreadable };
   }
   for (const row of libraryResult.value as unknown as PresetRow[]) {
     entries.push(rowToEntry(row));
   }
-  return { entries, state: "ok" };
+  if (personalResult.status === "fulfilled") {
+    for (const row of personalResult.value as unknown as PresetRow[]) {
+      entries.push(rowToEntry(row, "personal"));
+    }
+  }
+  return { entries, state: "ok", personalUnreadable };
 }
 
 /**
@@ -187,12 +248,23 @@ export function enabledPresets(catalog: PresetCatalog): EventGroupPreset[] {
   return catalog.entries.filter((e) => e.enabled);
 }
 
-/** A notice for the picker when the catalog could not be fully read. */
-export function catalogNotice(state: CatalogReadState): string | null {
-  if (state === "ok") return null;
-  return state === "all-unreadable"
-    ? "The preset library could not be read, so no presets are offered right now. Custom still works."
-    : "The server's own presets could not be read, so only the built-in presets that are switched on are offered.";
+/**
+ * A notice for the picker when the catalog could not be fully read.
+ * `personalUnreadable` is the catalog's flag for the host's own presets.
+ */
+export function catalogNotice(
+  state: CatalogReadState,
+  personalUnreadable = false,
+): string | null {
+  if (state === "all-unreadable") {
+    return "The preset library could not be read, so no presets are offered right now. Custom still works.";
+  }
+  if (state === "library-unreadable") {
+    return "The server's own presets could not be read, so only the built-in presets that are switched on are offered.";
+  }
+  return personalUnreadable
+    ? "Your own presets could not be read, so they are not offered right now."
+    : null;
 }
 
 /**
@@ -213,16 +285,22 @@ export function presetResolver(catalog: PresetCatalog): PresetResolver {
     if (catalog.state === "library-unreadable" && id.startsWith("lib:")) {
       return { refused: "unreadable" };
     }
+    if (catalog.personalUnreadable && id.startsWith(PERSONAL_PRESET_PREFIX)) {
+      return { refused: "unreadable" };
+    }
     return { refused: "unknown" };
   };
 }
 
 /** Read the catalog and build the resolver in one step. */
-export async function loadPresetResolver(guildId: string): Promise<{
+export async function loadPresetResolver(
+  guildId: string,
+  options: CatalogOptions = {},
+): Promise<{
   catalog: PresetCatalog;
   resolve: PresetResolver;
 }> {
-  const catalog = await loadPresetCatalog(guildId);
+  const catalog = await loadPresetCatalog(guildId, options);
   return { catalog, resolve: presetResolver(catalog) };
 }
 
@@ -406,7 +484,7 @@ export function eventSetupToFormValues(
 export type WriteResult<T = object> =
   ({ ok: true } & T) | { ok: false; error: string };
 
-function isDuplicateKey(err: unknown): boolean {
+export function isDuplicateKey(err: unknown): boolean {
   return (
     typeof err === "object" &&
     err !== null &&
@@ -414,10 +492,10 @@ function isDuplicateKey(err: unknown): boolean {
   );
 }
 
-const DUPLICATE_NAME =
+export const DUPLICATE_NAME =
   "A preset with that name already exists (names are compared ignoring case).";
 
-function toDoc(data: PresetData): Record<string, unknown> {
+export function toDoc(data: PresetData): Record<string, unknown> {
   return {
     name: data.name,
     nameKey: data.name.toLowerCase(),
@@ -435,20 +513,22 @@ function toDoc(data: PresetData): Record<string, unknown> {
  * 49 presets cannot both pass the 50 limit. The bot is one process, so this is
  * enough; the unique name index still guards names in storage.
  */
-const createLock = createKeyedLock();
+export const createLock = createKeyedLock();
 
 export function createLibraryPreset(
   guildId: string,
   data: PresetData,
+  publishedFrom?: string,
 ): Promise<WriteResult<{ id: string }>> {
   return createLock.run(guildId, () =>
-    createLibraryPresetLocked(guildId, data),
+    createLibraryPresetLocked(guildId, data, publishedFrom),
   );
 }
 
-async function createLibraryPresetLocked(
+export async function createLibraryPresetLocked(
   guildId: string,
   data: PresetData,
+  publishedFrom?: string,
 ): Promise<WriteResult<{ id: string }>> {
   try {
     const count = await EventGroupPresetModel.countDocuments({ guildId });
@@ -462,6 +542,7 @@ async function createLibraryPresetLocked(
       guildId,
       ...toDoc(data),
       enabled: true,
+      ...(publishedFrom ? { publishedFrom } : {}),
     });
     return { ok: true, id: libraryPresetId(created._id) };
   } catch (err) {

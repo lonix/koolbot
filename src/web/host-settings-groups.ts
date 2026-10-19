@@ -51,7 +51,10 @@ import {
   catalogNotice,
 } from "../services/event-group-preset-service.js";
 import type { IEvent } from "../models/event.js";
-import type { EventGroupPreset } from "../content/event-group-presets.js";
+import {
+  PERSONAL_PRESET_PREFIX,
+  type EventGroupPreset,
+} from "../content/event-group-presets.js";
 
 /** The select of the preset form: a preset id, or empty for "no change". */
 export const PRESET_PICK_FIELD = "preset_pick";
@@ -83,6 +86,11 @@ export interface GroupEditViewData {
   /** The stored setup in the preset row's shape: the form's base value. */
   presetBase: string;
   groupLabel: string;
+  /**
+   * Where "Save as my preset" goes (#1216): the host's own presets page,
+   * prefilled from this event. Absent = no link.
+   */
+  savePresetHref?: string;
   /**
    * The key the "add a group" form would give a new group, minted when the page
    * is built: posting the same form twice is the same request (the second finds
@@ -140,8 +148,11 @@ export function renderPresetForm(
   const notice = d.presetNotice
     ? `<p class="muted">${escapeHtml(d.presetNotice)}</p>`
     : "";
+  const links = d.savePresetHref
+    ? `<p class="muted"><a href="${escapeHtml(d.savePresetHref)}">Save these groups as my preset</a> · <a href="/me/events/presets">My presets</a></p>`
+    : "";
   if (d.presets.length === 0) {
-    return `<div class="field"><p class="muted">No preset on this server fits this event's ${escapeHtml(d.groups.length)} groups.</p>${notice}</div>`;
+    return `<div class="field"><p class="muted">No preset on this server fits this event's ${escapeHtml(d.groups.length)} groups.</p>${notice}${links}</div>`;
   }
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 <div class="field"><label for="host-settings-preset">Switch preset</label>
@@ -149,7 +160,7 @@ export function renderPresetForm(
 <option value="">Keep the current groups</option>${options}
 </select>
 ${hidden(baseField(GROUP_PRESET_ROW_ID), d.presetBase)}
-<p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}</div>
+<p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}${links}</div>
 <button type="submit">Apply preset</button>
 </form>`;
 }
@@ -212,9 +223,14 @@ ${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
 /** The group editor's data for one event (the fresh row) and the server's presets. */
 export async function buildGroupEditView(
   event: IEvent,
+  viewerId?: string,
 ): Promise<GroupEditViewData> {
   const groups = event.groups ?? [];
-  const catalog = await loadPresetCatalog(event.guildId);
+  // The viewer's own presets are offered next to the server's (#1216), even
+  // when an admin is looking at an event somebody else hosts.
+  const catalog = await loadPresetCatalog(event.guildId, {
+    ownerId: viewerId,
+  });
   const fits = (preset: EventGroupPreset): boolean =>
     preset.groups.length === groups.length &&
     preset.groups.every((g, i) => g.kind === groups[i].kind);
@@ -234,8 +250,14 @@ export async function buildGroupEditView(
     })),
     presets: enabledPresets(catalog)
       .filter(fits)
-      .map((p) => ({ id: p.id, label: p.label })),
-    presetNotice: catalogNotice(catalog.state),
+      .map((p) => ({
+        id: p.id,
+        label: p.id.startsWith(PERSONAL_PRESET_PREFIX)
+          ? `${p.label} (yours)`
+          : p.label,
+      })),
+    presetNotice: catalogNotice(catalog.state, catalog.personalUnreadable),
+    savePresetHref: `/me/events/presets?fromEvent=${encodeURIComponent(String(event._id))}`,
     presetBase: JSON.stringify(readPresetValue(event)),
   };
 }
@@ -260,6 +282,7 @@ const REFUSED_TEXT = {
 export async function prepareGroupEditBody(
   body: unknown,
   guildId: string,
+  viewerId?: string,
 ): Promise<PreparedBody> {
   const source = { ...((body ?? {}) as Record<string, unknown>) };
   delete source[valueField(GROUP_PRESET_ROW_ID)];
@@ -267,7 +290,9 @@ export async function prepareGroupEditBody(
   delete source[PRESET_PICK_FIELD];
   if (typeof pick !== "string" || pick === "")
     return { ok: true, body: source };
-  const catalog = await loadPresetCatalog(guildId);
+  // Only the viewer's own personal presets resolve (#1216): another host's
+  // `my:` id is "unknown" here, exactly as if it did not exist.
+  const catalog = await loadPresetCatalog(guildId, { ownerId: viewerId });
   const found = presetResolver(catalog)(pick);
   if (!("preset" in found)) {
     return { ok: false, error: REFUSED_TEXT[found.refused] };

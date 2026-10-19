@@ -1433,7 +1433,10 @@ export function createReadOnlyRouter(
 
       // The picker's presets: enabled built-ins plus enabled library presets
       // (#1200). Never throws; an unreadable library fails closed and says so.
-      const presetCatalog = await loadPresetCatalog(common.guildId);
+      // The viewing admin's own personal presets are included (#1216).
+      const presetCatalog = await loadPresetCatalog(common.guildId, {
+        ownerId: req.webSession?.discordUserId,
+      });
 
       res.type("text/html").send(
         renderEventsPage({
@@ -1455,7 +1458,10 @@ export function createReadOnlyRouter(
             maxCount: groupMaxCount,
           },
           groupPresets: enabledPresets(presetCatalog),
-          groupPresetsNotice: catalogNotice(presetCatalog.state),
+          groupPresetsNotice: catalogNotice(
+            presetCatalog.state,
+            presetCatalog.personalUnreadable,
+          ),
           flash: readFlash(req),
         }),
       );

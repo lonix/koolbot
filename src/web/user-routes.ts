@@ -93,6 +93,7 @@ import { renderSignedOut } from "./views.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createHostEventsRouter } from "./routes/host-events.js";
+import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
 import { formatEventWhen } from "../services/event-service.js";
 
@@ -565,6 +566,8 @@ export function createUserRouter(
   // Behind the session check and the write limiter above. The sub-router's
   // own gate (CSRF, then the event-host check) covers every path under it.
   router.use("/events/:id/host", createHostEventsRouter(client));
+  // A host's own group presets (#1216): `/me/events/presets`.
+  router.use("/events/presets", createMeEventPresetsRouter(client));
 
   // ---------- Index ----------
   router.get(

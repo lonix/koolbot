@@ -45,11 +45,22 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
 type Catalog =
   import("../../src/services/event-group-preset-service.js").PresetCatalog;
 const catalog: Catalog = { entries: [], state: "ok" };
+/** Personal presets by owner (#1216); the stand-in honours the asking owner like the service. */
+const personalByOwner: Record<string, Catalog["entries"]> = {};
 const presetActual =
   await import("../../src/services/event-group-preset-service.js");
 jest.unstable_mockModule(
   "../../src/services/event-group-preset-service.js",
-  () => ({ ...presetActual, loadPresetCatalog: async () => catalog }),
+  () => ({
+    ...presetActual,
+    loadPresetCatalog: async (_guild: string, opts?: { ownerId?: string }) => ({
+      ...catalog,
+      entries: [
+        ...catalog.entries,
+        ...(personalByOwner[opts?.ownerId ?? ""] ?? []),
+      ],
+    }),
+  }),
 );
 
 const { signValue } = await import("../../src/web/cookies.js");
@@ -444,6 +455,63 @@ describe("the switch on the page", () => {
     expect(r.text).toContain("Events are turned off");
     expect(r.text).not.toContain("groups_pick");
     expect(r.text).not.toContain("Switch groups");
+  });
+});
+
+describe("a non-admin host's own presets turn groups on (#1216)", () => {
+  const MINE = "my:" + "a".repeat(24);
+  const THEIRS = "my:" + "b".repeat(24);
+  const personal = (id: string, label: string, names: string[]): never =>
+    ({
+      ...RED_BLUE,
+      id,
+      label,
+      source: "personal",
+      groups: names.map((name) => ({
+        name,
+        kind: "team",
+        size: null,
+        tag: "",
+        marker: "",
+      })),
+    }) as never;
+
+  beforeEach(() => {
+    for (const k of Object.keys(personalByOwner)) delete personalByOwner[k];
+    personalByOwner[CREATOR] = [
+      personal(MINE, "My plan", ["Mine A", "Mine B"]),
+    ];
+    personalByOwner["999999999999999999"] = [
+      personal(THEIRS, "Their secret", ["S1", "S2"]),
+    ];
+  });
+
+  it("offers the host's own preset, marked, and never another host's", async () => {
+    const r = await call(panel());
+    expect(r.text).toContain(`value="${MINE}"`);
+    expect(r.text).toContain("My plan (yours)");
+    expect(r.text).not.toContain(THEIRS);
+    expect(r.text).not.toContain("Their secret");
+  });
+
+  it("builds the groups from the host's own preset", async () => {
+    const r = await post("settings", {
+      groups_pick: MINE,
+      b_groupsEnabled: '{"on":false}',
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(doc().groupsEnabled).toBe(true);
+    expect(doc().presetId).toBe(MINE);
+    expect(groups().map((g) => g.name)).toEqual(["Mine A", "Mine B"]);
+  });
+
+  it("refuses another host's preset id, and turns nothing on", async () => {
+    const r = await post("settings", {
+      groups_pick: THEIRS,
+      b_groupsEnabled: '{"on":false}',
+    });
+    expect(flashOf(r.location).type).toBe("err");
+    expect(doc().groupsEnabled).not.toBe(true);
   });
 });
 

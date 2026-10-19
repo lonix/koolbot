@@ -155,7 +155,11 @@ export function createEventsRouter(client: Client): Router {
         const presetId = groupInput.presetId;
         const resolvePreset =
           presetId && presetId !== "custom"
-            ? (await loadPresetResolver(session.guildId)).resolve
+            ? (
+                await loadPresetResolver(session.guildId, {
+                  ownerId: session.discordUserId,
+                })
+              ).resolve
             : undefined;
         const result = validateGroupSetup(groupInput, {
           maxCount,

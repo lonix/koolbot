@@ -91,6 +91,11 @@ for (const [path, exportName, label] of [
   ["rules-acceptance", "RulesAcceptance", "rules-acceptance"],
   ["user-name-history", "UserNameHistory", "user-name-history"],
   ["user-voice-preferences", "UserVoicePreferences", "user-voice-preferences"],
+  [
+    "event-group-personal-preset",
+    "EventGroupPersonalPreset",
+    "event-personal-preset",
+  ],
   ["rewind-snapshot", "RewindSnapshot", "rewind-snapshot"],
   ["rewind-nudge-state", "RewindNudgeState", "rewind-nudge-state"],
   ["digest-state", "DigestState", "digest-state"],
@@ -594,6 +599,15 @@ describe("UserDataDeletionService.purge", () => {
       expect(FILTERS["poll-turnout.updateMany"]).toEqual({
         guildId: GUILD,
         voterIds: USER,
+      });
+    });
+
+    it("deletes a host's personal event presets by owner and guild (#1216)", async () => {
+      await service().purge(USER, GUILD);
+
+      expect(FILTERS["event-personal-preset.deleteMany"]).toEqual({
+        ownerId: USER,
+        guildId: GUILD,
       });
     });
 
