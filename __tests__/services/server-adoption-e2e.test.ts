@@ -435,6 +435,81 @@ describe("server adoption, end to end on a small Community server", () => {
     expect(rules.extraErrors).toEqual([]);
   });
 
+  it("plans the same whatever the operator's environment says", async () => {
+    const baseline = (
+      await h.planClaims(c.world, c.claims)
+    ).plan.operations.map((o) => o.summary);
+    const keys = [
+      "voicechannels.cleanup.managed_only",
+      "voicechannels.category_id",
+    ];
+    const saved = keys.map((k) => process.env[k]);
+    process.env[keys[0]!] = "true";
+    process.env[keys[1]!] = "999999999999999999";
+    try {
+      const p = await h.planClaims(c.world, c.claims);
+      expect(p.plan.operations.map((o) => o.summary)).toEqual(baseline);
+      expect(p.plan.baseline.config["voicechannels.category_id"]).toBe("");
+    } finally {
+      keys.forEach((k, i) => {
+        if (saved[i] === undefined) delete process.env[k];
+        else process.env[k] = saved[i];
+      });
+    }
+  });
+
+  it("derives which channels follow their category from their overwrites, as Discord does", async () => {
+    const synced = async (): Promise<Record<string, boolean | null>> => {
+      const p = await h.planClaims(c.world, c.claims);
+      return Object.fromEntries(
+        p.scan.channels.map((x) => [x.id, x.syncedToParent]),
+      );
+    };
+    const first = await synced();
+    expect(first[c.ids.rules]).toBe(true); // no overwrites, like Information
+    expect(first[c.ids.supportersChat]).toBe(true);
+    expect(first[c.ids.general]).toBe(false); // the stale member overwrite
+    expect(first[c.ids.foreignLobby]).toBe(false); // the other bot's overwrite
+    expect(first[c.ids.catInfo]).toBeNull(); // a category has no parent
+
+    // Gating a child gives it overwrites of its own: it no longer follows.
+    // An approved sync of `general` removes the stale one: it now does.
+    const claims: Claim[] = [
+      ...c.claims,
+      { channelId: c.ids.general, action: "sync", approveReplace: true },
+    ];
+    const e = h.engine(c.world);
+    const p = await h.planClaims(c.world, claims);
+    await e.service.apply(
+      p.plan,
+      h.applyOpts(c.world, h.revalidatorFor(c.world, claims)),
+    );
+    const after = await synced();
+    expect(after[c.ids.supportersChat]).toBe(false);
+    expect(after[c.ids.general]).toBe(true);
+  });
+
+  it("mirrors a category gate onto the children that follow it and leaves the others alone", async () => {
+    // Alice's room follows the Rooms category; Bob's has an overwrite of its own.
+    c.world.channels.get(c.ids.roomBob)!.overwrites.push({
+      id: c.ids.supporters,
+      type: "role",
+      allow: VIEW,
+      deny: "0",
+    });
+    const p = await h.planClaims(c.world, [
+      {
+        channelId: c.ids.catRooms,
+        action: "gate",
+        roleIds: [c.ids.supporters],
+      },
+    ]);
+    expect(p.plan.errors).toEqual([]);
+    expect(touchedChannels(p.plan)).toEqual(
+      new Set([c.ids.catRooms, c.ids.roomAlice]),
+    );
+  });
+
   it("blocks binding the shared Voice Chat category while empty cleanup could delete the foreign lobby (#1032)", async () => {
     const risky: Claim[] = c.claims.map((x) =>
       x.channelId === c.ids.catVoice ? { ...x, voiceManagedOnly: false } : x,

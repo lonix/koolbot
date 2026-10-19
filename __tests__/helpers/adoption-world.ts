@@ -318,7 +318,7 @@ const otherBots = (w: World): string[] =>
 // ---------------------------------------------------------------------------
 
 /** Stored values over the schema defaults, as `readEffectiveConfig` reports them. */
-function effectiveConfig(w: World): Record<string, ConfigValue> {
+export function effectiveConfig(w: World): Record<string, ConfigValue> {
   const out: Record<string, ConfigValue> = {};
   for (const [k, v] of Object.entries(
     defaultConfig as unknown as Record<string, unknown>,
@@ -479,6 +479,15 @@ export function guildFromWorld(w: World, reads: Reads = {}): any {
       return [...this.values()].map(fn);
     }
   }
+  /** discord.js: a channel is locked when its overwrites equal its parent's. */
+  const syncedWithParent = (c: ChannelState): boolean => {
+    const parent = c.parentId ? w.channels.get(c.parentId) : undefined;
+    if (!parent) return false;
+    const key = (o: ChannelState["overwrites"][number]): string =>
+      `${o.type}:${o.id}:${BigInt(o.allow)}:${BigInt(o.deny)}`;
+    const a = c.overwrites.map(key).sort().join("|");
+    return a === parent.overwrites.map(key).sort().join("|");
+  };
   const channelObject = (c: ChannelState): any => ({
     id: c.id,
     name: c.name,
@@ -487,7 +496,7 @@ export function guildFromWorld(w: World, reads: Reads = {}): any {
     rawPosition: c.position,
     position: c.position,
     topic: c.topic,
-    permissionsLocked: c.parentId ? false : undefined,
+    permissionsLocked: c.parentId ? syncedWithParent(c) : undefined,
     members: c.kind === "voice" ? { size: c.voiceMemberCount } : undefined,
     permissionOverwrites: {
       cache: new Collection(
@@ -643,7 +652,13 @@ export function useWorld(w: World): void {
       ? w.config.get(key)
       : (defaultConfig as unknown as Record<string, unknown>)[key];
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getAll: async () => [...w.config].map(([key, value]) => ({ key, value })),
+    // The complete effective configuration, so the scan never falls back to the
+    // host environment (`readEffectiveConfig` does for keys it is not given).
+    getAll: async () =>
+      Object.entries(effectiveConfig(w)).map(([key, value]) => ({
+        key,
+        value,
+      })),
     getString: async (key: string, def = "") => {
       const v = effective(key);
       return typeof v === "string" ? v : def;
