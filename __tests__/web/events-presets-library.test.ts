@@ -1079,14 +1079,14 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
       '[name="groups_captains_lobby"]',
     ) as HTMLInputElement;
     box.checked = true;
-    box.dispatchEvent(new dom.window.Event("change"));
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     add.click();
     expect(
       dom.window.document.querySelectorAll("[data-group-row]"),
     ).toHaveLength(3);
     expect(add.hidden).toBe(true);
     box.checked = false;
-    box.dispatchEvent(new dom.window.Event("change"));
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(add.hidden).toBe(false);
   });
 });

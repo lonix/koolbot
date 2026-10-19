@@ -264,11 +264,13 @@ export const EVENT_PRESETS_SCRIPT =
   "function addRow(force){var n=rows().length;if(used()>=max&&!force)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);if(add)add.hidden=used()>=max;return true}" +
-  "if(add){add.hidden=used()>=max;add.addEventListener('click',function(){addRow()})}" +
-  "if(lobby&&add)lobby.addEventListener('change',function(){add.hidden=used()>=max});" +
-  // Changing a row's kind (a restored leads row) changes the count too.
-  "if(add)box.addEventListener('change',function(){add.hidden=used()>=max});" +
+  "box.appendChild(d.firstElementChild);recompute();return true}" +
+  "recompute();if(add)add.addEventListener('click',function(){addRow()});" +
+  // One recompute for every change inside the form (the lobby box, a row's kind
+  // such as a restored leads row). Code that sets a control by hand fires no
+  // change event, so it calls the same recompute itself (the draft restore below).
+  "function recompute(){if(add)add.hidden=used()>=max}" +
+  "form.addEventListener('change',recompute);" +
   "form.addEventListener('submit',function(){try{var d={};" +
   "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
@@ -289,7 +291,7 @@ export const EVENT_PRESETS_SCRIPT =
   "if(lobby&&typeof d['groups_captains_lobby']!=='boolean')lobby.checked=true}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]});" +
   // Setting `checked` fires no change event: the button follows the restored box.
-  "if(add)add.hidden=used()>=max}}catch(x){}" +
+  "recompute()}}catch(x){}" +
   "})();";
 
 export interface PresetEditorFormProps {

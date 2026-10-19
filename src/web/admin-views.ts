@@ -2661,8 +2661,11 @@ const EVENT_GROUPS_SCRIPT =
   // The captains lobby needs group leaders: the box is disabled (and so not
   // posted) while leaders are unticked, the server ignores it then too.
   "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked;sync()}" +
-  "if(form.elements['groups_captains_lobby'])form.elements['groups_captains_lobby'].addEventListener('change',sync);" +
-  "if(form.elements['groups_captains'])form.elements['groups_captains'].addEventListener('change',lobby);" +
+  // One recompute (the lobby box's state, then the cap and the button) for every
+  // change in the form: the lobby and leaders boxes, and a preset choice, whose
+  // handler sets the lobby box by hand (that fires no change event of its own, and
+  // the preset's own event bubbles here after its handler has run).
+  "form.addEventListener('change',lobby);" +
   "lobby();" +
   "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
   "form.elements['group_'+i+'_name'].value=g.name||'';" +

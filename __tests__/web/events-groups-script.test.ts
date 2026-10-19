@@ -562,3 +562,68 @@ describe("the Captains lobby counts toward the cap of Add a group (#1263)", () =
     expect(add(dom).hidden).toBe(true);
   });
 });
+
+describe("choosing a preset recomputes the lobby, the cap and the button (#1263)", () => {
+  const preset = (id: string, kinds: string[]) => ({
+    id,
+    label: id,
+    description: "",
+    groupLabel: "Team",
+    groups: kinds.map((kind, i) => ({
+      name: `${kind}${i}`,
+      kind,
+      size: null,
+      tag: "",
+      marker: "",
+    })),
+  });
+  const presets = [
+    preset("lib:plain", ["team", "team"]),
+    preset("lib:lobby", ["team", "team", "leads"]),
+  ];
+  const pick = (dom: JSDOM, id: string): void => {
+    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
+    select.value = id;
+    select.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const tickBox = (dom: JSDOM, name: string, checked: boolean): void => {
+    const el = field(dom, name);
+    el.checked = checked;
+    el.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const add = (dom: JSDOM): HTMLElement =>
+    dom.window.document.querySelector("[data-add-group]") as HTMLElement;
+
+  it("a preset without a lobby unticks the box and frees its slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    tickBox(dom, "groups_captains", true);
+    tickBox(dom, "groups_captains_lobby", true);
+    expect(add(dom).hidden).toBe(true);
+    pick(dom, "lib:plain");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+    expect(add(dom).hidden).toBe(false);
+  });
+
+  it("a preset with a lobby ticks the box and takes its slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    tickBox(dom, "groups_captains", true);
+    expect(add(dom).hidden).toBe(false);
+    pick(dom, "lib:lobby");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(add(dom).hidden).toBe(true);
+  });
+
+  it("with leaders off the lobby box stays disabled through a preset choice and takes no slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    pick(dom, "lib:lobby");
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+    expect(add(dom).hidden).toBe(false);
+    tickBox(dom, "groups_captains", true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    expect(add(dom).hidden).toBe(true);
+  });
+});
