@@ -6,6 +6,7 @@
  */
 
 import type { ConfigSchema } from "../services/config-schema.js";
+import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { getInactivityWindowMs } from "./session.js";
 import { THEME } from "./theme.js";
 import {
@@ -74,6 +75,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Info — read-only diagnostics / status surfaces.
   { href: "/admin/", label: "Dashboard", group: "Info" },
   { href: "/admin/bot-status", label: "Bot Status", group: "Info" },
+  { href: "/admin/bot-permissions", label: "Bot Permissions", group: "Info" },
   { href: "/admin/database", label: "Database", group: "Info" },
   { href: "/admin/audit/commands", label: "Command Audit", group: "Info" },
   { href: "/admin/metrics", label: "Command Metrics", group: "Info" },
@@ -782,7 +784,13 @@ function renderNav(
     const title = disabled
       ? ' title="This feature is disabled — open it to enable it"'
       : "";
-    const badge = disabled ? '<span class="nav-badge">off</span>' : "";
+    const issues =
+      item.href === "/admin/bot-permissions" ? getPermissionIssueCount() : 0;
+    const badge = disabled
+      ? '<span class="nav-badge">off</span>'
+      : issues > 0
+        ? `<span class="nav-badge" title="Missing permissions affect enabled features">${issues}</span>`
+        : "";
     return `<li><a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a></li>`;
   };
   // One <ul> per group, preceded by a small heading. Feature items are now
