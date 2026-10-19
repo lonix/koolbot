@@ -56,8 +56,13 @@ jobs:
           LAST_COMMIT_AGE_DAYS: '60'
           IMAGE: ghcr.io/cbrgm/cleanup-stale-branches-action@sha256:e0c9d2760d7ef3fa37768116552326a8797fac0e939aed1223d16e9882575a56 # v1.2.14
         run: |
+          # Actions runs this step with `bash -e`. errexit is switched off for the whole
+          # step on purpose: a failing docker run (image pull, panic, API error) must
+          # still reach the summary logic below and produce the INCOMPLETE banner.
+          set +e
           set -uo pipefail
           LOG="$RUNNER_TEMP/cleanup.log"
+          : > "$LOG"
 
           # Output is on stderr (Go `log`), so merge it. Keep the tool's exit code.
           docker run --rm -e GITHUB_TOKEN -e GITHUB_REPOSITORY "$IMAGE" \
@@ -80,6 +85,15 @@ jobs:
           fi
           if grep -q -F 'Error listing branches' "$CLEAN"; then
             incomplete="${incomplete:+$incomplete; }branch listing failed part-way (partial list)"
+          fi
+          # The tool logs "- Skipping `<branch>`: <reason>" for every skipped branch. Reasons
+          # below are the tool's expected exclusions (main.go at the pinned commit). Any other
+          # reason is a failed commit or base-PR lookup: the branch was dropped, so candidates
+          # may be missing even though the tool exits 0 and prints its normal result line.
+          unexpected="$(grep -E '^- Skipping ' "$CLEAN" | grep -v -E ': (it is the default branch|it is a protected branch|it is in the list of ignored branches|does not match allowed prefixes|does match ignored prefixes|last commit is newer than [0-9]+ days|has open pull requests|is the base for a pull request)$' || true)"
+          if [ -n "$unexpected" ]; then
+            n_unexpected="$(printf '%s\n' "$unexpected" | wc -l | tr -d ' ')"
+            incomplete="${incomplete:+$incomplete; }${n_unexpected} branch(es) were skipped because of a lookup error (see the step log for lines starting '- Skipping')"
           fi
 
           {
