@@ -16,6 +16,10 @@ import {
   CHANNEL_LEAD_MIN,
 } from "../services/event-groups.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
+import {
+  renderLeadersTagsFields,
+  type LeadersTagsView,
+} from "./host-settings-leaders-tags-view.js";
 
 export interface SettingsGroupView {
   name: string;
@@ -39,6 +43,8 @@ export interface SettingsViewData {
   locked: boolean | null;
   groupLabel: string;
   groups: SettingsGroupView[];
+  /** Leaders and tags fields (#1240); null when the event has no groups. */
+  leadersTags?: LeadersTagsView | null;
 }
 
 function hidden(name: string, value: string): string {
@@ -95,6 +101,7 @@ export function renderSettingsSection(d: SettingsViewData): string {
 <form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderLead(d)}
 ${renderLock(d)}
+${renderLeadersTagsFields(d.leadersTags ?? null)}
 <button type="submit">Save settings</button>
 </form>
 ${renderGroups(d)}`;

@@ -136,6 +136,8 @@ import {
   renderConfirmBody,
   renderSettingsSection,
 } from "../host-settings-view.js";
+import { leadersTagsViewOf } from "../host-settings-leaders-tags-view.js";
+import { createLiveEditEffects } from "../../services/event-live-edit-effects.js";
 import {
   renderCustomiseSection,
   type CustomiseEditView,
@@ -1135,6 +1137,7 @@ function createLiveEditDeps(client: Client): LiveEditDeps {
     },
     isEnding: (eventId) =>
       EventService.getInstance(client).isEventBeingEnded(eventId),
+    effects: createLiveEditEffects(client),
   };
 }
 
@@ -1199,6 +1202,7 @@ function createSettingsSection(client: Client): HostSectionRenderer {
         : null,
       locked: hasGroups ? (lockGroupsRow.read(fresh) as boolean) : null,
       groupLabel: fresh.groupLabel || "Group",
+      leadersTags: leadersTagsViewOf(fresh),
       groups: hasGroups
         ? (fresh.groups ?? []).map((g) => ({
             name: g.name,
