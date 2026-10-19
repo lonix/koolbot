@@ -105,6 +105,13 @@
  *   - `describe(value)`: plain text for the result and the confirmation page.
  * Order of execution is the order of `LIVE_EDIT_ROWS`. Values must be JSON
  * (they travel in the token and the audit row).
+ *
+ * The form is the only part a row does not bring with it: its control is
+ * rendered by `web/host-settings-view.ts` (a value field `s_<id>` and a base
+ * field `b_<id>`, see `valueField` / `baseField`) and fed by
+ * `createSettingsSection` in `web/routes/host-events.ts`. A new row adds its
+ * control and that wiring (and its `__tests__/web/host-settings-routes.test.ts`
+ * case); the planner, token, executor, result text and audit need nothing.
  */
 
 import crypto from "node:crypto";
