@@ -442,12 +442,78 @@ describe("customiseGroup: input (#1196)", () => {
 });
 
 describe("customiseGroup: the channel and the nicknames follow (#1196)", () => {
-  it("a team without a channel yet just stores the name (no pending rename)", async () => {
+  it("a team without a channel right now stores the name and marks it pending (a channel being created from the old name is settled later)", async () => {
     stored().channelId = null;
     const r = await run({ channelId: null, rawTag: null });
     expect(r.ok).toBe(true);
-    expect(stored().nameSyncPending).toBeUndefined();
+    expect(stored().name).toBe("Crimson");
+    expect(stored().nameSyncPending).toBe(true);
+    // Nothing to rename yet: the channel pass does it once the channel exists.
     expect(syncName).not.toHaveBeenCalled();
+  });
+
+  it("valid edits can never swap names around until no reset is possible", async () => {
+    // Red -> Green by Red's leader.
+    expect((await run({ rawName: "Green", rawTag: null })).ok).toBe(true);
+    // Blue's leader may not take Red (Red's reserved original) or Green (held).
+    for (const name of ["Red", "red", "Green"]) {
+      const r = await run({
+        groupKey: BLUE,
+        actorId: OTHER,
+        channelId: BLUE_CH,
+        rawName: name,
+        rawTag: null,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.code).toBe("name-taken");
+    }
+    expect(stored(BLUE).name).toBe("Blue");
+    // And Red's leader may not take Blue's name either.
+    expect((await run({ rawName: "Blue", rawTag: null })).ok).toBe(false);
+    // Blue renames to something free; every reset still works.
+    expect(
+      (
+        await run({
+          groupKey: BLUE,
+          actorId: OTHER,
+          channelId: BLUE_CH,
+          rawName: "Navy",
+          rawTag: null,
+        })
+      ).ok,
+    ).toBe(true);
+    const resetDeps = {
+      syncName: (g: string, e: string, k: string) => syncName(g, e, k),
+      retag: (g: string, e: string, m: string[]) => retag(g, e, m),
+    };
+    for (const key of [RED, BLUE]) {
+      const r = await resetGroupCustomisation(
+        { guildId: GUILD, eventId: EV, groupKey: key },
+        resetDeps,
+      );
+      expect(r.ok).toBe(true);
+    }
+    expect(stored().name).toBe("Red");
+    expect(stored(BLUE).name).toBe("Blue");
+  });
+
+  it("a host reset while the channel is being re-created marks the name pending", async () => {
+    await run({ rawName: "Crimson", rawTag: null });
+    // The channel pass has settled it, then the channel vanished and its
+    // re-creation is under way with the customised name.
+    stored().nameSyncPending = false;
+    stored().channelId = null;
+    const r = await resetGroupCustomisation(
+      { guildId: GUILD, eventId: EV, groupKey: RED },
+      {
+        syncName: (g, e, k) => syncName(g, e, k),
+        retag: (g, e, m) => retag(g, e, m),
+      },
+    );
+    expect(r.ok).toBe(true);
+    expect(stored().name).toBe("Red");
+    expect(stored().nameSyncPending).toBe(true);
+    expect(syncName).toHaveBeenCalledTimes(1); // only the earlier edit
   });
 
   it("only a tag change does not rename anything", async () => {

@@ -375,5 +375,13 @@ describe("helpers", () => {
     expect(nameTakenByOther(groups, RED, "RED")).toBe(false);
     expect(nameTakenByOther(groups, RED, "Green")).toBe(false);
     expect(nameTakenByOther(null, RED, "Green")).toBe(false);
+    // A renamed team keeps its original name reserved.
+    const renamed = [
+      { key: RED, name: "Red" },
+      { key: BLUE, name: "Navy", originalName: "Blue" },
+    ];
+    expect(nameTakenByOther(renamed, RED, "blue")).toBe(true);
+    expect(nameTakenByOther(renamed, RED, "Navy")).toBe(true);
+    expect(nameTakenByOther(renamed, BLUE, "Blue")).toBe(false);
   });
 });

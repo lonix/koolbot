@@ -1848,7 +1848,8 @@ set its clan tag from Discord; the host can put any team back at any time.
 - **What can be changed.** The team's name and, while the event uses **Clan tags**, its tag.
   Same rules as the schedule form: names 1 to 50 characters and unique within the event
   (case does not matter), tags up to 8 characters or empty, no control characters, spaces
-  collapsed. Mistakes are explained privately and nothing is stored.
+  collapsed. A team a leader renamed keeps its original name reserved, so no other team can take
+  it (a reset can then always go back). Mistakes are explained privately and nothing is stored.
 - **Renaming the channel.** The stored name is what counts; the team's channel is renamed after
   it. Discord allows about 2 renames per channel every 10 minutes, so a leader who has used
   them is told when to try again ("about 7 minutes") and nothing is stored; if only the tag

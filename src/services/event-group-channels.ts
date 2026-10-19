@@ -116,6 +116,9 @@ const MIN_RATE_LIMIT_BACKOFF_MS = MS_PER_MINUTE;
 /** After a rename whose outcome is unknown, look again (by reading) after this. */
 export const UNCONFIRMED_RENAME_HOLD_MS = MS_PER_MINUTE;
 /** Key suffixes in `holds` for a pending rename and a control message. */
+/** History searched for an existing control message: pages of 100, at most 5. */
+const CONTROL_SEARCH_PAGE = 100;
+const CONTROL_SEARCH_PAGES = 5;
 const RENAME_HOLD = "#rename";
 const CONTROL_HOLD = "#control";
 
@@ -2129,9 +2132,15 @@ export class EventGroupChannels {
         const channel = channelId as string;
         if (recordedId) {
           const key = `${channel}:${recordedId}`;
-          if (this.controlVerified.has(key)) continue;
-          if (await this.controlExists(channel, recordedId)) {
+          // A message seen to exist is a working button: whatever was reported
+          // or held back about it earlier no longer applies.
+          if (
+            this.controlVerified.has(key) ||
+            (await this.controlExists(channel, recordedId))
+          ) {
             this.controlVerified.add(key);
+            this.holds.delete(holdKey);
+            this.setLeadsProblem(eventId, problemKey, null);
             continue;
           }
           await this.recordControl(eventId, group, recordedId, null, null);
@@ -2254,35 +2263,56 @@ export class EventGroupChannels {
   }
 
   /** The bot's own control message of this group among the recent messages. */
+  /**
+   * The bot's own control message of this group in the channel's history, or
+   * null when the WHOLE history was read and there is none. History is read in
+   * pages of `CONTROL_SEARCH_PAGE` up to `CONTROL_SEARCH_PAGES` pages; a search
+   * that cannot rule the message out (the bot's own id unknown, or the cap
+   * reached with older messages left) throws, and the caller holds back and
+   * reports instead of posting a second button.
+   */
   private async findControl(
     channelId: string,
     eventId: string,
     groupKey: string,
   ): Promise<string | null> {
     const me = this.client.user?.id;
-    if (!me) return null;
+    if (!me) throw new Error("The bot's own id is unknown");
     const wantedId = customiseCustomId("btn", eventId, groupKey);
-    const messages = (await this.call(
-      (signal) =>
-        this.rest().get(Routes.channelMessages(channelId), {
-          query: new globalThis.URLSearchParams({ limit: "25" }),
-          signal,
-        }),
-      "look for the event group control message",
-      true,
-    )) as Array<{
+    type Raw = {
       id: string;
       author?: { id?: string };
       components?: Array<{ components?: Array<{ custom_id?: string }> }>;
-    }>;
-    for (const m of messages ?? []) {
-      if (m.author?.id !== me) continue;
-      const has = (m.components ?? []).some((row) =>
-        (row.components ?? []).some((c) => c.custom_id === wantedId),
-      );
-      if (has) return m.id;
+    };
+    let before: string | null = null;
+    for (let page = 0; page < CONTROL_SEARCH_PAGES; page++) {
+      const query = new globalThis.URLSearchParams({
+        limit: String(CONTROL_SEARCH_PAGE),
+      });
+      if (before) query.set("before", before);
+      const messages = ((await this.call(
+        (signal) =>
+          this.rest().get(Routes.channelMessages(channelId), {
+            query,
+            signal,
+          }),
+        "look for the event group control message",
+        true,
+      )) ?? []) as Raw[];
+      for (const m of messages) {
+        if (m.author?.id !== me) continue;
+        const has = (m.components ?? []).some((row) =>
+          (row.components ?? []).some((c) => c.custom_id === wantedId),
+        );
+        if (has) return m.id;
+      }
+      // A short page is the start of the channel: nothing older exists.
+      if (messages.length < CONTROL_SEARCH_PAGE) return null;
+      before = messages[messages.length - 1].id;
     }
-    return null;
+    throw new Error(
+      "The channel history is too long to rule out an earlier button message",
+    );
   }
 
   private async controlExists(

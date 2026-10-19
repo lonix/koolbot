@@ -247,12 +247,17 @@ export class CommandManager {
               retryAfter = raw.retry_after;
             }
           }
-          logger.warn(
-            `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, retryAfter * 1000),
-          );
+          // Nothing is retried after the last attempt, so nothing is waited
+          // for either: a caller that passes one attempt (a fail-fast write
+          // that holds a lock) gets the rate-limit error at once.
+          if (attempt < maxRetries) {
+            logger.warn(
+              `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryAfter * 1000),
+            );
+          }
         } else if (isTimeout && !retryOnTimeout) {
           logger.warn(
             `⏰ Discord API timeout for ${operationName}, not retrying (non-idempotent)`,

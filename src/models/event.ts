@@ -291,9 +291,9 @@ const EventGroupSchema = new Schema<IEventGroup>(
     memberIds: { type: [String], default: [] },
     originalName: { type: String, maxlength: 50 },
     originalTag: { type: String, maxlength: 8 },
-    nameSyncPending: { type: Boolean, default: false },
-    controlMessageId: { type: String, default: null },
-    controlChannelId: { type: String, default: null },
+    nameSyncPending: { type: Boolean },
+    controlMessageId: { type: String },
+    controlChannelId: { type: String },
   },
   { _id: false },
 );

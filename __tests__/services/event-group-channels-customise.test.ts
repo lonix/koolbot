@@ -157,18 +157,28 @@ function makeEnv(
         return { id: m.id };
       },
     ),
-    get: jest.fn(async (route: string) => {
-      calls.push({ op: "get", route });
-      if (fail.get) throw fail.get;
-      const ch = routeChannel(route);
-      const single = /messages\/(\d+)$/.exec(route);
-      if (single) {
-        const m = (messages.get(ch) ?? []).find((x) => x.id === single[1]);
-        if (!m) throw apiError(10008, 404);
-        return m;
-      }
-      return messages.get(ch) ?? [];
-    }),
+    get: jest.fn(
+      async (route: string, o?: { query?: globalThis.URLSearchParams }) => {
+        calls.push({ op: "get", route });
+        if (fail.get) throw fail.get;
+        const ch = routeChannel(route);
+        const single = /messages\/(\d+)$/.exec(route);
+        if (single) {
+          const m = (messages.get(ch) ?? []).find((x) => x.id === single[1]);
+          if (!m) throw apiError(10008, 404);
+          return m;
+        }
+        // The channel history, newest first, honouring `before` and `limit`.
+        const all = (messages.get(ch) ?? [])
+          .slice()
+          .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? 1 : -1));
+        const before = o?.query?.get("before");
+        const limit = Number(o?.query?.get("limit") ?? "50");
+        return all
+          .filter((m) => !before || BigInt(m.id) < BigInt(before))
+          .slice(0, limit);
+      },
+    ),
     delete: jest.fn(async (route: string) => {
       calls.push({ op: "delete", route });
       if (fail.delete) throw fail.delete;
@@ -624,6 +634,106 @@ describe("syncControls: the Customise team message (#1196)", () => {
     await env.channels.syncControls(EV);
     expect(stored().controlMessageId).toBeTruthy();
     expect(env.channels.getReport(EV)?.failures ?? []).toHaveLength(0);
+  });
+
+  it("a transient failure checking a recorded message is reported, and the report ends when it is seen to exist", async () => {
+    const env = makeEnv();
+    stored().controlMessageId = "300000000000000061";
+    stored().controlChannelId = RED_CH;
+    env.messages.set(RED_CH, [
+      {
+        id: "300000000000000061",
+        author: { id: BOT },
+        components: [{ components: [{ custom_id: customId(RED) }] }],
+      },
+    ]);
+    stored(BLUE).controlMessageId = "300000000000000062";
+    stored(BLUE).controlChannelId = BLUE_CH;
+    env.messages.set(BLUE_CH, [
+      {
+        id: "300000000000000062",
+        author: { id: BOT },
+        components: [{ components: [{ custom_id: customId(BLUE) }] }],
+      },
+    ]);
+    env.fail.get = new Error("network");
+    await env.channels.syncControls(EV);
+    expect(
+      env.channels
+        .getReport(EV)
+        ?.failures.some((f) => f.name.includes("customise button")),
+    ).toBe(true);
+    // Recovered, after the hold: seen to exist, so the report is gone and the
+    // scan has nothing left to look at.
+    env.fail.get = undefined;
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
+    await env.channels.syncControls(EV);
+    expect(env.channels.getReport(EV)?.failures ?? []).toHaveLength(0);
+    expect(env.channels.controlsNeedAttention(cstore.get(EV)!)).toBe(false);
+  });
+
+  describe("finding an existing button (a post whose record was lost)", () => {
+    const own = (n: number): Msg => ({
+      id: String(300000000000000000n + BigInt(n)),
+      author: { id: BOT },
+      components: [{ components: [{ custom_id: customId(RED) }] }],
+    });
+    const chatter = (from: number, count: number): Msg[] =>
+      Array.from({ length: count }, (_v, i) => ({
+        id: String(300000000000000000n + BigInt(from + i)),
+        author: { id: "555" },
+        components: [],
+      }));
+
+    it("looks past the newest 100 messages and adopts the button instead of posting a second", async () => {
+      const env = makeEnv();
+      // The button is the oldest of 250 messages.
+      env.messages.set(RED_CH, [own(1), ...chatter(2, 249)]);
+      await env.channels.syncControls(EV);
+      expect(
+        env.calls.filter((c) => c.op === "post" && c.route.includes(RED_CH)),
+      ).toHaveLength(0);
+      expect(stored().controlMessageId).toBe(String(300000000000000001n));
+    });
+
+    it("a short history without it means there is none: post", async () => {
+      const env = makeEnv();
+      env.messages.set(RED_CH, chatter(1, 30));
+      await env.channels.syncControls(EV);
+      expect(
+        env.calls.filter((c) => c.op === "post" && c.route.includes(RED_CH)),
+      ).toHaveLength(1);
+    });
+
+    it("a history too long to rule it out does NOT permit a new post: held and reported", async () => {
+      const env = makeEnv();
+      env.messages.set(RED_CH, chatter(1, 600));
+      await env.channels.syncControls(EV);
+      expect(
+        env.calls.filter((c) => c.op === "post" && c.route.includes(RED_CH)),
+      ).toHaveLength(0);
+      expect(stored().controlMessageId).toBeFalsy();
+      expect(
+        env.channels
+          .getReport(EV)
+          ?.failures.some((f) => f.name.includes("customise button")),
+      ).toBe(true);
+    });
+
+    it("a failed look does not permit a new post either", async () => {
+      const env = makeEnv();
+      env.fail.get = new Error("network");
+      await env.channels.syncControls(EV);
+      expect(env.calls.filter((c) => c.op === "post")).toHaveLength(0);
+    });
+
+    it("the bot's own id being unknown does not permit a post", async () => {
+      const env = makeEnv();
+      (env.channels as unknown as { client: { user: unknown } }).client.user =
+        null;
+      await env.channels.syncControls(EV);
+      expect(env.calls.filter((c) => c.op === "post")).toHaveLength(0);
+    });
   });
 
   it("a message posted while the record was taken by another pass is removed again", async () => {

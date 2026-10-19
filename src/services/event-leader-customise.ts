@@ -329,7 +329,9 @@ export async function customiseGroup(
       const $set: Record<string, unknown> = {};
       if (nameChanged) {
         $set["groups.$[g].name"] = newName;
-        if (group.channelId) $set["groups.$[g].nameSyncPending"] = true;
+        // Pending even with no channel recorded now: a channel being (re)created
+        // from the old name is settled by the rename pass once it exists.
+        $set["groups.$[g].nameSyncPending"] = true;
       }
       if (tagChanged) $set["groups.$[g].tag"] = newTag;
       if (firstEdit) {
@@ -613,9 +615,7 @@ export async function resetGroupCustomisation(
             "groups.$[g].name": name,
             "groups.$[g].tag": tag,
             // Never cleared here: a rename already pending stays pending.
-            ...(nameChanged && group.channelId
-              ? { "groups.$[g].nameSyncPending": true }
-              : {}),
+            ...(nameChanged ? { "groups.$[g].nameSyncPending": true } : {}),
           },
           $unset: {
             "groups.$[g].originalName": "",

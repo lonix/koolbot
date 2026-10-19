@@ -34,7 +34,9 @@ describe("renderCustomiseSection (#1196)", () => {
         },
       ],
     });
-    expect(html).not.toMatch(/<img|<script|<i>|<u>|<b>|<x>|<y>/);
+    for (const raw of ["<img", "<script", "<i>", "<u>", "<b>", "<x>", "<y>"]) {
+      expect(html).not.toContain(raw);
+    }
     expect(html).toContain("&lt;img src=x onerror=1&gt;");
     expect(html).toContain("&lt;i&gt;Ana&lt;/i&gt;");
     expect(html).toContain("channel rename pending");

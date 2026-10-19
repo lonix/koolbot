@@ -183,14 +183,27 @@ export function customiseRefusal(opts: {
   return null;
 }
 
-/** Case-insensitive name already used by another group of the event. */
+/**
+ * Case-insensitive name another group of the event has, or HAS RESERVED: a
+ * team a leader renamed keeps its original name reserved (`originalName`), so
+ * a leader can never take the name another team's reset must go back to.
+ * Without that, valid edits could swap names around (Red to Green, Blue to
+ * Red, Green to Blue) until every team's original is held by another and no
+ * reset could ever succeed.
+ */
 export function nameTakenByOther(
-  groups: readonly { key: string; name?: string }[] | null | undefined,
+  groups:
+    | readonly { key: string; name?: string; originalName?: string }[]
+    | null
+    | undefined,
   groupKey: string,
   name: string,
 ): boolean {
   const folded = name.toLowerCase();
   return (groups ?? []).some(
-    (g) => g.key !== groupKey && (g.name ?? "").toLowerCase() === folded,
+    (g) =>
+      g.key !== groupKey &&
+      ((g.name ?? "").toLowerCase() === folded ||
+        (g.originalName ?? "").toLowerCase() === folded),
   );
 }
