@@ -534,14 +534,30 @@ export type PresetGroupValue = {
   customised?: true;
 };
 
-/** The row's value: a preset id (`""` = Custom) and its groups by position. */
+/**
+ * The row's value: a preset id (`""` = Custom) and its groups by position. The
+ * Captains lobby (a hidden `leads` group, #1251) is never part of it (#1263):
+ * the value holds the visible groups only, on both sides, so a preset with a
+ * lobby fits an event without one and the reverse. Switching the preset never
+ * creates, deletes, renames or resizes the lobby; the Captains lobby row of the
+ * same panel owns that (with its confirmation rules).
+ */
 export type PresetValue = { id: string; groups: PresetGroupValue[] };
+
+/** The groups a preset is applied to (all but the lobby), each with its place in the full list. */
+function visibleGroups(
+  event: IEvent,
+): Array<{ group: GroupRowData; index: number }> {
+  return (event.groups ?? []).flatMap((group, index) =>
+    group.kind === "leads" ? [] : [{ group, index }],
+  );
+}
 
 /** The stored setup in the row's shape (also the form's base value). */
 export function readPresetValue(event: IEvent): PresetValue {
   return {
     id: event.presetId ?? "",
-    groups: (event.groups ?? []).map((g) => ({
+    groups: visibleGroups(event).map(({ group: g }) => ({
       name: g.name,
       kind: g.kind,
       size: typeof g.size === "number" ? g.size : null,
@@ -555,12 +571,14 @@ export function readPresetValue(event: IEvent): PresetValue {
 export function presetToValue(preset: EventGroupPreset): PresetValue {
   return {
     id: preset.id,
-    groups: preset.groups.map((g) => ({
-      name: g.name,
-      kind: g.kind,
-      size: g.size,
-      tag: g.tag,
-    })),
+    groups: preset.groups
+      .filter((g) => g.kind !== "leads")
+      .map((g) => ({
+        name: g.name,
+        kind: g.kind,
+        size: g.size,
+        tag: g.tag,
+      })),
   };
 }
 
@@ -592,6 +610,8 @@ function parsePresetValue(raw: string): PresetValue | null {
     if (typeof name !== "string" || typeof tag !== "string") return null;
     if (typeof kind !== "string") return null;
     if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) return null;
+    // The lobby is never part of a preset switch (see `PresetValue`).
+    if (kind === "leads") return null;
     if (size !== null && typeof size !== "number") return null;
     const nameCheck = checkGroupName(name);
     const tagCheck = checkGroupTag(tag);
@@ -638,19 +658,23 @@ function presetDiff(
   event: IEvent,
   to: PresetValue,
 ): Array<{
+  /** Place in the event's full group list (the lobby counted). */
   index: number;
+  /** Place among the visible groups, which is the preset's position. */
+  visibleIndex: number;
   group: GroupRowData;
   name: boolean;
   size: boolean;
   tag: boolean;
 }> {
   const out: ReturnType<typeof presetDiff> = [];
-  (event.groups ?? []).forEach((group, index) => {
-    const want = to.groups[index];
+  visibleGroups(event).forEach(({ group, index }, visibleIndex) => {
+    const want = to.groups[visibleIndex];
     if (!want) return;
     const size = typeof group.size === "number" ? group.size : null;
     out.push({
       index,
+      visibleIndex,
       group,
       name: group.name !== want.name,
       size: size !== want.size,
@@ -734,19 +758,23 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
   applicable: (e) =>
     hasGroups(e) ? null : "This event has no groups to apply a preset to.",
   validate: (to, ctx) => {
-    const groups = ctx.event.groups ?? [];
+    // The captains lobby is left out on both sides (see `PresetValue`).
+    const groups = visibleGroups(ctx.event);
     if (to.groups.length !== groups.length) {
-      return `That preset has ${to.groups.length} groups and this event has ${groups.length}. A preset is applied to the existing groups by position, so the numbers must match; adding or removing groups is a separate change.`;
+      return `That preset has ${to.groups.length} groups and this event has ${groups.length}. A preset is applied to the existing groups by position, so the numbers must match; adding or removing groups is a separate change. The captains lobby is not counted and is not changed by a preset.`;
     }
-    const kindChange = groups.findIndex((g, i) => g.kind !== to.groups[i].kind);
+    const kindChange = groups.findIndex(
+      ({ group }, i) => group.kind !== to.groups[i].kind,
+    );
     if (kindChange >= 0) {
-      return `That preset would change the kind of group ${kindChange + 1} (${groups[kindChange].kind} to ${to.groups[kindChange].kind}). Changing a group's kind also changes its members and channel access, so it is a separate change.`;
+      return `That preset would change the kind of group ${kindChange + 1} (${groups[kindChange].group.kind} to ${to.groups[kindChange].kind}). Changing a group's kind also changes its members and channel access, so it is a separate change.`;
     }
     const errors = ctx.validateSetup((input) => {
       to.groups.forEach((g, i) => {
-        input.rows[i].name = g.name;
-        input.rows[i].size = g.size === null ? "" : String(g.size);
-        input.rows[i].tag = g.tag;
+        const row = input.rows[groups[i].index];
+        row.name = g.name;
+        row.size = g.size === null ? "" : String(g.size);
+        row.tag = g.tag;
       });
     });
     return errors.length > 0 ? errors.join(" ") : null;
@@ -825,7 +853,7 @@ export const groupPresetRow: LiveEditRow = asRow<PresetValue>({
       if (!d.name && !d.size && !d.tag && !customised) continue;
       const id = `g${d.index}`;
       arrayFilters.push({ [`${id}.key`]: d.group.key });
-      const want = to.groups[d.index];
+      const want = to.groups[d.visibleIndex];
       if (d.name) {
         $set[`groups.$[${id}].name`] = want.name;
         $set[`groups.$[${id}].nameSyncPending`] = true;

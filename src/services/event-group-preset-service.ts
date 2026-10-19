@@ -54,6 +54,21 @@ export const PRESET_FORM_FIELDS = {
   description: "preset_description",
 } as const;
 
+/**
+ * The preset editor's carrier for a stored `leads` row (#1263). The row is shown
+ * as the Captains lobby tick, so its own values (name, size, tag, marker and its
+ * place in the list) travel in these hidden fields and are put back exactly as
+ * they were: opening and saving an old preset changes nothing. The tick
+ * (`groups_captains_lobby`) decides whether the lobby exists at all.
+ */
+export const PRESET_LOBBY_FIELDS = {
+  index: "lobby_index",
+  name: "lobby_name",
+  size: "lobby_size",
+  tag: "lobby_tag",
+  marker: "lobby_marker",
+} as const;
+
 /** One preset as the admin page lists it, built-in or from the library. */
 export interface PresetEntry extends EventGroupPreset {
   source: "builtin" | "library" | "personal";
@@ -370,7 +385,43 @@ export function validatePresetForm(
     errors.push("Preset description: control characters are not allowed.");
   }
 
-  const input = { ...parseGroupForm(body), enabled: true, presetId: "" };
+  const parsed = parseGroupForm(body);
+  // The Captains lobby tick is the only way to have a lobby (#1263), and it
+  // stands alone: a preset has no leaders setting, the lobby only takes effect
+  // on an event while leaders are ticked there. A posted `leads` row without the
+  // tick is dropped; with it, the carried row (an older preset's lobby) is kept
+  // exactly, else the validator adds a new one named from the leader label.
+  const tick = parsed.captainsLobby === true;
+  let rows = tick ? parsed.rows : parsed.rows.filter((r) => r.kind !== "leads");
+  const carriedName = normalizeGroupText(str(PRESET_LOBBY_FIELDS.name));
+  const carried =
+    tick &&
+    carriedName !== "" &&
+    rows.some((r) => r.kind !== "leads") &&
+    !rows.some((r) => r.kind === "leads");
+  if (carried) {
+    // Last while it is validated, so "Group N" in an error is the number the
+    // editor shows; it is moved back to its own place afterwards.
+    rows = [
+      ...rows,
+      {
+        position: rows.length + 1,
+        name: carriedName,
+        kind: "leads",
+        size: str(PRESET_LOBBY_FIELDS.size).trim(),
+        tag: str(PRESET_LOBBY_FIELDS.tag).trim(),
+        marker: str(PRESET_LOBBY_FIELDS.marker).trim(),
+      },
+    ];
+  }
+  const input = {
+    ...parsed,
+    rows,
+    enabled: true,
+    presetId: "",
+    // Only so the validator adds the lobby: this is not an event.
+    captainsEnabled: tick,
+  };
   const result = validateGroupSetup(input, {
     maxCount: Math.min(options.maxCount, GROUP_COUNT_HARD_MAX),
   });
@@ -385,6 +436,17 @@ export function validatePresetForm(
   }
   if (errors.length > 0 || !result.ok) return { ok: false, errors };
   const setup = result.setup;
+  if (carried) {
+    const at = setup.groups.findIndex((g) => g.kind === "leads");
+    const want = Math.min(
+      Math.max(Number.parseInt(str(PRESET_LOBBY_FIELDS.index), 10) || 0, 0),
+      setup.groups.length - 1,
+    );
+    if (at >= 0 && at !== want) {
+      const [lobby] = setup.groups.splice(at, 1);
+      setup.groups.splice(want, 0, lobby);
+    }
+  }
   return {
     ok: true,
     data: {
@@ -444,12 +506,26 @@ export function presetToFormValues(source: {
     // A checkbox: present only when ticked, like a posted form.
     ...(source.tagsEnabled === true ? { [GROUP_FORM_FIELDS.tags]: "1" } : {}),
   };
+  // The first `leads` row is the Captains lobby (#1263): the tick, with its own
+  // values carried aside. Every other row is listed in order.
+  const lobbyAt = source.groups.findIndex((g) => g.kind === "leads");
+  let listed = 0;
   source.groups.forEach((g, i) => {
-    values[`group_${i}_name`] = g.name;
-    values[`group_${i}_kind`] = g.kind;
-    values[`group_${i}_size`] = g.size === null ? "" : String(g.size);
-    values[`group_${i}_tag`] = g.tag;
-    values[`group_${i}_marker`] = g.marker;
+    if (i === lobbyAt) {
+      values[GROUP_FORM_FIELDS.captainsLobby] = "1";
+      values[PRESET_LOBBY_FIELDS.index] = String(i);
+      values[PRESET_LOBBY_FIELDS.name] = g.name;
+      values[PRESET_LOBBY_FIELDS.size] = g.size === null ? "" : String(g.size);
+      values[PRESET_LOBBY_FIELDS.tag] = g.tag;
+      values[PRESET_LOBBY_FIELDS.marker] = g.marker;
+      return;
+    }
+    values[`group_${listed}_name`] = g.name;
+    values[`group_${listed}_kind`] = g.kind;
+    values[`group_${listed}_size`] = g.size === null ? "" : String(g.size);
+    values[`group_${listed}_tag`] = g.tag;
+    values[`group_${listed}_marker`] = g.marker;
+    listed++;
   });
   return values;
 }

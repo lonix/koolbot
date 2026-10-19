@@ -222,10 +222,31 @@ describe("the validator with the resolver", () => {
     expect(result.setup.presetId).toBe(`lib:${OID}`);
     expect(result.setup.groupLabel).toBe("Squad");
     expect(result.setup.leaderLabel).toBe("Lead");
+    // The preset's leads row is the captains lobby (#1263): not a listed group,
+    // and only added while leaders are on (see the next test).
     expect(result.setup.groups.map((g) => [g.name, g.kind, g.size])).toEqual([
       ["Assault", "team", 8],
-      ["Command", "leads", null],
     ]);
+  });
+
+  it("a library preset's lobby is added on the no-script path only while leaders are on, named from the leader label (#1263)", async () => {
+    libraryRows = [row()];
+    const resolve = svc.presetResolver(await svc.loadPresetCatalog("g1"));
+    const on = validateGroupSetup(
+      { ...input(`lib:${OID}`), captainsEnabled: true },
+      { maxCount: 15, resolvePreset: resolve },
+    );
+    expect(on.ok).toBe(true);
+    if (!on.ok) return;
+    expect(on.setup.groups.map((g) => [g.name, g.kind])).toEqual([
+      ["Assault", "team"],
+      ["Lead lobby", "leads"],
+    ]);
+    const off = validateGroupSetup(
+      { ...input(`lib:${OID}`), captainsEnabled: false },
+      { maxCount: 15, resolvePreset: resolve },
+    );
+    expect(off.ok && off.setup.groups.map((g) => g.kind)).toEqual(["team"]);
   });
 
   it("refuses a disabled preset with a message saying so", async () => {
@@ -256,7 +277,6 @@ describe("validatePresetForm", () => {
     group_0_name: "Assault",
     group_0_size: "8",
     group_1_name: "Command",
-    group_1_kind: "leads",
     ...over,
   });
 
@@ -371,6 +391,7 @@ describe("validatePresetForm", () => {
   it("runs the event form's own rules on the groups", () => {
     const r = svc.validatePresetForm(
       body({
+        groups_captains_lobby: "1",
         group_0_size: "100",
         group_1_kind: "leads",
         group_2_name: "X",
@@ -401,6 +422,152 @@ describe("validatePresetForm", () => {
       );
       expect(lib.ok).toBe(form.ok);
     }
+  });
+
+  describe("the Captains lobby tick (#1263)", () => {
+    const kinds = (r: ReturnType<typeof svc.validatePresetForm>): string[] =>
+      r.ok ? r.data.groups.map((g) => `${g.name}:${g.kind}`) : [];
+
+    it("adds a lobby named from the leader label when ticked, standing alone (no leaders field)", () => {
+      const r = svc.validatePresetForm(
+        body({ groups_captains_lobby: "1", groups_leader_label: "Captain" }),
+        { maxCount: 15 },
+      );
+      expect(kinds(r)).toEqual([
+        "Assault:team",
+        "Command:team",
+        "Captain lobby:leads",
+      ]);
+    });
+
+    it("has no lobby when the tick is off, and drops a posted leads row then", () => {
+      expect(kinds(svc.validatePresetForm(body(), { maxCount: 15 }))).toEqual([
+        "Assault:team",
+        "Command:team",
+      ]);
+      const r = svc.validatePresetForm(
+        body({ group_2_name: "Old lobby", group_2_kind: "leads" }),
+        { maxCount: 15 },
+      );
+      expect(kinds(r)).toEqual(["Assault:team", "Command:team"]);
+    });
+
+    it("keeps a carried lobby exactly (name, size, tag, marker) at its own place", () => {
+      const r = svc.validatePresetForm(
+        body({
+          groups_captains_lobby: "1",
+          lobby_index: "1",
+          lobby_name: "War room",
+          lobby_size: "5",
+          lobby_tag: "WR",
+          lobby_marker: "R",
+        }),
+        { maxCount: 15 },
+      );
+      expect(r.ok && r.data.groups).toEqual([
+        { name: "Assault", kind: "team", size: 8, tag: "", marker: "" },
+        { name: "War room", kind: "leads", size: 5, tag: "WR", marker: "R" },
+        { name: "Command", kind: "team", size: null, tag: "", marker: "" },
+      ]);
+    });
+
+    it("drops a carried lobby when the tick is off", () => {
+      const r = svc.validatePresetForm(
+        body({ lobby_index: "1", lobby_name: "War room" }),
+        { maxCount: 15 },
+      );
+      expect(kinds(r)).toEqual(["Assault:team", "Command:team"]);
+    });
+
+    it("never adds a second lobby: a posted leads row is the lobby", () => {
+      const r = svc.validatePresetForm(
+        body({
+          groups_captains_lobby: "1",
+          group_2_name: "Old lobby",
+          group_2_kind: "leads",
+        }),
+        { maxCount: 15 },
+      );
+      expect(kinds(r)).toEqual([
+        "Assault:team",
+        "Command:team",
+        "Old lobby:leads",
+      ]);
+    });
+
+    it("counts the lobby toward the group limit", () => {
+      const r = svc.validatePresetForm(body({ groups_captains_lobby: "1" }), {
+        maxCount: 2,
+      });
+      expect(!r.ok && r.errors.join(" ")).toContain(
+        "counting the captains lobby",
+      );
+    });
+
+    it("a lobby alone is no preset", () => {
+      const r = svc.validatePresetForm(
+        { preset_name: "Only lobby", groups_captains_lobby: "1" },
+        { maxCount: 15 },
+      );
+      expect(!r.ok && r.errors[0]).toBe(
+        "Add at least one group, each with a name.",
+      );
+    });
+
+    it("presetToFormValues shows a stored leads row as the tick and carries its values", () => {
+      const values = svc.presetToFormValues({
+        label: "Old",
+        groupLabel: "Squad",
+        groups: [
+          { name: "A", kind: "team", size: null, tag: "", marker: "" },
+          { name: "War room", kind: "leads", size: 5, tag: "WR", marker: "R" },
+          { name: "B", kind: "open", size: 3, tag: "", marker: "" },
+        ],
+      });
+      expect(values).toMatchObject({
+        groups_captains_lobby: "1",
+        lobby_index: "1",
+        lobby_name: "War room",
+        lobby_size: "5",
+        lobby_tag: "WR",
+        lobby_marker: "R",
+        group_0_name: "A",
+        group_1_name: "B",
+        group_1_kind: "open",
+      });
+      expect(values).not.toHaveProperty("group_2_name");
+    });
+
+    it("presetToFormValues has no tick for a preset without a leads row", () => {
+      const values = svc.presetToFormValues({
+        groupLabel: "Squad",
+        groups: [{ name: "A", kind: "team", size: null, tag: "", marker: "" }],
+      });
+      expect(values).not.toHaveProperty("groups_captains_lobby");
+      expect(values).not.toHaveProperty("lobby_name");
+    });
+
+    it("round trip: a stored preset with a leads row in the middle saves back unchanged", () => {
+      const stored = [
+        { name: "A", kind: "team" as const, size: 4, tag: "AA", marker: "B" },
+        {
+          name: "War room",
+          kind: "leads" as const,
+          size: 5,
+          tag: "WR",
+          marker: "R",
+        },
+        { name: "B", kind: "open" as const, size: null, tag: "", marker: "" },
+      ];
+      const values = svc.presetToFormValues({
+        label: "Old",
+        groupLabel: "Squad",
+        leaderLabel: "Captain",
+        groups: stored,
+      });
+      const r = svc.validatePresetForm(values, { maxCount: 15 });
+      expect(r.ok && r.data.groups).toEqual(stored);
+    });
   });
 
   it("requires a name, bounds its length and refuses a built-in's name ignoring case", () => {

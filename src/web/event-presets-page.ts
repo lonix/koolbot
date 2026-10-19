@@ -21,6 +21,7 @@ import {
   PRESET_DESCRIPTION_MAX,
   PRESET_FORM_FIELDS,
   presetToFormValues,
+  PRESET_LOBBY_FIELDS,
   type CatalogReadState,
   type PresetEntry,
 } from "../services/event-group-preset-service.js";
@@ -201,13 +202,20 @@ async function loadHostPresets(
 }
 
 export function groupSummary(entry: PresetEntry): string {
-  const names = entry.groups
+  // The Captains lobby (a stored `leads` row) is a tag, not a listed group, as on
+  // the event form and the host panel (#1263).
+  const listed = entry.groups.filter((g) => g.kind !== "leads");
+  const names = listed
     .map((g) => `${g.marker ? `${g.marker} ` : ""}${g.name}`)
     .join(", ");
   const tags = entry.tagsEnabled
     ? ' <span class="tag" title="Pre-ticks the clan tags box on the event form">clan tags on</span>'
     : "";
-  return `<span class="muted">${entry.groups.length}:</span> ${escapeHtml(names)}${tags}`;
+  const lobby =
+    listed.length < entry.groups.length
+      ? ' <span class="tag" title="Ticks Captains lobby on the event form (used while group leaders is ticked)">captains lobby</span>'
+      : "";
+  return `<span class="muted">${listed.length}:</span> ${escapeHtml(names)}${tags}${lobby}`;
 }
 
 function entryRow(entry: PresetEntry, csrfInput: string): string {
@@ -246,13 +254,17 @@ export const EVENT_PRESETS_SCRIPT =
   "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
   "var KEY='koolbot-event-preset-draft';" +
   "function rows(){return box.querySelectorAll('[data-group-row]')}" +
+  // The Captains lobby is a channel too, so a ticked box counts toward the cap.
+  "var lobby=form.elements['groups_captains_lobby'];" +
+  "function used(){return rows().length+(lobby&&lobby.checked?1:0)}" +
   // `force` is only for putting back rows that were submitted before (the cap
   // applies to a person adding rows, not to restoring what they had entered).
-  "function addRow(force){var n=rows().length;if(n>=max&&!force)return false;" +
+  "function addRow(force){var n=rows().length;if(used()>=max&&!force)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);if(add)add.hidden=rows().length>=max;return true}" +
-  "if(add){add.hidden=rows().length>=max;add.addEventListener('click',function(){addRow()})}" +
+  "box.appendChild(d.firstElementChild);if(add)add.hidden=used()>=max;return true}" +
+  "if(add){add.hidden=used()>=max;add.addEventListener('click',function(){addRow()})}" +
+  "if(lobby&&add)lobby.addEventListener('change',function(){add.hidden=used()>=max});" +
   "form.addEventListener('submit',function(){try{var d={};" +
   "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
@@ -260,14 +272,15 @@ export const EVENT_PRESETS_SCRIPT =
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
   "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el)return;" +
-  // A copied preset (?from=, ?fromEvent=) that is refused comes back as a blank
-  // editor whose kind selects have no leads option; a leads row of the draft
-  // (the Captains lobby of an older preset or event) gets its option back, so
-  // the retry keeps it instead of defaulting to a team.
+  // A draft from before the tick can hold a leads row in a kind select, which
+  // has no leads option now; it gets its option back so the retry keeps the row
+  // instead of defaulting to a team, and the tick is set (it decides whether the
+  // lobby is kept, and an older draft has no tick of its own).
   "if(el.tagName==='SELECT'&&/^group_\\d+_kind$/.test(k)&&d[k]==='leads'){var has=false;" +
   "Array.prototype.forEach.call(el.options,function(o){if(o.value==='leads')has=true});" +
   "if(!has){var lo=document.createElement('option');lo.value='leads';" +
-  "lo.textContent='Leads (leaders and host only; use the Captains lobby switch instead)';el.appendChild(lo)}}" +
+  "lo.textContent='Leads (leaders and host only; use the Captains lobby tick instead)';el.appendChild(lo)}" +
+  "if(lobby)lobby.checked=true}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 
@@ -316,9 +329,22 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     renderGroupRow(String(i), String(i + 1), prefilled[i]),
   ).join("\n      ");
 
+  // The Captains lobby is a channel and counts toward the limit (the validator
+  // counts it), so the notice does too.
+  const lobbyOn = Boolean(v[GROUP_FORM_FIELDS.captainsLobby]);
+  const total = prefilled.length + (lobbyOn ? 1 : 0);
+  // What an older preset's lobby row held, carried so saving puts it back as it
+  // was (see `PRESET_LOBBY_FIELDS`). Always rendered, empty when there is none,
+  // so a restored draft has the fields to fill.
+  const lobbyFields = Object.values(PRESET_LOBBY_FIELDS)
+    .map(
+      (name) =>
+        `<input type="hidden" name="${name}" value="${escapeHtml(v[name] ?? "")}">`,
+    )
+    .join("");
   const oversize =
-    prefilled.length > props.maxCount
-      ? `<div class="notice warn" role="status">This setup has ${prefilled.length} groups but the limit is ${props.maxCount} (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you.</div>`
+    total > props.maxCount
+      ? `<div class="notice warn" role="status">This setup has ${total} groups${lobbyOn ? " (counting the Captains lobby)" : ""} but the limit is ${props.maxCount} (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you.</div>`
       : "";
   const editorHtml = props.editUnavailable
     ? '<div class="notice err" role="status">This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.</div>'
@@ -343,12 +369,14 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     </label>
     <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"${v[GROUP_FORM_FIELDS.tags] ? " checked" : ""}> Clan tags on nicknames: pre-tick this on the event form when the preset is chosen (the host can still change it for each event)</label>
     <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
+    <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"${lobbyOn ? " checked" : ""}> Captains lobby: a separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.</label>
+    ${lobbyFields}
     <div data-group-rows data-max="${props.maxCount}" class="stack">
       ${rows}
     </div>
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
-    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). A row of kind Leads is the Captains lobby of a preset saved earlier (at most one): it is kept as it is, and choosing the preset on the event form ticks Captains lobby instead of adding a row. Rows left completely empty are ignored.</p>
+    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). The Captains lobby counts as one of them. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
     ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
   </form>`;
