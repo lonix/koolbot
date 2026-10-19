@@ -322,8 +322,17 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
 
 /** What the follow-up of a stored change may touch. Set by the route; absent means none. */
 export interface LiveEditEffects {
-  /** One leads-channel pass (`EventService.syncLeadsAccess`); never throws. */
-  syncLeadsAccess(guildId: string, eventId: string): Promise<void>;
+  /**
+   * One leads-channel pass (`EventService.syncLeadsAccess`); never throws.
+   * `revoked` are people who lost access with this save: they are moved out of
+   * the channel at once (without it only people the permission cache already
+   * shows as unable to connect are, which can lag a write by a moment).
+   */
+  syncLeadsAccess(
+    guildId: string,
+    eventId: string,
+    revoked?: readonly string[],
+  ): Promise<void>;
   /** Post or remove the "Customise team" messages (`EventService.syncGroupControls`). */
   syncGroupControls(eventId: string): Promise<void>;
   /**

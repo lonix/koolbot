@@ -59,6 +59,7 @@
 
 import { Event, type IEvent } from "../models/event.js";
 import { OPEN_STATES } from "./event-customise-rules.js";
+import { effectiveLeaders } from "./event-leader-roles.js";
 import { checkGroupTag, validateLeaderLabel } from "./event-groups.js";
 import type {
   AfterSaveContext,
@@ -138,7 +139,25 @@ async function leadersFollowUp(ctx: AfterSaveContext): Promise<void> {
   const errors: unknown[] = [];
   if (ctx.saved.has("captainsEnabled")) {
     try {
-      await ctx.effects.syncLeadsAccess(ctx.guildId, ctx.eventId);
+      // With leaders off now, the stored leaders (kept, hidden) lost access
+      // with this save: they are named so that anyone of them connected to the
+      // leaders-only channel is moved out at once, not when the permission cache
+      // has caught up with the overwrite change (a later scan would).
+      let revoked: string[] = [];
+      try {
+        const fresh = (await Event.findOne({
+          _id: ctx.eventId,
+          guildId: ctx.guildId,
+        })
+          .select("captainsEnabled groups")
+          .lean()) as Pick<IEvent, "captainsEnabled" | "groups"> | null;
+        if (fresh && fresh.captainsEnabled !== true) {
+          revoked = effectiveLeaders(fresh.groups).map((l) => l.userId);
+        }
+      } catch {
+        // Unreadable: the pass still runs and the scan finishes the move.
+      }
+      await ctx.effects.syncLeadsAccess(ctx.guildId, ctx.eventId, revoked);
     } catch (err) {
       errors.push(err);
     }

@@ -69,7 +69,7 @@ const { customiseGroup, resetGroupCustomisation } =
   await import("../../src/services/event-leader-customise.js");
 const { customiseRefusal } =
   await import("../../src/services/event-customise-rules.js");
-const { leadsLeaderIds } =
+const { leadsLeaderIds, planLeadsEviction } =
   await import("../../src/services/event-leads-access.js");
 type LiveEditEffects =
   import("../../src/services/event-live-edit.js").LiveEditEffects;
@@ -390,6 +390,73 @@ describe("leaders off", () => {
       originalName: "Red",
       originalTag: "RED",
     });
+  });
+});
+
+describe("leaders off moves a connected ex-leader out of the leaders-only channel", () => {
+  /** An event with a leads channel, Alice leading Red whose channel is c-red. */
+  function seedWithLeadsChannel(over: Doc = {}): void {
+    seed({ captainsEnabled: true, ...over }, [{ channelId: "c-red" }]);
+    (stored().groups as Doc[]).push({
+      key: "g_00000009",
+      name: "Leaders",
+      kind: "leads",
+      channelId: "c-leads",
+      captainId: null,
+      memberIds: [],
+    });
+  }
+  const connected = {
+    ok: true,
+    members: [
+      { id: "alice", channelId: "c-leads" },
+      { id: "bob", channelId: "c-blue" },
+    ],
+  };
+
+  it("names the stored leaders as revoked, and the real eviction plan then moves them to their team channel", async () => {
+    seedWithLeadsChannel();
+    const seen: Array<readonly string[] | undefined> = [];
+    effects.syncLeadsAccess = async (_g, _e, revoked): Promise<void> => {
+      seen.push(revoked);
+    };
+    done(await save([flag("captainsEnabled", false, true)]));
+    expect(seen).toEqual([["alice"]]);
+    // The permission cache has not caught up with the overwrite change yet
+    // (it still says Alice can connect): only the revoked list moves her.
+    const plan = planLeadsEviction(stored() as never, connected, {
+      revoked: new Set(seen[0]),
+      isAdmin: () => false,
+      canConnect: () => true,
+    });
+    expect(plan).toEqual([
+      { userId: "alice", toChannelId: "c-red", fromChannelId: "c-leads" },
+    ]);
+    // Without the list, the stale cache leaves her where she is until a scan.
+    expect(
+      planLeadsEviction(stored() as never, connected, {
+        revoked: new Set(),
+        isAdmin: () => false,
+        canConnect: () => true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("names nobody when leaders are turned on (they gain access)", async () => {
+    seedWithLeadsChannel({ captainsEnabled: false });
+    const seen: Array<readonly string[] | undefined> = [];
+    effects.syncLeadsAccess = async (_g, _e, revoked): Promise<void> => {
+      seen.push(revoked);
+    };
+    done(await save([flag("captainsEnabled", true, false)]));
+    expect(seen).toEqual([[]]);
+  });
+
+  it("the host and the stored data are untouched: only access and presence change", async () => {
+    seedWithLeadsChannel();
+    done(await save([flag("captainsEnabled", false, true)]));
+    expect(groupOf(RED).captainId).toBe("alice");
+    expect(groupOf(RED).memberIds).toEqual(["alice"]);
   });
 });
 

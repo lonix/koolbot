@@ -100,11 +100,11 @@ describe("renderLeadersTagsFields", () => {
 
   it("selects the stored option of each switch", () => {
     const html = renderLeadersTagsFields(view);
-    expect(html).toMatch(
-      /name="s_captainsEnabled">\s*<option value="1" selected>/,
+    expect(html).toContain(
+      'name="s_captainsEnabled">\n<option value="1" selected>On: each team can have a leader</option>',
     );
-    expect(html).toMatch(
-      /name="s_captainCustomisationEnabled">\s*<option value="1">[^<]*<\/option>\s*<option value="0" selected>/,
+    expect(html).toContain(
+      'name="s_captainCustomisationEnabled">\n<option value="1">On</option>\n<option value="0" selected>Off</option>',
     );
   });
 

@@ -16,9 +16,15 @@ import type { LiveEditEffects } from "./event-live-edit.js";
 
 export function createLiveEditEffects(client: Client): LiveEditEffects {
   return {
-    async syncLeadsAccess(guildId, eventId): Promise<void> {
+    async syncLeadsAccess(guildId, eventId, revoked): Promise<void> {
       const { EventService } = await import("./event-service.js");
-      await EventService.getInstance(client).syncLeadsAccess(guildId, eventId);
+      await EventService.getInstance(client).syncLeadsAccess(
+        guildId,
+        eventId,
+        revoked && revoked.length > 0
+          ? (): readonly string[] => revoked
+          : undefined,
+      );
     },
     async syncGroupControls(eventId): Promise<void> {
       const { EventService } = await import("./event-service.js");
