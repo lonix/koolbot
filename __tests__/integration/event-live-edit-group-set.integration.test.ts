@@ -68,8 +68,23 @@ describeWithMongo(
       syncLeadsAccess: async () => undefined,
       syncGroupControls: async () => undefined,
       syncTags: async () => undefined,
-      createGroupChannels: async () => {
+      // Like the group pass: a channel id is recorded on every group that has
+      // none (positional write, as the pass does).
+      createGroupChannels: async (_guildId, eventId) => {
         calls.push("create");
+        const row = (await Event.findById(eventId).lean()) as {
+          groups?: Array<{ key: string; channelId?: string | null }>;
+        } | null;
+        for (const g of row?.groups ?? []) {
+          if (g.channelId) continue;
+          await Event.updateOne(
+            {
+              _id: eventId,
+              groups: { $elemMatch: { key: g.key, channelId: null } },
+            },
+            { $set: { "groups.$.channelId": `made-${g.key}` } },
+          );
+        }
         return { failures: [] };
       },
       emptyGroupChannel: async () => ({ status: "empty", moved: [] }),
@@ -256,7 +271,7 @@ describeWithMongo(
         size: 4,
         tag: "D",
         marker: "",
-        channelId: null,
+        channelId: "made-g_0000abcd",
         captainId: null,
         memberIds: [],
       });
