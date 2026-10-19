@@ -393,11 +393,15 @@ export function validatePresetForm(
   // exactly, else the validator adds a new one named from the leader label.
   const tick = parsed.captainsLobby === true;
   let rows = tick ? parsed.rows : parsed.rows.filter((r) => r.kind !== "leads");
+  // A lobby alone is no preset, whether it came as the carried row or as an
+  // ordinary leads row (a restored older draft): without another group the
+  // validator gets no rows, so it refuses, as for an empty form.
+  if (!rows.some((r) => r.kind !== "leads")) rows = [];
   const carriedName = normalizeGroupText(str(PRESET_LOBBY_FIELDS.name));
   const carried =
     tick &&
     carriedName !== "" &&
-    rows.some((r) => r.kind !== "leads") &&
+    rows.length > 0 &&
     !rows.some((r) => r.kind === "leads");
   if (carried) {
     // Last while it is validated, so "Group N" in an error is the number the

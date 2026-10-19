@@ -564,6 +564,69 @@ describe("the presets admin page (#1200)", () => {
     );
   });
 
+  it("restoring a draft recalculates the Add a group button: an unticked lobby frees its slot (#1263)", () => {
+    const values = presetToFormValues({
+      label: "Old",
+      groupLabel: "Squad",
+      groups: [
+        { name: "A", kind: "team", size: null, tag: "", marker: "" },
+        { name: "L", kind: "leads", size: null, tag: "", marker: "" },
+        { name: "B", kind: "team", size: null, tag: "", marker: "" },
+      ],
+    });
+    const restore = (lobby: boolean): HTMLElement => {
+      const html = adminPage({
+        values,
+        maxCount: 3,
+        editing: { id: LIB_ID, label: "Old" },
+      }).replace(
+        "<h1>Group presets</h1>",
+        '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+      );
+      const dom = new JSDOM(html, {
+        url: "http://localhost/admin/events/presets",
+        runScripts: "outside-only",
+      });
+      dom.window.sessionStorage.setItem(
+        "koolbot-event-preset-draft",
+        JSON.stringify({
+          groups_captains_lobby: lobby,
+          group_0_name: "A",
+          group_0_kind: "team",
+          group_1_name: "B",
+          group_1_kind: "team",
+        }),
+      );
+      const code = Array.from(
+        new JSDOM(html).window.document.querySelectorAll("script"),
+      )
+        .map((el) => el.textContent ?? "")
+        .find((c) => c.includes("koolbot-event-preset-draft"));
+      dom.window.eval(code as string);
+      return dom.window.document.querySelector(
+        "[data-add-group]",
+      ) as HTMLElement;
+    };
+    // At the limit with the lobby ticked: no button. Unticked: one slot is free.
+    expect(restore(true).hidden).toBe(true);
+    expect(restore(false).hidden).toBe(false);
+  });
+
+  it("an ordinary leads row is no preset on its own, even with the box ticked (a restored older draft)", () => {
+    const r = validatePresetForm(
+      {
+        preset_name: "Only lobby",
+        groups_captains_lobby: "1",
+        group_0_name: "War room",
+        group_0_kind: "leads",
+      },
+      { maxCount: 15 },
+    );
+    expect(!r.ok && r.errors[0]).toBe(
+      "Add at least one group, each with a name.",
+    );
+  });
+
   it("an edit carries the preset's id and the unreadable notice shows", () => {
     const html = adminPage({
       editing: { id: LIB_ID, label: "Mine" },

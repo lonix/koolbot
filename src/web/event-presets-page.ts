@@ -283,7 +283,9 @@ export const EVENT_PRESETS_SCRIPT =
   // Only when the draft has no tick of its own: an explicit false is the person
   // having unticked the box after an earlier restore, and stays unticked.
   "if(lobby&&typeof d['groups_captains_lobby']!=='boolean')lobby.checked=true}" +
-  "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
+  "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]});" +
+  // Setting `checked` fires no change event: the button follows the restored box.
+  "if(add)add.hidden=used()>=max}}catch(x){}" +
   "})();";
 
 export interface PresetEditorFormProps {
