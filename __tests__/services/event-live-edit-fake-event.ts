@@ -53,6 +53,8 @@ export function matchDoc(doc: Json, filter: unknown): boolean {
 
 /** Fields a live edit row may `$set`. */
 export const SETTABLE = new Set([
+  "testPartial",
+  "testOwed",
   "channelLeadMinutes",
   "groupsLocked",
   "testName",

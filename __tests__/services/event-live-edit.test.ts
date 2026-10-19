@@ -630,6 +630,7 @@ describe("the executor: fresh read, conditional writes, one result", () => {
       status: "done",
       applied: [],
       notApplied: [],
+      partial: [],
       alreadyApplied: ["channelLeadMinutes", "groupsLocked"],
     });
     expect(writes).toHaveLength(2);
@@ -1058,6 +1059,183 @@ describe("the confirmation round trip (rule 6) with a row that needs it", () => 
   });
 });
 
+describe("a row that stores its target and owes a follow-up (partial), then converges", () => {
+  /**
+   * Stores the target and a durable "owed" marker, then reports partial (as a
+   * rename whose Discord call failed would). `reconcile` finishes it.
+   */
+  const makeRow = (confirmReconcile: boolean): LiveEditRow =>
+    defineRow<string>({
+      id: "testPartial",
+      label: "Test partial",
+      read: (e) => String((e as unknown as Json).testPartial ?? "a"),
+      parse: (raw) => ({ ok: true, value: raw }),
+      applicable: () => null,
+      needsConfirmation: (from, to) =>
+        confirmReconcile && from === to ? "Finishing this is risky." : null,
+      owed: (e) =>
+        (e as unknown as Json).testOwed === true
+          ? "the channel still has the old name"
+          : null,
+      describe: (v) => `"${v}"`,
+      async apply({ eventId, guildId, from, to }) {
+        const { Event } = await import("../../src/models/event.js");
+        const r = await Event.updateOne(
+          {
+            _id: eventId,
+            guildId,
+            state: { $in: ["scheduled", "active"] },
+            testPartial: from,
+          } as never,
+          { $set: { testPartial: to, testOwed: true } } as never,
+        );
+        return (r?.matchedCount ?? 0) === 1
+          ? { status: "partial", message: "the channel still has the old name" }
+          : { status: "lost" };
+      },
+      async reconcile({ eventId, guildId }) {
+        const { Event } = await import("../../src/models/event.js");
+        const r = await Event.updateOne(
+          {
+            _id: eventId,
+            guildId,
+            state: { $in: ["scheduled", "active"] },
+            testOwed: true,
+          } as never,
+          { $set: { testOwed: false } } as never,
+        );
+        return (r?.matchedCount ?? 0) === 1
+          ? { status: "applied" }
+          : { status: "lost" };
+      },
+    });
+  const form = { rowId: "testPartial", to: "b", base: "a" };
+  const runWith = (rows: readonly LiveEditRow[], entries: unknown[] = [form]) =>
+    run(entries as never, deps(), rows);
+
+  it("keeps the stored change in the result and the audit with what is owed (not 'not applied')", async () => {
+    seed({ testPartial: "a" });
+    const rows = [...LIVE_EDIT_ROWS, makeRow(false)];
+    const out = await runWith(rows);
+    expect(out).toMatchObject({
+      status: "done",
+      applied: [],
+      notApplied: [],
+      partial: [
+        {
+          rowId: "testPartial",
+          from: "a",
+          to: "b",
+          owed: "the channel still has the old name",
+        },
+      ],
+    });
+    expect(store.get(EV)).toMatchObject({ testPartial: "b", testOwed: true });
+    const r = describeLiveEditOutcome(out, rows);
+    expect(r.ok).toBe(false);
+    expect(r.message).toBe(
+      'Saved but not finished: Test partial is now "b" (the channel still has the old name). Save again to finish.',
+    );
+    expect(r.details).toMatchObject({
+      outcome: "partial",
+      stored: [
+        {
+          row: "testPartial",
+          from: "a",
+          to: "b",
+          owed: "the channel still has the old name",
+        },
+      ],
+    });
+  });
+
+  it("re-saving the same form runs the follow-up (reconcile) instead of 'already applied', then converges", async () => {
+    seed({ testPartial: "a" });
+    const rows = [...LIVE_EDIT_ROWS, makeRow(false)];
+    await runWith(rows);
+    const second = await runWith(rows);
+    expect(second).toMatchObject({
+      status: "done",
+      applied: [{ rowId: "testPartial", reconcile: true }],
+      partial: [],
+      alreadyApplied: [],
+    });
+    expect(store.get(EV)).toMatchObject({ testPartial: "b", testOwed: false });
+    const r = describeLiveEditOutcome(second, rows);
+    expect(r).toMatchObject({
+      ok: true,
+      message: "Saved: Test partial is finished.",
+    });
+    expect(r.details).toMatchObject({
+      outcome: "applied",
+      changes: [{ row: "testPartial", reconcile: true }],
+    });
+    // A third save has nothing left to do.
+    expect(await runWith(rows)).toMatchObject({
+      applied: [],
+      partial: [],
+      alreadyApplied: ["testPartial"],
+    });
+  });
+
+  it("a reconcile asks for confirmation like any change, and the confirmed run still reconciles", async () => {
+    seed({ testPartial: "a" });
+    const rows = [...LIVE_EDIT_ROWS, makeRow(true)];
+    await runWith(rows);
+    const asked = await runWith(rows);
+    if (asked.status !== "needs-confirmation") throw new Error(asked.status);
+    expect(asked.reasons).toEqual(["Finishing this is risky."]);
+    expect(asked.changes).toMatchObject([
+      { rowId: "testPartial", from: "b", to: "b", reconcile: true },
+    ]);
+    expect(store.get(EV)?.testOwed).toBe(true);
+    const token = signConfirmation({
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+      changes: asked.changes,
+    });
+    const verified = verifyConfirmation(token, {
+      eventId: EV,
+      guildId: GUILD,
+      userId: HOST,
+    });
+    if (!verified.ok) throw new Error(verified.reason);
+    const confirmed = () =>
+      runLiveEdit({
+        guildId: GUILD,
+        eventId: EV,
+        deps: deps(),
+        rows,
+        confirmed: verified.changes,
+      });
+    expect(await confirmed()).toMatchObject({
+      status: "done",
+      applied: [{ rowId: "testPartial", reconcile: true }],
+    });
+    expect(store.get(EV)?.testOwed).toBe(false);
+    // Replayed once nothing is owed any more: stale, nothing written.
+    writes.length = 0;
+    expect(await confirmed()).toMatchObject({ status: "stale" });
+    expect(writes).toEqual([]);
+  });
+
+  it("the reconcile flag is part of the signed change set", () => {
+    const plain = changeSetHash([{ rowId: "r", from: "b", to: "b" }]);
+    const reconcile = changeSetHash([
+      { rowId: "r", from: "b", to: "b", reconcile: true },
+    ]);
+    expect(plain).not.toBe(reconcile);
+  });
+
+  it("a row without a durable owed marker is simply 'already applied' on a re-save", async () => {
+    seed({ testName: "b" });
+    expect(
+      await run([{ rowId: "testName", to: "b", base: "a" }], deps(), ROWS),
+    ).toMatchObject({ applied: [], alreadyApplied: ["testName"] });
+  });
+});
+
 describe("validation of an edited setup (rule 8)", () => {
   const event = (over: Json = {}): IEvent =>
     seed({
@@ -1181,6 +1359,7 @@ describe("the result text", () => {
           confirm: null,
         },
       ],
+      partial: [],
       notApplied: [],
       alreadyApplied: [],
     });

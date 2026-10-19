@@ -1207,7 +1207,9 @@ export class EventService extends ScheduledService {
       shouldCreateChannel(event, now, windows.leadMs) &&
       !this.adoptedHasOwnChannel(event, windows.native)
     ) {
-      const channel = await this.claimEventChannel(event, guild);
+      const channel = await this.claimEventChannel(event, guild, {
+        enforceLead: true,
+      });
       // The claim wrote the channel id (or adopted the winner's): the scan's
       // save must not write it back, whatever a cancel does to it meanwhile.
       this.ignoreClaimed(event, "channelId");
@@ -1657,6 +1659,10 @@ export class EventService extends ScheduledService {
             // Each occurrence is mirrored with the series' cover (#1181); the
             // image itself is shared, only its hash is copied.
             coverHash: latest?.coverHash ?? null,
+            // The channel lead time belongs to every event, with or without
+            // groups: a host's live edit of it (#1239) reaches the next
+            // occurrence of a plain event too.
+            channelLeadMinutes: groupSetup.channelLeadMinutes,
             ...(groupSetup.groupsEnabled ? groupSetup : {}),
             createdBy: previous.createdBy,
           });
@@ -2635,6 +2641,7 @@ export class EventService extends ScheduledService {
   private async claimEventChannel(
     event: IEvent,
     guild: Guild,
+    options: { enforceLead?: boolean } = {},
   ): Promise<VoiceChannel | null> {
     const channel = await this.createEventChannel(event, guild);
     if (!channel) return null;
@@ -2649,6 +2656,15 @@ export class EventService extends ScheduledService {
           // win: the claim then fails and the unclaimed channel is removed.
           state: { $in: ["scheduled", "active"] },
           seriesCancelled: { $ne: true },
+          // The scan decided to create from the lead time on its copy. A host
+          // who changed it while the channel was being created (live edit,
+          // #1239: it is conditional on "no channel yet", which this creation
+          // is not yet) must win: the claim then fails and the channel is
+          // removed, and the next scan decides again from the new lead. Not
+          // asked of "Start now", which creates whatever the lead says.
+          ...(options.enforceLead
+            ? { channelLeadMinutes: event.channelLeadMinutes ?? null }
+            : {}),
         },
         { $set: { channelId: channel.id } },
       );

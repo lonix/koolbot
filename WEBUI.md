@@ -1898,7 +1898,15 @@ removing groups, and groups on or off, each as another row of the same form.
   else changed while the form was open is reported ("was changed by someone else") and left
   alone; the other fields still save. The result lists what was saved and anything that was
   not, and saving the same form again converges: what is already applied reads "already
-  applied", and a form with nothing to change says so.
+  applied", and a form with nothing to change says so. A change that is stored but whose
+  follow-up is not finished (a later step's channel rename that Discord refused, for example)
+  is listed as "saved but not finished" with what is still owed, and saving the same form
+  again finishes it.
+- **The channel creation time and channel creation.** The save is refused once a channel
+  exists. A channel that is being created at that very moment is handled too: the scan only
+  records a new channel when the creation time is still the one it decided from, so a shorter
+  or longer time you saved meanwhile wins, the new channel is removed again and the next scan
+  decides from the saved time.
 - **Refused, and nothing changed,** while `events.enabled` is off (or cannot be read), for an
   ended or cancelled event, and for an event that is being ended. The section then shows why
   instead of the form.
@@ -1918,7 +1926,7 @@ removing groups, and groups on or off, each as another row of the same form.
   `partial`, `not-applied`, `nothing-to-do`, `invalid`, a refusal code or `needs-confirmation`)
   and the changed fields with their old and new values; confirming is one entry,
   `event.host.settings-confirm`. A repeating event's next occurrence starts from the creation
-  time saved here, like the rest of the group setup.
+  time saved here (with or without groups), like the rest of the group setup.
 - **Nothing new is stored per member**, and the confirmation needs no server-side record: the
   token is checked and then compared with the event itself.
 

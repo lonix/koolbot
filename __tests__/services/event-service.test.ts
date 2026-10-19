@@ -849,6 +849,101 @@ describe("claimEventChannel (start-now path)", () => {
   });
 });
 
+// The live edit of the channel lead time (#1239) is conditional on "no channel
+// yet", which a creation in progress still satisfies. The scan's claim is
+// therefore conditional on the lead time it decided from.
+describe("claimEventChannel (scan path) and a lead time changed during creation (#1239)", () => {
+  const CATEGORY_ID = "cat-1";
+  type Claimer = {
+    claimEventChannel: (
+      event: unknown,
+      guild: unknown,
+      options?: { enforceLead?: boolean },
+    ) => Promise<{ id: string } | null>;
+  };
+
+  function setup(): {
+    row: { channelId: string | null; channelLeadMinutes: number | null };
+    deletable: { delete: jest.Mock };
+    claim: (enforceLead: boolean) => Promise<{ id: string } | null>;
+  } {
+    EventService.reset();
+    // What the scan read: a 60 minute lead time, and decided to create.
+    const row = {
+      channelId: null as string | null,
+      channelLeadMinutes: 60 as number | null,
+    };
+    EventMock.findOneAndUpdate = jest.fn(
+      async (
+        filter: Record<string, unknown>,
+        update: { $set: { channelId: string } },
+      ) => {
+        if (row.channelId !== filter.channelId) return null;
+        if (
+          "channelLeadMinutes" in filter &&
+          row.channelLeadMinutes !== filter.channelLeadMinutes
+        ) {
+          return null;
+        }
+        row.channelId = update.$set.channelId;
+        return { _id: "evt-1" };
+      },
+    );
+    EventMock.findById = jest.fn(async () => ({ channelId: row.channelId }));
+    const deletable = { delete: jest.fn(async () => undefined) };
+    const cache = new Map<string, unknown>();
+    cache.set(CATEGORY_ID, { type: ChannelType.GuildCategory });
+    cache.set("chan-new", deletable);
+    const guild = {
+      channels: {
+        cache,
+        // The host saves a shorter lead time while Discord creates the channel.
+        create: jest.fn(async () => {
+          row.channelLeadMinutes = 5;
+          return { id: "chan-new" };
+        }),
+      },
+    };
+    const service = EventService.getInstance({} as never);
+    const event = {
+      _id: "evt-1",
+      guildId: "guild-1",
+      title: "Quiz",
+      state: "scheduled",
+      channelId: null,
+      categoryId: CATEGORY_ID,
+      channelLeadMinutes: 60,
+    };
+    return {
+      row,
+      deletable,
+      claim: (enforceLead) =>
+        (service as unknown as Claimer).claimEventChannel(event, guild, {
+          enforceLead,
+        }),
+    };
+  }
+
+  it("fails the scan's claim and removes the new channel, so the save is honoured", async () => {
+    const { row, deletable, claim } = setup();
+    expect(await claim(true)).toBeNull();
+    expect(row.channelId).toBeNull();
+    expect(deletable.delete).toHaveBeenCalledTimes(1);
+    // The claim asked for the lead time the scan decided from.
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: null, channelLeadMinutes: 60 }),
+      { $set: { channelId: "chan-new" } },
+    );
+  });
+
+  it("does not hold 'Start now' to the lead time (it creates whatever the lead says)", async () => {
+    const { row, deletable, claim } = setup();
+    expect(await claim(false)).toMatchObject({ id: "chan-new" });
+    expect(row.channelId).toBe("chan-new");
+    expect(deletable.delete).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------
 // Recurring events (#744)
 // ---------------------------------------------------------------
@@ -1178,7 +1273,24 @@ describe("recurring event lifecycle", () => {
     await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
     expect(created[0].groupsEnabled).toBeUndefined();
     expect(created[0].groups).toBeUndefined();
-    expect(created[0].channelLeadMinutes).toBeUndefined();
+    // No custom lead time: the server default stays in force.
+    expect(created[0].channelLeadMinutes).toBeNull();
+  });
+
+  it("carries a custom channel lead time to the next occurrence of an event WITHOUT groups (#1239)", async () => {
+    // The host saved a lead time in the live settings of a plain event; the
+    // lead time belongs to every event, not only to the group setup.
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+      groupsEnabled: false,
+      channelLeadMinutes: 45,
+      groups: [],
+    }));
+    const { service } = buildService();
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0].channelLeadMinutes).toBe(45);
+    expect(created[0].groupsEnabled).toBeUndefined();
   });
 
   it("createEvent stores the group setup only when the form switched groups on (#1188)", async () => {

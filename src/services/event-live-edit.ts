@@ -102,6 +102,13 @@
  *     must ask `ctx.ending()`. A Discord failure must leave DB and Discord in a
  *     state a later pass reconciles, and say so with `partial` or `failed`; it
  *     must never sleep through a rate limit (use the rename queue and report).
+ *   - `owed?(event)` and `reconcile?(ctx)`: only for a row whose `apply` can
+ *     return `partial`. `partial` is kept in the result and the audit (what was
+ *     stored, what is owed), and a re-save of the same form finds the stored
+ *     value equal to the submitted one, sees `owed` (read from the fresh row,
+ *     so the row must keep a durable marker, such as a pending flag) and runs
+ *     `reconcile` instead of reporting "already applied"; it asks
+ *     `needsConfirmation(stored, stored)` first like any change.
  *   - `describe(value)`: plain text for the result and the confirmation page.
  * Order of execution is the order of `LIVE_EDIT_ROWS`. Values must be JSON
  * (they travel in the token and the audit row).
@@ -265,6 +272,21 @@ export interface LiveEditRow<V extends JsonValue = JsonValue> {
   validate?(to: V, ctx: ValidateContext): string | null;
   needsConfirmation?(from: V, to: V, event: IEvent): string | null;
   apply(ctx: ApplyContext<V>): Promise<RowOutcome>;
+  /**
+   * Only for a row whose `apply` can return `partial` (the target is stored,
+   * a follow-up is still owed). Reads the FRESH row and returns what is still
+   * owed (plain text), or null when nothing is. A re-save whose submitted value
+   * equals the stored one then plans a reconcile change instead of "already
+   * applied", and the executor calls `reconcile`.
+   */
+  owed?(event: IEvent): string | null;
+  /**
+   * Finish the owed follow-up, from the stored value (`ctx.from === ctx.to`).
+   * The same rules as `apply` (conditional, explicit outcome, ask
+   * `ctx.ending()` before outward calls). `applicable` and `validate` are not
+   * asked: the target is already stored and only its follow-up is owed.
+   */
+  reconcile?(ctx: ApplyContext<V>): Promise<RowOutcome>;
   describe(value: V): string;
 }
 
@@ -415,6 +437,8 @@ export interface SubmittedEntry {
   to: JsonValue;
   /** What the form showed. */
   base: JsonValue;
+  /** A confirmed reconcile change (see `LiveEditRow.owed`); only from a token. */
+  reconcile?: boolean;
 }
 
 /** Form field names of a row. */
@@ -459,6 +483,8 @@ export interface PlannedChange {
   to: JsonValue;
   /** Why the host must confirm, or null. */
   confirm: string | null;
+  /** The target is already stored; only its owed follow-up is run. */
+  reconcile?: boolean;
 }
 
 export interface PlanProblem {
@@ -503,9 +529,32 @@ export function planLiveEdit(input: {
     if (!entry || seen.has(row.id)) continue;
     seen.add(row.id);
     const stored = row.read(input.event);
+    const owed = row.owed?.(input.event) ?? null;
+    const reconcileChange = (): PlannedChange => ({
+      rowId: row.id,
+      label: row.label,
+      from: stored,
+      to: stored,
+      confirm: row.needsConfirmation?.(stored, stored, input.event) ?? null,
+      reconcile: true,
+    });
+    if (entry.reconcile === true) {
+      // A confirmed reconcile: only while that follow-up is still owed (else
+      // the fresh change set differs from the confirmed one: stale).
+      if (owed !== null && same(entry.to, stored)) {
+        plan.changes.push(reconcileChange());
+      }
+      continue;
+    }
     if (same(entry.to, entry.base)) continue;
     if (same(entry.to, stored)) {
-      plan.alreadyApplied.push(row.id);
+      // Stored already, but a follow-up is owed: finish it (a re-save
+      // converges); otherwise already applied.
+      if (owed !== null && row.reconcile) {
+        plan.changes.push(reconcileChange());
+      } else {
+        plan.alreadyApplied.push(row.id);
+      }
       continue;
     }
     if (!same(stored, entry.base)) {
@@ -546,12 +595,13 @@ export interface ConfirmedChange {
   rowId: string;
   from: JsonValue;
   to: JsonValue;
+  reconcile?: boolean;
 }
 
 /** Hash of a change set (rows with their from and to), order-independent. */
 export function changeSetHash(changes: readonly ConfirmedChange[]): string {
   const canonical = [...changes]
-    .map((c) => ({ r: c.rowId, f: c.from, t: c.to }))
+    .map((c) => ({ r: c.rowId, f: c.from, t: c.to, k: c.reconcile === true }))
     .sort((a, b) => (a.r < b.r ? -1 : a.r > b.r ? 1 : 0));
   return crypto
     .createHash("sha256")
@@ -566,7 +616,7 @@ interface TokenPayload {
   u: string;
   x: number;
   h: string;
-  c: Array<{ r: string; f: JsonValue; t: JsonValue }>;
+  c: Array<{ r: string; f: JsonValue; t: JsonValue; k?: boolean }>;
 }
 
 function tokenMac(payload: string): string | null {
@@ -595,7 +645,12 @@ export function signConfirmation(input: {
     u: input.userId,
     x: (input.now ?? Date.now()) + CONFIRM_TTL_MS,
     h: changeSetHash(input.changes),
-    c: input.changes.map((c) => ({ r: c.rowId, f: c.from, t: c.to })),
+    c: input.changes.map((c) => ({
+      r: c.rowId,
+      f: c.from,
+      t: c.to,
+      ...(c.reconcile === true ? { k: true } : {}),
+    })),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const mac = tokenMac(body);
@@ -653,6 +708,7 @@ export function verifyConfirmation(
     rowId: c.r,
     from: c.f,
     to: c.t,
+    ...(c.k === true ? { reconcile: true } : {}),
   }));
   if (changeSetHash(changes) !== payload.h) {
     return { ok: false, reason: "invalid" };
@@ -689,6 +745,17 @@ export interface NotApplied {
   reason: string;
 }
 
+/** A change that is stored but whose follow-up is still owed. */
+export interface PartialApplied {
+  rowId: string;
+  label: string;
+  from: JsonValue;
+  to: JsonValue;
+  /** What is still owed, in plain text. */
+  owed: string;
+  reconcile: boolean;
+}
+
 export type LiveEditOutcome =
   | { status: "refused"; code: RefusalCode; message: string }
   | { status: "invalid"; errors: string[] }
@@ -701,6 +768,8 @@ export type LiveEditOutcome =
   | {
       status: "done";
       applied: PlannedChange[];
+      /** Stored, follow-up owed: re-saving the same form finishes it. */
+      partial: PartialApplied[];
       notApplied: NotApplied[];
       alreadyApplied: string[];
     };
@@ -772,6 +841,7 @@ export async function runLiveEdit(opts: {
             rowId: c.rowId,
             to: c.to,
             base: c.from,
+            reconcile: c.reconcile,
           }))
         : [...(opts.submission ?? [])];
     if (entries.some((e) => !rows.some((r) => r.id === e.rowId))) {
@@ -805,6 +875,7 @@ export async function runLiveEdit(opts: {
     }
 
     const applied: PlannedChange[] = [];
+    const partial: PartialApplied[] = [];
     const notApplied: NotApplied[] = plan.conflicts.map((c) => ({
       rowId: c.rowId,
       label: c.label,
@@ -823,14 +894,18 @@ export async function runLiveEdit(opts: {
       }
       let outcome: RowOutcome;
       try {
-        outcome = await row.apply({
+        const ctx = {
           event: event as IEvent,
           eventId,
           guildId,
           from: change.from,
           to: change.to,
-          ending: () => deps.isEnding(eventId),
-        });
+          ending: (): boolean => deps.isEnding(eventId),
+        };
+        outcome =
+          change.reconcile === true && row.reconcile
+            ? await row.reconcile(ctx)
+            : await row.apply(ctx);
       } catch (err) {
         logger.error(
           `Event ${sanitizeForLog(eventId)}: live edit of ${row.id} failed:`,
@@ -840,6 +915,17 @@ export async function runLiveEdit(opts: {
       }
       if (outcome.status === "applied") {
         applied.push(change);
+      } else if (outcome.status === "partial") {
+        // Stored, but not finished: kept in the result and the audit with
+        // what is owed, never folded into "not applied".
+        partial.push({
+          rowId: change.rowId,
+          label: change.label,
+          from: change.from,
+          to: change.to,
+          owed: outcome.message,
+          reconcile: change.reconcile === true,
+        });
       } else if (outcome.status === "lost") {
         notApplied.push({
           rowId: change.rowId,
@@ -860,6 +946,7 @@ export async function runLiveEdit(opts: {
     return {
       status: "done",
       applied,
+      partial,
       notApplied,
       alreadyApplied: plan.alreadyApplied,
     };
@@ -931,10 +1018,11 @@ export function describeLiveEditOutcome(
         },
       };
     case "done": {
+      const unfinished = outcome.notApplied.length + outcome.partial.length;
       const details = {
         outcome:
-          outcome.notApplied.length > 0
-            ? outcome.applied.length > 0
+          unfinished > 0
+            ? outcome.applied.length + outcome.partial.length > 0
               ? "partial"
               : "not-applied"
             : outcome.applied.length > 0
@@ -944,6 +1032,15 @@ export function describeLiveEditOutcome(
           row: c.rowId,
           from: c.from,
           to: c.to,
+          ...(c.reconcile === true ? { reconcile: true } : {}),
+        })),
+        // Stored but not finished, with what is still owed.
+        stored: outcome.partial.map((c) => ({
+          row: c.rowId,
+          from: c.from,
+          to: c.to,
+          owed: c.owed,
+          ...(c.reconcile ? { reconcile: true } : {}),
         })),
         notApplied: outcome.notApplied.map((n) => ({
           row: n.rowId,
@@ -951,7 +1048,7 @@ export function describeLiveEditOutcome(
         })),
         alreadyApplied: outcome.alreadyApplied,
       };
-      if (outcome.applied.length === 0 && outcome.notApplied.length === 0) {
+      if (outcome.applied.length === 0 && unfinished === 0) {
         return {
           ok: true,
           message: "Nothing to change: the event already has these settings.",
@@ -960,10 +1057,22 @@ export function describeLiveEditOutcome(
       }
       const saved = outcome.applied.map((c) => {
         const row = rowOf(c.rowId);
-        return `${c.label} is now ${row ? row.describe(c.to) : String(c.to)}`;
+        return c.reconcile === true
+          ? `${c.label} is finished`
+          : `${c.label} is now ${row ? row.describe(c.to) : String(c.to)}`;
       });
       const parts: string[] = [];
       if (saved.length > 0) parts.push(`Saved: ${saved.join("; ")}.`);
+      if (outcome.partial.length > 0) {
+        parts.push(
+          `Saved but not finished: ${outcome.partial
+            .map((c) => {
+              const row = rowOf(c.rowId);
+              return `${c.label} is now ${row ? row.describe(c.to) : String(c.to)} (${c.owed})`;
+            })
+            .join("; ")}. Save again to finish.`,
+        );
+      }
       if (outcome.notApplied.length > 0) {
         parts.push(
           `Not saved: ${outcome.notApplied
@@ -972,10 +1081,10 @@ export function describeLiveEditOutcome(
         );
       }
       return {
-        ok: outcome.notApplied.length === 0,
+        ok: unfinished === 0,
         message: parts.join(" "),
         details,
-        errorMessage: "some changes were not applied",
+        errorMessage: "some changes were not applied or not finished",
       };
     }
   }

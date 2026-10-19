@@ -1251,6 +1251,7 @@ function registerSettingsActions(router: Router, client: Client): void {
           rowId: c.rowId,
           from: c.from,
           to: c.to,
+          reconcile: c.reconcile,
         })),
       });
       if (!token) {
