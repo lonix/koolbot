@@ -16,6 +16,11 @@ import {
   CHANNEL_LEAD_MIN,
 } from "../services/event-groups.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
+import {
+  renderGroupEditor,
+  renderPresetForm,
+  type GroupEditViewData,
+} from "./host-settings-groups.js";
 
 export interface SettingsGroupView {
   name: string;
@@ -39,6 +44,8 @@ export interface SettingsViewData {
   locked: boolean | null;
   groupLabel: string;
   groups: SettingsGroupView[];
+  /** Names, sizes and the preset switch (#1241); absent = the read-only table. */
+  groupEdit?: GroupEditViewData;
 }
 
 function hidden(name: string, value: string): string {
@@ -95,9 +102,10 @@ export function renderSettingsSection(d: SettingsViewData): string {
 <form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderLead(d)}
 ${renderLock(d)}
+${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
 <button type="submit">Save settings</button>
 </form>
-${renderGroups(d)}`;
+${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}`;
 }
 
 export interface ConfirmChangeView {

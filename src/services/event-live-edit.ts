@@ -136,6 +136,7 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { withEventMoveLock } from "./event-move-guard.js";
 import { withGroupLock, writeGroupsLocked } from "./event-group-assignment.js";
+import { GROUP_EDIT_ROWS } from "./event-live-edit-groups.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -378,6 +379,8 @@ export const lockGroupsRow = defineRow<boolean>({
 export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   leadTimeRow,
   lockGroupsRow,
+  // Names, sizes and preset of the groups (#1241): `event-live-edit-groups.ts`.
+  ...GROUP_EDIT_ROWS,
 ];
 
 // ---------------------------------------------------------------

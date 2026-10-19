@@ -312,6 +312,26 @@ export function checkGroupTag(raw: string): GroupTextCheck {
   return { ok: true, value };
 }
 
+/**
+ * The one rule for a group's size (the event form, the host panel's live edit
+ * #1241): empty is no limit (null), else a whole number from `GROUP_SIZE_MIN`
+ * to `GROUP_SIZE_MAX`. `error` reads after "Group 3 size: ".
+ */
+export function checkGroupSize(
+  raw: string,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const text = raw.trim();
+  if (!text) return { ok: true, value: null };
+  const parsed = /^\d{1,3}$/.test(text) ? Number(text) : NaN;
+  if (!(parsed >= GROUP_SIZE_MIN && parsed <= GROUP_SIZE_MAX)) {
+    return {
+      ok: false,
+      error: `a whole number from ${GROUP_SIZE_MIN} to ${GROUP_SIZE_MAX}, or empty for no limit.`,
+    };
+  }
+  return { ok: true, value: parsed };
+}
+
 /** A group key: `g_` and eight hex digits. */
 const GROUP_KEY_PATTERN = /^g_[0-9a-f]{8}$/;
 
@@ -477,15 +497,11 @@ export function validateGroupSetup(
     }
 
     let size: number | null = null;
-    if (row.size) {
-      const parsed = /^\d{1,3}$/.test(row.size) ? Number(row.size) : NaN;
-      if (!(parsed >= GROUP_SIZE_MIN && parsed <= GROUP_SIZE_MAX)) {
-        errors.push(
-          `${where} size: a whole number from ${GROUP_SIZE_MIN} to ${GROUP_SIZE_MAX}, or empty for no limit.`,
-        );
-      } else {
-        size = parsed;
-      }
+    const sizeCheck = checkGroupSize(row.size);
+    if (sizeCheck.ok) {
+      size = sizeCheck.value;
+    } else {
+      errors.push(`${where} size: ${sizeCheck.error}`);
     }
 
     const tagCheck = checkGroupTag(row.tag);

@@ -94,6 +94,15 @@ export interface IEventGroup {
    */
   nameSyncPending?: boolean;
   /**
+   * True while the group's stored size has not been confirmed as its channel's
+   * user limit (a host's size change whose channel update failed or could not
+   * be checked, #1241). Set in the same write that changes the size; cleared
+   * only after the channel was confirmed to carry that limit. A pass finishes
+   * it. Deliberately no schema default: absent reads as false. The "over size"
+   * state is NOT stored: it is derived (members above size).
+   */
+  sizeSyncPending?: boolean;
+  /**
    * The control message (button) of the leader customiser in this group's
    * channel (#1196): its message id and the channel it was posted in, so a
    * re-created channel never trusts an id from the old one.
@@ -299,6 +308,7 @@ const EventGroupSchema = new Schema<IEventGroup>(
     originalName: { type: String, maxlength: 50 },
     originalTag: { type: String, maxlength: 8 },
     nameSyncPending: { type: Boolean },
+    sizeSyncPending: { type: Boolean },
     controlMessageId: { type: String },
     controlChannelId: { type: String },
   },

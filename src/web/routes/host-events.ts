@@ -137,6 +137,14 @@ import {
   renderSettingsSection,
 } from "../host-settings-view.js";
 import {
+  buildGroupEditView,
+  prepareGroupEditBody,
+} from "../host-settings-groups.js";
+import {
+  configureGroupEditEffects,
+  createGroupEditEffects,
+} from "../../services/event-live-edit-groups.js";
+import {
   renderCustomiseSection,
   type CustomiseEditView,
 } from "../host-customise-view.js";
@@ -1208,6 +1216,8 @@ function createSettingsSection(client: Client): HostSectionRenderer {
             overSize: isGroupOverSize(g),
           }))
         : [],
+      // Names, sizes and the preset switch (#1241).
+      groupEdit: hasGroups ? await buildGroupEditView(fresh) : undefined,
     });
   };
 }
@@ -1232,9 +1242,21 @@ function registerSettingsActions(router: Router, client: Client): void {
     "/settings",
     async ({ req, event, session }) => {
       // Everything taken from the request and the session before the first await.
-      const parsed = parseSubmission(req.body);
+      const rawBody = req.body;
       const csrfToken = getCsrfToken(req);
       const eventId = String(event._id);
+      // A chosen preset is resolved from the server's catalog (#1241): the
+      // content of a preset is never taken from the client.
+      const prepared = await prepareGroupEditBody(rawBody, event.guildId);
+      if (!prepared.ok) {
+        return {
+          ok: false,
+          message: `Nothing was changed. ${prepared.error}`,
+          details: { outcome: "invalid", errors: [prepared.error] },
+          errorMessage: "invalid",
+        };
+      }
+      const parsed = parseSubmission(prepared.body);
       if (parsed.errors.length > 0) {
         return {
           ok: false,
@@ -1491,6 +1513,8 @@ export function createHostEventsRouter(client: Client): Router {
   HOST_SECTION_RENDERERS.end = createEndSection();
   registerEndAction(router, client);
   // The "Live settings" section and its save and confirm actions (#1239).
+  // The rows of names, sizes and preset (#1241) reach Discord through these.
+  configureGroupEditEffects(createGroupEditEffects(client));
   HOST_SECTION_RENDERERS.settings = createSettingsSection(client);
   registerSettingsActions(router, client);
 
