@@ -52,11 +52,13 @@ describeWithMongo(
     useRealMongo();
 
     const calls: string[] = [];
+    /** Somebody is connected to a voice channel of the event (the gateway cache). */
+    let voiceInUse = true;
     const deleted = new Set<string>();
 
     const effects: LiveEditEffects = {
       // Somebody is connected, so turning the lobby off asks first.
-      eventVoiceInUse: () => true,
+      eventVoiceInUse: () => voiceInUse,
       syncGroupName: async (_g, _e, key) => ({
         groupKey: key,
         status: "applied",
@@ -146,6 +148,7 @@ describeWithMongo(
     beforeEach(async () => {
       await Event.deleteMany({});
       calls.length = 0;
+      voiceInUse = true;
       deleted.clear();
       jest
         .spyOn(ConfigService.getInstance(), "getBoolean")
@@ -398,9 +401,27 @@ describeWithMongo(
         ],
       });
       const oldId = String(inserted.insertedId);
+      // Nobody is connected to a voice channel of the event: no confirmation.
+      voiceInUse = false;
       const out = await run(oldId, false, true);
       expect(outcomeOf(out)).toBe("done:captainsLobby");
       expect((await groupsOf(oldId)).map((g) => g.key)).toEqual([A, B]);
+    });
+
+    it("nobody connected: a lobby with a channel is removed without asking, through the real channel pass", async () => {
+      const id = await makeEvent([
+        {
+          key: LOBBY,
+          name: "Leader lobby",
+          kind: "leads",
+          channelId: LOBBY_CH,
+        },
+      ]);
+      voiceInUse = false;
+      const out = await run(id, false, true);
+      expect(outcomeOf(out)).toBe("done:captainsLobby");
+      expect(await leadsOf(id)).toEqual([]);
+      expect([...deleted]).toEqual([`/channels/${LOBBY_CH}`]);
     });
 
     it("a lobby whose channel could not be deleted stays; saving it off again finishes it", async () => {

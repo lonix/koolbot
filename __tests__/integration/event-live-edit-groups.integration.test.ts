@@ -59,6 +59,7 @@ const deps: LiveEditDeps = {
       status: "applied",
     }),
     retagMembers: () => undefined,
+    eventVoiceInUse: () => true,
     syncLeadsAccess: async () => undefined,
     syncGroupControls: async () => undefined,
     syncTags: async () => undefined,
