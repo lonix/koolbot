@@ -1047,32 +1047,45 @@ describe("the group limit cap and the size of a confirmation", () => {
     expect(done(size).applied).toHaveLength(1);
   });
 
-  it("a signed confirmation of a preset switch of 25 groups with the longest names and tags still verifies", () => {
+  it("a signed confirmation of a preset switch of 25 customised groups with the longest names and tags still verifies", () => {
     // Worst case for the token: 25 groups, 50-character names and 8-character
-    // tags of 3-byte characters, in both the stored (from) and chosen (to) value.
-    const groups = Array.from({ length: 25 }, (_, i) => ({
-      name: `${String.fromCharCode(0x4e00 + i)}`.repeat(50),
-      kind: "team",
-      size: 99,
-      tag: "\u6f22".repeat(8),
-    }));
-    const other = groups.map((g, i) => ({
-      ...g,
-      name: `${String.fromCharCode(0x4f00 + i)}`.repeat(50),
-    }));
+    // tags of 3-byte characters, each customised by a leader (original name of
+    // 50 such characters), in both the stored (from) and chosen (to) value. The
+    // stored value comes from the real reader, so it is what a page would sign.
+    const cjk = (code: number, n: number): string =>
+      String.fromCharCode(code).repeat(n);
+    const stored = {
+      groupsEnabled: true,
+      presetId: "lib:65a000000000000000000001",
+      groups: Array.from({ length: 25 }, (_, i) => ({
+        key: `g_${String(i + 1).padStart(8, "0")}`,
+        name: cjk(0x4e00 + i, 50),
+        originalName: cjk(0x5e00 + i, 50),
+        originalTag: cjk(0x6f22, 8),
+        kind: "team",
+        size: 99,
+        tag: cjk(0x6f22, 8),
+        memberIds: [],
+      })),
+    };
+    const from = readPresetValue(stored as never);
+    const to = {
+      id: "lib:65a000000000000000000002",
+      groups: from.groups.map((g, i) => ({
+        name: cjk(0x4f00 + i, 50),
+        kind: g.kind,
+        size: 99,
+        tag: g.tag,
+      })),
+    };
     const token = signConfirmation({
       eventId: EV,
       guildId: GUILD,
       userId: "111111111111111111",
-      changes: [
-        {
-          rowId: GROUP_PRESET_ROW_ID,
-          from: { id: "lib:65a000000000000000000001", groups },
-          to: { id: "lib:65a000000000000000000002", groups: other },
-        },
-      ],
+      changes: [{ rowId: GROUP_PRESET_ROW_ID, from, to }],
       revision: 12345,
     }) as string;
+    // The token's own limit is 16384 characters; verification refuses more.
     expect(token.length).toBeLessThan(16_384);
     expect(
       verifyConfirmation(token, {
