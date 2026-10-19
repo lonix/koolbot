@@ -20,6 +20,7 @@ import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import {
   permissionNames,
   type ChannelKind,
+  channelKindOf,
   type ChannelState,
   type ConfigValue,
   type OverwriteState,
@@ -384,21 +385,6 @@ function snowflakes(value: string): string[] {
 
 function posOf(c: GuildBasedChannel): number {
   return "rawPosition" in c ? (c.rawPosition ?? 0) : 0;
-}
-
-function kindOf(type: ChannelType): ChannelKind {
-  switch (type) {
-    case ChannelType.GuildCategory:
-      return "category";
-    case ChannelType.GuildText:
-    case ChannelType.GuildAnnouncement:
-      return "text";
-    case ChannelType.GuildVoice:
-    case ChannelType.GuildStageVoice:
-      return "voice";
-    default:
-      return "other";
-  }
 }
 
 /** `VerifiedBot` public flag of a cached user; `null` when flags are unknown. */
@@ -921,7 +907,7 @@ export class ServerScanService {
     return {
       id: c.id,
       name,
-      kind: kindOf(c.type),
+      kind: channelKindOf(c.type),
       typeName: ChannelType[c.type] ?? String(c.type),
       parentId,
       parentName: parentId

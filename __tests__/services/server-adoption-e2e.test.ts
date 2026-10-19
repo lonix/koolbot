@@ -722,15 +722,14 @@ describe("server adoption, end to end on a large community", () => {
   });
 
   it("applies, re-plans empty and rolls back, keeping the lobby's live rooms, the team channels, the booster role and every webhook", async () => {
-    // Without the forum claim, which cannot be applied today (#1244, below).
-    const claims = L.claims.filter((x) => x.channelId !== L.ids.feedback);
+    const claims = L.claims;
     const e = h.engine(L.world);
     const p = await h.planClaims(L.world, claims);
     const result = await e.service.apply(p.plan, h.applyOpts(L.world));
     expect(result.status).toBe("applied");
     expect(result.failed).toEqual([]);
     // One gateway write per overwrite step and four settings, nothing else.
-    expect(e.writeCalls()).toHaveLength(7);
+    expect(e.writeCalls()).toHaveLength(9);
     expect(e.writeCalls().every((x) => x === "setOverwrite")).toBe(true);
     expect(e.writes.filter((w) => w.startsWith("config:"))).toHaveLength(4);
 
@@ -770,34 +769,21 @@ describe("server adoption, end to end on a large community", () => {
       { channelId: L.ids.feedback, action: "read-only" },
     ];
 
-    it("applies once the live read classifies the forum the way the scan does", async () => {
-      // The scan reports a forum as "other". With the live read agreeing, the
-      // plan applies, is idempotent and rolls back like any other.
-      const e = h.engine(L.world, {
-        liveKind: (type) => (type === h.T.forum ? "other" : undefined),
-      });
+    it("applies against the real live read, re-plans empty and rolls back (#1244)", async () => {
+      const e = h.engine(L.world);
       const p = await h.planClaims(L.world, forumClaim());
       expect(p.plan.errors).toEqual([]);
       const result = await e.service.apply(p.plan, h.applyOpts(L.world));
       expect(result.status).toBe("applied");
+      expect(result.failed).toEqual([]);
       expect(
         (await h.planClaims(L.world, forumClaim())).plan.operations,
       ).toEqual([]);
-      await e.service.rollback(result.snapshotId, {
+      const back = await e.service.rollback(result.snapshotId, {
         actor: h.actorFor(L.world),
       });
+      expect(back.failed).toEqual([]);
       expect(h.snapshotOf(L.world)).toEqual(before);
-    });
-
-    // Known bug #1244: the scan calls a forum "other", the live read calls it
-    // "text", and the engine refuses the plan as "changed since it was made".
-    // When it is fixed this starts passing, which fails `it.failing`: make it
-    // a plain `it` then.
-    it.failing("applies against the real live read (#1244)", async () => {
-      const e = h.engine(L.world);
-      const p = await h.planClaims(L.world, forumClaim());
-      const result = await e.service.apply(p.plan, h.applyOpts(L.world));
-      expect(result.status).toBe("applied");
     });
   });
 

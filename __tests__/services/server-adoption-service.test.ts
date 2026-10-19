@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import { PermissionsBitField } from "discord.js";
+import { ChannelType, Collection, PermissionsBitField } from "discord.js";
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -10,7 +10,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { ServerAdoptionService, AdoptionPlanError } =
+const { ServerAdoptionService, AdoptionPlanError, DiscordAdoptionGateway } =
   await import("../../src/services/server-adoption-service.js");
 type Deps =
   import("../../src/services/server-adoption-service.js").AdoptionDeps;
@@ -2163,5 +2163,52 @@ describe("reaction role pairings (#1022)", () => {
     const result = await h.service.apply(pairingPlan(), opts);
     expect(result.status).toBe("partial");
     expect(result.failed[0].error).toContain("powerful permissions");
+  });
+});
+
+describe("DiscordAdoptionGateway.readChannel (#1244)", () => {
+  const live = (type: ChannelType, extra: Record<string, unknown> = {}) => ({
+    id: "c1",
+    name: "chan",
+    type,
+    parentId: null,
+    position: 3,
+    permissionOverwrites: { cache: new Collection() },
+    isVoiceBased: () =>
+      type === ChannelType.GuildVoice || type === ChannelType.GuildStageVoice,
+    members: { size: 2 },
+    ...extra,
+  });
+  const read = (channel: unknown) =>
+    new DiscordAdoptionGateway({
+      channels: { fetch: async () => channel },
+    } as never).readChannel("c1");
+
+  it.each([
+    [ChannelType.GuildCategory, "category"],
+    [ChannelType.GuildText, "text"],
+    [ChannelType.GuildAnnouncement, "text"],
+    [ChannelType.GuildVoice, "voice"],
+    [ChannelType.GuildStageVoice, "voice"],
+    [ChannelType.GuildForum, "other"],
+    [ChannelType.GuildMedia, "other"],
+  ])(
+    "reads channel type %s as %s and keeps the raw type",
+    async (type, kind) => {
+      expect(await read(live(type))).toMatchObject({ kind, rawType: type });
+    },
+  );
+
+  it("counts connected members on voice channels only", async () => {
+    expect(await read(live(ChannelType.GuildVoice))).toMatchObject({
+      voiceMemberCount: 2,
+    });
+    expect(await read(live(ChannelType.GuildForum))).toMatchObject({
+      voiceMemberCount: 0,
+    });
+  });
+
+  it("returns null for a channel without permission overwrites", async () => {
+    expect(await read({ id: "c1" })).toBeNull();
   });
 });
