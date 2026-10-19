@@ -280,7 +280,9 @@ export const EVENT_PRESETS_SCRIPT =
   "Array.prototype.forEach.call(el.options,function(o){if(o.value==='leads')has=true});" +
   "if(!has){var lo=document.createElement('option');lo.value='leads';" +
   "lo.textContent='Leads (leaders and host only; use the Captains lobby tick instead)';el.appendChild(lo)}" +
-  "if(lobby)lobby.checked=true}" +
+  // Only when the draft has no tick of its own: an explicit false is the person
+  // having unticked the box after an earlier restore, and stays unticked.
+  "if(lobby&&typeof d['groups_captains_lobby']!=='boolean')lobby.checked=true}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]})}}catch(x){}" +
   "})();";
 
