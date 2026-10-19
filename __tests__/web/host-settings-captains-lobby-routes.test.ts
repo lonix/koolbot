@@ -31,6 +31,7 @@ import {
   store,
   writes,
   fake,
+  SETTABLE,
   clone,
   EventMock,
   type Json,
@@ -137,13 +138,23 @@ let server: Server;
 let base = "";
 const passes: string[] = [];
 let failChannel = false;
+/** Channel ids somebody is connected to in the fake gateway cache. */
+let connected = new Set<string>();
 
 function fakeClient(): never {
   return {
     guilds: {
       cache: {
         get: () => ({
-          channels: { cache: { get: () => undefined } },
+          // The gateway voice-state cache: a channel somebody is connected to.
+          channels: {
+            cache: {
+              get: (id: string) =>
+                connected.has(id)
+                  ? { isVoiceBased: () => true, members: { size: 1 } }
+                  : undefined,
+            },
+          },
           members: { cache: { get: () => undefined } },
         }),
       },
@@ -244,12 +255,14 @@ beforeEach(() => {
   store.clear();
   store.set(EVENT_ID, makeEvent());
   writes.length = 0;
+  SETTABLE.add("captainsEnabled");
   fake.beforeWrite = null;
   fake.extraGroupFields = new Set(["memberIds"]);
   fake.failReads = false;
   auditRows = [];
   eventsEnabled = true;
   failChannel = false;
+  connected = new Set(["c-lobby"]);
   passes.length = 0;
   resetMoveGuardForTests();
 
@@ -352,11 +365,21 @@ describe("the switch on the page", () => {
     expect(r.text).not.toContain(DISABLED_SELECT);
   });
 
-  it("is disabled, with the reason, while leaders are off and there is no lobby", async () => {
+  it("is usable while leaders are off and there is no lobby: both can be turned on in one save", async () => {
     store.get(EVENT_ID)!.captainsEnabled = false;
     const r = await call(panel());
-    expect(r.text).toContain(DISABLED_SELECT);
-    expect(r.text).toContain("Turn leaders on and save first");
+    expect(r.text).toContain(ENABLED_SELECT);
+    expect(r.text).not.toContain(DISABLED_SELECT);
+    expect(r.text).toContain("in this same save is fine");
+    const saved = await post("settings", {
+      s_captainsEnabled: "1",
+      b_captainsEnabled: "0",
+      ...lobbyForm("1", "0"),
+    });
+    expect(flashOf(saved.location).type).toBe("ok");
+    expect(store.get(EVENT_ID)!.captainsEnabled).toBe(true);
+    expect(leadsRows()).toHaveLength(1);
+    expect(auditRows).toHaveLength(1);
   });
 
   it("stays usable with leaders off when a lobby exists, so it can be turned off", async () => {
@@ -547,7 +570,39 @@ describe("turning it off", () => {
     expect(auditRows[0]).toMatchObject({ result: "failure" });
   });
 
+  it("nobody connected to any voice channel of the event: no confirmation page, even though the lobby has a channel", async () => {
+    connected = new Set();
+    store.get(EVENT_ID)!.groups = [
+      team(A, "Heli"),
+      team(B, "Logi"),
+      lobbyGroup({ channelId: "c-lobby" }),
+    ];
+    const r = await post("settings", lobbyForm("0", "1"));
+    // No page: the save went straight on (this harness's mover then refuses).
+    expect(r.status).toBe(303);
+    expect(r.text).not.toContain("Confirm these changes");
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0].details).not.toMatchObject({
+      outcome: "needs-confirmation",
+    });
+  });
+
+  it("somebody in the main channel, or in a group's, asks too", async () => {
+    store.get(EVENT_ID)!.groups = [
+      team(A, "Heli", { channelId: "c-a" }),
+      team(B, "Logi"),
+      lobbyGroup({ channelId: "c-lobby" }),
+    ];
+    for (const where of ["c-main", "c-a"]) {
+      connected = new Set([where]);
+      const r = await post("settings", lobbyForm("0", "1"));
+      expect(r.status).toBe(200);
+      expect(r.text).toContain("Somebody is connected to a voice channel");
+    }
+  });
+
   it("a lobby that has no channel yet is removed at once, without a confirmation page", async () => {
+    connected = new Set();
     store.get(EVENT_ID)!.groups = [
       team(A, "Heli"),
       team(B, "Logi"),

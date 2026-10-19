@@ -2105,9 +2105,9 @@ from the host and the current leaders.
 
 - **Needs leaders.** The switch is only used while **Group leaders** is on. On the schedule form the
   box is disabled until leaders is ticked, and the server ignores it without leaders. In Live
-  settings turning it **on** is refused while leaders are off (the control is disabled with the
-  reason, and a save that turns leaders on and the lobby on together is two saves: leaders first).
-  Turning it **off** is always possible.
+  settings turning it **on** is judged against leaders as the same save leaves them: leaders on and
+  the lobby on can be saved together (leaders are applied first), and the lobby on with leaders
+  off, or leaders switched off in the same save, is refused. Turning it **off** is always possible.
 - **Nothing to configure, nothing visible in the group list.** The lobby is stored as a hidden group
   of kind `leads` in the event's groups (so the channel pass, the cleanup and the repeating series
   keep working unchanged), and the switch is read from the presence of that group: there is no
@@ -2117,16 +2117,21 @@ from the host and the current leaders.
   an event keeps. It is named after what leaders are called ("Leader lobby", "Captain lobby"), and
   counts toward `events.groups.max_count` because it is a channel.
 - **On** creates the restricted channel at once on a running event, through the same pass as every
-  group channel (with one conditional write that also holds "leaders still on", "this many groups"
-  and "no leaders-only group yet", so there can never be two), and then brings the channel's access
+  group channel. Its name and the group limit are decided from the event as it is after the other
+  changes of the same save (a leader label or rename in the same save is taken into account, a
+  group added in the same save counts toward the limit), and the write holds "leaders still on",
+  "this many groups" and "no leaders-only group yet", so there can never be two. Then brings the channel's access
   in line: only the host and the current leaders can join. An event that has not started makes it
   with the other channels later. If the channel could not be made (a full category, a missing
   permission) the result says "Saved but not finished" and the same form saved again finishes it.
 - **Off** moves everybody connected to the lobby, you included, to the main channel (the same mover
   as **Remove groups**), then deletes the channel and the group in one step. You are asked to confirm
-  first when the lobby has a channel; with no channel yet it is removed without asking. Whether
-  anybody is in it right now cannot be seen when the page is built, so the question is asked
-  whenever the channel exists. If somebody cannot be moved, or the channel cannot be deleted, **nothing
+  first when anybody is connected to a voice channel of the event (its main channel, any group's or
+  the lobby's), read from the gateway's voice states with no extra Discord request; with nobody
+  connected it is removed without asking, even though the channel exists. The confirmation is bound
+  to that answer: if somebody connects between the page and your confirmation that needed none,
+  nothing is applied and you are asked again, and a channel recorded meanwhile that the page did
+  not show is not touched (save again to be asked). If somebody cannot be moved, or the channel cannot be deleted, **nothing
   is removed**: the lobby stays, the result says why, and saving again plans the removal again. Turning
   it on again later makes a new, empty channel. If an end or cancel takes hold of the event during the
   removal, the group's record is left for the end to clean up.

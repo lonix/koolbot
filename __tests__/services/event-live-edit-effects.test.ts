@@ -15,6 +15,49 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+describe("eventVoiceInUse (#1251)", () => {
+  const clientWith = (channels: Record<string, number>): never =>
+    ({
+      guilds: {
+        cache: {
+          get: (id: string) =>
+            id === "g"
+              ? {
+                  channels: {
+                    cache: {
+                      get: (cid: string) =>
+                        cid in channels
+                          ? {
+                              isVoiceBased: () => true,
+                              members: { size: channels[cid] },
+                            }
+                          : undefined,
+                    },
+                  },
+                }
+              : undefined,
+        },
+      },
+    }) as never;
+
+  it("is true when anyone is connected to any of the channels, from the gateway cache", () => {
+    const fx = createLiveEditEffects(clientWith({ main: 0, a: 0, lobby: 2 }));
+    expect(fx.eventVoiceInUse("g", ["main", "a", "lobby"])).toBe(true);
+    expect(fx.eventVoiceInUse("g", ["main", "a"])).toBe(false);
+  });
+
+  it("is false for channels the cache does not hold, and for no channels", () => {
+    const fx = createLiveEditEffects(clientWith({ main: 0 }));
+    expect(fx.eventVoiceInUse("g", ["gone"])).toBe(false);
+    expect(fx.eventVoiceInUse("g", [])).toBe(false);
+  });
+
+  it("is true (unknown, so ask) when the server is not in the cache", () => {
+    const fx = createLiveEditEffects(clientWith({}));
+    expect(fx.eventVoiceInUse("other", ["main"])).toBe(true);
+  });
+});
+
 describe("createLiveEditEffects", () => {
   it("hands the revoked ids to the leads pass as the list it takes first", async () => {
     const syncLeadsAccess = jest.fn<

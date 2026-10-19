@@ -152,12 +152,12 @@ describe("renderLeadersTagsFields", () => {
       );
     });
 
-    it("is disabled while leaders are off and there is no lobby", () => {
+    it("is usable while leaders are off, so both can be turned on in one save, and says so", () => {
       const html = renderLeadersTagsFields(
         viewWith({ captainsEnabled: false }, false),
       );
-      expect(html).toContain('name="s_captainsLobby" disabled>');
-      expect(html).toContain("Turn leaders on and save first");
+      expect(html).not.toContain('name="s_captainsLobby" disabled');
+      expect(html).toContain("in this same save is fine");
     });
 
     it("can still be turned off while leaders are off", () => {
