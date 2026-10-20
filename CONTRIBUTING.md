@@ -725,6 +725,11 @@ from GHCR and marks the preview comment as removed. For that delete to succeed, 
 on the package (package settings → Manage Actions access). Without it, the
 cleanup job fails and the tags can be deleted by hand from the package page.
 
+The release-please PR is labelled `docker-preview` automatically (`release-please.yml`, using
+`RELEASE_PLEASE_TOKEN`), so `pr-<number>` follows the release candidate as `main` moves. When the
+release PR merges, its `pr-<number>` images are **deleted** and the label is removed. Anything
+pinned to it (for example a dev stack) must move to `:X.Y`, `:latest` or `:nightly` before then.
+
 ## Issue Reporting
 
 ### Before Creating an Issue

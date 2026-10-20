@@ -531,7 +531,8 @@ jobs:
       # Deleting a package version also needs the repository to hold the Admin
       # role on the package (package settings -> Manage Actions access).
       packages: write
-      # Mark the sticky preview comment as removed.
+      # Mark the sticky preview comment as removed, and drop the docker-preview
+      # label from a merged release PR.
       pull-requests: write
     steps:
       - name: Delete pr-<number> image versions
@@ -591,3 +592,23 @@ jobs:
               'Reopen the PR (with the `docker-preview` label still on) to build a new one.',
             ].join('\n');
             await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+
+      # release-please.yml labels its release PR docker-preview. Once that PR is merged
+      # the images are gone, so drop the label too, leaving `autorelease: tagged` only.
+      # Cosmetic: only a 404 (label already absent) is tolerated, anything else fails
+      # this last step. The head ref is only read in `if`, never put into script text.
+      - name: Remove docker-preview from a merged release PR
+        if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-please--')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                ...context.repo, issue_number: Number(process.env.PR_NUMBER), name: 'docker-preview',
+              });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              core.info('docker-preview label was not on the PR.');
+            }
