@@ -8,49 +8,40 @@
  * contrast misses fixed in #855 (`#6b7280` at 3.6:1, `#ef4444` at 3.8:1, …)
  * before they shipped.
  *
- * Add a pair here whenever you add a token: an untested token is an
- * ungated one.
+ * Every colour token must either appear in a pair below or be named in
+ * `DECORATIVE` with a reason; the last suite fails otherwise (#1326), so a new
+ * token cannot skip the gate.
  */
 
 import { describe, it, expect } from "@jest/globals";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // The palette is whatever `docs/design/tokens.json` says (#1315); read it
 // here so a token edit is gated by the same ratios as the stylesheet it feeds.
-const TOKEN_VALUES = new Map(
-  (
-    JSON.parse(
-      fs.readFileSync(
-        new URL("../../docs/design/tokens.json", import.meta.url),
-        "utf8",
-      ),
-    ) as { color: { tokens: Array<{ name: string; value: string }> } }
-  ).color.tokens.map((t) => [t.name, t.value]),
-);
+const RAW_TOKENS = (
+  JSON.parse(
+    fs.readFileSync(
+      new URL("../../docs/design/tokens.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { color: { tokens: Array<{ name: string; value: string }> } }
+).color.tokens;
 
-function token(name: string): string {
-  const value = TOKEN_VALUES.get(name);
+const RAW_VALUES = new Map(RAW_TOKENS.map((t) => [t.name, t.value]));
+
+/** A token's colour, following `{alias}` values (`embed-warn` is `{warn}`). */
+function resolve(name: string, seen: string[] = []): string {
+  if (seen.includes(name)) {
+    throw new Error(
+      `Alias cycle in tokens.json: ${[...seen, name].join(" -> ")}`,
+    );
+  }
+  const value = RAW_VALUES.get(name);
   if (!value) throw new Error(`No colour token named ${name}`);
-  return value;
+  const alias = /^\{([\w-]+)\}$/.exec(value);
+  return alias ? resolve(alias[1], [...seen, name]) : value;
 }
-
-const THEME = {
-  bg: token("bg"),
-  surface: token("surface"),
-  surfaceAlt: token("surface-alt"),
-  border: token("border"),
-  control: token("control"),
-  text: token("text"),
-  muted: token("muted"),
-  link: token("link"),
-  focus: token("focus"),
-  warn: token("warn"),
-  primary: token("primary"),
-  primaryHover: token("primary-hover"),
-  danger: token("danger"),
-  dangerHover: token("danger-hover"),
-  onPrimary: token("on-primary"),
-};
 
 /** WCAG 1.4.3 floor for body text. */
 const TEXT_MIN = 4.5;
@@ -96,90 +87,135 @@ export function contrastRatio(a: string, b: string): number {
 
 interface Pair {
   what: string;
+  /** Token names, so the coverage suite can see which tokens are gated. */
   fg: string;
   bg: string;
   min: number;
 }
 
-/** Backgrounds any foreground token can end up sitting on. */
-const SURFACES: Array<[string, string]> = [
-  ["page background", THEME.bg],
-  ["a card", THEME.surface],
-  ["a table header", THEME.surfaceAlt],
+const pair = (what: string, fg: string, bg: string, min: number): Pair => ({
+  what,
+  fg,
+  bg,
+  min,
+});
+
+/** Grounds a text token can sit on (DESIGN.md, `docs/design/components.md`). */
+const GROUNDS: Array<[string, string]> = [
+  ["page background", "bg"],
+  ["a card", "surface"],
+  ["a table header", "surface-alt"],
+  ["the top bar", "chrome"],
+  ["the current nav item", "selected"],
 ];
 
-/** Foreground tokens that carry text, and therefore owe 4.5:1 everywhere. */
+/** Grounds a control edge, focus ring or warning can sit on (not `selected`). */
+const SURFACES = GROUNDS.filter(([, bg]) => bg !== "selected");
+
+/** Foreground tokens that carry text on those grounds, and owe 4.5:1 on each. */
 const TEXT_TOKENS: Array<[string, string]> = [
-  ["body text", THEME.text],
-  ["muted text", THEME.muted],
-  ["link text", THEME.link],
-  ["warning text", THEME.warn],
+  ["body text", "text"],
+  ["secondary text", "text-secondary"],
+  ["muted text", "muted"],
+  ["link text", "link"],
 ];
 
 const PAIRS: Pair[] = [
   ...TEXT_TOKENS.flatMap(([name, fg]) =>
-    SURFACES.map(([surfaceName, bg]) => ({
-      what: `${name} on ${surfaceName}`,
-      fg,
-      bg,
-      min: TEXT_MIN,
-    })),
+    GROUNDS.map(([groundName, bg]) =>
+      pair(`${name} on ${groundName}`, fg, bg, TEXT_MIN),
+    ),
+  ),
+  // Warning text is for the page and the cards, not the selected nav item.
+  ...SURFACES.map(([groundName, bg]) =>
+    pair(`warning text on ${groundName}`, "warn", bg, TEXT_MIN),
   ),
   // Button fills carry their own label colour, so they're judged against it
   // rather than against the page.
-  {
-    what: "primary button label",
-    fg: THEME.onPrimary,
-    bg: THEME.primary,
-    min: TEXT_MIN,
-  },
-  {
-    what: "primary button label (hover)",
-    fg: THEME.onPrimary,
-    bg: THEME.primaryHover,
-    min: TEXT_MIN,
-  },
-  {
-    what: "destructive button label",
-    fg: THEME.onPrimary,
-    bg: THEME.danger,
-    min: TEXT_MIN,
-  },
-  {
-    what: "destructive button label (hover)",
-    fg: THEME.onPrimary,
-    bg: THEME.dangerHover,
-    min: TEXT_MIN,
-  },
+  pair("primary button label", "on-primary", "primary", TEXT_MIN),
+  pair("primary button label (hover)", "on-primary", "primary-hover", TEXT_MIN),
+  pair("destructive button label", "on-primary", "danger", TEXT_MIN),
+  pair(
+    "destructive button label (hover)",
+    "on-primary",
+    "danger-hover",
+    TEXT_MIN,
+  ),
+  // The default button (`.btn`, `.kb-btn`) is `text` on `fill`; the secondary
+  // one is `pill-text`; the segmented control's selected option, an avatar and
+  // a hovered pill are `on-primary` on `fill` / `fill-hover`.
+  pair("neutral button label", "text", "fill", TEXT_MIN),
+  pair("neutral button label (hover)", "text", "fill-hover", TEXT_MIN),
+  pair("secondary button label", "pill-text", "fill", TEXT_MIN),
+  pair("secondary button label (hover)", "pill-text", "fill-hover", TEXT_MIN),
+  pair("surface link in the banner", "text-secondary", "fill", TEXT_MIN),
+  pair("selected segment, avatar", "on-primary", "fill", TEXT_MIN),
+  pair("hovered pill or banner link", "on-primary", "fill-hover", TEXT_MIN),
+  pair("current nav item label", "on-primary", "selected", TEXT_MIN),
+  pair("hovered nav item label", "on-primary", "chrome", TEXT_MIN),
+  pair("pill text on a neutral pill", "pill-text", "fill", TEXT_MIN),
   // Notices and badges share one palette on the admin and member pages
-  // (#1315), so the member pages' old warning and error fills are gone: judge
-  // every pair the stylesheets use.
-  ...(["ok", "err", "info", "warn"] as const).map((kind) => ({
-    what: `${kind} notice text on its fill`,
-    fg: token(`${kind}-text`),
-    bg: token(`${kind}-bg`),
-    min: TEXT_MIN,
-  })),
-  // Non-text: a control's edge and the focus ring only owe 3:1 (WCAG 1.4.11 /
-  // 2.4.11), but they owe it against every surface they can be drawn on.
-  ...SURFACES.flatMap(([surfaceName, bg]) => [
-    {
-      what: `form-control border on ${surfaceName}`,
-      fg: THEME.control,
-      bg,
-      min: UI_MIN,
-    },
-    { what: `focus ring on ${surfaceName}`, fg: THEME.focus, bg, min: UI_MIN },
+  // (#1315): judge every pair the stylesheets use.
+  ...(["ok", "err", "info", "warn"] as const).map((kind) =>
+    pair(
+      `${kind} notice text on its fill`,
+      `${kind}-text`,
+      `${kind}-bg`,
+      TEXT_MIN,
+    ),
+  ),
+  pair("info text on the current nav item", "info-text", "selected", TEXT_MIN),
+  // Status dots reuse the notice text colours on any surface.
+  ...(["ok", "err", "warn"] as const).flatMap((kind) =>
+    SURFACES.map(([groundName, bg]) =>
+      pair(`${kind} status dot on ${groundName}`, `${kind}-text`, bg, TEXT_MIN),
+    ),
+  ),
+  // Activity data: Rewind's hero, and the peak hour in a heatmap or bar list.
+  pair("Rewind text on the hero", "lore-text", "lore-deep", TEXT_MIN),
+  pair("Rewind text on the year chip", "lore-text", "lore", TEXT_MIN),
+  pair("heatmap peak on a card", "lore-peak", "surface", TEXT_MIN),
+  // Non-text: a control's edge, the focus ring and meter fills only owe 3:1
+  // (WCAG 1.4.11 / 2.4.11), but they owe it against every surface they can be
+  // drawn on.
+  ...SURFACES.flatMap(([groundName, bg]) => [
+    pair(`form-control border on ${groundName}`, "control", bg, UI_MIN),
+    pair(`focus ring on ${groundName}`, "focus", bg, UI_MIN),
   ]),
+  pair("focus ring on the current nav item", "focus", "selected", UI_MIN),
+  pair("meter fill and switch track on a card", "primary", "surface", UI_MIN),
 ];
 
-describe("THEME palette contrast (#856)", () => {
-  for (const pair of PAIRS) {
-    it(`${pair.what} clears ${pair.min}:1`, () => {
+/**
+ * Colour tokens that carry no information on their own, so they owe no ratio.
+ * Adding a token to `tokens.json` means adding a pair above or an entry here
+ * (with the reason); the last suite fails until you do.
+ */
+const DECORATIVE: Record<string, string> = {
+  border:
+    "hairlines only (1.6:1 on purpose); a control's edge is `control`, which is paired",
+  "heat-empty":
+    "empty heatmap cell; every value is also in the cell's label and the bar list",
+  "lore-fill":
+    "heatmap cells and activity bars; the values are named in text beside them",
+  scrim: "the dialog backdrop, bg at 70% (8-digit hex, not a text ground)",
+  "embed-brand": "Discord embed accent bar; the title carries the meaning",
+  "embed-ok": "Discord embed accent bar; the title carries the meaning",
+  "embed-warn": "Discord embed accent bar (an alias of warn)",
+  "embed-danger": "Discord embed accent bar; the title carries the meaning",
+  "embed-neutral": "Discord embed accent bar (an alias of control)",
+  "embed-lore": "Discord embed accent bar; the title carries the meaning",
+};
+
+describe("palette contrast (#856)", () => {
+  for (const p of PAIRS) {
+    it(`${p.what} clears ${p.min}:1`, () => {
       // Rounded to 2dp so a failure names the ratio you have to tune a
       // replacement colour against, not just "below the floor".
-      const ratio = Number(contrastRatio(pair.fg, pair.bg).toFixed(2));
-      expect(ratio).toBeGreaterThanOrEqual(pair.min);
+      const ratio = Number(
+        contrastRatio(resolve(p.fg), resolve(p.bg)).toFixed(2),
+      );
+      expect(ratio).toBeGreaterThanOrEqual(p.min);
     });
   }
 
@@ -188,19 +224,89 @@ describe("THEME palette contrast (#856)", () => {
     // only as the control border, which owes 3:1), #b45309 was 3.4:1 as the
     // warning colour. Re-introducing one as a text colour is the regression
     // this guards.
-    const textColours = [THEME.text, THEME.muted, THEME.link, THEME.warn];
+    const textColours = ["text", "text-secondary", "muted", "link", "warn"].map(
+      (name) => resolve(name),
+    );
     for (const failed of ["#6b7280", "#b45309", "#ef4444"]) {
       expect(textColours).not.toContain(failed);
     }
   });
 
   it("treats the decorative hairline as decorative", () => {
-    // `THEME.border` is deliberately below 3:1 — it draws card/table
-    // hairlines, which convey nothing on their own. Form-control edges use
-    // `THEME.control` instead precisely because they do.
-    expect(contrastRatio(THEME.border, THEME.bg)).toBeLessThan(UI_MIN);
-    expect(contrastRatio(THEME.control, THEME.bg)).toBeGreaterThanOrEqual(
+    // `border` is deliberately below 3:1 — it draws card/table hairlines,
+    // which convey nothing on their own. Form-control edges use `control`
+    // instead precisely because they do.
+    expect(contrastRatio(resolve("border"), resolve("bg"))).toBeLessThan(
       UI_MIN,
     );
+    expect(
+      contrastRatio(resolve("control"), resolve("bg")),
+    ).toBeGreaterThanOrEqual(UI_MIN);
   });
+});
+
+describe("every colour token is gated or marked decorative (#1326)", () => {
+  const paired = new Set(PAIRS.flatMap((p) => [p.fg, p.bg]));
+
+  for (const { name } of RAW_TOKENS) {
+    it(`${name} has a contrast pair or a decorative entry, not both`, () => {
+      expect(paired.has(name) !== name in DECORATIVE).toBe(true);
+    });
+  }
+
+  it("names no token that is gone", () => {
+    const known = new Set(RAW_TOKENS.map((t) => t.name));
+    for (const name of [...paired, ...Object.keys(DECORATIVE)]) {
+      expect(known.has(name)).toBe(true);
+    }
+  });
+});
+
+describe("the pairs cover the colours the stylesheets use (#1326)", () => {
+  /** `color` / `background` token pairs declared together in one CSS rule. */
+  function declaredPairs(file: string): Array<[string, string, string]> {
+    const text = fs.readFileSync(
+      fileURLToPath(new URL(file, import.meta.url)),
+      "utf8",
+    );
+    const found: Array<[string, string, string]> = [];
+    for (const chunk of text.split("}")) {
+      const open = chunk.lastIndexOf("{");
+      if (open < 0) continue;
+      const selector = chunk.slice(0, open).trim().split("\n").pop() ?? "";
+      const tokens: Record<string, string> = {};
+      for (const decl of chunk.slice(open + 1).split(";")) {
+        const colon = decl.indexOf(":");
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).trim();
+        const value = decl.slice(colon + 1).trim();
+        const match = /^var\(--([\w-]+)\)$/.exec(value);
+        if (match && (prop === "color" || prop === "background")) {
+          tokens[prop] = match[1];
+        }
+      }
+      if (tokens.color && tokens.background) {
+        found.push([selector, tokens.color, tokens.background]);
+      }
+    }
+    return found;
+  }
+
+  const covered = new Set(PAIRS.map((p) => `${p.fg}|${p.bg}`));
+
+  for (const file of [
+    "../../docs/design/kb.css",
+    "../../src/web/admin-layout.ts",
+  ]) {
+    it(`every colour on a background in ${file.split("/").pop()} is a tested pair`, () => {
+      const rules = declaredPairs(file).filter(
+        ([, fg, bg]) => RAW_VALUES.has(fg) && RAW_VALUES.has(bg),
+      );
+      expect(rules.length).toBeGreaterThan(5);
+      const untested = rules
+        .filter(([, fg, bg]) => !covered.has(`${fg}|${bg}`))
+        .map(([selector, fg, bg]) => `${selector.slice(-60)}: ${fg} on ${bg}`);
+      expect(untested).toEqual([]);
+    });
+  }
 });

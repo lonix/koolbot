@@ -27,6 +27,7 @@ import {
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
+  renderTicketsPage,
   renderQuotesPage,
   renderBirthdaysPage,
   renderReactionRolesPage,
@@ -41,11 +42,14 @@ import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
+import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
+import { renderRulesPage } from "../../src/web/rules-page.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
 import {
   renderAdminFixPage,
   renderRoleDeletePage,
+  renderRoleGroupsPage,
 } from "../../src/web/role-groups-views.js";
 import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
 import {
@@ -1925,6 +1929,170 @@ export function adminPages(): A11yPage[] {
           peak: { day: 5, hour: 20, minutes: 90 },
           timeZone: "Europe/Stockholm",
         },
+      }),
+    },
+    {
+      name: "Bot permissions",
+      html: renderBotPermissionsPage({
+        ...COMMON,
+        report: {
+          available: true,
+          reason: null,
+          fresh: true,
+          problems: [
+            {
+              permission: "ManageRoles",
+              target: { kind: "server", id: null, name: "Test Guild" },
+              features: [
+                {
+                  id: "rules",
+                  area: "Members",
+                  feature: "Rules acceptance",
+                  effect: "The acceptance role cannot be given.",
+                  fix: "Give the bot Manage Roles.",
+                },
+              ],
+            },
+          ],
+          unknown: [],
+          quiet: [],
+          okFeatures: [],
+          notes: ["Polls are on but no channel is set."],
+        },
+      }),
+    },
+    {
+      name: "Bot permissions (unavailable)",
+      html: renderBotPermissionsPage({
+        ...COMMON,
+        report: {
+          available: false,
+          reason: "The bot could not read this server from Discord.",
+          fresh: false,
+          problems: [],
+          unknown: [],
+          quiet: [],
+          okFeatures: [],
+          notes: [],
+        },
+      }),
+    },
+    {
+      name: "Role groups",
+      html: renderRoleGroupsPage({
+        ...COMMON,
+        groups: [
+          {
+            id: "g1",
+            name: "Mods",
+            roleId: "r1",
+            rank: 2,
+            permissions: "0",
+            capabilities: ["staff"],
+            colour: null,
+            hoist: false,
+            createdByKoolbot: false,
+            gateOnly: false,
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+            roleName: "Moderator",
+            unlinked: false,
+            lostRoleId: null,
+            recreateRequestedAt: null,
+            syncPolicy: null,
+            driftSignature: null,
+            roleMissing: false,
+            memberCount: 3,
+            roleLock: null,
+            drift: [],
+          },
+        ],
+        roleOptions: [
+          {
+            id: "r1",
+            name: "Moderator",
+            memberCount: 3,
+            lock: null,
+            taken: true,
+          },
+          {
+            id: "r2",
+            name: "Server Booster",
+            memberCount: 40,
+            lock: "managed",
+            taken: false,
+          },
+        ],
+        plan: null,
+        extraErrors: [],
+        botScanUnavailable: false,
+        botsMissing: 0,
+        adminReport: { humans: [], bots: [] },
+        adminGroupLacksAdministrator: false,
+        membersUnavailable: false,
+        roleNames: {},
+        globalPolicy: "flag",
+      }),
+    },
+    {
+      name: "Rules acceptance",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        accepted: 12,
+        native: { screening: false, community: true },
+        intentMissing: true,
+        plan: null,
+        channels: [{ id: "100000000000000010", name: "rules" }],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      name: "Support tickets",
+      html: renderTicketsPage({
+        ...COMMON,
+        guildId: "g1",
+        enabled: true,
+        statusFilter: "",
+        statusOptions: ["open", "claimed", "closed"],
+        total: 2,
+        page: 1,
+        pageSize: 50,
+        rows: [
+          {
+            id: "a".repeat(24),
+            createdAt: "2026-01-01T00:00:00.000Z",
+            authorId: "u1",
+            authorLabel: "alice",
+            channelId: "c1",
+            subject: "Cannot join voice",
+            status: "open",
+            claimedByLabel: null,
+            closedByLabel: null,
+            closedAt: null,
+          },
+          {
+            id: "b".repeat(24),
+            createdAt: "2026-01-02T00:00:00.000Z",
+            authorId: "u2",
+            authorLabel: "bob",
+            channelId: "c2",
+            subject: "Role request",
+            status: "closed",
+            claimedByLabel: "mod",
+            closedByLabel: "mod",
+            closedAt: "2026-01-03T00:00:00.000Z",
+          },
+        ],
       }),
     },
   ];
