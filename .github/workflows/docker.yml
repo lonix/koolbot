@@ -370,6 +370,14 @@ jobs:
   # `cosign verify <image>:latest` finds the signature made in
   # attest-and-sign. (imagetools copies a single source index unchanged, so the
   # digest should stay identical; not yet confirmed on a real run.)
+  #
+  # `needs: attest-and-sign` only covers THIS run's image, but the newest
+  # release may be a different run whose signing is still in progress or has
+  # failed. So the job resolves that release's image to a digest, runs
+  # `cosign verify` on the digest, and promotes that same digest only if the
+  # signature checks out. If it does not (for example the newest release is
+  # still signing), the job fails without moving any alias, and the newest
+  # release's own promote, which runs after its attest-and-sign, sets them.
   promote:
     name: Promote release aliases
     runs-on: ubuntu-latest
@@ -381,6 +389,8 @@ jobs:
       cancel-in-progress: false
     permissions:
       # contents: read is for the releases lookup (a private repo needs it).
+      # packages: write adds the alias tags; cosign verify only reads. No
+      # id-token: nothing is signed here.
       contents: read
       packages: write
     steps:
@@ -390,6 +400,9 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Point latest, X.Y and X at the newest release
         env:
@@ -412,10 +425,23 @@ jobs:
           minor="${BASH_REMATCH[2]}"
           image="${IMAGE,,}"
           version="${newest#v}"
-          echo "Newest release is ${newest} (this run: ${TRIGGER_TAG}); promoting ${image}:${version}."
+          echo "Newest release is ${newest} (this run: ${TRIGGER_TAG}); resolving ${image}:${version}."
+          digest="$(docker buildx imagetools inspect "${image}:${version}" --format '{{.Manifest.Digest}}')"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: ${digest}" >&2; exit 1; }
+          # Only an image signed by this repo's docker.yml on a release tag
+          # may be promoted. Regex metacharacters in the repo name are escaped.
+          repo_re="$(printf '%s' "${REPO}" | sed -E 's/[]\\.*+?^${}()|[-]/\\&/g')"
+          if ! cosign verify \
+            --certificate-identity-regexp "^https://github\.com/${repo_re}/\.github/workflows/docker\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${image}@${digest}" > /dev/null; then
+            echo "::error::${newest} (${image}@${digest}) has no valid cosign signature yet, so no alias was moved. Its own promote run sets them once its signing succeeds; re-run that tag's workflow if signing failed." >&2
+            exit 1
+          fi
+          echo "Verified ${image}@${digest}; promoting it."
           docker buildx imagetools create \
             --tag "${image}:latest" --tag "${image}:${major}.${minor}" --tag "${image}:${major}" \
-            "${image}:${version}"
+            "${image}@${digest}"
 
   preview-comment:
     name: Post preview pull command

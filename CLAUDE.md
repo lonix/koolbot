@@ -189,7 +189,7 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
 - **`docker.yml`** — on `v*.*.*` tags, a nightly schedule that builds `main` (a merge to `main` does not build), `workflow_dispatch`
   and the opt-in PR preview: hadolint (fails on errors), then a local amd64 build scanned by Trivy (fixable CRITICAL fails; arm64 is
   not scanned), and only then push/attest/sign (cosign) to GHCR. A tag build publishes only `X.Y.Z`; the serialized `promote` job then moves
-  `latest`, `X.Y` and `X` to the newest release (fresh lookup, same signed digest). `nightly` and `main` follow `main` and never get
+  `latest`, `X.Y` and `X` to the newest release (fresh lookup, cosign-verified digest). `nightly` and `main` follow `main` and never get
   `latest`. Only PR previews are cancelled in progress, so a run that
   has pushed always signs.
 - **`pr-title-lint.yml`** — see below.
