@@ -42,6 +42,7 @@ import { hasScope, type AuthenticatedRequest } from "../session.js";
 import { fetchChannelData } from "../read-only-routes.js";
 import { buildCaseView, loadCaseHistory } from "../moderation-case-groups.js";
 import {
+  effectivePage,
   logRowUserIds,
   loadCommandAuditPage,
   readCommandAuditFilters,
@@ -84,9 +85,9 @@ function pageOf(req: Request): number {
 
 /**
  * Members who cannot talk right now, from the guild member cache. The log does
- * not store how long a timeout lasts, so it cannot answer this; the cache is
- * only complete with the Server Members intent, and without it the answer is
- * "not known" rather than a wrong number.
+ * not store how long a timeout lasts, so it cannot answer this. The cache is
+ * only complete with the Server Members intent, and even then only once every
+ * member is cached; otherwise the answer is "not known", never a wrong number.
  */
 export async function countActiveTimeouts(
   client: Client,
@@ -95,6 +96,11 @@ export async function countActiveTimeouts(
   if (!env.guildMembersIntent) return null;
   try {
     const guild = await client.guilds.fetch(guildId);
+    // The intent does not mean the cache is full (a large guild is still
+    // filling after startup): count only when every member is cached, as the
+    // server scan does, otherwise an uncached member's timeout is missed and
+    // the tile would read a confident, wrong number.
+    if (guild.members.cache.size < guild.memberCount) return null;
     const now = Date.now();
     let n = 0;
     for (const member of guild.members.cache.values()) {
@@ -192,7 +198,7 @@ export function createMeModerationRouter(client: Client): Router {
       const { guildId } = session;
       const reason = await moderatorReason(client, session);
       const kind = parseModLogKind(req.query.kind);
-      const page = pageOf(req);
+      const requestedPage = pageOf(req);
       const enabled = await ConfigService.getInstance().getBoolean(
         "moderation.enabled",
         false,
@@ -229,9 +235,13 @@ export function createMeModerationRouter(client: Client): Router {
       const since = new Date(Date.now() - 7 * MS_PER_DAY);
       const casesEnabled = await cases.isEnabled().catch(() => false);
 
-      const [total, docs, actions7d, timeoutsNow, liveCount, queue] =
+      // Count first, so the page that is fetched is the page that is shown.
+      const total = await moderation
+        .countRecent(guildId, { actions })
+        .catch(() => 0);
+      const page = effectivePage(requestedPage, total, PAGE_SIZE);
+      const [docs, actions7d, timeoutsNow, liveCount, queue] =
         await Promise.all([
-          moderation.countRecent(guildId, { actions }).catch(() => 0),
           moderation
             .getRecent(guildId, {
               actions,
@@ -414,7 +424,7 @@ export function createMeModerationRouter(client: Client): Router {
       const { guildId } = session;
       const reason = await moderatorReason(client, session);
       const config = ConfigService.getInstance();
-      const page = pageOf(req);
+      const requestedPage = pageOf(req);
       const filters = readCommandAuditFilters(
         req.query as Record<string, unknown>,
       );
@@ -425,7 +435,7 @@ export function createMeModerationRouter(client: Client): Router {
           client,
           guildId,
           filters,
-          page,
+          page: requestedPage,
           pageSize: PAGE_SIZE,
           channelNames: channelData.names,
         }),
@@ -445,7 +455,7 @@ export function createMeModerationRouter(client: Client): Router {
           filters,
           rows: audit.rows,
           total: audit.total,
-          page,
+          page: audit.page,
           pageSize: PAGE_SIZE,
         }),
       );

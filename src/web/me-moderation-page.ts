@@ -234,7 +234,7 @@ function renderTiles(p: ModLogBodyProps): string {
     value: count(t.timeoutsNow),
     detail:
       t.timeoutsNow === null
-        ? "Needs the Server Members intent to count."
+        ? "Needs the Server Members intent and a fully loaded member list to count."
         : "Members who cannot talk right now",
     href: `${MOD_BASE}?kind=timeouts#actions`,
   });
@@ -379,6 +379,14 @@ const DECISION_LABELS: Record<ModerationCaseDecision, string> = {
   readmit: "Readmit",
 };
 
+/** Confirmation before a decision that closes the case; same text as the admin page. */
+const DECISION_CONFIRM: Partial<Record<ModerationCaseDecision, string>> = {
+  permanent:
+    "Make this removal permanent? The case closes with no further review.",
+  readmit:
+    "Record readmission? KoolBot does not unban in Discord; do that there.",
+};
+
 function caseEvents(c: CaseView): string {
   if (c.events.length === 0) {
     return '<p class="kb-muted">No decisions yet.</p>';
@@ -422,7 +430,11 @@ function reviewForm(p: ModCaseBodyProps): string {
         : d === "readmit"
           ? "kb-btn kb-btn--primary"
           : "kb-btn";
-    return `<button type="submit" class="${cls}" formaction="${base}/${d}">${DECISION_LABELS[d]}</button>`;
+    // Terminal decisions ask first, with the admin page's own wording.
+    const confirm = DECISION_CONFIRM[d]
+      ? ` data-confirm="${escapeHtml(DECISION_CONFIRM[d])}"`
+      : "";
+    return `<button type="submit" class="${cls}" formaction="${base}/${d}"${confirm}>${DECISION_LABELS[d]}</button>`;
   }).join("\n    ");
   return `<form method="POST" action="${base}/uphold" class="kb-stack">
   <input type="hidden" name="_csrf" value="${escapeHtml(p.csrfToken)}">

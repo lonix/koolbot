@@ -163,7 +163,24 @@ export function buildCommandAuditQuery(
   return query;
 }
 
+/**
+ * The page to fetch and show: the requested one, pulled back to the last page
+ * that exists. Used BEFORE reading rows, so a bookmarked page that fell out of
+ * range (retention cleanup, a narrower filter) shows the last page rather than
+ * an empty one under a page number that does not exist.
+ */
+export function effectivePage(
+  requested: number,
+  total: number,
+  pageSize: number,
+): number {
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  return Math.min(Math.max(1, requested), last);
+}
+
 export interface CommandAuditPageData {
+  /** The page the rows belong to (the request, clamped to the last page). */
+  page: number;
   total: number;
   rows: CommandAuditRow[];
   userOptions: Array<{ id: string; label: string }>;
@@ -183,17 +200,18 @@ export async function loadCommandAuditPage(args: {
   pageSize: number;
   channelNames: ReadonlyMap<string, string>;
 }): Promise<CommandAuditPageData> {
-  const { client, guildId, filters, page, pageSize, channelNames } = args;
+  const { client, guildId, filters, pageSize, channelNames } = args;
   const query = buildCommandAuditQuery(guildId, filters);
-  const [total, docs] = await Promise.all([
-    DiscordCommandAuditLog.countDocuments(query).catch(() => 0),
-    DiscordCommandAuditLog.find(query)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
-      .lean()
-      .catch(() => [] as Array<Record<string, unknown>>),
-  ]);
+  const total = await DiscordCommandAuditLog.countDocuments(query).catch(
+    () => 0,
+  );
+  const page = effectivePage(args.page, total, pageSize);
+  const docs = await DiscordCommandAuditLog.find(query)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * pageSize)
+    .limit(pageSize)
+    .lean()
+    .catch(() => [] as Array<Record<string, unknown>>);
 
   // Resolve user labels from the guild member cache so the table shows names
   // rather than raw snowflakes. One fetch per request.
@@ -240,5 +258,5 @@ export async function loadCommandAuditPage(args: {
   const userOptions = Array.from(userIdsOnPage)
     .sort()
     .map((id) => ({ id, label: userLabels.get(id) ?? id }));
-  return { total, rows, userOptions };
+  return { page, total, rows, userOptions };
 }

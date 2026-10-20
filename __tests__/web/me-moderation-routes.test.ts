@@ -135,12 +135,19 @@ const member = (
 });
 
 let members = new Map<string, FakeMember>();
+let memberCount: number | null = null;
 const client = {
   commands: new Map([["warn", {}]]),
   guilds: {
     fetch: async () => ({
+      get memberCount(): number {
+        return memberCount ?? members.size;
+      },
       members: {
         cache: {
+          get size(): number {
+            return members.size;
+          },
           get: (id: string) => members.get(id),
           values: () => members.values(),
         },
@@ -226,6 +233,7 @@ beforeEach(() => {
     ["u-bad", member("Bad Ben")],
   ]);
   delete process.env.GUILD_MEMBERS_INTENT;
+  memberCount = null;
   asModerator();
   moderation.countRecent.mockImplementation(async (...args: unknown[]) => {
     const q = args[1] as { since?: Date };
@@ -388,11 +396,25 @@ describe("tiles", () => {
     expect(cases.countLiveCases).toHaveBeenCalledWith(GUILD);
   });
 
+  it("shows a dash while the member cache is incomplete, even with the intent", async () => {
+    process.env.GUILD_MEMBERS_INTENT = "true";
+    members.set("u-t1", member("T1", [], Date.now() + 60_000));
+    memberCount = members.size + 40;
+    const page = await html("/");
+    expect(
+      page.includes(
+        '<span class="kb-overline">Timeouts running now</span></div>\n  <div class="kb-tile__value">—</div>',
+      ),
+    ).toBe(true);
+  });
+
   it("says the timeout count is unknown without the Server Members intent", async () => {
     const page = await html("/");
-    expect(page.includes("Needs the Server Members intent to count.")).toBe(
-      true,
-    );
+    expect(
+      page.includes(
+        "Needs the Server Members intent and a fully loaded member list to count.",
+      ),
+    ).toBe(true);
     expect(
       page.includes(
         '<span class="kb-overline">Timeouts running now</span></div>\n  <div class="kb-tile__value">—</div>',
@@ -547,6 +569,43 @@ describe("actions", () => {
   });
 });
 
+describe("pages out of range", () => {
+  it("shows and fetches the last page of the actions list", async () => {
+    moderation.countRecent.mockImplementation(async (...args: unknown[]) => {
+      const q = args[1] as { since?: Date };
+      return q.since ? 4 : 100;
+    });
+    const page = await html("/?page=3");
+    const listCall = moderation.getRecent.mock.calls[0][1] as { skip: number };
+    expect(listCall.skip).toBe(50);
+    expect(page.includes("Page 2 of 2")).toBe(true);
+    expect(page.includes("No actions logged yet.")).toBe(false);
+  });
+
+  it("shows and fetches the last page of the command audit", async () => {
+    const skip = jest.fn(() => ({
+      limit: () => ({
+        lean: () =>
+          Promise.resolve([
+            {
+              createdAt: new Date("2026-01-03T09:30:00Z"),
+              discordUserId: MOD,
+              commandName: "warn",
+              channelId: "c-1",
+              result: "success",
+              durationMs: 1,
+            },
+          ]),
+      }),
+    }));
+    auditCount.mockReturnValue(Promise.resolve(80));
+    auditFind.mockReturnValue({ sort: () => ({ skip }) });
+    const page = await html("/audit?page=9");
+    expect(skip).toHaveBeenCalledWith(50);
+    expect(page.includes("Page 2 of 2")).toBe(true);
+  });
+});
+
 describe("case page and Review", () => {
   it("shows the four decisions on a live case, each CSRF-protected", async () => {
     const page = await html("/cases/case-1");
@@ -556,6 +615,21 @@ describe("case page and Review", () => {
       ).toBe(true);
     }
     expect(page.includes(`name="_csrf" value="${TEST_CSRF_TOKEN}"`)).toBe(true);
+  });
+
+  it("asks before the two decisions that close the case, with the admin wording", async () => {
+    const page = await html("/cases/case-1");
+    expect(
+      page.includes(
+        'formaction="/me/moderation/cases/case-1/permanent" data-confirm="Make this removal permanent? The case closes with no further review."',
+      ),
+    ).toBe(true);
+    expect(
+      page.includes(
+        'formaction="/me/moderation/cases/case-1/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there."',
+      ),
+    ).toBe(true);
+    expect(page.split(' data-confirm="').length - 1).toBe(2);
   });
 
   it("offers no decisions on a resolved case", async () => {
