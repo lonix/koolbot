@@ -6,11 +6,19 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.github/zizmor.yml'
+      - '.github/dependabot.yml'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.github/zizmor.yml'
+      - '.github/dependabot.yml'
+  schedule:
+    # Weekly, so zizmor's online audits (e.g. known-vulnerable pinned actions) also report
+    # new advisories without a workflow edit. Runs on the default branch and uploads SARIF.
+    - cron: '41 5 * * 1'
   workflow_dispatch:
 
 concurrency:

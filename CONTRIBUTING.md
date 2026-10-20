@@ -512,7 +512,8 @@ commit subject on `main`. release-please reads those subjects to build the
 changelog and pick the next version — and it silently ignores any subject that
 is not a valid conventional commit. A title like `Fix memory leak` is dropped
 from the release entirely; `fix: prevent memory leak in CooldownManager` is
-not. The `PR Title Lint` workflow enforces this on every PR.
+not. The `PR Title Lint` workflow enforces this on every PR, and re-runs when the title is edited or new
+commits are pushed.
 
 ## Pull Request Process
 

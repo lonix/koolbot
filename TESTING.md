@@ -355,7 +355,9 @@ it('should handle long operation', async () => {
 
 ## CI Integration
 
-Tests run automatically in GitHub Actions on pull requests to `main` and pushes to `main`. The
+Tests run automatically in GitHub Actions on pull requests to `main` and pushes to `main`. A newer push to
+a pull request cancels that PR's older CI run; runs on `main` are never cancelled, so every merged commit
+gets a full result. The
 configuration lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alongside the `lint`
 and `typecheck` jobs:
 

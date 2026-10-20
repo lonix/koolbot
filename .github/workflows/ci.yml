@@ -7,10 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel in-progress runs for the same workflow and ref
+# Pull requests: one run per PR ref, a newer push cancels the older run.
+# Everything else (push to main, workflow_dispatch): never cancel, and key the group on the
+# commit SHA so runs for different commits never share a group. A shared group would still
+# replace a *pending* run when a third merge arrives, so every merged commit gets a full result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Default to least privilege; individual jobs opt in if needed.
 permissions:
