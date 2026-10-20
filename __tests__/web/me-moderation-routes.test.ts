@@ -438,6 +438,22 @@ describe("tiles", () => {
   });
 });
 
+describe("row headers", () => {
+  it("names the member as the row header in the actions table", async () => {
+    const page = await html("/");
+    expect(page.includes('<th scope="row" title="u-bad">Bad Ben</th>')).toBe(
+      true,
+    );
+  });
+
+  it("names the member as the row header in the command audit table", async () => {
+    const page = await html("/audit");
+    expect(page.includes(`<th scope="row" title="${MOD}">${MOD}</th>`)).toBe(
+      true,
+    );
+  });
+});
+
 describe("hostile query values stay inert", () => {
   const hostile = [
     "kind=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E",
@@ -689,6 +705,64 @@ describe("case page and Review", () => {
     expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
       action: "moderation.case.readmit",
       result: "failure",
+    });
+  });
+
+  describe("refusals are audited too", () => {
+    const secret = "SECRET-NOTE-TEXT";
+    const only = (): Record<string, unknown> => {
+      expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+      expect(cases.decide).not.toHaveBeenCalled();
+      const [session, entry] = mockRecordAudit.mock.calls[0] as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+      expect(session).toMatchObject({ discordUserId: MOD, guildId: GUILD });
+      return entry;
+    };
+
+    it("an oversized note", async () => {
+      const res = await harness.post("/cases/case-1/uphold", {
+        note: secret + "x".repeat(600),
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+      const entry = only();
+      expect(entry).toMatchObject({
+        action: "moderation.case.uphold",
+        targetId: "case-1",
+        result: "failure",
+        errorMessage: "Note must be 500 characters or fewer.",
+      });
+      expect(JSON.stringify(entry).includes(secret)).toBe(false);
+    });
+
+    it("an invalid review date", async () => {
+      const res = await harness.post("/cases/case-1/extend", {
+        next_review_in_days: "30days",
+        note: secret,
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+      const entry = only();
+      expect(entry).toMatchObject({
+        action: "moderation.case.extend",
+        targetId: "case-1",
+        result: "failure",
+      });
+      expect(JSON.stringify(entry).includes(secret)).toBe(false);
+      expect(JSON.stringify(entry).includes("30days")).toBe(false);
+    });
+
+    it("cases switched off", async () => {
+      cases.isEnabled.mockResolvedValue(false);
+      await harness.post("/cases/case-1/readmit", { note: secret });
+      const entry = only();
+      expect(entry).toMatchObject({
+        action: "moderation.case.readmit",
+        targetId: "case-1",
+        result: "failure",
+        errorMessage: "Moderation cases are turned off.",
+      });
+      expect(JSON.stringify(entry).includes(secret)).toBe(false);
     });
   });
 

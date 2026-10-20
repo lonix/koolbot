@@ -316,7 +316,7 @@ function renderActions(p: ModLogBodyProps): string {
             : '<span class="kb-muted">—</span>';
         return `<tr>
 <td class="kb-mono">${escapeHtml(r.createdAt.slice(0, 16).replace("T", " "))}</td>
-<td title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</td>
+<th scope="row" title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</th>
 <td>${actionBadge(r.action)}</td>
 <td>${moderator}</td>
 <td>${r.reason ? escapeHtml(r.reason.slice(0, 200)) : '<span class="kb-muted">—</span>'}</td>${
@@ -597,7 +597,7 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
             }`;
             return `<tr>
 <td class="kb-mono">${escapeHtml(r.createdAt.slice(0, 16).replace("T", " "))}</td>
-<td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
+<th scope="row" title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</th>
 <td class="kb-mono">${cmd}</td>
 <td>${channelMention(r.channelLabel ?? r.channelId)}</td>
 <td>${resultBadge(r.result)}</td>

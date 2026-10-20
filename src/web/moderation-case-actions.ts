@@ -136,17 +136,27 @@ export async function decideCase(args: {
   const review = parseReviewDate(get, "next_review");
   const action = `moderation.case.${decision}`;
 
+  // A refusal is audited like any other failed attempt: who tried which
+  // decision on which case. The reason is one of our own fixed sentences, never
+  // the note or the date the person typed, so no free text reaches the row.
+  const refuse = async (text: string): Promise<CaseFlash> => {
+    await audit(session, {
+      action,
+      targetId: caseId,
+      result: "failure",
+      errorMessage: text,
+    });
+    return { type: "err", text };
+  };
+
   if (!(await cases.isEnabled())) {
-    return { type: "err", text: "Moderation cases are turned off." };
+    return refuse("Moderation cases are turned off.");
   }
   const lengthError = firstLengthError([
     { label: "Note", value: note, max: TEXT_LIMITS.caseNote },
   ]);
   if (lengthError || !review.ok) {
-    return {
-      type: "err",
-      text: lengthError ?? (review.ok ? "" : review.reason),
-    };
+    return refuse(lengthError ?? (review.ok ? "" : review.reason));
   }
 
   try {
