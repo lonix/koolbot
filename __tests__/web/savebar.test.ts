@@ -579,3 +579,133 @@ describe("cooperating with the AJAX settings save", () => {
     expect(text()).toBe("1 unsaved change");
   });
 });
+
+describe("a cron picker's inactive controls (real cron script)", () => {
+  const CRON_ROWS: SettingRow[] = [
+    row({
+      key: "x.schedule",
+      type: "cron",
+      current: "0 9 * * *",
+      defaultValue: "0 9 * * *",
+    }),
+    row({
+      key: "x.name",
+      type: "string",
+      current: "Lobby",
+      defaultValue: "Lobby",
+    }),
+  ];
+
+  function start(barScript?: string): void {
+    const doc = new DOMParser().parseFromString(
+      pageHtml([{ category: "x", rows: CRON_ROWS }]),
+      "text/html",
+    );
+    mount(doc.body.innerHTML);
+    const scripts = Array.from(doc.querySelectorAll("script")).map(
+      (s) => s.textContent ?? "",
+    );
+    const cron = scripts.find((s) => s.includes("cron-picker"));
+    const bars = scripts.find((s) => s.includes("data-savebar"));
+    if (!cron || !bars) throw new Error("scripts missing from the page");
+    new Function(cron)();
+    run(barScript ?? bars);
+  }
+
+  const mode = (): HTMLSelectElement => el<HTMLSelectElement>(".cron-mode");
+  const dow = (): HTMLSelectElement => el<HTMLSelectElement>(".cron-dow");
+  const dom = (): HTMLInputElement => el<HTMLInputElement>(".cron-dom");
+  const custom = (): HTMLInputElement => el<HTMLInputElement>(".cron-custom");
+
+  function choose(select: HTMLSelectElement, value: string): void {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  it("counts the active controls, not the ones the mode hides", () => {
+    start();
+    expect(bar().hidden).toBe(true);
+    choose(mode(), "weekly");
+    expect(text()).toBe("1 unsaved change");
+    choose(dow(), "3");
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("is clean again after Daily, Weekly, another weekday, Daily", () => {
+    start();
+    choose(mode(), "weekly");
+    choose(dow(), "3");
+    choose(mode(), "daily");
+    expect(el<HTMLInputElement>(".cron-hidden").value).toBe("0 9 * * *");
+    expect(dow().closest("[hidden]")).not.toBeNull();
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("is clean again after the monthly day is edited and Daily returns", () => {
+    start();
+    choose(mode(), "monthly");
+    type(dom(), "15");
+    choose(mode(), "daily");
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("is clean again after the custom expression is edited and Daily returns", () => {
+    start();
+    choose(mode(), "custom");
+    type(custom(), "5 4 * * 1");
+    choose(mode(), "daily");
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("still restores a hidden control on Discard", () => {
+    start();
+    choose(mode(), "weekly");
+    choose(dow(), "3");
+    choose(mode(), "daily");
+    type(name(), "Squad");
+    discard().click();
+    expect(dow().value).toBe("0");
+    expect(name().value).toBe("Lobby");
+  });
+
+  it("puts focus on a visible restored control, not a hidden weekday select", () => {
+    start();
+    choose(mode(), "weekly");
+    choose(dow(), "3");
+    choose(mode(), "daily");
+    type(name(), "Squad");
+    discard().click();
+    expect(bar().hidden).toBe(true);
+    expect(document.activeElement).toBe(name());
+  });
+
+  it("is caught when hidden cron controls count", () => {
+    const from =
+      "function inactive(el){return el.disabled||!!el.closest('[hidden]')}";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    start(
+      SAVEBAR_SCRIPT.replace(from, "function inactive(el){return el.disabled}"),
+    );
+    choose(mode(), "weekly");
+    choose(dow(), "3");
+    choose(mode(), "daily");
+    expect(bar().hidden).toBe(false);
+  });
+
+  it("is caught when Discard focuses the first restored control, hidden or not", () => {
+    const from = "var f=els.filter(focusable)[0]||";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    start(
+      SAVEBAR_SCRIPT.replace(
+        from,
+        "var f=els.filter(function(el){return el.type!=='hidden'})[0]||",
+      ),
+    );
+    choose(mode(), "weekly");
+    choose(dow(), "3");
+    choose(mode(), "daily");
+    type(name(), "Squad");
+    discard().click();
+    expect(document.activeElement).not.toBe(name());
+  });
+});

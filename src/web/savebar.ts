@@ -43,7 +43,12 @@ export const SAVEBAR_SCRIPT =
   // `any` also looks at a control the cascade disabled: Discard must restore
   // it (it comes back when its master is switched on again), but a disabled
   // control is not saved and so never counts as a change.
-  "function changed(el,any){if(el.disabled&&!any)return false;var t=el.type;" +
+  // A control inside a `[hidden]` ancestor is inactive too: the cron picker
+  // hides the time, weekday, day and expression controls its current mode does
+  // not use, and only its computed value is submitted. They are the picker's
+  // own state, so the `hidden` attribute is the one source of truth here.
+  "function inactive(el){return el.disabled||!!el.closest('[hidden]')}" +
+  "function changed(el,any){if(!any&&inactive(el))return false;var t=el.type;" +
   "if(t==='checkbox'||t==='radio')return el.checked!==el.defaultChecked;" +
   "if(el.tagName==='SELECT'){" +
   "if(el.multiple){for(var i=0;i<el.options.length;i++){" +
@@ -97,6 +102,11 @@ export const SAVEBAR_SCRIPT =
   // re-enables dependents on the master's change event.
   "var els=changedControls(form,true);els.forEach(restore);" +
   "els.forEach(function(el){fire(el,'input');fire(el,'change')});" +
-  "update();var f=els.filter(function(el){return el.type!=='hidden'})[0];" +
-  "if(f){try{f.focus()}catch(e){}}})}" +
+  // The bar hides now, so focus must go somewhere that can take it: the first
+  // restored control that is enabled and visible, else the first such control
+  // of the form, else the form itself.
+  "update();function focusable(el){return el.type!=='hidden'&&!NOT.test(el.type)&&!inactive(el)}" +
+  "var f=els.filter(focusable)[0]||Array.prototype.filter.call(form.elements,focusable)[0];" +
+  "if(!f){form.setAttribute('tabindex','-1');f=form}" +
+  "try{f.focus()}catch(e){}})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-savebar]'),wire)})();";
