@@ -27,7 +27,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 /**
  * Ad-hoc "looking for group" posts (#957).
  *
- * The immediate counterpart to the Events feature: `/event` schedules a
+ * The immediate counterpart to the Events feature: the Events page schedules a
  * gathering for later, `/lfg` says "I'm playing now, who's in?". A post is a
  * single embed with a live roster and Join / Leave / Close buttons, and it
  * closes as soon as the party fills, the host closes it, or it ages past

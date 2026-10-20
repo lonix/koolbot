@@ -73,7 +73,6 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
     file: "achievements",
   },
   { name: "quote", configKey: "quotes.enabled", file: "quote" },
-  { name: "event", configKey: "events.enabled", file: "event" },
   { name: "lfg", configKey: "lfg.enabled", file: "lfg" },
   { name: "remind", configKey: "reminders.enabled", file: "remind" },
   { name: "ticket", configKey: "tickets.enabled", file: "ticket" },

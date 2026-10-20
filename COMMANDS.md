@@ -34,7 +34,6 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/aka](#aka)
   - [/achievements](#achievements)
   - [/quote](#quote)
-  - [/event](#event)
   - [/lfg](#lfg)
   - [/remind](#remind)
   - [/ticket](#ticket)
@@ -93,7 +92,7 @@ API Latency: 123ms
 or shows detailed information about a specific command.
 
 The list is derived from the bot's command registry and each command's slash-command definition, so every
-registered command (including `/quote`, `/event`, `/warn` and `/modlog`) appears automatically with its
+registered command (including `/quote`, `/warn` and `/modlog`) appears automatically with its
 description and a usage line such as `/quote <add|edit|export|import|reset> [options]`.
 
 **Note:** Core command, **always enabled**, no configuration needed.
@@ -524,135 +523,11 @@ and is auto-recreated if deleted.
 
 ---
 
-### `/event`
-
-Schedule server events backed by a **temporary voice channel**. For servers
-that don't run static voice channels: instead of pre-creating a channel by
-hand, you schedule an event and KoolBot spins up a voice channel shortly
-before it starts, announces the event with a Discord event link (members mark
-**Interested** there), reminds attendees beforehand, and deletes the channel
-once the event ends and empties.
-
-Gated by the `events.enabled` feature flag. The `create`, `cancel`, and
-`start` subcommands require the **Administrator** permission; `list` is open
-to everyone.
-
-Configure the channel category, announcement channel, timezone, and timing
-windows under **Settings → Events** (or the `/admin/events` page). See
-[SETTINGS.md](SETTINGS.md#events).
-
-#### `/event create` (admin)
-
-Schedule a new event.
-
-```text
-/event create title:"Game Night" date:2026-07-04 time:20:00
-/event create title:"Movie Night" date:2026-07-05 time:21:30 description:"Bring snacks" duration:180 timezone:Europe/London
-```
-
-**Options:**
-
-- `title` (required) — event title (also used to name the voice channel)
-- `date` (required) — start date, `YYYY-MM-DD`
-- `time` (required) — start time, 24-hour `HH:MM`
-- `description` (optional) — shown in the announcement and on the Discord event
-- `duration` (optional) — length in minutes (1–1440); defaults to
-  `events.default_duration_minutes`
-- `timezone` (optional) — IANA zone the date/time is interpreted in
-  (e.g. `Europe/London`); defaults to `events.timezone`
-- `repeat` (optional) — make it a recurring series: `weekly`, `biweekly`
-  (every 2 weeks) or `monthly`, at the same wall-clock time. Needs
-  `events.recurrence_enabled`
-
-```text
-/event create title:"Game Night" date:2026-07-04 time:20:00 repeat:weekly
-```
-
-On creation the bot creates a Discord scheduled event and posts a plain
-announcement in the configured announcement channel containing its link;
-Discord renders that as an event card with its own **Interested** button.
-KoolBot has no Going / Maybe / Can't buttons on new events.
-
-#### `/event list`
-
-List upcoming and in-progress events with their IDs and Discord event links
-(events posted before native-only events also show their old RSVP tally).
-Occurrences of a recurring series are marked `🔁` with their cadence.
-
-```text
-/event list
-```
-
-#### `/event cancel` (admin)
-
-Cancel an event and remove its voice channel (if already created). The
-announcement is updated to show the event as cancelled and the Discord event
-is cancelled too.
-
-```text
-/event cancel id:697bdfe2808f7d245289392c
-/event cancel id:697bdfe2808f7d245289392c scope:series
-```
-
-**Options:**
-
-- `id` (required) — event ID from `/event list`
-- `scope` (optional) — for a recurring event: `occurrence` (default) cancels
-  just that date and the series carries on with the next one; `series`
-  cancels every upcoming occurrence and stops the series. Ignored for
-  one-off events.
-
-#### `/event start` (admin)
-
-Spin up the event's voice channel immediately, ahead of its scheduled
-creation window.
-
-```text
-/event start id:697bdfe2808f7d245289392c
-```
-
-**How it works:**
-
-1. Admin schedules an event via `/event create` or the `/admin/events` page
-2. Bot creates the Discord scheduled event and posts an announcement with
-   its link; members press **Interested** on Discord's event card
-3. A reminder is posted `events.reminder_minutes` before start. It pings
-   nobody (Discord notifies Interested members itself); only events posted
-   before native-only events still ping their old Going / Maybe RSVPs
-4. The temporary voice channel is created `events.create_lead_minutes`
-   before start (or immediately via `/event start`)
-5. Once the event's duration elapses it is marked ended; the empty channel
-   is removed after `events.channel_grace_minutes`
-
-The whole lifecycle is driven by a once-a-minute scan, so it is
-restart-safe — progress is tracked on the stored event, not in memory.
-
-For a recurring event, step 5 also creates the **next occurrence** (new
-announcement, new Discord event, new channel) at the same wall-clock time; future occurrences are
-never pre-created.
-
-**Team leaders customise from a button, not a command (#1196).** When an event
-uses groups with leaders and the host ticked **Leaders can customise**, the bot
-posts a **Customise team** button in each team channel's chat. The team's
-current leader (and nobody else) can press it to rename the team and set its
-clan tag; everyone else gets a private refusal. There is no slash command for
-this: setup and the host's reset live in the Web UI, under the host panel's
-**Team names and tags** section (see [WEBUI.md](WEBUI.md)).
-
-Every event is also a Discord **scheduled event** that shows in the server's
-Events list; cancel and end are mirrored too, and a recurring series is mirrored
-as one one-off Discord event per occurrence. The bot needs the Create Events (or
-Manage Events) permission; without it there is no event card and no Interested
-button. Announcements posted before native-only events keep their old RSVP
-buttons until the event ends.
-
----
-
 ### `/lfg`
 
 **Description:** Post a **"looking for group"** call for something you want
 to play right now, and let people join from the post itself. For a
-_scheduled_ session with an Interested list, use [`/event`](#event) instead.
+_scheduled_ session with an Interested list, use the **Events** page in the Web UI (`/admin/events`) instead.
 
 **Enable:** Web UI → Settings → `lfg.enabled = true` → Reload commands.
 
@@ -1281,8 +1156,6 @@ surfaces share the same validation.
 | `/seen`                      | Everyone\*                                                 | Voice tracking + seen enabled |
 | `/aka`                       | Everyone\*                                                 | Name history enabled          |
 | `/quote`                     | Everyone\*                                                 | Quotes enabled                |
-| `/event list`                | Everyone\*                                                 | Events enabled                |
-| `/event` create/cancel/start | Administrator                                              | Events enabled                |
 | `/lfg`                       | Everyone\*                                                 | LFG enabled                   |
 | `/remind`                    | Everyone\*                                                 | Reminders enabled             |
 | `/ticket`                    | Everyone\*                                                 | Tickets enabled               |
@@ -1394,8 +1267,6 @@ when its message, role, category, or channel is deleted.
 /aka user:@User                     # Previously known names
 /quote add text:"..." author:@User  # Add a quote
 /quote edit id:"..." [text:"..."] [author:@User]
-/event list                         # List upcoming events
-/event create title:"..." date:YYYY-MM-DD time:HH:MM  # (admin) schedule an event
 /lfg game:"..." [size:N] [note:"..."]  # Ad-hoc looking-for-group post
 /remind set message:"..." in:2h     # Set a personal reminder
 /remind list                        # Your pending reminders
@@ -1445,6 +1316,11 @@ Once in the admin Web UI (admin sessions):
 | Voice Channels    | `/vc reload`, `/vc force-reload`                                    |
 | Weekly Digest     | (new — weekly DM digest configuration and preview)                  |
 | Voice Analytics   | (new — voice activity charts and channel breakdowns)                |
+
+The `/event` command was removed after 2.0: administrators schedule, cancel and start events on the **Events** page, and
+members see them in Discord's own Events list (every event is mirrored as a native Discord scheduled event) and in the
+announcement channel. There is no member-facing events list command. The native event needs the bot's Create Events (or Manage Events)
+permission; without it there is no event card in the Events list.
 
 Feature pages stay in the nav while their `*.enabled` setting is off —
 greyed out, badged **off**, and sorted below the enabled ones. The page

@@ -49,7 +49,7 @@ Retention is your community's choice, and `0` keeps data forever.
 
 Schedule an event and KoolBot creates a temporary voice channel shortly before it starts, collects RSVPs, reminds
 attendees, and cleans the channel up once the event is over. Great for communities that don't keep static voice
-channels around. Manage it from `/event` or the **Events** admin page.
+channels around. Manage it from the **Events** admin page (the `/event` command was removed after 2.0; see COMMANDS.md).
 
 ### 🎮 Looking for group, in one command
 

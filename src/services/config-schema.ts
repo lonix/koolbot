@@ -1112,7 +1112,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   events: {
     title: "Events",
     description:
-      "Schedule server events that spin up a temporary voice channel shortly before they start, announce each one with a Discord event link members can mark Interested on, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
+      "Schedule server events that spin up a temporary voice channel shortly before they start, announce each one with a Discord event link members can mark Interested on, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from the /admin/events page.",
   },
   lfg: {
     title: "LFG",
@@ -1831,7 +1831,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.enabled": {
     label: "Events enabled",
     description:
-      "Enable scheduled events, the /event command, and the /admin/events page. Events create a temporary voice channel shortly before they start and remove it once they end.",
+      "Enable scheduled events and the /admin/events page. Events create a temporary voice channel shortly before they start and remove it once they end.",
     category: "events",
     type: "boolean",
   },

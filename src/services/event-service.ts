@@ -278,7 +278,7 @@ export function formatEventWhen(event: {
 }
 
 /** Link to a native scheduled event; Discord renders it as an event card. */
-export function nativeEventUrl(guildId: string, nativeEventId: string): string {
+function nativeEventUrl(guildId: string, nativeEventId: string): string {
   return `https://discord.com/events/${guildId}/${nativeEventId}`;
 }
 

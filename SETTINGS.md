@@ -193,7 +193,7 @@ and at least one `/me/*` surface is on (derived in `src/web/me-surfaces.ts`).
 | `voicetracking.seen.enabled` | `false` | Enable/disable the `/seen` command                                                                                                        |
 | `aka.enabled`                | `false` | Enable/disable the `/aka` command                                                                                                         |
 | `achievements.enabled`       | `false` | Enable/disable the achievements system and the `/achievements` command                                                                    |
-| `events.enabled`             | `false` | Enable/disable the `/event` command                                                                                                       |
+| `events.enabled`             | `false` | Enable/disable the events feature and the `/admin/events` page                                                                            |
 | `lfg.enabled`                | `false` | Enable/disable the `/lfg` command                                                                                                         |
 | `reminders.enabled`          | `false` | Enable/disable the `/remind` command                                                                                                      |
 | `moderation.enabled`         | `false` | Enables `/warn`, `/timeout`, `/ban` and `/modlog` together                                                                                |
@@ -810,12 +810,12 @@ channel shortly before it starts, announces it with a Discord event link (member
 Discord's own event card), posts a reminder beforehand,
 and deletes the channel once the event ends and empties.
 
-Manage events from the **`/admin/events`** page or the **`/event`** slash
-command (see [COMMANDS.md](COMMANDS.md#event)).
+Manage events from the **`/admin/events`** page. Members see them in Discord's Events list and the announcement
+channel.
 
 | Setting                           | Default   | Description                                                                                                                       |
 | --------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `events.enabled`                  | `false`   | Master switch — enables the feature, the `/event` command, and the `/admin/events` page                                           |
+| `events.enabled`                  | `false`   | Master switch — enables the feature and the `/admin/events` page                                                                  |
 | `events.category_id`              | `""`      | Category the temporary event voice channels are created under (**required** for channels to spin up)                              |
 | `events.announcement_channel_id`  | `""`      | Text channel where the event announcement (with the Discord event link) and the pre-start reminder are posted                     |
 | `events.timezone`                 | `""`      | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
@@ -839,8 +839,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   wall-clock time is interpreted and displayed.
 - The temporary channel is a plain managed voice channel; if voice
   tracking is enabled, time spent in it is tracked like any other channel.
-- Only administrators can create, cancel, or start events; `/event list`
-  is open to everyone. A configurable creator role is a possible future
+- Only administrators can create, cancel, or start events, from the Web UI. A configurable creator role is a possible future
   enhancement.
 - **Recurring events** (weekly / every 2 weeks / monthly, same wall-clock
   time) are a _series_ of ordinary event rows sharing a `seriesId`. Future

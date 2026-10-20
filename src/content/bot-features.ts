@@ -66,7 +66,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
     emoji: "📅",
     label: "Events",
     description:
-      "Scheduled server events announced with a Discord event link via `/event`",
+      "Scheduled server events announced with a Discord event link members can mark Interested on",
     listed: true,
   },
   lfg: {

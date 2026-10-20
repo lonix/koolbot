@@ -163,7 +163,6 @@ tests:
           - 'src/handlers/event-rsvp-handler.ts'
           - 'src/models/event.ts'
           - 'src/models/user-birthday.ts'
-          - 'src/commands/event.ts'
 
 'area: reaction-roles':
   - changed-files:
