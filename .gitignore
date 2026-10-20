@@ -39,6 +39,7 @@ docker-compose.override.yml
 
 # Testing
 coverage/
+ui-preview/
 .nyc_output/
 
 # Misc

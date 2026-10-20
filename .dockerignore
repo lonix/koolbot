@@ -30,6 +30,7 @@ Thumbs.db
 
 # Test files
 coverage
+ui-preview
 .nyc_output
 __tests__
 *.test.ts
