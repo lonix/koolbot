@@ -444,6 +444,14 @@ export class ModerationCaseService {
     return byId;
   }
 
+  /** Cases still waiting on a decision (`open` or `under_review`), uncapped. */
+  public async countLiveCases(guildId: string): Promise<number> {
+    return ModerationCase.countDocuments({
+      guildId,
+      status: { $in: LIVE_CASE_STATUSES },
+    }).exec();
+  }
+
   /** The review queue, in the order the admin page shows it. */
   public async getQueue(
     guildId: string,

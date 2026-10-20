@@ -1,7 +1,7 @@
 /**
  * Route guards on `/me` (#1316): `/me/events*` needs the host scope and
  * `/me/moderation*` the moderator scope, over real HTTP through the real
- * `createUserRouter`. The two event sub-routers are replaced by markers so the
+ * `createUserRouter`. The sub-routers are replaced by markers so the
  * test sees only whether the guard let the request through; the creator check
  * behind the guard (`isEventHost`) has its own tests in `event-host.test.ts`
  * and `host-panel-routes.test.ts`.
@@ -31,6 +31,16 @@ jest.unstable_mockModule("../../src/web/routes/me-event-presets.js", () => ({
     const r = Router();
     r.use((_req, res) => {
       res.status(200).type("text/plain").send("presets-reached");
+    });
+    return r;
+  },
+}));
+
+jest.unstable_mockModule("../../src/web/routes/me-moderation.js", () => ({
+  createMeModerationRouter: (): Router => {
+    const r = Router();
+    r.use((_req, res) => {
+      res.status(200).type("text/plain").send("moderation-reached");
     });
     return r;
   },
@@ -146,10 +156,10 @@ describe("/me/moderation needs the moderator scope (#1316)", () => {
     ["an admin session", "admin", ["member"]],
   ] as const)("lets %s past the guard", async (_n, role, scopes) => {
     as(role, [...scopes]);
-    // No moderation page exists yet (#1320): past the guard the answer is the
-    // router's plain 404, which is how a test tells "guard passed" from 403.
     for (const path of MODERATION_PATHS) {
-      expect(await status(path, "GET")).toBe(404);
+      const res = await harness.get(path);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("moderation-reached");
     }
   });
 

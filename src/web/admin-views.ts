@@ -5283,6 +5283,7 @@ export interface ModerationRow {
   /** The log row's id; the "Open case" form posts it (#908). */
   entryId: string;
   /** The case opened against this row, if any. */
+  caseId?: string | null;
   caseNumber: number | null;
   caseStatus: string | null;
   createdAt: string;
@@ -5330,7 +5331,7 @@ export interface ModerationProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
-const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
+export const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
   warn: "warn",
   kick: "kick",
   ban: "ban",
@@ -5367,7 +5368,7 @@ function buildModerationQueryString(
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
-const CASE_STATUS_LABELS: Record<string, string> = {
+export const CASE_STATUS_LABELS: Record<string, string> = {
   open: "open",
   under_review: "under review",
   upheld: "upheld",

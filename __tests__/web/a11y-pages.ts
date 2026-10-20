@@ -40,6 +40,14 @@ import {
 } from "../../src/web/admin-views.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
+import {
+  renderModAuditBody,
+  renderModCaseBody,
+  renderModCaseMissingBody,
+  renderModLogBody,
+  type ModLogBodyProps,
+} from "../../src/web/me-moderation-page.js";
+import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
@@ -2571,6 +2579,7 @@ export function userPages(): A11yPage[] {
         }),
       ),
     },
+    ...moderatorPages(shell),
     {
       name: "/me host panel (end the event, running plain event)",
       html: shell(
@@ -2798,4 +2807,239 @@ const REWIND = {
 /** Every page the a11y gate scans. */
 export function allPages(): A11yPage[] {
   return [...adminPages(), ...userPages(), ...preAuthPages()];
+}
+
+// ---------- /me/moderation (#1320) ----------
+
+const MOD_REASON = { kind: "groups", names: ["Moderator"] } as const;
+
+const modLogProps = (over: Partial<ModLogBodyProps> = {}): ModLogBodyProps => ({
+  reason: MOD_REASON,
+  enabled: true,
+  casesEnabled: true,
+  tiles: {
+    openCases: 2,
+    overdueCases: 1,
+    actionsLast7Days: 9,
+    timeoutsNow: 1,
+  },
+  openCases: [
+    {
+      id: "65a000000000000000000001",
+      caseNumber: 4,
+      userId: "u-1",
+      userLabel: "Bad Ben",
+      action: "ban",
+      status: "under_review",
+      reviewAt: "2026-01-10T09:00:00.000Z",
+      due: true,
+    },
+    {
+      id: "65a000000000000000000002",
+      caseNumber: 5,
+      userId: "u-2",
+      userLabel: "Kick Kim",
+      action: "kick",
+      status: "open",
+      reviewAt: null,
+      due: false,
+    },
+  ],
+  kind: "all",
+  rows: [
+    {
+      entryId: "e1",
+      caseId: "65a000000000000000000001",
+      caseNumber: 4,
+      caseStatus: "under_review",
+      createdAt: "2026-01-01T10:00:00.000Z",
+      userId: "u-1",
+      userLabel: "Bad Ben",
+      moderatorId: "m-1",
+      moderatorLabel: "Mod Mia",
+      action: "ban",
+      reason: "spam <b>links</b>",
+      source: "audit",
+    },
+    {
+      entryId: "e2",
+      caseId: null,
+      caseNumber: null,
+      caseStatus: null,
+      createdAt: "2026-01-02T10:00:00.000Z",
+      userId: "u-2",
+      userLabel: "Kick Kim",
+      moderatorId: null,
+      moderatorLabel: null,
+      action: "warn",
+      reason: null,
+      source: "command",
+    },
+  ],
+  total: 120,
+  page: 2,
+  pageSize: 50,
+  ...over,
+});
+
+const modCase = (over: Partial<CaseView> = {}): CaseView => ({
+  id: "65a000000000000000000001",
+  caseNumber: 4,
+  userId: "u-1",
+  userLabel: "Bad Ben",
+  action: "ban",
+  status: "open",
+  reviewAt: "2026-02-01T09:00:00.000Z",
+  openedAt: "2026-01-01T10:00:00.000Z",
+  openedByLabel: "Mod Mia",
+  originModeratorLabel: "Mod Mia",
+  reason: "spam",
+  events: [
+    {
+      at: "2026-01-05T09:00:00.000Z",
+      byLabel: "KoolBot",
+      to: "under_review",
+      outcome: null,
+      note: null,
+    },
+    {
+      at: "2026-01-06T09:00:00.000Z",
+      byLabel: "Mod Mia",
+      to: "open",
+      outcome: "upheld",
+      note: "still a risk",
+    },
+  ],
+  history: [
+    { createdAt: "2025-12-01T10:00:00.000Z", action: "warn", reason: "caps" },
+    { createdAt: "2025-11-01T10:00:00.000Z", action: "timeout", reason: null },
+  ],
+  live: true,
+  ...over,
+});
+
+function moderatorPages(
+  shell: (title: string, active: string, body: string) => string,
+): A11yPage[] {
+  const page = (name: string, title: string, body: string): A11yPage => ({
+    name: `/me/moderation ${name}`,
+    html: shell(title, "/me/moderation", body),
+  });
+  const auditProps = {
+    reason: MOD_REASON,
+    enabled: true,
+    commandOptions: ["warn", "component:poll-vote"],
+    userOptions: [{ id: "u-1", label: "Mod Mia" }],
+    filters: { commandName: "", userId: "", result: "", from: "", to: "" },
+    rows: [
+      {
+        createdAt: "2026-01-03T09:30:00.000Z",
+        discordUserId: "u-1",
+        userLabel: "Mod Mia",
+        commandName: "warn",
+        subcommand: null,
+        channelId: "c-1",
+        channelLabel: "general",
+        result: "denied" as const,
+        errorMessage: "Missing permission",
+        durationMs: 12,
+      },
+    ],
+    total: 80,
+    page: 1,
+    pageSize: 50,
+  };
+  return [
+    page(
+      "mod log (tiles, open cases, actions)",
+      "Mod log",
+      renderModLogBody(modLogProps()),
+    ),
+    page(
+      "mod log (timeouts filter, no cases)",
+      "Mod log",
+      renderModLogBody(
+        modLogProps({
+          casesEnabled: false,
+          kind: "timeouts",
+          openCases: null,
+          tiles: {
+            openCases: null,
+            overdueCases: 0,
+            actionsLast7Days: 0,
+            timeoutsNow: null,
+          },
+          rows: [],
+          total: 0,
+          page: 1,
+        }),
+      ),
+    ),
+    page(
+      "mod log (nothing open, administrator)",
+      "Mod log",
+      renderModLogBody(
+        modLogProps({
+          reason: { kind: "admin" },
+          openCases: [],
+          tiles: {
+            openCases: 0,
+            overdueCases: 0,
+            actionsLast7Days: 3,
+            timeoutsNow: 0,
+          },
+        }),
+      ),
+    ),
+    page(
+      "mod log (cases unreadable)",
+      "Mod log",
+      renderModLogBody(modLogProps({ openCases: null })),
+    ),
+    page(
+      "mod log (moderation off)",
+      "Mod log",
+      renderModLogBody(modLogProps({ enabled: false })),
+    ),
+    page(
+      "case (live, with the Review form)",
+      "Case #4",
+      renderModCaseBody({
+        reason: MOD_REASON,
+        csrfToken: COMMON.csrfToken,
+        case: modCase(),
+        defaultReviewDays: 90,
+      }),
+    ),
+    page(
+      "case (resolved)",
+      "Case #4",
+      renderModCaseBody({
+        reason: MOD_REASON,
+        csrfToken: COMMON.csrfToken,
+        case: modCase({
+          live: false,
+          status: "lifted",
+          events: [],
+          history: [],
+        }),
+        defaultReviewDays: 90,
+      }),
+    ),
+    page(
+      "case (not found)",
+      "Case not found",
+      renderModCaseMissingBody(MOD_REASON, true),
+    ),
+    page(
+      "command audit (read only)",
+      "Command audit",
+      renderModAuditBody(auditProps),
+    ),
+    page(
+      "command audit (empty, auditing off)",
+      "Command audit",
+      renderModAuditBody({ ...auditProps, enabled: false, rows: [], total: 0 }),
+    ),
+  ];
 }

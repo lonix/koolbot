@@ -95,6 +95,7 @@ import { renderSignedOut } from "./views.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createHostEventsRouter } from "./routes/host-events.js";
+import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
 import { formatEventWhen } from "../services/event-service.js";
@@ -576,10 +577,11 @@ export function createUserRouter(
   // A host's own group presets (#1216): `/me/events/presets`.
   router.use("/events/presets", createMeEventPresetsRouter(client));
 
-  // Moderation pages (#1320, not built yet) need the `moderator` scope. The
-  // guard is mounted now so every route added under `/me/moderation` is gated
-  // from its first commit: add routes to this router, never beside it.
+  // Moderation pages (#1320) need the `moderator` scope. The guard sits ahead
+  // of the router, so every route added under `/me/moderation` is gated from
+  // its first commit: add routes to that router, never beside it.
   router.use("/moderation", requireScopeMiddleware("moderator"));
+  router.use("/moderation", createMeModerationRouter(client));
 
   // ---------- Index ----------
   router.get(

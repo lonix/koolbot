@@ -93,11 +93,11 @@ the member's role groups. The scopes are resolved from the role groups **on ever
 someone from the group removes the scope on their next request, within the same ~15 s window as the other live checks when the
 Server Members intent is off.
 
-| Scope      | Granted by (role group capability)                | Reaches                                        |
-| ---------- | ------------------------------------------------- | ---------------------------------------------- |
-| Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                           |
-| Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created  |
-| Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*` (pages arrive with #1320)    |
+| Scope      | Granted by (role group capability)                | Reaches                                          |
+| ---------- | ------------------------------------------------- | ------------------------------------------------ |
+| Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                             |
+| Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created    |
+| Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*`: Mod log, cases, Command audit |
 
 - A host reaches only events they created (`isEventHost`); an admin session reaches every event. A member who is not in a host group gets 403
   on `/me/events*`, even for an event they created earlier.
@@ -107,6 +107,17 @@ Server Members intent is off.
 - Fails closed, all or nothing: both capabilities come from one read of the role groups. If the groups or the member cannot be read
   (Discord or database error), the session is plain `member` for that request, never a partial set, and the
   event and moderation pages answer 403. The request is still served as `me` otherwise.
+- **Moderator scope (#1320).** `/me/moderation` is the Mod log for people who moderate but are not admins. The header says why they see it
+  (the Moderator role groups they are in; an administrator session says so instead). It shows three tiles (open cases, actions in the last
+  7 days, timeouts running now), the **Open cases** with a **Review** link, and the **Actions** list, filterable by kind (All, Warnings,
+  Timeouts, Bans; a kick shows under All), 50 per page. Each row links to its case at `/me/moderation/cases/:id`, where the four decisions
+  (Uphold, Extend, Make permanent, Readmit) are the same ones the admin Moderation page offers: the same service call, and an audit row
+  (`moderation.case.<decision>`) for every attempt. `/me/moderation/audit` is the Command audit, read only (no settings card, no write
+  route). A moderator cannot open a case, run the review pass, change a moderation setting or reach any `/admin` page. The log shows what
+  the admin log shows (member, moderator, action, reason); message content and attachments are never stored there. "Timeouts running now"
+  counts members whose Discord timeout has not ended, from the member cache, so it needs the Server Members intent and shows a dash
+  without it (the log does not record how long a timeout lasts). Mod-log rows carry no channel; channels appear in the Command audit.
+  Tickets will join this section when it is switched on.
 - Nothing grants the scope automatically. The **Event host** preset on the Role Groups page only pre-fills the form, and an existing
   server gains no host members from this change.
 

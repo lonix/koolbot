@@ -111,13 +111,14 @@ export async function loadCaseHistory(
   return byCase;
 }
 
-export function buildCaseGroups(
-  queue: CaseQueue,
+/** One case as the pages render it: names, origin reason, decisions, prior history. */
+export function buildCaseView(
+  c: IModerationCase,
   originEntries: ReadonlyMap<string, IModerationLog>,
   history: ReadonlyMap<string, IModerationLog[]>,
   labelOf: (id: string | null) => string,
-): CaseGroups {
-  const view = (c: IModerationCase): CaseView => ({
+): CaseView {
+  return {
     id: String(c._id),
     caseNumber: c.caseNumber,
     userId: c.userId,
@@ -145,7 +146,17 @@ export function buildCaseGroups(
       reason: h.reason ?? null,
     })),
     live: c.status === "open" || c.status === "under_review",
-  });
+  };
+}
+
+export function buildCaseGroups(
+  queue: CaseQueue,
+  originEntries: ReadonlyMap<string, IModerationLog>,
+  history: ReadonlyMap<string, IModerationLog[]>,
+  labelOf: (id: string | null) => string,
+): CaseGroups {
+  const view = (c: IModerationCase): CaseView =>
+    buildCaseView(c, originEntries, history, labelOf);
   return {
     overdue: queue.overdue.map(view),
     dueSoon: queue.dueSoon.map(view),
