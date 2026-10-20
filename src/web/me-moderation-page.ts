@@ -46,11 +46,15 @@ export const MOD_LOG_KIND_ACTIONS: Record<
   bans: ["ban", "unban"],
 };
 
-/** Anything unknown means All: the query string is the member's to type. */
+/**
+ * Anything unknown means All: the query string is the member's to type. The
+ * result is always one of our own constants, never the submitted value, so
+ * nothing the member typed reaches a renderer (an array, an object or a string
+ * that merely looks like a kind all fall back to All).
+ */
 export function parseModLogKind(raw: unknown): ModLogKind {
-  return (MOD_LOG_KINDS as readonly string[]).includes(String(raw))
-    ? (raw as ModLogKind)
-    : "all";
+  if (typeof raw !== "string") return "all";
+  return MOD_LOG_KINDS.find((k) => k === raw) ?? "all";
 }
 
 /** Why the viewer holds the Moderator scope. */
@@ -276,7 +280,7 @@ function renderOpenCases(p: ModLogBodyProps): string {
 
 function pageQuery(kind: ModLogKind, page: number): string {
   const parts: string[] = [];
-  if (kind !== "all") parts.push(`kind=${kind}`);
+  if (kind !== "all") parts.push(`kind=${encodeURIComponent(kind)}`);
   if (page > 1) parts.push(`page=${page}`);
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }

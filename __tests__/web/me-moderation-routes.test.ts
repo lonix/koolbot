@@ -416,6 +416,54 @@ describe("tiles", () => {
   });
 });
 
+describe("hostile query values stay inert", () => {
+  const hostile = [
+    "kind=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+    "kind[]=bans",
+    "kind[]=bans&kind[]=%3Cscript%3E",
+    "kind[x]=%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+    "page=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+  ];
+  it.each(hostile)("the mod log ignores %s", async (query) => {
+    const page = await html(`/?${query}`);
+    expect(page.includes("<script>alert(1)")).toBe(false);
+    expect(page.includes("%3Cscript")).toBe(false);
+    const list = moderation.getRecent.mock.calls[0][1] as {
+      actions?: string[];
+      skip: number;
+    };
+    expect(list.actions).toBeUndefined();
+    expect(list.skip).toBe(0);
+  });
+
+  it("parseModLogKind only ever returns one of its own constants", async () => {
+    const { parseModLogKind } =
+      await import("../../src/web/me-moderation-page.js");
+    // An array whose string form is a valid kind used to pass through as the
+    // submitted value itself.
+    const arr = ["bans"];
+    expect(parseModLogKind(arr)).toBe("all");
+    expect(parseModLogKind({ toString: () => "bans" })).toBe("all");
+    expect(parseModLogKind('"><script>')).toBe("all");
+    expect(parseModLogKind(undefined)).toBe("all");
+    expect(parseModLogKind("bans")).toBe("bans");
+  });
+
+  it("escapes hostile audit filters and a hostile case id", async () => {
+    const evil = "%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E";
+    const audit = await html(
+      `/audit?command=${evil}&user=${evil}&result=${evil}&from=${evil}&to=${evil}&page=${evil}`,
+    );
+    expect(audit.includes("<script>alert(1)")).toBe(false);
+    cases.findCase.mockResolvedValue(null);
+    const res = await harness.get(`/cases/${evil}`);
+    expect(res.status).toBe(404);
+    expect((await res.text()).includes("<script>alert(1)")).toBe(false);
+    const post = await harness.post(`/cases/${evil}/uphold`, {});
+    expect(post.headers.get("location")?.includes("<script>")).toBe(false);
+  });
+});
+
 describe("actions", () => {
   it.each([
     ["", undefined],
