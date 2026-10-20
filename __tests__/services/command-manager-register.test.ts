@@ -249,3 +249,93 @@ describe("shared REST instance (#1307)", () => {
     resetSharedRest();
   });
 });
+
+describe("serialised registration (#1307)", () => {
+  let manager: CommandManager;
+  let putSpy: jest.SpiedFunction<typeof REST.prototype.put>;
+  let getSpy: jest.SpiedFunction<typeof REST.prototype.get>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    CommandManager.reset();
+    PermissionsService.reset();
+    resetSharedRest();
+    manager = CommandManager.getInstance({ user: { id: "1" } } as never);
+    const values: Record<string, string> = {
+      GUILD_ID: "guild-1",
+      CLIENT_ID: "client-1",
+      DISCORD_TOKEN: "t",
+    };
+    (manager as unknown as { configService: unknown }).configService = {
+      getString: async (key: string) => values[key] ?? "",
+      getBoolean: async () => false,
+    };
+  });
+
+  afterEach(() => {
+    putSpy.mockRestore();
+    getSpy.mockRestore();
+  });
+
+  const cmd = (name: string): { name: string; description: string } => ({
+    name,
+    description: "",
+  });
+
+  it("the later of two overlapping registrations wins", async () => {
+    // Discord holds list A. Run 1 wants B, run 2 wants A again.
+    let discord: unknown[] = [cmd("a")];
+    const desired = [[cmd("b")], [cmd("a")]];
+    let loads = 0;
+    (manager as unknown as { getEnabledCommands: unknown }).getEnabledCommands =
+      async () => desired[loads++];
+
+    const releasePut: Array<() => void> = [];
+    getSpy = jest.spyOn(REST.prototype, "get").mockImplementation(async () => {
+      const snapshot = discord;
+      // Let the other registration interleave between GET and PUT.
+      await new Promise((r) => setTimeout(r, 0));
+      return snapshot;
+    });
+    const puts: unknown[][] = [];
+    putSpy = jest
+      .spyOn(REST.prototype, "put")
+      .mockImplementation(async (_route, options) => {
+        const body = (options as { body: unknown[] }).body;
+        puts.push(body);
+        await new Promise<void>((r) => releasePut.push(r));
+        discord = body;
+        return body;
+      });
+
+    const first = manager.registerCommands();
+    const second = manager.registerCommands();
+    // Release every PUT as soon as it is issued.
+    const pump = setInterval(() => releasePut.splice(0).forEach((r) => r()), 1);
+    try {
+      await Promise.all([first, second]);
+    } finally {
+      clearInterval(pump);
+    }
+
+    expect(discord).toEqual([cmd("a")]);
+    expect(puts.at(-1)).toEqual([cmd("a")]);
+  });
+
+  it("a failed run does not block the next one", async () => {
+    let loads = 0;
+    (manager as unknown as { getEnabledCommands: unknown }).getEnabledCommands =
+      async () => {
+        if (loads++ === 0) throw new Error("load failed");
+        return [cmd("a")];
+      };
+    getSpy = jest.spyOn(REST.prototype, "get").mockResolvedValue([]);
+    putSpy = jest.spyOn(REST.prototype, "put").mockResolvedValue([]);
+
+    const first = manager.registerCommands();
+    const second = manager.registerCommands();
+    await expect(first).rejects.toThrow("load failed");
+    await expect(second).resolves.toBeUndefined();
+    expect(putSpy).toHaveBeenCalledTimes(1);
+  });
+});

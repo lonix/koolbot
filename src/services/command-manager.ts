@@ -334,7 +334,23 @@ export class CommandManager {
     }
   }
 
-  public async registerCommands(): Promise<void> {
+  /**
+   * Registration runs one at a time (#1307). Each run loads the desired list
+   * when it starts, compares and overwrites; if two overlapped, both could
+   * read the same registered list, one would skip as "unchanged" and the
+   * other's older PUT would then land last, leaving Discord outdated. The
+   * queue means the last request always sees the previous run's result. A
+   * failed run rejects its own caller only; it never blocks later runs.
+   */
+  private registrationQueue: Promise<void> = Promise.resolve();
+
+  public registerCommands(): Promise<void> {
+    const run = this.registrationQueue.then(() => this.registerCommandsOnce());
+    this.registrationQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async registerCommandsOnce(): Promise<void> {
     try {
       if (!this.client) {
         throw new Error("Client not set");
