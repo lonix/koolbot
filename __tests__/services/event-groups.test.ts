@@ -869,6 +869,39 @@ describe("the series group setup (#1266)", () => {
     expect(readSeriesGroupSetup(stored)).toEqual(stored);
   });
 
+  it("keeps the captains lobby as a structural group, without its channel or anybody in it", () => {
+    const lobby = {
+      key: "g_lobby",
+      name: "Captain lobby",
+      tag: "",
+      kind: "leads" as const,
+      size: null,
+      marker: "",
+      channelId: "c-lobby",
+      captainId: "u-leader",
+      memberIds: ["u9"],
+    };
+    const row = { ...liveRow, groups: [...liveRow.groups, lobby] };
+    const series = seriesGroupSetupOf(row);
+    expect(series.groups.map((g) => [g.key, g.kind])).toEqual([
+      ["g_a", "team"],
+      ["g_b", "open"],
+      ["g_lobby", "leads"],
+    ]);
+    const text = JSON.stringify(series);
+    for (const forbidden of ["c-lobby", "u-leader", "u9"]) {
+      expect(text).not.toContain(forbidden);
+    }
+    const next = successorGroupFields(series, null).groups;
+    expect(hasCaptainsLobby(next)).toBe(true);
+    expect(next[2]).toMatchObject({
+      key: "g_lobby",
+      channelId: null,
+      captainId: null,
+      memberIds: [],
+    });
+  });
+
   it("builds a successor's fields from it without memberships, leaders or channels", () => {
     const fields = successorGroupFields(seriesGroupSetupOf(liveRow), 25);
     expect(fields).toMatchObject({

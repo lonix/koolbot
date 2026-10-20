@@ -452,3 +452,34 @@ describe("a lowered events.groups.max_count (#1200)", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe("the Captains lobby tick (#1263)", () => {
+  const groupsOf = (): Array<{ name: string; kind: string }> =>
+    (
+      mockCreate.mock.calls[0][1] as {
+        groups: Array<{ name: string; kind: string }>;
+      }
+    ).groups;
+
+  it("stores a lobby only when the tick is posted, as a leads row named from the leader label", async () => {
+    await post("/events/presets/save", {
+      ...goodBody,
+      groups_leader_label: "Captain",
+      groups_captains_lobby: "1",
+    });
+    expect(groupsOf().map((g) => [g.name, g.kind])).toEqual([
+      ["Assault", "team"],
+      ["Logi", "team"],
+      ["Captain lobby", "leads"],
+    ]);
+  });
+
+  it("stores no lobby without the tick, even when a leads row is posted", async () => {
+    await post("/events/presets/save", {
+      ...goodBody,
+      group_2_name: "Old lobby",
+      group_2_kind: "leads",
+    });
+    expect(groupsOf().map((g) => g.kind)).toEqual(["team", "team"]);
+  });
+});

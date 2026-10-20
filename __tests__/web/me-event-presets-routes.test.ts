@@ -412,3 +412,67 @@ describe("CSRF", () => {
     expect(typeof requireCsrf).toBe("function");
   });
 });
+
+describe("the Captains lobby tick on the hosts' page (#1263)", () => {
+  it("saves a lobby from the tick and shows it ticked, as no row, when the preset is edited", async () => {
+    const flash = await save({ ...good, groups_captains_lobby: "1" });
+    expect(flash.type).toBe("ok");
+    const stored = personal.state.rows[0] as unknown as {
+      groups: Array<{ name: string; kind: string }>;
+    };
+    expect(stored.groups.map((g) => g.kind)).toEqual(["team", "team", "leads"]);
+    const html = await page(
+      `edit=${encodeURIComponent(presetIdOf(A, "Clan match"))}`,
+    );
+    expect(html).toMatch(
+      /<input type="checkbox" name="groups_captains_lobby" value="1" checked>/,
+    );
+    // Two group rows and the template the script clones; the lobby has no row.
+    expect(html.split("<fieldset data-group-row>").length - 1).toBe(3);
+    expect(html).toContain('name="lobby_name" value="Leader lobby"');
+  });
+
+  it("copying an event with a lobby shows the tick, not a row", async () => {
+    mockGetEvent.mockResolvedValue({
+      _id: "65a000000000000000000001",
+      guildId: GUILD,
+      createdBy: A,
+      title: "Friday",
+      state: "scheduled",
+      groupsEnabled: true,
+      groupLabel: "Squad",
+      leaderLabel: "Leader",
+      channelLeadMinutes: null,
+      tagsEnabled: false,
+      groups: [
+        {
+          key: "g_1",
+          name: "Heli",
+          kind: "team",
+          size: null,
+          tag: "",
+          marker: "",
+          memberIds: [],
+          captainId: null,
+          channelId: null,
+        },
+        {
+          key: "g_2",
+          name: "Leader lobby",
+          kind: "leads",
+          size: null,
+          tag: "",
+          marker: "",
+          memberIds: [],
+          captainId: null,
+          channelId: null,
+        },
+      ],
+    });
+    const html = await page("fromEvent=65a000000000000000000001");
+    expect(html).toMatch(
+      /<input type="checkbox" name="groups_captains_lobby" value="1" checked>/,
+    );
+    expect(html).not.toContain('value="leads"');
+  });
+});

@@ -478,3 +478,81 @@ describe("buildGroupEditView gives the group set forms their data (#1242)", () =
     expect(["g_00000001", "g_00000002"]).not.toContain(data.addKey);
   });
 });
+
+describe("the preset switch and the Captains lobby (#1263)", () => {
+  const lobbyEvent = (lobby: boolean) =>
+    ({
+      guildId: "g",
+      groupLabel: "Squad",
+      presetId: null,
+      groups: [
+        { key: "g_00000001", name: "A", kind: "team", size: 1, memberIds: [] },
+        ...(lobby
+          ? [
+              {
+                key: "g_00000009",
+                name: "Leader lobby",
+                kind: "leads",
+                size: null,
+                memberIds: [],
+              },
+            ]
+          : []),
+        {
+          key: "g_00000002",
+          name: "B",
+          kind: "open",
+          size: null,
+          memberIds: [],
+        },
+      ],
+    }) as never;
+  const presetSet = (): void => {
+    catalog = {
+      state: "ok",
+      entries: [
+        entryOf("plain", [
+          { name: "X", kind: "team" },
+          { name: "Y", kind: "open" },
+        ]),
+        entryOf("with-lobby", [
+          { name: "X", kind: "team" },
+          { name: "Lobby", kind: "leads" },
+          { name: "Y", kind: "open" },
+        ]),
+        entryOf("lobby-only", [{ name: "Lobby", kind: "leads" }]),
+        entryOf("wrong-kind", [
+          { name: "X", kind: "team" },
+          { name: "Lobby", kind: "leads" },
+          { name: "Y", kind: "team" },
+        ]),
+      ],
+    };
+  };
+
+  it("an event with a lobby is offered presets with and without one, judged on the visible groups", async () => {
+    presetSet();
+    const data = await buildGroupEditView(lobbyEvent(true));
+    expect(data.presets.map((p) => p.id)).toEqual(["plain", "with-lobby"]);
+  });
+
+  it("an event without a lobby is offered a preset that has one", async () => {
+    presetSet();
+    const data = await buildGroupEditView(lobbyEvent(false));
+    expect(data.presets.map((p) => p.id)).toEqual(["plain", "with-lobby"]);
+  });
+
+  it("the form's base value leaves the lobby out", async () => {
+    presetSet();
+    const data = await buildGroupEditView(lobbyEvent(true));
+    expect(
+      JSON.parse(data.presetBase).groups.map((g: { name: string }) => g.name),
+    ).toEqual(["A", "B"]);
+  });
+
+  it("the form says the lobby is not counted and a preset never changes it", () => {
+    const html = renderPresetForm(view(), "/x", "tok");
+    expect(html).toContain("The captains lobby is not counted");
+    expect(html).toContain("never changed by a preset");
+  });
+});

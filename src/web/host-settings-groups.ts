@@ -173,7 +173,7 @@ export function renderPresetForm(
 <option value="">Keep the current groups</option>${options}
 </select>
 ${hidden(baseField(GROUP_PRESET_ROW_ID), d.presetBase)}
-<p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}${links}</div>
+<p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. The captains lobby is not counted and is never changed by a preset (use its own switch above). Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}${links}</div>
 ${renderSeriesTick(seriesTick)}
 <button type="submit">Apply preset</button>
 </form>`;
@@ -251,9 +251,18 @@ export async function buildGroupEditView(
   const catalog = await loadPresetCatalog(event.guildId, {
     ownerId: viewerId,
   });
-  const fits = (preset: EventGroupPreset): boolean =>
-    preset.groups.length === groups.length &&
-    preset.groups.every((g, i) => g.kind === groups[i].kind);
+  // The captains lobby is left out on both sides (#1263): a preset with a lobby
+  // fits an event without one and the reverse. Applying a preset never touches
+  // the lobby; the Captains lobby switch of this panel owns it.
+  const visible = groups.filter((g) => g.kind !== "leads");
+  const fits = (preset: EventGroupPreset): boolean => {
+    const listed = preset.groups.filter((g) => g.kind !== "leads");
+    return (
+      listed.length > 0 &&
+      listed.length === visible.length &&
+      listed.every((g, i) => g.kind === visible[i].kind)
+    );
+  };
   return {
     groupLabel: event.groupLabel || "Group",
     addKey: newGroupKey(new Set(groups.map((g) => g.key))),

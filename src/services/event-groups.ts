@@ -501,15 +501,24 @@ export function validateGroupSetup(
   // No rows typed in and a preset chosen: use the preset's groups (this is
   // what a browser without scripts posts).
   let rows = input.rows;
+  // A preset's `leads` row is the captains lobby (#1263), exactly as the form's
+  // script reads it: it is not a row of the list but turns the lobby on, and the
+  // lobby is then added below only while leaders are on, with the name derived
+  // from the leader label. Copying it in as an ordinary row would store a lobby
+  // for an event without leaders, which the form's own box never allows.
+  let presetLobby = false;
   if (rows.length === 0 && preset) {
-    rows = preset.groups.map((group, i) => ({
-      position: i + 1,
-      name: group.name,
-      kind: group.kind,
-      size: group.size === null ? "" : String(group.size),
-      tag: group.tag,
-      marker: group.marker,
-    }));
+    presetLobby = preset.groups.some((g) => g.kind === "leads");
+    rows = preset.groups
+      .filter((g) => g.kind !== "leads")
+      .map((group, i) => ({
+        position: i + 1,
+        name: group.name,
+        kind: group.kind,
+        size: group.size === null ? "" : String(group.size),
+        tag: group.tag,
+        marker: group.marker,
+      }));
   }
   if (rows.length === 0) {
     errors.push(
@@ -523,7 +532,7 @@ export function validateGroupSetup(
   let lobbyAdded = false;
   if (
     rows.length > 0 &&
-    input.captainsLobby === true &&
+    (input.captainsLobby === true || presetLobby) &&
     input.captainsEnabled === true &&
     !rows.some((r) => r.kind === "leads")
   ) {

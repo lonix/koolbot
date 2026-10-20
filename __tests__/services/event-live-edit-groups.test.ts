@@ -52,6 +52,7 @@ const {
   groupSizeRowId,
   groupPresetRow,
   readPresetValue,
+  presetToValue,
   GROUP_PRESET_ROW_ID,
   GROUP_EDIT_POSITIONS,
   GROUP_EDIT_ROWS,
@@ -1313,5 +1314,227 @@ describe("selecting the current preset again establishes the baseline", () => {
     const again = await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]);
     expect(done(again).applied).toEqual([]);
     expect(rowWrites()).toHaveLength(before);
+  });
+});
+
+describe("switch preset and the captains lobby (#1263)", () => {
+  const L = "g_00000009";
+  /** The seeded event with its hidden lobby in the middle: Alpha, lobby, Bravo, Charlie. */
+  function seedWithLobby(): void {
+    const doc = seed();
+    const [a, b, c] = doc.groups as Json[];
+    doc.groups = [
+      a,
+      {
+        key: L,
+        name: "Leader lobby",
+        kind: "leads",
+        size: 2,
+        tag: "LL",
+        marker: "",
+        channelId: "c-lobby",
+        captainId: null,
+        memberIds: [],
+      },
+      b,
+      c,
+    ];
+    store.set(EV, doc);
+  }
+
+  it("the stored value and a preset's value both leave the lobby out", () => {
+    seedWithLobby();
+    expect(
+      readPresetValue(store.get(EV) as never).groups.map((g) => g.name),
+    ).toEqual(["Alpha", "Bravo", "Charlie"]);
+    expect(
+      presetToValue({
+        id: "lib:x",
+        label: "x",
+        groupLabel: "Team",
+        groups: [
+          { name: "One", kind: "team", size: null, tag: "", marker: "" },
+          { name: "Lobby", kind: "leads", size: null, tag: "", marker: "" },
+          { name: "Two", kind: "open", size: 3, tag: "T", marker: "" },
+        ],
+      } as never).groups,
+    ).toEqual([
+      { name: "One", kind: "team", size: null, tag: "" },
+      { name: "Two", kind: "open", size: 3, tag: "T" },
+    ]);
+  });
+
+  it("a preset fits by the visible groups: applied by position, the lobby is never renamed, resized, moved or touched", async () => {
+    seedWithLobby();
+    const out = await confirmed(
+      await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]),
+    );
+    expect(done(out).applied.map((c) => c.rowId)).toEqual([
+      GROUP_PRESET_ROW_ID,
+    ]);
+    expect(
+      groupsOf().map((g) => [g.key, g.name, g.size, g.tag, g.kind]),
+    ).toEqual([
+      [A, "Squad 1", 4, "S1", "team"],
+      [L, "Leader lobby", 2, "LL", "leads"],
+      [B, "Squad 2", 4, "S2", "team"],
+      [C, "Squad 3", 4, "S3", "team"],
+    ]);
+    expect(group(L)).toMatchObject({ channelId: "c-lobby" });
+    expect("nameSyncPending" in group(L)).toBe(false);
+    expect("sizeSyncPending" in group(L)).toBe(false);
+    expect(calls.some((c) => c.endsWith(L))).toBe(false);
+    expect(rowWrites()).toHaveLength(1);
+  });
+
+  it("a preset with a lobby applies to an event without one: no group is created", async () => {
+    seed();
+    const preset = presetToValue({
+      id: "lib:x",
+      label: "x",
+      groupLabel: "Team",
+      groups: [
+        ...(squads().groups as Json[]).map((g) => ({ ...g, marker: "" })),
+        { name: "Lobby", kind: "leads", size: null, tag: "", marker: "" },
+      ],
+    } as never);
+    const out = await confirmed(
+      await run([entry(GROUP_PRESET_ROW_ID, preset, baseOf())]),
+    );
+    expect(done(out).applied).toHaveLength(1);
+    expect(groupsOf().map((g) => g.name)).toEqual([
+      "Squad 1",
+      "Squad 2",
+      "Squad 3",
+    ]);
+  });
+
+  it("a preset without a lobby applies to an event that has one: the lobby stays", async () => {
+    seedWithLobby();
+    await confirmed(
+      await run([entry(GROUP_PRESET_ROW_ID, squads(), baseOf())]),
+    );
+    expect(groupsOf().map((g) => g.kind)).toEqual([
+      "team",
+      "leads",
+      "team",
+      "team",
+    ]);
+  });
+
+  it("the number and kinds are judged on the visible groups, and the message numbers them as the host sees them", async () => {
+    seedWithLobby();
+    const two = {
+      id: "builtin:two",
+      groups: (squads().groups as Json[]).slice(0, 2),
+    };
+    const few = await run([entry(GROUP_PRESET_ROW_ID, two, baseOf())]);
+    expect(text(few)).toContain("has 2 groups and this event has 3");
+    expect(text(few)).toContain("The captains lobby is not counted");
+    const kind = await run([
+      entry(GROUP_PRESET_ROW_ID, squads([{}, {}, { kind: "open" }]), baseOf()),
+    ]);
+    expect(text(kind)).toContain("change the kind of group 3 (team to open)");
+    expect(writes).toEqual([]);
+  });
+
+  describe("work owed to the lobby's channel is never retried or reported by a preset switch", () => {
+    const owingLobby = (): void => {
+      seedWithLobby();
+      Object.assign(group(L), {
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    };
+    const matching = {
+      id: "",
+      groups: [
+        { name: "Alpha", kind: "team", size: 3, tag: "A" },
+        { name: "Bravo", kind: "team", size: null, tag: "" },
+        { name: "Charlie", kind: "team", size: 2, tag: "" },
+      ],
+    };
+
+    it("reselecting a preset that already matches the visible groups makes no call for the lobby and owes nothing", async () => {
+      owingLobby();
+      const out = done(
+        await run([entry(GROUP_PRESET_ROW_ID, matching, baseOf())]),
+      );
+      expect(calls).toEqual([]);
+      expect(out.partial).toEqual([]);
+      expect(out.applied).toEqual([]);
+      expect(group(L)).toMatchObject({
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    });
+
+    it("a switch that changes a size renames and resizes only its own groups, and is not partial because of the lobby", async () => {
+      owingLobby();
+      const out = done(
+        await run([
+          entry(
+            GROUP_PRESET_ROW_ID,
+            {
+              ...matching,
+              groups: [
+                { name: "Alpha", kind: "team", size: 8, tag: "A" },
+                ...matching.groups.slice(1),
+              ],
+            },
+            baseOf(),
+          ),
+        ]),
+      );
+      expect(out.applied).toHaveLength(1);
+      expect(out.partial).toEqual([]);
+      expect(calls).toEqual([`limit:${A}`]);
+      expect(group(L)).toMatchObject({
+        nameSyncPending: true,
+        sizeSyncPending: true,
+      });
+    });
+
+    it("an owed group's own channel work is still retried, numbered as the host sees the groups", async () => {
+      owingLobby();
+      Object.assign(group(B), { nameSyncPending: true });
+      nameResult = (key) => ({
+        groupKey: key,
+        status: "limited",
+        retryAfterMs: 60_000,
+      });
+      const out = done(
+        await run([entry(GROUP_PRESET_ROW_ID, matching, baseOf())]),
+      );
+      expect(calls).toEqual([`name:${B}`]);
+      expect(out.partial[0].owed).toContain(
+        "Group 2: the channel is not renamed yet",
+      );
+    });
+  });
+
+  it("a preset name is checked against the whole setup by the group's own place: a visible group cannot take the lobby's name", async () => {
+    seedWithLobby();
+    const out = await run([
+      entry(
+        GROUP_PRESET_ROW_ID,
+        squads([{}, { name: "Leader lobby" }]),
+        baseOf(),
+      ),
+    ]);
+    expect(out).toMatchObject({ status: "invalid" });
+    expect(text(out)).toContain("names must be unique");
+    expect(writes).toEqual([]);
+  });
+
+  it("a preset value that names a leads group is out of date (the lobby is never part of a switch)", () => {
+    expect(
+      groupPresetRow.parse(
+        '{"id":"x","groups":[{"name":"A","kind":"leads","size":null,"tag":""}]}',
+      ),
+    ).toEqual({
+      ok: false,
+      error: "Switch preset: the form is out of date. Reload the page.",
+    });
   });
 });

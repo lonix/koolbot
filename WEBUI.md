@@ -1463,6 +1463,7 @@ server nicknames while the event runs (off by default; see **Clan tags** below).
 The leaders-only channel is no longer a kind of group in the list: a preset (or a
 draft) that still has a `leads` group ticks the **Captains lobby** box instead of
 adding a row, and an event or preset saved before keeps its `leads` group as it is.
+The preset editor has the same tick (#1263, see **Captains lobby in presets** below).
 Names must be unique within an
 event and the number of groups is capped by `events.groups.max_count`; a preset with
 more groups than the cap is greyed out in the picker and refused by the server
@@ -1501,7 +1502,37 @@ box to the preset's default, which the host can still change for that event. A p
 without the field (every preset saved before it existed, and every built-in) means off,
 and choosing one puts the box back to off. The tag format (before or after the name) is
 set per event, not on a preset. There is no default for the leaders switch (#1195), so
-a preset never turns leaders on. The leader label is part of a preset, as before. Everything on these pages is admin-only and audited
+a preset never turns leaders on. The leader label is part of a preset, as before.
+
+**Captains lobby in presets** (#1263). The preset editor (the server's library page and the hosts'
+own page, one shared form) has a **Captains lobby** tick instead of a "Leads" choice in a group's
+kind: the kind list offers only Team and Open, and a preset has at most one lobby. The tick stands
+alone: a preset has no leaders setting of its own (above), so it is not tied to anything on the
+page. It says "this setup has a captains lobby", and choosing the preset on the schedule form ticks
+**Captains lobby** there, where the box only takes effect while **Group leaders** is ticked (the host
+can untick it for the event). The lobby counts toward the group limit because it is a channel. The
+preset list shows it as a **captains lobby** tag next to the groups, not as a group. A preset saved
+before keeps working unchanged: its `leads` row is shown as the ticked box, and the row's own name,
+size, tag, marker and place in the list are carried in hidden fields and written back as they were,
+so opening and saving an old preset changes nothing; unticking the box removes the row, ticking it
+on a preset without one adds a row named from the leader label ("Leader lobby"). A lobby alone is
+not a preset (at least one other group is needed). The stored shape is unchanged, there is no new
+setting, and a draft kept in the browser from before the tick (it can hold a "Leads" row) gets its
+option back and the tick set, so a retry keeps the lobby. How a preset with a lobby is applied:
+
+- **Schedule form.** With scripts on, the preset ticks the box (never adds a row). Without scripts, a
+  preset with all rows left empty uses the preset's groups, and the lobby is added only when
+  **Group leaders** is ticked, like the box itself, named from the leader label.
+- **Host panel, groups on.** The groups are created without the preset's lobby: leaders are off after
+  a switch-on, and the lobby is only used while they are on. Switch leaders and the **Captains
+  lobby** switch on afterwards in Live settings. The picker counts the visible groups only.
+- **Host panel, Switch preset.** The captains lobby is left out on both sides: a preset fits when its
+  groups and kinds match the event's visible groups, with or without a lobby on either side. Applying
+  it never creates, deletes, renames or resizes the event's lobby (so no channel is made or removed
+  by it); the **Captains lobby** switch of Live settings owns that, with its own rules. A page shown
+  before an update that still holds the old preset value is refused as out of date and reloads.
+
+Everything on these pages is admin-only and audited
 (`event-preset.create`, `.update`, `.delete`, `.toggle`, `.publish`, `.unpublish`).
 
 An event keeps its own copy of its groups, and the preset's id is only a
@@ -2091,7 +2122,8 @@ preset** form under it.
   is never stored. An over-size group takes nobody new (host Assign people, a join to its channel
   and Randomise all see it as full) until it is below its size again; people can still leave it.
 - **Switch preset.** Choose a preset (the server's enabled presets that have the same number of
-  groups and the same kinds as the event) and its names, sizes and default tags are applied to the
+  groups and the same kinds as the event, not counting the captains lobby on either side; a preset
+  never changes the event's lobby, #1263) and its names, sizes and default tags are applied to the
   existing groups by position, in one write. The presets are read from the server's library when the
   page is shown and again when you save; what you confirm is exactly that content, bound into the
   signed confirmation, and nothing a browser posts is taken as the content of a preset. Every name
@@ -2217,9 +2249,10 @@ from the host and the current leaders.
 - **Presets and old events.** A preset or event that already has a `leads` group keeps working
   unchanged: the switch shows on, the group is the lobby, and at most one `leads` group is allowed
   (the form, the add-group form and the write itself all refuse a second). Choosing such a preset on
-  the schedule form ticks **Captains lobby** instead of adding a row for it. Presets that contain a
-  `leads` row only fit a running event that has the lobby when applied in Live settings (a preset is
-  applied to the existing groups by position and kind).
+  the schedule form ticks **Captains lobby** instead of adding a row for it, and the preset editor
+  shows its `leads` row as the same tick (#1263). Applying a preset in Live settings compares the
+  visible groups only, so a preset with a lobby fits an event without one and the reverse, and it
+  never creates, removes or renames the lobby.
 - **Same rules as the rest of Live settings.** The event is read again inside the locks, the switch
   is written conditionally on what it was decided from with an explicit outcome, a re-save is
   "nothing to change", one result and one `event.host.settings` audit entry per save, and nothing

@@ -63,7 +63,10 @@
  *   here; every group field explicit, no schema default), only while the event
  *   still has no groups. Leaders, leader customisation, the tag position and the
  *   lock stay at their stored values (off for a plain event); the host switches
- *   them on with the existing rows afterwards. A preset's channel lead time is
+ *   them on with the existing rows afterwards. A preset's captains lobby (a
+ *   `leads` row, #1263) is therefore not created: `presetToSetup` leaves it out,
+ *   and the host ticks the lobby (the Captains lobby row) once leaders are on.
+ *   A preset's channel lead time is
  *   not applied (the event keeps its own). The host then renames, adds and
  *   removes groups with the other rows (the same planners, no second editor).
  * - Either way the channels are then made by the existing group pass
@@ -171,13 +174,19 @@ export function presetToSetup(preset: EventGroupPreset): SwitchSetup {
     groupLabel: preset.groupLabel,
     leaderLabel: preset.leaderLabel ?? DEFAULT_LEADER_LABEL,
     tagsEnabled: preset.tagsEnabled === true,
-    groups: preset.groups.map((g) => ({
-      name: g.name,
-      kind: g.kind,
-      size: g.size,
-      tag: g.tag,
-      marker: g.marker,
-    })),
+    // The preset's captains lobby (a `leads` row) is not created here (#1263):
+    // leaders are off after a switch-on, and the lobby is only effective while
+    // they are on. The host switches leaders and the lobby on afterwards with
+    // their own rows, which carry the confirmation rules.
+    groups: preset.groups
+      .filter((g) => g.kind !== "leads")
+      .map((g) => ({
+        name: g.name,
+        kind: g.kind,
+        size: g.size,
+        tag: g.tag,
+        marker: g.marker,
+      })),
   };
 }
 

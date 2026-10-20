@@ -512,3 +512,118 @@ describe("the Captains lobby switch of the event form (#1251)", () => {
     expect(fresh).not.toContain('value="leads"');
   });
 });
+
+describe("the Captains lobby counts toward the cap of Add a group (#1263)", () => {
+  const change = (dom: JSDOM, name: string, checked: boolean): void => {
+    const el = field(dom, name);
+    el.checked = checked;
+    el.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const add = (dom: JSDOM): HTMLElement =>
+    dom.window.document.querySelector("[data-add-group]") as HTMLElement;
+
+  it("a posted lobby takes a slot, an unposted one (leaders off, so the box is disabled) does not", () => {
+    const dom = boot(3, 2);
+    expect(add(dom).hidden).toBe(false);
+    change(dom, "groups_captains", true);
+    change(dom, "groups_captains_lobby", true);
+    // Two rows and the lobby are the three slots.
+    expect(add(dom).hidden).toBe(true);
+    change(dom, "groups_captains_lobby", false);
+    expect(add(dom).hidden).toBe(false);
+    change(dom, "groups_captains_lobby", true);
+    expect(add(dom).hidden).toBe(true);
+    // Leaders off: the box is disabled and not posted, so its slot is free.
+    change(dom, "groups_captains", false);
+    expect(add(dom).hidden).toBe(false);
+  });
+
+  it("the button cannot add past the cap while the lobby is ticked", () => {
+    const dom = boot(3, 2);
+    change(dom, "groups_captains", true);
+    change(dom, "groups_captains_lobby", true);
+    add(dom).click();
+    expect(
+      dom.window.document.querySelectorAll("[data-group-row]"),
+    ).toHaveLength(2);
+  });
+
+  it("a restored draft keeps all its rows and shows the button state of its restored lobby", () => {
+    const dom = boot(3, 2, {
+      groups_enabled: true,
+      groups_captains: true,
+      groups_captains_lobby: true,
+      group_0_name: "A",
+      group_1_name: "B",
+    });
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(add(dom).hidden).toBe(true);
+  });
+});
+
+describe("choosing a preset recomputes the lobby, the cap and the button (#1263)", () => {
+  const preset = (id: string, kinds: string[]) => ({
+    id,
+    label: id,
+    description: "",
+    groupLabel: "Team",
+    groups: kinds.map((kind, i) => ({
+      name: `${kind}${i}`,
+      kind,
+      size: null,
+      tag: "",
+      marker: "",
+    })),
+  });
+  const presets = [
+    preset("lib:plain", ["team", "team"]),
+    preset("lib:lobby", ["team", "team", "leads"]),
+  ];
+  const pick = (dom: JSDOM, id: string): void => {
+    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
+    select.value = id;
+    select.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const tickBox = (dom: JSDOM, name: string, checked: boolean): void => {
+    const el = field(dom, name);
+    el.checked = checked;
+    el.dispatchEvent(
+      new (dom.window as Win).Event("change", { bubbles: true }),
+    );
+  };
+  const add = (dom: JSDOM): HTMLElement =>
+    dom.window.document.querySelector("[data-add-group]") as HTMLElement;
+
+  it("a preset without a lobby unticks the box and frees its slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    tickBox(dom, "groups_captains", true);
+    tickBox(dom, "groups_captains_lobby", true);
+    expect(add(dom).hidden).toBe(true);
+    pick(dom, "lib:plain");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+    expect(add(dom).hidden).toBe(false);
+  });
+
+  it("a preset with a lobby ticks the box and takes its slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    tickBox(dom, "groups_captains", true);
+    expect(add(dom).hidden).toBe(false);
+    pick(dom, "lib:lobby");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(add(dom).hidden).toBe(true);
+  });
+
+  it("with leaders off the lobby box stays disabled through a preset choice and takes no slot", () => {
+    const dom = boot(3, 2, undefined, presets);
+    pick(dom, "lib:lobby");
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+    expect(add(dom).hidden).toBe(false);
+    tickBox(dom, "groups_captains", true);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(false);
+    expect(add(dom).hidden).toBe(true);
+  });
+});

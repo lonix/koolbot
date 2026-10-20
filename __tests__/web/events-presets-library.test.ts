@@ -1,4 +1,4 @@
-/* global HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLFormElement, HTMLElement */
+/* global HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLFormElement, HTMLElement, Document */
 /**
  * The picker and the admin page of the preset library (#1200). The markup and
  * the page script come from `renderEventsPage` / `renderEventPresetsPage`, and
@@ -7,8 +7,15 @@
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import { renderEventsPage } from "../../src/web/admin-views.js";
-import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import {
+  renderEventPresetsPage,
+  renderPresetEditorForm,
+} from "../../src/web/event-presets-page.js";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
+import {
+  presetToFormValues,
+  validatePresetForm,
+} from "../../src/services/event-group-preset-service.js";
 import {
   EVENT_GROUP_PRESETS,
   type EventGroupPreset,
@@ -445,7 +452,7 @@ describe("the presets admin page (#1200)", () => {
     expect(html).toContain("Prefilled from x");
   });
 
-  it("a saved preset's leads row keeps its own kind option, so saving never turns it into a team; no other row can pick it (#1251)", () => {
+  it("a leads row that arrives as an ordinary row value keeps its own kind option, so saving never turns it into a team; no other row can pick it (#1251, #1263)", () => {
     const html = adminPage({
       values: {
         preset_name: "Old command preset",
@@ -502,11 +509,169 @@ describe("the presets admin page (#1200)", () => {
       ) as HTMLSelectElement;
     expect(kind(1).value).toBe("leads");
     expect(kind(0).value).toBe("team");
+    // An older draft has no tick of its own: restoring its leads row ticks the
+    // box, because the tick decides whether the lobby is kept (#1263).
+    expect(
+      (
+        dom.window.document.querySelector(
+          '[name="groups_captains_lobby"]',
+        ) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
     // Only the row that was a leads row gets the option.
     expect(Array.from(kind(0).options).map((o) => o.value)).toEqual([
       "team",
       "open",
     ]);
+  });
+
+  it("a draft with a leads row and an explicit unticked box stays unticked on a second restore, and one with an explicit tick stays ticked (#1263)", () => {
+    const restore = (draft: Record<string, unknown>): HTMLInputElement => {
+      const html = adminPage().replace(
+        "<h1>Group presets</h1>",
+        '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+      );
+      const dom = new JSDOM(html, {
+        url: "http://localhost/admin/events/presets",
+        runScripts: "outside-only",
+      });
+      dom.window.sessionStorage.setItem(
+        "koolbot-event-preset-draft",
+        JSON.stringify(draft),
+      );
+      const code = Array.from(
+        new JSDOM(html).window.document.querySelectorAll("script"),
+      )
+        .map((el) => el.textContent ?? "")
+        .find((c) => c.includes("koolbot-event-preset-draft"));
+      dom.window.eval(code as string);
+      return dom.window.document.querySelector(
+        '[name="groups_captains_lobby"]',
+      ) as HTMLInputElement;
+    };
+    // The box comes first in the form, so it is first in a stored draft.
+    const rows = {
+      group_0_name: "Alpha",
+      group_0_kind: "team",
+      group_1_name: "Command",
+      group_1_kind: "leads",
+    };
+    expect(restore({ groups_captains_lobby: false, ...rows }).checked).toBe(
+      false,
+    );
+    expect(restore({ groups_captains_lobby: true, ...rows }).checked).toBe(
+      true,
+    );
+  });
+
+  it("restoring a draft recalculates the Add a group button: an unticked lobby frees its slot (#1263)", () => {
+    const values = presetToFormValues({
+      label: "Old",
+      groupLabel: "Squad",
+      groups: [
+        { name: "A", kind: "team", size: null, tag: "", marker: "" },
+        { name: "L", kind: "leads", size: null, tag: "", marker: "" },
+        { name: "B", kind: "team", size: null, tag: "", marker: "" },
+      ],
+    });
+    const restore = (lobby: boolean): HTMLElement => {
+      const html = adminPage({
+        values,
+        maxCount: 3,
+        editing: { id: LIB_ID, label: "Old" },
+      }).replace(
+        "<h1>Group presets</h1>",
+        '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+      );
+      const dom = new JSDOM(html, {
+        url: "http://localhost/admin/events/presets",
+        runScripts: "outside-only",
+      });
+      dom.window.sessionStorage.setItem(
+        "koolbot-event-preset-draft",
+        JSON.stringify({
+          groups_captains_lobby: lobby,
+          group_0_name: "A",
+          group_0_kind: "team",
+          group_1_name: "B",
+          group_1_kind: "team",
+        }),
+      );
+      const code = Array.from(
+        new JSDOM(html).window.document.querySelectorAll("script"),
+      )
+        .map((el) => el.textContent ?? "")
+        .find((c) => c.includes("koolbot-event-preset-draft"));
+      dom.window.eval(code as string);
+      return dom.window.document.querySelector(
+        "[data-add-group]",
+      ) as HTMLElement;
+    };
+    // At the limit with the lobby ticked: no button. Unticked: one slot is free.
+    expect(restore(true).hidden).toBe(true);
+    expect(restore(false).hidden).toBe(false);
+  });
+
+  it("a restored older draft counts its leads row once, as the lobby: the free slot stays usable, and changing the row's kind recounts (#1263)", () => {
+    const html = adminPage({ maxCount: 4 }).replace(
+      "<h1>Group presets</h1>",
+      '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+    );
+    const dom = new JSDOM(html, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    dom.window.sessionStorage.setItem(
+      "koolbot-event-preset-draft",
+      JSON.stringify({
+        group_0_name: "A",
+        group_0_kind: "team",
+        group_1_name: "B",
+        group_1_kind: "team",
+        group_2_name: "Command",
+        group_2_kind: "leads",
+      }),
+    );
+    const code = Array.from(
+      new JSDOM(html).window.document.querySelectorAll("script"),
+    )
+      .map((el) => el.textContent ?? "")
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    const doc = dom.window.document;
+    const add = doc.querySelector("[data-add-group]") as HTMLElement;
+    // A, B and the lobby are three of four slots.
+    expect(add.hidden).toBe(false);
+    const kind = doc.querySelector(
+      '[name="group_2_kind"]',
+    ) as HTMLSelectElement;
+    const changeKind = (value: string): void => {
+      kind.value = value;
+      kind.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    };
+    // The restored row turned into a team is a third group next to the lobby.
+    changeKind("team");
+    expect(add.hidden).toBe(true);
+    changeKind("leads");
+    expect(add.hidden).toBe(false);
+    add.click();
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(4);
+    expect(add.hidden).toBe(true);
+  });
+
+  it("an ordinary leads row is no preset on its own, even with the box ticked (a restored older draft)", () => {
+    const r = validatePresetForm(
+      {
+        preset_name: "Only lobby",
+        groups_captains_lobby: "1",
+        group_0_name: "War room",
+        group_0_kind: "leads",
+      },
+      { maxCount: 15 },
+    );
+    expect(!r.ok && r.errors[0]).toBe(
+      "Add at least one group, each with a name.",
+    );
   });
 
   it("an edit carries the preset's id and the unreadable notice shows", () => {
@@ -716,5 +881,212 @@ describe("a preset's clan tags default (#1194)", () => {
         ) as HTMLInputElement
       ).checked,
     ).toBe(true);
+  });
+});
+
+describe("the Captains lobby tick in the preset editor (#1263)", () => {
+  const stored = [
+    { name: "Alpha", kind: "team", size: 4, tag: "AL", marker: "G" },
+    { name: 'War <room> "1"', kind: "leads", size: 5, tag: "WR", marker: "R" },
+    { name: "Specs", kind: "open", size: null, tag: "", marker: "" },
+  ];
+  const editor = (values: Record<string, string>, maxCount = 15): string =>
+    renderPresetEditorForm({
+      csrfInput: '<input type="hidden" name="_csrf" value="t">',
+      action: "/x",
+      editing: { id: LIB_ID, label: "Old" },
+      values,
+      maxCount,
+      defaultCount: 2,
+      cancelHref: "/x",
+    });
+  const docOf = (html: string): Document => new JSDOM(html).window.document;
+  const tick = (doc: Document): HTMLInputElement =>
+    doc.querySelector('[name="groups_captains_lobby"]') as HTMLInputElement;
+  /** What a browser would post: named controls, a checkbox only when checked. */
+  const posted = (doc: Document): Record<string, string> => {
+    const body: Record<string, string> = {};
+    const form = doc.querySelector("form[data-preset-form]") as HTMLFormElement;
+    for (const el of Array.from(form.elements) as HTMLInputElement[]) {
+      if (!el.name || el.type === "submit" || el.type === "button") continue;
+      if (el.type === "checkbox" && !el.checked) continue;
+      body[el.name] = el.value;
+    }
+    return body;
+  };
+
+  it("an old preset's leads row is the ticked box: no row for it, no leads option anywhere", () => {
+    const doc = docOf(
+      editor(
+        presetToFormValues({
+          label: "Old",
+          groupLabel: "Squad",
+          groups: stored,
+        }),
+      ),
+    );
+    expect(tick(doc).checked).toBe(true);
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(2);
+    const optionValues = Array.from(
+      doc.querySelectorAll<HTMLOptionElement>("select option"),
+    ).map((o) => o.value);
+    expect(optionValues).not.toContain("leads");
+    const template = doc.querySelector("template[data-group-row-template]");
+    expect(template?.innerHTML.includes("leads")).toBe(false);
+    // The row's own values are carried aside, escaped.
+    const lobbyName = doc.querySelector(
+      '[name="lobby_name"]',
+    ) as HTMLInputElement;
+    expect(lobbyName.type).toBe("hidden");
+    expect(lobbyName.value).toBe('War <room> "1"');
+  });
+
+  it("a preset without a lobby shows the box unticked, with nothing carried", () => {
+    const doc = docOf(
+      editor(presetToFormValues({ groupLabel: "Squad", groups: [stored[0]] })),
+    );
+    expect(tick(doc).checked).toBe(false);
+    expect(
+      (doc.querySelector('[name="lobby_name"]') as HTMLInputElement).value,
+    ).toBe("");
+    const blank = docOf(editor({}));
+    expect(tick(blank).checked).toBe(false);
+  });
+
+  it("states that the tick stands alone and only takes effect while leaders are ticked on the event", () => {
+    const html = editor({});
+    expect(html).toContain("Captains lobby");
+    expect(html).toContain(
+      "only takes effect on an event while group leaders is ticked",
+    );
+    expect(html).not.toContain("use the Captains lobby switch instead");
+  });
+
+  it("round trip through the rendered form: opening and saving an old preset changes nothing", () => {
+    const values = presetToFormValues({
+      label: "Old",
+      description: "d",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      channelLeadMinutes: 15,
+      tagsEnabled: true,
+      groups: stored,
+    });
+    const body = posted(docOf(editor(values)));
+    const result = validatePresetForm(body, { maxCount: 15 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.groups).toEqual(stored);
+    expect(result.data).toMatchObject({
+      name: "Old",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      channelLeadMinutes: 15,
+      tagsEnabled: true,
+    });
+  });
+
+  it("unticking the box in the rendered form removes the lobby on save; ticking a preset without one adds it", () => {
+    const withLobby = docOf(
+      editor(presetToFormValues({ groupLabel: "Squad", groups: stored })),
+    );
+    tick(withLobby).checked = false;
+    const off = validatePresetForm(
+      { ...posted(withLobby), preset_name: "Old" },
+      { maxCount: 15 },
+    );
+    expect(off.ok && off.data.groups.map((g) => g.kind)).toEqual([
+      "team",
+      "open",
+    ]);
+
+    const without = docOf(
+      editor(presetToFormValues({ groupLabel: "Squad", groups: [stored[0]] })),
+    );
+    tick(without).checked = true;
+    const on = validatePresetForm(
+      { ...posted(without), preset_name: "New" },
+      { maxCount: 15 },
+    );
+    expect(on.ok && on.data.groups.map((g) => [g.name, g.kind])).toEqual([
+      ["Alpha", "team"],
+      ["Leader lobby", "leads"],
+    ]);
+  });
+
+  it("the same editor is on the hosts' own page", () => {
+    const html = renderMyEventPresetsBody({
+      csrfToken: "t",
+      presets: [],
+      editing: null,
+      editUnavailable: false,
+      values: presetToFormValues({ groupLabel: "Squad", groups: stored }),
+      prefillNote: null,
+      maxCount: 15,
+      defaultCount: 2,
+    });
+    const doc = docOf(html);
+    expect(tick(doc).checked).toBe(true);
+    expect(doc.querySelectorAll("[data-group-row]")).toHaveLength(2);
+  });
+
+  it("the oversize warning counts the lobby", () => {
+    const html = editor(
+      presetToFormValues({ groupLabel: "Squad", groups: stored }),
+      2,
+    );
+    expect(html).toContain(
+      "has 3 groups (counting the Captains lobby) but the limit is 2",
+    );
+  });
+
+  it("the list shows the lobby as a tag, not as a group", () => {
+    const html = adminPage();
+    const row = html.slice(html.indexOf("Mine &quot;"));
+    expect(row).toContain("captains lobby");
+    expect(row).toContain('<span class="muted">2:</span>');
+    expect(row).not.toContain("Command");
+  });
+
+  it("the page script counts a ticked lobby toward the cap of the Add a group button", () => {
+    const html = editor({}, 4);
+    const dom = new JSDOM(`<body>${html}</body>`, {
+      url: "http://localhost/admin/events/presets",
+      runScripts: "outside-only",
+    });
+    const pageHtml = renderEventPresetsPage({
+      csrfToken: "t",
+      remainingMs: 1,
+      entries: [],
+      state: "ok",
+      maxCount: 4,
+      defaultCount: 2,
+      editing: null,
+      values: {},
+      prefillNote: null,
+    });
+    const code = Array.from(
+      new JSDOM(pageHtml).window.document.querySelectorAll("script"),
+    )
+      .map((el) => el.textContent ?? "")
+      .find((c) => c.includes("koolbot-event-preset-draft"));
+    dom.window.eval(code as string);
+    const add = dom.window.document.querySelector(
+      "[data-add-group]",
+    ) as HTMLElement;
+    expect(add.hidden).toBe(false);
+    const box = dom.window.document.querySelector(
+      '[name="groups_captains_lobby"]',
+    ) as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    add.click();
+    expect(
+      dom.window.document.querySelectorAll("[data-group-row]"),
+    ).toHaveLength(3);
+    expect(add.hidden).toBe(true);
+    box.checked = false;
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(add.hidden).toBe(false);
   });
 });
