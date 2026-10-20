@@ -21,6 +21,12 @@ import {
   scriptTag,
 } from "../../src/web/html.js";
 import { applyNonce, buildCsp } from "../../src/web/security-headers.js";
+import {
+  EVENT_CANCEL_SERIES_ITEMS,
+  eventCancelItems,
+  REACTION_ROLE_DELETE_ITEMS,
+  REACTION_ROLE_GROUP_DELETE_ITEMS,
+} from "../../src/web/admin-views.js";
 import { installDocumentForAxe } from "./a11y-dom.js";
 import { allPages } from "./a11y-pages.js";
 
@@ -440,6 +446,83 @@ const NEEDS_LIST: Array<[string, (a: string) => boolean]> = [
   ["moderation make permanent", (a) => a.endsWith("/permanent")],
   ["role-group delete", (a) => a.endsWith("/delete-role/apply")],
 ];
+
+describe("consequence lists state what the service does", () => {
+  const all = (items: readonly string[]): string => items.join(" ");
+
+  it("reaction-role delete: shared-role exception and the full category scope", () => {
+    const text = all(REACTION_ROLE_DELETE_ITEMS);
+    expect(text).toContain(
+      "If another mapping uses the role, the role and category are kept",
+    );
+    expect(text).toContain(
+      "every channel in it, including channels added by hand and their history",
+    );
+  });
+
+  it("group delete: both the all-bot-created and the bound-category case", () => {
+    const text = all(REACTION_ROLE_GROUP_DELETE_ITEMS);
+    expect(text).toContain("If the bot created every mapping");
+    expect(text).toContain(
+      "including channels added by hand and their history",
+    );
+    expect(text).toContain(
+      "If any mapping uses an existing category, that category and its channels are kept",
+    );
+  });
+
+  it("event cancel: never promises the Discord event is cancelled for an adopted one", () => {
+    for (const recurring of [false, true]) {
+      const adopted = all(eventCancelItems(true, recurring));
+      expect(adopted).toContain("adopted, so it is left unchanged in Discord");
+      expect(adopted).not.toContain("is cancelled");
+      const own = all(eventCancelItems(false, recurring));
+      expect(own).toContain("With event sync on");
+      expect(own).toContain("marked completed if it has already started");
+      expect(own).not.toContain("left unchanged");
+    }
+    const series = all(EVENT_CANCEL_SERIES_ITEMS);
+    expect(series).toContain("adopted Discord events are left unchanged");
+    expect(series).toContain("With event sync on");
+  });
+
+  it("the rendered pages carry exactly these lists", () => {
+    let roleDelete = 0;
+    for (const page of allPages()) {
+      installDocumentForAxe(page.html);
+      for (const el of Array.from(
+        document.querySelectorAll<HTMLElement>("[data-confirm-list]"),
+      )) {
+        const action = (el as HTMLFormElement).getAttribute("action") ?? "";
+        const items = JSON.parse(el.getAttribute("data-confirm-list")!);
+        if (action === "/admin/reaction-roles/delete") {
+          roleDelete += 1;
+          expect(items).toEqual(REACTION_ROLE_DELETE_ITEMS);
+        }
+        if (action === "/admin/reaction-roles/group/delete") {
+          expect(items).toEqual(REACTION_ROLE_GROUP_DELETE_ITEMS);
+        }
+        if (/^\/admin\/events\/[^/]+\/cancel$/.test(action)) {
+          expect(items.some((i: string) => i.includes("event sync"))).toBe(
+            true,
+          );
+        }
+      }
+    }
+    expect(roleDelete).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("notices that the wording is wired to the list (mutation)", () => {
+    // Dropping the shared-role exception from the data must fail the check.
+    const mutated = REACTION_ROLE_DELETE_ITEMS.filter(
+      (i) => !i.includes("another mapping"),
+    );
+    expect(all(mutated)).not.toContain(
+      "If another mapping uses the role, the role and category are kept",
+    );
+    expect(mutated).not.toEqual(REACTION_ROLE_DELETE_ITEMS);
+  });
+});
 
 describe("tone: a high-impact site can never be neutral", () => {
   it("keeps every listed action out of the neutral set", () => {

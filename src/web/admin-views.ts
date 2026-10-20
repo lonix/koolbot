@@ -119,33 +119,57 @@ function formatUtc(date: Date | null | undefined): string {
 const CHANGELOG_URL = "https://github.com/lonix/koolbot/blob/main/CHANGELOG.md";
 
 /** Consequence lists for the confirmation dialogs (#1343); see `confirmListAttr`. */
-const REACTION_ROLE_DELETE_LIST = confirmListAttr([
-  "The Discord role is deleted, so members who hold it lose it.",
-  "The category and channel the bot created for it are deleted.",
+export const REACTION_ROLE_DELETE_ITEMS: readonly string[] = [
+  "The reaction message is deleted.",
+  "If no other mapping uses the role, the role is deleted and members lose it.",
+  "If no other mapping uses the role, its category is deleted with every channel in it, including channels added by hand and their history.",
+  "If another mapping uses the role, the role and category are kept.",
   "This cannot be undone.",
-]);
-const REACTION_ROLE_GROUP_DELETE_LIST = confirmListAttr([
-  "The roles the bot created for the group are deleted.",
-  "Reused roles, and roles still used by another mapping, are kept.",
-  "The group's shared category and channel are deleted.",
+];
+const REACTION_ROLE_DELETE_LIST = confirmListAttr(REACTION_ROLE_DELETE_ITEMS);
+export const REACTION_ROLE_GROUP_DELETE_ITEMS: readonly string[] = [
+  "The shared reaction message is deleted.",
+  "If the bot created every mapping, the group's category is deleted with every channel in it, including channels added by hand and their history.",
+  "If any mapping uses an existing category, that category and its channels are kept.",
+  "Roles the bot created are deleted; reused roles, and roles a mapping outside the group still uses, are kept.",
   "This cannot be undone.",
-]);
-const EVENT_CANCEL_LIST = confirmListAttr([
-  "The event is marked cancelled and stops running.",
-  "Its announcement and Discord event are updated to show it as cancelled.",
+];
+const REACTION_ROLE_GROUP_DELETE_LIST = confirmListAttr(
+  REACTION_ROLE_GROUP_DELETE_ITEMS,
+);
+const EVENT_CANCEL_COMMON = [
+  "Its announcement post is updated to show it as cancelled.",
   "Channels the bot made for it are removed.",
-]);
-const EVENT_CANCEL_OCCURRENCE_LIST = confirmListAttr([
-  "This occurrence is marked cancelled and stops running.",
-  "Its announcement and Discord event are updated to show it as cancelled.",
-  "Channels the bot made for it are removed.",
-  "The series continues with its next occurrence.",
-]);
-const EVENT_CANCEL_SERIES_LIST = confirmListAttr([
-  "Every unfinished occurrence of the series is cancelled.",
-  "No further occurrences are created.",
-  "Channels the bot made for those occurrences are removed.",
-]);
+];
+/** Discord's side of a cancel depends on event sync and on who made the event. */
+function eventCancelDiscordLine(adopted: boolean): string {
+  return adopted
+    ? "Its Discord event was adopted, so it is left unchanged in Discord."
+    : "With event sync on, its Discord event is cancelled, or marked completed if it has already started.";
+}
+export function eventCancelItems(
+  adopted: boolean,
+  recurring: boolean,
+): string[] {
+  return [
+    recurring
+      ? "This occurrence is marked cancelled and stops running."
+      : "The event is marked cancelled and stops running.",
+    ...EVENT_CANCEL_COMMON,
+    eventCancelDiscordLine(adopted),
+    ...(recurring ? ["The series continues with its next occurrence."] : []),
+  ];
+}
+function eventCancelList(adopted: boolean, recurring: boolean): string {
+  return confirmListAttr(eventCancelItems(adopted, recurring));
+}
+export const EVENT_CANCEL_SERIES_ITEMS: readonly string[] = [
+  "Every unfinished occurrence of the series is marked cancelled, and no further ones are created.",
+  "Their announcement posts are updated to show them as cancelled.",
+  "Channels the bot made for them are removed.",
+  "With event sync on, Discord events the bot created are cancelled or marked completed; adopted Discord events are left unchanged.",
+];
+const EVENT_CANCEL_SERIES_LIST = confirmListAttr(EVENT_CANCEL_SERIES_ITEMS);
 
 /**
  * Dashboard "Version" card (#1029): running vs latest release, the update
@@ -1443,10 +1467,10 @@ export function renderSettingsPage(props: SettingsProps): string {
   <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
   <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone."${confirmListAttr(
     [
-      "Every setting is rewritten to its built-in default.",
-      "Keys left behind by removed features are deleted.",
+      "Every setting is rewritten to its built-in default, including channels, roles and feature switches.",
+      "Stored keys that are no longer in the schema are deleted.",
       "Bootstrap and environment values (Discord token, Mongo URI, Web UI session) are not touched.",
-      "You may need to reload commands afterwards.",
+      "Scheduled jobs restart from the defaults; reload commands yourself afterwards.",
     ],
   )}>
     <input type="hidden" name="_csrf" value="${csrf}">
@@ -2950,7 +2974,7 @@ export function renderEventsPage(props: EventsProps): string {
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${e.recurrence ? EVENT_CANCEL_OCCURRENCE_LIST : EVENT_CANCEL_LIST}>${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${eventCancelList(e.nativeAdopted === true, Boolean(e.recurrence))}>${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
       const channelCell = e.channelId
@@ -3740,8 +3764,8 @@ ${renderFeatureSettingsCard({
   </dl>
   <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
     [
-      "Every notice message in its channel is deleted.",
-      "All notices are posted again from the saved list.",
+      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
+      "Every notice is posted again from the saved list.",
     ],
   )}>
     ${csrfInput}
@@ -3886,7 +3910,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", feature
   <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
     [
       "Every message in the quote channel is deleted, including anything that is not a quote.",
-      "All quotes are posted again with their saved votes.",
+      "The header and every quote are posted again, with their saved votes.",
     ],
   )}>
     ${csrfInput}
@@ -4048,6 +4072,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       "The saved birthday is removed.",
       "Any birthday role they hold is taken back.",
       "The bot's birthday posts about them are deleted.",
+      "If the role or a post cannot be undone, the birthday is kept so you can retry.",
     ],
   )}>${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
 </td>
