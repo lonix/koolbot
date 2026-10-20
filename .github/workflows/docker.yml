@@ -575,7 +575,9 @@ jobs:
   preview-outdated:
     name: Mark preview outdated
     runs-on: ubuntu-latest
-    needs: build-and-push
+    # hadolint is listed too: when it fails, build-and-push is skipped (not
+    # failed), and the notice should still say the build failed.
+    needs: [hadolint, build-and-push]
     timeout-minutes: 5
     # `!cancelled()` so a skipped or failed build still reaches this job; a run
     # cancelled by a newer push does not (that push's run takes over). An
@@ -594,7 +596,7 @@ jobs:
       - name: Mark the preview comment outdated
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          BUILD_RESULT: ${{ needs.build-and-push.result }}
+          BUILD_RESULT: ${{ (needs.hadolint.result == 'failure' || needs.build-and-push.result == 'failure') && 'failure' || 'not-built' }}
         with:
           script: |
             const MARKER = '<!-- docker-preview -->';
@@ -635,6 +637,17 @@ jobs:
               core.info('No built preview comment to mark.');
               return;
             }
+            // Narrow the read-modify-write: another writer (a build finishing)
+            // may have rewritten the comment since the list above. If its
+            // commit marker changed, that writer compared the head itself, so
+            // leave it alone. Not a lock: a write landing between this read and
+            // the update below can still be overwritten (see the PR notes).
+            const { data: fresh } = await github.rest.issues.getComment({ ...context.repo, comment_id: existing.id });
+            if (fresh.body.match(/<!-- docker-preview-commit: ([0-9a-f]{40}) -->/)?.[1] !== built) {
+              core.info('The preview comment changed while this job ran; leaving it to that writer.');
+              return;
+            }
+            existing.body = fresh.body;
             if (built === head) {
               // The head is back on the built commit (e.g. a force-push), so an
               // earlier outdated notice no longer applies.
