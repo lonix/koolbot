@@ -63,37 +63,45 @@ function team(name: string, marker = ""): EventGroupPresetGroup {
   return { name, kind: "team", size: null, tag: "", marker };
 }
 
+/** "Red 🔴, Blue 🔵": the team list as text, so a description cannot drift from it. */
+function describeTeams(groups: readonly EventGroupPresetGroup[]): string {
+  return groups
+    .map((g) => (g.marker ? `${g.name} ${g.marker}` : g.name))
+    .join(", ");
+}
+
+function teamPreset(
+  id: string,
+  groups: readonly EventGroupPresetGroup[],
+): EventGroupPreset {
+  return {
+    id,
+    label: `${groups.length} teams`,
+    description: describeTeams(groups),
+    groupLabel: "Team",
+    groups,
+  };
+}
+
+/**
+ * Named by team count, ordered by it. The ids are historical (they once named
+ * the themes: Red vs Blue, Wardogs, EVE factions). They are stored on events
+ * (`presetId`) and in the per-guild switches (`builtinId`), so they must never
+ * change; only the label and description are free to.
+ */
 export const EVENT_GROUP_PRESETS: readonly EventGroupPreset[] = [
-  {
-    id: "builtin:red-vs-blue",
-    label: "Red vs Blue",
-    description: "Two teams.",
-    groupLabel: "Team",
-    groups: [team("Red", "🔴"), team("Blue", "🔵")],
-  },
-  {
-    id: "builtin:eve-factions",
-    label: "EVE factions",
-    description: "The four empires: Amarr, Caldari, Gallente and Minmatar.",
-    groupLabel: "Team",
-    groups: [
-      team("Amarr"),
-      team("Caldari"),
-      team("Gallente"),
-      team("Minmatar"),
-    ],
-  },
-  {
-    id: "builtin:wardogs",
-    label: "Wardogs",
-    description: "Manticore (green), Valkyra (red) and Lonestar (blue).",
-    groupLabel: "Team",
-    groups: [
-      team("Manticore", "🟢"),
-      team("Valkyra", "🔴"),
-      team("Lonestar", "🔵"),
-    ],
-  },
+  teamPreset("builtin:red-vs-blue", [team("Red", "🔴"), team("Blue", "🔵")]),
+  teamPreset("builtin:wardogs", [
+    team("Manticore", "🟢"),
+    team("Valkyra", "🔴"),
+    team("Lonestar", "🔵"),
+  ]),
+  teamPreset("builtin:eve-factions", [
+    team("Amarr", "🟡"),
+    team("Caldari", "🔵"),
+    team("Gallente", "🟢"),
+    team("Minmatar", "🔴"),
+  ]),
 ];
 
 /** The built-in preset with this id, or undefined (also for Custom/null). */
