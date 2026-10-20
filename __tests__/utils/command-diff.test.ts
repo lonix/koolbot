@@ -142,4 +142,90 @@ describe("commandListsMatch (#1307)", () => {
     cyc.self = cyc;
     expect(commandListsMatch([cyc], [{ name: "a" }])).toBe(false);
   });
+
+  describe("malformed collections never compare equal", () => {
+    const ping = (): Cmd[] => [{ name: "ping", description: "Pong" }];
+    const bad = (extra: Cmd): Cmd[] => [
+      {
+        type: 1,
+        name: "ping",
+        description: "Pong",
+        dm_permission: true,
+        nsfw: false,
+        ...extra,
+      },
+    ];
+
+    it("top-level options / localisations / contexts", () => {
+      expect(commandListsMatch(ping(), bad({ options: "invalid" }))).toBe(
+        false,
+      );
+      expect(commandListsMatch(ping(), bad({ options: {} }))).toBe(false);
+      expect(commandListsMatch(ping(), bad({ name_localizations: "x" }))).toBe(
+        false,
+      );
+      expect(
+        commandListsMatch(ping(), bad({ description_localizations: ["a"] })),
+      ).toBe(false);
+      expect(commandListsMatch(ping(), bad({ options: [1] }))).toBe(false);
+    });
+
+    it("nested options, choices, channel_types", () => {
+      const withOpt = (o: Cmd): Cmd[] =>
+        bad({ options: [{ type: 3, name: "a", description: "A", ...o }] });
+      const desired = (): Cmd[] => [
+        {
+          name: "ping",
+          description: "Pong",
+          options: [{ type: 3, name: "a", description: "A" }],
+        },
+      ];
+      expect(commandListsMatch(desired(), withOpt({}))).toBe(true);
+      expect(commandListsMatch(desired(), withOpt({ options: "x" }))).toBe(
+        false,
+      );
+      expect(commandListsMatch(desired(), withOpt({ choices: "x" }))).toBe(
+        false,
+      );
+      expect(commandListsMatch(desired(), withOpt({ choices: [null] }))).toBe(
+        false,
+      );
+      expect(
+        commandListsMatch(desired(), withOpt({ channel_types: "x" })),
+      ).toBe(false);
+      expect(
+        commandListsMatch(
+          desired(),
+          withOpt({
+            choices: [{ name: "a", value: 1, name_localizations: 5 }],
+          }),
+        ),
+      ).toBe(false);
+    });
+
+    it("absent markers (null, {}, []) still match", () => {
+      expect(
+        commandListsMatch(
+          ping(),
+          bad({
+            options: [],
+            name_localizations: {},
+            description_localizations: null,
+          }),
+        ),
+      ).toBe(true);
+    });
+
+    it("localisation changes are detected", () => {
+      const s = ping();
+      s[0].name_localizations = { nb: "ping" };
+      expect(commandListsMatch(s, bad({}))).toBe(false);
+      expect(
+        commandListsMatch(s, bad({ name_localizations: { nb: "ping" } })),
+      ).toBe(true);
+      expect(
+        commandListsMatch(ping(), bad({ name_localizations: { nb: "ping" } })),
+      ).toBe(false);
+    });
+  });
 });

@@ -160,6 +160,40 @@ describe("CommandManager.registerCommands (#1293)", () => {
       expect(putSpy).not.toHaveBeenCalled();
     });
 
+    it("requests the localisation dictionaries in the GET", async () => {
+      getSpy.mockResolvedValue(registered);
+      await manager.registerCommands();
+      const options = getSpy.mock.calls[0][1] as {
+        query: { get(k: string): string | null };
+      };
+      expect(options.query.get("with_localizations")).toBe("true");
+    });
+
+    it("sends no PUT when translations are unchanged", async () => {
+      const tr = { nb: "hei" };
+      (
+        manager as unknown as { getEnabledCommands: unknown }
+      ).getEnabledCommands = async () => [
+        { name: "ping", description_localizations: tr },
+      ];
+      getSpy.mockResolvedValue([
+        { ...registered[1], description_localizations: { nb: "hei" } },
+      ]);
+      await manager.registerCommands();
+      expect(putSpy).not.toHaveBeenCalled();
+    });
+
+    it("sends a PUT when translations were removed on our side", async () => {
+      (
+        manager as unknown as { getEnabledCommands: unknown }
+      ).getEnabledCommands = async () => [{ name: "ping", description: "" }];
+      getSpy.mockResolvedValue([
+        { ...registered[1], description_localizations: { nb: "hei" } },
+      ]);
+      await manager.registerCommands();
+      expect(putSpy).toHaveBeenCalledTimes(1);
+    });
+
     it("sends one PUT when a command was added", async () => {
       getSpy.mockResolvedValue(registered.slice(0, 1));
       await manager.registerCommands();

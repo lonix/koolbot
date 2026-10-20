@@ -19,6 +19,28 @@ function isRecord(value: Json): value is Record<string, Json> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Collection fields must be an array (or dictionary) or absent. Anything else
+ * is malformed: throw so commandListsMatch reports "different" and the caller
+ * sends the PUT, instead of the projection silently treating it as absent.
+ */
+function arr(value: Json): Json[] | null {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) throw new Error("expected array");
+  return value;
+}
+
+function dict(value: Json): Record<string, Json> | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new Error("expected object");
+  return value;
+}
+
+function item(value: Json): Record<string, Json> {
+  if (!isRecord(value)) throw new Error("expected object");
+  return value;
+}
+
 /** undefined, null, {} and [] all mean "absent" to Discord. */
 function emptyToNull(value: Json): Json {
   if (value === undefined || value === null) return null;
@@ -44,37 +66,37 @@ function sortedKeys(value: Json): Json {
   return value;
 }
 
-function projectOption(option: Json): Json {
-  if (!isRecord(option)) return option;
-  const choices = Array.isArray(option.choices)
-    ? option.choices.map((c) =>
-        isRecord(c)
-          ? {
-              name: c.name,
-              name_localizations: emptyToNull(c.name_localizations),
-              value: c.value,
-            }
-          : c,
-      )
-    : null;
+function projectOption(raw: Json): Json {
+  const option = item(raw);
+  const choices = arr(option.choices);
+  const nested = arr(option.options);
   return {
     type: option.type,
     name: option.name,
-    name_localizations: emptyToNull(option.name_localizations),
+    name_localizations: emptyToNull(dict(option.name_localizations)),
     description: option.description,
-    description_localizations: emptyToNull(option.description_localizations),
+    description_localizations: emptyToNull(
+      dict(option.description_localizations),
+    ),
     required: option.required ?? false,
     autocomplete: option.autocomplete ?? false,
-    choices: emptyToNull(choices),
-    channel_types: emptyToNull(option.channel_types),
+    choices: emptyToNull(
+      choices?.map((c) => {
+        const choice = item(c);
+        return {
+          name: choice.name,
+          name_localizations: emptyToNull(dict(choice.name_localizations)),
+          value: choice.value,
+        };
+      }) ?? null,
+    ),
+    channel_types: emptyToNull(arr(option.channel_types)),
     min_value: option.min_value ?? null,
     max_value: option.max_value ?? null,
     min_length: option.min_length ?? null,
     max_length: option.max_length ?? null,
     // Option order is significant (positional), so it is preserved.
-    options: Array.isArray(option.options)
-      ? emptyToNull(option.options.map(projectOption))
-      : null,
+    options: emptyToNull(nested?.map(projectOption) ?? null),
   };
 }
 
@@ -82,24 +104,25 @@ function projectOption(option: Json): Json {
  * `contexts` / `integration_types` are only compared when we send them:
  * Discord fills them in itself for commands that omit them.
  */
-function projectCommand(command: Json, compareExtras: boolean): Json {
-  if (!isRecord(command)) return command;
+function projectCommand(raw: Json, compareExtras: boolean): Json {
+  const command = item(raw);
+  const options = arr(command.options);
   const out: Record<string, Json> = {
     type: command.type ?? 1,
     name: command.name,
-    name_localizations: emptyToNull(command.name_localizations),
+    name_localizations: emptyToNull(dict(command.name_localizations)),
     description: command.description ?? "",
-    description_localizations: emptyToNull(command.description_localizations),
+    description_localizations: emptyToNull(
+      dict(command.description_localizations),
+    ),
     default_member_permissions: str(command.default_member_permissions),
     dm_permission: command.dm_permission ?? true,
     nsfw: command.nsfw ?? false,
-    options: Array.isArray(command.options)
-      ? emptyToNull(command.options.map(projectOption))
-      : null,
+    options: emptyToNull(options?.map(projectOption) ?? null),
   };
   if (compareExtras) {
-    out.contexts = emptyToNull(command.contexts);
-    out.integration_types = emptyToNull(command.integration_types);
+    out.contexts = emptyToNull(arr(command.contexts));
+    out.integration_types = emptyToNull(arr(command.integration_types));
   }
   return out;
 }

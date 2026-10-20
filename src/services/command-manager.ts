@@ -1,3 +1,4 @@
+import { URLSearchParams } from "node:url";
 import {
   Routes,
   Client,
@@ -307,7 +308,12 @@ export class CommandManager {
   ): Promise<boolean> {
     try {
       const registered = await this.makeDiscordApiCall(
-        async () => rest.get(route),
+        async () =>
+          // Without with_localizations Discord omits the translation
+          // dictionaries, which would hide added/removed translations.
+          rest.get(route, {
+            query: new URLSearchParams({ with_localizations: "true" }),
+          }),
         "fetch registered commands",
         15000,
         1,
