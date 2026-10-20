@@ -139,7 +139,7 @@ import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
-import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
+import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
@@ -1037,18 +1037,7 @@ export function createReadOnlyRouter(
       for (const v of BOOTSTRAP_VARS) {
         const raw = getEnv(v.key);
         const present = typeof raw === "string" && raw.length > 0;
-        let display: string | undefined;
-        if (present && raw) {
-          if (v.isSecret) {
-            // Only reveal a 4-char tail when long enough that the tail
-            // isn't the whole value. Mirrors the scaffold's behaviour.
-            display = raw.length >= 8 ? `…${raw.slice(-4)}` : undefined;
-          } else if (raw.length > 32) {
-            display = `${raw.slice(0, 28)}…`;
-          } else {
-            display = raw;
-          }
-        }
+        const display = bootstrapDisplay(v, raw);
         const arr = grouped.get(v.category) ?? [];
         arr.push({ key: v.key, present, isSecret: v.isSecret, display });
         grouped.set(v.category, arr);

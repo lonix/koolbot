@@ -34,6 +34,7 @@ import {
   defaultConfig,
   settingsMetadata,
 } from "../../src/services/config-schema.js";
+import { bootstrapDisplay } from "../../src/web/bootstrap-vars.js";
 
 const COMMON = { csrfToken: "csrf", remainingMs: 60_000 };
 
@@ -195,7 +196,7 @@ describe("renderDashboardPage", () => {
 });
 
 describe("renderBootstrapPage", () => {
-  it("shows status tags + masked secrets", () => {
+  it("shows status tags and never any part of a secret", () => {
     const html = renderBootstrapPage({
       ...COMMON,
       groups: [
@@ -206,21 +207,54 @@ describe("renderBootstrapPage", () => {
               key: "WEBUI_SESSION_SECRET",
               present: true,
               isSecret: true,
-              display: "…abcd",
+              // Even if a caller hands a tail in, the page must not render it.
+              display: "…TAILZ9",
             },
             {
               key: "WEBUI_SESSION_TTL_MINUTES",
               present: false,
               isSecret: false,
             },
+            {
+              key: "CLIENT_ID",
+              present: true,
+              isSecret: false,
+              display: "123456789",
+            },
           ],
         },
       ],
     });
     expect(html).toContain("WEBUI_SESSION_SECRET");
-    expect(html).toContain("…abcd");
-    expect(html).toContain("configured");
-    expect(html).toContain("unset");
+    expect(html).toContain('<span class="tag tag-on">configured</span>');
+    expect(html).toContain('<span class="tag tag-off">unset</span>');
+    expect(html).not.toContain("TAILZ9");
+    expect(html).not.toContain("…TAIL");
+    // Non-secret values are unchanged.
+    expect(html).toContain('<span class="mono">123456789</span>');
+  });
+
+  it("states that secrets are presence-only", () => {
+    const html = renderBootstrapPage({ ...COMMON, groups: [] });
+    expect(html).toContain("configured or unset only");
+    expect(html).not.toContain("last 4");
+  });
+});
+
+describe("bootstrapDisplay", () => {
+  const secret = { key: "S", category: "Process", isSecret: true } as const;
+  const plain = { key: "P", category: "Process", isSecret: false } as const;
+
+  it("returns nothing for a secret, whatever its length", () => {
+    expect(bootstrapDisplay(secret, "abcdefghijklmnop-TAIL")).toBeUndefined();
+    expect(bootstrapDisplay(secret, "short")).toBeUndefined();
+    expect(bootstrapDisplay(secret, undefined)).toBeUndefined();
+  });
+
+  it("keeps non-secret behaviour: full value, or a 28-char prefix when long", () => {
+    expect(bootstrapDisplay(plain, "value")).toBe("value");
+    expect(bootstrapDisplay(plain, "x".repeat(33))).toBe(`${"x".repeat(28)}…`);
+    expect(bootstrapDisplay(plain, "")).toBeUndefined();
   });
 });
 
