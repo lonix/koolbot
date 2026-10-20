@@ -217,30 +217,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
-      # Tag builds only: is this tag the newest release? A strict vX.Y.Z tag
-      # that is not older than the newest published release may move latest,
-      # X.Y and X; anything else publishes only its own version tag. Fails
-      # (before anything is pushed) if the releases API cannot be read.
-      - name: Check whether this tag is the newest release
-        id: newest
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          stable='^v[0-9]+\.[0-9]+\.[0-9]+$'
-          newest=false
-          if [[ "${TAG}" =~ ${stable} ]]; then
-            published="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
-            [[ "${published}" =~ ${stable} ]] || { echo "unexpected release tag: ${published}" >&2; exit 1; }
-            highest="$(printf '%s\n%s\n' "${TAG}" "${published}" | sort -V | tail -n 1)"
-            [[ "${highest}" == "${TAG}" ]] && newest=true
-          fi
-          echo "newest=${newest}" >> "${GITHUB_OUTPUT}"
-          echo "${TAG}: newest release=${newest} (published: ${published:-n/a})"
-
       # Previews are linux/amd64 only; QEMU is just for the arm64 release leg.
       - name: Set up QEMU
         if: github.event_name != 'pull_request'
@@ -271,20 +247,16 @@ jobs:
           DOCKER_METADATA_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' }}
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # `latest` and the X.Y / X aliases move only when this tag is the
-          # newest release (see the freshness step), so re-running or finishing
-          # late for an older tag cannot roll them back. Otherwise only X.Y.Z is
-          # published. Nightly and branch builds never get `latest`; they get
-          # `nightly` (default branch only) and `main`. Empty `newest` (not a
-          # tag build) leaves the semver lines enabled, and they emit nothing.
+          # A tag build publishes only its own X.Y.Z. `latest`, X.Y and X are
+          # moved by the `promote` job, which decides freshness in a serialized
+          # step, so no build can roll them back. Nightly and branch builds
+          # never get `latest`; they get `nightly` (default branch only) and
+          # `main`.
           flavor: |
             latest=false
           tags: |
-            type=raw,value=latest,enable=${{ steps.newest.outputs.newest == 'true' }}
             type=raw,value=nightly,enable={{is_default_branch}}
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ steps.newest.outputs.newest != 'false' }}
-            type=semver,pattern={{major}},enable=${{ steps.newest.outputs.newest != 'false' }}
             type=sha,format=short,enable=${{ github.event_name != 'pull_request' }}
             type=ref,event=branch
             type=ref,event=pr
@@ -380,6 +352,70 @@ jobs:
           for tag in ${TAGS}; do
             cosign sign --yes "${tag}@${DIGEST}"
           done
+
+  # Moves latest, X.Y and X to the newest release (tag builds only). The
+  # version image above is already pushed and signed; this job only adds tags
+  # to that digest, and a failure here leaves it published and signed.
+  #
+  # All promote runs share ONE group and never cancel, so they run one at a
+  # time. GitHub keeps only one PENDING run per group and drops older pending
+  # ones, which is harmless here: every run resolves the newest release itself
+  # and promotes THAT release's image, never this run's own tag, so whichever
+  # run goes last (even a re-run of an older tag) leaves the aliases on the
+  # newest release. Version builds are not in this group, so they cannot be
+  # dropped.
+  #
+  # No re-sign is needed: the cosign signature and attestations are stored by
+  # image digest, and the aliases point at that same digest, so
+  # `cosign verify <image>:latest` finds the signature made in
+  # attest-and-sign. (imagetools copies a single source index unchanged, so the
+  # digest should stay identical; not yet confirmed on a real run.)
+  promote:
+    name: Promote release aliases
+    runs-on: ubuntu-latest
+    needs: attest-and-sign
+    timeout-minutes: 10
+    if: github.ref_type == 'tag'
+    concurrency:
+      group: ${{ github.workflow }}-promote
+      cancel-in-progress: false
+    permissions:
+      # contents: read is for the releases lookup (a private repo needs it).
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point latest, X.Y and X at the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          TRIGGER_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          stable='^v([0-9]+)\.([0-9]+)\.[0-9]+$'
+          # Only a real release tag triggers promotion; a pre-release tag
+          # never moves the aliases.
+          if [[ ! "${TRIGGER_TAG}" =~ ${stable} ]]; then
+            echo "::notice::${TRIGGER_TAG} is not a stable release tag; nothing to promote."
+            exit 0
+          fi
+          newest="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+          [[ "${newest}" =~ ${stable} ]] || { echo "unexpected release tag: ${newest}" >&2; exit 1; }
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          image="${IMAGE,,}"
+          version="${newest#v}"
+          echo "Newest release is ${newest} (this run: ${TRIGGER_TAG}); promoting ${image}:${version}."
+          docker buildx imagetools create \
+            --tag "${image}:latest" --tag "${image}:${major}.${minor}" --tag "${image}:${major}" \
+            "${image}:${version}"
 
   preview-comment:
     name: Post preview pull command

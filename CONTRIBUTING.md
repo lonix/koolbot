@@ -675,9 +675,10 @@ docker build .
 
 `Docker Build and Push` publishes these tags to `ghcr.io/lonix/koolbot`:
 
-- `latest`, `X.Y.Z`, `X.Y`, `X` - a release. `latest` is always the newest release, never unreleased code. Re-running an older
-  tag's build publishes only its own `X.Y.Z`, so it cannot move `latest`, `X.Y` or `X` backwards. Release images pick up base-image
-  fixes at the next release.
+- `latest`, `X.Y.Z`, `X.Y`, `X` - a release. `latest` is always the newest release, never unreleased code. A tag build publishes
+  its `X.Y.Z` first (signed like any image). A separate `promote` job then points `latest`, `X.Y` and `X` at whichever release is the
+  newest at that moment, one run at a time, so re-running or finishing late for an older tag cannot move them backwards. Release
+  images pick up base-image fixes at the next release.
 - `nightly` and `main` - the head of `main`, built nightly. A merge to `main` does not start a build.
 - `sha-<short-sha>` - the commit a tag or nightly build was made from.
 - `pr-<number>` and `pr-<number>-sha-<short-sha>` - PR previews (see below).
