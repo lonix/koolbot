@@ -42,7 +42,7 @@ export default {
   // to raise the numbers below to just under the new actuals.
   coverageThreshold: {
     global: {
-      branches: 72,
+      branches: 78,
       functions: 84,
       lines: 79,
       statements: 78,
