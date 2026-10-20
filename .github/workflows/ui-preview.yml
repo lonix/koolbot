@@ -1,17 +1,24 @@
 name: UI Preview
 
-# Screenshots of every Web UI page for PRs that touch the Web UI (#1327), so a
-# reviewer can see the change without running the bot. A review aid, never a gate.
+# Screenshots of the Web UI pages a PR changes (#1327, #1341), so a reviewer can
+# see the change without running the bot. A review aid, never a gate.
 #
 # Every page renderer is a pure function and the a11y fixtures hold one per
 # page, so `scripts/render-ui-preview.mjs` writes the pages to static HTML with
 # no Discord token, MongoDB or secrets. `scripts/screenshot-ui-preview.mjs`
 # photographs them with the Google Chrome that ubuntu-latest already ships
 # (playwright-core, no browser download). The base branch is rendered with the
-# same script so the job summary can list the pages whose HTML changed first.
+# same script, and only the pages whose HTML differs are photographed, before
+# and after. When the stylesheet differs every page does: a representative
+# sample is highlighted and the full set goes in the `all-pages/` folder. When
+# nothing differs no screenshots are taken.
 #
-# Runs on `pull_request` with a read-only token and uploads an artifact, so it
-# works on fork PRs as-is: no pull_request_target, no PR comment, no secrets.
+# The `preview` job runs on `pull_request` with a read-only token and uploads
+# the artifact, so it works on fork PRs as-is: no pull_request_target, no
+# secrets. It also builds the PR comment text (as data, in a job output). The
+# separate `comment` job holds `pull-requests: write`, checks out and runs no
+# repository code, and only posts that text, for same-repo PRs. A fork PR gets
+# the artifact and the job summary, no comment, and does not fail.
 #
 # The path filter below is safe ONLY because this workflow is not a required
 # status check (`CI Success` is the single required check). A required check
@@ -27,7 +34,8 @@ on:
       - __tests__/web/a11y-pages.ts
       - scripts/render-ui-preview.mjs
       - scripts/screenshot-ui-preview.mjs
-      - scripts/ui-preview-summary.mjs
+      - scripts/ui-preview-plan.mjs
+      - scripts/ui-preview-comment.mjs
       - .github/workflows/ui-preview.yml
 
 concurrency:
@@ -42,6 +50,9 @@ jobs:
     name: Screenshots
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
+      comment-body: ${{ steps.comment.outputs.body }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,8 +80,8 @@ jobs:
         run: node scripts/render-ui-preview.mjs --out ui-preview/head
 
       # Best effort: a base that cannot be rendered only costs the changed-pages
-      # ordering, which the summary then says. The base reuses this checkout's
-      # node_modules (it is only rendering, not building).
+      # selection, which the comment then says (all pages, no before shots). The
+      # base reuses this checkout's node_modules (it is only rendering, not building).
       - name: Render base branch pages
         continue-on-error: true
         run: |
@@ -78,21 +89,87 @@ jobs:
           ln -s "$PWD/node_modules" base/node_modules
           node base/scripts/render-ui-preview.mjs --out ui-preview/base
 
+      - name: Choose the pages to screenshot
+        run: node scripts/ui-preview-plan.mjs --head ui-preview/head --base ui-preview/base --out ui-preview/plan.json
+
       - name: Take screenshots
-        run: node scripts/screenshot-ui-preview.mjs --html ui-preview/head --out ui-preview/screenshots
+        run: node scripts/screenshot-ui-preview.mjs --plan ui-preview/plan.json --head ui-preview/head --base ui-preview/base --out ui-preview/artifact
 
       - name: Upload preview artifact
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-preview
-          path: |
-            ui-preview/screenshots
-            ui-preview/head
+          path: ui-preview/artifact
           retention-days: 14
           if-no-files-found: error
 
-      - name: Write job summary
+      # The comment text travels to the `comment` job base64-encoded on one
+      # line, so nothing in it can be read as workflow syntax or a delimiter.
+      - name: Write job summary and comment text
+        id: comment
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        run: node scripts/ui-preview-summary.mjs --head ui-preview/head --base ui-preview/base --artifact-url "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node scripts/ui-preview-comment.mjs --plan ui-preview/plan.json --out ui-preview/comment.md
+          node scripts/ui-preview-comment.mjs --plan ui-preview/plan.json --out ui-preview/summary.md --summary
+          cat ui-preview/summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "body=$(base64 -w0 ui-preview/comment.md)" >> "$GITHUB_OUTPUT"
+
+  # Same-repo PRs only: a fork's token cannot write, and this must NOT move to
+  # `pull_request_target` to work around that. No checkout, no repository code:
+  # it posts the text the read-only job built, as data. Never a blocking check.
+  comment:
+    name: PR comment
+    needs: preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      !cancelled() && needs.preview.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      # Create or update the sticky preview comment on the PR.
+      pull-requests: write
+    steps:
+      - name: Create or update the preview comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BODY_B64: ${{ needs.preview.outputs.comment-body }}
+          ARTIFACT_URL: ${{ needs.preview.outputs.artifact-url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            const MARKER = '<!-- ui-preview -->';
+            const number = Number(process.env.PR_NUMBER);
+            const body = Buffer.from(process.env.BODY_B64 ?? '', 'base64').toString('utf8');
+            if (!body.startsWith(MARKER)) {
+              core.warning('The preview comment text is missing or malformed; not posting it.');
+              return;
+            }
+            // GitHub rejects comments over 65536 characters.
+            if (body.length > 65000) {
+              core.warning('The preview comment text is too long; not posting it.');
+              return;
+            }
+            const url = process.env.ARTIFACT_URL;
+            if (url && !body.includes(url)) {
+              core.warning('The comment text does not link this run\'s artifact; posting it anyway.');
+            }
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo, issue_number: number, per_page: 100,
+              });
+              const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(MARKER));
+              if (existing) {
+                await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: number, body });
+              }
+            } catch (err) {
+              // A same-repo PR can still carry a read-only token (Dependabot). The
+              // artifact and job summary are the preview, so never fail over this.
+              core.warning(`Could not post the preview comment: ${err.message}`);
+            }

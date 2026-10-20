@@ -678,10 +678,20 @@ docker build .
 
 A PR that touches `src/web/**`, `docs/design/**` or `__tests__/web/a11y-pages.ts` runs the `UI Preview` workflow, so a reviewer can see
 what a Web UI change looks like without running the bot. It renders every page from the a11y fixtures to static HTML (no Discord token,
-MongoDB or secrets), screenshots each one with the runner's Chrome (a full-page PNG at 1280px wide, plus 390px for the shell and a few
-key pages), and uploads them as the `ui-preview` artifact, kept 14 days. The job summary lists the pages whose HTML differs from the base
-branch first; it compares the HTML, not the pixels, so it does not flake. It uses the read-only `pull_request` token and posts no
-comment, so it also runs on fork PRs. To review a PR, open the run's summary and download the artifact.
+MongoDB or secrets), renders the base branch the same way, and compares the HTML (not the pixels, so it does not flake). It screenshots
+only what the PR changes, with the runner's Chrome (a full-page PNG at 1280px wide, plus 390px for the shell and a few key pages), and
+uploads them as the `ui-preview` artifact, kept 14 days:
+
+- one or a few pages changed: `changed/` holds `<page>.base.png` (before) and `<page>.png` (after) for those pages only;
+- the shared stylesheet or tokens changed, so every page differs: `sample/` holds before and after for a representative sample
+  (dashboard, one settings page, one `/me` page, the 390px reflow pages) and `all-pages/` holds every page (after only);
+- nothing differs: no screenshots, only `manifest.json` and `plan.json`.
+
+A same-repo PR also gets one sticky `ui-preview` comment, rewritten on every push, with the commit, the time (UTC), the artifact link and
+the list of changed pages. A separate small job posts it with `pull-requests: write`; the screenshots job keeps a read-only token, and the
+comment text is built there and only posted by the other job, which runs no repository code. A fork PR gets the artifact and the job summary
+but no comment (and does not fail): there is no `pull_request_target` and no secret. To review a PR, open its `ui-preview` comment and
+download the artifact.
 
 It is not a required check and does not run on other PRs. Never add it to branch protection or a ruleset: a required check behind a path
 filter never reports on PRs that skip it, so those PRs could not merge. To render and screenshot locally (set `UI_PREVIEW_CHROME` to a

@@ -198,11 +198,13 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
 - **`docker-check.yml`** — pre-merge Docker checks on PRs that touch Docker-related files (path-filtered): hadolint on `Dockerfile` and
   `Dockerfile.dev`, `docker compose config -q` on both compose files, and a non-pushing `linux/amd64` test build. **Not a required check**;
   the path filter is only safe for that reason, so never add it to branch protection.
-- **`ui-preview.yml`** — screenshots of every Web UI page on PRs that touch `src/web/**`, `docs/design/**` or the a11y page fixtures
-  (path-filtered): `scripts/render-ui-preview.mjs` renders the fixtures to static HTML (no bot, Mongo or secrets), playwright-core photographs
-  them with the runner's Chrome, and one `ui-preview` artifact plus a job summary (pages whose HTML differs from the base branch first)
-  come out. Read-only token, so fork PRs work. **Not a required check**; the path filter is only safe for that reason, so never add it to
-  branch protection.
+- **`ui-preview.yml`** — screenshots of the Web UI pages a PR changes, on PRs that touch `src/web/**`, `docs/design/**` or the a11y page
+  fixtures (path-filtered): `scripts/render-ui-preview.mjs` renders the fixtures to static HTML (no bot, Mongo or secrets) for head and base,
+  `ui-preview-plan.mjs` picks the pages whose HTML (or the shared stylesheet) differs, and playwright-core photographs only those with the
+  runner's Chrome: before and after in `changed/`, or a sample plus the full `all-pages/` set when everything changed, or nothing. The
+  `preview` job is read-only (fork PRs work, no `pull_request_target`) and builds the comment text with `ui-preview-comment.mjs`; a separate
+  `comment` job (same-repo PRs only, `pull-requests: write` only, no checkout) posts it as the sticky `<!-- ui-preview -->` comment.
+  **Not a required check**; the path filter is only safe for that reason, so never add it to branch protection.
 - **`actionlint.yml`** / **`zizmor`** — lint + security-audit workflow YAML when `.github/workflows/**`
   changes.
 - **`codeql.yml`** — CodeQL scan (PRs, pushes, weekly cron).
