@@ -44,9 +44,24 @@ function usedVars(source: string): string[] {
 
 const KNOWN = new Set([...declaredVars(generated), ...declaredVars(kbCss)]);
 
-/** `#rgb`, `#rrggbb` and `#rrggbbaa`; issue numbers such as `#855` have no a-f letter and are skipped. */
-const HEX_LITERAL = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+/** Every CSS hex length: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`. */
+const HEX_LITERAL =
+  /(?<![&\w/])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/g;
 
+/** Property or attribute names whose value is a colour (or a var() fallback). */
+const COLOUR_CONTEXT =
+  /(?:colou?r|background|border[\w-]*|outline[\w-]*|fill|stroke|shadow|gradient|--[\w-]+)\s*[:=(,]/i;
+
+/** Attributes whose quoted value is an anchor or an identifier, not a colour. */
+const ANCHOR_ATTRIBUTE =
+  /(?:href|action|for|id|src|name|value|data-[\w-]+|aria-[\w-]+)\s*=\s*["'`]$/i;
+
+/**
+ * Hex colour literals in `source`. A `#abc` is a colour only in a colour
+ * context (after a colour property, `fill=`, a `var()` fallback, or alone in
+ * quotes); `#1315` in prose, `href="#add"` and `&#39;` are not. Digit-only
+ * colours such as `#000` therefore count.
+ */
 function hexLiterals(source: string): string[] {
   return source.split("\n").flatMap((line) => {
     // The embed-colour form shows a person what a hex colour looks like
@@ -54,7 +69,20 @@ function hexLiterals(source: string): string[] {
     if (line.includes("embedColor") || line.includes("Colour (hex")) {
       return [];
     }
-    return (line.match(HEX_LITERAL) ?? []).filter((h) => /[a-fA-F]/.test(h));
+    if (/^\s*(?:\/\/|\/\*|\*)/.test(line)) return [];
+    const found: string[] = [];
+    for (const m of line.matchAll(HEX_LITERAL)) {
+      const at = m.index ?? 0;
+      const before = line.slice(0, at);
+      const after = line[at + m[0].length] ?? "";
+      const segment = before.slice(
+        Math.max(before.lastIndexOf(";"), before.lastIndexOf("{")) + 1,
+      );
+      const quoted = /["'`]$/.test(before) && after === before.slice(-1);
+      if (ANCHOR_ATTRIBUTE.test(before)) continue;
+      if (COLOUR_CONTEXT.test(segment) || quoted) found.push(m[0]);
+    }
+    return found;
   });
 }
 
@@ -110,9 +138,32 @@ describe("design token drift (#1315)", () => {
     expect(found).toEqual([]);
   });
 
-  it("recognises the regressions it exists for", () => {
-    expect(hexLiterals("color:#fff;background:#0f1115")).toHaveLength(2);
-    expect(hexLiterals("see #855 and #1315")).toEqual([]);
+  it.each([
+    ["color:#fff;background:#0f1115", ["#fff", "#0f1115"]],
+    ["color:#000", ["#000"]],
+    ["background:#808080;", ["#808080"]],
+    ["color:#abcd", ["#abcd"]],
+    ["border:1px solid #12345678", ["#12345678"]],
+    ["box-shadow:0 0 1px #000", ["#000"]],
+    ['<rect fill="#fff">', ["#fff"]],
+    ['const c = "#0f1115";', ["#0f1115"]],
+    ["color:var(--x,#fff)", ["#fff"]],
+    [
+      "background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%)",
+      ["#1e1b4b", "#312e81"],
+    ],
+    ["see #855 and #1315 and (#855)", []],
+    ["Note: see #1315 and #abcd", []],
+    ['<a href="#add">x</a>', []],
+    ['<a href="#123">x</a>', []],
+    ["&#39; and &#x27;", []],
+    ["https://example.test/#fff", []],
+    ["color:var(--text)", []],
+  ])("matches %s", (source, expected) => {
+    expect(hexLiterals(source)).toEqual(expected);
+  });
+
+  it("recognises an unknown token name", () => {
     expect(KNOWN.has("--not-a-token")).toBe(false);
   });
 });
