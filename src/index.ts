@@ -17,6 +17,7 @@ import {
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { sanitizeForLog } from "./utils/log-sanitize.js";
+import { markMongoDisconnectIntentional } from "./utils/mongo.js";
 import { safeReply } from "./utils/safe-reply.js";
 import { ConfigService } from "./services/config-service.js";
 import { startComponentAudit } from "./utils/component-audit.js";
@@ -613,6 +614,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
       async () => {
         const { default: mongoose } = await import("mongoose");
         if (mongoose.connection.readyState !== 0) {
+          // Expected disconnect: keep the trackers from warning "connection lost".
+          markMongoDisconnectIntentional();
           await mongoose.connection.close();
           logger.info("✅ Database connections closed");
         }

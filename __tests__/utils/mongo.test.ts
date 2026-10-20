@@ -1,6 +1,19 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import mongoose from "mongoose";
-import { MongoConnectionGuard } from "../../src/utils/mongo.js";
+import {
+  MongoConnectionGuard,
+  markMongoDisconnectIntentional,
+  isMongoDisconnectIntentional,
+  resetMongoDisconnectIntentional,
+} from "../../src/utils/mongo.js";
+import logger from "../../src/utils/logger.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { DEFAULT_MONGODB_URI } from "../../src/config/env.js";
 
@@ -77,5 +90,45 @@ describe("MongoConnectionGuard", () => {
     const guard = new MongoConnectionGuard("test service");
 
     await expect(guard.ensureConnection()).rejects.toThrow("unreachable");
+  });
+
+  describe("disconnect warning (#1295)", () => {
+    beforeEach(() => {
+      resetMongoDisconnectIntentional();
+    });
+
+    afterEach(() => {
+      resetMongoDisconnectIntentional();
+      jest.restoreAllMocks();
+    });
+
+    it("warns on a genuine runtime disconnect", () => {
+      const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
+      const registered = handlersFor();
+      const guard = new MongoConnectionGuard("test service");
+
+      registered.get("connected")?.();
+      registered.get("disconnected")?.();
+
+      expect(warn).toHaveBeenCalledWith(
+        "MongoDB connection lost for test service",
+      );
+      expect(guard.isConnected).toBe(false);
+    });
+
+    it("does not warn once the shutdown close is marked intentional", () => {
+      const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
+      const registered = handlersFor();
+      const guard = new MongoConnectionGuard("test service");
+
+      registered.get("connected")?.();
+      markMongoDisconnectIntentional();
+      expect(isMongoDisconnectIntentional()).toBe(true);
+      registered.get("disconnected")?.();
+
+      expect(warn).not.toHaveBeenCalled();
+      // The connection state is still tracked correctly.
+      expect(guard.isConnected).toBe(false);
+    });
   });
 });
