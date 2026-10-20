@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           # Use a PAT / GitHub App token (not the default GITHUB_TOKEN) so the
           # tag and release this action creates can trigger downstream
@@ -34,3 +35,26 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Build a preview image of the release candidate (#1094, #1278): the release PR is
+      # the one PR nobody labels by hand, so its pr-<n> image would otherwise go stale.
+      # Each push to main makes release-please update (force-push) the release branch,
+      # a `synchronize` on a labelled PR, which docker.yml rebuilds.
+      # `pr` is the JSON PullRequest object of the PR release-please created or updated
+      # (action v5 output; unset when it touched no PR, hence the `if`). It reaches the
+      # script only through env, never interpolated into it.
+      # Do not add docker-preview to release-please-config.json's `label` option:
+      # release-please uses that set to find its own pending PR.
+      - name: Label the release PR docker-preview
+        if: steps.release.outputs.pr != ''
+        env:
+          # Must be the PAT: a label added with GITHUB_TOKEN does not trigger
+          # docker.yml's `labeled` event, so no preview would be built.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning title=RELEASE_PLEASE_TOKEN is not set::Skipping the docker-preview label on release PR #${PR_NUMBER}. Labels and pushes made with GITHUB_TOKEN do not trigger docker.yml, so the pr-${PR_NUMBER} preview image will not be built or refreshed."
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" -f 'labels[]=docker-preview' --silent

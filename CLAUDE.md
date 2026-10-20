@@ -197,7 +197,9 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   release-impact labels derived from the Conventional Commit PR title). Runs on
   `pull_request_target` so fork PRs get a write token, and therefore must never check out or run PR
   code — see the `dangerous-triggers` exemption in `.github/zizmor.yml`.
-- **`release-please.yml`** — release automation on push to `main`.
+- **`release-please.yml`** — release automation on push to `main`; it also labels the release PR `docker-preview`
+  (with `RELEASE_PLEASE_TOKEN`, skipped with a warning when unset) so `pr-<n>` tracks the release candidate. `docker.yml`
+  removes the label and deletes the images when that PR merges.
 
 Coverage thresholds are enforced by `coverageThreshold.global` in `jest.config.js`, which is the
 single source of truth for the numbers — read them there (`TESTING.md` carries the same table for
