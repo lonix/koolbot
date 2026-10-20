@@ -115,6 +115,8 @@ should not send its admins' browsers to a font CDN, and the native face is the f
   [SideNav](docs/design/components.md#sidenav) has the full lists and the renames.
 - **Setup wizard:** Features → Access → Channels → Review. The Access step maps Discord roles to the four scopes before anything else is set up.
 - **Member pages** (My preferences, host panel): TopBar, then one centred column up to `member-content-max`, with Tabs under the bar.
+- **As built (#1317):** the TopBar and the non-admin SideNav are rendered by `src/web/app-shell.ts` (the nav registry is `SHELL_NAV`), a section shows
+  once it has a page that exists, and the sidebar once two sections do. The admin console still uses its legacy `nav.side` until the nav reorganisation (#1296).
 - **Reflow:** below 760px the nav sits above the content, columns stack and setting controls drop under their names (#855).
 
 ## Iconography

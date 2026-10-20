@@ -279,8 +279,11 @@ describe("renderAdminPage", () => {
     expect(html).not.toContain(
       "border:1px solid var(--border);border-radius:6px;padding:.4rem .55rem",
     );
-    // Finish button: white on #ef4444 was 3.76:1.
-    expect(html).toContain(".banner button{background:var(--danger);");
+    // Finish button: white on #ef4444 was 3.76:1. It is the kb-btn--danger of the
+    // shared top bar now, whose --danger pair a11y-contrast.test.ts gates.
+    expect(html).toContain(
+      '<button type="submit" class="kb-btn kb-btn--danger kb-btn--sm">Finish</button>',
+    );
     expect(html).not.toContain("#ef4444");
     // Small muted text at 12px: a darker grey and --control were < 4.5:1.
     expect(html).not.toContain("#6b7280");
@@ -412,7 +415,8 @@ describe("renderAdminPage grouped sidebar (#613)", () => {
       const start = headingPos(item.group);
       const nextGroup = NAV_GROUP_ORDER[groupIdx + 1];
       const end = nextGroup === undefined ? html.length : headingPos(nextGroup);
-      const itemPos = html.indexOf(`href="${item.href}"`);
+      // From the group's heading on: the top bar's brand link shares `/admin/`.
+      const itemPos = html.indexOf(`href="${item.href}"`, start);
       expect(itemPos).toBeGreaterThan(start);
       expect(itemPos).toBeLessThan(end);
     }

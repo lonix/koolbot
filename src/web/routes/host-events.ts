@@ -1288,7 +1288,7 @@ function withFullResult(
       ...result,
       page: renderUserPage({
         title: `Settings: ${event.title}`,
-        active: "/me/",
+        active: "/me/events",
         body: renderResultBody({
           ok: result.ok,
           message: result.message,
@@ -1389,7 +1389,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         ...result,
         page: renderUserPage({
           title: `Confirm changes: ${event.title}`,
-          active: "/me/",
+          active: "/me/events",
           body: renderConfirmBody({
             csrfToken,
             actionPath: `${hostPanelPath(eventId)}/settings-confirm`,
@@ -1644,7 +1644,7 @@ export function createHostEventsRouter(client: Client): Router {
       res.type("text/html").send(
         renderUserPage({
           title: `Host panel: ${event.title}`,
-          active: "/me/",
+          active: "/me/events",
           body: renderHostPanelBody({
             event: toPanelEvent(client, event),
             controls,

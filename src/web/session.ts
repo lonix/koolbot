@@ -24,6 +24,11 @@ import {
 import { env } from "../config/env.js";
 import { isForeignGuild } from "../utils/guild-scope.js";
 import { renderErrorPage } from "./views.js";
+import {
+  runWithViewer,
+  viewerFromSession,
+  type ShellScopeReasons,
+} from "./app-shell.js";
 
 export const SESSION_COOKIE = "koolbot_session";
 /**
@@ -57,6 +62,19 @@ export interface WebSessionContext {
    * admin surface is gated by `role === "admin"` alone.
    */
   scopes: WebScope[];
+  /**
+   * Who is signed in, for the top bar (#1317). The server nickname or display
+   * name from the member the session check already fetched (read from the
+   * client cache, never a new Discord call); `undefined` when it is not
+   * cached. Untrusted text: escape it.
+   */
+  displayName?: string;
+  /**
+   * The Discord roles behind the `host` and `moderator` scopes, for the "why
+   * you see this" line (#1317). Only set for a `user` session that holds one of
+   * them; `undefined` falls back to the capability's own name.
+   */
+  scopeReasons?: WebScopeReasons;
   lastActivityAt: number;
   /**
    * Server-side hard cap for the session, mirrored from
@@ -65,6 +83,9 @@ export interface WebSessionContext {
    */
   expiresAt: Date;
 }
+
+/** Names of the Discord roles that grant the host and moderator scopes (#1317). */
+export type WebScopeReasons = ShellScopeReasons;
 
 export type AuthenticatedRequest = Request & { webSession?: WebSessionContext };
 
@@ -306,16 +327,24 @@ export function createSessionMiddleware(
         ? ["member", "host", "moderator"]
         : await resolveUserScopes(client, payload.uid, payload.gid);
 
+    const scopeReasons =
+      role === "user" && scopes.length > 1
+        ? await resolveScopeReasons(client, payload.uid, payload.gid)
+        : undefined;
+
     req.webSession = {
       sessionId: payload.sid,
       discordUserId: payload.uid,
       guildId: payload.gid,
       role,
       scopes,
+      displayName: cachedDisplayName(client, payload.uid, payload.gid),
+      scopeReasons,
       lastActivityAt: now,
       expiresAt: dbSession.expiresAt,
     };
-    next();
+    // Hand the layouts who is looking (#1317) for the rest of this request.
+    runWithViewer(viewerFromSession(req.webSession), next);
   };
 }
 
@@ -337,6 +366,48 @@ async function resolveUserScopes(
   } catch (err) {
     logger.warn("Failed to resolve web scopes; using member only", err);
     return ["member"];
+  }
+}
+
+/**
+ * The role names behind a `user` session's extra scopes (#1317). Cosmetic, so a
+ * failure (including a permissions service without the method) is no reasons.
+ */
+async function resolveScopeReasons(
+  client: Client,
+  userId: string,
+  guildId: string,
+): Promise<WebScopeReasons | undefined> {
+  try {
+    return await PermissionsService.getInstance(client).resolveWebScopeReasons(
+      userId,
+      guildId,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Display name for the top bar, from what discord.js already holds: the member
+ * the session check just fetched, else the cached user. No Discord call.
+ */
+function cachedDisplayName(
+  client: Client,
+  userId: string,
+  guildId: string,
+): string | undefined {
+  try {
+    const member = client.guilds?.cache
+      ?.get(guildId)
+      ?.members?.cache?.get(userId);
+    const name =
+      member?.displayName ??
+      client.users?.cache?.get(userId)?.displayName ??
+      undefined;
+    return typeof name === "string" && name.trim() !== "" ? name : undefined;
+  } catch {
+    return undefined;
   }
 }
 

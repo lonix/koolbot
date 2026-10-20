@@ -59,6 +59,7 @@ src/
     ├── admin-layout.ts   # Shared admin layout (re-exports the html.ts escapers)
     ├── admin-views.ts    # Page renderers for the admin pages
     ├── user-routes.ts    # The /me self-service routes (prefs, rewind, birthday, …)
+    ├── app-shell.ts      # Top bar, scope badges, sidebar nav registry, "why you see this" (both layouts)
     ├── user-layout.ts    # /me nav, page shell and per-page body renderers
     └── views.ts          # Sign-in / sign-out / invalid-link views
 ```
@@ -173,6 +174,16 @@ across two modules, not an appendix to the admin panel. Routes live in
 `user-routes.ts`; `user-layout.ts` holds `USER_NAV_ITEMS`, the `renderUserPage`
 shell and one `renderUser*Body` function per page. `createUserWebRouter` in
 `src/web/index.ts` composes them.
+
+**The app shell and sidebar (#1317).** `app-shell.ts` renders the top bar, the scope badges, the sidebar and the
+"why you see this" line for both layouts, from `kb-` classes. The sidebar's pages are the `SHELL_NAV` registry there:
+adding a page is one entry `{ scope, label, href, icon, available, featureKey? }`. `available: false` keeps an item out
+of the sidebar until its page exists (never a link to a 404); a `featureKey` item also waits for its feature to be on. A
+scope's section appears once it has a visible item, and the sidebar once two sections do. Pass the page's own path as
+`active` to `renderUserPage` (`/me/events...` is the Hosting area, `/me/moderation...` the Moderation area, as in the
+scope guards): it picks the current item and decides whether the why line shows. Layouts do not take a request, so the
+session middleware puts the request's `ShellViewer` (display name, scopes, role names) in an `AsyncLocalStorage`
+(`runWithViewer`) and the layouts read it; tests pass `viewer` (and `navRegistry`) to the renderer directly.
 
 It shares the admin surface's session cookie (path `/`, set by magic-link
 redemption at `/admin/s/:token`) and its CSRF middleware, but differs in two

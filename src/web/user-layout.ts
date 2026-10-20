@@ -1,18 +1,29 @@
 /**
  * Shared layout for the user self-service surface added in #481.
  *
- * Deliberately slim: no admin nav, no settings/wizard surfaces — just a
- * top bar with the session-expiry banner, the "Finish" button, an
- * optional "Back to admin panel" link for admin-role sessions, and a
- * narrow main column. As `/me` grows (#482 notification prefs, #484
- * Rewind), new pages bolt onto `USER_NAV_ITEMS` below without touching
- * the admin layout.
+ * No admin nav, no settings/wizard surfaces: the shared top bar (who you are,
+ * your scopes, the session timer, Sign out, and an "Admin console" link for
+ * admins), then either one centred column (Member only) or a sidebar with one
+ * section per scope plus the column (#1317; see `app-shell.ts`). A new My
+ * preferences tab bolts onto `USER_NAV_ITEMS` below, a new sidebar page onto
+ * `SHELL_NAV` in `app-shell.ts`, without touching the admin layout.
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import {
+  SESSION_LOW_MS,
+  renderScopeWhy,
+  renderSideNav,
+  renderTopBar,
+  resolveViewer,
+  scopeOfPath,
+  sectionsFor,
+  type ShellNavItem,
+  type ShellViewer,
+} from "./app-shell.js";
 import {
   DAY_NAMES,
   formatHourLabel,
@@ -105,7 +116,7 @@ export interface UserPageOptions {
   remainingMs: number;
   /**
    * When the redeemed session is admin-role, the layout renders a small
-   * "Back to admin panel" link in the top bar so the admin can hop
+   * "Admin console" link in the top bar so the admin can hop
    * between surfaces without re-running `/config`. The header link on
    * the admin layout (added in the same issue) does the inverse.
    */
@@ -142,6 +153,14 @@ export interface UserPageOptions {
    * and `/me/privacy` + `/me/privacy/export` return 404 (#1066).
    */
   privacyEnabled?: boolean;
+  /**
+   * Who is looking (#1317). Normally omitted: the session middleware sets the
+   * request's viewer and `resolveViewer` reads it, with `isAdmin` as the last
+   * resort. Tests pass it to render a scope combination directly.
+   */
+  viewer?: ShellViewer;
+  /** Sidebar entries; defaults to the app's `SHELL_NAV`. Tests inject their own. */
+  navRegistry?: readonly ShellNavItem[];
 }
 
 const STYLE = [
@@ -152,17 +171,12 @@ const STYLE = [
   "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}",
   "a{color:var(--link);text-decoration:none}",
   "a:hover{text-decoration:underline}",
-  ".banner{background:var(--chrome);border-bottom:1px solid var(--border);padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:1rem;flex-wrap:wrap}",
-  ".banner .left{display:flex;gap:.75rem;align-items:center}",
-  ".banner .right{display:flex;gap:.75rem;align-items:center}",
-  ".banner .pill{background:var(--fill);color:var(--pill-text);padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
-  ".banner form{display:inline;margin:0}",
-  // --danger (not --embed-danger) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
-  `.banner button{background:var(--danger);color:var(--on-primary);border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
-  `.banner button:hover{background:var(--danger-hover)}`,
-  ".banner a.surface{color:var(--text-secondary);background:var(--fill);padding:.25rem .55rem;border-radius:4px;font-weight:600}",
-  ".banner a.surface:hover{background:var(--fill-hover);text-decoration:none;color:var(--on-primary)}",
-  ".shell{display:flex;min-height:calc(100vh - 41px);justify-content:center}",
+  // The top bar and sidebar are the shared kb-topbar / kb-sidenav (app-shell.ts, #1317), reflowing
+  // at 760px in kb.css; only the sign-out form needs a reset here.
+  ".kb-topbar form{margin:0}",
+  // `.shell` is the member-only column: no sidebar, one centred column. With a sidebar the
+  // page uses `.kb-shell` instead.
+  ".shell{display:flex;min-height:calc(100vh - var(--topbar-height));justify-content:center}",
   // `min-width:0` + `overflow-x:auto` keep a wide table scrolling inside the
   // content column rather than the whole page (WCAG 1.4.10 reflow, #855).
   "main{flex:1;padding:2rem 2rem;max-width:64rem;min-width:0;overflow-x:auto}",
@@ -287,7 +301,6 @@ const STYLE = [
   // element, with the nav / button hover surfaces mirrored for focus.
   `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
   ".page-nav a:focus-visible{background:var(--chrome);text-decoration:none;color:var(--on-primary)}",
-  ".banner a.surface:focus-visible{background:var(--fill-hover);color:var(--on-primary);text-decoration:none}",
   `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
   // Reflow (WCAG 1.4.10, #855): tighter gutters on narrow viewports.
@@ -310,6 +323,8 @@ const SCRIPT =
   "function expire(){if(fired)return;fired=true;window.location.href='/me/'}" +
   "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
   "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
+  // Under five minutes the wrapper (`.kb-session`) turns warn.
+  `if(el.parentNode&&el.parentNode.classList)el.parentNode.classList.toggle('is-low',r<${SESSION_LOW_MS});` +
   "if(r<=0)expire()}" +
   "function applyRemaining(ms){deadline=Date.now()+toMs(ms);tick()}" +
   "function onActivity(){if(inactivityMs<=0||fired)return;" +
@@ -339,11 +354,25 @@ const FLASH_FOCUS_SCRIPT =
   "if(!n)return;try{n.focus()}catch(e){}})();";
 
 export function renderUserPage(opts: UserPageOptions): string {
-  const remainingMs = Math.max(0, Math.floor(opts.remainingMs));
-  const inactivityMs = getInactivityWindowMs();
-  const adminLink = opts.isAdmin
-    ? '<a class="surface" href="/admin/">Back to admin panel</a>'
-    : "";
+  const viewer = resolveViewer(opts.viewer, opts.isAdmin);
+  const sections = sectionsFor(viewer, opts.navRegistry);
+  const sideNav = renderSideNav(sections, opts.active);
+  // With a sidebar the page navigation is the sidebar's; the My preferences
+  // tabs belong to the You section only. Without one they stay in the column.
+  const onMemberPage = scopeOfPath(opts.active) === "member";
+  const tabs =
+    !sideNav || onMemberPage
+      ? renderPageNav(opts.active, {
+          rewindEnabled: opts.rewindEnabled,
+          presetsEnabled: opts.presetsEnabled,
+          birthdayEnabled: opts.birthdayEnabled,
+          privacyEnabled: opts.privacyEnabled,
+        })
+      : "";
+  const inner = `${renderScopeWhy(viewer, opts.active)}${tabs}${renderFlash(opts.flash)}${opts.body}`;
+  const content = sideNav
+    ? `<div class="kb-shell">${sideNav}<main id="main" class="kb-main" tabindex="-1">${inner}</main></div>`
+    : `<div class="shell"><main id="main" tabindex="-1">${inner}</main></div>`;
   return [
     "<!doctype html>",
     '<html lang="en"><head>',
@@ -358,26 +387,17 @@ export function renderUserPage(opts: UserPageOptions): string {
     // First focusable element on every page (#855); `main` carries
     // `tabindex="-1"` so the fragment jump also moves keyboard focus.
     '<a class="skip-link" href="#main">Skip to content</a>',
-    // A `<header>` banner landmark rather than a bare div, so the session
-    // countdown / Finish button aren't stranded outside every landmark
-    // (axe `region`, #856).
-    '<header class="banner">',
-    '<div class="left"><strong>Koolbot · My preferences</strong></div>',
-    '<div class="right">',
-    adminLink,
-    "Session expires in ",
-    `<span id="session-countdown" data-remaining-ms="${remainingMs}" data-inactivity-ms="${inactivityMs}" class="mono">--:--</span> · `,
-    '<form method="POST" action="/me/finish">',
-    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<button type="submit">Finish</button>',
-    "</form></div></header>",
-    '<div class="shell">',
-    `<main id="main" tabindex="-1">${renderPageNav(opts.active, {
-      rewindEnabled: opts.rewindEnabled,
-      presetsEnabled: opts.presetsEnabled,
-      birthdayEnabled: opts.birthdayEnabled,
-      privacyEnabled: opts.privacyEnabled,
-    })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
+    // A `<header>` banner landmark (the top bar), so the session countdown and
+    // Sign out are not stranded outside every landmark (axe `region`, #856).
+    renderTopBar({
+      viewer,
+      surface: "me",
+      home: "/me/",
+      csrfToken: opts.csrfToken,
+      remainingMs: opts.remainingMs,
+      inactivityMs: getInactivityWindowMs(),
+    }),
+    content,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
     `${scriptTag(FLASH_FOCUS_SCRIPT)}`,
@@ -502,7 +522,7 @@ export function renderUserIndexBody(opts: {
   } | null;
 }): string {
   const greeting = opts.isAdmin
-    ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Back to admin panel</em> link above to manage the server.</p>`
+    ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Admin console</em> link above to manage the server.</p>`
     : `<p class="subtitle">These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.</p>`;
   // Each manageable surface is always listed (#709); a disabled feature is
   // tagged "off" rather than dropped, so the overview reads the same whether
