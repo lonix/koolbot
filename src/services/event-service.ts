@@ -141,6 +141,21 @@ export interface CreateEventInput {
   createdBy: string;
 }
 
+/** What the announcement shows of an event, as one comparable string. */
+export function announcementContentKey(event: {
+  title: string;
+  description?: string | null;
+  startTime: Date;
+  durationMinutes: number;
+}): string {
+  return JSON.stringify([
+    event.title,
+    event.description ?? "",
+    event.startTime.getTime(),
+    event.durationMinutes,
+  ]);
+}
+
 /** The outcome of {@link EventService.editEvent} (#1298). */
 export type EditEventResult =
   | { ok: true; event: IEvent; diff: EventEditDiff }
@@ -1469,7 +1484,11 @@ export class EventService extends ScheduledService {
       if (event.state !== "scheduled" && event.state !== "active") {
         this.linkVerified.delete(id);
       } else {
-        const pair = `${event.announcementMessageId ?? ""}|${event.nativeEventId ?? ""}`;
+        // The content this copy renders is part of the key (#1298): a scan
+        // holding the row from before an edit can finish its refresh after the
+        // edit's own, overwrite the post with the old text, and must not certify
+        // it. The next scan reads the edited row, sees another key and refreshes.
+        const pair = `${event.announcementMessageId ?? ""}|${event.nativeEventId ?? ""}|${announcementContentKey(event)}`;
         if (this.linkVerified.get(id) !== pair) {
           const refreshed = await this.updateAnnouncement(event);
           if (refreshed && event.announcementMessageId) {
@@ -2003,6 +2022,10 @@ export class EventService extends ScheduledService {
             ? { $in: ["", null] }
             : row.description,
         startTime: row.startTime,
+        // Matched like the version token reads it, so two edits that read the
+        // same version cannot both win by changing only the timezone.
+        timezone:
+          (row.timezone ?? "") === "" ? { $in: ["", null] } : row.timezone,
         durationMinutes: row.durationMinutes,
         nativeAdopted: { $ne: true },
         seriesCancelled: { $ne: true },
@@ -2907,6 +2930,13 @@ export class EventService extends ScheduledService {
                 startTime: event.startTime,
               }
             : {}),
+          // The channel was named from this title. An edit that renamed the
+          // event while it was being created wins: the claim fails and the
+          // wrongly named channel is removed (a started event's title is
+          // locked, so it could never be fixed afterwards). Not for an adopted
+          // event, whose title is copied onto the in-memory row by the scan
+          // before it is saved.
+          ...(event.nativeAdopted === true ? {} : { title: event.title }),
         },
         { $set: { channelId: channel.id } },
       );

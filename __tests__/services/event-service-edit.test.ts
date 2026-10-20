@@ -211,7 +211,20 @@ describe("EventService.editEvent", () => {
       startTime: stored.startTime,
       durationMinutes: 90,
       nativeAdopted: { $ne: true },
+      timezone: "UTC",
     });
+  });
+
+  it("matches an empty stored timezone the way the version token reads it", async () => {
+    stored = row({ timezone: undefined });
+    await service.editEvent(
+      input({ title: "New", timezone: "" }, { now: NOW }) as never,
+    );
+    const filter = EventStatics.findOneAndUpdate.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(filter.timezone).toEqual({ $in: ["", null] });
   });
 
   it("re-arms the reminder only when the start moves", async () => {
@@ -387,6 +400,34 @@ describe("EventService.editEvent", () => {
       expect(service.deleteEventChannel).toHaveBeenCalled();
     });
 
+    it("is conditioned on the title the channel was named from, so a rename during creation removes the channel", async () => {
+      service.createEventChannel = jest.fn(async () => ({ id: "c-new" }));
+      service.deleteEventChannel = jest.fn(async () => undefined);
+      EventStatics.findOneAndUpdate = jest.fn(async () => null);
+      await service.claimEventChannel(row(), { id: "guild-1" }, {});
+      const filter = EventStatics.findOneAndUpdate.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(filter.title).toBe("Quiz night");
+      expect(service.deleteEventChannel).toHaveBeenCalled();
+    });
+
+    it("leaves the title out for an adopted event, whose scan copy carries a pulled title", async () => {
+      service.createEventChannel = jest.fn(async () => ({ id: "c-new" }));
+      EventStatics.findOneAndUpdate = jest.fn(async () => ({}));
+      await service.claimEventChannel(
+        row({ nativeAdopted: true }),
+        { id: "guild-1" },
+        {},
+      );
+      const filter = EventStatics.findOneAndUpdate.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(filter).not.toHaveProperty("title");
+    });
+
     it("does not condition Start now on the start time", async () => {
       service.createEventChannel = jest.fn(async () => ({ id: "c-new" }));
       EventStatics.findOneAndUpdate = jest.fn(async () => ({}));
@@ -397,5 +438,55 @@ describe("EventService.editEvent", () => {
       >;
       expect(filter).not.toHaveProperty("startTime");
     });
+  });
+});
+
+describe("the announcement refresh after a scan that held an older row (#1298)", () => {
+  type Scan = {
+    nativeSync: { syncEvent: jest.Mock };
+    updateAnnouncement: jest.Mock;
+    logLifecycle: jest.Mock;
+    processEvent: (...a: unknown[]) => Promise<void>;
+  };
+
+  function scanService(): Scan {
+    EventService.reset();
+    const service = EventService.getInstance({
+      guilds: { fetch: jest.fn(async () => ({ id: "guild-1" })) },
+    } as never) as unknown as Scan;
+    service.nativeSync = { syncEvent: jest.fn(async () => undefined) };
+    service.updateAnnouncement = jest.fn(async () => true);
+    service.logLifecycle = jest.fn(async () => undefined);
+    return service;
+  }
+
+  const windows = { reminderMs: 0, leadMs: 0, graceMs: 0, native: new Map() };
+  const copy = (over: Record<string, unknown> = {}) =>
+    row({
+      announcementMessageId: "m1",
+      announcementChannelId: "c1",
+      nativeEventId: "n1",
+      startTime: new Date("2030-06-01T20:00:00Z"),
+      save: jest.fn(async () => undefined),
+      ...over,
+    });
+  const now = new Date("2030-06-01T10:00:00Z");
+
+  it("refreshes again from a fresh row after an older copy certified its own content", async () => {
+    const service = scanService();
+    // The scan that read the row before the edit finishes its refresh late.
+    await service.processEvent(copy(), { id: "guild-1" }, now, windows);
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+    // Same copy again: already verified, nothing to do.
+    await service.processEvent(copy(), { id: "guild-1" }, now, windows);
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+    // The next scan reads the edited row: another title, so it must refresh.
+    await service.processEvent(
+      copy({ title: "Edited" }),
+      { id: "guild-1" },
+      now,
+      windows,
+    );
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(2);
   });
 });

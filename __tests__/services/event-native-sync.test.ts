@@ -317,7 +317,7 @@ describe("NativeEventSync.syncEvent", () => {
     const active = (o: Record<string, unknown> = {}) =>
       makeNative({ status: GuildScheduledEventStatus.Active, ...o });
 
-    it("pushes name, description and location but never start, end or type", async () => {
+    it("pushes name, description and location in one patch without start, end or type, and the end on its own", async () => {
       const { guild, scheduledEvents } = makeGuild({
         natives: [
           active({
@@ -330,10 +330,19 @@ describe("NativeEventSync.syncEvent", () => {
         ],
       });
       await makeSync().syncEvent(makeEvent({ nativeEventId: "n1" }), guild);
-      expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+      expect(scheduledEvents.edit).toHaveBeenCalledTimes(2);
       const patch = (
         scheduledEvents.edit.mock.calls[0] as unknown[]
       )[1] as Record<string, unknown>;
+      // The host can change a running event's length (#1298): the end is sent
+      // alone, never with the locked start.
+      const endPatch = (
+        scheduledEvents.edit.mock.calls[1] as unknown[]
+      )[1] as Record<string, unknown>;
+      expect(Object.keys(endPatch).sort()).toEqual([
+        "reason",
+        "scheduledEndTime",
+      ]);
       expect(patch).toMatchObject({
         name: "Game night",
         description: "Bring snacks",
@@ -342,6 +351,37 @@ describe("NativeEventSync.syncEvent", () => {
       expect(patch).not.toHaveProperty("scheduledStartTime");
       expect(patch).not.toHaveProperty("scheduledEndTime");
       expect(patch).not.toHaveProperty("entityType");
+    });
+
+    it("sends no end for a running event whose new end is already past", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [active({ scheduledEndTimestamp: FUTURE.getTime() + 1 })],
+      });
+      await makeSync().syncEvent(
+        makeEvent({
+          nativeEventId: "n1",
+          startTime: new Date(Date.now() - 3 * 60 * 60 * 1000),
+          durationMinutes: 60,
+        }),
+        guild,
+      );
+      expect(scheduledEvents.edit).not.toHaveBeenCalled();
+    });
+
+    it("logs a rejected end edit once and does not throw", async () => {
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [active({ scheduledEndTimestamp: 2 })],
+      });
+      scheduledEvents.edit.mockRejectedValue(new Error("rejected"));
+      const sync = makeSync();
+      const ev = makeEvent({ nativeEventId: "n1" });
+      await expect(sync.syncEvent(ev, guild)).resolves.toBeUndefined();
+      await sync.syncEvent(ev, guild);
+      expect(
+        logger.warn.mock.calls.filter((c) =>
+          String(c[0]).includes("move the end"),
+        ),
+      ).toHaveLength(1);
     });
 
     it("logs a rejected edit and does not throw", async () => {

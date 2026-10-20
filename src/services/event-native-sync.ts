@@ -675,6 +675,35 @@ export class NativeEventSync {
       }
     }
 
+    // A running event's length can be edited by the host (#1298). Discord ends
+    // an external event at its end time, so a stale end would close the card
+    // early or late. The start is locked, but the end alone is sent, as its own
+    // patch, so a rejection never blocks the name/description patch above.
+    // Whether Discord accepts it for an Active event is unverified: a failure
+    // is logged once per event and the next scan tries again.
+    if (
+      active &&
+      !converting &&
+      diff.scheduledEndTime &&
+      want.end.getTime() > Date.now()
+    ) {
+      try {
+        await this.callApi(
+          () =>
+            guild.scheduledEvents.edit(native.id, {
+              scheduledEndTime: diff.scheduledEndTime,
+              reason: "KoolBot event mirror",
+            } as unknown as EditOptions),
+          "edit guild scheduled event end",
+        );
+      } catch (error) {
+        this.warnOnce(
+          `active-end:${String(event._id)}`,
+          `Native events: could not move the end of running event ${sanitizeForLog(native.id)}: ${sanitizeForLog(String(error))}`,
+        );
+      }
+    }
+
     if (converting && !startPast) {
       // The complete conversion goes in one patch: type, no channel, location
       // and end time. Failure is logged and retried next scan, nothing more.

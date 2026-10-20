@@ -491,6 +491,21 @@ describe("a moved start", () => {
   });
 });
 
+describe("the form's markup", () => {
+  it("is built from the shared kb- components, with labels tied to their controls", async () => {
+    const r = await call(EDIT);
+    expect(r.text).toContain('class="kb-pagehead"');
+    expect(r.text).toContain('class="kb-panel"');
+    expect(r.text).toContain('class="kb-btn kb-btn--primary"');
+    for (const name of ["title", "date", "time", "timezone", "duration"]) {
+      expect(r.text).toContain(`for="edit-${name}"`);
+      expect(r.text).toContain(`id="edit-${name}"`);
+    }
+    // `form.stack` is an admin-layout class that the /me layout does not load.
+    expect(r.text).not.toContain('class="stack"');
+  });
+});
+
 describe("an event that has started", () => {
   it("offers only description and duration, and shows title and start as text", async () => {
     events[EVENT_ID] = makeEvent({ state: "active", channelId: "c-main" });
