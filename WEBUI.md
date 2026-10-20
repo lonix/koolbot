@@ -1500,8 +1500,8 @@ is gated by `events.enabled` (the #610 disabled-feature pattern).
 The **Groups** section of the schedule form (#1188) is optional and off unless
 "Use groups for this event" is ticked; a plain event is created exactly as before.
 It sets up a list of groups for the event, such as quiz teams, clan-match squads,
-breakout rooms or raid parties: a **preset** (Red vs Blue, EVE factions or Wardogs,
-or Custom), what a group and a leader are called (Team, Squad, Room, Party;
+breakout rooms or raid parties: a **preset** (2, 3 or 4 teams, each listed with its team
+names and markers, or Custom), what a group and a leader are called (Team, Squad, Room, Party;
 Leader, Captain), a **channel creation time** in minutes before the start (empty
 uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: members
 belong to it; **open**: anyone can join, such as spectators), an optional size (1 to 99, the voice user limit), an

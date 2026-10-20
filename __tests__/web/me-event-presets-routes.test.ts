@@ -171,7 +171,7 @@ describe("saving", () => {
       { ...good, group_0_size: "100" },
       { ...good, group_1_name: "assault" },
       { ...good, preset_name: "" },
-      { ...good, preset_name: "Wardogs" },
+      { ...good, preset_name: "3 teams" },
       { ...good, preset_name: "x".repeat(51) },
     ]) {
       expect((await save(bad)).type).toBe("err");

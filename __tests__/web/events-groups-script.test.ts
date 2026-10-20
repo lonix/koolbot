@@ -143,7 +143,7 @@ describe("oversized presets (#1188)", () => {
     }));
 
   it("the server refuses an oversized preset instead of saving a truncated copy", () => {
-    // Rows cut down to the cap, still under the Wardogs id.
+    // Rows cut down to the cap, still under the wardogs id.
     const truncated = validateGroupSetup(
       {
         enabled: true,
@@ -157,7 +157,7 @@ describe("oversized presets (#1188)", () => {
     );
     expect(truncated.ok).toBe(false);
     expect(!truncated.ok && truncated.errors[0]).toContain(
-      'Preset "Wardogs" needs 3 groups but the limit is 2',
+      'Preset "3 teams" needs 3 groups but the limit is 2',
     );
     // No rows: also refused, not expanded.
     const empty = validateGroupSetup(
