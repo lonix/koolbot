@@ -397,6 +397,7 @@ describe("Achievements Command", () => {
       expect(editReply).toHaveBeenCalledWith({
         content:
           "<@user-1> hasn't earned any badges yet. Keep participating in voice channels!",
+        allowedMentions: { parse: [] },
       });
     });
 

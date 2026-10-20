@@ -239,7 +239,8 @@ describe("VoiceStats Command", () => {
       }) as unknown as MockInteraction;
 
     function recentLines(editReply: jest.Mock): string[] {
-      const content = editReply.mock.calls[0][0] as string;
+      const content = (editReply.mock.calls[0][0] as { content: string })
+        .content;
       const lines = content.split("\n");
       const headerIdx = lines.indexOf("**Recent Sessions:**");
       expect(headerIdx).toBeGreaterThan(-1);
@@ -301,7 +302,9 @@ describe("VoiceStats Command", () => {
       } as unknown as MockInteraction;
       await execute(interaction);
 
-      const content = interaction.editReply.mock.calls[0][0] as string;
+      const content = (
+        interaction.editReply.mock.calls[0][0] as { content: string }
+      ).content;
       expect(content).not.toContain("Staff Room");
       expect(content).toContain("• a voice channel: 1h 0m");
       // Current channel name, not the one stored with the session.
@@ -338,7 +341,8 @@ describe("VoiceStats Command", () => {
           guild,
         } as unknown as MockInteraction;
         await execute(interaction);
-        return interaction.editReply.mock.calls[0][0] as string;
+        return (interaction.editReply.mock.calls[0][0] as { content: string })
+          .content;
       };
 
       it("shows the stored name of a deleted room marked public", async () => {
@@ -482,7 +486,9 @@ describe("VoiceStats Command", () => {
       await execute(interaction);
 
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
-      const content = interaction.editReply.mock.calls[0][0] as string;
+      const content = (
+        interaction.editReply.mock.calls[0][0] as { content: string }
+      ).content;
       expect(typeof content).toBe("string");
       expect(content.length).toBeLessThanOrEqual(2000);
       expect(
@@ -501,7 +507,9 @@ describe("VoiceStats Command", () => {
 
       await execute(interaction);
 
-      const content = interaction.editReply.mock.calls[0][0] as string;
+      const content = (
+        interaction.editReply.mock.calls[0][0] as { content: string }
+      ).content;
       expect(content.length).toBeLessThanOrEqual(2000);
       expect(content).not.toContain("…and");
       expect(content.split("\n")).toHaveLength(11);
@@ -535,7 +543,9 @@ describe("VoiceStats Command", () => {
       expect(interaction.deferReply).toHaveBeenCalledWith();
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "Top Voice Channel Users (week):\n🥇 <@user-1>: 1h 0m",
+        expect.objectContaining({
+          content: "Top Voice Channel Users (week):\n🥇 <@user-1>: 1h 0m",
+        }),
       );
     });
 
@@ -555,7 +565,9 @@ describe("VoiceStats Command", () => {
       ]);
       const top = makeTopInteraction(null, "week");
       await execute(top);
-      expectNeutral(top.editReply.mock.calls[0][0] as string);
+      expectNeutral(
+        (top.editReply.mock.calls[0][0] as { content: string }).content,
+      );
 
       mockGetUserStats.mockResolvedValue({
         userId: "user-1",
@@ -594,7 +606,8 @@ describe("VoiceStats Command", () => {
         },
       } as unknown as MockInteraction;
       await execute(user);
-      const text = user.editReply.mock.calls[0][0] as string;
+      const text = (user.editReply.mock.calls[0][0] as { content: string })
+        .content;
       expectNeutral(text);
       // The header is a mention; the recent-session channel name is escaped.
       expect(text.match(/\\<@555\\>/g)).toHaveLength(1);

@@ -117,7 +117,7 @@ describe("Seen Command", () => {
       expect(interaction.deferReply).toHaveBeenCalledWith();
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
-      expect(interaction.editReply.mock.calls[0][0]).toMatch(
+      expect(interaction.editReply.mock.calls[0][0].content).toMatch(
         /^<@user-2> was last seen in a voice channel <t:\d+:R>\.$/,
       );
     });
@@ -129,7 +129,9 @@ describe("Seen Command", () => {
 
       expect(interaction.deferReply).toHaveBeenCalledTimes(1);
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "<@user-2> has never been seen in a voice channel.",
+        expect.objectContaining({
+          content: "<@user-2> has never been seen in a voice channel.",
+        }),
       );
     });
 
@@ -153,12 +155,16 @@ describe("Seen Command", () => {
         guildWith(true, hostile),
       );
       await execute(present);
-      expectNeutral(present.editReply.mock.calls[0][0] as string);
+      expectNeutral(
+        (present.editReply.mock.calls[0][0] as { content: string }).content,
+      );
 
       mockGetActiveSession.mockReturnValue(null);
       const absent = makeInteraction({ id: "user-2", username: hostile });
       await execute(absent);
-      expectNeutral(absent.editReply.mock.calls[0][0] as string);
+      expectNeutral(
+        (absent.editReply.mock.calls[0][0] as { content: string }).content,
+      );
     });
 
     it("edits the deferred reply when the user is currently in a channel", async () => {
@@ -173,7 +179,9 @@ describe("Seen Command", () => {
       expect(interaction.deferReply).toHaveBeenCalledTimes(1);
       expect(mockGetUserLastSeen).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "<@user-2> is currently in <#c1>.",
+        expect.objectContaining({
+          content: "<@user-2> is currently in <#c1>.",
+        }),
       );
     });
 
@@ -187,7 +195,9 @@ describe("Seen Command", () => {
 
       await execute(interaction);
 
-      const reply = interaction.editReply.mock.calls[0][0] as string;
+      const reply = (
+        interaction.editReply.mock.calls[0][0] as { content: string }
+      ).content;
       expect(reply).toBe("<@user-2> is currently in a voice channel.");
       expect(reply).not.toContain("Staff Secret");
     });
@@ -206,7 +216,9 @@ describe("Seen Command", () => {
 
       await execute(interaction);
 
-      const reply = interaction.editReply.mock.calls[0][0] as string;
+      const reply = (
+        interaction.editReply.mock.calls[0][0] as { content: string }
+      ).content;
       expect(reply).toBe("<@user-2> is currently in <#c1>.");
       expect(reply).not.toContain("Staff Secret");
     });
@@ -221,7 +233,9 @@ describe("Seen Command", () => {
       await execute(interaction);
 
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "<@user-2> is currently in a voice channel.",
+        expect.objectContaining({
+          content: "<@user-2> is currently in a voice channel.",
+        }),
       );
     });
 
