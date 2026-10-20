@@ -404,6 +404,7 @@ it to the host on all interfaces.
 ```yaml
 services:
   bot:
+    # newest release; `:nightly` follows main, `:X.Y.Z` pins a version
     image: ghcr.io/lonix/koolbot:latest
     container_name: koolbot
     restart: unless-stopped
@@ -483,6 +484,7 @@ exposed.
 ```yaml
 services:
   bot:
+    # newest release; `:nightly` follows main, `:X.Y.Z` pins a version
     image: ghcr.io/lonix/koolbot:latest
     container_name: koolbot
     restart: unless-stopped

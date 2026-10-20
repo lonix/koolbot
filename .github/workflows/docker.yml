@@ -1,15 +1,30 @@
 name: Docker Build and Push
 
+# Image tags (#1278):
+#   v*.*.* tag push      -> latest, X.Y.Z, X.Y, X (+ sha-<short>)
+#   nightly main build   -> nightly, main, sha-<short>   (never latest)
+#   weekly release build -> latest, X.Y.Z, X.Y, X of the NEWEST release,
+#                           rebuilt from its tag on a fresh base image
+#   PR preview           -> pr-<number>, pr-<number>-sha-<short>
+# A merge to main does not build; the nightly run and the release tag do.
 on:
   push:
-    branches: [main]
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-  # Weekly rebuild so a quiet main still picks up refreshed base images and
-  # the Trivy scan sees newly published advisories (#963).
+    inputs:
+      rebuild-release:
+        description: Rebuild the newest release (what the weekly run does) instead of main
+        type: boolean
+        default: false
+  # Nightly: builds main HEAD on a freshly pulled base image, which also keeps
+  # the Trivy scan current with new advisories (#963).
+  # Weekly (Mondays): rebuilds the newest release tag on a fresh base image so
+  # `latest` picks up base-image fixes between releases. The plan job below
+  # recognises this run by its exact cron string, so keep the two in sync.
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 3 * * *'
+    - cron: '47 3 * * 1'
   # Opt-in preview images for same-repo PRs carrying the `docker-preview`
   # label (#1094): adding the label or pushing to a labelled PR builds
   # ghcr.io/<repo>:pr-<number>; closing the PR deletes its preview tags.
@@ -19,7 +34,11 @@ on:
   pull_request:
     types: [labeled, synchronize, reopened, closed]
 
-# Cancel in-progress runs for the same workflow and ref (except on tags).
+# Only PR previews are ever cancelled in progress. A schedule, dispatch or tag
+# run that has pushed an image must always reach cosign signing, so those runs
+# queue instead (a newer pending run replaces an older pending one in the same
+# group). The two schedules get their own groups so a nightly never displaces
+# the pending weekly release rebuild, or the reverse.
 # pull_request events are keyed by PR number instead: on a merged PR's
 # `closed` event github.ref is the base branch, which would put cleanup in the
 # same group as the release build on main. A pull_request event that neither
@@ -29,7 +48,9 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) ||
+      github.event_name == 'schedule' && format('schedule-{0}', github.event.schedule) ||
+      github.ref
     }}${{
       github.event_name == 'pull_request' && !(
         github.event.pull_request.head.repo.full_name == github.repository && (
@@ -41,7 +62,7 @@ concurrency:
         )
       ) && format('-skip-{0}', github.run_id) || ''
     }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -51,9 +72,77 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Decides what this run builds and which tags it may publish. Everything it
+  # reads from the event goes through env vars, never into the script text.
+  # `latest` is only ever enabled here, for a stable vX.Y.Z tag push or for the
+  # rebuild of the newest release, so no main, nightly or dispatch build can
+  # move it.
+  plan:
+    name: Plan build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      # preview (pull_request), release (rebuild of the newest release) or
+      # standard (tag push, nightly, dispatch: build the triggering ref).
+      mode: ${{ steps.plan.outputs.mode }}
+      # Commit to check out; empty means the event's default ref.
+      ref: ${{ steps.plan.outputs.ref }}
+      # Release tag to feed metadata-action when rebuilding; empty otherwise.
+      tag: ${{ steps.plan.outputs.tag }}
+      latest: ${{ steps.plan.outputs.latest }}
+      nightly: ${{ steps.plan.outputs.nightly }}
+    steps:
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REBUILD_INPUT: ${{ inputs.rebuild-release }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          stable='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          mode=standard ref='' tag='' latest=false nightly=false
+
+          if [[ "${EVENT_NAME}" == pull_request ]]; then
+            mode=preview
+          elif [[ "${EVENT_NAME}" == push ]]; then
+            # The trigger only matches v*.*.*; a pre-release tag still builds
+            # but must not become latest.
+            if [[ "${REF_TYPE}" == tag && "${REF_NAME}" =~ ${stable} ]]; then
+              latest=true
+            fi
+          elif [[ ( "${EVENT_NAME}" == schedule && "${SCHEDULE}" == '47 3 * * 1' ) \
+               || ( "${EVENT_NAME}" == workflow_dispatch && "${REBUILD_INPUT}" == true ) ]]; then
+            tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+            [[ "${tag}" =~ ${stable} ]] || { echo "unexpected release tag: ${tag}" >&2; exit 1; }
+            ref="$(gh api "repos/${REPO}/commits/${tag}" --jq .sha)"
+            [[ "${ref}" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected commit: ${ref}" >&2; exit 1; }
+            mode=release latest=true
+          elif [[ -n "${DEFAULT_BRANCH}" && "${REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            nightly=true
+          fi
+
+          {
+            echo "mode=${mode}"
+            echo "ref=${ref}"
+            echo "tag=${tag}"
+            echo "latest=${latest}"
+            echo "nightly=${nightly}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Plan: mode=${mode} tag=${tag:-n/a} commit=${ref:-n/a} latest=${latest} nightly=${nightly}"
+
   hadolint:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
+    needs: plan
     # On pull_request, only build for a same-repo PR that carries the
     # `docker-preview` label: when it is added, and on later pushes or a
     # reopen while it is still there. build-and-push `needs` this job, so it
@@ -76,6 +165,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The release commit for the weekly rebuild, so the gate lints and
+          # scans what is about to be pushed; empty (default ref) otherwise.
+          ref: ${{ needs.plan.outputs.ref }}
           persist-credentials: false
 
       - name: Run hadolint
@@ -105,7 +197,7 @@ jobs:
   scan-image:
     name: Build and scan image
     runs-on: ubuntu-latest
-    needs: hadolint
+    needs: [plan, hadolint]
     timeout-minutes: 20
     if: github.event_name != 'pull_request'
     outputs:
@@ -118,6 +210,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.plan.outputs.ref }}
           persist-credentials: false
 
       - name: Set up Docker Buildx
@@ -181,7 +274,7 @@ jobs:
   build-and-push:
     name: Build and push
     runs-on: ubuntu-latest
-    needs: [hadolint, scan-image]
+    needs: [plan, hadolint, scan-image]
     timeout-minutes: 30
     # scan-image is skipped on pull_request (previews are not scanned), and a
     # skipped dependency would skip this job too, so the gate is spelled out:
@@ -204,9 +297,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Previews build the PR head itself rather than the merge ref, so
-          # the image matches the commit its tag names. Empty (the default
-          # ref) for every other event.
-          ref: ${{ github.event.pull_request.head.sha }}
+          # the image matches the commit its tag names. The weekly release
+          # rebuild builds the release commit instead of main. Empty (the
+          # default ref) for every other event.
+          ref: ${{ github.event.pull_request.head.sha || needs.plan.outputs.ref }}
           persist-credentials: false
 
       # Previews are linux/amd64 only; QEMU is just for the arm64 release leg.
@@ -239,13 +333,25 @@ jobs:
           DOCKER_METADATA_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' }}
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` is switched on only by the plan job (stable tag push or the
+          # newest-release rebuild); flavor keeps metadata-action from adding
+          # it on its own. The release rebuild builds an old commit, so it must
+          # not emit the sha or branch tags that would name the wrong commit,
+          # and takes its version from the resolved release tag instead of the
+          # (branch) ref. The v0.0.0 is a placeholder the disabled lines never use.
+          flavor: |
+            latest=false
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=short,enable=${{ github.event_name != 'pull_request' }}
-            type=ref,event=branch
+            type=raw,value=latest,enable=${{ needs.plan.outputs.latest == 'true' }}
+            type=raw,value=nightly,enable=${{ needs.plan.outputs.nightly == 'true' }}
+            type=semver,pattern={{version}},enable=${{ needs.plan.outputs.mode != 'release' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.plan.outputs.mode != 'release' }}
+            type=semver,pattern={{major}},enable=${{ needs.plan.outputs.mode != 'release' }}
+            type=semver,pattern={{version}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
+            type=semver,pattern={{major}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
+            type=sha,format=short,enable=${{ github.event_name != 'pull_request' && needs.plan.outputs.mode != 'release' }}
+            type=ref,event=branch,enable=${{ needs.plan.outputs.mode != 'release' }}
             type=ref,event=pr
             type=sha,format=short,prefix=pr-${{ github.event.pull_request.number }}-sha-,enable=${{ github.event_name == 'pull_request' }}
           labels: |
@@ -253,6 +359,7 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.plan.outputs.ref || github.sha }}
           # metadata-action builds the annotations output from the
           # `annotations` input (not `labels`), so the custom description must
           # be repeated here to land in steps.meta.outputs.annotations — which
@@ -262,6 +369,7 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.plan.outputs.ref || github.sha }}
 
       - name: Build and push Docker image
         id: build
@@ -274,8 +382,8 @@ jobs:
           # whenever Alpine ships security updates, so pulling fresh is how the
           # image absorbs patched system OpenSSL (libssl3/libcrypto3) — e.g. the
           # High PKCS7_verify use-after-free (#57/#72). Without this, the gha
-          # build cache could reuse a stale base and a rebuild on main would
-          # never pick up the fix.
+          # build cache could reuse a stale base and the nightly and weekly
+          # rebuilds would never pick up the fix.
           pull: true
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           # Release builds reuse the digest-pinned base the scan job resolved;

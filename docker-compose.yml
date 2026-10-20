@@ -1,5 +1,7 @@
 services:
   bot:
+    # `latest` is the newest release. To follow main, use `:nightly` (built
+    # nightly, may be unreleased); to pin, use a version such as `:2.1.0`.
     image: ghcr.io/lonix/koolbot:latest
     container_name: koolbot
     restart: unless-stopped
