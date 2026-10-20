@@ -11,6 +11,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { renderSeriesTick } from "./host-settings-series.js";
 import {
   CHANNEL_LEAD_MAX,
   CHANNEL_LEAD_MIN,
@@ -59,6 +60,8 @@ export interface SettingsViewData {
   leadersTags?: LeadersTagsView | null;
   /** The groups on/off forms (#1243); absent = none shown. */
   groupsSwitch?: GroupsSwitchView;
+  /** The event repeats: its forms carry the "also for the next occurrences" tick (#1266). */
+  seriesTick?: boolean;
 }
 
 function hidden(name: string, value: string): string {
@@ -117,11 +120,12 @@ ${renderLead(d)}
 ${renderLock(d)}
 ${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
 ${renderLeadersTagsFields(d.leadersTags ?? null)}
+${renderSeriesTick(d.seriesTick)}
 <button type="submit">Save settings</button>
 </form>
-${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken) : renderGroups(d)}
-${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken) : ""}
-${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken) : ""}`;
+${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : renderGroups(d)}
+${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
+${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}`;
 }
 
 export interface ConfirmChangeView {

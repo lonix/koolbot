@@ -348,9 +348,10 @@ function confirm(
 }
 
 describe("registration and parsing", () => {
-  it("is the last row, with a letters-only id and no duplicates", () => {
+  it("is the last row but the tick for the next occurrences (#1266), with a letters-only id and no duplicates", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids[ids.length - 1]).toBe("groupsEnabled");
+    expect(ids[ids.length - 2]).toBe("groupsEnabled");
+    expect(ids[ids.length - 1]).toBe("seriesSetup");
     expect(new Set(ids).size).toBe(ids.length);
     expect(groupsSwitchRow.id).toMatch(/^[A-Za-z]+$/);
     expect(GROUPS_SWITCH_ROW_ID).toBe("groupsEnabled");
@@ -722,7 +723,7 @@ describe("groups turned off", () => {
       { status: "needs-confirmation" }
     >;
     expect(first.reasons[0]).toContain(
-      "This event repeats, and the next one is made from the settings it has now, so it starts without groups too.",
+      'This event repeats: the next one starts with the group setup of the series. Tick "Also for the next occurrences" in the same save to make "groups off" the setup of the series too.',
     );
     expect(first.reasons[0]).not.toContain("clan tags");
   });

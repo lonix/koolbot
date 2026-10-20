@@ -113,6 +113,40 @@ export interface IEventGroup {
   controlChannelId?: string | null;
 }
 
+/**
+ * One group of a series' stored setup (#1266): only what the host decided.
+ * No members, leader or channel, so nothing here is member data.
+ */
+export interface ISeriesGroup {
+  key: string;
+  name: string;
+  kind: EventGroupKind;
+  size: number | null;
+  tag: string;
+  marker: string;
+}
+
+/**
+ * The group setup every following occurrence of a series starts with (#1266):
+ * the host's names and default tags (never a leader's rename), counts, kinds,
+ * sizes, labels, the lock and the leader and tag switches. Set when the series
+ * is made and replaced when the host ticks "also for the next occurrences";
+ * the successor copies it and carries it on. Deliberately no schema defaults: a
+ * row without it (older rows, one-off events) reads as "not stored".
+ */
+export interface ISeriesGroupSetup {
+  groupsEnabled: boolean;
+  presetId: string | null;
+  groupLabel: string;
+  leaderLabel: string;
+  groupsLocked: boolean;
+  captainsEnabled: boolean;
+  captainCustomisationEnabled: boolean;
+  tagsEnabled: boolean;
+  tagsSuffix: boolean;
+  groups: ISeriesGroup[];
+}
+
 export interface IEventRsvp {
   userId: string;
   status: RsvpStatus;
@@ -252,8 +286,9 @@ export interface IEvent extends Document {
   groups: IEventGroup[];
   /**
    * Host's "lock groups" switch (#1191): while true, joining a group's channel
-   * does not change anyone's stored group. Per occurrence: a successor starts
-   * unlocked, so it is not part of `copyGroupSetup`.
+   * does not change anyone's stored group. Not part of `copyGroupSetup` (the
+   * presets read that); a recurring series carries the host's choice in
+   * `seriesGroupSetup` (#1266).
    */
   groupsLocked: boolean;
   /** Group leaders on for this event (#1195); set on the event form. */
@@ -278,6 +313,12 @@ export interface IEvent extends Document {
    * without it reads as 0.
    */
   liveEditRevision?: number;
+  /**
+   * What the next occurrences start with (#1266); see `ISeriesGroupSetup`.
+   * Optional and without a schema default, so a row without it (an older row, a
+   * one-off event) has none and its successor is made from the row itself.
+   */
+  seriesGroupSetup?: ISeriesGroupSetup | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -313,6 +354,36 @@ const EventGroupSchema = new Schema<IEventGroup>(
     sizeSyncPending: { type: Boolean },
     controlMessageId: { type: String },
     controlChannelId: { type: String },
+  },
+  { _id: false },
+);
+
+// No defaults anywhere in the series setup (#1266): it is stored whole, and a
+// default on a stored field once broke a round-trip test (see EventGroupSchema).
+const SeriesGroupSchema = new Schema<ISeriesGroup>(
+  {
+    key: { type: String, maxlength: 32 },
+    name: { type: String, maxlength: 50 },
+    kind: { type: String, enum: EVENT_GROUP_KINDS },
+    size: { type: Number, min: 1, max: 99 },
+    tag: { type: String, maxlength: 8 },
+    marker: { type: String, maxlength: 16 },
+  },
+  { _id: false },
+);
+
+const SeriesGroupSetupSchema = new Schema<ISeriesGroupSetup>(
+  {
+    groupsEnabled: { type: Boolean },
+    presetId: { type: String },
+    groupLabel: { type: String, maxlength: 20 },
+    leaderLabel: { type: String, maxlength: 20 },
+    groupsLocked: { type: Boolean },
+    captainsEnabled: { type: Boolean },
+    captainCustomisationEnabled: { type: Boolean },
+    tagsEnabled: { type: Boolean },
+    tagsSuffix: { type: Boolean },
+    groups: { type: [SeriesGroupSchema], default: undefined },
   },
   { _id: false },
 );
@@ -373,6 +444,7 @@ const EventSchema = new Schema<IEvent>(
     tagsEnabled: { type: Boolean, default: false },
     tagsSuffix: { type: Boolean, default: false },
     liveEditRevision: { type: Number },
+    seriesGroupSetup: { type: SeriesGroupSetupSchema },
     createdBy: { type: String, required: true },
   },
   {

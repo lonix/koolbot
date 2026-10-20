@@ -17,6 +17,7 @@
 
 import { escapeHtml } from "./html.js";
 import { GROUP_KIND_OPTIONS } from "./admin-views.js";
+import { renderSeriesTick } from "./host-settings-series.js";
 import {
   GROUP_NAME_MAX,
   GROUP_SIZE_MAX,
@@ -146,6 +147,7 @@ export function renderPresetForm(
   d: GroupEditViewData,
   actionPath: string,
   csrfToken: string,
+  seriesTick?: boolean,
 ): string {
   if (d.groups.length === 0) return "";
   const options = d.presets
@@ -172,6 +174,7 @@ export function renderPresetForm(
 </select>
 ${hidden(baseField(GROUP_PRESET_ROW_ID), d.presetBase)}
 <p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. The captains lobby is not counted and is never changed by a preset (use its own switch above). Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}${links}</div>
+${renderSeriesTick(seriesTick)}
 <button type="submit">Apply preset</button>
 </form>`;
 }
@@ -186,8 +189,10 @@ export function renderGroupSetForms(
   d: GroupEditViewData,
   actionPath: string,
   csrfToken: string,
+  seriesTick?: boolean,
 ): string {
   if (d.groups.length === 0) return "";
+  const tick = renderSeriesTick(seriesTick);
   const label = d.groupLabel.toLowerCase();
   // The captains lobby is a switch, not a group to tick or add (#1251).
   const listed = d.groups.filter((g) => g.kind !== "leads");
@@ -210,6 +215,7 @@ export function renderGroupSetForms(
 ${boxes}
 ${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
 <p class="muted">Tick the ${escapeHtml(label)}s to remove. You are asked to confirm first. Everybody in a removed ${escapeHtml(label)}'s channel, you included, is moved to the main channel, its members are unassigned (their clan tags come off), and then the channel is deleted. If somebody cannot be moved, that ${escapeHtml(label)} is kept and the result says why: save again to move the rest.</p></fieldset>
+${tick}
 <button type="submit">Remove selected</button>
 </form>`;
   const kinds = GROUP_KIND_OPTIONS.map(
@@ -228,6 +234,7 @@ ${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
 <input id="host-settings-add-tag" type="text" maxlength="${GROUP_TAG_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.tag)}">
 ${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
 <p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others. Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
+${tick}
 <button type="submit">Add ${escapeHtml(label)}</button>
 </form>`;
   return `${remove}\n${add}`;

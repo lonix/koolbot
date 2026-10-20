@@ -243,6 +243,8 @@ describe("registration", () => {
       // The Captains lobby switch (#1251), then the groups switch (#1243).
       "captainsLobby",
       "groupsEnabled",
+      // "Also for the next occurrences" (#1266) runs after everything else.
+      "seriesSetup",
     ]);
   });
 });

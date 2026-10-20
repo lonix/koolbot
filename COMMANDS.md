@@ -629,7 +629,9 @@ restart-safe — progress is tracked on the stored event, not in memory.
 
 For a recurring event, step 5 also creates the **next occurrence** (new
 announcement, new Discord event, new channel) at the same wall-clock time; future occurrences are
-never pre-created.
+never pre-created. The next occurrence starts with the series' group setup (the host's names, sizes
+and settings; never members, leaders or channels), which the host panel can change for the
+following occurrences (see the Web UI guide).
 
 **Team leaders customise from a button, not a command (#1196).** When an event
 uses groups with leaders and the host ticked **Leaders can customise**, the bot

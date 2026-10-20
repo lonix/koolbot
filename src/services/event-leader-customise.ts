@@ -41,7 +41,7 @@
  *    host's name and tag in `originalName` / `originalTag` in the SAME write
  *    (filtered on them still being absent), so the host panel's reset has
  *    something to go back to for a Custom event as well as a preset one, and a
- *    recurring series' next occurrence starts from them (`copyGroupSetup`).
+ *    recurring series' next occurrence starts from them (`seriesGroupSetupOf`, #1266).
  *    Reset restores them and clears them.
  * 6. **Tags follow through the one tag function.** After a tag change lands the
  *    members of the group are brought in line by `EventNicknameTags.syncMember`
