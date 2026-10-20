@@ -222,7 +222,7 @@ function renderTiles(p: ModLogBodyProps): string {
   const actions = tile({
     label: "Actions, last 7 days",
     value: count(t.actionsLast7Days),
-    detail: "Warnings, timeouts, kicks and bans",
+    detail: "Every logged action",
     href: "#actions",
   });
   const timeouts = tile({
