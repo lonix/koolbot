@@ -1,5 +1,7 @@
 # KoolBot Developer Guide
 
+KoolBot: Keeper Of Our Lore. Quotes, stats, history and logs, all yours.
+
 Complete guide for developers extending or maintaining KoolBot.
 
 ## Table of Contents
