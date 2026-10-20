@@ -221,6 +221,8 @@ export function createMeModerationRouter(client: Client): Router {
             openCases: null,
             kind,
             rows: [],
+            rowsUnavailable: false,
+            caseLookupFailed: false,
             total: 0,
             page: 1,
             pageSize: PAGE_SIZE,
@@ -233,12 +235,19 @@ export function createMeModerationRouter(client: Client): Router {
       const cases = ModerationCaseService.getInstance(client);
       const actions = MOD_LOG_KIND_ACTIONS[kind];
       const since = new Date(Date.now() - 7 * MS_PER_DAY);
-      const casesEnabled = await cases.isEnabled().catch(() => false);
+      // A failed read of the switch is an error, not "cases are off".
+      const casesEnabled = await cases.isEnabled();
 
+      // A failed read is "unavailable", never an empty list or a zero count:
+      // the empty state is for a read that succeeded and found nothing.
+      let logUnavailable = false;
       // Count first, so the page that is fetched is the page that is shown.
       const total = await moderation
         .countRecent(guildId, { actions })
-        .catch(() => 0);
+        .catch(() => {
+          logUnavailable = true;
+          return 0;
+        });
       const page = effectivePage(requestedPage, total, PAGE_SIZE);
       const [docs, actions7d, timeoutsNow, liveCount, overdueCount, queue] =
         await Promise.all([
@@ -248,7 +257,10 @@ export function createMeModerationRouter(client: Client): Router {
               limit: PAGE_SIZE,
               skip: (page - 1) * PAGE_SIZE,
             })
-            .catch(() => [] as IModerationLog[]),
+            .catch(() => {
+              logUnavailable = true;
+              return [] as IModerationLog[];
+            }),
           moderation
             .countRecent(guildId, { since })
             .then((n): number | null => n)
@@ -269,13 +281,17 @@ export function createMeModerationRouter(client: Client): Router {
           casesEnabled ? cases.getQueue(guildId).catch(() => null) : null,
         ]);
 
+      let caseLookupFailed = false;
       const casesByEntry = casesEnabled
         ? await cases
             .getCasesForEntries(
               guildId,
               docs.map((d) => d._id as never),
             )
-            .catch(() => new Map<string, IModerationCase>())
+            .catch(() => {
+              caseLookupFailed = true;
+              return new Map<string, IModerationCase>();
+            })
         : new Map<string, IModerationCase>();
 
       const openRaw: IModerationCase[] = queue
@@ -333,6 +349,8 @@ export function createMeModerationRouter(client: Client): Router {
           openCases,
           kind,
           rows: toModerationRows(docs, casesByEntry, labels),
+          rowsUnavailable: logUnavailable,
+          caseLookupFailed,
           total,
           page,
           pageSize: PAGE_SIZE,
@@ -348,9 +366,10 @@ export function createMeModerationRouter(client: Client): Router {
       const { guildId } = session;
       const reason = await moderatorReason(client, session);
       const cases = ModerationCaseService.getInstance(client);
-      const casesEnabled = await cases.isEnabled().catch(() => false);
+      const casesEnabled = await cases.isEnabled();
+      // A failed lookup must not read as "no such case": it is left to throw.
       const found = casesEnabled
-        ? await cases.findCase(guildId, String(req.params.id)).catch(() => null)
+        ? await cases.findCase(guildId, String(req.params.id))
         : null;
       if (!found) {
         await wrap(
@@ -363,14 +382,18 @@ export function createMeModerationRouter(client: Client): Router {
         return;
       }
       const moderation = ModerationService.getInstance(client);
-      const originEntries = await cases
-        .getOriginEntries([found])
-        .catch(() => new Map<string, IModerationLog>());
+      // Left to throw: without the origin entry the reason would read as
+      // "No reason recorded", which is a different claim.
+      const originEntries = await cases.getOriginEntries([found]);
+      let historyUnavailable = false;
       const history = await loadCaseHistory(
         moderation,
         guildId,
         [found],
         originEntries,
+        () => {
+          historyUnavailable = true;
+        },
       );
       const ids = new Set<string>([found.userId, found.openedByUserId]);
       if (found.originModeratorId) ids.add(found.originModeratorId);
@@ -389,7 +412,7 @@ export function createMeModerationRouter(client: Client): Router {
         renderModCaseBody({
           reason,
           csrfToken: csrfOf(req),
-          case: view,
+          case: { ...view, historyUnavailable },
           defaultReviewDays: await cases.getDefaultReviewDays(),
         }),
       );
@@ -460,6 +483,7 @@ export function createMeModerationRouter(client: Client): Router {
           userOptions: audit.userOptions,
           filters,
           rows: audit.rows,
+          unavailable: audit.unavailable,
           total: audit.total,
           page: audit.page,
           pageSize: PAGE_SIZE,

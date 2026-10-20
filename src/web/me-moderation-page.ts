@@ -176,6 +176,10 @@ export interface ModLogBodyProps {
   openCases: OpenCaseItem[] | null;
   kind: ModLogKind;
   rows: ModerationRow[];
+  /** The log could not be read: not an empty log. */
+  rowsUnavailable: boolean;
+  /** The cases for these rows could not be looked up. */
+  caseLookupFailed: boolean;
   total: number;
   page: number;
   pageSize: number;
@@ -297,7 +301,9 @@ function renderActions(p: ModLogBodyProps): string {
   ).join("\n  ");
 
   let table: string;
-  if (p.rows.length === 0) {
+  if (p.rowsUnavailable) {
+    table = `<div class="kb-panel__body"><div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">The log could not be read.</p><p class="kb-callout__text">This is not an empty log. Reload the page in a moment.</p></div></div></div>`;
+  } else if (p.rows.length === 0) {
     table = `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${
       p.kind === "all"
         ? "No actions logged yet."
@@ -316,7 +322,9 @@ function renderActions(p: ModLogBodyProps): string {
         const caseCell =
           r.caseId && r.caseNumber !== null
             ? `<a href="${MOD_BASE}/cases/${encodeURIComponent(r.caseId)}">Case #${r.caseNumber}</a> ${caseStatusBadge(r.caseStatus ?? "open")}`
-            : '<span class="kb-muted">—</span>';
+            : p.caseLookupFailed
+              ? '<span class="kb-muted">Unavailable</span>'
+              : '<span class="kb-muted">—</span>';
         return `<tr>
 <td class="kb-mono">${escapeHtml(r.createdAt.slice(0, 16).replace("T", " "))}</td>
 <th scope="row" title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</th>
@@ -343,7 +351,7 @@ function renderActions(p: ModLogBodyProps): string {
       ? `<footer class="kb-panel__foot"><span>Page ${page} of ${totalPages}</span>${prev}${next}</footer>`
       : "";
   return `<section class="kb-panel" id="actions" aria-labelledby="actions-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title" id="actions-h">Actions</h2><span class="kb-panel__meta">${p.total} ${plural(p.total, "entry", "entries")}</span></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="actions-h">Actions</h2><span class="kb-panel__meta">${p.rowsUnavailable ? "unavailable" : `${p.total} ${plural(p.total, "entry", "entries")}`}</span></header>
   <nav class="kb-tabs" aria-label="Filter actions by kind">
   ${kinds}
   </nav>
@@ -409,6 +417,9 @@ function caseEvents(c: CaseView): string {
 }
 
 function caseHistory(c: CaseView): string {
+  if (c.historyUnavailable) {
+    return '<p class="kb-muted">The prior history could not be read. Reload the page in a moment.</p>';
+  }
   if (c.history.length === 0) {
     return '<p class="kb-muted">No other history on file.</p>';
   }
@@ -535,6 +546,8 @@ export interface ModAuditBodyProps {
     to: string;
   };
   rows: CommandAuditRow[];
+  /** The audit could not be read: not an empty audit. */
+  unavailable?: boolean;
   total: number;
   page: number;
   pageSize: number;
@@ -583,8 +596,9 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
     .map((r) => option(r, r, p.filters.result))
     .join("");
 
-  const table =
-    p.rows.length === 0
+  const table = p.unavailable
+    ? `<div class="kb-panel__body"><div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">The command audit could not be read.</p><p class="kb-callout__text">This is not an empty audit. Reload the page in a moment.</p></div></div></div>`
+    : p.rows.length === 0
       ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No command invocations match.</p><p class="kb-empty__text">${
           p.enabled
             ? "Commands show up here as people use them."

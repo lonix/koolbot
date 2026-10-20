@@ -628,6 +628,88 @@ describe("actions", () => {
   });
 });
 
+describe("a failed read is never shown as empty or zero", () => {
+  const rejected = (): Promise<never> => Promise.reject(new Error("db down"));
+
+  it("says the log is unavailable when the rows cannot be read", async () => {
+    moderation.getRecent.mockImplementation(rejected);
+    const page = await html("/");
+    expect(page.includes("The log could not be read.")).toBe(true);
+    expect(page.includes("No actions logged yet.")).toBe(false);
+    expect(page.includes("No warnings logged.")).toBe(false);
+  });
+
+  it("says the log is unavailable when the count cannot be read, and not zero entries", async () => {
+    moderation.countRecent.mockImplementation(async (...args: unknown[]) => {
+      const q = args[1] as { since?: Date };
+      if (q.since) return 4;
+      throw new Error("db down");
+    });
+    const page = await html("/?kind=warnings");
+    expect(page.includes("The log could not be read.")).toBe(true);
+    expect(page.includes("0 entries")).toBe(false);
+    expect(page.includes("No warnings logged.")).toBe(false);
+  });
+
+  it("keeps the empty state for a read that succeeded and found nothing", async () => {
+    moderation.getRecent.mockResolvedValue([]);
+    moderation.countRecent.mockResolvedValue(0);
+    const page = await html("/");
+    expect(page.includes("No actions logged yet.")).toBe(true);
+    expect(page.includes("The log could not be read.")).toBe(false);
+  });
+
+  it("marks the case column unavailable when the case lookup fails", async () => {
+    cases.getCasesForEntries.mockImplementation(rejected);
+    const page = await html("/");
+    expect(page.includes('<span class="kb-muted">Unavailable</span>')).toBe(
+      true,
+    );
+  });
+
+  it("does not turn a failed case-switch read into 'cases are off'", async () => {
+    cases.isEnabled.mockImplementation(rejected);
+    expect((await harness.get("/")).status).toBe(500);
+    expect((await harness.get("/cases/case-1")).status).toBe(500);
+  });
+
+  it("does not turn a failed case lookup into 'no such case'", async () => {
+    cases.findCase.mockImplementation(rejected);
+    expect((await harness.get("/cases/case-1")).status).toBe(500);
+  });
+
+  it("does not show a missing origin entry as 'No reason recorded'", async () => {
+    cases.getOriginEntries.mockImplementation(rejected);
+    expect((await harness.get("/cases/case-1")).status).toBe(500);
+  });
+
+  it("says the prior history could not be read instead of 'No other history'", async () => {
+    moderation.getHistory.mockImplementation(rejected);
+    const page = await html("/cases/case-1");
+    expect(page.includes("The prior history could not be read.")).toBe(true);
+    expect(page.includes("No other history on file.")).toBe(false);
+  });
+
+  it("says the command audit is unavailable instead of empty", async () => {
+    auditCount.mockReturnValue(Promise.reject(new Error("db down")));
+    const page = await html("/audit");
+    expect(page.includes("The command audit could not be read.")).toBe(true);
+    expect(page.includes("No command invocations match.")).toBe(false);
+  });
+
+  it("says the command audit is unavailable when its rows cannot be read", async () => {
+    auditFind.mockReturnValue({
+      sort: () => ({
+        skip: () => ({
+          limit: () => ({ lean: () => Promise.reject(new Error("db down")) }),
+        }),
+      }),
+    });
+    const page = await html("/audit");
+    expect(page.includes("The command audit could not be read.")).toBe(true);
+  });
+});
+
 describe("pages out of range", () => {
   it("shows and fetches the last page of the actions list", async () => {
     moderation.countRecent.mockImplementation(async (...args: unknown[]) => {

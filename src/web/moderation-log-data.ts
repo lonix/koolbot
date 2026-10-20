@@ -179,6 +179,8 @@ export function effectivePage(
 }
 
 export interface CommandAuditPageData {
+  /** A read failed: the rows and total are not the real ones. */
+  unavailable: boolean;
   /** The page the rows belong to (the request, clamped to the last page). */
   page: number;
   total: number;
@@ -202,16 +204,21 @@ export async function loadCommandAuditPage(args: {
 }): Promise<CommandAuditPageData> {
   const { client, guildId, filters, pageSize, channelNames } = args;
   const query = buildCommandAuditQuery(guildId, filters);
-  const total = await DiscordCommandAuditLog.countDocuments(query).catch(
-    () => 0,
-  );
+  let unavailable = false;
+  const total = await DiscordCommandAuditLog.countDocuments(query).catch(() => {
+    unavailable = true;
+    return 0;
+  });
   const page = effectivePage(args.page, total, pageSize);
   const docs = await DiscordCommandAuditLog.find(query)
     .sort({ createdAt: -1 })
     .skip((page - 1) * pageSize)
     .limit(pageSize)
     .lean()
-    .catch(() => [] as Array<Record<string, unknown>>);
+    .catch(() => {
+      unavailable = true;
+      return [] as Array<Record<string, unknown>>;
+    });
 
   // Resolve user labels from the guild member cache so the table shows names
   // rather than raw snowflakes. One fetch per request.
@@ -258,5 +265,5 @@ export async function loadCommandAuditPage(args: {
   const userOptions = Array.from(userIdsOnPage)
     .sort()
     .map((id) => ({ id, label: userLabels.get(id) ?? id }));
-  return { page, total, rows, userOptions };
+  return { unavailable, page, total, rows, userOptions };
 }

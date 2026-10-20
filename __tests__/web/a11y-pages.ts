@@ -2876,6 +2876,8 @@ const modLogProps = (over: Partial<ModLogBodyProps> = {}): ModLogBodyProps => ({
       source: "command",
     },
   ],
+  rowsUnavailable: false,
+  caseLookupFailed: false,
   total: 120,
   page: 2,
   pageSize: 50,
@@ -2997,6 +2999,27 @@ function moderatorPages(
       renderModLogBody(modLogProps({ openCases: null })),
     ),
     page(
+      "mod log (log and case lookup unavailable)",
+      "Mod log",
+      renderModLogBody(
+        modLogProps({
+          rowsUnavailable: true,
+          caseLookupFailed: true,
+          tiles: {
+            openCases: 2,
+            overdueCases: null,
+            actionsLast7Days: null,
+            timeoutsNow: null,
+          },
+        }),
+      ),
+    ),
+    page(
+      "mod log (case lookup failed)",
+      "Mod log",
+      renderModLogBody(modLogProps({ caseLookupFailed: true })),
+    ),
+    page(
       "mod log (moderation off)",
       "Mod log",
       renderModLogBody(modLogProps({ enabled: false })),
@@ -3035,6 +3058,26 @@ function moderatorPages(
       "command audit (read only)",
       "Command audit",
       renderModAuditBody(auditProps),
+    ),
+    page(
+      "command audit (unavailable)",
+      "Command audit",
+      renderModAuditBody({
+        ...auditProps,
+        unavailable: true,
+        rows: [],
+        total: 0,
+      }),
+    ),
+    page(
+      "case (history unavailable)",
+      "Case #4",
+      renderModCaseBody({
+        reason: MOD_REASON,
+        csrfToken: COMMON.csrfToken,
+        case: modCase({ historyUnavailable: true, history: [] }),
+        defaultReviewDays: 90,
+      }),
     ),
     page(
       "command audit (empty, auditing off)",

@@ -65,6 +65,8 @@ export interface CaseView {
   history: CaseHistoryItem[];
   /** False for terminal statuses; the page offers no actions on those. */
   live: boolean;
+  /** The prior history could not be read (an empty list would be a claim). */
+  historyUnavailable?: boolean;
 }
 
 export interface CaseGroups {
@@ -91,6 +93,8 @@ export async function loadCaseHistory(
   guildId: string,
   cases: readonly IModerationCase[],
   originEntries: ReadonlyMap<string, IModerationLog>,
+  /** Called with the case id when its history could not be read. */
+  onFailure?: (caseId: string) => void,
 ): Promise<Map<string, IModerationLog[]>> {
   const byCase = new Map<string, IModerationLog[]>();
   for (let i = 0; i < cases.length; i += CASE_HISTORY_CONCURRENCY) {
@@ -103,7 +107,10 @@ export async function loadCaseHistory(
             skip: 0,
             before: origin?.createdAt,
           })
-          .catch(() => []);
+          .catch(() => {
+            onFailure?.(String(c._id));
+            return [] as IModerationLog[];
+          });
         byCase.set(String(c._id), rows);
       }),
     );
