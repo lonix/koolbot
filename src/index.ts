@@ -19,6 +19,7 @@ import logger, { isDebugMode } from "./utils/logger.js";
 import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { markMongoDisconnectIntentional } from "./utils/mongo.js";
 import { safeReply } from "./utils/safe-reply.js";
+import { runWithTimeout } from "./utils/run-with-timeout.js";
 import { ConfigService } from "./services/config-service.js";
 import { startComponentAudit } from "./utils/component-audit.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
@@ -469,29 +470,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   try {
     logger.info(`🔄 Received ${signal}, starting graceful shutdown...`);
 
-    // Helper function to run operations with timeout
-    const runWithTimeout = async <T>(
-      operation: () => Promise<T>,
-      timeoutMs: number,
-      operationName: string,
-    ): Promise<T | null> => {
-      try {
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(
-            () => reject(new Error(`Timeout after ${timeoutMs}ms`)),
-            timeoutMs,
-          );
-        });
-
-        const result = await Promise.race([operation(), timeoutPromise]);
-        logger.info(`✅ ${operationName} completed`);
-        return result;
-      } catch (error) {
-        logger.error(`❌ Error in ${operationName}:`, error);
-        return null;
-      }
-    };
-
     // 1. Switch lobby to offline mode (priority 1) - 5 second timeout
     await runWithTimeout(
       async () => {
@@ -525,22 +503,10 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Bot status offline",
     );
 
-    // 3. Deregister commands (no wait needed) - 5 second timeout
-    await runWithTimeout(
-      async () => {
-        const guildId = env.guildId ?? "";
-        if (guildId) {
-          const rest = new REST({ version: "10" }).setToken(env.discordToken!);
-          await rest.put(
-            Routes.applicationGuildCommands(env.clientId!, guildId),
-            { body: [] },
-          );
-          logger.info("✅ Commands deregistered from Discord");
-        }
-      },
-      5000,
-      "Command deregistration",
-    );
+    // Slash commands are deliberately left registered. The next startup
+    // re-syncs them anyway, and wiping them here only makes them vanish from
+    // members' clients during a restart (#1294). Use
+    // `npm run unregister-guild-commands` to really uninstall.
 
     // 4. Clean up voice channels (existing functionality) - 3 second timeout
     await runWithTimeout(
