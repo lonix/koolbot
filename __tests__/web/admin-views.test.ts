@@ -5516,7 +5516,8 @@ describe("Settings page accessibility (#854)", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
     expect(html).toContain('aria-label="Reset Enable X to its default, Off"');
     expect(html).toContain('aria-label="Reset Count to its default, 10"');
-    expect(html).toContain("Default: Off");
+    expect(html).toContain('title="Reset to default: Off"');
+    expect(html).not.toContain(">Default: Off<");
   });
 
   it("marks rejected keys aria-invalid and points them at the flash banner", () => {

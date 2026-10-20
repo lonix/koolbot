@@ -200,9 +200,11 @@ describe("renderResetControl and renderChangedMark", () => {
     expect(button?.getAttribute("aria-label")).toBe(
       "Reset Cleanup <log> to its default, On",
     );
-    expect(host.querySelector(".kb-setting__default")?.textContent).toBe(
-      "Default: On",
-    );
+    expect(button?.getAttribute("title")).toBe("Reset to default: On");
+    // The default is never visible text: it cannot wrap and would break
+    // reflow on a narrow screen. Only the icon button renders.
+    expect(host.querySelector(".kb-setting__default")).toBeNull();
+    expect(host.textContent).toBe("");
     expect(host.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(host.querySelector("b, script, log")).toBeNull();
   });

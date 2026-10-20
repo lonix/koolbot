@@ -219,8 +219,28 @@ describe.each([
       "Reset Name to its default, not set",
     ]);
     expect(doc.querySelectorAll(".kb-setting__changed")).toHaveLength(4);
-    expect(doc.body.textContent).toContain("Default: On");
+    expect(doc.body.textContent).not.toContain("Default:");
+    expect(doc.querySelector(".kb-setting__default")).toBeNull();
     expect(doc.body.textContent).toContain("(changed)");
+  });
+
+  it("truncates a very long default in the reset label and keeps it whole in the title", () => {
+    const long = "Welcome to the server, please read the rules. ".repeat(4);
+    const doc = render([
+      row({
+        key: "x.msg",
+        type: "string",
+        label: "Message",
+        current: "hi",
+        defaultValue: long,
+      }),
+    ]);
+    const button = doc.querySelector<HTMLButtonElement>('button[name="key"]');
+    const label = button?.getAttribute("aria-label") ?? "";
+    expect(label.length).toBeLessThan(100);
+    expect(label.endsWith("…")).toBe(true);
+    expect(button?.getAttribute("title")).toBe(`Reset to default: ${long}`);
+    expect(doc.body.textContent).not.toContain("Welcome to the server");
   });
 
   it("submits reset through a sibling form, never as a button of the save form", () => {

@@ -141,14 +141,18 @@ export function renderResetControl(
   label: string,
   defaultText: string,
   formId: string,
+  fullDefaultText = defaultText,
 ): string {
   const name = escapeHtml(label || key);
   const text = escapeHtml(defaultText);
+  const full = escapeHtml(fullDefaultText);
+  // The default is only in the accessible name and the tooltip, never visible
+  // text: a long default (a message template) beside the control would not
+  // wrap and would break reflow on a narrow screen (WCAG 1.4.10).
   return (
-    `<span class="kb-setting__default">Default: ${text}</span>` +
     `<button type="submit" form="${escapeHtml(formId)}" name="key" value="${escapeHtml(key)}" ` +
     `class="kb-btn kb-btn--ghost kb-btn--icon kb-btn--sm" ` +
-    `aria-label="Reset ${name} to its default, ${text}" title="Reset to default: ${text}">${RESET_ICON}</button>`
+    `aria-label="Reset ${name} to its default, ${text}" title="Reset to default: ${full}">${RESET_ICON}</button>`
   );
 }
 

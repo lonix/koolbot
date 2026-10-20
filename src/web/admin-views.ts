@@ -1095,14 +1095,14 @@ function currentStringOf(r: SettingRow): string {
 }
 
 /** A value as people read it: On/Off, an option's label, or "not set". */
-function describeSettingValue(r: SettingRow, value: unknown): string {
+function describeSettingValue(r: SettingRow, value: unknown, max = 60): string {
   const v = coerceToDisplayValue(value);
   if (r.type === "boolean") return v === true ? "On" : "Off";
   if (v === "") return "not set";
   const text = String(v);
   const option = r.options?.find((o) => o.value === text);
   const shown = option ? option.label : text;
-  return shown.length > 60 ? `${shown.slice(0, 59)}…` : shown;
+  return shown.length > max ? `${shown.slice(0, max - 1)}…` : shown;
 }
 
 /**
@@ -1254,6 +1254,7 @@ function renderSettingRows(
               r.label,
               describeSettingValue(r, r.defaultValue),
               ctx.resetFormId,
+              describeSettingValue(r, r.defaultValue, Infinity),
             )
           : "");
     const nested =
