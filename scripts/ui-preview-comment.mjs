@@ -98,13 +98,24 @@ export function buildComment(
   }
   lines.push(facts.join(" · "), "");
 
-  const sampleLines = (withBase) => [
-    `Highlighted sample, in ${code("sample/")}${withBase ? " (before and after)" : ""}:`,
-    "",
-    ...list(plan.sample, { base: withBase }),
-    "",
-    `Every page is in ${code("all-pages/")} (after only).`,
-  ];
+  const sampleLines = (withBase) => {
+    // A page the PR adds has no base render, so it has no before shot.
+    const added = new Set(withBase ? plan.added.map((p) => p.file) : []);
+    return [
+      `Highlighted sample, in ${code("sample/")}${withBase ? " (before and after)" : ""}:`,
+      "",
+      ...list(
+        plan.sample.filter((p) => !added.has(p.file)),
+        { base: withBase },
+      ),
+      ...list(
+        plan.sample.filter((p) => added.has(p.file)),
+        { base: false },
+      ).map((l) => `${l} (new page, no before)`),
+      "",
+      `Every page is in ${code("all-pages/")} (after only).`,
+    ];
+  };
 
   if (plan.mode === "none") {
     lines.push(

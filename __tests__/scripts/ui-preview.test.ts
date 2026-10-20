@@ -253,6 +253,24 @@ describe("UI preview comment (#1341)", () => {
     expect(body).toContain("- `Dashboard`: `dashboard.base.png`");
   });
 
+  it("lists no before shot for a new page in the all-changed sample", () => {
+    const all = {
+      ...some,
+      mode: "all",
+      changed: [],
+      cssChanged: ["kb.css"],
+      added: [entry("Fresh", true)],
+      sample: [entry("Dashboard"), entry("Fresh", true)],
+    };
+    const body = comment.buildComment(all, ctx) as string;
+    expect(body).toContain("- `Dashboard`: `dashboard.base.png`");
+    expect(body).toContain(
+      "- `Fresh`: `fresh.png`, `fresh@390.png` (new page, no before)",
+    );
+    expect(body).not.toContain("fresh.base.png");
+    expect(body).not.toContain("fresh@390.base.png");
+  });
+
   it("explains a missing base and lists no before shots", () => {
     const noBase = {
       ...some,
