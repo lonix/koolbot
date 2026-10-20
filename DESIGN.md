@@ -23,19 +23,25 @@ HTML and CSS, rendered by the server; there is no client framework.
 ## Principles
 
 1. **State before detail.** Every page opens with what is true now: a few stat tiles or status dots. Lists, tables and settings come after.
-2. **Problems first, the rest folded.** What needs a decision is open and at the top (a warning Callout, *Needs fixing*). What is fine is counted and
-   folded (*In place 9*) in a Disclosure.
+2. **Problems first, the rest folded.** What needs a decision is open and at the top (a warning Callout, *Needs fixing*). What is fine or finished is
+   counted and folded in a Disclosure (*Not needed 3*, *Past events 12*).
 3. **Show the value, not just the setting.** A preference card says how it is set ("Europe/Oslo · 10:59 now"); a feature row says *On* or *Off*.
    Nobody should open a page to learn its state.
 4. **Explain at the moment it matters.** One line of description per setting. The long "what happens if" text goes behind *More*, and the consequences
    of a destructive step go in its Dialog, not in a paragraph that sits on the page forever.
 5. **Content first, settings last.** A feature page opens with what the feature holds (quotes, events, tickets). Its settings sit at the bottom in one
    Disclosure, folded, with a summary line of the current values.
-6. **Act where it lives.** Overview pages (Dashboard, Server scan) link to the page that acts; they do not carry switches or forms of their own.
-7. **People see only what they can use.** Each scope adds its own section, and nothing else shows. On `/me`, a feature the server has switched off is
+6. **Choose, don't type.** When the valid values are known, offer them: a switch, a segmented control, a bounded number, a picker for channels, roles
+   and timezones, an emoji picker. A free-text box is only for text that is genuinely free (names, messages, descriptions). Ids the bot manages are
+   shown, never typed.
+7. **Move things directly.** When the task is putting things into groups or into an order (people into teams; notices, presence messages, poll
+   questions, role-group ranks), let people drag them. Every drag has a keyboard and single-click alternative, a menu or *Move up* / *Move down* (WCAG
+   2.5.7), and the same form works without JavaScript. Settings are never dragged.
+8. **Act where it lives.** Overview pages (Dashboard, Server scan) link to the page that acts; they do not carry switches or forms of their own.
+9. **People see only what they can use.** Each scope adds its own section, and nothing else shows. On `/me`, a feature the server has switched off is
    not shown at all: no tab, no card. A page says why someone sees it ("You can host because you are in @Event hosts").
-8. **One job, one primary button.** Each view has at most one `primary` button. Long forms get one SaveBar instead of a Save button per section.
-9. **Never colour alone.** Every state has a word (*On*, *Off*, *Active*, *1 issue*) and usually an icon or dot. Teams are told apart by name and tag.
+10. **One job, one primary button.** Each view has at most one `primary` button. Long forms get one SaveBar instead of a Save button per section.
+11. **Never colour alone.** Every state has a word (*On*, *Off*, *Active*, *1 issue*) and usually an icon or dot. Teams are told apart by name and tag.
 
 ## Content
 

@@ -24,8 +24,15 @@ group shows them applied.
 3. *Settings (n)* folded at the bottom, its summary saying how many differ from the default. It opens by default when the feature is off or a required
    value is missing, and stays open after a save.
 
-Inside settings: SettingRows grouped under overlines; Switch, SegmentedControl, NumberField, Picker or EmojiPicker as the control; children nested
-under their parent; one SaveBar; destructive steps last, each with a Dialog.
+Inside settings: SettingRows grouped under overlines; Switch, SegmentedControl, NumberField, Picker or EmojiPicker as the control (choose, don't type:
+free text only for names, messages and descriptions); children nested under their parent; one SaveBar; destructive steps last, each with a Dialog.
+
+## Grouping and ordering (people into teams, notices, presence messages, poll questions, role-group ranks)
+
+- Drag is the main way: a board of columns for groups, a list with a drag handle for order.
+- Every item also has a menu (*Move to…*) or *Move up* / *Move down* buttons, reachable by keyboard and with one click, so no task needs a drag (WCAG 2.5.7).
+- Without JavaScript the same controls post a form.
+- A move that changes something in Discord (moving people in voice) is a separate, explicit action, like *Send to teams*.
 
 ## Pages for a scope
 
