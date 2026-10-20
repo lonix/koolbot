@@ -2484,7 +2484,7 @@ export const GROUP_KIND_OPTIONS: ReadonlyArray<[string, string]> = [
 /** The option of a row that is already a leads group (an old preset). */
 const LEADS_KIND_OPTION: [string, string] = [
   "leads",
-  "Leads (leaders and host only; use the Captains lobby switch instead)",
+  "Leads (leaders and host only; use the Captains lobby tick instead)",
 ];
 
 /**
@@ -2639,11 +2639,14 @@ const EVENT_GROUPS_SCRIPT =
   "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
   "function rows(){return box.querySelectorAll('[data-group-row]')}" +
   "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
-  "function addRow(){var n=rows().length;if(n>=max)return false;" +
+  // The captains lobby is a channel and counts toward the cap while it will be
+  // posted (ticked and not disabled), exactly as the server counts it.
+  "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
+  "function addRow(){var n=rows().length;if(used()>=max)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
   "box.appendChild(d.firstElementChild);sync();validity();return true}" +
-  "function sync(){if(add)add.hidden=rows().length>=max}" +
+  "function sync(){if(add)add.hidden=used()>=max}" +
   "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
   "sync();" +
   // While groups are off the section's number fields leave native validation
@@ -2657,8 +2660,12 @@ const EVENT_GROUPS_SCRIPT =
   "validity();" +
   // The captains lobby needs group leaders: the box is disabled (and so not
   // posted) while leaders are unticked, the server ignores it then too.
-  "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked}" +
-  "if(form.elements['groups_captains'])form.elements['groups_captains'].addEventListener('change',lobby);" +
+  "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked;sync()}" +
+  // One recompute (the lobby box's state, then the cap and the button) for every
+  // change in the form: the lobby and leaders boxes, and a preset choice, whose
+  // handler sets the lobby box by hand (that fires no change event of its own, and
+  // the preset's own event bubbles here after its handler has run).
+  "form.addEventListener('change',lobby);" +
   "lobby();" +
   "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
   "form.elements['group_'+i+'_name'].value=g.name||'';" +

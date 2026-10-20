@@ -816,3 +816,41 @@ describe("switching off: always confirmed", () => {
     expect(passes).not.toContain("tags:restore");
   });
 });
+
+describe("a preset with a Captains lobby switches groups on (#1263)", () => {
+  const WITH_LOBBY = {
+    ...RED_BLUE,
+    id: "lib:red-blue-lobby",
+    label: "Red vs Blue with lobby",
+    groups: [
+      ...RED_BLUE.groups,
+      { name: "Command", kind: "leads", size: null, tag: "", marker: "" },
+    ],
+  };
+
+  it("lists it with the visible groups counted, and says the lobby comes later with the leaders", async () => {
+    catalog.entries = [WITH_LOBBY as never];
+    const r = await call(panel());
+    expect(r.text).toContain(
+      '<option value="lib:red-blue-lobby">Red vs Blue with lobby (2 groups)</option>',
+    );
+    expect(r.text).toContain(
+      "so does a preset's Captains lobby (switch it on with the leaders)",
+    );
+  });
+
+  it("creates the visible groups only: leaders are off after a switch-on, so no lobby channel is made", async () => {
+    catalog.entries = [WITH_LOBBY as never];
+    const r = await post("settings", {
+      groups_pick: "lib:red-blue-lobby",
+      b_groupsEnabled: '{"on":false}',
+    });
+    expect(r.status).toBe(303);
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(doc().groupsEnabled).toBe(true);
+    expect(groups().map((g) => [g.name, g.kind])).toEqual([
+      ["Red", "team"],
+      ["Blue", "team"],
+    ]);
+  });
+});

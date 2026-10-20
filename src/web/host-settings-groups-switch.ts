@@ -121,7 +121,8 @@ export async function buildGroupsSwitchView(
       label: p.id.startsWith(PERSONAL_PRESET_PREFIX)
         ? `${p.label} (yours)`
         : p.label,
-      count: p.groups.length,
+      // The captains lobby is not listed or created here (#1263).
+      count: p.groups.filter((g) => g.kind !== "leads").length,
     })),
     presetNotice: catalogNotice(catalog.state, catalog.personalUnreadable),
   };
@@ -222,7 +223,7 @@ ${hidden(id, ON)}${hidden(base, OFF)}
 ${picker}
 <table class="prefs-table"><caption class="muted">Or your own groups (leave a name empty to skip a row)</caption><thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Size</th><th scope="col">Tag</th></tr></thead><tbody>${rows}</tbody></table>
 ${hidden(base, OFF)}
-<p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
+<p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and so does a preset's Captains lobby (switch it on with the leaders), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
     "Switch groups on",
     // Six rows, most of them blank or ignored (a chosen preset wins, a blank
     // name skips its row): the browser must not refuse the submit over a size in

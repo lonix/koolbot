@@ -172,6 +172,8 @@ describeWithMongo("event group preset library (#1200)", () => {
         groupLabel: "",
         leaderLabel: "",
         channelLeadMinutes: "",
+        // The preset's leads row is the captains lobby (#1263): added while leaders are on.
+        captainsEnabled: true,
         rows: [],
       },
       { maxCount: 15, resolvePreset: presetResolver(catalog) },
@@ -192,7 +194,7 @@ describeWithMongo("event group preset library (#1200)", () => {
     expect(before.presetId).toBe(created.id);
     expect(before.groups.map((g: { name: string }) => g.name)).toEqual([
       "Assault",
-      "Command",
+      "Lead lobby",
     ]);
 
     await updateLibraryPreset(
