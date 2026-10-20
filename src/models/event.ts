@@ -129,7 +129,8 @@ export interface ISeriesGroup {
 /**
  * The group setup every following occurrence of a series starts with (#1266):
  * the host's names and default tags (never a leader's rename), counts, kinds,
- * sizes, labels, the lock and the leader and tag switches. Set when the series
+ * sizes, labels and the leader and tag switches (never the lock: it is an
+ * in-event state and starts off in every occurrence). Set when the series
  * is made and replaced when the host ticks "also for the next occurrences";
  * the successor copies it and carries it on. Deliberately no schema defaults: a
  * row without it (older rows, one-off events) reads as "not stored".
@@ -139,7 +140,6 @@ export interface ISeriesGroupSetup {
   presetId: string | null;
   groupLabel: string;
   leaderLabel: string;
-  groupsLocked: boolean;
   captainsEnabled: boolean;
   captainCustomisationEnabled: boolean;
   tagsEnabled: boolean;
@@ -286,9 +286,9 @@ export interface IEvent extends Document {
   groups: IEventGroup[];
   /**
    * Host's "lock groups" switch (#1191): while true, joining a group's channel
-   * does not change anyone's stored group. Not part of `copyGroupSetup` (the
-   * presets read that); a recurring series carries the host's choice in
-   * `seriesGroupSetup` (#1266).
+   * does not change anyone's stored group. Per occurrence: a successor always
+   * starts unlocked, so it is part of neither `copyGroupSetup` nor the series'
+   * stored setup (#1266).
    */
   groupsLocked: boolean;
   /** Group leaders on for this event (#1195); set on the event form. */
@@ -378,7 +378,6 @@ const SeriesGroupSetupSchema = new Schema<ISeriesGroupSetup>(
     presetId: { type: String },
     groupLabel: { type: String, maxlength: 20 },
     leaderLabel: { type: String, maxlength: 20 },
-    groupsLocked: { type: Boolean },
     captainsEnabled: { type: Boolean },
     captainCustomisationEnabled: { type: Boolean },
     tagsEnabled: { type: Boolean },

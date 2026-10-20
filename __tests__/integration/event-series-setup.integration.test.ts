@@ -41,7 +41,6 @@ describeWithMongo("series group setup against a real MongoDB (#1266)", () => {
     presetId: null,
     groupLabel: "Squad",
     leaderLabel: "Captain",
-    groupsLocked: true,
     captainsEnabled: true,
     captainCustomisationEnabled: false,
     tagsEnabled: true,
@@ -153,7 +152,7 @@ describeWithMongo("series group setup against a real MongoDB (#1266)", () => {
     const raw = await Event.collection.findOne({ _id: next._id });
     expect(raw).toMatchObject({
       groupsEnabled: true,
-      groupsLocked: true,
+      groupsLocked: false,
       groupLabel: "Squad",
       leaderLabel: "Captain",
       captainsEnabled: true,
@@ -202,7 +201,6 @@ describeWithMongo("series group setup against a real MongoDB (#1266)", () => {
       presetId: null,
       groupLabel: "Squad",
       leaderLabel: "Leader",
-      groupsLocked: false,
       captainsEnabled: false,
       captainCustomisationEnabled: false,
       tagsEnabled: false,

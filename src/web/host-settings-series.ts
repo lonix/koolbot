@@ -15,5 +15,5 @@ export function renderSeriesTick(show: boolean | undefined): string {
   if (!show) return "";
   return `<div class="field"><label class="check"><input type="checkbox" name="${valueField(SERIES_SETUP_ROW_ID)}" value="1"> Also for the next occurrences</label>
 <input type="hidden" name="${baseField(SERIES_SETUP_ROW_ID)}" value="0">
-<p class="muted">Ticked, the groups of this event as they are after this save (names, sizes, kinds, tags, labels, lock and tag settings, and whether groups are on) are what every following occurrence starts with, until you change them again. People, leaders and channels are never carried over, and a name or tag a leader chose is not either: the next occurrence gets your names. Unticked, this change is for this occurrence only.</p></div>`;
+<p class="muted">Ticked, the groups of this event as they are after this save (names, sizes, kinds, tags, labels, leader and tag settings, and whether groups are on) are what every following occurrence starts with, until you change them again. People, leaders and channels are never carried over, and a name or tag a leader chose is not either: the next occurrence gets your names. The lock always starts off. Unticked, this change is for this occurrence only.</p></div>`;
 }
