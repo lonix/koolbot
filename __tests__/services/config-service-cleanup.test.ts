@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 const mockFind = jest.fn();
 const mockDeleteOne = jest.fn();
 const mockUpdateOne = jest.fn();
+const mockUpdateMany = jest.fn();
 const mockLoggerInfo = jest.fn();
 const mockLoggerError = jest.fn();
 
@@ -18,6 +19,7 @@ jest.unstable_mockModule("../../src/models/config.js", () => ({
     find: mockFind,
     deleteOne: mockDeleteOne,
     updateOne: mockUpdateOne,
+    updateMany: mockUpdateMany,
     findOne: jest.fn(),
   },
   CONFIG_CATEGORIES: [
@@ -81,6 +83,7 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
     mockFind.mockResolvedValue([]);
     mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
     mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    mockUpdateMany.mockResolvedValue({ modifiedCount: 0 });
     // Reset the singleton so each test gets a fresh, uninitialized instance.
     (ConfigService as unknown as { instance: unknown }).instance = undefined;
   });
@@ -345,6 +348,37 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
         (call) => (call[0] as { key: string }).key,
       );
       expect(deletedKeys).toEqual([]);
+    });
+  });
+
+  describe("stored description cleanup (#1302)", () => {
+    it("unsets only the description field, on every row that has one", async () => {
+      mockUpdateMany.mockResolvedValue({ modifiedCount: 3 });
+      await ConfigService.getInstance().initialize();
+
+      expect(mockUpdateMany).toHaveBeenCalledTimes(1);
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        { description: { $exists: true } },
+        { $unset: { description: "" } },
+        { timestamps: false },
+      );
+    });
+
+    it("is safe to run again: a no-op result is not an error", async () => {
+      mockUpdateMany.mockResolvedValue({ modifiedCount: 0 });
+      const service = ConfigService.getInstance();
+      await service.initialize();
+      expect(mockLoggerError).not.toHaveBeenCalled();
+    });
+
+    it("a failed unset does not stop the unknown-settings sweep or startup", async () => {
+      mockUpdateMany.mockRejectedValue(new Error("write failed"));
+      mockFind.mockResolvedValue([
+        { key: "unknown.setting", value: "x", category: "core" },
+      ]);
+      await ConfigService.getInstance().initialize();
+
+      expect(mockDeleteOne).toHaveBeenCalledWith({ key: "unknown.setting" });
     });
   });
 });

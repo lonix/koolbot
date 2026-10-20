@@ -216,6 +216,7 @@ export class ConfigService {
    * are security-sensitive or required before database access. They will be removed from the database if found.
    */
   private async cleanupUnknownSettings(): Promise<void> {
+    await this.unsetStoredDescriptions();
     try {
       // Get all valid config keys from the schema
       const validKeys = new Set(Object.keys(defaultConfig));
@@ -370,6 +371,31 @@ export class ConfigService {
     }
   }
 
+  /**
+   * Drop the `description` stored on config rows by earlier versions (#1302).
+   * Descriptions come from the schema now, so the stored copy is only ever
+   * stale. Idempotent (matches nothing once done), touches no other field
+   * (`timestamps: false` keeps `updatedAt`), and harmless to roll back because
+   * older code falls back to the schema text when a row has none. A failure
+   * is logged, never thrown, and does not stop the unknown-settings sweep.
+   */
+  private async unsetStoredDescriptions(): Promise<void> {
+    try {
+      const result = await Config.updateMany(
+        { description: { $exists: true } },
+        { $unset: { description: "" } },
+        { timestamps: false },
+      );
+      if (result.modifiedCount > 0) {
+        logger.info(
+          `🧹 Removed stored descriptions from ${result.modifiedCount} settings (the schema is the source of truth)`,
+        );
+      }
+    } catch (error) {
+      logger.error("Error removing stored setting descriptions:", error);
+    }
+  }
+
   public async get(key: string): Promise<unknown> {
     try {
       return await this.readValue(key);
@@ -414,7 +440,10 @@ export class ConfigService {
         await this.set(
           key,
           oldConfig.value,
-          oldConfig.description.replace(/gamification/gi, "achievements"),
+          (oldConfig.description ?? "").replace(
+            /gamification/gi,
+            "achievements",
+          ),
           "achievements",
           { skipDependencyCheck: true },
         );
@@ -576,6 +605,9 @@ export class ConfigService {
    * batch up front (Setup Wizard apply, Settings section save) or that replace
    * the entire config snapshot (reset-to-defaults, YAML import, env migration),
    * where per-key ordering would otherwise produce spurious rejections.
+   *
+   * `description` is accepted for call-site compatibility but is not persisted
+   * (#1302); the schema owns descriptions.
    */
   public async set<T>(
     key: string,
@@ -588,12 +620,15 @@ export class ConfigService {
       await this.assertDependenciesSatisfied(key, value);
     }
     try {
+      // `description` is deliberately not stored: it is a copy of the schema's
+      // text that would freeze at first save and go stale (#1302). Readers take
+      // it from `settingsMetadata`. `category` stays because the startup sweep
+      // validates the stored value against CONFIG_CATEGORIES.
       await Config.findOneAndUpdate(
         { key },
         {
           key,
           value,
-          description,
           category,
           updatedAt: new Date(),
         },

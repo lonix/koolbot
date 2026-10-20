@@ -50,7 +50,12 @@ export const CONFIG_CATEGORIES = [
 export interface IConfig extends Document {
   key: string;
   value: string | number | boolean;
-  description: string;
+  /**
+   * Legacy. Descriptions live in `settingsMetadata` (config-schema.ts), the
+   * single source of truth, and are no longer written here (#1302). Rows
+   * created before that may still carry one until the startup cleanup unsets it.
+   */
+  description?: string;
   category: string;
   updatedAt: Date;
 }
@@ -69,7 +74,7 @@ const ConfigSchema = new Schema<IConfig>(
     },
     description: {
       type: String,
-      required: true,
+      required: false,
     },
     category: {
       type: String,

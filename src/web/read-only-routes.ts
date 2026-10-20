@@ -461,7 +461,7 @@ export function envSettingFallback(
 /**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
- * a stored DB row taking precedence. Lets a feature page render its own keys
+ * the schema winning over any stored row (#1302). Lets a feature page render its own keys
  * with the shared control renderer (#705).
  *
  * `current` resolves in the order `ConfigService.get` (and the Settings page)
@@ -491,8 +491,8 @@ export function buildSettingRows(
         : (envSettingFallback(key, defaultValue) ?? defaultValue),
       defaultValue,
       type: meta?.type ?? describeType(defaultValue),
-      description: dbEntry?.description ?? meta?.description ?? "",
-      category: dbEntry?.category ?? meta?.category ?? deriveCategory(key),
+      description: meta?.description ?? dbEntry?.description ?? "",
+      category: meta?.category ?? dbEntry?.category ?? deriveCategory(key),
       options: meta?.options,
       warnBelow: meta?.warnBelow,
       min: meta?.min,
@@ -1102,11 +1102,11 @@ export function createReadOnlyRouter(
       });
       const storedByKey = new Map(stored.map((s) => [s.key, s]));
 
-      // Description and category come from the static settingsMetadata
-      // map (one entry per key in `defaultConfig`); when a DB row exists
-      // and overrides them, prefer the DB value. This way every key has a
-      // stable description on a fresh install — even before /config set
-      // ever runs — without losing operator-customised descriptions.
+      // Description and category come from the static settingsMetadata map
+      // (one entry per key in `defaultConfig`), which always wins so a text
+      // change in code reaches existing installs (#1302). A stored row's
+      // description/category is only the fallback for orphan keys the schema
+      // no longer knows (the loop below).
       // `type` comes from settingsMetadata when present (the typed config
       // schema is authoritative) and falls back to runtime-inferred type
       // for orphan DB rows that the schema doesn't know about.
@@ -1122,9 +1122,9 @@ export function createReadOnlyRouter(
               : (envSettingFallback(key, defaultValue) ?? defaultValue),
             defaultValue,
             type: meta?.type ?? describeType(defaultValue),
-            description: dbEntry?.description ?? meta?.description ?? "",
+            description: meta?.description ?? dbEntry?.description ?? "",
             category:
-              dbEntry?.category ?? meta?.category ?? deriveCategory(key),
+              meta?.category ?? dbEntry?.category ?? deriveCategory(key),
             options: meta?.options,
             warnBelow: meta?.warnBelow,
             min: meta?.min,
