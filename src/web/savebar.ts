@@ -81,10 +81,22 @@ export const SAVEBAR_SCRIPT =
   "else if(el.tagName==='SELECT'){o.s=[];for(var i=0;i<el.options.length;i++)o.s.push(el.options[i].selected)}" +
   "else if(t!=='hidden'&&!NOT.test(t))o.v=el.value;" +
   "else return;out.push(o)});return out}" +
-  "function commit(list){list.forEach(function(o){var el=o.el;" +
+  // Setting a default can reselect the original option or radio when the
+  // control was changed by the user (the automatic deselection of the old one
+  // does not mark it dirty), which would undo an edit made after the submit.
+  // So the live states are captured first, the defaults come from the
+  // submitted snapshot, and the live states are put back afterwards.
+  "function commit(list){var live=list.map(function(o){var el=o.el;var l={el:el};" +
+  "if('c' in o)l.c=el.checked;" +
+  "else if('s' in o){l.s=[];for(var i=0;i<el.options.length;i++)l.s.push(el.options[i].selected)}" +
+  "return l});" +
+  "list.forEach(function(o){var el=o.el;" +
   "if('c' in o)el.defaultChecked=o.c;" +
   "else if('s' in o){for(var i=0;i<o.s.length;i++)el.options[i].defaultSelected=o.s[i]}" +
-  "else el.defaultValue=o.v})}" +
+  "else el.defaultValue=o.v});" +
+  "live.forEach(function(l){var el=l.el;" +
+  "if('c' in l)el.checked=l.c;" +
+  "else if('s' in l){for(var i=0;i<l.s.length;i++)el.options[i].selected=l.s[i]}})}" +
   "function wire(bar){var form=bar.closest('form');if(!form)return;" +
   "var text=bar.querySelector('[data-savebar-text]');" +
   "var discard=bar.querySelector('[data-savebar-discard]');" +
@@ -96,17 +108,24 @@ export const SAVEBAR_SCRIPT =
   "update();" +
   "form.addEventListener('input',update);form.addEventListener('change',update);" +
   "form.addEventListener('submit',function(){pending=snap(form)});" +
-  "form.addEventListener('kb-saved',function(){commit(pending||snap(form));pending=null;update()});" +
+  // The bar hides when the form is clean, so focus must go somewhere that can
+  // take it: the first of `els` that is enabled and visible, else the first
+  // such control of the form, else the form itself.
+  "function focusable(el){return el.type!=='hidden'&&!NOT.test(el.type)&&!inactive(el)}" +
+  "function moveFocus(els,keepScroll){" +
+  "var f=els.filter(focusable)[0]||Array.prototype.filter.call(form.elements,focusable)[0];" +
+  "if(!f){form.setAttribute('tabindex','-1');f=form}" +
+  "try{f.focus(keepScroll?{preventScroll:true}:undefined)}catch(e){}}" +
+  // After an accepted save the bar may hide under the user's focus (a
+  // keyboard user on Discard or Save): move focus then, and only then.
+  "form.addEventListener('kb-saved',function(){" +
+  "var had=bar.contains(document.activeElement);" +
+  "commit(pending||snap(form));pending=null;update();" +
+  "if(had&&bar.hidden)moveFocus([],true)});" +
   "if(discard)discard.addEventListener('click',function(){" +
   // Restore every value first, then fire the events: the cascade script
   // re-enables dependents on the master's change event.
   "var els=changedControls(form,true);els.forEach(restore);" +
   "els.forEach(function(el){fire(el,'input');fire(el,'change')});" +
-  // The bar hides now, so focus must go somewhere that can take it: the first
-  // restored control that is enabled and visible, else the first such control
-  // of the form, else the form itself.
-  "update();function focusable(el){return el.type!=='hidden'&&!NOT.test(el.type)&&!inactive(el)}" +
-  "var f=els.filter(focusable)[0]||Array.prototype.filter.call(form.elements,focusable)[0];" +
-  "if(!f){form.setAttribute('tabindex','-1');f=form}" +
-  "try{f.focus()}catch(e){}})}" +
+  "update();moveFocus(els,false)})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-savebar]'),wire)})();";

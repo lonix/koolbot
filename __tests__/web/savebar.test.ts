@@ -709,3 +709,170 @@ describe("a cron picker's inactive controls (real cron script)", () => {
     expect(document.activeElement).not.toBe(name());
   });
 });
+
+describe("edits and focus while a save is in flight", () => {
+  const LETTERS = ["a", "b", "c", "d", "e", "f"].map((v) => ({
+    value: v,
+    label: `Option ${v}`,
+  }));
+  const FLIGHT_ROWS: SettingRow[] = [
+    row({
+      key: "x.name",
+      type: "string",
+      current: "Lobby",
+      defaultValue: "Lobby",
+    }),
+    row({
+      key: "x.picker",
+      type: "string",
+      current: "a",
+      defaultValue: "a",
+      options: LETTERS,
+    }),
+    row({
+      key: "x.period",
+      type: "string",
+      current: "week",
+      defaultValue: "week",
+      options: [
+        { value: "week", label: "This week" },
+        { value: "month", label: "This month" },
+        { value: "alltime", label: "All time" },
+      ],
+    }),
+  ];
+
+  const tick = async (): Promise<void> => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  /** Mounts the page, runs its save and bar scripts, holds the response. */
+  function start(barScript?: string): () => void {
+    const doc = new DOMParser().parseFromString(
+      pageHtml([{ category: "x", rows: FLIGHT_ROWS }]),
+      "text/html",
+    );
+    mount(doc.body.innerHTML);
+    const scripts = Array.from(doc.querySelectorAll("script")).map(
+      (s) => s.textContent ?? "",
+    );
+    const saveScript = scripts.find((s) => s.includes("save-section"));
+    const bars = scripts.find((s) => s.includes("data-savebar"));
+    if (!saveScript || !bars) throw new Error("scripts missing from the page");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    (globalThis as unknown as { fetch: unknown }).fetch = jest.fn(async () => {
+      await gate;
+      return {
+        status: 200,
+        text: async () => JSON.stringify({ type: "ok", text: "Saved." }),
+      };
+    });
+    new Function(saveScript)();
+    run(barScript ?? bars);
+    return release;
+  }
+
+  const save = (): void =>
+    el<HTMLButtonElement>("[data-savebar] button[type=submit]").click();
+  const picker = (): HTMLSelectElement =>
+    el<HTMLSelectElement>('select[name="value_x.picker"]');
+  const radios = (): HTMLInputElement[] =>
+    Array.from(
+      document.querySelectorAll<HTMLInputElement>(
+        'input[name="value_x.period"]',
+      ),
+    );
+
+  it("keeps a select changed after the submit, and keeps it unsaved", async () => {
+    const release = start();
+    type(name(), "Squad");
+    save();
+    picker().value = "c";
+    picker().dispatchEvent(new Event("change", { bubbles: true }));
+    release();
+    await tick();
+    expect(picker().value).toBe("c");
+    expect(bar().hidden).toBe(false);
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("keeps a segmented control changed after the submit, and keeps it unsaved", async () => {
+    const release = start();
+    type(name(), "Squad");
+    save();
+    radios()[1].checked = true;
+    radios()[1].dispatchEvent(new Event("change", { bubbles: true }));
+    release();
+    await tick();
+    expect(radios()[1].checked).toBe(true);
+    expect(radios()[0].checked).toBe(false);
+    expect(bar().hidden).toBe(false);
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("is caught when the live selection is not put back after the defaults", async () => {
+    const from = "live.forEach(function(l){";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    const mutated = SAVEBAR_SCRIPT.replace(from, "[].forEach(function(l){");
+    expect(mutated).not.toBe(SAVEBAR_SCRIPT);
+    const release = start(mutated);
+    type(name(), "Squad");
+    save();
+    picker().value = "c";
+    picker().dispatchEvent(new Event("change", { bubbles: true }));
+    radios()[1].checked = true;
+    radios()[1].dispatchEvent(new Event("change", { bubbles: true }));
+    release();
+    await tick();
+    const lost = picker().value !== "c" || !radios()[1].checked;
+    expect(lost).toBe(true);
+  });
+
+  it("moves focus off the bar when an accepted save hides it", async () => {
+    const release = start();
+    type(name(), "Squad");
+    discard().focus();
+    expect(document.activeElement).toBe(discard());
+    save();
+    release();
+    await tick();
+    expect(bar().hidden).toBe(true);
+    const active = document.activeElement as HTMLElement | null;
+    expect(active).not.toBe(document.body);
+    expect(bar().contains(active)).toBe(false);
+    expect(active?.closest("[hidden]")).toBeNull();
+  });
+
+  it("leaves focus alone when the user moved elsewhere", async () => {
+    const release = start();
+    type(name(), "Squad");
+    save();
+    size2().focus();
+    release();
+    await tick();
+    expect(bar().hidden).toBe(true);
+    expect(document.activeElement).toBe(size2());
+  });
+
+  it("is caught when the save path never moves focus", async () => {
+    const from = "if(had&&bar.hidden)moveFocus([],true)";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    const release = start(SAVEBAR_SCRIPT.replace(from, ""));
+    type(name(), "Squad");
+    discard().focus();
+    save();
+    release();
+    await tick();
+    const active = document.activeElement as HTMLElement | null;
+    expect(active === document.body || bar().contains(active)).toBe(true);
+  });
+
+  /** A visible control the user could have moved to. */
+  function size2(): HTMLElement {
+    return picker();
+  }
+});
