@@ -172,6 +172,8 @@ export type EditEventResult =
         | "bad-end"
         | "past"
         | "native-pending"
+        | "native-active"
+        | "disabled"
         | "unchanged";
       message: string;
     };
@@ -1958,6 +1960,12 @@ export class EventService extends ScheduledService {
     if (!id || !row || row.guildId !== input.guildId) {
       return { ok: false, code: "not-found", message: "Event not found." };
     }
+    // Fails closed, as `endEventNow` does: with events off the native sync and
+    // the repair scan are idle, so an edit would leave Discord and the
+    // announcement on a different schedule from the row.
+    if (!(await this.editsAllowed())) {
+      return { ok: false, code: "disabled", message: EDIT_MESSAGES.disabled };
+    }
     const mode = editModeOf(row, now, this.isBeingEnded(id));
     if (mode.mode === "refused") {
       return { ok: false, code: "refused", message: mode.message };
@@ -1982,12 +1990,26 @@ export class EventService extends ScheduledService {
     if (moved && want.startTime.getTime() <= now.getTime()) {
       return { ok: false, code: "past", message: EDIT_MESSAGES.past };
     }
+    // Only a change of the duration can end the event: an event the scan keeps
+    // open past its scheduled end (people still in its channels) still takes a
+    // new description.
     if (
       mode.mode === "limited" &&
+      want.durationMinutes !== row.durationMinutes &&
       computeEndTime(row.startTime, want.durationMinutes).getTime() <=
         now.getTime()
     ) {
       return { ok: false, code: "bad-end", message: EDIT_MESSAGES.badEnd };
+    }
+    // The mirror never moves the start of a running native event, so a start
+    // that moved here would leave Discord, the reminder and the channel on
+    // different schedules. Unreadable counts as locked.
+    if (moved && !(await this.startMayMove(row))) {
+      return {
+        ok: false,
+        code: "native-active",
+        message: EDIT_MESSAGES.nativeActive,
+      };
     }
     const diff = diffEventEdit(row, want);
     if (!hasEdit(diff)) {
@@ -2089,6 +2111,34 @@ export class EventService extends ScheduledService {
     }
     logger.info(`Edited event ${sanitizeForLog(id)}`);
     return { ok: true, event: updated, diff };
+  }
+
+  /** Whether events are on; false when off or when the setting cannot be read. */
+  public async editsAllowed(): Promise<boolean> {
+    try {
+      return (
+        (await this.configService.getBoolean("events.enabled", false)) === true
+      );
+    } catch (error) {
+      logger.warn("Could not read events.enabled to edit an event:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Whether the event's start may move: its linked native event, read fresh,
+   * is still Scheduled (or there is none). False when it is running, finished
+   * or cannot be read. Adopted events are refused earlier.
+   */
+  public async startMayMove(event: {
+    guildId: string;
+    nativeEventId?: string | null;
+  }): Promise<boolean> {
+    const status = await this.nativeSync.linkedStatus({
+      guildId: event.guildId,
+      nativeEventId: event.nativeEventId ?? null,
+    });
+    return status === "none" || status === "scheduled";
   }
 
   public async listEvents(guildId: string): Promise<IEvent[]> {

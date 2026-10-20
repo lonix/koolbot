@@ -2672,6 +2672,17 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me edit event (start held by a running Discord event)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ startLocked: true }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
       name: "/me edit event (started: description and duration only)",
       html: shell(
         "Edit event: Quiz night",

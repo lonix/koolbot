@@ -181,6 +181,48 @@ describe("diffNativeFields", () => {
   });
 });
 
+describe("NativeEventSync.linkedStatus (#1298)", () => {
+  const ev = { guildId: "g1", nativeEventId: "n1" };
+
+  it("is none without a link, and when the native event no longer exists", async () => {
+    const { guild } = makeGuild();
+    const sync = makeSync();
+    (sync as unknown as { client: unknown }).client = {
+      guilds: { fetch: async () => guild },
+    };
+    expect(
+      await sync.linkedStatus({ guildId: "g1", nativeEventId: null }),
+    ).toBe("none");
+    expect(await sync.linkedStatus(ev)).toBe("none");
+  });
+
+  it.each([
+    [GuildScheduledEventStatus.Scheduled, "scheduled"],
+    [GuildScheduledEventStatus.Active, "locked"],
+    [GuildScheduledEventStatus.Completed, "locked"],
+    [GuildScheduledEventStatus.Canceled, "locked"],
+  ])("maps native status %s to %s", async (status, expected) => {
+    const { guild } = makeGuild({ natives: [makeNative({ status })] });
+    const sync = makeSync();
+    (sync as unknown as { client: unknown }).client = {
+      guilds: { fetch: async () => guild },
+    };
+    expect(await sync.linkedStatus(ev)).toBe(expected);
+  });
+
+  it("is unknown when Discord cannot be read", async () => {
+    const sync = makeSync();
+    (sync as unknown as { client: unknown }).client = {
+      guilds: {
+        fetch: async () => {
+          throw new Error("down");
+        },
+      },
+    };
+    expect(await sync.linkedStatus(ev)).toBe("unknown");
+  });
+});
+
 describe("NativeEventSync.syncEvent", () => {
   it("does nothing when the toggle is off", async () => {
     config.getBoolean.mockResolvedValue(false);

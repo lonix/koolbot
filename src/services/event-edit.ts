@@ -69,6 +69,10 @@ export const EDIT_MESSAGES = {
     "The new duration would end the event in the past. Use a longer duration, or end the event from the host panel.",
   nativePending:
     "The Discord event is still being created. Try again in a minute to change the title or the start; the description and duration can change now.",
+  disabled:
+    "Events are turned off (or the setting could not be read), so the event cannot be edited. Turn on events.enabled first.",
+  nativeActive:
+    "The Discord event is already running (or its state could not be read), so the start time cannot move. The title, description and duration can still change.",
   past: "The event start time must be in the future.",
   unchanged: "Nothing was changed.",
 } as const;

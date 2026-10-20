@@ -48,6 +48,7 @@ import { renderUserPage, type UserFlashMessage } from "../user-layout.js";
 import { formatInTimeZone } from "date-fns-tz";
 import { resolveTimezone } from "../../utils/timezone.js";
 import {
+  EDIT_MESSAGES,
   editModeOf,
   eventEditVersion,
   type EditMode,
@@ -1587,6 +1588,16 @@ function registerEditRoutes(router: Router, client: Client): void {
     const csrfToken = getCsrfToken(req);
     const zone = zoneOf(event);
     void (async (): Promise<void> => {
+      if (!(await service().editsAllowed())) {
+        hostPanelRedirect(res, eventId, {
+          type: "err",
+          text: EDIT_MESSAGES.disabled,
+        });
+        return;
+      }
+      // A running Discord event keeps its start: show it as text, not a field.
+      const startLocked =
+        mode.mode === "full" && !(await service().startMayMove(event));
       const flags = await readMeSurfaceFlags();
       res
         .set("Cache-Control", "no-store")
@@ -1607,6 +1618,7 @@ function registerEditRoutes(router: Router, client: Client): void {
                 when: formatEventWhen(event),
                 version: eventEditVersion(event),
                 mode: mode.mode,
+                startLocked,
               },
               csrfToken,
             }),
@@ -1665,9 +1677,11 @@ function registerEditRoutes(router: Router, client: Client): void {
       // A started event keeps its title and start: whatever was posted for them
       // is ignored, and the service refuses a change anyway.
       const full = mode.mode === "full";
-      const date = full ? field("date") : shown.date;
-      const time = full ? field("time") : shown.time;
-      const timezone = full ? field("timezone") || zone : zone;
+      // Same for a start the running Discord event holds in place.
+      const editStart = full && (await service().startMayMove(event));
+      const date = editStart ? field("date") : shown.date;
+      const time = editStart ? field("time") : shown.time;
+      const timezone = editStart ? field("timezone") || zone : zone;
       // An unchanged start keeps the stored instant, so a round trip through
       // the wall clock (a repeated hour at a DST change) cannot move it, and
       // an event that is about to start can still get a new description.

@@ -139,6 +139,10 @@ let scopes: string[] = ["member", "host"];
 let server: Server;
 let base = "";
 const syncEvent = jest.fn<(e: unknown) => Promise<void>>(async () => undefined);
+const linkedStatus = jest.fn<(e: unknown) => Promise<string>>(
+  async () => "scheduled",
+);
+let eventsOn = true;
 const updateAnnouncement = jest.fn<(e: unknown) => Promise<boolean>>(
   async () => true,
 );
@@ -265,6 +269,8 @@ beforeEach(() => {
   sessionRole = "user";
   scopes = ["member", "host"];
   syncEvent.mockClear();
+  linkedStatus.mockClear().mockResolvedValue("scheduled");
+  eventsOn = true;
   updateAnnouncement.mockClear();
   postAnnouncement.mockClear();
 
@@ -287,7 +293,8 @@ beforeEach(() => {
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     registerReloadCallback: () => undefined,
     addChangeListener: () => undefined,
-    getBoolean: async () => false,
+    getBoolean: async (key: string) =>
+      key === "events.enabled" ? eventsOn : false,
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
   } as never);
@@ -298,11 +305,12 @@ beforeEach(() => {
 
   EventService.reset();
   const service = EventService.getInstance(fakeClient()) as unknown as {
-    nativeSync: { syncEvent: unknown };
+    nativeSync: { syncEvent: unknown; linkedStatus: unknown };
     updateAnnouncement: unknown;
     postAnnouncement: unknown;
   };
   service.nativeSync.syncEvent = syncEvent;
+  service.nativeSync.linkedStatus = linkedStatus;
   service.updateAnnouncement = updateAnnouncement;
   service.postAnnouncement = postAnnouncement;
   jest
@@ -503,6 +511,59 @@ describe("the form's markup", () => {
     }
     // `form.stack` is an admin-layout class that the /me layout does not load.
     expect(r.text).not.toContain('class="stack"');
+  });
+});
+
+describe("events switched off", () => {
+  it("sends the form and the save back to the panel with the reason, changing nothing", async () => {
+    eventsOn = false;
+    const get = await call(EDIT);
+    expect(get.status).toBe(303);
+    expect(flashOf(get.location).msg).toContain("Events are turned off");
+    const post = await call(EDIT, {
+      method: "POST",
+      body: {
+        title: "Nope",
+        description: "x",
+        date: "2099-06-01",
+        time: "18:00",
+        timezone: "UTC",
+        duration: "90",
+        version: "x",
+      },
+    });
+    expect(flashOf(post.location).msg).toContain("Events are turned off");
+    expect(row().title).toBe("Quiz night");
+    expect(syncEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("a start held by a running Discord event", () => {
+  it.each(["locked", "unknown"])(
+    "shows the start as text, keeps the title editable and ignores posted start fields (%s)",
+    async (status) => {
+      events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
+      linkedStatus.mockResolvedValue(status);
+      const page = await call(EDIT);
+      expect(page.text).not.toContain('name="date"');
+      expect(page.text).not.toContain('name="time"');
+      expect(page.text).toContain('name="title"');
+      expect(page.text).toContain("cannot move");
+      const r = await save({
+        title: "Renamed",
+        date: "2099-07-09",
+        time: "01:00",
+      });
+      expect(flashOf(r.location).type).toBe("ok");
+      expect(row().title).toBe("Renamed");
+      expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
+    },
+  );
+
+  it("keeps the date and time fields while the Discord event is still scheduled", async () => {
+    events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
+    const page = await call(EDIT);
+    expect(page.text).toContain('name="date"');
   });
 });
 

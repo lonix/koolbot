@@ -34,6 +34,11 @@ export interface EventEditView {
   /** `eventEditVersion` of the row shown; the save is refused if it moved on. */
   version: string;
   mode: "full" | "limited";
+  /**
+   * The linked Discord event is already running (or its state could not be
+   * read), so the start cannot move: shown as text, title still editable.
+   */
+  startLocked?: boolean;
 }
 
 export function renderEventEditBody(opts: {
@@ -43,8 +48,21 @@ export function renderEventEditBody(opts: {
   const e = opts.event;
   const panel = hostPanelPath(e.id);
   const full = e.mode === "full";
-  const scheduleFields = full
-    ? `<div class="kb-fields">
+  const titleField = `<div class="kb-fields">
+        <div class="kb-field">
+          <label class="kb-label" for="edit-title">Title</label>
+          <input class="kb-input" id="edit-title" type="text" name="title" required maxlength="${EVENT_TITLE_MAX}" value="${escapeHtml(e.title)}">
+        </div>
+      </div>`;
+  const scheduleFields =
+    full && e.startLocked
+      ? `${titleField}
+      <p class="kb-help">The Discord event is already running (or its state could not be read), so the start time cannot move. You can still change the title, description and duration.</p>
+      <dl class="kb-kv">
+        <dt>Starts</dt><dd class="kb-mono">${escapeHtml(e.when)}</dd>
+      </dl>`
+      : full
+        ? `<div class="kb-fields">
         <div class="kb-field">
           <label class="kb-label" for="edit-title">Title</label>
           <input class="kb-input" id="edit-title" type="text" name="title" required maxlength="${EVENT_TITLE_MAX}" value="${escapeHtml(e.title)}">
@@ -64,14 +82,15 @@ export function renderEventEditBody(opts: {
           <input class="kb-input" id="edit-timezone" type="text" name="timezone" value="${escapeHtml(e.timezone)}">
         </div>
       </div>`
-    : `<p class="kb-help">This event has already started, so its title and start time are fixed. You can still change the description and the duration.</p>
+        : `<p class="kb-help">This event has already started, so its title and start time are fixed. You can still change the description and the duration.</p>
       <dl class="kb-kv">
         <dt>Title</dt><dd>${escapeHtml(e.title)}</dd>
         <dt>Started</dt><dd class="kb-mono">${escapeHtml(e.when)}</dd>
       </dl>`;
-  const foot = full
-    ? `<footer class="kb-panel__foot">Moving the start moves the Discord event, the announcement, the reminder and the time the voice channel is created. People who marked Interested keep their answer.</footer>`
-    : "";
+  const foot =
+    full && !e.startLocked
+      ? `<footer class="kb-panel__foot">Moving the start moves the Discord event, the announcement, the reminder and the time the voice channel is created. People who marked Interested keep their answer.</footer>`
+      : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <p class="kb-pagehead__crumbs"><a href="${escapeHtml(panel)}">Host panel</a></p>

@@ -12,11 +12,12 @@ import {
   afterEach,
 } from "@jest/globals";
 
+const configBoolean = jest.fn<(k: string, d?: boolean) => Promise<boolean>>();
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       registerReloadCallback: jest.fn(),
-      getBoolean: jest.fn(),
+      getBoolean: configBoolean,
       getString: jest.fn(),
       getNumber: jest.fn(),
     })),
@@ -144,7 +145,7 @@ describe("eventEditVersion and diffEventEdit", () => {
 
 describe("EventService.editEvent", () => {
   type Priv = {
-    nativeSync: { syncEvent: jest.Mock };
+    nativeSync: { syncEvent: jest.Mock; linkedStatus: jest.Mock };
     updateAnnouncement: jest.Mock;
     isBeingEnded: jest.Mock;
     claimEventChannel: (
@@ -163,7 +164,11 @@ describe("EventService.editEvent", () => {
     service = EventService.getInstance({
       guilds: { fetch: jest.fn(async () => ({ id: "guild-1" })) },
     } as never) as never;
-    service.nativeSync = { syncEvent: jest.fn(async () => undefined) };
+    configBoolean.mockReset().mockResolvedValue(true);
+    service.nativeSync = {
+      syncEvent: jest.fn(async () => undefined),
+      linkedStatus: jest.fn(async () => "scheduled"),
+    };
     service.updateAnnouncement = jest.fn(async () => true);
     stored = row();
     EventStatics.findById = jest.fn(() => ({
@@ -349,6 +354,87 @@ describe("EventService.editEvent", () => {
     });
     await service.editEvent(input({ title: "New" }) as never);
     expect(verified.has(id)).toBe(false);
+  });
+
+  it("refuses every edit when events are off, and when the setting cannot be read", async () => {
+    configBoolean.mockResolvedValue(false);
+    expect(
+      await service.editEvent(input({ title: "New" }) as never),
+    ).toMatchObject({ ok: false, code: "disabled" });
+    configBoolean.mockRejectedValue(new Error("config down"));
+    expect(
+      await service.editEvent(input({ title: "New" }) as never),
+    ).toMatchObject({ ok: false, code: "disabled" });
+    expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  describe("a start that a running Discord event holds in place", () => {
+    const moveTo = { startTime: new Date("2030-01-01T22:00:00Z") };
+
+    it.each(["locked", "unknown"])(
+      "refuses a moved start when the linked native event is %s",
+      async (status) => {
+        stored = row({ nativeEventId: "n1" });
+        service.nativeSync.linkedStatus.mockResolvedValue(status);
+        expect(await service.editEvent(input(moveTo) as never)).toMatchObject({
+          ok: false,
+          code: "native-active",
+        });
+        expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["scheduled", "none"])(
+      "allows a moved start when the linked native event is %s",
+      async (status) => {
+        stored = row({ nativeEventId: "n1" });
+        service.nativeSync.linkedStatus.mockResolvedValue(status);
+        expect(await service.editEvent(input(moveTo) as never)).toMatchObject({
+          ok: true,
+        });
+      },
+    );
+
+    it("lets the title, description and duration through even when the status cannot be read, without asking", async () => {
+      stored = row({ nativeEventId: "n1" });
+      service.nativeSync.linkedStatus.mockResolvedValue("unknown");
+      expect(
+        await service.editEvent(
+          input({
+            title: "T",
+            description: "D",
+            durationMinutes: 100,
+          }) as never,
+        ),
+      ).toMatchObject({ ok: true });
+      expect(service.nativeSync.linkedStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("an active event kept open past its scheduled end", () => {
+    beforeEach(() => {
+      // Started 2 hours ago with a 90 minute duration: ended 30 minutes ago.
+      stored = row({
+        state: "active",
+        channelId: "c",
+        startTime: new Date(NOW.getTime() - 120 * MIN),
+      });
+    });
+
+    it("takes a new description with the duration unchanged", async () => {
+      expect(
+        await service.editEvent(input({ description: "Fixed" }) as never),
+      ).toMatchObject({ ok: true });
+    });
+
+    it("still refuses a duration that ends in the past, and accepts one that reaches the future", async () => {
+      expect(
+        await service.editEvent(input({ durationMinutes: 100 }) as never),
+      ).toMatchObject({ ok: false, code: "bad-end" });
+      expect(
+        await service.editEvent(input({ durationMinutes: 180 }) as never),
+      ).toMatchObject({ ok: true });
+    });
   });
 
   it("answers not-found for another guild's event", async () => {

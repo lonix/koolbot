@@ -174,6 +174,29 @@ export class NativeEventSync {
   }
 
   /**
+   * The state of the native event a row is linked to, read fresh from Discord
+   * (#1298), for a start-time edit that must not move under a running card.
+   * `none`: no link, or the link is gone (nothing to keep in line). `scheduled`:
+   * still editable. `locked`: Active, finished or cancelled, whose start the
+   * mirror never moves. `unknown`: the read failed; callers fail closed.
+   */
+  public async linkedStatus(
+    event: Pick<IEvent, "guildId" | "nativeEventId">,
+  ): Promise<"none" | "scheduled" | "locked" | "unknown"> {
+    if (!event.nativeEventId) return "none";
+    try {
+      const guild = await this.client.guilds.fetch(event.guildId);
+      const native = await this.fetchNative(guild, event.nativeEventId);
+      if (!native) return "none";
+      return native.status === GuildScheduledEventStatus.Scheduled
+        ? "scheduled"
+        : "locked";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
    * Load the guild's native events once, for a whole scan. Returns null when
    * mirroring is off, and `"failed"` when the listing failed: the caller then
    * skips native sync for this tick instead of falling back to one fetch per
