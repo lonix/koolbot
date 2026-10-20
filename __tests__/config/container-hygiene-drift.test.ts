@@ -29,7 +29,6 @@ describe("container and repo hygiene (#1154)", () => {
 
   it("no setup doc or script publishes MongoDB on all interfaces", () => {
     for (const file of [
-      ".github/copilot-setup-steps.yml",
       "CONTRIBUTING.md",
       "README.md",
       "TESTING.md",

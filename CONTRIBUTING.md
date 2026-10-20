@@ -66,7 +66,8 @@ For detailed technical guidance on extending KoolBot:
    cp .env.example .env
    ```
 
-   Edit `.env` and add your Discord bot credentials and MongoDB URI.
+   Edit `.env` and add your Discord bot credentials and MongoDB URI. Credentials are only needed to run the
+   bot against a real Discord server; tests use mocked Discord.js and MongoDB, so you can build and test without them.
 
 6. **Build the project**:
 
@@ -116,6 +117,12 @@ docker-compose -f docker-compose.dev.yml logs -f koolbot
 # Stop containers
 docker-compose -f docker-compose.dev.yml down
 ```
+
+### Copilot cloud agent setup
+
+`.github/workflows/copilot-setup-steps.yml` prepares the GitHub Copilot cloud agent's environment (Node from `.nvmrc`,
+then `npm ci`). Copilot only reads that exact path, and its job must stay named `copilot-setup-steps`. Run it manually
+from Actions > Copilot Setup Steps > Run workflow to check a change.
 
 ### Available Scripts
 
