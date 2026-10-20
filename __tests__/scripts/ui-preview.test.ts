@@ -271,6 +271,26 @@ describe("UI preview comment (#1341)", () => {
     expect(body).not.toContain("fresh@390.base.png");
   });
 
+  it("reports removed pages in the all-changed case too", () => {
+    const all = {
+      ...some,
+      mode: "all",
+      changed: [],
+      cssChanged: ["kb.css"],
+      removed: [entry("Gone")],
+      sample: [entry("Dashboard")],
+    };
+    const body = comment.buildComment(all, ctx) as string;
+    expect(body).toContain("1 page no longer rendered");
+    expect(body).toContain("- `Gone`");
+  });
+
+  it("says the comment follows pushes that touch UI files", () => {
+    const body = comment.buildComment(some, ctx) as string;
+    expect(body).toContain("Updated on pushes that touch UI files");
+    expect(body).not.toContain("every push");
+  });
+
   it("explains a missing base and lists no before shots", () => {
     const noBase = {
       ...some,

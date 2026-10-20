@@ -154,20 +154,21 @@ export function buildComment(
         ).map((l) => `${l} (new page, no before)`),
       );
     }
-    if (plan.removed.length) {
-      lines.push(
-        "",
-        `${plan.removed.length} page${plan.removed.length === 1 ? "" : "s"} no longer rendered:`,
-        "",
-        ...plan.removed.slice(0, MAX_LISTED).map((p) => `- ${code(p.name)}`),
-      );
-    }
+  }
+
+  if (plan.removed.length) {
+    lines.push(
+      "",
+      `${plan.removed.length} page${plan.removed.length === 1 ? "" : "s"} no longer rendered:`,
+      "",
+      ...plan.removed.slice(0, MAX_LISTED).map((p) => `- ${code(p.name)}`),
+    );
   }
 
   if (!summary) {
     lines.push(
       "",
-      "> Updated on every push. Screenshots are rendered from fixtures, so no bot, database or secrets are involved.",
+      "> Updated on pushes that touch UI files, so the commit above is the one this was rendered from. Screenshots are rendered from fixtures, so no bot, database or secrets are involved.",
     );
   }
   return lines.join("\n") + "\n";

@@ -687,8 +687,8 @@ uploads them as the `ui-preview` artifact, kept 14 days:
   (dashboard, one settings page, one `/me` page, the 390px reflow pages) and `all-pages/` holds every page (after only);
 - nothing differs: no screenshots, only `manifest.json` and `plan.json`.
 
-A same-repo PR also gets one sticky `ui-preview` comment, rewritten on every push, with the commit, the time (UTC), the artifact link and
-the list of changed pages. A separate small job posts it with `pull-requests: write`; the screenshots job keeps a read-only token, and the
+A same-repo PR also gets one sticky `ui-preview` comment, rewritten on pushes that touch UI files (the commit it shows is the one it was rendered
+from), with the commit, the time (UTC), the artifact link and the list of changed pages. A separate small job posts it with `pull-requests: write`; the screenshots job keeps a read-only token, and the
 comment text is built there and only posted by the other job, which runs no repository code. A fork PR gets the artifact and the job summary
 but no comment (and does not fail): there is no `pull_request_target` and no secret. To review a PR, open its `ui-preview` comment and
 download the artifact.
