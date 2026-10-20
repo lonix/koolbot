@@ -671,6 +671,21 @@ touch .env && docker compose -f docker-compose.yml config -q && docker compose -
 docker build .
 ```
 
+### Docker image tags
+
+`Docker Build and Push` publishes these tags to `ghcr.io/lonix/koolbot`:
+
+- `latest`, `X.Y.Z`, `X.Y`, `X` - a release. `latest` is always the newest release, never unreleased code. A tag build publishes
+  its `X.Y.Z` first (signed like any image). A separate `promote` job then points `latest`, `X.Y` and `X` at whichever release is the
+  newest at that moment (after verifying that image's cosign signature), one run at a time, so re-running or finishing late for an
+  older tag cannot move them backwards. Release images pick up base-image fixes at the next release.
+- `nightly` and `main` - the head of `main`, built nightly. A merge to `main` does not start a build.
+- `sha-<short-sha>` - the commit a tag or nightly build was made from.
+- `pr-<number>` and `pr-<number>-sha-<short-sha>` - PR previews (see below).
+
+Only PR previews are cancelled in progress, so a run that has pushed an image always gets to sign it. To run the nightly build
+by hand, use **Run workflow** on the `Docker Build and Push` workflow from `main`.
+
 ### Testing a PR in Docker
 
 Large changes often need a run in a real container before they merge. A

@@ -1,15 +1,20 @@
 name: Docker Build and Push
 
+# Image tags (#1278):
+#   v*.*.* tag push -> latest, X.Y.Z, X.Y, X (+ sha-<short>)
+#   nightly main    -> nightly, main, sha-<short>   (never latest)
+#   PR preview      -> pr-<number>, pr-<number>-sha-<short>
+# A merge to main does not build; the nightly run and the release tag do.
 on:
   push:
-    branches: [main]
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-  # Weekly rebuild so a quiet main still picks up refreshed base images and
-  # the Trivy scan sees newly published advisories (#963).
+  # Nightly build of main on a freshly pulled base image, so a quiet main still
+  # picks up refreshed base images and the Trivy scan sees newly published
+  # advisories (#963). Release images get base-image fixes at the next release.
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 3 * * *'
   # Opt-in preview images for same-repo PRs carrying the `docker-preview`
   # label (#1094): adding the label or pushing to a labelled PR builds
   # ghcr.io/<repo>:pr-<number>; closing the PR deletes its preview tags.
@@ -19,7 +24,10 @@ on:
   pull_request:
     types: [labeled, synchronize, reopened, closed]
 
-# Cancel in-progress runs for the same workflow and ref (except on tags).
+# Only PR previews are ever cancelled in progress. A schedule, dispatch or tag
+# run that has pushed an image must always reach cosign signing, so those runs
+# queue instead (a newer pending run replaces an older pending one for the same
+# ref).
 # pull_request events are keyed by PR number instead: on a merged PR's
 # `closed` event github.ref is the base branch, which would put cleanup in the
 # same group as the release build on main. A pull_request event that neither
@@ -41,7 +49,7 @@ concurrency:
         )
       ) && format('-skip-{0}', github.run_id) || ''
     }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -239,11 +247,16 @@ jobs:
           DOCKER_METADATA_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' }}
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # A tag build publishes only its own X.Y.Z. `latest`, X.Y and X are
+          # moved by the `promote` job, which decides freshness in a serialized
+          # step, so no build can roll them back. Nightly and branch builds
+          # never get `latest`; they get `nightly` (default branch only) and
+          # `main`.
+          flavor: |
+            latest=false
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=nightly,enable={{is_default_branch}}
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha,format=short,enable=${{ github.event_name != 'pull_request' }}
             type=ref,event=branch
             type=ref,event=pr
@@ -274,7 +287,7 @@ jobs:
           # whenever Alpine ships security updates, so pulling fresh is how the
           # image absorbs patched system OpenSSL (libssl3/libcrypto3) — e.g. the
           # High PKCS7_verify use-after-free (#57/#72). Without this, the gha
-          # build cache could reuse a stale base and a rebuild on main would
+          # build cache could reuse a stale base and the nightly rebuild would
           # never pick up the fix.
           pull: true
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
@@ -339,6 +352,103 @@ jobs:
           for tag in ${TAGS}; do
             cosign sign --yes "${tag}@${DIGEST}"
           done
+
+  # Moves latest, X.Y and X to the newest release (tag builds only). The
+  # version image above is already pushed and signed; this job only adds tags
+  # to that digest, and a failure here leaves it published and signed.
+  #
+  # All promote runs share ONE group and never cancel, so they run one at a
+  # time. GitHub keeps only one PENDING run per group and drops older pending
+  # ones, which is harmless here: every run resolves the newest release itself
+  # and promotes THAT release's image, never this run's own tag, so whichever
+  # run goes last (even a re-run of an older tag) leaves the aliases on the
+  # newest release. Version builds are not in this group, so they cannot be
+  # dropped.
+  #
+  # No re-sign is needed: the cosign signature and attestations are stored by
+  # image digest, and the aliases point at that same digest, so
+  # `cosign verify <image>:latest` finds the signature made in
+  # attest-and-sign. (imagetools copies a single source index unchanged, so the
+  # digest should stay identical; not yet confirmed on a real run.)
+  #
+  # `needs: attest-and-sign` only covers THIS run's image, but the newest
+  # release may be a different run whose signing is still in progress or has
+  # failed. So the job resolves that release's image to a digest, runs
+  # `cosign verify` on the digest, and promotes that same digest only if the
+  # signature checks out. If it does not (for example the newest release is
+  # still signing), the job fails without moving any alias, and the newest
+  # release's own promote, which runs after its attest-and-sign, sets them.
+  promote:
+    name: Promote release aliases
+    runs-on: ubuntu-latest
+    needs: attest-and-sign
+    timeout-minutes: 10
+    # A pre-release tag (v1.2.3-rc.1) never promotes. It is kept out of the
+    # shared group as well as skipped: GitHub keeps one pending run per group,
+    # and an ineligible run must not displace a pending stable promote. The
+    # step below keeps the strict vX.Y.Z regex as a second guard.
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    concurrency:
+      group: >-
+        ${{ github.workflow }}-promote${{
+          contains(github.ref_name, '-') && format('-skip-{0}', github.run_id) || ''
+        }}
+      cancel-in-progress: false
+    permissions:
+      # contents: read is for the releases lookup (a private repo needs it).
+      # packages: write adds the alias tags; cosign verify only reads. No
+      # id-token: nothing is signed here.
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Point latest, X.Y and X at the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          TRIGGER_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          stable='^v([0-9]+)\.([0-9]+)\.[0-9]+$'
+          # Only a real release tag triggers promotion; a pre-release tag
+          # never moves the aliases.
+          if [[ ! "${TRIGGER_TAG}" =~ ${stable} ]]; then
+            echo "::notice::${TRIGGER_TAG} is not a stable release tag; nothing to promote."
+            exit 0
+          fi
+          newest="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+          [[ "${newest}" =~ ${stable} ]] || { echo "unexpected release tag: ${newest}" >&2; exit 1; }
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          image="${IMAGE,,}"
+          version="${newest#v}"
+          echo "Newest release is ${newest} (this run: ${TRIGGER_TAG}); resolving ${image}:${version}."
+          digest="$(docker buildx imagetools inspect "${image}:${version}" --format '{{.Manifest.Digest}}')"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: ${digest}" >&2; exit 1; }
+          # Only an image signed by this repo's docker.yml on a release tag
+          # may be promoted. Regex metacharacters in the repo name are escaped.
+          repo_re="$(printf '%s' "${REPO}" | sed -E 's/[]\\.*+?^${}()|[-]/\\&/g')"
+          if ! cosign verify \
+            --certificate-identity-regexp "^https://github\.com/${repo_re}/\.github/workflows/docker\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${image}@${digest}" > /dev/null; then
+            echo "::error::${newest} (${image}@${digest}) has no valid cosign signature yet, so no alias was moved. Its own promote run sets them once its signing succeeds; re-run that tag's workflow if signing failed." >&2
+            exit 1
+          fi
+          echo "Verified ${image}@${digest}; promoting it."
+          docker buildx imagetools create \
+            --tag "${image}:latest" --tag "${image}:${major}.${minor}" --tag "${image}:${major}" \
+            "${image}@${digest}"
 
   preview-comment:
     name: Post preview pull command
