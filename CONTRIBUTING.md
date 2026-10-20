@@ -688,10 +688,10 @@ uploads them as the `ui-preview` artifact, kept 14 days:
 - nothing differs: no screenshots, only `manifest.json` and `plan.json`.
 
 A same-repo PR also gets one sticky `ui-preview` comment, rewritten on pushes that touch UI files (the commit it shows is the one it was rendered
-from), with the commit, the time (UTC), the artifact link and the list of changed pages. A separate small job posts it with `pull-requests: write`; the screenshots job keeps a read-only token, and the
-comment text is built there and only posted by the other job, which runs no repository code. A fork PR gets the artifact and the job summary
-but no comment (and does not fail): there is no `pull_request_target` and no secret. To review a PR, open its `ui-preview` comment and
-download the artifact.
+from), with the commit, the time (UTC), the artifact link and the list of changed pages. A separate small job posts it with `pull-requests: write`;
+the screenshots job keeps a read-only token, and the comment text is built there and only posted by the other job, which runs no repository code. A
+fork PR gets the artifact and the job summary but no comment (and does not fail): there is no `pull_request_target` and no secret. To review a PR,
+open its `ui-preview` comment and download the artifact.
 
 It is not a required check and does not run on other PRs. Never add it to branch protection or a ruleset: a required check behind a path
 filter never reports on PRs that skip it, so those PRs could not merge. To render and screenshot locally (set `UI_PREVIEW_CHROME` to a
