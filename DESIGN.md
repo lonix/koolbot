@@ -6,7 +6,7 @@ where existing code disagrees, this document wins and the gap is tracked in the 
 | File | What it holds |
 | --- | --- |
 | [docs/design/tokens.json](docs/design/tokens.json) | Every colour, type style, spacing step, radius, shadow and layout size. The single source for values. |
-| [docs/design/kb.css](docs/design/kb.css) | The `kb-` component stylesheet, built only from the tokens. |
+| [docs/design/kb.css](docs/design/kb.css) | The `kb-` component stylesheet. Colours, spacing, radii, shadows and layout come from the tokens; font sizes still repeat the type scale until #1315 generates type properties. |
 | [docs/design/components.md](docs/design/components.md) | One section per component: what it is for, its markup, its rules. |
 | [docs/design/pages.md](docs/design/pages.md) | The redesigned pages, per scope, and what each shows first. |
 | [docs/design/patterns.md](docs/design/patterns.md) | Page patterns, and which component replaces each old class. |

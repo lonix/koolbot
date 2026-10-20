@@ -67,8 +67,8 @@ Underlined tabs for the member pages: Overview, Notifications, Timezone, Voice.
 **Markup.** `nav.kb-tabs` with plain links; the current one has `aria-current="page"` (white label plus a `primary` underline, so the state is not
 colour alone).
 
-Members only see what they can use. A tab whose feature the server has switched off (Birthday, Rewind) is not rendered at all, and its route answers
-with the overview. This replaces the greyed *Off* tabs of #709.
+Members only see what they can use. A tab whose feature the server has switched off (Birthday, Rewind) is not rendered at all, and its route returns
+404 (#1292). This replaces the greyed *Off* tabs of #709.
 
 Also used inside a page for sibling views of one thing (Server scan: Overview, Roles, Channels, Other bots, Discord), each with a count badge. Inside
 a panel, switch sections with a SegmentedControl instead.
@@ -130,7 +130,7 @@ so the state never rests on colour or position alone), then the label text. With
 
 - On: `primary` track, white thumb. Off: `bg` track with a `control` edge (3.66:1 on surface), `muted` thumb.
 - A switch that depends on another (Captains lobby needs Leaders) is `disabled`, with help text naming what to turn on.
-- In a form with a save bar, a switch changes only the form. On the dashboard switchboard (Dashboard B) a switch saves at once, and its panel says so.
+- A switch changes only its form; the SaveBar saves it. The Dashboard has no switches: features are switched on their own page.
 
 ### SegmentedControl
 
@@ -401,7 +401,8 @@ Detail on demand, built on `details`/`summary`, in three sizes: a whole panel se
 **Markup.** `details.kb-disclosure` → `summary` (a `kb-chev` chevron icon, the label, optional count badge, optional `span.kb-disclosure__hint`
 summarising what is inside) and `div.kb-disclosure__body`. Inline: `details.kb-disclosure--inline` with a short link-coloured summary.
 
-- Fold what is fine, keep what needs a decision open: Bot Permissions shows *Needs fixing* open and *In place (9)* folded, with a hint listing the features.
+- Fold what does not need a decision, keep the rest open: Bot permissions keeps every needed permission in its matrix and folds only *Not needed (3)*;
+  Server scan folds *Notes*.
 - The summary must say what is inside, so people can skip it.
 - Never hide something a person must read before acting; that belongs in the Dialog for that action.
 
