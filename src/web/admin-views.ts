@@ -4,7 +4,7 @@
  * without a Discord client or MongoDB.
  */
 
-import { confirmListAttr, scriptTag } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
@@ -1340,7 +1340,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 
   const actionBar = `
 <div class="actions">
-  <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status.">
+  <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status."${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${csrf}">
     <button type="submit" class="btn">Reload commands</button>
   </form>
@@ -3415,7 +3415,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Unarchive</button></form>
   <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel."${REACTION_ROLE_DELETE_LIST}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   } else {
-    actions = `<form method="POST" action="/admin/reaction-roles/archive" data-confirm="Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
+    actions = `<form method="POST" action="/admin/reaction-roles/archive" data-confirm="Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved."${CONFIRM_NEUTRAL_ATTR}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
   <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel."${REACTION_ROLE_DELETE_LIST}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   }
 
@@ -4106,7 +4106,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", feat
     <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron)}</dd>
     <dt>Stored birthdays</dt><dd>${props.listUnavailable ? '<span class="muted">unavailable</span>' : props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?">
+  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -4864,7 +4864,7 @@ ${renderFeatureSettingsCard({
     <button type="submit" name="preview" value="1" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Preview digest</button>
     <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
   </form>
-  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?">
+  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${sendDisabled ? " disabled" : ""}>Send now</button>
     <span class="muted">${sendHint}</span>
@@ -5086,7 +5086,7 @@ ${renderFeatureSettingsCard({
 <div class="card">
   <h2>Current holders</h2>
   ${holdersHtml}
-  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately.">
+  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately."${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -5507,7 +5507,7 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
             "It is not reviewed again.",
           ],
         )}>Make permanent</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there.">Readmit</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there."${CONFIRM_NEUTRAL_ATTR}>Readmit</button>
       </div>
       <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Readmit records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
@@ -5558,7 +5558,7 @@ ${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days
   return `<div class="card">
   <h2>Cases</h2>
   <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided when it came due. Escalation stays a human decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?">
+  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?"${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
     <button type="submit" class="btn btn-sm">Run review pass now</button>
   </form>

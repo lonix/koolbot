@@ -424,8 +424,12 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
 - `data-confirm-list` is a JSON array of consequence strings (`confirmListAttr()` writes it). They are rendered with `textContent`, never as HTML.
   Give a list to the high-impact actions: reset defaults, rebuild and resync, reaction-role and group delete, event cancel, birthday remove and
   making a removal permanent. Other actions are title-only.
-- The danger button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads *Go back*, so it is never confused with a
+- The confirm button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads *Go back*, so it is never confused with a
   *Cancel* verb such as "Cancel event".
+- `data-confirm-tone` is `danger` (the default, so a site that says nothing fails closed to red) or `neutral` (the `primary` fill and its
+  `on-primary` label, a pair the #1326 contrast gate already covers). Red is for actions that delete, remove, cancel or reset; "Run now", "Apply plan",
+  "Readmit" and "Archive" are neutral. `NEUTRAL_CONFIRM_ACTIONS` in `src/web/html.ts` is the one list of neutral actions; a site that carries a
+  consequence list can never be neutral, and the drift test fails when a site's tone and that list disagree.
 - Confirming submits the same form (`requestSubmit`), so the CSRF token, typed-name guards and other submit handlers are unchanged.
 - Without `showModal()` it falls back to `window.confirm()`; without JavaScript the form posts at once, as before.
 

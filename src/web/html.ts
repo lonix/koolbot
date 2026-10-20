@@ -82,7 +82,7 @@ export const CONFIRM_SCRIPT = [
   "head.appendChild(title);var items=listOf(src);",
   "if(items.length){var ul=el('ul');items.forEach(function(t){ul.appendChild(el('li','',t))});body.appendChild(ul);",
   "body.id='kb-confirm-body';d.setAttribute('aria-describedby',body.id)}",
-  "var back=el('button','kb-btn kb-btn--ghost','Go back'),ok=el('button','kb-btn kb-btn--danger',verbOf(src,btn));",
+  "var back=el('button','kb-btn kb-btn--ghost','Go back'),ok=el('button','kb-btn '+(src.getAttribute('data-confirm-tone')==='neutral'?'kb-btn--primary':'kb-btn--danger'),verbOf(src,btn));",
   "back.type='button';ok.type='button';",
   "back.addEventListener('click',function(){d.close()});",
   "ok.addEventListener('click',function(){confirmed=true;d.close();go()});",
@@ -108,6 +108,42 @@ export const CONFIRM_SCRIPT = [
   "ask(b,b,b,function(){bypass=b;try{b.click()}finally{bypass=null}})},true)",
   "})();",
 ].join("");
+
+/**
+ * The tone of a confirmation (`data-confirm-tone`): `danger` (the default, so a
+ * site that says nothing fails closed to red) or `neutral`, which gives the
+ * confirm button the primary fill. Red is kept for actions that delete, remove,
+ * cancel or reset, so admins do not learn to read it as routine.
+ */
+export const CONFIRM_NEUTRAL_ATTR = ` data-confirm-tone="neutral"`;
+
+/**
+ * The single source of truth for which `data-confirm` actions are NOT
+ * destructive (form `action`, or a button's `formaction`). Only these may carry
+ * `CONFIRM_NEUTRAL_ATTR`, and every one of them must: the drift test in
+ * `__tests__/web/confirm-dialog.test.ts` checks both directions, and that no site
+ * with a consequence list is ever neutral. Everything else is `danger`.
+ */
+export const NEUTRAL_CONFIRM_ACTIONS: readonly RegExp[] = [
+  /^\/admin\/settings\/reload$/,
+  /^\/admin\/birthdays\/run-now$/,
+  /^\/admin\/digest\/send-now$/,
+  /^\/admin\/leaderboard-roles\/run-now$/,
+  /^\/admin\/moderation\/cases\/run-review$/,
+  /^\/admin\/moderation\/cases\/[^/]+\/readmit$/,
+  /^\/admin\/reaction-roles\/archive$/,
+  /^\/admin\/rules\/sync$/,
+  /^\/admin\/rules\/apply$/,
+  /^\/admin\/adopt\/claims\/apply$/,
+  /^\/admin\/adopt\/events\/apply$/,
+  /^\/admin\/role-groups\/apply$/,
+  /^\/admin\/role-groups\/admin-fix\/apply$/,
+];
+
+/** True when `action` is one of the non-destructive confirmations. */
+export function isNeutralConfirmAction(action: string): boolean {
+  return NEUTRAL_CONFIRM_ACTIONS.some((re) => re.test(action));
+}
 
 /**
  * The `data-confirm-list` attribute (leading space included) that gives a

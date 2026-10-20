@@ -3,7 +3,7 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
-import { scriptTag } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import {
@@ -91,7 +91,7 @@ function renderPlan(p: EventAdoptionPlan, csrf: string): string {
       .map((id) => `<input type="hidden" name="ev" value="${escapeHtml(id)}">`)
       .join("");
   const apply = eventPlanIsApplicable(p)
-    ? `<form method="POST" action="${EVENT_ADOPTION_PATH}/apply" data-confirm="Adopt these events as KoolBot events? A snapshot is saved first and the Discord events are not changed.">${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">Roll it back later from <a href="/admin/adopt/history">Adoption</a>.</span></form>`
+    ? `<form method="POST" action="${EVENT_ADOPTION_PATH}/apply" data-confirm="Adopt these events as KoolBot events? A snapshot is saved first and the Discord events are not changed."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">Roll it back later from <a href="/admin/adopt/history">Adoption</a>.</span></form>`
     : "";
   return `<h3>Preview</h3>${renderAdoptionDiff(p.plan)}${apply}`;
 }

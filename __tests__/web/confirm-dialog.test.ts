@@ -15,6 +15,8 @@ import {
   CONFIRM_SCRIPT,
   confirmListAttr,
   escapeHtml,
+  isNeutralConfirmAction,
+  NEUTRAL_CONFIRM_ACTIONS,
   NONCE_MARKER,
   scriptTag,
 } from "../../src/web/html.js";
@@ -87,7 +89,9 @@ function fixtureHtml(): string {
     `${confirmListAttr(["The role is deleted.", HOSTILE])}>` +
     `<input type="hidden" name="_csrf" value="tok"><button id="del" type="submit">Delete</button></form>` +
     `<form id="g" method="POST" action="/x"><button id="perm" type="submit" formaction="/y/permanent" ` +
-    `data-confirm="Make permanent?">Make permanent</button></form>`
+    `data-confirm="Make permanent?">Make permanent</button></form>` +
+    `<form id="n" method="POST" action="/admin/digest/send-now" data-confirm="Send it?" ` +
+    `data-confirm-tone="neutral"><button type="submit">Send now</button></form>`
   );
 }
 
@@ -106,6 +110,8 @@ interface Observations {
   confirmResubmitsSameForm: boolean;
   csrfSurvives: boolean;
   buttonSubmitterKept: boolean;
+  dangerByDefault: boolean;
+  neutralToneIsPrimary: boolean;
 }
 
 /** Drive one copy of the script through every behaviour the issue lists. */
@@ -153,6 +159,9 @@ function observe(script: string): Observations {
       items[1].children.length === 0;
     const { back, ok } = buttons(d);
     obs.confirmRepeatsVerb = ok.textContent === "Delete";
+    obs.dangerByDefault =
+      ok.classList.contains("kb-btn--danger") &&
+      !ok.classList.contains("kb-btn--primary");
     obs.cancelFocused = document.activeElement === back;
 
     // Go back.
@@ -195,6 +204,16 @@ function observe(script: string): Observations {
       before === 0 &&
       seen.length === 1 &&
       seen[0].submitter === perm;
+
+    // A neutral site gets the primary fill, not the danger one.
+    document.getElementById("n")!.dispatchEvent(submitEvent());
+    const d5 = dialog();
+    const neutralOk = d5 ? buttons(d5).ok : null;
+    obs.neutralToneIsPrimary =
+      neutralOk !== null &&
+      neutralOk.classList.contains("kb-btn--primary") &&
+      !neutralOk.classList.contains("kb-btn--danger");
+    d5?.close();
     return obs;
   } finally {
     document.removeEventListener("submit", sink);
@@ -227,6 +246,8 @@ describe("confirmation dialog (#1343)", () => {
       confirmResubmitsSameForm: true,
       csrfSurvives: true,
       buttonSubmitterKept: true,
+      dangerByDefault: true,
+      neutralToneIsPrimary: true,
     });
   });
 
@@ -366,6 +387,16 @@ describe("mutation check on the confirm wiring", () => {
       "back.addEventListener('click',function(){d.close()});",
       "",
     ],
+    [
+      "neutral tone is honoured",
+      "src.getAttribute('data-confirm-tone')==='neutral'?'kb-btn--primary':'kb-btn--danger'",
+      "'kb-btn--danger'",
+    ],
+    [
+      "danger is the default tone",
+      "src.getAttribute('data-confirm-tone')==='neutral'?",
+      "src.getAttribute('data-confirm-tone')!=='danger'?",
+    ],
     ["dialog is removed on close", "d.parentNode.removeChild(d)", "0"],
     [
       "button carries its submitter",
@@ -410,10 +441,35 @@ const NEEDS_LIST: Array<[string, (a: string) => boolean]> = [
   ["role-group delete", (a) => a.endsWith("/delete-role/apply")],
 ];
 
+describe("tone: a high-impact site can never be neutral", () => {
+  it("keeps every listed action out of the neutral set", () => {
+    const samples = [
+      "/admin/settings/reset-defaults",
+      "/admin/notices/sync",
+      "/admin/quotes/sync",
+      "/admin/reaction-roles/delete",
+      "/admin/reaction-roles/group/delete",
+      "/admin/events/e1/cancel",
+      "/admin/birthdays/b1/remove",
+      "/admin/moderation/cases/c1/permanent",
+      "/admin/role-groups/g1/delete-role/apply",
+    ];
+    for (const action of samples) {
+      expect(NEEDS_LIST.some(([, test]) => test(action))).toBe(true);
+      expect(isNeutralConfirmAction(action)).toBe(false);
+    }
+  });
+
+  it("treats an unknown action as danger", () => {
+    expect(isNeutralConfirmAction("/admin/anything/delete")).toBe(false);
+  });
+});
+
 describe("every data-confirm site in the rendered pages (drift)", () => {
   it("opens the dialog, carries a valid list, and submits the same form", () => {
     installDialogStandIn();
     const matched = new Set<string>();
+    const neutralSeen = new Set<number>();
     let sites = 0;
     try {
       for (const page of allPages()) {
@@ -456,6 +512,23 @@ describe("every data-confirm site in the rendered pages (drift)", () => {
                 expect(raw).not.toBeNull();
               }
             }
+            // Tone: declared (or inherited as danger) and consistent with the
+            // one list of non-destructive actions; a list-bearing site is
+            // never neutral.
+            const tone = el.getAttribute("data-confirm-tone");
+            expect([null, "danger", "neutral"]).toContain(tone);
+            const neutral = isNeutralConfirmAction(action);
+            if ((tone === "neutral") !== neutral) {
+              throw new Error(
+                `${page.name}: ${title} (${action}) tone=${tone} but isNeutralConfirmAction=${neutral}`,
+              );
+            }
+            if (raw !== null) expect(tone).not.toBe("neutral");
+            if (neutral) {
+              neutralSeen.add(
+                NEUTRAL_CONFIRM_ACTIONS.findIndex((re) => re.test(action)),
+              );
+            }
             // A browser only fires submit once the form is valid (e.g. the
             // typed guild name), so satisfy the required fields first.
             for (const field of Array.from(
@@ -474,6 +547,11 @@ describe("every data-confirm site in the rendered pages (drift)", () => {
             );
             expect(submits).toHaveLength(0);
             expect(document.activeElement).toBe(buttons(d!).back);
+            expect(
+              buttons(d!).ok.classList.contains(
+                neutral ? "kb-btn--primary" : "kb-btn--danger",
+              ),
+            ).toBe(true);
             buttons(d!).ok.click();
             expect(dialog()).toBeNull();
             if (submits.length !== 1) {
@@ -492,6 +570,17 @@ describe("every data-confirm site in the rendered pages (drift)", () => {
       removeDialogStandIn();
     }
     expect(sites).toBeGreaterThan(10);
+    // Plan-apply forms that the a11y fixtures do not render (no applicable
+    // plan there); their tone is covered by the attribute check above on every
+    // site that does render. Anything else missing means a fixture was lost.
+    const NOT_FIXTURED = ["/admin/rules/apply", "/admin/role-groups/apply"].map(
+      (a) => NEUTRAL_CONFIRM_ACTIONS.findIndex((re) => re.test(a)),
+    );
+    expect(Array.from(neutralSeen).sort((a, b) => a - b)).toEqual(
+      NEUTRAL_CONFIRM_ACTIONS.map((_, i) => i).filter(
+        (i) => !NOT_FIXTURED.includes(i),
+      ),
+    );
     expect(Array.from(matched).sort()).toEqual(
       NEEDS_LIST.map(([name]) => name).sort(),
     );
