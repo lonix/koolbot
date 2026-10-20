@@ -201,6 +201,9 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.meta.outputs.tags }}
+      # When the push finished (UTC), shown in the preview comment. Only set
+      # on pull_request.
+      built-at: ${{ steps.built-at.outputs.time }}
     # Previews run this job too, so it only gets what a push needs. The
     # release-only grants live on attest-and-sign, which previews never reach.
     permissions:
@@ -303,6 +306,11 @@ jobs:
           # previews skip them to stay fast and cheap.
           provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
           sbom: ${{ github.event_name != 'pull_request' }}
+
+      - name: Record the build time
+        id: built-at
+        if: github.event_name == 'pull_request'
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
 
   attest-and-sign:
     name: Attest and sign
@@ -472,21 +480,32 @@ jobs:
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           DIGEST: ${{ needs.build-and-push.outputs.digest }}
+          BUILT_AT: ${{ needs.build-and-push.outputs.built-at }}
         with:
           script: |
             const MARKER = '<!-- docker-preview -->';
             const number = context.issue.number;
             const image = process.env.IMAGE.toLowerCase();
             const digest = process.env.DIGEST;
-            // metadata-action's short SHA is the first 7 characters.
-            const sha = context.payload.pull_request.head.sha.slice(0, 7);
+            // The commit the image was built from: build-and-push checks out
+            // this exact head SHA. metadata-action's short SHA is its first 7
+            // characters.
+            const fullSha = context.payload.pull_request.head.sha;
+            const sha = fullSha.slice(0, 7);
+            const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${fullSha}`;
+            // `2026-10-20T10:02:03Z` -> `2026-10-20 10:02:03 UTC`
+            const builtAt = (process.env.BUILT_AT || new Date().toISOString().slice(0, 19) + 'Z')
+              .replace('T', ' ').replace('Z', ' UTC');
             const tag = `pr-${number}`;
             const pinned = `${tag}-sha-${sha}`;
             const body = [
               MARKER,
+              // Machine-readable: the preview-outdated job compares this with the
+              // PR head. Keep it on line 2.
+              `<!-- docker-preview-commit: ${fullSha} -->`,
               '### 🐳 Docker preview ready',
               '',
-              `Built from ${sha} ([run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})).`,
+              `Built from [\`${sha}\`](${commitUrl}) at ${builtAt} ([run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})).`,
               '',
               'Latest build of this PR:',
               '',
@@ -503,7 +522,7 @@ jobs:
               `Digest: \`${digest}\``,
               '',
               '> Run it with its own Discord application/token, a test guild and a throwaway MongoDB, never production.',
-              '> This comment is updated on every rebuild. The images are deleted when the PR is closed.',
+              '> This comment is updated on every rebuild, and marked outdated when a push to the PR is not built. The images are deleted when the PR is closed.',
             ].join('\n');
 
             const comments = await github.paginate(github.rest.issues.listComments, {
@@ -515,6 +534,82 @@ jobs:
             } else {
               await github.rest.issues.createComment({ ...context.repo, issue_number: number, body });
             }
+
+  # Marks the sticky preview comment outdated when the PR head has moved on
+  # without a new build (#1308). preview-comment rewrites the comment on every
+  # successful build; this covers the pull_request runs that ran but did not
+  # build: label removed (hadolint skipped), build skipped or failed. It only
+  # edits an existing comment, and only when that comment's commit marker
+  # differs from the current head. Not covered: events that start no run (a push
+  # made with GITHUB_TOKEN, a PR with merge conflicts, removing the label with
+  # no later push) and fork PRs, which never get a preview comment.
+  preview-outdated:
+    name: Mark preview outdated
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    timeout-minutes: 5
+    # `!cancelled()` so a skipped or failed build still reaches this job; a run
+    # cancelled by a newer push does not (that push's run takes over). An
+    # unrelated label does not move the head, so it is left out.
+    if: >-
+      !cancelled() && needs.build-and-push.result != 'success' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository && (
+        github.event.action == 'synchronize' || github.event.action == 'reopened' ||
+        (github.event.action == 'labeled' && github.event.label.name == 'docker-preview')
+      )
+    permissions:
+      # Edit the sticky preview comment.
+      pull-requests: write
+    steps:
+      - name: Mark the preview comment outdated
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BUILD_RESULT: ${{ needs.build-and-push.result }}
+        with:
+          script: |
+            const MARKER = '<!-- docker-preview -->';
+            const number = context.issue.number;
+            const head = context.payload.pull_request.head.sha;
+            // A newer push is already in flight: its run owns the comment.
+            const { data: current } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+            if (current.head.sha !== head) {
+              core.info('The PR head moved again; leaving the comment to the newer run.');
+              return;
+            }
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(MARKER));
+            // No comment, or the "removed" one (no commit marker): nothing to mark.
+            const built = existing?.body.match(/<!-- docker-preview-commit: ([0-9a-f]{40}) -->/)?.[1];
+            if (!built) {
+              core.info('No built preview comment to mark.');
+              return;
+            }
+            if (built === head) {
+              core.info('The preview already matches the PR head.');
+              return;
+            }
+            const why = process.env.BUILD_RESULT === 'failure'
+              ? 'The build for the new head failed'
+              : 'No build ran for the new head (the `docker-preview` label may be missing, or the build was skipped)';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const commitUrl = (h) => `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${h}`;
+            const notice = [
+              '<!-- docker-preview-outdated -->',
+              '> [!WARNING]',
+              `> **Outdated.** The PR head is now [\`${head.slice(0, 7)}\`](${commitUrl(head)}), but the image below was built from ` +
+                `[\`${built.slice(0, 7)}\`](${commitUrl(built)}). ${why} ([run](${runUrl})).`,
+              '<!-- /docker-preview-outdated -->',
+              '',
+            ].join('\n');
+            // Drop an earlier notice so repeated runs do not stack them.
+            const base = existing.body
+              .replace(/<!-- docker-preview-outdated -->[\s\S]*?<!-- \/docker-preview-outdated -->\n\n?/, '')
+              .replace(/^### .*$/m, '### 🐳 Docker preview outdated');
+            const body = base.replace(/^(### .*\n\n)/m, `$1${notice}\n`);
+            await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
 
   cleanup-preview:
     name: Delete PR preview image
