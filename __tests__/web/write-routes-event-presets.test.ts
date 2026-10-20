@@ -90,7 +90,7 @@ beforeEach(async () => {
   mockCreate.mockResolvedValue({ ok: true, id: `lib:${OID}` });
   mockUpdate.mockResolvedValue({ ok: true });
   mockDelete.mockResolvedValue({ ok: true });
-  mockToggle.mockResolvedValue({ ok: true, label: "Wardogs" });
+  mockToggle.mockResolvedValue({ ok: true, label: "3 teams" });
   harness = await startAdminHarness([
     stubRequireSession(createTestSession()),
     requireAdminRoleMiddleware(),
@@ -161,7 +161,7 @@ describe("POST /events/presets/save", () => {
       { ...goodBody, group_0_size: "100" },
       { ...goodBody, group_1_name: "assault" },
       { ...goodBody, preset_name: "" },
-      { ...goodBody, preset_name: "Wardogs" },
+      { ...goodBody, preset_name: "3 teams" },
       { preset_name: "Big", g: "x" },
     ]) {
       const flash = await post("/events/presets/save", bad);
