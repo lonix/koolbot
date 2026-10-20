@@ -477,6 +477,35 @@ describe("reflow (#855)", () => {
     expect(narrow.length).toBeGreaterThan(0);
   });
 
+  /** The declarations of the first top-level kb.css rule for `selector`. */
+  const rule = (selector: string): string => {
+    const line = css.split("\n").find((l) => l.startsWith(`${selector} { `));
+    return line ?? "";
+  };
+
+  it("lets a long name and three badges wrap instead of scrolling the page", () => {
+    // jsdom has no layout, so the contract is the rules themselves, at every
+    // width (not only inside the 760px query).
+    expect(rule(".kb-topbar")).toContain("flex-wrap: wrap");
+    expect(rule(".kb-topbar")).toContain("min-height: var(--topbar-height)");
+    expect(rule(".kb-topbar")).not.toContain(" height: var(--topbar-height)");
+    expect(rule(".kb-topbar__end")).toContain("flex-wrap: wrap");
+    expect(rule(".kb-topbar__end")).toContain("min-width: 0");
+    expect(rule(".kb-topbar__end")).toContain("max-width: 100%");
+    expect(rule(".kb-whoami")).toContain("flex-wrap: wrap");
+    expect(rule(".kb-whoami")).toContain("min-width: 0");
+    expect(rule(".kb-whoami")).toContain("max-width: 100%");
+  });
+
+  it("shrinks and breaks an unbroken display name", () => {
+    const name = rule(".kb-whoami__name");
+    expect(name).toContain("min-width: 0");
+    expect(name).toContain("max-width: 18rem");
+    expect(name).toContain("overflow-wrap: anywhere");
+    const doc = userPage({ ...member, displayName: "x".repeat(200) });
+    expect(doc.querySelector(".kb-whoami > .kb-whoami__name")).not.toBeNull();
+  });
+
   it("emits those hook classes", () => {
     const doc = userPage(host);
     for (const sel of [

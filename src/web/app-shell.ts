@@ -436,7 +436,7 @@ function renderWhoami(viewer: ShellViewer): string {
   return (
     `<span class="kb-whoami">` +
     `<span class="kb-avatar" aria-hidden="true">${escapeHtml(initialOf(name))}</span>` +
-    `<span>${escapeHtml(name)}</span>${badgeScopes(viewer).join("")}</span>`
+    `<span class="kb-whoami__name">${escapeHtml(name)}</span>${badgeScopes(viewer).join("")}</span>`
   );
 }
 
