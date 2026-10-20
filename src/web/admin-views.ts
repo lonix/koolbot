@@ -303,11 +303,12 @@ export function renderBootstrapPage(props: BootstrapProps): string {
           const status = r.present
             ? `<span class="tag tag-on">configured</span>`
             : `<span class="tag tag-off">unset</span>`;
-          const value = r.present
-            ? r.isSecret
-              ? `<span class="muted mono">${escapeHtml(r.display ?? "")}</span>`
-              : `<span class="mono">${escapeHtml(r.display ?? "")}</span>`
-            : "";
+          // Secrets are presence-only: never render `display` for them, even
+          // if a caller passes one.
+          const value =
+            r.present && !r.isSecret
+              ? `<span class="mono">${escapeHtml(r.display ?? "")}</span>`
+              : "";
           return `<tr><td class="mono">${escapeHtml(r.key)}</td><td>${status}</td><td>${value}</td></tr>`;
         })
         .join("");
@@ -322,7 +323,7 @@ export function renderBootstrapPage(props: BootstrapProps): string {
   const body = `
 <h1>Bootstrap</h1>
 <p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
-<div class="notice info">Secrets are surfaced as presence + last 4 characters only. Never edited from the WebUI, never written to MongoDB.</div>
+<div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
 ${sections}
 `;
   return renderAdminPage({

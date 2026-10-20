@@ -41,3 +41,19 @@ export const BOOTSTRAP_VARS: readonly BootstrapEnvVar[] = [
 export const PROTECTED_KEYS: ReadonlySet<string> = new Set(
   BOOTSTRAP_VARS.map((v) => v.key),
 );
+
+/**
+ * What the Bootstrap page may show next to a variable's status tag.
+ *
+ * Secrets are presence-only: no prefix, no tail, no length. A guild
+ * Administrator who signs in to the Web UI is not necessarily the host
+ * operator, so even a few characters of a token or connection string are
+ * more than they need. Non-secret values are shown (long ones truncated).
+ */
+export function bootstrapDisplay(
+  v: BootstrapEnvVar,
+  raw: string | undefined,
+): string | undefined {
+  if (!raw || v.isSecret) return undefined;
+  return raw.length > 32 ? `${raw.slice(0, 28)}…` : raw;
+}

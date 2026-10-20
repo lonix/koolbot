@@ -62,8 +62,8 @@ Complete configuration reference for all KoolBot settings.
 
 These settings live in `.env` only. Editing them requires editing the
 file on the host and restarting the bot. The Web UI's **Bootstrap** page
-surfaces them read-only for diagnostics, with secrets masked to the last
-4 characters.
+surfaces them read-only for diagnostics; secrets are shown as configured or
+unset only, never any part of their value.
 
 ### Required for the bot itself
 
@@ -167,7 +167,7 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/koolbot
 ### Bootstrap diagnostics
 
 Inside the Web UI, the **Bootstrap** page shows whether each env var is
-configured. Secrets are masked (e.g. `DISCORD_TOKEN ✓ ...x9F2`). You
+configured. Secrets show as configured or unset only, never any part of their value. You
 can verify the process picked up the values you set without having to
 shell into the container.
 
@@ -2161,7 +2161,7 @@ restarts, so the note is not reposted.
 `METRICS_ENABLED` and `METRICS_TOKEN` are also `.env`-only but are not listed
 on the Bootstrap page.
 
-These are visible on the Web UI's **Bootstrap** page (secrets masked).
+These are visible on the Web UI's **Bootstrap** page (secrets show as configured or unset only).
 Edit them in `.env` and restart the bot to change them.
 
 ---

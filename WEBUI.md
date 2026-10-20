@@ -233,7 +233,9 @@ else lives in MongoDB and is edited via the Web UI.**
 
 The Web UI's **Bootstrap** page surfaces every `.env` value the bot
 reads (see `BOOTSTRAP_VARS` in `src/web/read-only-routes.ts`),
-read-only, with secrets masked (last 4 characters only). You can verify
+read-only. Secrets (`DISCORD_TOKEN`, `MONGODB_URI`, `WEBUI_SESSION_SECRET`)
+show as configured or unset only, never any part of their value, because a
+guild Administrator is not necessarily the host operator. You can verify
 what the process saw at startup, but you cannot change it from the
 browser.
 
