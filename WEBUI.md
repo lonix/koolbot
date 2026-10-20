@@ -3225,8 +3225,8 @@ sign-in and error pages are styled too). Write `var(--name)`, never a hex
 literal. Form-control borders use `var(--control)` (3.97:1, the WCAG 1.4.11
 floor is 3:1), secondary text uses `var(--muted)` (6.8:1 on a card — the 4.5:1
 floor applies to small text), and destructive buttons use `var(--danger)`
-(white text reaches 4.8:1). Edit a value in `tokens.json` and restart (the dev
-server restarts itself) to change it on every page. Don't
+(white text reaches 4.8:1). Edit a value in `tokens.json` (or `kb.css`) and
+restart the bot to change it on every page; `npm run dev` does not watch those two files. Don't
 introduce a new grey for "less important" text — the previous ones
 (`#6b7280`, `#64748b`, `#b45309`) all failed.
 

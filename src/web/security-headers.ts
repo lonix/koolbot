@@ -13,7 +13,7 @@ import { NONCE_MARKER } from "./html.js";
  *  - `Cache-Control: no-store` (every page here is authenticated or carries a
  *    one-time token / CSRF token, so a shared browser must not keep copies).
  *    The stylesheet router is mounted ahead of this middleware on purpose: it
- *    carries no per-user data, needs no session and is cached by version,
+ *    carries no per-user data, needs no session and is cached by version.
  *  - `Strict-Transport-Security` only when `WEBUI_BASE_URL` is `https://`.
  *
  * CSP design. The pages are server-rendered strings with inline `<script>`

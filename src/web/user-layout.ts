@@ -145,8 +145,11 @@ export interface UserPageOptions {
 }
 
 const STYLE = [
+  // kb.css is linked ahead of this sheet but the legacy pages keep their own look until each
+  // moves to the kb- classes (#1314): undo its base line-height and colour-scheme here.
+  ":root{color-scheme:normal}",
   "*,*::before,*::after{box-sizing:border-box}",
-  "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}",
+  "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}",
   "a{color:var(--link);text-decoration:none}",
   "a:hover{text-decoration:underline}",
   ".banner{background:var(--chrome);border-bottom:1px solid var(--border);padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:1rem;flex-wrap:wrap}",

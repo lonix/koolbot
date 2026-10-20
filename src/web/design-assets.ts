@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
 import logger from "../utils/logger.js";
+import { createRateLimiter } from "./rate-limit.js";
 
 /**
  * The Web UI's design assets (#1315): one `tokens.css` generated from
@@ -16,9 +17,10 @@ import logger from "../utils/logger.js";
  * image: both are two levels below the repository root), so the same code
  * works in all three without a build step. `tokens.css` is generated on first
  * use from `tokens.json` and cached in memory together with a content-hash
- * version, so editing `tokens.json` and restarting (`npm run dev` restarts on
- * its own) changes every page; there is no generated file to commit or forget
- * to rebuild. The Dockerfiles copy `docs/design/` next to `dist/`.
+ * version, so editing `tokens.json` or `kb.css` and restarting the bot changes
+ * every page (`node --watch` does not watch files read at runtime, so
+ * `npm run dev` needs a manual restart for these two); there is no generated
+ * file to commit or forget to rebuild. The Dockerfiles copy `docs/design/` next to `dist/`.
  *
  * Serving. The files are served from a fixed two-entry map (never a directory
  * lookup from the request path, so there is nothing to traverse), under
@@ -159,6 +161,10 @@ export function designStylesheetLinks(surface: "/admin" | "/me"): string {
 /** Public, unauthenticated, no-session router for the two stylesheets. */
 export function createDesignAssetsRouter(): Router {
   const router = Router();
+  // Generous: each page load fetches two files. It bounds the (cached) file read per client.
+  router.use(
+    createRateLimiter({ windowMs: 60_000, max: 300, keyName: "design-assets" }),
+  );
   router.get("/:file", (req: Request, res: Response) => {
     const name = String(req.params.file);
     let assets: DesignAssets;
