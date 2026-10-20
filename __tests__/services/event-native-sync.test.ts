@@ -86,7 +86,8 @@ function makeGuild(opts: { perms?: bigint[]; natives?: unknown[] } = {}) {
   );
   const collection = Object.assign(natives, {});
   const scheduledEvents = {
-    fetch: jest.fn(async (id?: string) => {
+    fetch: jest.fn(async (arg?: string | { guildScheduledEvent: string }) => {
+      const id = typeof arg === "object" ? arg.guildScheduledEvent : arg;
       if (id) {
         const found = natives.get(id);
         if (!found) {
@@ -208,6 +209,25 @@ describe("NativeEventSync.linkedStatus (#1298)", () => {
       guilds: { fetch: async () => guild },
     };
     expect(await sync.linkedStatus(ev)).toBe(expected);
+  });
+
+  it("reads live state, not the manager cache, so an event started in Discord since the last scan is locked", async () => {
+    const stale = makeNative({ status: GuildScheduledEventStatus.Scheduled });
+    const live = makeNative({ status: GuildScheduledEventStatus.Active });
+    const fetch = jest.fn(
+      async (
+        arg?: string | { guildScheduledEvent: string; force?: boolean },
+      ) => (typeof arg === "object" && arg.force ? live : stale),
+    );
+    const sync = makeSync();
+    (sync as unknown as { client: unknown }).client = {
+      guilds: { fetch: async () => ({ scheduledEvents: { fetch } }) },
+    };
+    expect(await sync.linkedStatus(ev)).toBe("locked");
+    expect(fetch).toHaveBeenCalledWith({
+      guildScheduledEvent: "n1",
+      force: true,
+    });
   });
 
   it("is unknown when Discord cannot be read", async () => {

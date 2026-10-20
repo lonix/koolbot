@@ -186,7 +186,12 @@ export class NativeEventSync {
     if (!event.nativeEventId) return "none";
     try {
       const guild = await this.client.guilds.fetch(event.guildId);
-      const native = await this.fetchNative(guild, event.nativeEventId);
+      const native = await this.fetchNative(
+        guild,
+        event.nativeEventId,
+        null,
+        true,
+      );
       if (!native) return "none";
       return native.status === GuildScheduledEventStatus.Scheduled
         ? "scheduled"
@@ -614,11 +619,21 @@ export class NativeEventSync {
     guild: Guild,
     nativeId: string,
     cache?: NativeCache | null,
+    force = false,
   ): Promise<GuildScheduledEvent | null> {
     if (cache) return cache.get(nativeId) ?? null;
     try {
       return await this.callApi(
-        () => guild.scheduledEvents.fetch(nativeId),
+        () =>
+          // `force` skips the manager cache: the client does not receive the
+          // scheduled-event gateway events, so a cached copy can say Scheduled
+          // for an event somebody has since started.
+          force
+            ? guild.scheduledEvents.fetch({
+                guildScheduledEvent: nativeId,
+                force: true,
+              })
+            : guild.scheduledEvents.fetch(nativeId),
         "fetch guild scheduled event",
       );
     } catch (error) {

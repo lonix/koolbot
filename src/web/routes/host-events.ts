@@ -1678,7 +1678,19 @@ function registerEditRoutes(router: Router, client: Client): void {
       // is ignored, and the service refuses a change anyway.
       const full = mode.mode === "full";
       // Same for a start the running Discord event holds in place.
-      const editStart = full && (await service().startMayMove(event));
+      // Whether the start may move NOW, and whether the form that was submitted
+      // offered it. A form that offered it while the Discord event has since
+      // started (or cannot be read) is stale: refuse it before anything is
+      // saved, or the other fields would be saved and the schedule change
+      // silently dropped. A form rendered without the fields is a locked form:
+      // whatever it posts for the start is ignored.
+      const canMoveStart = full && (await service().startMayMove(event));
+      const offeredStart = full && field("startEditable") === "1";
+      if (offeredStart && !canMoveStart) {
+        await fail(EDIT_MESSAGES.nativeActive);
+        return;
+      }
+      const editStart = offeredStart && canMoveStart;
       const date = editStart ? field("date") : shown.date;
       const time = editStart ? field("time") : shown.time;
       const timezone = editStart ? field("timezone") || zone : zone;

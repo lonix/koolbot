@@ -206,19 +206,32 @@ function flashOf(location: string | null): { type: string; msg: string } {
   return { type: q.get("flash") ?? "", msg: q.get("msg") ?? "" };
 }
 
-/** The version token the edit form of the stored event carries. */
-async function versionOf(): Promise<string> {
+/** What the edit form of the stored event carries: its version token and whether it offered the start. */
+async function formState(): Promise<{
+  version: string;
+  startEditable: string;
+}> {
   const r = await call(EDIT);
-  const m = /name="version" value="([^"]+)"/.exec(r.text);
-  if (!m) throw new Error(`no version in the form (status ${r.status})`);
-  return m[1];
+  const version = /name="version" value="([^"]+)"/.exec(r.text);
+  const start = /name="startEditable" value="([01])"/.exec(r.text);
+  if (!version || !start) {
+    throw new Error(`no form state (status ${r.status})`);
+  }
+  return { version: version[1], startEditable: start[1] };
+}
+
+async function versionOf(): Promise<string> {
+  return (await formState()).version;
 }
 
 async function save(
   body: Json,
-  init: { version?: string } = {},
+  init: { version?: string; startEditable?: string } = {},
 ): Promise<{ status: number; text: string; location: string | null }> {
-  const version = init.version ?? (await versionOf());
+  const state =
+    init.version !== undefined && init.startEditable !== undefined
+      ? { version: init.version, startEditable: init.startEditable }
+      : await formState();
   return call(EDIT, {
     method: "POST",
     body: {
@@ -228,7 +241,8 @@ async function save(
       time: "18:00",
       timezone: "UTC",
       duration: "90",
-      version,
+      version: init.version ?? state.version,
+      startEditable: init.startEditable ?? state.startEditable,
       ...body,
     },
   });
@@ -564,6 +578,55 @@ describe("a start held by a running Discord event", () => {
     events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
     const page = await call(EDIT);
     expect(page.text).toContain('name="date"');
+  });
+});
+
+describe("a form that went stale because the Discord event started", () => {
+  it.each(["locked", "unknown"])(
+    "refuses the whole save, changing nothing, when the status became %s after the form offered the start",
+    async (status) => {
+      events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
+      const form = await formState();
+      expect(form.startEditable).toBe("1");
+      linkedStatus.mockResolvedValue(status);
+      const r = await save(
+        { title: "Renamed", date: "2099-06-09", description: "New text" },
+        form,
+      );
+      expect(flashOf(r.location).type).toBe("err");
+      expect(flashOf(r.location).msg).toContain("cannot move");
+      expect(row().title).toBe("Quiz night");
+      expect(row().description).toBe("Bring a friend");
+      expect(syncEvent).not.toHaveBeenCalled();
+      const entry = auditRows.find(
+        (a) => (a as { action?: string }).action === "event.edit",
+      ) as { result: string };
+      expect(entry.result).toBe("failure");
+    },
+  );
+
+  it("still ignores start fields posted by a form that never offered them", async () => {
+    events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
+    linkedStatus.mockResolvedValue("locked");
+    const form = await formState();
+    expect(form.startEditable).toBe("0");
+    const r = await save({ title: "Renamed", date: "2099-06-09" }, form);
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().title).toBe("Renamed");
+    expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
+  });
+});
+
+describe("start fields on a form that did not offer them", () => {
+  it("are ignored even when the Discord event has become movable since", async () => {
+    events[EVENT_ID] = makeEvent({ nativeEventId: "n1" });
+    linkedStatus.mockResolvedValue("locked");
+    const form = await formState();
+    linkedStatus.mockResolvedValue("scheduled");
+    const r = await save({ title: "Renamed", date: "2099-06-09" }, form);
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().title).toBe("Renamed");
+    expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
   });
 });
 
