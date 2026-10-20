@@ -18,6 +18,7 @@ import {
   renderScopeWhy,
   renderSideNav,
   renderTopBar,
+  renderVersionPill,
   resolveViewer,
   scopeOfPath,
   sectionsFor,
@@ -355,7 +356,7 @@ const FLASH_FOCUS_SCRIPT =
 
 export function renderUserPage(opts: UserPageOptions): string {
   const viewer = resolveViewer(opts.viewer, opts.isAdmin);
-  const sections = sectionsFor(viewer, opts.navRegistry);
+  const sections = sectionsFor(viewer, opts.navRegistry, viewer.features);
   const sideNav = renderSideNav(sections, opts.active);
   // With a sidebar the page navigation is the sidebar's; the My preferences
   // tabs belong to the You section only. Without one they stay in the column.
@@ -393,6 +394,7 @@ export function renderUserPage(opts: UserPageOptions): string {
       viewer,
       surface: "me",
       home: "/me/",
+      brandExtraHtml: renderVersionPill(),
       csrfToken: opts.csrfToken,
       remainingMs: opts.remainingMs,
       inactivityMs: getInactivityWindowMs(),

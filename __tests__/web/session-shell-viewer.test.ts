@@ -138,6 +138,8 @@ describe("session middleware: who is looking (#1317)", () => {
       role: "user",
       scopes: ["member", "host"],
       reasons: { host: ["Event hosts"], staff: [], elevated: false },
+      // No sidebar page is gated by a feature yet, so nothing was read.
+      features: {},
     });
     // Nothing leaks past the request.
     expect(currentViewer()).toBeNull();

@@ -18,11 +18,10 @@ import {
 import {
   SESSION_LOW_MS,
   renderTopBar,
+  renderVersionPill,
   resolveViewer,
   type ShellViewer,
 } from "./app-shell.js";
-import { getBotVersion } from "../utils/version.js";
-import { formatVersion } from "../utils/semver.js";
 
 // Re-exported from session.ts so the renderer and the cookie middleware
 // share a single source of truth for the inactivity sliding window.
@@ -237,7 +236,7 @@ export function setAdminUpdateBadgeProvider(
 }
 
 function renderVersionPills(): string {
-  const running = `<span class="kb-pill kb-mono" title="Running version">${escapeHtml(formatVersion(getBotVersion()))}</span>`;
+  const running = renderVersionPill();
   let badge: AdminUpdateBadge | null;
   try {
     badge = updateBadgeProvider?.() ?? null;

@@ -23,10 +23,13 @@ import {
 } from "./cookies.js";
 import { env } from "../config/env.js";
 import { isForeignGuild } from "../utils/guild-scope.js";
+import { ConfigService } from "../services/config-service.js";
 import { renderErrorPage } from "./views.js";
 import {
+  resolveShellFeatures,
   runWithViewer,
   viewerFromSession,
+  type ShellFeatureStatus,
   type ShellScopeReasons,
 } from "./app-shell.js";
 
@@ -75,6 +78,8 @@ export interface WebSessionContext {
    * them; `undefined` falls back to the capability's own name.
    */
   scopeReasons?: WebScopeReasons;
+  /** State of the features gating sidebar items, read once per request (#1317). */
+  shellFeatures?: ShellFeatureStatus;
   lastActivityAt: number;
   /**
    * Server-side hard cap for the session, mirrored from
@@ -332,6 +337,11 @@ export function createSessionMiddleware(
         ? await resolveScopeReasons(client, payload.uid, payload.gid)
         : undefined;
 
+    // One read per request of the features that gate sidebar items (none today).
+    const shellFeatures = await resolveShellFeatures((key) =>
+      ConfigService.getInstance().getBoolean(key),
+    );
+
     req.webSession = {
       sessionId: payload.sid,
       discordUserId: payload.uid,
@@ -340,6 +350,7 @@ export function createSessionMiddleware(
       scopes,
       displayName: cachedDisplayName(client, payload.uid, payload.gid),
       scopeReasons,
+      shellFeatures,
       lastActivityAt: now,
       expiresAt: dbSession.expiresAt,
     };

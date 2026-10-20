@@ -23,6 +23,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ConfigSchema } from "../services/config-schema.js";
 import type { WebScope } from "../models/web-session.js";
 import { escapeHtml } from "./html.js";
+import { getBotVersion } from "../utils/version.js";
+import { formatVersion } from "../utils/semver.js";
 
 // ---- who is looking --------------------------------------------------------
 
@@ -41,6 +43,11 @@ export interface ShellViewer {
   /** `member` plus the host and moderator scopes held on this request. */
   scopes: WebScope[];
   reasons?: ShellScopeReasons;
+  /**
+   * State of the features that gate sidebar items (`ShellNavItem.featureKey`),
+   * read once per request by the session middleware. Absent means all off.
+   */
+  features?: ShellFeatureStatus;
 }
 
 /** What `viewerFromSession` reads; a structural subset of `WebSessionContext`. */
@@ -49,6 +56,7 @@ export interface ShellSessionLike {
   scopes: WebScope[];
   displayName?: string;
   scopeReasons?: ShellScopeReasons;
+  shellFeatures?: ShellFeatureStatus;
 }
 
 export function viewerFromSession(session: ShellSessionLike): ShellViewer {
@@ -57,6 +65,7 @@ export function viewerFromSession(session: ShellSessionLike): ShellViewer {
     role: session.role,
     scopes: session.scopes,
     reasons: session.scopeReasons,
+    features: session.shellFeatures,
   };
 }
 
@@ -297,6 +306,38 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
 ];
 
 export type ShellFeatureStatus = Partial<Record<keyof ConfigSchema, boolean>>;
+
+/**
+ * Read the state of every feature that gates a built sidebar item, once, for
+ * the request. `read` is `ConfigService.getBoolean` in practice; a failed read
+ * counts as off (the item stays hidden), never as on. With no gated item built
+ * (today) nothing is read.
+ */
+export async function resolveShellFeatures(
+  read: (key: keyof ConfigSchema) => Promise<boolean>,
+  registry: readonly ShellNavItem[] = SHELL_NAV,
+): Promise<ShellFeatureStatus> {
+  const keys = new Set<keyof ConfigSchema>();
+  for (const item of registry) {
+    if (item.available && item.featureKey) keys.add(item.featureKey);
+  }
+  const status: ShellFeatureStatus = {};
+  await Promise.all(
+    Array.from(keys).map(async (key) => {
+      try {
+        status[key] = (await read(key)) === true;
+      } catch {
+        status[key] = false;
+      }
+    }),
+  );
+  return status;
+}
+
+/** The running version as the top bar's pill (the admin bar adds its update link). */
+export function renderVersionPill(): string {
+  return `<span class="kb-pill kb-mono" title="Running version">${escapeHtml(formatVersion(getBotVersion()))}</span>`;
+}
 
 function isVisible(item: ShellNavItem, status?: ShellFeatureStatus): boolean {
   if (!item.available) return false;

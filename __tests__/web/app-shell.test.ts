@@ -10,7 +10,7 @@
  */
 
 import fs from "node:fs";
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import {
   SCOPE_INFO,
   SHELL_NAV,
@@ -18,11 +18,14 @@ import {
   renderScopeWhy,
   renderSideNav,
   renderTopBar,
+  resolveShellFeatures,
   scopeOfPath,
   sectionsFor,
   type ShellNavItem,
   type ShellViewer,
 } from "../../src/web/app-shell.js";
+import { getBotVersion } from "../../src/utils/version.js";
+import { formatVersion } from "../../src/utils/semver.js";
 import { renderUserPage } from "../../src/web/user-layout.js";
 import { renderAdminPage } from "../../src/web/admin-layout.js";
 
@@ -541,5 +544,91 @@ describe("renderSideNav", () => {
     expect(doc.querySelector("nav i")).toBeNull();
     const labels = Array.from(doc.querySelectorAll("a")).map((a) => text(a));
     expect(labels).toContain("<i>New</i>");
+  });
+});
+
+describe("running version in the top bar", () => {
+  const version = formatVersion(getBotVersion());
+
+  it("shows it on /me, without the admin update link", () => {
+    const doc = userPage(member);
+    const pill = doc.querySelector(".kb-topbar .kb-pill.kb-mono");
+    expect(text(pill)).toBe(version);
+    expect(doc.querySelector(".kb-topbar a.kb-pill")).toBeNull();
+  });
+
+  it("shows it in the admin console too", () => {
+    const doc = parse(
+      renderAdminPage({
+        title: "Dashboard",
+        active: "/admin/",
+        body: "",
+        viewer: admin,
+        ...COMMON,
+      }),
+    );
+    expect(text(doc.querySelector(".kb-topbar .kb-pill.kb-mono"))).toBe(
+      version,
+    );
+  });
+});
+
+describe("feature-gated sidebar items through renderUserPage", () => {
+  const registry: ShellNavItem[] = [
+    ...BUILT.filter((i) => i.label !== "Tickets"),
+    {
+      scope: "moderator",
+      label: "Tickets",
+      href: "/me/moderation/tickets",
+      icon: "ticket",
+      featureKey: "tickets.enabled",
+      available: true,
+    },
+  ];
+  const withFeatures = (features: ShellViewer["features"]): string[] =>
+    links(userPage({ ...moderator, features }, { navRegistry: registry }));
+
+  it("shows the item when the viewer's feature is on", () => {
+    expect(withFeatures({ "tickets.enabled": true })).toContain("Tickets");
+  });
+
+  it("hides it when the feature is off or unknown", () => {
+    expect(withFeatures({ "tickets.enabled": false })).not.toContain("Tickets");
+    expect(withFeatures(undefined)).not.toContain("Tickets");
+  });
+});
+
+describe("resolveShellFeatures", () => {
+  const gated = (available: boolean): ShellNavItem => ({
+    scope: "moderator",
+    label: "Tickets",
+    href: "/me/moderation/tickets",
+    icon: "ticket",
+    featureKey: "tickets.enabled",
+    available,
+  });
+
+  it("reads nothing while no gated page is built", async () => {
+    const read = jest.fn(async () => true);
+    expect(await resolveShellFeatures(read)).toEqual({});
+    expect(await resolveShellFeatures(read, [gated(false)])).toEqual({});
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("reads each built gated feature once", async () => {
+    const read = jest.fn(async () => true);
+    const status = await resolveShellFeatures(read, [gated(true), gated(true)]);
+    expect(status).toEqual({ "tickets.enabled": true });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith("tickets.enabled");
+  });
+
+  it("fails closed: a failed read is off", async () => {
+    const read = jest.fn(async () => {
+      throw new Error("mongo down");
+    });
+    expect(await resolveShellFeatures(read, [gated(true)])).toEqual({
+      "tickets.enabled": false,
+    });
   });
 });
