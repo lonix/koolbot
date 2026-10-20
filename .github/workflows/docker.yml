@@ -383,9 +383,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: attest-and-sign
     timeout-minutes: 10
-    if: github.ref_type == 'tag'
+    # A pre-release tag (v1.2.3-rc.1) never promotes. It is kept out of the
+    # shared group as well as skipped: GitHub keeps one pending run per group,
+    # and an ineligible run must not displace a pending stable promote. The
+    # step below keeps the strict vX.Y.Z regex as a second guard.
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
     concurrency:
-      group: ${{ github.workflow }}-promote
+      group: >-
+        ${{ github.workflow }}-promote${{
+          contains(github.ref_name, '-') && format('-skip-{0}', github.run_id) || ''
+        }}
       cancel-in-progress: false
     permissions:
       # contents: read is for the releases lookup (a private repo needs it).
