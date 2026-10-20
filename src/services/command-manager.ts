@@ -8,9 +8,12 @@ import {
   DiscordAPIError,
   HTTPError,
   MessageFlags,
+  RESTEvents,
+  type RateLimitData,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
 import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
@@ -294,6 +297,23 @@ export class CommandManager {
     throw new Error(`Unexpected error in ${operationName}`);
   }
 
+  /**
+   * Log every 429 that @discordjs/rest handles internally (#1293). The client
+   * queues and waits out a rate limit without raising an error, so without this
+   * a stalled request is only ever seen as a timeout in `makeDiscordApiCall`.
+   * Only the route template, method, scope and timings are logged; never the
+   * token, the request body or the bucket hash.
+   */
+  private logRestRateLimits(rest: REST): void {
+    rest.on(RESTEvents.RateLimited, (info: RateLimitData) => {
+      logger.warn(
+        `Discord REST rate limited: ${sanitizeForLog(info.method, 16)} ${sanitizeForLog(info.route, 128)} ` +
+          `(scope=${sanitizeForLog(info.scope, 16)}, global=${info.global}, limit=${Number(info.limit)}, ` +
+          `retryAfter=${Number(info.retryAfter)}ms, timeToReset=${Number(info.timeToReset)}ms)`,
+      );
+    });
+  }
+
   public async registerCommands(): Promise<void> {
     try {
       if (!this.client) {
@@ -308,6 +328,7 @@ export class CommandManager {
       const rest = new REST({ version: "10" }).setToken(
         await this.configService.getString("DISCORD_TOKEN"),
       );
+      this.logRestRateLimits(rest);
 
       const commands = await this.getEnabledCommands();
       logger.debug(
@@ -315,29 +336,16 @@ export class CommandManager {
       );
 
       try {
-        // First, clear all existing commands to force Discord to refresh its cache
-        logger.debug(
-          "Clearing all existing commands to force Discord cache refresh...",
-        );
-        await this.makeDiscordApiCall(
-          async () =>
-            rest.put(
-              Routes.applicationGuildCommands(
-                await this.configService.getString("CLIENT_ID"),
-                guildId,
-              ),
-              { body: [] },
-            ),
-          "clear existing commands",
-          15000, // 15 second timeout for clear operation
-          2, // 2 retries for clear operation
-        );
-
-        // Wait a moment for Discord to process the clear
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Now register the new command list
-        logger.debug("Registering new commands with Discord API...");
+        // One bulk overwrite (PUT) replaces the guild's whole command list
+        // atomically: commands that are no longer in `commands` (a disabled
+        // feature, a retired command such as /event) are deleted by Discord in
+        // the same call, and unchanged ones are left as they are. Do NOT clear
+        // with `PUT []` first (#1293): that deleted and re-created every command
+        // on each start, spent the per-day command-create budget, and added a
+        // second request on a route Discord rate limits. Discord's client cache
+        // picks up an overwrite on its own, so no clear is needed for that. The
+        // bot's own lookup table is rebuilt by populateClientCommands().
+        logger.debug("Registering commands with Discord API...");
         const data = await this.makeDiscordApiCall(
           async () =>
             rest.put(
