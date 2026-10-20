@@ -731,8 +731,12 @@ Push` workflow then builds the PR head and pushes:
 
 Every new push to the PR rebuilds the image while the label is on. Remove the
 label to stop further builds. When a build finishes, the workflow posts a comment
-on the PR with the commit, the digest and the `docker pull` commands for both
-tags, and updates that same comment on every rebuild. Preview images are `linux/amd64` only and skip the
+on the PR with the commit (linked) and the UTC time it was built from, the digest and the `docker pull`
+commands for both tags, and updates that same comment on every rebuild. When a later push to the PR is not
+built (label removed, build skipped or failed), the comment is marked **outdated** and names the new head.
+That needs a workflow run, so a push that starts none (made with `GITHUB_TOKEN`, a PR with merge conflicts)
+or removing the label with no later push leaves the comment as it was: compare its commit with the PR head.
+Preview images are `linux/amd64` only and skip the
 release-only steps (the pre-push Trivy scan (amd64 only), cosign signing, provenance and SBOM). PRs from
 forks never get a preview, because their workflow token cannot push to GHCR.
 

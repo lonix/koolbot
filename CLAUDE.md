@@ -214,7 +214,8 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   not scanned), and only then push/attest/sign (cosign) to GHCR. A tag build publishes only `X.Y.Z`; the serialized `promote` job then moves
   `latest`, `X.Y` and `X` to the newest release (fresh lookup, cosign-verified digest). `nightly` and `main` follow `main` and never get
   `latest`. Only PR previews are cancelled in progress, so a run that
-  has pushed always signs.
+  has pushed always signs. The preview comment (`<!-- docker-preview -->`) states the built commit and UTC time;
+  the `preview-outdated` job marks it outdated when a push is not built.
 - **`pr-title-lint.yml`** — see below.
 - **`auto-label.yml`** — labels issues and PRs (path map in `.github/labeler.yml`, plus type and
   release-impact labels derived from the Conventional Commit PR title). Runs on

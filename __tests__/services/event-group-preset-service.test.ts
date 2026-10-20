@@ -98,8 +98,8 @@ describe("loadPresetCatalog", () => {
     expect(catalog.state).toBe("ok");
     expect(catalog.entries.map((e) => [e.id, e.enabled])).toEqual([
       ["builtin:red-vs-blue", true],
-      ["builtin:eve-factions", true],
       ["builtin:wardogs", true],
+      ["builtin:eve-factions", true],
     ]);
   });
 
@@ -259,7 +259,7 @@ describe("the validator with the resolver", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.join(" ")).toContain(
-      'Preset "Wardogs" is switched off on this server',
+      'Preset "3 teams" is switched off on this server',
     );
   });
 
@@ -615,7 +615,7 @@ describe("validatePresetForm", () => {
       maxCount: 15,
     });
     expect(!long.ok && long.errors.join(" ")).toContain("at most 50");
-    const builtin = svc.validatePresetForm(body({ preset_name: "WARDOGS" }), {
+    const builtin = svc.validatePresetForm(body({ preset_name: "3 TEAMS" }), {
       maxCount: 15,
     });
     expect(!builtin.ok && builtin.errors.join(" ")).toContain("built-in");
@@ -734,7 +734,7 @@ describe("writes", () => {
   it("switches a built-in with an upsert of the wanted state, and rejects unknown built-ins", async () => {
     mockToggleUpdateOne.mockResolvedValue({});
     const r = await svc.setPresetEnabled("g1", "builtin:wardogs", false);
-    expect(r).toEqual({ ok: true, label: "Wardogs" });
+    expect(r).toEqual({ ok: true, label: "3 teams" });
     expect(mockToggleUpdateOne).toHaveBeenCalledWith(
       { guildId: "g1", builtinId: "builtin:wardogs" },
       { $set: { enabled: false } },
