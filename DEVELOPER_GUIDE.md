@@ -134,7 +134,9 @@ return 404.
      request succeeds once the blip clears.
    - **Resolves the `/me` scopes** (`member`, `host`, `moderator`) from role groups with
      `PermissionsService.resolveWebScopes` on every request for a `user` session (#1316) and puts them on
-     `req.webSession.scopes`. The stored `scopes` column is never read. A lookup failure yields `["member"]`:
+     `req.webSession.scopes`. The stored `scopes` column is never read. Both capabilities come from one group snapshot
+     (`RoleGroupService.memberScopeCapabilities`, which throws instead of swallowing a failed read); any failure yields
+     `["member"]`, never a partial set:
      fail closed, never open. Guard a `/me` area with `requireScopeMiddleware("host" | "moderator")` mounted
      on its prefix before its routers (`/me/events` and `/me/moderation` already are; add moderation pages
      under that router, not beside it). Scopes never open `/admin`: that is `requireAdminRoleMiddleware`

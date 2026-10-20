@@ -176,12 +176,15 @@ describe("resolveWebScopes (#1316)", () => {
     expect(await service.resolveWebScopes("user1", GUILD)).toEqual(["member"]);
   });
 
-  it("is all-or-nothing: a failure on the second capability discards the first", async () => {
-    const groups = RoleGroupService.getInstance();
-    jest
-      .spyOn(groups, "memberHasCapability")
-      .mockResolvedValueOnce(true)
-      .mockRejectedValueOnce(new Error("boom"));
-    expect(await scopesOf(member(["rHost"]))).toEqual(["member"]);
+  it("is all-or-nothing with the REAL group code: one failed group read never leaves a partial answer", async () => {
+    // A member who holds both scopes. The first group read fails, any later
+    // one would succeed: with separate per-capability reads (the swallowing
+    // `memberHasCapability`) that gave ["member", "moderator"].
+    listGroups.mockRejectedValueOnce(new Error("mongo blip"));
+    expect(await scopesOf(member(["rHost", "rMod"]))).toEqual(["member"]);
+    // Both scopes come from a single snapshot: one read per resolution.
+    listGroups.mockClear();
+    await scopesOf(member(["rHost", "rMod"]));
+    expect(listGroups).toHaveBeenCalledTimes(1);
   });
 });

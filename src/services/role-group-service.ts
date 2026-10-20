@@ -195,6 +195,34 @@ export class RoleGroupService {
     );
   }
 
+  /**
+   * The `host` and `staff` capabilities of a member from ONE group snapshot
+   * (#1316), for web scopes. Unlike `memberHasCapability` it does NOT swallow
+   * a failed group read: it throws, so the caller can fall back to nothing
+   * rather than keep a half-answer (one capability read, the other not). The
+   * owner / `Administrator` shortcut needs no group read, as there.
+   */
+  public async memberScopeCapabilities(
+    member: GuildMember,
+  ): Promise<{ host: boolean; staff: boolean }> {
+    if (
+      member.guild.ownerId === member.id ||
+      member.permissions?.has(PermissionsBitField.Flags.Administrator)
+    ) {
+      return { host: true, staff: true };
+    }
+    const groups = await this.list(member.guild.id);
+    const held = (...wanted: RoleGroupCapability[]): boolean =>
+      groups.some(
+        (g) =>
+          g.roleId !== null &&
+          g.capabilities.some((c) => wanted.includes(c)) &&
+          member.roles.cache.has(g.roleId),
+      );
+    // `admin` implies both, as in `memberHasCapability`.
+    return { host: held("host", "admin"), staff: held("staff", "admin") };
+  }
+
   /** Does the member hold the group's role, or one of any higher group? */
   public async memberIsAtOrAbove(
     member: GuildMember,

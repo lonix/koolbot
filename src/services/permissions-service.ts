@@ -349,9 +349,10 @@ export class PermissionsService {
     try {
       const guild = await this.client.guilds.fetch(guildId);
       const member = await this.fetchMemberFresh(guild, guildId, userId);
-      const groups = RoleGroupService.getInstance();
-      const isHost = await groups.memberHasCapability(member, "host");
-      const isModerator = await groups.memberHasCapability(member, "staff");
+      // One snapshot; a failed group read throws into the catch below, so
+      // there is never a partial answer.
+      const { host: isHost, staff: isModerator } =
+        await RoleGroupService.getInstance().memberScopeCapabilities(member);
       const scopes: WebScope[] = ["member"];
       if (isHost) scopes.push("host");
       if (isModerator) scopes.push("moderator");

@@ -104,7 +104,8 @@ Server Members intent is off.
 - **No scope opens `/admin`.** The admin console is gated by the session role alone (`requireAdminRoleMiddleware`); a host or
   moderator signs in with `/me` and holds a `user` session. A test walks every registered `/admin` route with each scope combination
   and expects 403.
-- Fails closed: if the groups or the member cannot be read (Discord or database error), the session is plain `member` for that request and the
+- Fails closed, all or nothing: both capabilities come from one read of the role groups. If the groups or the member cannot be read
+  (Discord or database error), the session is plain `member` for that request, never a partial set, and the
   event and moderation pages answer 403. The request is still served as `me` otherwise.
 - Nothing grants the scope automatically. The **Event host** preset on the Role Groups page only pre-fills the form, and an existing
   server gains no host members from this change.
