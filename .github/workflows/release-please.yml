@@ -5,6 +5,13 @@ on:
     branches:
       - main
 
+# One run at a time: two quick merges must not race on the release PR or on creating the
+# tag and release. Queued runs wait (never cancel one that is mid-release); release-please
+# works from the current state of main, so a replaced pending run loses nothing.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
