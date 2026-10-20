@@ -421,7 +421,7 @@ describe("mutation check of the counting logic", () => {
 });
 
 describe("cooperating with the AJAX settings save", () => {
-  function pageScripts(): { save: string; bar: string } {
+  function pageScripts(): { save: string; bar: string; cascade: string } {
     const doc = new DOMParser().parseFromString(
       pageHtml([{ category: "x", rows: ROWS }]),
       "text/html",
@@ -432,23 +432,61 @@ describe("cooperating with the AJAX settings save", () => {
     );
     const save = scripts.find((s) => s.includes("save-section"));
     const barScript = scripts.find((s) => s.includes("data-savebar"));
-    if (!save || !barScript) throw new Error("scripts missing from the page");
-    return { save, bar: barScript };
+    const cascade = scripts.find((s) => s.includes("data-cascade-master"));
+    if (!save || !barScript || !cascade) {
+      throw new Error("scripts missing from the page");
+    }
+    return { save, bar: barScript, cascade };
   }
 
-  async function saveWith(status: number, json: unknown): Promise<void> {
+  const tick = async (): Promise<void> => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  /** A fetch whose response the test releases. */
+  function delayedFetch(status: number, json: unknown): () => void {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    (globalThis as unknown as { fetch: unknown }).fetch = jest.fn(async () => {
+      await gate;
+      return { status, text: async () => JSON.stringify(json) };
+    });
+    return release;
+  }
+
+  /** Mounts the page and runs its save, cascade and (given) save bar script. */
+  function start(barScript?: string): void {
     const scripts = pageScripts();
-    (globalThis as unknown as { fetch: unknown }).fetch = jest.fn(async () => ({
-      status,
-      text: async () => JSON.stringify(json),
-    }));
     new Function(scripts.save)();
-    run(scripts.bar);
+    new Function(scripts.cascade)();
+    run(barScript ?? scripts.bar);
+  }
+
+  const save = (): void =>
+    el<HTMLButtonElement>("[data-savebar] button[type=submit]").click();
+
+  async function saveWith(status: number, json: unknown): Promise<void> {
+    const release = delayedFetch(status, json);
+    start();
     type(name(), "Squad");
     expect(text()).toBe("1 unsaved change");
-    el<HTMLButtonElement>("[data-savebar] button[type=submit]").click();
-    await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
+    save();
+    release();
+    await tick();
+  }
+
+  /** Submit "Squad", type "Team" before the response returns. */
+  async function editDuringSave(barScript?: string): Promise<void> {
+    const release = delayedFetch(200, { type: "ok", text: "Saved." });
+    start(barScript);
+    type(name(), "Squad");
+    save();
+    type(name(), "Team");
+    release();
+    await tick();
   }
 
   it("is on the page as a nonce-tagged script", () => {
@@ -475,6 +513,69 @@ describe("cooperating with the AJAX settings save", () => {
       invalidKeys: ["x.name"],
     });
     expect(bar().hidden).toBe(false);
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("keeps an edit made while the save was in flight unsaved", async () => {
+    await editDuringSave();
+    expect(bar().hidden).toBe(false);
+    expect(text()).toBe("1 unsaved change");
+    // Discard goes back to what the server received, not to the typed value.
+    discard().click();
+    expect(name().value).toBe("Squad");
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("treats Discard during the save as a change from what was saved", async () => {
+    const release = delayedFetch(200, { type: "ok", text: "Saved." });
+    start();
+    type(name(), "Squad");
+    save();
+    discard().click();
+    expect(name().value).toBe("Lobby");
+    release();
+    await tick();
+    // The server holds "Squad"; the form shows "Lobby".
+    expect(name().value).toBe("Lobby");
+    expect(bar().hidden).toBe(false);
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("is caught when the baseline is read from the live controls", async () => {
+    const from = "commit(pending||snap(form))";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    await editDuringSave(SAVEBAR_SCRIPT.replace(from, "commit(snap(form))"));
+    // The mutant calls the edit saved and hides the bar.
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("Discard restores a control the cascade disabled (real cascade script)", () => {
+    start();
+    type(name(), "Squad");
+    toggle(enabled());
+    expect(name().disabled).toBe(true);
+    discard().click();
+    expect(name().value).toBe("Lobby");
+    expect(enabled().checked).toBe(true);
+    expect(name().disabled).toBe(false);
+    expect(bar().hidden).toBe(true);
+  });
+
+  it("keeps a disabled control out of the count", () => {
+    start();
+    type(name(), "Squad");
+    toggle(enabled());
+    expect(text()).toBe("1 unsaved change");
+  });
+
+  it("is caught when Discard skips a disabled control", () => {
+    const from = "changedControls(form,true)";
+    expect(SAVEBAR_SCRIPT).toContain(from);
+    start(SAVEBAR_SCRIPT.replace(from, "changedControls(form)"));
+    type(name(), "Squad");
+    toggle(enabled());
+    discard().click();
+    expect(name().value).toBe("Squad");
     expect(text()).toBe("1 unsaved change");
   });
 });

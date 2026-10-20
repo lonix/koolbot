@@ -40,7 +40,10 @@ export const SAVEBAR_SCRIPT =
   "function defIndex(s){for(var i=0;i<s.options.length;i++){" +
   "if(s.options[i].defaultSelected)return i}" +
   "return(s.multiple||s.size>1)?-1:0}" +
-  "function changed(el){if(el.disabled)return false;var t=el.type;" +
+  // `any` also looks at a control the cascade disabled: Discard must restore
+  // it (it comes back when its master is switched on again), but a disabled
+  // control is not saved and so never counts as a change.
+  "function changed(el,any){if(el.disabled&&!any)return false;var t=el.type;" +
   "if(t==='checkbox'||t==='radio')return el.checked!==el.defaultChecked;" +
   "if(el.tagName==='SELECT'){" +
   "if(el.multiple){for(var i=0;i<el.options.length;i++){" +
@@ -50,8 +53,8 @@ export const SAVEBAR_SCRIPT =
   // compares as changed: a cron picker's controls count, not its hidden copy.
   "if(t==='hidden'||NOT.test(t))return false;" +
   "return el.value!==el.defaultValue}" +
-  "function changedControls(form){var out=[];" +
-  "Array.prototype.forEach.call(form.elements,function(el){if(changed(el))out.push(el)});" +
+  "function changedControls(form,any){var out=[];" +
+  "Array.prototype.forEach.call(form.elements,function(el){if(changed(el,any))out.push(el)});" +
   "return out}" +
   "function rowOf(el){return el.closest('.kb-setting')||el}" +
   "function count(form){var rows=[];" +
@@ -64,24 +67,36 @@ export const SAVEBAR_SCRIPT =
   "if(el.multiple){for(var i=0;i<el.options.length;i++)el.options[i].selected=el.options[i].defaultSelected}" +
   "else el.selectedIndex=defIndex(el)}" +
   "else el.value=el.defaultValue}" +
-  "function commit(form){Array.prototype.forEach.call(form.elements,function(el){" +
-  "if(el.disabled)return;var t=el.type;" +
-  "if(t==='checkbox'||t==='radio')el.defaultChecked=el.checked;" +
-  "else if(el.tagName==='SELECT'){for(var i=0;i<el.options.length;i++)el.options[i].defaultSelected=el.options[i].selected}" +
-  "else if(t!=='hidden'&&!NOT.test(t))el.defaultValue=el.value})}" +
+  // What the form holds right now, for the controls a save sends. Taken when
+  // the form is submitted, so an edit made while the request is in flight is
+  // not mistaken for saved.
+  "function snap(form){var out=[];Array.prototype.forEach.call(form.elements,function(el){" +
+  "if(el.disabled)return;var t=el.type;var o={el:el};" +
+  "if(t==='checkbox'||t==='radio')o.c=el.checked;" +
+  "else if(el.tagName==='SELECT'){o.s=[];for(var i=0;i<el.options.length;i++)o.s.push(el.options[i].selected)}" +
+  "else if(t!=='hidden'&&!NOT.test(t))o.v=el.value;" +
+  "else return;out.push(o)});return out}" +
+  "function commit(list){list.forEach(function(o){var el=o.el;" +
+  "if('c' in o)el.defaultChecked=o.c;" +
+  "else if('s' in o){for(var i=0;i<o.s.length;i++)el.options[i].defaultSelected=o.s[i]}" +
+  "else el.defaultValue=o.v})}" +
   "function wire(bar){var form=bar.closest('form');if(!form)return;" +
   "var text=bar.querySelector('[data-savebar-text]');" +
   "var discard=bar.querySelector('[data-savebar-discard]');" +
-  "var shown=-1;" +
+  "var shown=-1;var pending=null;" +
   "function update(){var n=count(form);if(n===shown)return;shown=n;" +
   "bar.hidden=n===0;" +
   "if(text)text.textContent=n+' unsaved change'+(n===1?'':'s')}" +
   "if(discard)discard.hidden=false;" +
   "update();" +
   "form.addEventListener('input',update);form.addEventListener('change',update);" +
-  "form.addEventListener('kb-saved',function(){commit(form);update()});" +
+  "form.addEventListener('submit',function(){pending=snap(form)});" +
+  "form.addEventListener('kb-saved',function(){commit(pending||snap(form));pending=null;update()});" +
   "if(discard)discard.addEventListener('click',function(){" +
-  "var els=changedControls(form);els.forEach(function(el){restore(el);fire(el,'input');fire(el,'change')});" +
+  // Restore every value first, then fire the events: the cascade script
+  // re-enables dependents on the master's change event.
+  "var els=changedControls(form,true);els.forEach(restore);" +
+  "els.forEach(function(el){fire(el,'input');fire(el,'change')});" +
   "update();var f=els.filter(function(el){return el.type!=='hidden'})[0];" +
   "if(f){try{f.focus()}catch(e){}}})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-savebar]'),wire)})();";
