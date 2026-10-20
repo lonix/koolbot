@@ -238,6 +238,7 @@ beforeEach(() => {
   jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
     isAdministrator: async () => false,
     checkCommandPermission: async () => true,
+    resolveWebScopes: async () => ["member", "host"],
   } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => {

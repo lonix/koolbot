@@ -179,14 +179,48 @@ export class RoleGroupService {
       return false;
     }
     if (capability === "bot" && !this.isBotAccount(member)) return false;
+    // `admin` implies the capabilities below it: an admin is also staff and may
+    // also host. Nothing implies `admin`, and `bot` stands alone.
     const wanted: RoleGroupCapability[] =
-      capability === "staff" ? ["staff", "admin"] : [capability];
+      capability === "staff"
+        ? ["staff", "admin"]
+        : capability === "host"
+          ? ["host", "admin"]
+          : [capability];
     return groups.some(
       (g) =>
         g.roleId !== null &&
         g.capabilities.some((c) => wanted.includes(c)) &&
         member.roles.cache.has(g.roleId),
     );
+  }
+
+  /**
+   * The `host` and `staff` capabilities of a member from ONE group snapshot
+   * (#1316), for web scopes. Unlike `memberHasCapability` it does NOT swallow
+   * a failed group read: it throws, so the caller can fall back to nothing
+   * rather than keep a half-answer (one capability read, the other not). The
+   * owner / `Administrator` shortcut needs no group read, as there.
+   */
+  public async memberScopeCapabilities(
+    member: GuildMember,
+  ): Promise<{ host: boolean; staff: boolean }> {
+    if (
+      member.guild.ownerId === member.id ||
+      member.permissions?.has(PermissionsBitField.Flags.Administrator)
+    ) {
+      return { host: true, staff: true };
+    }
+    const groups = await this.list(member.guild.id);
+    const held = (...wanted: RoleGroupCapability[]): boolean =>
+      groups.some(
+        (g) =>
+          g.roleId !== null &&
+          g.capabilities.some((c) => wanted.includes(c)) &&
+          member.roles.cache.has(g.roleId),
+      );
+    // `admin` implies both, as in `memberHasCapability`.
+    return { host: held("host", "admin"), staff: held("staff", "admin") };
   }
 
   /** Does the member hold the group's role, or one of any higher group? */

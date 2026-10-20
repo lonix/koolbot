@@ -132,6 +132,16 @@ return 404.
      API hiccup, rate limit) is not a denial: the middleware responds 503
      without revoking the session or clearing the cookie, so the next
      request succeeds once the blip clears.
+   - **Resolves the `/me` scopes** (`member`, `host`, `moderator`) from role groups with
+     `PermissionsService.resolveWebScopes` on every request for a `user` session (#1316) and puts them on
+     `req.webSession.scopes`. The stored `scopes` column is never read. Both capabilities come from one group snapshot
+     (`RoleGroupService.memberScopeCapabilities`, which throws instead of swallowing a failed read); any failure yields
+     `["member"]`, never a partial set:
+     fail closed, never open. Guard a `/me` area with `requireScopeMiddleware("host" | "moderator")` mounted
+     on its prefix before its routers (`/me/events` and `/me/moderation` already are; add moderation pages
+     under that router, not beside it). Scopes never open `/admin`: that is `requireAdminRoleMiddleware`
+     (`role === "admin"`) only. The `host` and `staff` capabilities are shown as **Event host** and
+     **Moderator** through `capabilityLabel`; use it wherever a capability is rendered.
 4. `POST /admin/finish` revokes the session in MongoDB, clears the cookie.
 
 The cookie value carries `sid`, `uid`, `gid`, `iat`, `act` — all

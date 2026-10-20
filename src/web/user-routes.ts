@@ -32,6 +32,8 @@ import {
   AuthenticatedRequest,
   clearSessionCookie,
   createSessionPingHandler,
+  hasScope,
+  requireScopeMiddleware,
   type WebSessionContext,
 } from "./session.js";
 import { getDisplayedRemainingMs } from "./admin-layout.js";
@@ -565,9 +567,19 @@ export function createUserRouter(
   // ---------- Event host panel (#1189) ----------
   // Behind the session check and the write limiter above. The sub-router's
   // own gate (CSRF, then the event-host check) covers every path under it.
+  // Hosting needs the `host` scope (#1316), resolved from role groups on every
+  // request. The guard sits on the `/events` prefix, ahead of both routers
+  // below, so it covers the panel and the presets. A host still only reaches
+  // events they created (`isEventHost`), an admin session every event.
+  router.use("/events", requireScopeMiddleware("host"));
   router.use("/events/:id/host", createHostEventsRouter(client));
   // A host's own group presets (#1216): `/me/events/presets`.
   router.use("/events/presets", createMeEventPresetsRouter(client));
+
+  // Moderation pages (#1320, not built yet) need the `moderator` scope. The
+  // guard is mounted now so every route added under `/me/moderation` is gated
+  // from its first commit: add routes to this router, never beside it.
+  router.use("/moderation", requireScopeMiddleware("moderator"));
 
   // ---------- Index ----------
   router.get(
@@ -581,8 +593,11 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
+      // Only hosts see the card: its links lead to `/me/events*` (#1316).
       const hostedEvents = (
-        await listHostedEvents(session.guildId, session.discordUserId)
+        hasScope(session, "host")
+          ? await listHostedEvents(session.guildId, session.discordUserId)
+          : []
       ).map((e) => ({
         id: e.id,
         title: e.title,

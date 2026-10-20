@@ -712,7 +712,7 @@ settings — the Web UI's **Permissions** page narrows who may run a command the
 bot already received, it cannot widen Discord's own gate. Server-wide history
 is also viewable on the `/admin/moderation` page.
 
-Once the server has a `staff` or `admin` role group (Web UI, **Role Groups**), `/warn`,
+Once the server has a Moderator (`staff`) or Admin role group (Web UI, **Role Groups**), `/warn`,
 `/timeout`, `/ban` and `/modlog` also require a role from a staff or admin group, unless you
 set an explicit restriction for the command on the **Permissions** page (administrators always
 pass). With no such group, access is unchanged.
@@ -1176,7 +1176,7 @@ applies in its native menu but cannot apply to an action the bot executes on
 your behalf.
 
 `/raidmode` follows the same staff default as `/warn`, `/timeout`, `/ban` and
-`/modlog`: while the Web UI has at least one `staff` or `admin` role group and no
+`/modlog`: while the Web UI has at least one Moderator (`staff`) or Admin role group and no
 explicit restriction is set for the command, only members of those groups can run it
 (administrators still bypass). On a server with such a group this narrows `/raidmode`
 from every Moderate Members holder to the staff group; set an explicit restriction on the

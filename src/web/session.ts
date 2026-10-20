@@ -7,7 +7,11 @@ import {
   PermissionCheckError,
 } from "../services/permissions-service.js";
 import { WebSessionService } from "../services/web-session-service.js";
-import type { IWebSession, WebSessionRole } from "../models/web-session.js";
+import type {
+  IWebSession,
+  WebScope,
+  WebSessionRole,
+} from "../models/web-session.js";
 import {
   clearCookie,
   hostCookieName,
@@ -44,7 +48,15 @@ export interface WebSessionContext {
    * read this rather than re-decoding the cookie.
    */
   role: WebSessionRole;
-  scopes: string[];
+  /**
+   * Scopes resolved from role groups on THIS request (#1316); never the
+   * stored column. A `user` session holds `member` plus `host` and/or
+   * `moderator` while its role groups say so; failure to resolve leaves
+   * `["member"]`. An `admin` session holds all three (it passes every scope
+   * guard through its role regardless). No `/admin` route reads this: the
+   * admin surface is gated by `role === "admin"` alone.
+   */
+  scopes: WebScope[];
   lastActivityAt: number;
   /**
    * Server-side hard cap for the session, mirrored from
@@ -286,15 +298,106 @@ export function createSessionMiddleware(
     const refreshed: CookiePayload = { ...payload, rol: role, act: now };
     writeSessionCookie(res, refreshed);
 
+    // Scopes come from the role groups, live, on every request (#1316), and
+    // never from the stored column. An admin session is gated by its role (the
+    // live Administrator check above), so it needs no lookup.
+    const scopes: WebScope[] =
+      role === "admin"
+        ? ["member", "host", "moderator"]
+        : await resolveUserScopes(client, payload.uid, payload.gid);
+
     req.webSession = {
       sessionId: payload.sid,
       discordUserId: payload.uid,
       guildId: payload.gid,
       role,
-      scopes: dbSession.scopes,
+      scopes,
       lastActivityAt: now,
       expiresAt: dbSession.expiresAt,
     };
+    next();
+  };
+}
+
+/**
+ * Scopes of a `user` session, resolved live. Fails closed: anything that goes
+ * wrong, including a permissions service that cannot answer, leaves plain
+ * `member` (#1316).
+ */
+async function resolveUserScopes(
+  client: Client,
+  userId: string,
+  guildId: string,
+): Promise<WebScope[]> {
+  try {
+    const scopes = await PermissionsService.getInstance(
+      client,
+    ).resolveWebScopes(userId, guildId);
+    return normalizeScopes(scopes);
+  } catch (err) {
+    logger.warn("Failed to resolve web scopes; using member only", err);
+    return ["member"];
+  }
+}
+
+/** Keep only known scopes, always including `member`. */
+function normalizeScopes(raw: unknown): WebScope[] {
+  const out: WebScope[] = ["member"];
+  if (!Array.isArray(raw)) return out;
+  for (const s of ["host", "moderator"] as const) {
+    if (raw.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * True when the session holds `scope` for THIS request. An `admin` session
+ * holds every scope (it is the host of every event and may see moderation);
+ * a `user` session needs it in its live-resolved `scopes`. Anything missing or
+ * malformed is a no.
+ */
+export function hasScope(
+  session: Pick<WebSessionContext, "role" | "scopes"> | null | undefined,
+  scope: WebScope,
+): boolean {
+  if (!session) return false;
+  if (session.role === "admin") return true;
+  if (session.role !== "user") return false;
+  return Array.isArray(session.scopes) && session.scopes.includes(scope);
+}
+
+/**
+ * Express guard for a `/me` area that needs a scope (#1316): `/me/events*`
+ * needs `host`, `/me/moderation*` needs `moderator`. Mount it AFTER
+ * `createSessionMiddleware`, on the area's prefix and BEFORE the area's
+ * routers, so nothing underneath runs for a session without the scope. It
+ * grants nothing on `/admin`, which only `requireAdminRoleMiddleware` opens.
+ */
+export function requireScopeMiddleware(
+  scope: Exclude<WebScope, "member">,
+): (req: AuthenticatedRequest, res: Response, next: NextFunction) => void {
+  const what = scope === "host" ? "the Event host role" : "the Moderator role";
+  return function requireScope(req, res, next): void {
+    if (!req.webSession) {
+      respondUnauthorized(res);
+      return;
+    }
+    if (!hasScope(req.webSession, scope)) {
+      res
+        .status(403)
+        .type("text/html")
+        .send(
+          renderErrorPage({
+            title: "Forbidden",
+            heading: "Forbidden",
+            bodyHtml:
+              `<p>This page needs ${what}. ` +
+              `Visit <a href="/me/">/me</a> for your own preferences, or ask an Administrator ` +
+              `to add you to the right role group.</p>`,
+          }),
+        );
+      return;
+    }
     next();
   };
 }

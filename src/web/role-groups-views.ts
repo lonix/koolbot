@@ -13,6 +13,7 @@ import {
 } from "../services/role-group-plan.js";
 import {
   ROLE_GROUP_CAPABILITIES,
+  capabilityLabel,
   ROLE_GROUP_SYNC_POLICIES,
 } from "../models/role-group.js";
 import {
@@ -104,7 +105,7 @@ function permissionChecks(bits: string | null): string {
 function capabilityChecks(caps: readonly string[], disabled: boolean): string {
   return ROLE_GROUP_CAPABILITIES.map(
     (c) =>
-      `<label class="check"><input type="checkbox" name="capability" value="${c}"${caps.includes(c) ? " checked" : ""}${disabled ? " disabled" : ""}> ${c}</label>`,
+      `<label class="check"><input type="checkbox" name="capability" value="${c}"${caps.includes(c) ? " checked" : ""}${disabled ? " disabled" : ""}> ${escapeHtml(capabilityLabel(c))}</label>`,
   ).join(" ");
 }
 
@@ -193,7 +194,7 @@ function editForm(g: RoleGroupRow, csrf: string, globalPolicy: string): string {
 ${csrf}
 <label>Name <input type="text" name="name" value="${escapeHtml(g.name)}" maxlength="100" required></label>
 <fieldset><legend>Capabilities</legend>${capabilityChecks(g.capabilities, g.gateOnly)}
-<p class="muted">Features ask for capabilities instead of role ids. <code>admin</code> also counts as <code>staff</code>. <code>bot</code> groups only ever match bot accounts.</p></fieldset>
+<p class="muted">Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code>/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.</p></fieldset>
 ${
   locked
     ? `<p class="muted">The role is ${g.gateOnly ? "integration-managed" : "locked"}, so its permissions and colour are not edited.</p>`
@@ -305,7 +306,10 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
         `<form method="POST" action="/admin/role-groups/reorder" class="inline-form">${csrf}<input type="hidden" name="groupId" value="${escapeHtml(g.id)}"><input type="hidden" name="direction" value="${dir}"><button type="submit" class="btn" aria-label="Move ${escapeHtml(g.name)} ${dir}"${disabled ? " disabled" : ""}>${dir === "up" ? "↑" : "↓"}</button></form>`;
       const caps = g.capabilities.length
         ? g.capabilities
-            .map((c) => `<span class="tag tag-info">${escapeHtml(c)}</span>`)
+            .map(
+              (c) =>
+                `<span class="tag tag-info">${escapeHtml(capabilityLabel(c))}</span>`,
+            )
             .join(" ")
         : `<span class="muted">none (gating only)</span>`;
       return `<tr>

@@ -98,14 +98,14 @@ describe("GET /permissions", () => {
       },
     ] as never);
     const html = await page();
-    expect(html).toContain("staff only (default)");
+    expect(html).toContain("Moderators only (default)");
     expect(html).toContain("Mods and above (group)");
   });
 
   it("shows them as open when the guild has no groups", async () => {
     jest.spyOn(RoleGroupService.getInstance(), "list").mockResolvedValue([]);
     const html = await page();
-    expect(html).not.toContain("staff only (default)");
+    expect(html).not.toContain("Moderators only (default)");
     expect(html).not.toContain("role groups unavailable");
     expect(html).toContain("open");
   });
@@ -116,7 +116,7 @@ describe("GET /permissions", () => {
       .mockRejectedValue(new Error("database offline"));
     const html = await page();
     expect(html).toContain("unknown (role groups unavailable)");
-    expect(html).not.toContain("staff only (default)");
+    expect(html).not.toContain("Moderators only (default)");
     expect(html).toContain("couldn't be read");
   });
 });

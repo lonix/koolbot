@@ -87,6 +87,29 @@ What changes per session:
   who need to act on another user's data do so via the admin panel's
   audit/user tooling, not by impersonating them on `/me/*`.
 
+**Scopes on `/me` (#1316).** A `user` session is `member` and may also be an **Event host** and/or a **Moderator**, depending on
+the member's role groups. The scopes are resolved from the role groups **on every request** (the same live member lookup the
+`me` re-check uses, so it adds no extra Discord call), never stored: the `scopes` column on the session row is not read. Removing
+someone from the group removes the scope on their next request, within the same ~15 s window as the other live checks when the
+Server Members intent is off.
+
+| Scope      | Granted by (role group capability)                | Reaches                                        |
+| ---------- | ------------------------------------------------- | ---------------------------------------------- |
+| Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                           |
+| Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created  |
+| Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*` (pages arrive with #1320)    |
+
+- A host reaches only events they created (`isEventHost`); an admin session reaches every event. A member who is not in a host group gets 403
+  on `/me/events*`, even for an event they created earlier.
+- **No scope opens `/admin`.** The admin console is gated by the session role alone (`requireAdminRoleMiddleware`); a host or
+  moderator signs in with `/me` and holds a `user` session. A test walks every registered `/admin` route with each scope combination
+  and expects 403.
+- Fails closed, all or nothing: both capabilities come from one read of the role groups. If the groups or the member cannot be read
+  (Discord or database error), the session is plain `member` for that request, never a partial set, and the
+  event and moderation pages answer 403. The request is still served as `me` otherwise.
+- Nothing grants the scope automatically. The **Event host** preset on the Role Groups page only pre-fills the form, and an existing
+  server gains no host members from this change.
+
 The role is fixed by the command: `/config` always issues `admin` (and
 re-checks the invoker's live `Administrator` bit, besides registering with
 `default_member_permissions = Administrator`), `/me` always issues `user`.
@@ -1243,10 +1266,13 @@ every feature keeps its current behaviour.
 - **Create / edit / reorder / delete.** A group is backed by an _existing role_ (picked from the
   server's roles, with its member count) or by a _new role_ the engine creates when the plan is
   applied. Rank is edited with the ↑ / ↓ buttons; the list is shown highest first, and role
-  positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, VIP, Bots)
-  pre-fill the permission and capability boxes, which stay editable.
+  positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, Event host, VIP, Bots)
+  pre-fill the permission and capability boxes, which stay editable. The **Event host** preset ticks only the
+  Event host capability and no Discord permission, and adds nobody.
 - **Capabilities** are what features query instead of hard-coding role ids: `admin`, `staff`
-  (moderator-level; `admin` implies it) and `bot` (bot accounts only: humans can't be in a bot
+  (shown as **Moderator** in the UI; the stored key stays `staff`; `admin` implies it), `host` (shown as
+  **Event host**: lets members open the host panel of events they created, from `/me`; `admin` implies it; it opens no admin page)
+  and `bot` (bot accounts only: humans can't be in a bot
   group, and member-facing features such as leaderboards, digest, achievements and welcome
   ignore it). Groups without a capability are still usable for gating (a "Friends" or regional
   role). The guild owner and members with the Administrator permission always count as `admin`,
@@ -1344,13 +1370,13 @@ groups are defined:
   (that group plus every group ranked higher), under a _Role groups_ heading above the roles. A
   group entry resolves to the group's role at check time, so re-ranking or re-linking a group takes
   effect without editing the command. A group with no role (unlinked) grants nothing, and the
-  command stays restricted. While at least one `staff` or `admin` group exists, the moderation
-  commands (`/warn`, `/timeout`, `/ban`, `/modlog`, `/raidmode`) default to staff unless you set a restriction
+  command stays restricted. While at least one Moderator (`staff`) or Admin group exists, the moderation
+  commands (`/warn`, `/timeout`, `/ban`, `/modlog`, `/raidmode`) default to Moderators unless you set a restriction
   for them on this page; the page marks them _staff only (default)_. Members with the Administrator
   permission still bypass every check. If the groups can't be read, the check is refused (the user
   is told permissions can't be verified) rather than opening the command.
 - **Quotes**: the _Roles allowed to delete quotes_ picker (`quotes.delete_roles`) offers the same
-  group entries. Left empty, it means the `staff` and `admin` groups once one exists. With no such
+  group entries. Left empty, it means the Moderator (`staff`) and Admin groups once one exists. With no such
   group the setting works as before.
 - **Birthday role and leaderboard tiers, powerful roles (#1145)**: saving a role with Administrator,
   Manage Server, Manage Roles, Manage Channels, Manage Webhooks, Kick, Ban, Timeout or Mention

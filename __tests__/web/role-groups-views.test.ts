@@ -101,6 +101,29 @@ describe("renderRoleGroupsPage", () => {
     expect(tokens).toBe(forms);
   });
 
+  it("shows the staff capability as Moderator and host as Event host; the stored key stays staff (#1316)", () => {
+    const html = renderRoleGroupsPage(
+      props({ groups: [row({ capabilities: ["staff", "host"] })] }),
+    );
+    expect(html).toContain('<span class="tag tag-info">Moderator</span>');
+    expect(html).toContain('<span class="tag tag-info">Event host</span>');
+    // The tag no longer shows the raw key ...
+    expect(html).not.toContain('<span class="tag tag-info">staff</span>');
+    // ... but the form still posts it, so nothing stored changes.
+    expect(html).toContain('name="capability" value="staff" checked');
+    expect(html).toContain('name="capability" value="host" checked');
+    expect(html).toContain("> Moderator</label>");
+    expect(html).toContain("> Event host</label>");
+    expect(html).not.toContain("> staff</label>");
+  });
+
+  it("offers an Event host preset that ticks host and nothing else (#1316)", () => {
+    const html = renderRoleGroupsPage(props());
+    expect(html).toContain(
+      '<option value="event-host" data-permissions="" data-capabilities="host">Event host</option>',
+    );
+  });
+
   it("explains that groups are optional when there are none", () => {
     const html = renderRoleGroupsPage(props({ groups: [] }));
     expect(html).toContain("No groups yet");
