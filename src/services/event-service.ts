@@ -23,6 +23,15 @@ import {
   type RsvpStatus,
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
+import {
+  EDIT_MESSAGES,
+  diffEventEdit,
+  editModeOf,
+  eventEditVersion,
+  hasEdit,
+  type EventEditDiff,
+  type EventEditFields,
+} from "./event-edit.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import {
   copyGroupSetup,
@@ -131,6 +140,22 @@ export interface CreateEventInput {
   groups?: EventGroupSetup;
   createdBy: string;
 }
+
+/** The outcome of {@link EventService.editEvent} (#1298). */
+export type EditEventResult =
+  | { ok: true; event: IEvent; diff: EventEditDiff }
+  | {
+      ok: false;
+      code:
+        | "not-found"
+        | "refused"
+        | "conflict"
+        | "locked"
+        | "bad-end"
+        | "past"
+        | "unchanged";
+      message: string;
+    };
 
 /** Raised when a recurring event is requested while recurrence is off. */
 export class RecurrenceDisabledError extends Error {
@@ -1880,6 +1905,136 @@ export class EventService extends ScheduledService {
     return event;
   }
 
+  /**
+   * Edit an upcoming event in place (#1298). One conditional write, so an edit
+   * that loses a race with Start now, an end, a cancel or another edit changes
+   * nothing and says so (`conflict`).
+   *
+   * Nothing is timer-driven: the one-minute scan reads the row, so a new
+   * `startTime` re-arms the lead-time channel and the reminder by itself. The
+   * only thing that must be put back is `reminderSent` when the start moves.
+   * Afterwards the native Discord event is patched through the normal sync
+   * (`diffNativeFields` then `scheduledEvents.edit`, never delete and create,
+   * so the Interested list survives) and the announcement is edited in place.
+   * RSVPs, the cover, the groups and the announcement ids are not touched.
+   *
+   * `expectedVersion` is `eventEditVersion` of the row the form was built from.
+   * Does not take `withEventMoveLock` or move `liveEditRevision`: no group
+   * field changes here.
+   */
+  public async editEvent(input: {
+    eventId: string;
+    guildId: string;
+    expectedVersion: string;
+    changes: EventEditFields;
+    now?: Date;
+  }): Promise<EditEventResult> {
+    const now = input.now ?? new Date();
+    const id = canonicalEventId(input.eventId);
+    const row = id ? await this.getEvent(id) : null;
+    if (!id || !row || row.guildId !== input.guildId) {
+      return { ok: false, code: "not-found", message: "Event not found." };
+    }
+    const mode = editModeOf(row, now, this.isBeingEnded(id));
+    if (mode.mode === "refused") {
+      return { ok: false, code: "refused", message: mode.message };
+    }
+    const conflict = (): EditEventResult => ({
+      ok: false,
+      code: "conflict",
+      message: EDIT_MESSAGES.conflict,
+    });
+    if (eventEditVersion(row) !== input.expectedVersion) return conflict();
+
+    const want = input.changes;
+    const moved = want.startTime.getTime() !== row.startTime.getTime();
+    if (
+      mode.mode === "limited" &&
+      (want.title !== row.title ||
+        moved ||
+        (want.timezone ?? "") !== (row.timezone ?? ""))
+    ) {
+      return { ok: false, code: "locked", message: EDIT_MESSAGES.locked };
+    }
+    if (moved && want.startTime.getTime() <= now.getTime()) {
+      return { ok: false, code: "past", message: EDIT_MESSAGES.past };
+    }
+    if (
+      mode.mode === "limited" &&
+      computeEndTime(row.startTime, want.durationMinutes).getTime() <=
+        now.getTime()
+    ) {
+      return { ok: false, code: "bad-end", message: EDIT_MESSAGES.badEnd };
+    }
+    const diff = diffEventEdit(row, want);
+    if (!hasEdit(diff)) {
+      return { ok: false, code: "unchanged", message: EDIT_MESSAGES.unchanged };
+    }
+
+    const changes: Record<string, unknown> = {};
+    if (want.title !== row.title) changes.title = want.title;
+    if (want.description !== (row.description ?? "")) {
+      changes.description = want.description;
+    }
+    if (moved) {
+      changes.startTime = want.startTime;
+      // Re-arm the reminder for the new start.
+      changes.reminderSent = false;
+    }
+    if ((want.timezone ?? "") !== (row.timezone ?? "")) {
+      changes.timezone = want.timezone;
+    }
+    if (want.durationMinutes !== row.durationMinutes) {
+      changes.durationMinutes = want.durationMinutes;
+    }
+
+    const updated = await Event.findOneAndUpdate(
+      {
+        _id: row._id,
+        guildId: row.guildId,
+        // The state and channel the edit was judged on: a start, end or cancel
+        // since then no longer matches. `channelId` is part of it, so the scan's
+        // lead-time creation cannot slip in between a full edit's check and write.
+        state: row.state,
+        channelId: row.channelId ?? null,
+        title: row.title,
+        description:
+          (row.description ?? "") === ""
+            ? { $in: ["", null] }
+            : row.description,
+        startTime: row.startTime,
+        durationMinutes: row.durationMinutes,
+        nativeAdopted: { $ne: true },
+        seriesCancelled: { $ne: true },
+      },
+      { $set: changes },
+      { new: true },
+    );
+    if (!updated) return conflict();
+
+    // The write is done; what follows is best effort and repaired by the scan
+    // (the native sync and the link refresh both run on every tick).
+    this.linkVerified.delete(id);
+    try {
+      await this.nativeSync.syncEvent(updated);
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(id)}: native sync after edit failed:`,
+        error,
+      );
+    }
+    try {
+      await this.updateAnnouncement(updated);
+    } catch (error) {
+      logger.error(
+        `Event ${sanitizeForLog(id)}: announcement refresh after edit failed:`,
+        error,
+      );
+    }
+    logger.info(`Edited event ${sanitizeForLog(id)}`);
+    return { ok: true, event: updated, diff };
+  }
+
   public async listEvents(guildId: string): Promise<IEvent[]> {
     return Event.find({ guildId }).sort({ startTime: 1 });
   }
@@ -2743,8 +2898,14 @@ export class EventService extends ScheduledService {
           // is not yet) must win: the claim then fails and the channel is
           // removed, and the next scan decides again from the new lead. Not
           // asked of "Start now", which creates whatever the lead says.
+          // The same goes for the start time (#1298): an edit that moved it
+          // while the channel was being created wins, and the next scan decides
+          // again from the new start.
           ...(options.enforceLead
-            ? { channelLeadMinutes: event.channelLeadMinutes ?? null }
+            ? {
+                channelLeadMinutes: event.channelLeadMinutes ?? null,
+                startTime: event.startTime,
+              }
             : {}),
         },
         { $set: { channelId: channel.id } },

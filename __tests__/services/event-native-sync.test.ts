@@ -286,6 +286,33 @@ describe("NativeEventSync.syncEvent", () => {
     );
   });
 
+  it("patches a moved start, a new title and a new duration in one edit, and never deletes or recreates (#1298)", async () => {
+    // The native event still shows the old schedule; the row was edited.
+    const { guild, scheduledEvents } = makeGuild({ natives: [makeNative()] });
+    const moved = new Date(FUTURE.getTime() + 2 * 60 * 60 * 1000);
+    await makeSync().syncEvent(
+      makeEvent({
+        nativeEventId: "n1",
+        title: "Game night (moved)",
+        startTime: moved,
+        durationMinutes: 60,
+      }),
+      guild,
+    );
+    expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({
+        name: "Game night (moved)",
+        scheduledStartTime: moved,
+        scheduledEndTime: new Date(moved.getTime() + 60 * 60 * 1000),
+      }),
+    );
+    // Same native event, so the Interested list survives.
+    expect(scheduledEvents.create).not.toHaveBeenCalled();
+    expect(scheduledEvents.delete).not.toHaveBeenCalled();
+  });
+
   describe("running (Active) native events", () => {
     const active = (o: Record<string, unknown> = {}) =>
       makeNative({ status: GuildScheduledEventStatus.Active, ...o });

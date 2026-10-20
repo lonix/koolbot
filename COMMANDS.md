@@ -1317,7 +1317,7 @@ Once in the admin Web UI (admin sessions):
 | Weekly Digest     | (new — weekly DM digest configuration and preview)                  |
 | Voice Analytics   | (new — voice activity charts and channel breakdowns)                |
 
-The `/event` command was removed after 2.0: administrators schedule, cancel and start events on the **Events** page, and
+The `/event` command was removed after 2.0: administrators schedule, edit, cancel and start events on the **Events** page, and
 members see them in Discord's own Events list (every event is mirrored as a native Discord scheduled event) and in the
 announcement channel. There is no member-facing events list command. The native event needs the bot's Create Events (or Manage Events)
 permission; without it there is no event card in the Events list.

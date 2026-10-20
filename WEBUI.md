@@ -2627,6 +2627,15 @@ ended, or is being ended, answers "could not be cancelled: it is ended" (admin p
 spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
+**Edit** (#1298) opens the create form pre-filled, on the host panel's own address (`/me/events/<id>/host/edit`), for an upcoming or running one-off
+event. An administrator can edit any event; a host with the Event host role only the events they created. A scheduled event with no channel yet takes a
+new title, description, date, time, timezone and duration, with the same checks as the create form. The Discord event is patched in place (so the people
+who marked Interested are kept), the announcement is edited in place, and a moved start moves the lead-time channel creation and sends the reminder
+again. An event that has started (running, its channel already created, or past its start) can only change its description and duration. Finished,
+cancelled, recurring and adopted events cannot be edited: changing one occurrence of a series would change every later one. A save made on an
+out-of-date form (the event started, ended, was cancelled or edited meanwhile) changes nothing and asks you to reload. Every save is audited as
+`event.edit` with the changed fields before and after.
+
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event
 within a minute: sent when it is new or changed (never on every scan) and cleared

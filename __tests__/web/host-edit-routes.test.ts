@@ -1,0 +1,664 @@
+/**
+ * Editing an upcoming event (#1298), over real HTTP: real Express, the real
+ * session middleware, the real CSRF check, the real scope guard and host gate,
+ * and the real `EventService.editEvent`. Stubbed: the session row, the
+ * permission lookup, the audit write, the event model (a small stateful fake
+ * whose `findOneAndUpdate` really matches on the filter, so a lost race is
+ * a lost race), and the Discord-facing passes (native sync, announcement edit).
+ */
+
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from "@jest/globals";
+import { Buffer } from "buffer";
+import express from "express";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
+
+type Json = Record<string, unknown>;
+
+let events: Record<string, Json> = {};
+/** Runs right before the next conditional write; a hook to lose a race. */
+let beforeWrite: (() => void) | null = null;
+
+const clone = (row: Json | undefined): Json | null => {
+  if (!row) return null;
+  const out: Json = { ...row };
+  for (const [k, v] of Object.entries(row)) {
+    if (v instanceof Date) out[k] = new Date(v.getTime());
+  }
+  return out;
+};
+
+function same(actual: unknown, want: unknown): boolean {
+  if (want instanceof Date) {
+    return actual instanceof Date && actual.getTime() === want.getTime();
+  }
+  if (want && typeof want === "object") {
+    const w = want as { $in?: unknown[]; $ne?: unknown };
+    if (w.$in) {
+      return w.$in.some((x) => (x ?? null) === (actual ?? null));
+    }
+    if ("$ne" in w) return actual !== w.$ne;
+  }
+  return (actual ?? null) === (want ?? null);
+}
+
+jest.unstable_mockModule("../../src/models/event.js", () => ({
+  EVENT_RECURRENCES: ["none", "weekly", "biweekly", "monthly"],
+  EVENT_GROUP_KINDS: ["team", "open", "leads"],
+  Event: {
+    findById: (id: string) => {
+      const value = clone(events[id]);
+      return {
+        lean: async () => value,
+        catch: () => Promise.resolve(value),
+        then: (ok: (v: unknown) => unknown) => Promise.resolve(value).then(ok),
+      };
+    },
+    findOneAndUpdate: async (
+      filter: Json,
+      update: { $set: Json },
+    ): Promise<Json | null> => {
+      beforeWrite?.();
+      beforeWrite = null;
+      const row = events[filter._id as string];
+      if (!row) return null;
+      for (const [k, want] of Object.entries(filter)) {
+        if (k === "_id") continue;
+        if (!same(row[k], want)) return null;
+      }
+      Object.assign(row, update.$set);
+      return clone(row);
+    },
+  },
+}));
+
+const { signValue } = await import("../../src/web/cookies.js");
+const { deriveCsrfToken, ensureCsrfCookie } =
+  await import("../../src/web/csrf.js");
+const { createSessionMiddleware } = await import("../../src/web/session.js");
+const { createUserRouter } = await import("../../src/web/user-routes.js");
+const { WebSessionService } =
+  await import("../../src/services/web-session-service.js");
+const { PermissionsService } =
+  await import("../../src/services/permissions-service.js");
+const { EventService } = await import("../../src/services/event-service.js");
+const { ConfigService } = await import("../../src/services/config-service.js");
+const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+
+const SECRET = "test-secret-for-host-edit-routes";
+const GUILD = "guild-1";
+const CREATOR = "111111111111111111";
+const OTHER = "222222222222222222";
+const EVENT_ID = "65a000000000000000000001";
+const PANEL = `/me/events/${EVENT_ID}/host`;
+const EDIT = `${PANEL}/edit`;
+
+/** Far enough ahead that "in the future" never flips during the run. */
+const START = new Date("2099-06-01T18:00:00.000Z");
+
+function makeEvent(over: Json = {}): Json {
+  return {
+    _id: EVENT_ID,
+    guildId: GUILD,
+    createdBy: CREATOR,
+    title: "Quiz night",
+    description: "Bring a friend",
+    state: "scheduled",
+    startTime: new Date(START.getTime()),
+    timezone: "UTC",
+    durationMinutes: 90,
+    channelId: null,
+    recurrence: "none",
+    seriesId: null,
+    reminderSent: true,
+    nativeAdopted: false,
+    seriesCancelled: false,
+    nativeEventId: "native-1",
+    announcementChannelId: "ann-ch",
+    announcementMessageId: "ann-msg",
+    rsvps: [{ userId: "u9", status: "going" }],
+    groupsEnabled: false,
+    groups: [],
+    ...over,
+  };
+}
+
+let auditRows: Array<Record<string, unknown>> = [];
+let sessionUser = CREATOR;
+let sessionRole: "user" | "admin" = "user";
+let scopes: string[] = ["member", "host"];
+let server: Server;
+let base = "";
+const syncEvent = jest.fn<(e: unknown) => Promise<void>>(async () => undefined);
+const updateAnnouncement = jest.fn<(e: unknown) => Promise<boolean>>(
+  async () => true,
+);
+const postAnnouncement = jest.fn<(e: unknown) => Promise<void>>(
+  async () => undefined,
+);
+
+function fakeClient(): never {
+  const guild = { id: GUILD, channels: { cache: new Map() } };
+  return {
+    guilds: {
+      cache: { get: (id: string) => (id === GUILD ? guild : undefined) },
+      fetch: async () => guild,
+    },
+  } as never;
+}
+
+function cookie(user: string): string {
+  const now = Date.now();
+  const encoded = Buffer.from(
+    JSON.stringify({
+      sid: "sid-1",
+      uid: user,
+      gid: GUILD,
+      rol: "user",
+      iat: now - 1000,
+      act: now - 1000,
+    }),
+  ).toString("base64url");
+  return `koolbot_session=${signValue(encoded, SECRET)}`;
+}
+
+const csrf = (): string => deriveCsrfToken("sid-1") ?? "";
+
+async function call(
+  path: string,
+  init: { method?: string; csrf?: boolean; body?: Json } = {},
+): Promise<{ status: number; text: string; location: string | null }> {
+  const method = init.method ?? "GET";
+  const form = new globalThis.URLSearchParams();
+  if (method !== "GET" && init.csrf !== false) form.set("_csrf", csrf());
+  for (const [k, v] of Object.entries(init.body ?? {})) form.set(k, String(v));
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      cookie: cookie(sessionUser),
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: method === "GET" ? undefined : form.toString(),
+    redirect: "manual",
+  });
+  return {
+    status: res.status,
+    text: await res.text(),
+    location: res.headers.get("location"),
+  };
+}
+
+function flashOf(location: string | null): { type: string; msg: string } {
+  const q = new globalThis.URL(location ?? "", "http://x").searchParams;
+  return { type: q.get("flash") ?? "", msg: q.get("msg") ?? "" };
+}
+
+/** The version token the edit form of the stored event carries. */
+async function versionOf(): Promise<string> {
+  const r = await call(EDIT);
+  const m = /name="version" value="([^"]+)"/.exec(r.text);
+  if (!m) throw new Error(`no version in the form (status ${r.status})`);
+  return m[1];
+}
+
+async function save(
+  body: Json,
+  init: { version?: string } = {},
+): Promise<{ status: number; text: string; location: string | null }> {
+  const version = init.version ?? (await versionOf());
+  return call(EDIT, {
+    method: "POST",
+    body: {
+      title: "Quiz night",
+      description: "Bring a friend",
+      date: "2099-06-01",
+      time: "18:00",
+      timezone: "UTC",
+      duration: "90",
+      version,
+      ...body,
+    },
+  });
+}
+
+const row = (): Json => events[EVENT_ID];
+
+beforeAll(async () => {
+  process.env.WEBUI_SESSION_SECRET = SECRET;
+  process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+  process.env.GUILD_ID = GUILD;
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
+  app.use(ensureCsrfCookie);
+  app.use(
+    "/me",
+    createUserRouter(fakeClient(), createSessionMiddleware({} as never)),
+  );
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, "127.0.0.1", resolve);
+  });
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(async () => {
+  EventService.reset();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+beforeEach(() => {
+  process.env.WEBUI_SESSION_SECRET = SECRET;
+  process.env.GUILD_ID = GUILD;
+  (WebSessionService as unknown as { instance: unknown }).instance = null;
+  events = { [EVENT_ID]: makeEvent() };
+  beforeWrite = null;
+  auditRows = [];
+  sessionUser = CREATOR;
+  sessionRole = "user";
+  scopes = ["member", "host"];
+  syncEvent.mockClear();
+  updateAnnouncement.mockClear();
+  postAnnouncement.mockClear();
+
+  jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
+    async () =>
+      ({
+        discordUserId: sessionUser,
+        guildId: GUILD,
+        role: sessionRole,
+        scopes: [],
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      }) as never,
+  );
+  jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+    isAdministrator: async () => sessionRole === "admin",
+    checkCommandPermission: async () => true,
+    resolveWebScopes: async () => scopes,
+  } as never);
+  jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+    registerReloadCallback: () => undefined,
+    addChangeListener: () => undefined,
+    getBoolean: async () => false,
+    getNumber: async (_k: string, f: number) => f,
+    getString: async (_k: string, f: string) => f,
+  } as never);
+  jest.spyOn(WebAuditLog, "create").mockImplementation(async (r: unknown) => {
+    auditRows.push(r as Record<string, unknown>);
+    return {} as never;
+  });
+
+  EventService.reset();
+  const service = EventService.getInstance(fakeClient()) as unknown as {
+    nativeSync: { syncEvent: unknown };
+    updateAnnouncement: unknown;
+    postAnnouncement: unknown;
+  };
+  service.nativeSync.syncEvent = syncEvent;
+  service.updateAnnouncement = updateAnnouncement;
+  service.postAnnouncement = postAnnouncement;
+  jest
+    .spyOn(EventService, "getInstance")
+    .mockReturnValue(service as unknown as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+describe("who may edit", () => {
+  it("lets the host edit their own event", async () => {
+    const r = await save({ title: "Quiz night 2" });
+    expect(r.status).toBe(303);
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().title).toBe("Quiz night 2");
+  });
+
+  it("lets an admin session edit an event somebody else created", async () => {
+    sessionRole = "admin";
+    sessionUser = OTHER;
+    scopes = ["member"];
+    const r = await save({ title: "By an admin" });
+    expect(r.status).toBe(303);
+    expect(row().title).toBe("By an admin");
+    expect(row().createdBy).toBe(CREATOR);
+  });
+
+  it("answers 403 to a host editing somebody else's event, and changes nothing", async () => {
+    sessionUser = OTHER;
+    const direct = await call(EDIT, {
+      method: "POST",
+      body: { title: "Hijacked", date: "2099-06-01", time: "18:00" },
+    });
+    expect(direct.status).toBe(403);
+    expect((await call(EDIT)).status).toBe(403);
+    expect(row().title).toBe("Quiz night");
+    expect(
+      auditRows.some(
+        (a) => (a as { action?: string }).action === "event.host.denied",
+      ),
+    ).toBe(true);
+    expect(syncEvent).not.toHaveBeenCalled();
+  });
+
+  it("answers 403 to a member without the host scope", async () => {
+    scopes = ["member"];
+    expect((await call(EDIT)).status).toBe(403);
+    const post = await call(EDIT, {
+      method: "POST",
+      body: { title: "Nope", date: "2099-06-01", time: "18:00" },
+    });
+    expect(post.status).toBe(403);
+    expect(row().title).toBe("Quiz night");
+  });
+
+  it("refuses a save without a CSRF token", async () => {
+    const version = await versionOf();
+    const r = await call(EDIT, {
+      method: "POST",
+      csrf: false,
+      body: { title: "No token", date: "2099-06-01", time: "18:00", version },
+    });
+    expect(r.status).toBe(403);
+    expect(row().title).toBe("Quiz night");
+  });
+});
+
+describe("validation is the create form's", () => {
+  const cases: Array<[string, Json, string]> = [
+    [
+      "a missing title",
+      { title: "" },
+      "Title, date and time are all required.",
+    ],
+    ["a missing date", { date: "" }, "Title, date and time are all required."],
+    [
+      "a title over 100 characters",
+      { title: "x".repeat(101) },
+      "Title must be 100 characters or fewer.",
+    ],
+    [
+      "a description over 1000 characters",
+      { description: "x".repeat(1001) },
+      "Description must be 1000 characters or fewer.",
+    ],
+    [
+      "an impossible date",
+      { date: "2099-02-30" },
+      "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
+    ],
+    [
+      "a start in the past",
+      { date: "2000-01-01" },
+      "The event start time must be in the future.",
+    ],
+    [
+      "a duration of 0",
+      { duration: "0" },
+      "Duration must be between 1 and 1440 minutes.",
+    ],
+    [
+      "a duration over 1440",
+      { duration: "1441" },
+      "Duration must be between 1 and 1440 minutes.",
+    ],
+    [
+      "an unknown timezone",
+      { timezone: "Mars/Base" },
+      "Invalid timezone: Mars/Base",
+    ],
+  ];
+
+  it.each(cases)(
+    "refuses %s with the create form's message",
+    async (_n, body, msg) => {
+      const r = await save(body);
+      expect(r.status).toBe(303);
+      expect(flashOf(r.location)).toEqual({ type: "err", msg });
+      expect(r.location).toContain(EDIT);
+      expect(row().title).toBe("Quiz night");
+      expect(row().durationMinutes).toBe(90);
+      expect(syncEvent).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("a moved start", () => {
+  it("stores the new instant in the form's timezone, re-arms the reminder and keeps RSVPs and announcement ids", async () => {
+    const r = await save({
+      date: "2099-06-02",
+      time: "20:30",
+      timezone: "Europe/Oslo",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    // 20:30 CEST in June is 18:30 UTC.
+    expect((row().startTime as Date).toISOString()).toBe(
+      "2099-06-02T18:30:00.000Z",
+    );
+    expect(row().timezone).toBe("Europe/Oslo");
+    expect(row().reminderSent).toBe(false);
+    expect(row().rsvps).toEqual([{ userId: "u9", status: "going" }]);
+    expect(row().announcementMessageId).toBe("ann-msg");
+    expect(row().nativeEventId).toBe("native-1");
+  });
+
+  it("patches the native event and edits the announcement in place, never reposting", async () => {
+    await save({ time: "19:00", title: "Renamed" });
+    expect(syncEvent).toHaveBeenCalledTimes(1);
+    const synced = syncEvent.mock.calls[0][0] as Json;
+    expect(synced.title).toBe("Renamed");
+    expect((synced.startTime as Date).toISOString()).toBe(
+      "2099-06-01T19:00:00.000Z",
+    );
+    expect(updateAnnouncement).toHaveBeenCalledTimes(1);
+    expect(postAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("keeps the reminder as it was when only the title changes", async () => {
+    await save({ title: "Only the title" });
+    expect(row().reminderSent).toBe(true);
+  });
+
+  it("writes an event.edit audit row with before and after for the changed fields only", async () => {
+    await save({ title: "Quiz night 2", duration: "60" });
+    const entry = auditRows.find(
+      (a) => (a as { action?: string }).action === "event.edit",
+    ) as { targetId: string; result: string; details: Json };
+    expect(entry.targetId).toBe(EVENT_ID);
+    expect(entry.result).toBe("success");
+    expect(entry.details).toEqual({
+      before: { title: "Quiz night", durationMinutes: 90 },
+      after: { title: "Quiz night 2", durationMinutes: 60 },
+    });
+  });
+
+  it("says nothing was changed, and writes nothing, for an identical form", async () => {
+    const r = await save({});
+    expect(flashOf(r.location)).toEqual({
+      type: "err",
+      msg: "Nothing was changed.",
+    });
+    expect(syncEvent).not.toHaveBeenCalled();
+    expect(updateAnnouncement).not.toHaveBeenCalled();
+  });
+});
+
+describe("an event that has started", () => {
+  it("offers only description and duration, and shows title and start as text", async () => {
+    events[EVENT_ID] = makeEvent({ state: "active", channelId: "c-main" });
+    const r = await call(EDIT);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('name="description"');
+    expect(r.text).toContain('name="duration"');
+    expect(r.text).not.toContain('name="date"');
+    expect(r.text).not.toContain('name="title"');
+    expect(r.text).toContain("already started");
+  });
+
+  it("refuses to move the start or rename it, even when the form is forged", async () => {
+    events[EVENT_ID] = makeEvent({ state: "active", channelId: "c-main" });
+    const r = await save({
+      title: "Renamed",
+      date: "2099-07-01",
+      time: "10:00",
+      description: "New text",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    // Title, start and timezone posted for a started event are ignored.
+    expect(row().title).toBe("Quiz night");
+    expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
+    expect(row().description).toBe("New text");
+  });
+
+  it("treats a scheduled event whose channel already exists as started", async () => {
+    events[EVENT_ID] = makeEvent({ channelId: "c-early" });
+    const r = await call(EDIT);
+    expect(r.text).not.toContain('name="date"');
+  });
+
+  it("treats an event whose start has passed as started", async () => {
+    events[EVENT_ID] = makeEvent({
+      startTime: new Date(Date.now() - 10 * 60_000),
+    });
+    const r = await call(EDIT);
+    expect(r.text).not.toContain('name="date"');
+  });
+
+  it("changes the duration of a running event but not into the past", async () => {
+    events[EVENT_ID] = makeEvent({
+      state: "active",
+      channelId: "c-main",
+      startTime: new Date(Date.now() - 30 * 60_000),
+    });
+    const ok = await save({ duration: "240" });
+    expect(flashOf(ok.location).type).toBe("ok");
+    expect(row().durationMinutes).toBe(240);
+    const bad = await save({ duration: "10" });
+    expect(flashOf(bad.location).type).toBe("err");
+    expect(flashOf(bad.location).msg).toContain("end the event in the past");
+    expect(row().durationMinutes).toBe(240);
+  });
+
+  it("can still fix a typo in the description when the start is minutes away", async () => {
+    events[EVENT_ID] = makeEvent({
+      startTime: new Date(Date.now() + 2 * 60_000),
+    });
+    const r = await save({ description: "Fixed" });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().description).toBe("Fixed");
+  });
+});
+
+describe("what is refused", () => {
+  it.each([
+    ["an ended event", { state: "ended" }, "finished or was cancelled"],
+    ["a cancelled event", { state: "cancelled" }, "finished or was cancelled"],
+    [
+      "a recurring event",
+      { recurrence: "weekly", seriesId: EVENT_ID },
+      "recurring series",
+    ],
+    ["an adopted event", { nativeAdopted: true }, "adopted"],
+  ])(
+    "refuses %s, with a message, on both GET and POST",
+    async (_n, over, text) => {
+      events[EVENT_ID] = makeEvent(over);
+      const get = await call(EDIT);
+      expect(get.status).toBe(303);
+      expect(flashOf(get.location).msg).toContain(text);
+      const post = await call(EDIT, {
+        method: "POST",
+        body: {
+          title: "Changed",
+          date: "2099-06-01",
+          time: "18:00",
+          version: "x",
+        },
+      });
+      expect(post.status).toBe(303);
+      expect(flashOf(post.location).type).toBe("err");
+      expect(flashOf(post.location).msg).toContain(text);
+      expect(row().title).toBe("Quiz night");
+      expect(syncEvent).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("a race", () => {
+  it("reports a changed event, and writes nothing, when the form is older than the event", async () => {
+    const version = await versionOf();
+    // Somebody else edited the title since the form was opened.
+    row().title = "Edited elsewhere";
+    const r = await save({ title: "Mine" }, { version });
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect(row().title).toBe("Edited elsewhere");
+    expect(syncEvent).not.toHaveBeenCalled();
+  });
+
+  it("loses to a cancel that lands between the check and the write", async () => {
+    const version = await versionOf();
+    beforeWrite = (): void => {
+      row().state = "cancelled";
+    };
+    const r = await save({ title: "Too late" }, { version });
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect(row().title).toBe("Quiz night");
+    expect(row().state).toBe("cancelled");
+    expect(syncEvent).not.toHaveBeenCalled();
+    expect(updateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("loses to a start (the scan creating the channel) between the check and the write", async () => {
+    const version = await versionOf();
+    beforeWrite = (): void => {
+      row().channelId = "c-lead";
+      row().state = "active";
+    };
+    const r = await save({ date: "2099-06-05" }, { version });
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
+  });
+
+  it("refuses while an end is in progress", async () => {
+    const service = EventService.getInstance(fakeClient()) as unknown as {
+      isEventBeingEnded: (id: string) => boolean;
+    };
+    jest.spyOn(service, "isEventBeingEnded").mockReturnValue(true);
+    const r = await call(EDIT);
+    expect(r.status).toBe(303);
+    expect(flashOf(r.location).msg).toContain("being ended");
+  });
+});
+
+describe("escaping", () => {
+  it("escapes the title and description in the form", async () => {
+    events[EVENT_ID] = makeEvent({
+      title: `<script>alert("t")</script>`,
+      description: `</textarea><img src=x onerror=alert(1)>`,
+    });
+    const r = await call(EDIT);
+    expect(r.status).toBe(200);
+    expect(r.text).not.toContain(`<script>alert("t")</script>`);
+    expect(r.text).not.toContain("<img src=x");
+    expect(r.text).toContain("&lt;script&gt;alert(&quot;t&quot;)");
+  });
+});
+
+describe("the links", () => {
+  it("shows Edit on the host panel of an editable event, and not on a series", async () => {
+    const own = await call(PANEL);
+    expect(own.text).toContain(`href="${EDIT}"`);
+    events[EVENT_ID] = makeEvent({ recurrence: "weekly", seriesId: EVENT_ID });
+    const series = await call(PANEL);
+    expect(series.text).not.toContain(`href="${EDIT}"`);
+  });
+});

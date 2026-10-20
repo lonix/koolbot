@@ -45,6 +45,15 @@ import { getDisplayedRemainingMs } from "../admin-layout.js";
 import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage, type UserFlashMessage } from "../user-layout.js";
+import { formatInTimeZone } from "date-fns-tz";
+import { resolveTimezone } from "../../utils/timezone.js";
+import {
+  editModeOf,
+  eventEditVersion,
+  type EditMode,
+} from "../../services/event-edit.js";
+import { renderEventEditBody } from "../event-edit-view.js";
+import { validateEventForm } from "../event-form.js";
 import { renderErrorPage } from "../views.js";
 import { isEventHost } from "../event-host.js";
 import { hostControlsAvailable, hostPanelPath } from "../host-panel-shared.js";
@@ -1509,6 +1518,7 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
     ...tagStatusFor(client, event, groupsEnabled),
     adopted: event.nativeAdopted === true,
+    editable: editModeOf(event, new Date()).mode !== "refused",
   };
 }
 
@@ -1546,6 +1556,171 @@ function groupNoticesFor(client: Client, event: IEvent): string[] {
     ...report.warnings,
     ...report.failures.map((f) => `${f.name}: ${f.reason}`),
   ];
+}
+
+/**
+ * Edit an upcoming event (#1298): `GET` the pre-filled form, `POST` the save.
+ * Both sit behind the gate of `createHostEventsRouter` (CSRF, the `host` scope,
+ * `isEventHost`: an admin edits any event, a host only their own), so nothing
+ * here checks who is asking. The save is audited as `event.edit`.
+ */
+function registerEditRoutes(router: Router, client: Client): void {
+  // Looked up per request, like the other sections: the router is built before
+  // the service in some tests.
+  const service = (): EventService => EventService.getInstance(client);
+  const edit = (event: IEvent): EditMode =>
+    editModeOf(
+      event,
+      new Date(),
+      service().isEventBeingEnded(String(event._id)),
+    );
+  const zoneOf = (event: IEvent): string => resolveTimezone(event.timezone);
+
+  router.get("/edit", (req, res, next: NextFunction) => {
+    const { hostEvent: event, hostSession: session } = req as HostRequest;
+    const eventId = String(event._id);
+    const mode = edit(event);
+    if (mode.mode === "refused") {
+      hostPanelRedirect(res, eventId, { type: "err", text: mode.message });
+      return;
+    }
+    const csrfToken = getCsrfToken(req);
+    const zone = zoneOf(event);
+    void (async (): Promise<void> => {
+      const flags = await readMeSurfaceFlags();
+      res
+        .set("Cache-Control", "no-store")
+        .type("text/html")
+        .send(
+          renderUserPage({
+            title: `Edit event: ${event.title}`,
+            active: "/me/",
+            body: renderEventEditBody({
+              event: {
+                id: eventId,
+                title: event.title,
+                description: event.description ?? "",
+                durationMinutes: event.durationMinutes,
+                timezone: zone,
+                date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
+                time: formatInTimeZone(event.startTime, zone, "HH:mm"),
+                when: formatEventWhen(event),
+                version: eventEditVersion(event),
+                mode: mode.mode,
+              },
+              csrfToken,
+            }),
+            csrfToken,
+            remainingMs: getDisplayedRemainingMs(session),
+            isAdmin: session.role === "admin",
+            flash: readSignedFlash(req.query),
+            ...flags,
+          }),
+        );
+    })().catch(next);
+  });
+
+  router.post("/edit", (req, res, next: NextFunction) => {
+    const { hostEvent: event, hostSession: session } = req as HostRequest;
+    const eventId = String(event._id);
+    const editPath = `${hostPanelPath(eventId)}/edit`;
+    const back = (flash: UserFlashMessage, to: string = editPath): void => {
+      const text = truncateFlash(flash.text);
+      const qs = new globalThis.URLSearchParams({
+        flash: flash.type,
+        msg: text,
+        sig: signFlash(flash.type, text),
+      }).toString();
+      res.redirect(303, `${to}?${qs}`);
+    };
+    const fail = async (
+      message: string,
+      to?: string,
+      details?: Record<string, unknown>,
+    ): Promise<void> => {
+      await recordAudit(
+        session,
+        boundAuditEntry({
+          action: "event.edit",
+          targetId: eventId,
+          details,
+          result: "failure",
+          errorMessage: message,
+        }),
+      );
+      back({ type: "err", text: message }, to);
+    };
+    void (async (): Promise<void> => {
+      const mode = edit(event);
+      if (mode.mode === "refused") {
+        await fail(mode.message, hostPanelPath(eventId));
+        return;
+      }
+      const field = (name: string): string => bodyString(req, name).trim();
+      const zone = zoneOf(event);
+      const shown = {
+        date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
+        time: formatInTimeZone(event.startTime, zone, "HH:mm"),
+      };
+      // A started event keeps its title and start: whatever was posted for them
+      // is ignored, and the service refuses a change anyway.
+      const full = mode.mode === "full";
+      const date = full ? field("date") : shown.date;
+      const time = full ? field("time") : shown.time;
+      const timezone = full ? field("timezone") || zone : zone;
+      // An unchanged start keeps the stored instant, so a round trip through
+      // the wall clock (a repeated hour at a DST change) cannot move it, and
+      // an event that is about to start can still get a new description.
+      const startUnchanged =
+        date === shown.date && time === shown.time && timezone === zone;
+      const parsed = await validateEventForm(
+        {
+          title: full ? field("title") : event.title,
+          description: field("description"),
+          date,
+          time,
+          duration: field("duration"),
+          timezone,
+        },
+        { requireFuture: !startUnchanged },
+      );
+      if (!parsed.ok) {
+        await fail(parsed.error);
+        return;
+      }
+      const result = await service().editEvent({
+        eventId,
+        guildId: session.guildId,
+        expectedVersion: field("version"),
+        changes: {
+          ...parsed.value,
+          startTime: startUnchanged ? event.startTime : parsed.value.startTime,
+          timezone: startUnchanged ? event.timezone : parsed.value.timezone,
+        },
+      });
+      if (!result.ok) {
+        // A conflict sends the host back to a fresh form; a refusal to the panel.
+        await fail(
+          result.message,
+          result.code === "refused" ? hostPanelPath(eventId) : undefined,
+        );
+        return;
+      }
+      await recordAudit(
+        session,
+        boundAuditEntry({
+          action: "event.edit",
+          targetId: eventId,
+          details: { before: result.diff.before, after: result.diff.after },
+          result: "success",
+        }),
+      );
+      hostPanelRedirect(res, eventId, {
+        type: "ok",
+        text: "Event updated. The Discord event and the announcement were refreshed.",
+      });
+    })().catch(next);
+  });
 }
 
 export function createHostEventsRouter(client: Client): Router {
@@ -1619,6 +1794,8 @@ export function createHostEventsRouter(client: Client): Router {
   // The "Live settings" section and its save and confirm actions (#1239).
   HOST_SECTION_RENDERERS.settings = createSettingsSection(client);
   registerSettingsActions(router, client);
+  // Editing the event itself (#1298): `GET` and `POST` `/edit`.
+  registerEditRoutes(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
