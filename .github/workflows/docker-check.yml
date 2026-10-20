@@ -1,0 +1,99 @@
+name: Docker Check
+
+# Pre-merge checks for Docker changes (#1277): lint both Dockerfiles, validate
+# both compose files and test-build the image. Nothing is pushed.
+#
+# The path filter below is safe ONLY because this workflow is not a required
+# status check (`CI Success` is the single required check). A required check
+# behind a path filter would never report on PRs that skip it and block them.
+# Do not add this workflow to branch protection or a ruleset.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - Dockerfile.*
+      - .dockerignore
+      - docker-compose*.yml
+      - package.json
+      - package-lock.json
+      - .github/workflows/docker*.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hadolint:
+    name: Hadolint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same gate as docker.yml (#1154): only real errors fail the check.
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+      - name: Lint Dockerfile.dev
+        if: ${{ !cancelled() }}
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile.dev
+          failure-threshold: error
+
+  compose:
+    name: Compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Both compose files reference `env_file: .env`, which is gitignored.
+      # `config` fails if it is missing, so give it an empty one.
+      - name: Create empty .env
+        run: touch .env
+
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Validate docker-compose.dev.yml
+        run: docker compose -f docker-compose.dev.yml config -q
+
+  build:
+    name: Test build (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Read-only cache: PR builds reuse the release layers but never write
+      # (no cache-to), so they cannot evict the cache docker.yml maintains.
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
+          provenance: false
+          sbom: false

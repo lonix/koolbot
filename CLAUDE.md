@@ -179,6 +179,9 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   and `test` (matrix Node 22, 24 & 26, all must pass, `npm run test:ci`). The `ci-success` aggregator job is the single
   required status check — it fails if any job failed or was cancelled.
 - **`markdown-lint.yml`** — markdownlint on `**/*.md` changes.
+- **`docker-check.yml`** — pre-merge Docker checks on PRs that touch Docker-related files (path-filtered): hadolint on `Dockerfile` and
+  `Dockerfile.dev`, `docker compose config -q` on both compose files, and a non-pushing `linux/amd64` test build. **Not a required check**;
+  the path filter is only safe for that reason, so never add it to branch protection.
 - **`actionlint.yml`** / **`zizmor`** — lint + security-audit workflow YAML when `.github/workflows/**`
   changes.
 - **`codeql.yml`** — CodeQL scan (PRs, pushes, weekly cron).

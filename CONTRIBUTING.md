@@ -650,6 +650,19 @@ old title are dropped).
 New issues get the same `area: *` labels from keywords in their title and body,
 plus a type label when the issue form did not already set one.
 
+### Docker checks on PRs
+
+A PR that touches `Dockerfile`, `Dockerfile.*`, `.dockerignore`, `docker-compose*.yml`, `package.json`, `package-lock.json` or
+`.github/workflows/docker*.yml` runs the `Docker Check` workflow. It lints `Dockerfile` and `Dockerfile.dev` with hadolint (errors fail),
+validates both compose files with `docker compose config -q`, and test-builds the image for `linux/amd64` without pushing it. It is not a
+required check and does not run on other PRs. To run the same checks locally:
+
+```bash
+hadolint --failure-threshold error Dockerfile Dockerfile.dev
+touch .env && docker compose -f docker-compose.yml config -q && docker compose -f docker-compose.dev.yml config -q
+docker build .
+```
+
 ### Testing a PR in Docker
 
 Large changes often need a run in a real container before they merge. A
