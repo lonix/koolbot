@@ -44,6 +44,7 @@ const moderation = {
 const cases = {
   isEnabled: fn(),
   countLiveCases: fn(),
+  countOverdueCases: fn(),
   getQueue: fn(),
   getCasesForEntries: fn(),
   getDefaultReviewDays: fn(),
@@ -243,6 +244,7 @@ beforeEach(() => {
   moderation.getHistory.mockResolvedValue([]);
   cases.isEnabled.mockResolvedValue(true);
   cases.countLiveCases.mockResolvedValue(3);
+  cases.countOverdueCases.mockResolvedValue(1);
   cases.getQueue.mockResolvedValue({
     overdue: [
       liveCase({
@@ -422,9 +424,50 @@ describe("tiles", () => {
     ).toBe(true);
   });
 
+  it("reports the real overdue count, not the length of the capped queue", async () => {
+    cases.countOverdueCases.mockResolvedValue(125);
+    cases.getQueue.mockResolvedValue({
+      overdue: Array.from({ length: 100 }, (_, i) =>
+        liveCase({
+          _id: `case-o${i}`,
+          caseNumber: 100 + i,
+          reviewAt: new Date(Date.now() - 86_400_000),
+        }),
+      ),
+      dueSoon: [],
+      scheduled: [],
+      indefinite: [],
+      recentlyResolved: [],
+    });
+    const page = await html("/");
+    expect(page.includes("125 due for review")).toBe(true);
+    expect(page.includes("100 due for review")).toBe(false);
+    expect(cases.countOverdueCases).toHaveBeenCalledWith(GUILD);
+  });
+
+  it("says the overdue count could not be read, never none, when its read fails", async () => {
+    cases.countOverdueCases.mockRejectedValue(new Error("db down"));
+    const page = await html("/");
+    expect(page.includes("Due for review could not be read.")).toBe(true);
+    expect(page.includes("None due for review")).toBe(false);
+    expect(page.includes("due for review</div>")).toBe(false);
+    // The open count itself still shows.
+    expect(
+      page.includes(
+        '<span class="kb-overline">Open cases</span></div>\n  <div class="kb-tile__value">3</div>',
+      ),
+    ).toBe(true);
+  });
+
+  it("says none due only when the count really is zero", async () => {
+    cases.countOverdueCases.mockResolvedValue(0);
+    expect((await html("/")).includes("None due for review")).toBe(true);
+  });
+
   it("marks the open cases tile as a warning only when there are some", async () => {
     expect((await html("/")).includes("kb-tile kb-tile--warn")).toBe(true);
     cases.countLiveCases.mockResolvedValue(0);
+    cases.countOverdueCases.mockResolvedValue(0);
     cases.getQueue.mockResolvedValue({
       overdue: [],
       dueSoon: [],

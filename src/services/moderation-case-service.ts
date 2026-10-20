@@ -452,6 +452,22 @@ export class ModerationCaseService {
     }).exec();
   }
 
+  /**
+   * Live cases whose review date has passed, uncapped (the queue shows at most
+   * 100 per group, so its length is not a count). Same filter as the queue's
+   * overdue group.
+   */
+  public async countOverdueCases(
+    guildId: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    return ModerationCase.countDocuments({
+      guildId,
+      status: { $in: LIVE_CASE_STATUSES },
+      reviewAt: { $lte: now },
+    }).exec();
+  }
+
   /** The review queue, in the order the admin page shows it. */
   public async getQueue(
     guildId: string,

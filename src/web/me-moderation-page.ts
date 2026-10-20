@@ -166,7 +166,8 @@ export interface ModLogBodyProps {
   tiles: {
     /** Null: could not be read. */
     openCases: number | null;
-    overdueCases: number;
+    /** Null: could not be read. Never shown as zero. */
+    overdueCases: number | null;
     actionsLast7Days: number | null;
     /** Null: not known (the GuildMembers intent is off, or the read failed). */
     timeoutsNow: number | null;
@@ -217,9 +218,11 @@ function renderTiles(p: ModLogBodyProps): string {
         detail:
           open === null
             ? "Could not be read."
-            : t.overdueCases > 0
-              ? `${t.overdueCases} due for review`
-              : "None due for review",
+            : t.overdueCases === null
+              ? "Due for review could not be read."
+              : t.overdueCases > 0
+                ? `${t.overdueCases} due for review`
+                : "None due for review",
         href: "#open-cases",
         warn: (open ?? 0) > 0,
       });

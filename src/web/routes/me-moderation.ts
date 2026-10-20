@@ -214,7 +214,7 @@ export function createMeModerationRouter(client: Client): Router {
             casesEnabled: false,
             tiles: {
               openCases: null,
-              overdueCases: 0,
+              overdueCases: null,
               actionsLast7Days: null,
               timeoutsNow: null,
             },
@@ -240,7 +240,7 @@ export function createMeModerationRouter(client: Client): Router {
         .countRecent(guildId, { actions })
         .catch(() => 0);
       const page = effectivePage(requestedPage, total, PAGE_SIZE);
-      const [docs, actions7d, timeoutsNow, liveCount, queue] =
+      const [docs, actions7d, timeoutsNow, liveCount, overdueCount, queue] =
         await Promise.all([
           moderation
             .getRecent(guildId, {
@@ -257,6 +257,12 @@ export function createMeModerationRouter(client: Client): Router {
           casesEnabled
             ? cases
                 .countLiveCases(guildId)
+                .then((n): number | null => n)
+                .catch((): number | null => null)
+            : Promise.resolve<number | null>(null),
+          casesEnabled
+            ? cases
+                .countOverdueCases(guildId)
                 .then((n): number | null => n)
                 .catch((): number | null => null)
             : Promise.resolve<number | null>(null),
@@ -320,7 +326,7 @@ export function createMeModerationRouter(client: Client): Router {
           casesEnabled,
           tiles: {
             openCases: liveCount,
-            overdueCases: queue?.overdue.length ?? 0,
+            overdueCases: overdueCount,
             actionsLast7Days: actions7d,
             timeoutsNow,
           },

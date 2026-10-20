@@ -563,6 +563,19 @@ describe("countLiveCases", () => {
   });
 });
 
+describe("countOverdueCases", () => {
+  it("counts live cases past their review date, uncapped", async () => {
+    caseCountDocuments.mockReturnValue({ exec: async () => 125 });
+    const now = new Date("2026-06-01T00:00:00Z");
+    expect(await service().countOverdueCases("g1", now)).toBe(125);
+    expect(caseCountDocuments).toHaveBeenCalledWith({
+      guildId: "g1",
+      status: { $in: ["open", "under_review"] },
+      reviewAt: { $lte: now },
+    });
+  });
+});
+
 describe("getQueue", () => {
   it("builds the four groups from the right filters, scoped to the guild", async () => {
     caseFind.mockImplementation(() => query([]));
