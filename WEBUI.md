@@ -13,7 +13,8 @@ own preferences (notifications, timezone, birthday, voice presets, Rewind,
 privacy) without ever touching the admin panel. Members reach it with `/me`;
 admins can hop between the two surfaces from their `/config` session.
 
-This document explains how to enable it, expose it, and operate it.
+This document explains how to enable it, expose it, and operate it. How its pages look and are put
+together is defined in [DESIGN.md](DESIGN.md).
 
 ---
 

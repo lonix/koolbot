@@ -676,6 +676,7 @@ docker compose restart mongodb
 ## 📚 Documentation
 
 - **[WEBUI.md](WEBUI.md)** — Web UI setup, reverse-proxy guidance, magic-link flow
+- **[DESIGN.md](DESIGN.md)** — Design system for the Web UI and the bot's Discord messages
 - **[COMMANDS.md](COMMANDS.md)** — Complete command reference with examples
 - **[SETTINGS.md](SETTINGS.md)** — All configuration options explained
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** — Architecture and contribution patterns
