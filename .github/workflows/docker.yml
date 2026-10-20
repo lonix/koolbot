@@ -285,7 +285,9 @@ jobs:
       (needs.scan-image.result == 'success' || needs.scan-image.result == 'skipped')
     outputs:
       digest: ${{ steps.build.outputs.digest }}
-      tags: ${{ steps.meta.outputs.tags }}
+      # Space-separated: the pushed tags, plus the release aliases when the
+      # weekly rebuild moved them.
+      tags: ${{ steps.meta.outputs.tags }} ${{ steps.aliases.outputs.tags }}
     # Previews run this job too, so it only gets what a push needs. The
     # release-only grants live on attest-and-sign, which previews never reach.
     permissions:
@@ -338,18 +340,18 @@ jobs:
           # it on its own. The release rebuild builds an old commit, so it must
           # not emit the sha or branch tags that would name the wrong commit,
           # and takes its version from the resolved release tag instead of the
-          # (branch) ref. The v0.0.0 is a placeholder the disabled lines never use.
+          # (branch) ref. It pushes only X.Y.Z: the shared aliases (latest, X.Y,
+          # X) are moved by the "Move release aliases" step after a freshness
+          # check. The v0.0.0 is a placeholder the disabled lines never use.
           flavor: |
             latest=false
           tags: |
-            type=raw,value=latest,enable=${{ needs.plan.outputs.latest == 'true' }}
+            type=raw,value=latest,enable=${{ needs.plan.outputs.latest == 'true' && needs.plan.outputs.mode != 'release' }}
             type=raw,value=nightly,enable=${{ needs.plan.outputs.nightly == 'true' }}
             type=semver,pattern={{version}},enable=${{ needs.plan.outputs.mode != 'release' }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ needs.plan.outputs.mode != 'release' }}
             type=semver,pattern={{major}},enable=${{ needs.plan.outputs.mode != 'release' }}
             type=semver,pattern={{version}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
-            type=semver,pattern={{major}},value=${{ needs.plan.outputs.tag || 'v0.0.0' }},enable=${{ needs.plan.outputs.mode == 'release' }}
             type=sha,format=short,enable=${{ github.event_name != 'pull_request' && needs.plan.outputs.mode != 'release' }}
             type=ref,event=branch,enable=${{ needs.plan.outputs.mode != 'release' }}
             type=ref,event=pr
@@ -359,7 +361,7 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ needs.plan.outputs.ref || github.sha }}
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || needs.plan.outputs.ref || github.sha }}
           # metadata-action builds the annotations output from the
           # `annotations` input (not `labels`), so the custom description must
           # be repeated here to land in steps.meta.outputs.annotations — which
@@ -369,7 +371,7 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ needs.plan.outputs.ref || github.sha }}
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || needs.plan.outputs.ref || github.sha }}
 
       - name: Build and push Docker image
         id: build
@@ -399,6 +401,39 @@ jobs:
           provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
           sbom: ${{ github.event_name != 'pull_request' }}
 
+      # Weekly release rebuild only. The build above pushed X.Y.Z; the aliases
+      # shared with other release builds move here, seconds before they are
+      # used rather than a whole build earlier, and only if the release being
+      # rebuilt is still the newest. If a newer release appeared meanwhile, its
+      # own tag build owns latest/X.Y/X and this run leaves them alone.
+      - name: Move release aliases if still newest
+        id: aliases
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PLAN_TAG: ${{ needs.plan.outputs.tag }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${PLAN_TAG}" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]] || { echo "unexpected tag: ${PLAN_TAG}" >&2; exit 1; }
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest: ${DIGEST}" >&2; exit 1; }
+          newest="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+          if [[ "${newest}" != "${PLAN_TAG}" ]]; then
+            echo "::notice::${newest} is now the newest release; leaving latest, ${major}.${minor} and ${major} to it."
+            exit 0
+          fi
+          # metadata-action lowercased the name; reuse it (the only tag here is X.Y.Z).
+          version_ref="${TAGS%%$'\n'*}"
+          image="${version_ref%:*}"
+          docker buildx imagetools create \
+            --tag "${image}:latest" --tag "${image}:${major}.${minor}" --tag "${image}:${major}" \
+            "${image}@${DIGEST}"
+          echo "tags=${image}:latest ${image}:${major}.${minor} ${image}:${major}" >> "${GITHUB_OUTPUT}"
+
   attest-and-sign:
     name: Attest and sign
     runs-on: ubuntu-latest
@@ -406,6 +441,14 @@ jobs:
     timeout-minutes: 15
     # Release concern only: preview images are not attested or signed. The
     # image was already scanned (scan-image) before it was pushed.
+    #
+    # Known limitation (#1278): the provenance attestation and the keyless
+    # cosign certificate describe the workflow run, and a scheduled run is on
+    # main. For the weekly release rebuild they therefore name main as the
+    # triggering ref/SHA although the image was built from the release commit
+    # (that commit is in the image's revision label and is what the checkout
+    # built). Fixing it needs a custom provenance predicate or a run in the
+    # release ref's context; neither is done here.
     if: github.event_name != 'pull_request'
     permissions:
       contents: read

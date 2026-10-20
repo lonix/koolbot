@@ -681,7 +681,9 @@ docker build .
 - `sha-<short-sha>` - the commit a tag or nightly build was made from.
 - `pr-<number>` and `pr-<number>-sha-<short-sha>` - PR previews (see below).
 
-Only PR previews are cancelled in progress, so a run that has pushed an image always gets to sign it. To run a nightly or
+Only PR previews are cancelled in progress, so a run that has pushed an image always gets to sign it. For the weekly rebuild, the provenance attestation and
+the cosign certificate name the scheduled run on `main` as their trigger, not the release tag, because that is the workflow
+context they are issued in. The image's `org.opencontainers.image.revision` label carries the release commit. To run a nightly or
 release rebuild by hand, use **Run workflow** on the `Docker Build and Push` workflow (set the `rebuild-release` input for the
 release rebuild).
 
