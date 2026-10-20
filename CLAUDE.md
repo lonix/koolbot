@@ -186,11 +186,11 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   changes.
 - **`codeql.yml`** — CodeQL scan (PRs, pushes, weekly cron).
 - **`dependency-review.yml`** — flags risky dependency changes on PRs.
-- **`docker.yml`** — on `v*.*.*` tags, a nightly schedule that builds `main` (a merge to `main` does not build), a weekly schedule
-  that rebuilds the newest release tag on a fresh base, `workflow_dispatch` and the opt-in PR preview: hadolint (fails on errors),
-  then a local amd64 build scanned by Trivy (fixable CRITICAL fails; arm64 is not scanned), and only then push/attest/sign (cosign)
-  to GHCR. `latest` is the newest release (tag build or weekly rebuild only), `nightly` and `main` follow `main`. Only PR previews
-  are cancelled in progress, so a run that has pushed always signs. The `plan` job decides which tags a run may publish.
+- **`docker.yml`** — on `v*.*.*` tags, a nightly schedule that builds `main` (a merge to `main` does not build), `workflow_dispatch`
+  and the opt-in PR preview: hadolint (fails on errors), then a local amd64 build scanned by Trivy (fixable CRITICAL fails; arm64 is
+  not scanned), and only then push/attest/sign (cosign) to GHCR. `latest`, `X.Y` and `X` move only when the built tag is the newest
+  release; `nightly` and `main` follow `main` and never get `latest`. Only PR previews are cancelled in progress, so a run that
+  has pushed always signs.
 - **`pr-title-lint.yml`** — see below.
 - **`auto-label.yml`** — labels issues and PRs (path map in `.github/labeler.yml`, plus type and
   release-impact labels derived from the Conventional Commit PR title). Runs on

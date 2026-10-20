@@ -675,18 +675,15 @@ docker build .
 
 `Docker Build and Push` publishes these tags to `ghcr.io/lonix/koolbot`:
 
-- `latest`, `X.Y.Z`, `X.Y`, `X` - a release. `latest` is always the newest release, never unreleased code. A weekly run (Mondays)
-  rebuilds the newest release from its tag on a fresh base image and re-signs it, so these tags pick up base-image fixes between
-  releases.
+- `latest`, `X.Y.Z`, `X.Y`, `X` - a release. `latest` is always the newest release, never unreleased code. Re-running an older
+  tag's build publishes only its own `X.Y.Z`, so it cannot move `latest`, `X.Y` or `X` backwards. Release images pick up base-image
+  fixes at the next release.
 - `nightly` and `main` - the head of `main`, built nightly. A merge to `main` does not start a build.
 - `sha-<short-sha>` - the commit a tag or nightly build was made from.
 - `pr-<number>` and `pr-<number>-sha-<short-sha>` - PR previews (see below).
 
-Only PR previews are cancelled in progress, so a run that has pushed an image always gets to sign it. For the weekly rebuild, the provenance attestation and
-the cosign certificate name the scheduled run on `main` as their trigger, not the release tag, because that is the workflow
-context they are issued in. The image's `org.opencontainers.image.revision` label carries the release commit. To run a nightly or
-release rebuild by hand, use **Run workflow** on the `Docker Build and Push` workflow (set the `rebuild-release` input for the
-release rebuild).
+Only PR previews are cancelled in progress, so a run that has pushed an image always gets to sign it. To run the nightly build
+by hand, use **Run workflow** on the `Docker Build and Push` workflow from `main`.
 
 ### Testing a PR in Docker
 
