@@ -593,6 +593,9 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 3. Wait 2-5 minutes for Discord to sync. Try a different channel or
    restart the Discord client if needed.
 
+On start the bot compares its command list with what Discord has registered and skips the update when they match; the debug log
+says "Guild commands unchanged ... skipping bulk overwrite". If the comparison fails it sends the update anyway.
+
 ### "Application did not respond" Error
 
 **Causes:**
@@ -768,7 +771,7 @@ Event channels are created by the event scan shortly before the start time
 
 Also confirm `events.enabled` is `true`; events are scheduled from the `/admin/events` page. The `/event` command was removed;
 if it still shows in Discord after upgrading, the bot has not re-registered its commands yet. Restart it and check the log for
-"Successfully registered guild commands" (if Discord was unreachable at startup, registration is skipped), or run
+"Successfully registered guild commands" or "Guild commands already up to date" (if Discord was unreachable at startup, registration is skipped), or run
 `npm run unregister-guild-commands` and restart.
 
 ### Event announcement has no event card / no Interested button

@@ -7,7 +7,6 @@ import {
   Collection,
   ChatInputCommandInteraction,
   AutocompleteInteraction,
-  REST,
   Routes,
   TextChannel,
   Partials,
@@ -17,6 +16,7 @@ import {
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { sanitizeForLog } from "./utils/log-sanitize.js";
+import { getSharedRest } from "./utils/discord-rest.js";
 import { markMongoDisconnectIntentional } from "./utils/mongo.js";
 import { safeReply } from "./utils/safe-reply.js";
 import { runWithTimeout } from "./utils/run-with-timeout.js";
@@ -359,7 +359,7 @@ async function cleanupGlobalCommands(): Promise<void> {
       return;
     }
 
-    const rest = new REST({ version: "10" }).setToken(token);
+    const rest = getSharedRest(token);
 
     // Check for global commands
     const globalCommands = (await rest.get(

@@ -1,5 +1,4 @@
 import {
-  REST,
   Routes,
   Client,
   Collection,
@@ -8,12 +7,11 @@ import {
   DiscordAPIError,
   HTTPError,
   MessageFlags,
-  RESTEvents,
-  type RateLimitData,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
-import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { getSharedRest } from "../utils/discord-rest.js";
+import { commandListsMatch } from "../utils/command-diff.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
 import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
@@ -298,20 +296,36 @@ export class CommandManager {
   }
 
   /**
-   * Log every 429 that @discordjs/rest handles internally (#1293). The client
-   * queues and waits out a rate limit without raising an error, so without this
-   * a stalled request is only ever seen as a timeout in `makeDiscordApiCall`.
-   * Only the route template, method, scope and timings are logged; never the
-   * token, the request body or the bucket hash.
+   * True only when a GET of the guild's commands matches `commands`. Any
+   * failure (GET error, timeout, odd shape) returns false so the caller sends
+   * the PUT: the skip is an optimisation, never a correctness risk.
    */
-  private logRestRateLimits(rest: REST): void {
-    rest.on(RESTEvents.RateLimited, (info: RateLimitData) => {
-      logger.warn(
-        `Discord REST rate limited: ${sanitizeForLog(info.method, 16)} ${sanitizeForLog(info.route, 128)} ` +
-          `(scope=${sanitizeForLog(info.scope, 16)}, global=${info.global}, limit=${Number(info.limit)}, ` +
-          `retryAfter=${Number(info.retryAfter)}ms, timeToReset=${Number(info.timeToReset)}ms)`,
+  private async isRegistrationUpToDate(
+    rest: ReturnType<typeof getSharedRest>,
+    route: `/${string}`,
+    commands: unknown[],
+  ): Promise<boolean> {
+    try {
+      const registered = await this.makeDiscordApiCall(
+        async () => rest.get(route),
+        "fetch registered commands",
+        15000,
+        1,
       );
-    });
+      const same = commandListsMatch(commands, registered);
+      if (!same) {
+        logger.debug(
+          "Registered guild commands differ; sending bulk overwrite",
+        );
+      }
+      return same;
+    } catch (error) {
+      logger.debug(
+        "Could not compare registered commands; sending bulk overwrite:",
+        error,
+      );
+      return false;
+    }
   }
 
   public async registerCommands(): Promise<void> {
@@ -325,10 +339,9 @@ export class CommandManager {
         throw new Error("GUILD_ID not set in configuration");
       }
 
-      const rest = new REST({ version: "10" }).setToken(
+      const rest = getSharedRest(
         await this.configService.getString("DISCORD_TOKEN"),
       );
-      this.logRestRateLimits(rest);
 
       const commands = await this.getEnabledCommands();
       logger.debug(
@@ -345,16 +358,22 @@ export class CommandManager {
         // second request on a route Discord rate limits. Discord's client cache
         // picks up an overwrite on its own, so no clear is needed for that. The
         // bot's own lookup table is rebuilt by populateClientCommands().
+        const clientId = await this.configService.getString("CLIENT_ID");
+        const route = Routes.applicationGuildCommands(clientId, guildId);
+
+        // Skip the PUT when Discord already has exactly this list (#1307), so
+        // a plain restart sends no write. Any doubt or error sends the PUT.
+        if (await this.isRegistrationUpToDate(rest, route, commands)) {
+          logger.debug(
+            `Guild commands unchanged (${commands.length}); skipping bulk overwrite`,
+          );
+          logger.info("Guild commands already up to date");
+          return;
+        }
+
         logger.debug("Registering commands with Discord API...");
         const data = await this.makeDiscordApiCall(
-          async () =>
-            rest.put(
-              Routes.applicationGuildCommands(
-                await this.configService.getString("CLIENT_ID"),
-                guildId,
-              ),
-              { body: commands },
-            ),
+          async () => rest.put(route, { body: commands }),
           "register new commands",
           30000, // 30 second timeout for registration
           3, // 3 retries for registration
@@ -450,7 +469,7 @@ export class CommandManager {
         throw new Error("GUILD_ID not set in configuration");
       }
 
-      const rest = new REST({ version: "10" }).setToken(
+      const rest = getSharedRest(
         await this.configService.getString("DISCORD_TOKEN"),
       );
 
