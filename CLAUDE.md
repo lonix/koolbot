@@ -122,6 +122,14 @@ Prometheus metrics at `src/web/metrics.ts`). It is gated by env/config — see `
 **Static content (`src/content/`)** holds achievement/accolade/status/notice definitions; `examples/`
 holds example poll libraries.
 
+### Design system (read before any Web UI or Discord-message work)
+
+`DESIGN.md` and `docs/design/` define how the Web UI and the bot's Discord messages look and read: the palette
+and type (`docs/design/tokens.json`, the single source for values), the `kb-` components (`docs/design/kb.css`,
+`docs/design/components.md`), page patterns, the four access scopes (Member, Event host, Moderator, Admin) and the
+embed rules (`docs/design/discord.md`). New pages, components and embeds follow it. Where existing code disagrees,
+the design wins and the gap is tracked in the redesign epic (#1314); do not copy an old pattern into new code.
+
 ### Admin surface: Web UI only (design decision — read before proposing a new command)
 
 **The Web UI is the _only_ admin surface.** Slash commands are reserved for day-to-day
