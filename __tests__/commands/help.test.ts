@@ -280,9 +280,7 @@ describe("Help Command", () => {
     it("should describe the commands that used to be missing from /help", async () => {
       const entries = await getCommandHelpEntries();
 
-      expect(entries.get("event")?.usage).toBe(
-        "/event <create|list|cancel|start> [options]",
-      );
+      expect(entries.has("event")).toBe(false);
       expect(entries.get("warn")?.usage).toBe("/warn <user> <reason>");
       expect(entries.get("modlog")?.usage).toBe("/modlog <user> [page]");
     });

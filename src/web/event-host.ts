@@ -2,9 +2,9 @@
  * Who may run an event from the host panel (#1189).
  *
  * The host of an event is its creator (`IEvent.createdBy`); a Web UI admin can
- * act as host of any event of the configured guild. The host is often NOT a
- * Web UI admin (members create events with `/event create`), so the panel is
- * served from the member surface (`/me/events/:id/host`), which accepts both
+ * act as host of any event of the configured guild. The host is often NOT in an
+ * admin session (the Administrator who scheduled the event may have signed in
+ * through `/me`), so the panel is served from the member surface (`/me/events/:id/host`), which accepts both
  * session roles, and this module is the one place that decides who gets in.
  *
  * Everything here is pure and synchronous on purpose: callers read the session

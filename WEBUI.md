@@ -1422,7 +1422,8 @@ off the page still renders but shows a notice and only whatever was captured
 before it was disabled.
 
 The **Events** page (`/admin/events`) is the Web UI surface for the event
-scheduler (`/event create`, `list`, `cancel`, `start`) — events that spin up a
+scheduler: events are created, cancelled and started here (the `/event` command was removed), and members see them in
+Discord's Events list and the announcement channel (the bot needs Create Events or Manage Events for the event card) — events that spin up a
 temporary voice channel shortly before they start, are announced with a Discord
 event link, remind attendees, and clean themselves up afterward. A status card shows whether the
 feature, the `events.category_id` channel category, and the
@@ -1708,12 +1709,12 @@ matters when events share the voice channels' category and managed-only cleanup 
 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
-under `/admin`, because the host is the event's creator, who is often not a Web UI
-admin. The creator signs in with `/me` like any member and finds their open events
+under `/admin`, because the host is the event's creator, who may have signed in with `/me`
+rather than `/config`. The creator signs in with `/me` like any member and finds their open events
 under **Events you host** on the overview; admins open it from the **Host panel**
 link on each row of the Events page. Who may open it:
 
-- the member who created the event (`/event create` or the schedule form), and
+- the member who created the event (through the schedule form), and
 - an admin session, for any event of this server. An admin who signed in with
   `/me` instead of `/config` holds a member session and sees only their own events.
 
@@ -2570,8 +2571,8 @@ only if the event is still in the state it was decided from, so a cancel decided
 one nor delete its channel. A cancel keeps the event's main channel id on the record until Discord
 confirms the channel is gone (deleted, or already missing), and takes the id from the row as it is
 at the claim; if the delete fails or the bot restarts, the scan finishes it within a minute. Cancelling reports whether it really cancelled: an event that has
-ended, or is being ended, answers "could not be cancelled: it is ended" (admin page, `/event
-cancel`), is not counted by a series cancel and spawns no successor. A recurring event's next occurrence is created by the next scan,
+ended, or is being ended, answers "could not be cancelled: it is ended" (admin page), is not counted by a series cancel and
+spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover

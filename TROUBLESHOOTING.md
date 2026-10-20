@@ -766,8 +766,10 @@ Event channels are created by the event scan shortly before the start time
 - `events.announcement_channel_id not set — skipping event announcement`: the
   announcement is skipped (the channel is unaffected).
 
-Also confirm `events.enabled` is `true` and that you reloaded commands so
-`/event` appears.
+Also confirm `events.enabled` is `true`; events are scheduled from the `/admin/events` page. The `/event` command was removed;
+if it still shows in Discord after upgrading, the bot has not re-registered its commands yet. Restart it and check the log for
+"Successfully registered guild commands" (if Discord was unreachable at startup, registration is skipped), or run
+`npm run unregister-guild-commands` and restart.
 
 ### Event announcement has no event card / no Interested button
 

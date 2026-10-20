@@ -192,7 +192,7 @@ export function createMockButtonInteraction(
 /**
  * A member stub whose `permissions` is the raw string bitfield Discord sends
  * for a non-cached interaction member. `admin: true` sets the Administrator
- * bit (1 << 3), which is the shape `/quote`, `/event` and `/config` gate on.
+ * bit (1 << 3), which is the shape `/quote` and `/config` gate on.
  */
 export function createRawMember(admin: boolean): { permissions: string } {
   return { permissions: admin ? String(1n << 3n) : "0" };

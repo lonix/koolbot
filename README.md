@@ -178,7 +178,6 @@ commands always registered, and `/me` follows the Web UI):
 - `/aka` — Previously known names for a member (`aka.enabled`)
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes; admins also get `/quote export` / `import` / `reset` (`quotes.enabled`)
-- `/event` — Browse server events (`list`); administrators schedule them with `create`, `cancel` and `start` (`events.enabled`)
 - `/lfg` — Post a "looking for group" call for a game right now (`lfg.enabled`)
 - `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
 - `/ticket` — Open a private support ticket with staff; close it when done (`tickets.enabled`)
