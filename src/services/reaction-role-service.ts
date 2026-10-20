@@ -59,6 +59,7 @@ import {
   ReactionRoleMode,
   REACTION_ROLE_MODES,
 } from "../models/reaction-role-config.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * A picker posted by a server-adoption step carries the step's key in its embed
@@ -1078,7 +1079,7 @@ export class ReactionRoleService {
 
     if (style === "button") {
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
           `Click the button below to toggle the **${roleName}** role and its channels.`,
@@ -1102,7 +1103,7 @@ export class ReactionRoleService {
 
     if (style === "select") {
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
           `Use the menu below to give yourself the **${roleName}** role and its channels.`,
@@ -1152,7 +1153,7 @@ export class ReactionRoleService {
     }
 
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
+      .setColor(embedColor("brand"))
       .setTitle(`${emoji} ${roleName}`)
       .setDescription(description)
       .setFooter({ text: footer })
@@ -2068,7 +2069,7 @@ export class ReactionRoleService {
       } else {
         // Post a fresh single-mapping message for this existing role.
         const embed = new EmbedBuilder()
-          .setColor(0x5865f2)
+          .setColor(embedColor("brand"))
           .setTitle(`${emoji} ${role.name}`)
           .setDescription(
             `React with ${emoji} to get the **${role.name}** role!`,
@@ -2925,7 +2926,7 @@ export class ReactionRoleService {
             ? "React to opt in — removing your reaction keeps the role"
             : "React to add a role, remove your reaction to lose it";
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(embedColor("brand"))
         .setTitle(groupName)
         .setDescription(
           `React to choose your **${groupName}** role:\n\n${optionLines.join("\n")}`,

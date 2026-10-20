@@ -45,6 +45,7 @@ import {
   pingUsers,
 } from "../utils/allowed-mentions.js";
 import { CooldownManager } from "./cooldown-manager.js";
+import { embedColor } from "../utils/embed-style.js";
 
 const configService = ConfigService.getInstance();
 
@@ -2406,7 +2407,7 @@ export class VoiceChannelManager {
             `Privacy: 🌐 Public` +
             (isLive ? "\n🔴 **LIVE**" : ""),
         )
-        .setColor(isLive ? 0xff0000 : 0x00ff00)
+        .setColor(isLive ? embedColor("danger") : embedColor("ok"))
         .setFooter({ text: "Only the channel owner can use these controls" });
 
       const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -3944,7 +3945,13 @@ export class VoiceChannelManager {
           `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}` +
           (isLive ? "\n🔴 **LIVE**" : ""),
       )
-      .setColor(isLive ? 0xff0000 : isPrivate ? 0xff6600 : 0x00ff00)
+      .setColor(
+        isLive
+          ? embedColor("danger")
+          : isPrivate
+            ? embedColor("warn")
+            : embedColor("ok"),
+      )
       .setFooter({ text: "Only the channel owner can use these controls" });
 
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(

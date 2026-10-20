@@ -7,8 +7,9 @@ so this is the larger half of the brand.
 
 - **Accent bar** from the six `embed-*` tokens, chosen by what the message is about, never by feature: `embed-brand` for KoolBot itself (help,
   welcome, notices headers, announcements by default), `embed-ok` when something worked or is on, `embed-warn` when it needs attention, `embed-danger`
-  when something failed or was removed, `embed-neutral` for plain information, `embed-lore` for activity and history. Pass them as integers
-  (`0x3b82f6`). No Discord blurple, and no pure `0xff0000` or `0x00ff00`. The bar is decorative: the title always says what the message is.
+  when something failed or was removed, `embed-neutral` for plain information, `embed-lore` for activity and history. Get them from `embedColor(kind)`
+  in `src/utils/embed-style.ts`, never a hex literal.
+  No Discord blurple, and no pure `0xff0000` or `0x00ff00`. The bar is decorative: the title always says what the message is.
 - **A colour the community chose stays theirs.** Notice categories and custom announcements keep their own colour; `embed-neutral` is only the default.
 - **Title:** sentence case, at most one emoji at the start, and only when it names a thing (📢 for notices, 🎮 for a game server). Field names carry no emoji.
 - **Description:** one or two short sentences saying what this is and what to do with it. No "Welcome!" filler, no "All posts are managed by" boilerplate.

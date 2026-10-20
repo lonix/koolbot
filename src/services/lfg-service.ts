@@ -23,6 +23,7 @@ import {
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Ad-hoc "looking for group" posts (#957).
@@ -134,9 +135,6 @@ const lifecycleLock = createKeyedLock();
 export const MIN_PARTY_SIZE = 2;
 /** Roster mentions have to stay inside one embed field. */
 export const MAX_PARTY_SIZE = 25;
-
-const COLOR_OPEN = 0x5865f2; // blurple
-const COLOR_CLOSED = 0x99aab5; // grey
 
 export interface CreateLfgInput {
   guildId: string;
@@ -830,7 +828,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   } {
     const closed = post.state === "closed";
     const embed = new EmbedBuilder()
-      .setColor(closed ? COLOR_CLOSED : COLOR_OPEN)
+      .setColor(closed ? embedColor("neutral") : embedColor("brand"))
       .setTitle(closed ? `🎮 ${post.game} (closed)` : `🎮 LFG — ${post.game}`)
       .addFields(
         { name: "Host", value: `<@${post.hostId}>`, inline: true },

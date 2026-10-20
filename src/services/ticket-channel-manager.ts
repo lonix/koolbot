@@ -21,6 +21,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import { cooldownRemaining, startCooldown } from "../utils/member-cooldown.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Support tickets (#1004): a private text channel per ticket.
@@ -46,8 +47,6 @@ const MEMBER_ALLOW = [
   PermissionFlagsBits.ReadMessageHistory,
   PermissionFlagsBits.AttachFiles,
 ];
-
-const EMBED_COLOR = 0x5865f2;
 
 /** Open/claimed tickets count against a member's cap; closed ones do not. */
 const LIVE_STATUSES: TicketStatus[] = ["open", "claimed"];
@@ -610,7 +609,7 @@ export class TicketChannelManager {
     staffRoleId: string,
   ): Promise<void> {
     const embed = new EmbedBuilder()
-      .setColor(EMBED_COLOR)
+      .setColor(embedColor("brand"))
       .setTitle("🎫 Support ticket")
       .setDescription(ticket.subject)
       .setFooter({

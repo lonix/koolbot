@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Router, type Request, type Response } from "express";
+import { DESIGN_DIR, readDesignTokensJson } from "../utils/design-tokens.js";
 import logger from "../utils/logger.js";
 import { createRateLimiter } from "./rate-limit.js";
 
@@ -12,10 +12,9 @@ import { createRateLimiter } from "./rate-limit.js";
  * two static files and linked from every page (both layouts and the pre-auth
  * pages) so the palette lives in exactly one place.
  *
- * Where the files come from. `docs/design/` is read relative to this module
- * (`src/web/` under `npm run dev`, `dist/web/` under `npm start` and in the
- * image: both are two levels below the repository root), so the same code
- * works in all three without a build step. `tokens.css` is generated on first
+ * Where the files come from. `docs/design/` is located by `utils/design-tokens.ts`
+ * relative to that module (two levels below the repository root in `src/`,
+ * `dist/` and the image), so the same code works in all three without a build step. `tokens.css` is generated on first
  * use from `tokens.json` and cached in memory together with a content-hash
  * version, so editing `tokens.json` or `kb.css` and restarting the bot changes
  * every page (`node --watch` does not watch files read at runtime, so
@@ -30,11 +29,6 @@ import { createRateLimiter } from "./rate-limit.js";
  * data. They are cacheable (`immutable` when the `?v=` hash matches) and so
  * deliberately do not carry the `Cache-Control: no-store` of the pages.
  */
-
-const DESIGN_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../docs/design",
-);
 
 const ASSET_PATH = "_assets";
 
@@ -118,9 +112,7 @@ let cached: DesignAssets | null = null;
 /** Read, generate and hash the assets once; later calls reuse the result. */
 export function loadDesignAssets(): DesignAssets {
   if (cached) return cached;
-  const tokens = JSON.parse(
-    fs.readFileSync(path.join(DESIGN_DIR, "tokens.json"), "utf8"),
-  ) as DesignTokens;
+  const tokens = readDesignTokensJson() as DesignTokens;
   const files: Record<string, string> = {
     "tokens.css": buildTokensCss(tokens),
     "kb.css": fs.readFileSync(path.join(DESIGN_DIR, "kb.css"), "utf8"),

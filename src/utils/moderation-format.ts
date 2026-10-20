@@ -1,4 +1,4 @@
-import type { ColorResolvable } from "discord.js";
+import { embedColor } from "./embed-style.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
 /**
@@ -35,26 +35,26 @@ export function actionLabel(action: ModerationAction): string {
   }
 }
 
-/** Embed accent colour per action: red for the severe end, green for a lift. */
-export function actionColor(action: ModerationAction): ColorResolvable {
+/**
+ * Embed accent colour per action. Punitive actions are `danger`, the softer
+ * ones (a warn, a timeout, a quarantine, a kick) are `warn`, a lift is `ok`.
+ */
+export function actionColor(action: ModerationAction): number {
   switch (action) {
-    case "warn":
-      return 0xf59e0b;
-    case "kick":
-      return 0xf97316;
     case "ban":
-      return 0xdc2626;
+    case "raid_lockdown":
+      return embedColor("danger");
+    case "warn":
+    case "kick":
     case "timeout":
     case "quarantine":
-      return 0xeab308;
-    case "raid_lockdown":
-      return 0xdc2626;
+      return embedColor("warn");
     case "unban":
     case "untimeout":
     case "raid_clear":
-      return 0x22c55e;
+      return embedColor("ok");
     default:
-      return 0x6366f1;
+      return embedColor("neutral");
   }
 }
 

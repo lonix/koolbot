@@ -49,6 +49,7 @@ import {
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Events feature (#708): scheduled gatherings backed by a *temporary*
@@ -94,10 +95,6 @@ const DISCORD_UNKNOWN_MESSAGE = 10008;
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
 // Embed accent colours for the announcement message by lifecycle state.
-const COLOR_SCHEDULED = 0x5865f2; // blurple
-const COLOR_ACTIVE = 0x57f287; // green
-const COLOR_ENDED = 0x99aab5; // grey
-const COLOR_CANCELLED = 0xed4245; // red
 
 /**
  * `ended` and `cancelled` are terminal: the event is over either way, so
@@ -363,13 +360,13 @@ export function computeOccurrenceStart(
 function accentColor(state: IEvent["state"]): number {
   switch (state) {
     case "active":
-      return COLOR_ACTIVE;
+      return embedColor("ok");
     case "ended":
-      return COLOR_ENDED;
+      return embedColor("neutral");
     case "cancelled":
-      return COLOR_CANCELLED;
+      return embedColor("danger");
     default:
-      return COLOR_SCHEDULED;
+      return embedColor("brand");
   }
 }
 
