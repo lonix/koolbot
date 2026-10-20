@@ -288,6 +288,9 @@ describe("UI preview comment (#1341)", () => {
   it("says the comment follows pushes that touch UI files", () => {
     const body = comment.buildComment(some, ctx) as string;
     expect(body).toContain("Updated on pushes that touch UI files");
+    expect(body).toContain(
+      "Rendered from this PR merged with the current base branch, built for the commit above.",
+    );
     expect(body).not.toContain("every push");
   });
 

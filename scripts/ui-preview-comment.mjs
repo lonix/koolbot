@@ -168,7 +168,7 @@ export function buildComment(
   if (!summary) {
     lines.push(
       "",
-      "> Updated on pushes that touch UI files, so the commit above is the one this was rendered from. Screenshots are rendered from fixtures, so no bot, database or secrets are involved.",
+      "> Updated on pushes that touch UI files. Rendered from this PR merged with the current base branch, built for the commit above. Screenshots are rendered from fixtures, so no bot, database or secrets are involved.",
     );
   }
   return lines.join("\n") + "\n";
