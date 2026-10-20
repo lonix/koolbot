@@ -381,6 +381,11 @@ const STYLE = [
   // A static class (not toggled by the cascade script) so an enabled section
   // master can't strip the greying off a still-dependency-locked control.
   ".dep-off{opacity:.5}",
+  // The same lock on a settings row (#1318): dims the row's own content but not
+  // the children nested inside its `.kb-setting__extra`. A separate class from
+  // the `is-inactive` the cascade script toggles, so turning the master on can
+  // never clear a dependency lock.
+  ".kb-setting--locked>:not(.kb-setting__extra){opacity:.5}",
   // Off-screen but still in the accessibility tree — used for labels that
   // name a control whose caption is carried by a column header or adjacent
   // cell rather than by text of its own (#854).
@@ -586,8 +591,8 @@ const CASCADE_DISABLE_SCRIPT =
   "if(el===master||el.type==='hidden')return;" +
   "var locked=el.hasAttribute('data-dep-locked');" +
   "el.disabled=off||locked;" +
-  "var row=el.closest('.field-row,tr');" +
-  "if(row)row.classList.toggle('cascade-off',off)})}" +
+  "var row=el.closest('.kb-setting,.field-row,tr');" +
+  "if(row)row.classList.toggle(row.classList.contains('kb-setting')?'is-inactive':'cascade-off',off)})}" +
   "master.addEventListener('change',apply);apply()}" +
   "document.querySelectorAll('[data-cascade-master]').forEach(wire)})();";
 
@@ -690,7 +695,7 @@ const SETTINGS_SAVE_SCRIPT =
   // CSRF token and every value_*/keys field round-trip through the parser.
   "var body;try{body=new URLSearchParams(new FormData(form))}catch(err){return}" +
   "e.preventDefault();" +
-  "var save=form.querySelector('button[type=submit]:not([formaction])');" +
+  "var save=form.querySelector('button[type=submit]:not([formaction]):not([form])');" +
   "if(save)save.disabled=true;" +
   "fetch(form.action,{method:'POST',credentials:'same-origin',cache:'no-store'," +
   "headers:{'Accept':'application/json','X-Requested-With':'fetch'}," +

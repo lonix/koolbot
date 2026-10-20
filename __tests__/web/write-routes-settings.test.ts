@@ -1,3 +1,4 @@
+/* global HTMLFormElement, HTMLInputElement */
 /**
  * Route-handler tests for the Settings write router (issue #849).
  *
@@ -28,6 +29,7 @@ import {
 } from "./admin-harness.js";
 import { PROTECTED_KEYS } from "../../src/web/bootstrap-vars.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
+import type { SettingRow } from "../../src/web/admin-views.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGet = jest.fn<(key: string) => Promise<unknown>>();
@@ -1899,5 +1901,79 @@ describe("POST /settings/import/apply", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("disk full");
+  });
+});
+
+// #1318: the settings rows render switches as real checkboxes. An unchecked
+// checkbox posts nothing, so this drives the actual rendered form through a
+// DOM, serialises it the way a browser does and posts it, to prove an
+// unchecked switch still saves `false` and the `keys` field survives.
+describe("rendered settings form -> POST /settings/save-section (#1318)", () => {
+  async function renderedFormBody(
+    mutate: (form: HTMLFormElement) => void,
+  ): Promise<Record<string, string[]>> {
+    const { renderFeatureSettingsCard } =
+      await import("../../src/web/admin-views.js");
+    const { JSDOM } = await import("jsdom");
+    const row = (key: string, label: string): SettingRow => ({
+      key,
+      label,
+      current: true,
+      defaultValue: false,
+      type: "boolean",
+      description: "",
+      category: "core",
+    });
+    const rows = [
+      row("core.cleanup.enabled", "Cleanup log"),
+      row("core.startup.enabled", "Startup log"),
+    ];
+    const html = renderFeatureSettingsCard({
+      category: "core",
+      settingRows: rows,
+      returnTo: "/admin/audit/commands",
+      csrfToken: "unused-the-harness-adds-its-own",
+    });
+    const dom = new JSDOM(`<!doctype html><body>${html}</body>`);
+    const form = dom.window.document.querySelector(
+      'form[action="/admin/settings/save-section"]',
+    ) as HTMLFormElement;
+    expect(form).not.toBeNull();
+    mutate(form);
+    const body: Record<string, string[]> = {};
+    for (const [name, value] of new dom.window.FormData(form).entries()) {
+      if (name === "_csrf" || typeof value !== "string") continue;
+      (body[name] ??= []).push(value);
+    }
+    return body;
+  }
+
+  it("saves false for a switch the user turned off", async () => {
+    const body = await renderedFormBody((form) => {
+      (
+        form.querySelector(
+          'input[name="value_core.cleanup.enabled"]',
+        ) as HTMLInputElement
+      ).checked = false;
+    });
+    // The browser sends nothing for the unchecked switch...
+    expect(body["value_core.cleanup.enabled"]).toBeUndefined();
+    expect(body["value_core.startup.enabled"]).toEqual(["true"]);
+    // ...but the form still lists the key, which is what makes it a write.
+    expect(body.keys).toEqual(["core.cleanup.enabled", "core.startup.enabled"]);
+
+    const res = await harness.post("/settings/save-section", body);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    const written = new Map(mockConfigSet.mock.calls.map((c) => [c[0], c[1]]));
+    expect(written.get("core.cleanup.enabled")).toBe(false);
+    expect(written.get("core.startup.enabled")).toBe(true);
+  });
+
+  it("saves true for a switch left on", async () => {
+    const body = await renderedFormBody(() => undefined);
+    await harness.post("/settings/save-section", body);
+    const written = new Map(mockConfigSet.mock.calls.map((c) => [c[0], c[1]]));
+    expect(written.get("core.cleanup.enabled")).toBe(true);
+    expect(written.get("core.startup.enabled")).toBe(true);
   });
 });

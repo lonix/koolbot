@@ -336,6 +336,72 @@ const SETTING_ROWS: SettingRow[] = [
   },
 ];
 
+/**
+ * Rows for the nested-dependents state of the Settings page (#1318): a changed
+ * three-option enum (segmented control, with a reset button), a locked child
+ * nested under its off parent, and a child whose parent is on another card
+ * (no control, a "requires" note). Real schema keys, because the dependency
+ * graph comes from the schema.
+ */
+const NESTED_GROUPS: Array<{ category: string; rows: SettingRow[] }> = [
+  {
+    category: "voicetracking",
+    rows: [
+      {
+        key: "voicetracking.enabled",
+        label: "Voice tracking",
+        current: false,
+        defaultValue: false,
+        type: "boolean",
+        description: "Track time spent in voice channels.",
+        category: "voicetracking",
+      },
+      {
+        key: "voicetracking.announcements.enabled",
+        label: "Announcements",
+        current: true,
+        defaultValue: false,
+        type: "boolean",
+        description: "Announce milestones in a channel.",
+        category: "voicetracking",
+      },
+    ],
+  },
+  {
+    category: "leaderboard_roles",
+    rows: [
+      {
+        key: "leaderboard_roles.period",
+        label: "Period",
+        current: "week",
+        defaultValue: "alltime",
+        type: "string",
+        description: "Which window the leaderboard covers.",
+        category: "leaderboard_roles",
+        options: [
+          { value: "week", label: "This week" },
+          { value: "month", label: "This month" },
+          { value: "alltime", label: "All time" },
+        ],
+      },
+    ],
+  },
+  {
+    category: "digest",
+    rows: [
+      {
+        key: "digest.include_achievements",
+        label: "Include achievements",
+        current: true,
+        defaultValue: false,
+        type: "boolean",
+        description: "Add achievements to the weekly digest.",
+        category: "digest",
+      },
+    ],
+  },
+];
+
 /** Props for the Channel Claims page; `over` swaps in a previewed plan. */
 function claimsProps(
   over: Partial<Parameters<typeof renderChannelClaimsPage>[0]> = {},
@@ -733,6 +799,16 @@ export function adminPages(): A11yPage[] {
         guildId: "g1",
         guildName: "Test Guild",
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Settings (nested dependents, segmented control, reset)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: NESTED_GROUPS,
+        guildId: "g1",
+        guildName: "Test Guild",
       }),
     },
     {

@@ -312,11 +312,13 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    // Human label appears as bold primary text.
-    expect(html).toContain("<strong>Voice Channel Management enabled</strong>");
-    // Raw dotted key still rendered, but de-emphasised as a small code ref.
-    expect(html).toMatch(
-      /<code class="mono muted"[^>]*>voicechannels\.enabled<\/code>/,
+    // Human label is the row's name, and the caption of its switch.
+    expect(html).toContain(
+      '<label id="set-voicechannels.enabled-label" for="set-voicechannels.enabled">Voice Channel Management enabled</label>',
+    );
+    // Raw dotted key still rendered, as a small code reference behind More.
+    expect(html).toContain(
+      'Setting key: <code class="kb-mono">voicechannels.enabled</code>',
     );
   });
 
@@ -370,7 +372,9 @@ describe("renderSettingsPage", () => {
     });
     expect(html).toContain("voicechannels.enabled");
     expect(html).toContain("Enable VC mgmt");
-    expect(html).toContain('class="tag tag-info">boolean');
+    // The control says what it takes, so the type badge is gone.
+    expect(html).not.toContain('class="tag tag-info">boolean');
+    expect(html).toContain('type="checkbox" role="switch"');
   });
 
   it("wraps each section in one save form, exposes per-row reset, and pre-fills values (issue #433)", () => {
@@ -410,10 +414,14 @@ describe("renderSettingsPage", () => {
     // handler can enumerate the section without trusting `value_*` names.
     expect(html).toContain('name="keys" value="quotes.max_length"');
     expect(html).toContain('name="keys" value="quotes.channel_id"');
-    // Per-row Reset is retained via HTML5 formaction so a single click
-    // posts just that key to the existing /settings/reset handler.
-    expect(html).toContain('formaction="/admin/settings/reset"');
+    // Per-row Reset (shown for a value that differs from its default) submits
+    // a sibling form, so a single click posts just that key to the existing
+    // /settings/reset handler and is never the save form's default button.
+    expect(html).toContain('action="/admin/settings/reset"');
+    expect(html).toContain('form="form-quotes-reset"');
     expect(html).toContain('name="key" value="quotes.max_length"');
+    expect(html).toContain('name="key" value="quotes.channel_id"');
+    expect(html).not.toContain('formaction="/admin/settings/reset"');
     // Value controls use the per-row name and round-trip the current value.
     expect(html).toContain('name="value_quotes.max_length"');
     expect(html).toContain('name="value_quotes.channel_id"');
@@ -423,7 +431,7 @@ describe("renderSettingsPage", () => {
     expect(html).not.toContain('action="/admin/settings/set"');
   });
 
-  it("tags the value and default cells so long values stay bounded, not nowrap (issue #489)", () => {
+  it("keeps a long value in a bounded control rather than a table cell (issue #489)", () => {
     const longTiers =
       "role-aaaaaaaaaaaaaaaa:1000,role-bbbbbbbbbbbbbbbb:2500,role-cccccccccccccccc:5000,role-dddddddddddddddd:10000";
     const html = renderSettingsPage({
@@ -444,13 +452,12 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    // The editable value cell and the default cell carry the classes the
-    // stylesheet uses to bound long content within the column.
-    expect(html).toContain('<td class="settings-value">');
-    expect(html).toContain('<td class="settings-default">');
-    // The previous fixed `white-space:nowrap` on the default cell forced
-    // long values to push the table wide — it must be gone.
-    expect(html).not.toContain('<td style="white-space:nowrap">');
+    // The value sits in the row's control column (a bounded `.kb-input`),
+    // not a table cell, and an unchanged value shows no default column.
+    expect(html).toContain('<div class="kb-setting__control">');
+    expect(html).toContain('class="kb-input"');
+    expect(html).not.toContain('<td class="settings-default"');
+    expect(html).not.toContain("<table");
   });
 
   it("shows the warnBelow warning when a value is below the threshold (#575)", () => {
@@ -936,7 +943,7 @@ describe("renderSettingsPage", () => {
     );
   });
 
-  it("renders an options-typed setting as a single-select with the current value pre-selected", () => {
+  it("renders an options-typed setting with more than four options as a single-select with the current value pre-selected", () => {
     const html = renderSettingsPage({
       ...COMMON,
       textChannels: [],
@@ -955,8 +962,10 @@ describe("renderSettingsPage", () => {
               description: "",
               category: "leaderboard_roles",
               options: [
+                { value: "day", label: "Today" },
                 { value: "week", label: "This week" },
                 { value: "month", label: "This month" },
+                { value: "year", label: "This year" },
                 { value: "alltime", label: "All time" },
               ],
             },
@@ -964,18 +973,19 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toMatch(
-      /<select name="value_leaderboard_roles\.period"[^>]*>/,
+    expect(html).toContain(
+      '<select class="kb-select" name="value_leaderboard_roles.period"',
     );
     expect(html).toContain('<option value="week">This week</option>');
     expect(html).toContain(
       '<option value="month" selected>This month</option>',
     );
     expect(html).toContain('<option value="alltime">All time</option>');
-    // No free-text input is emitted for an options key.
+    // No free-text input and no radio group for a long option list.
     expect(html).not.toContain(
-      '<input type="text" name="value_leaderboard_roles.period"',
+      'name="value_leaderboard_roles.period" maxlength',
     );
+    expect(html).not.toContain('role="radiogroup"');
   });
 
   it("surfaces an out-of-range options value as a selected `(unknown)` option", () => {
@@ -1052,7 +1062,7 @@ describe("renderSettingsPage", () => {
 
   // ---- Feature-dependency greying (#666) ----
 
-  it("greys + disables a control whose hard dependsOn target is off, with a 'requires X' hint", () => {
+  it("shows no control for a row whose dependsOn target is off on another section, only a 'requires X' hint (#666, #1318)", () => {
     const html = renderSettingsPage({
       ...COMMON,
       groups: [
@@ -1084,13 +1094,15 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    // The dependent control renders disabled and dep-locked so the cascade
-    // script can't re-enable it under an enabled section master.
-    expect(html).toMatch(
-      /name="value_achievements\.enabled"[^>]*\bdisabled\b[^>]*data-dep-locked/,
+    // Its parent is on another card, so it cannot nest under it, and a
+    // control is never shown disabled without its parent right above it: the
+    // row has no control at all, only the stored value kept in the form.
+    expect(html).not.toContain('role="switch" id="set-achievements.enabled"');
+    expect(html).toContain(
+      '<input type="hidden" name="value_achievements.enabled" value="false">',
     );
-    // Its row is greyed via the static dependency class.
-    expect(html).toContain('<tr class="dep-off">');
+    // Its row is dimmed via the static dependency class.
+    expect(html).toContain('<div class="kb-setting kb-setting--locked">');
     // The hint names the unmet dependency by its human label and links to its
     // section, using the same dependsOn graph the write-time validator uses.
     expect(html).toContain(
@@ -1158,20 +1170,18 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    // Hidden input carries the current value so the disabled (unsubmitted)
-    // checkbox can't be clobbered on Save.
+    // Hidden input carries the current value, since the row has no control
+    // to submit it (its parent is on another card), so Save can't flip it.
     expect(html).toContain(
       '<input type="hidden" name="value_digest.include_achievements" value="true">',
     );
-    // The visible checkbox is still disabled + dep-locked.
-    expect(html).toMatch(
-      /type="checkbox"[^>]*name="value_digest\.include_achievements"[^>]*\bdisabled\b[^>]*data-dep-locked/,
+    expect(html).not.toContain(
+      'name="value_digest.include_achievements" value="true" checked',
     );
-    // The master toggle (dependency met) is neither locked nor round-tripped
-    // with a hidden value field.
-    expect(html).not.toMatch(
-      /name="value_digest\.enabled"[^>]*data-dep-locked/,
-    );
+    expect(html).not.toContain('id="set-digest.include_achievements"');
+    // The master toggle (dependency met) renders as an enabled switch and is
+    // not round-tripped with a hidden value field.
+    expect(html).toContain('id="set-digest.enabled"');
     expect(html).not.toContain(
       '<input type="hidden" name="value_digest.enabled"',
     );
@@ -1212,10 +1222,8 @@ describe("renderSettingsPage", () => {
     // Dependency met → the control isn't locked, greyed, or hinted. (The
     // cascade script always mentions `data-dep-locked`, so assert against the
     // specific control rather than the whole document.)
-    expect(html).not.toMatch(
-      /name="value_achievements\.enabled"[^>]*data-dep-locked/,
-    );
-    expect(html).not.toContain('<tr class="dep-off">');
+    expect(html).toContain('id="set-achievements.enabled"');
+    expect(html).not.toContain('<div class="kb-setting kb-setting--locked">');
     expect(html).not.toContain("settings-dep-hint");
   });
 
@@ -2732,7 +2740,7 @@ describe("renderReactionRolesPage", () => {
     // is part of the form, so the cascade stays on: unticking it greys the
     // other controls and the server writes only the master.
     expect(html).toContain(
-      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope>',
+      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope id="',
     );
     expect(html).toContain(
       '<input type="hidden" name="redirect" value="/admin/reaction-roles">',
@@ -2753,19 +2761,25 @@ describe("renderReactionRolesPage", () => {
         `<input type="hidden" name="keys" value="${key}">`,
       );
     }
-    // Enable toggle is a checked checkbox acting as the cascade master.
-    expect(html).toMatch(
-      /<input type="checkbox"[^>]*name="value_reactionroles\.enabled" value="true" checked data-cascade-master>/,
+    // Enable toggle is a checked switch acting as the cascade master.
+    expect(html).toContain('role="switch" id="set-reactionroles.enabled"');
+    expect(html).toContain(
+      'name="value_reactionroles.enabled" value="true" checked',
     );
+    expect(html).toContain("data-cascade-master>");
     // Channel is a text-channel picker with the current channel selected.
-    expect(html).toMatch(
-      /<select[^>]*name="value_reactionroles\.message_channel_id"/,
-    );
+    expect(html).toContain('id="set-reactionroles.message_channel_id"');
+    expect(html).toContain('name="value_reactionroles.message_channel_id"');
     expect(html).toContain('<option value="chan-1" selected>#roles</option>');
     expect(html).toContain("#general</option>");
-    // Style is a select built from the schema options.
-    expect(html).toMatch(/<select[^>]*name="value_reactionroles\.style"/);
-    expect(html).toContain('<option value="button" selected>Button</option>');
+    // Style has three short options, so it is a segmented control built from
+    // the schema options, with the current one checked.
+    expect(html).toContain(
+      '<div class="kb-segmented" role="radiogroup" id="set-reactionroles.style"',
+    );
+    expect(html).toContain(
+      '<input type="radio" id="set-reactionroles.style-1" name="value_reactionroles.style" value="button" checked>',
+    );
     expect(html).toContain(">Save settings</button>");
   });
 
@@ -3502,7 +3516,7 @@ describe("renderVoiceChannelsPage", () => {
     });
     // Posts through the shared settings route, back to this page, cascade off.
     expect(html).toContain(
-      '<form method="POST" action="/admin/settings/save-section">',
+      '<form method="POST" action="/admin/settings/save-section" id="',
     );
     expect(html).toContain(
       '<input type="hidden" name="redirect" value="/admin/voice-channels">',
@@ -3541,7 +3555,7 @@ describe("renderVoiceChannelsPage", () => {
     // No settings form is emitted (the substring in the shared AJAX script
     // doesn't count — assert on this page's own form markup instead).
     expect(html).not.toContain(
-      '<form method="POST" action="/admin/settings/save-section">',
+      '<form method="POST" action="/admin/settings/save-section" id="',
     );
     expect(html).not.toContain(">Save settings</button>");
   });
@@ -3666,27 +3680,38 @@ describe("renderFeatureSettingsCard (#971)", () => {
         ],
       },
     });
-    expect(html).toMatch(
-      /<input type="checkbox" id="set-x\.flag"[^>]*name="value_x\.flag" value="true" checked>/,
+    expect(html).toContain(
+      '<input type="checkbox" role="switch" id="set-x.flag" name="value_x.flag" value="true" checked',
     );
-    expect(html).toMatch(/<input type="number" id="set-x\.count"[^>]*min="1"/);
-    expect(html).toMatch(/<input type="text" id="set-x\.name"[^>]*value="hi"/);
+    expect(html).toContain(
+      '<input type="number" class="kb-input" id="set-x.count"',
+    );
+    expect(html).toContain('min="1"');
+    expect(html).toContain(
+      '<input type="text" class="kb-input" id="set-x.name"',
+    );
+    expect(html).toContain('value="hi"');
     expect(html).toContain('<option value="t1" selected>#general</option>');
     // Voice-kind list draws from the voice picker, not the text one.
-    expect(html).toMatch(/name="value_x\.voice_list" multiple/);
+    expect(html).toContain('name="value_x.voice_list" multiple');
     expect(html).toContain('<option value="v1" selected>#Lounge</option>');
     expect(html).toContain('<option value="c1" selected>#Voice</option>');
     expect(html).toContain('<option value="r1" selected>@Mods</option>');
     expect(html).toContain('<option value="r2" selected>@VIP</option>');
     expect(html).toContain("cron-picker");
-    expect(html).toContain('<option value="b" selected>Bravo</option>');
-    // Each caption is a real label for its control (#854); cron is a group.
-    expect(html).toContain('<label id="set-x.name-label" for="set-x.name">');
-    expect(html).toContain('<div id="set-x.cron-label">');
-    // Every row gets its own Reset button.
-    expect(html.match(/formaction="\/admin\/settings\/reset"/g)).toHaveLength(
-      10,
+    // Two short options: a segmented control with the current one checked.
+    expect(html).toContain(
+      '<input type="radio" id="set-x.mode-1" name="value_x.mode" value="b" checked>',
     );
+    // Each caption is a real label for its control (#854); cron and the
+    // segmented control are labelled groups.
+    expect(html).toContain('<label id="set-x.name-label" for="set-x.name">');
+    expect(html).toContain(
+      '<p class="kb-setting__name" id="set-x.cron-label">',
+    );
+    expect(html).toContain('aria-labelledby="set-x.mode-label"');
+    // Every row here differs from its default, so each gets a Reset button.
+    expect(html.split('<button type="submit" form="').length - 1).toBe(10);
   });
 
   it("links help and warnBelow text into aria-describedby", () => {
@@ -3707,7 +3732,7 @@ describe("renderFeatureSettingsCard (#971)", () => {
     );
     expect(html).toContain('id="set-x.days-warn"');
     expect(html).toContain(
-      '<td class="muted" id="set-x.days-help">Retention.</td>',
+      '<p class="kb-setting__desc" id="set-x.days-help">Retention.</p>',
     );
   });
 
@@ -3720,11 +3745,13 @@ describe("renderFeatureSettingsCard (#971)", () => {
       ],
     });
     expect(html).toContain(
-      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope>',
+      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope id="',
     );
-    expect(html).toMatch(
-      /name="value_quotes\.enabled" value="true" checked data-cascade-master>/,
+    expect(html).toContain(
+      'name="value_quotes.enabled" value="true" checked aria-labelledby="set-quotes.enabled-label" data-cascade-master>',
     );
+    // The feature's other settings nest under the master toggle.
+    expect(html).toContain('<div class="kb-nested">');
     // Cascade on: switching the master off writes only the master flag, so
     // the form must NOT opt out with no_cascade.
     expect(html).not.toContain('name="no_cascade"');
@@ -3737,8 +3764,8 @@ describe("renderFeatureSettingsCard (#971)", () => {
         row({ key: "quotes.enabled", type: "boolean", current: false }),
       ],
     });
-    expect(html).toMatch(
-      /name="value_quotes\.enabled" value="true" data-cascade-master>/,
+    expect(html).toContain(
+      'name="value_quotes.enabled" value="true" aria-labelledby="set-quotes.enabled-label" data-cascade-master>',
     );
   });
 
@@ -3762,7 +3789,7 @@ describe("renderFeatureSettingsCard (#971)", () => {
     expect(html).not.toContain("data-cascade-master");
   });
 
-  it("locks a control whose off-card dependency is off, round-tripping its value", () => {
+  it("shows a row without a control when its off-card dependency is off, round-tripping its value", () => {
     const rows = [
       row({ key: "digest.enabled", type: "boolean", current: false }),
       row({
@@ -3779,14 +3806,15 @@ describe("renderFeatureSettingsCard (#971)", () => {
         ["achievements.enabled", false],
       ]),
     });
-    expect(locked).toContain('<tr class="dep-off">');
+    expect(locked).toContain('<div class="kb-setting kb-setting--locked">');
     expect(locked).toContain(
       '<input type="hidden" name="value_digest.include_achievements" value="true">',
     );
-    expect(locked).toMatch(
-      /name="value_digest\.include_achievements" value="true" checked disabled data-dep-locked>/,
-    );
+    // Its parent is on another card, so no disabled control is shown.
+    expect(locked).not.toContain('id="set-digest.include_achievements"');
+    expect(locked).not.toContain("data-dep-locked>");
     expect(locked).toContain('id="set-digest.include_achievements-dep"');
+    expect(locked).toContain("Requires Achievements");
     // No in-page sections to link to on a feature page.
     expect(locked).not.toContain('href="#section-');
 
@@ -3798,8 +3826,10 @@ describe("renderFeatureSettingsCard (#971)", () => {
         ["achievements.enabled", true],
       ]),
     });
-    expect(unlocked).not.toContain("dep-off");
-    expect(unlocked).not.toContain("data-dep-locked");
+    expect(unlocked).not.toContain(
+      '<div class="kb-setting kb-setting--locked">',
+    );
+    expect(unlocked).toContain('id="set-digest.include_achievements"');
   });
 });
 
@@ -3988,16 +4018,18 @@ describe("renderDigestPage settings card (#976)", () => {
     expect(html).not.toContain("<h2>Configuration</h2>");
   });
 
-  it("locks the achievements toggle while achievements are off", () => {
+  it("replaces the achievements toggle with a 'requires' note while achievements are off", () => {
     const html = render(digestRows(), {
       dependencyState: new Map([
         ["voicetracking.enabled", true],
         ["achievements.enabled", false],
       ]),
     });
-    expect(html).toMatch(
-      /name="value_digest\.include_achievements"[^>]*data-dep-locked/,
+    expect(html).toContain(
+      '<input type="hidden" name="value_digest.include_achievements"',
     );
+    expect(html).not.toContain('id="set-digest.include_achievements"');
+    expect(html).toContain('id="set-digest.include_achievements-dep"');
   });
 
   it("shows a notice instead of controls when settings can't be read", () => {
@@ -4185,19 +4217,20 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain("Voice Channel Management enabled");
     expect(html).toContain('<code class="mono muted"');
     // Every field posts the value_-prefixed name shared with the Settings page.
-    expect(html).toMatch(
-      /type="checkbox"[^>]*name="value_voicechannels.enabled"[^>]*value="true" checked/,
+    expect(html).toContain(
+      'name="value_voicechannels.enabled" value="true" checked',
     );
-    expect(html).toMatch(
-      /type="number"[^>]*name="value_quotes.max_length"[^>]*value="500"/,
+    expect(html).toContain('name="value_quotes.max_length" value="500"');
+    expect(html).toContain(
+      'type="number" class="kb-input" id="wiz-quotes.max_length"',
     );
     expect(html).toContain('value="Lobby"');
     expect(html).toContain("Enable VC");
     // Each field label is associated with its control via matching for/id so
     // screen readers and click-to-focus keep working (#703).
     expect(html).toContain('for="wiz-voicechannels.enabled"');
-    expect(html).toMatch(/type="checkbox" id="wiz-voicechannels.enabled"/);
-    expect(html).toMatch(/type="number" id="wiz-quotes.max_length"/);
+    expect(html).toContain('id="wiz-voicechannels.enabled"');
+    expect(html).toContain('id="wiz-quotes.max_length"');
   });
 
   it("renders a channel key as a real channel dropdown instead of a free-text ID box (#703)", () => {
@@ -4304,7 +4337,7 @@ describe("renderWizardStepPage", () => {
     // Channel key → text-channel dropdown with the current value selected,
     // carrying an id its label points at (#703).
     expect(html).toMatch(
-      /<select id="wiz-reactionroles\.message_channel_id"[^>]*name="value_reactionroles\.message_channel_id"[^>]*>/,
+      /<select class="kb-select" id="wiz-reactionroles\.message_channel_id"[^>]*name="value_reactionroles\.message_channel_id"[^>]*>/,
     );
     expect(html).toContain('for="wiz-reactionroles.message_channel_id"');
     expect(html).toContain(
@@ -4313,19 +4346,19 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain('<option value="chan-2">#general</option>');
     // Category key → category dropdown.
     expect(html).toMatch(
-      /<select id="wiz-voicechannels\.category_id"[^>]*name="value_voicechannels\.category_id"[^>]*>/,
+      /<select class="kb-select" id="wiz-voicechannels\.category_id"[^>]*name="value_voicechannels\.category_id"[^>]*>/,
     );
     expect(html).toContain('<option value="cat-1">#Voice Channels</option>');
     // Role key → role dropdown with the `@` prefix.
     expect(html).toMatch(
-      /<select id="wiz-leaderboard_roles\.some_role"[^>]*name="value_leaderboard_roles\.some_role"[^>]*>/,
+      /<select class="kb-select" id="wiz-leaderboard_roles\.some_role"[^>]*name="value_leaderboard_roles\.some_role"[^>]*>/,
     );
     expect(html).toContain('<option value="role-1">@Moderator</option>');
     // No raw free-text input is emitted for any of these picker keys.
     expect(html).not.toContain('<input type="text"');
   });
 
-  it("renders an options-backed key as a <select> using the value_ field name and pre-selects the current value", () => {
+  it("renders a short options-backed key as a segmented control the label names by id, not `for` (#1318)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
       ...EMPTY_PICKERS,
@@ -4349,10 +4382,46 @@ describe("renderWizardStepPage", () => {
         },
       },
     });
+    expect(html).toContain(
+      '<div class="kb-segmented" role="radiogroup" id="wiz-leaderboard_roles.period" aria-labelledby="wiz-leaderboard_roles.period-label"',
+    );
+    expect(html).toContain(
+      'name="value_leaderboard_roles.period" value="month" checked',
+    );
+    // A radiogroup is not labelable, so the caption must not point `for` at it.
+    expect(html).not.toContain('for="wiz-leaderboard_roles.period"');
+  });
+
+  it("renders an options-backed key with more than four options as a <select> using the value_ field name and pre-selects the current value", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      ...EMPTY_PICKERS,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "leaderboard_roles",
+      settingKeys: ["leaderboard_roles.period"],
+      currentValues: { "leaderboard_roles.period": "month" },
+      defaultValues: { "leaderboard_roles.period": "alltime" },
+      metadata: {
+        "leaderboard_roles.period": {
+          label: "Leaderboard window",
+          description: "Activity window",
+          category: "leaderboard_roles",
+          type: "string",
+          options: [
+            { value: "day", label: "Today" },
+            { value: "week", label: "This week" },
+            { value: "month", label: "This month" },
+            { value: "year", label: "This year" },
+            { value: "alltime", label: "All time" },
+          ],
+        },
+      },
+    });
     // The wizard shares the Settings page's value_-prefixed field name, with an
     // id the label points at.
-    expect(html).toMatch(
-      /<select name="value_leaderboard_roles\.period" id="wiz-leaderboard_roles\.period"[^>]*>/,
+    expect(html).toContain(
+      '<select class="kb-select" name="value_leaderboard_roles.period" id="wiz-leaderboard_roles.period"',
     );
     expect(html).toContain('for="wiz-leaderboard_roles.period"');
     expect(html).toContain(
@@ -4689,7 +4758,9 @@ describe("renderSettingsPage cascading disable (#485)", () => {
     // control is tagged as a master. (The shared client script — which
     // references these attribute names as query selectors — is always
     // embedded, so assert against the form/control markup specifically.)
-    expect(html).toContain('action="/admin/settings/save-section">');
+    expect(html).toContain(
+      'action="/admin/settings/save-section" id="form-quotes"',
+    );
     expect(html).not.toMatch(/<form[^>]*data-cascade-scope/);
     expect(html).not.toMatch(/name="value_[^"]*"[^>]*data-cascade-master/);
   });
@@ -5152,7 +5223,7 @@ describe("Command Audit and Metrics settings cards (#978)", () => {
       // submitted key is written — unchecking one must not drop the others.
       expect(html).toContain('name="no_cascade"');
       expect(html).toContain(
-        '<form method="POST" action="/admin/settings/save-section">',
+        '<form method="POST" action="/admin/settings/save-section" id="',
       );
     },
   );
@@ -5305,20 +5376,27 @@ describe("Settings page accessibility (#854)", () => {
   it("associates every non-cron control with a <label for> naming the row", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
     expect(html).toContain(
-      '<label id="set-x.enabled-label" for="set-x.enabled"><strong>Enable X</strong></label>',
+      '<label id="set-x.enabled-label" for="set-x.enabled">Enable X</label>',
     );
     expect(html).toContain(
-      '<label id="set-x.count-label" for="set-x.count"><strong>Count</strong></label>',
+      '<label id="set-x.count-label" for="set-x.count">Count</label>',
     );
-    expect(html).toMatch(/<input type="checkbox" id="set-x\.enabled"/);
-    expect(html).toMatch(/<input type="number" id="set-x\.count"/);
+    expect(html).toContain(
+      '<input type="checkbox" role="switch" id="set-x.enabled"',
+    );
+    expect(html).toContain(
+      '<input type="number" class="kb-input" id="set-x.count"',
+    );
   });
 
   it("links the description cell to the control via aria-describedby", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
-    expect(html).toContain('<td class="muted" id="set-x.enabled-help">');
-    expect(html).toMatch(
-      /id="set-x\.enabled" aria-describedby="set-x\.enabled-help"/,
+    expect(html).toContain(
+      '<p class="kb-setting__desc" id="set-x.enabled-help">Turn X on.</p>',
+    );
+    // The switch is named by the row name and described by the one-line help.
+    expect(html).toContain(
+      'aria-labelledby="set-x.enabled-label" aria-describedby="set-x.enabled-help"',
     );
   });
 
@@ -5332,7 +5410,53 @@ describe("Settings page accessibility (#854)", () => {
     );
   });
 
-  it("links an unmet dependency hint to the locked control", () => {
+  it("nests a dependent under its parent and links the unmet hint to the locked control", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.enabled",
+              label: "Voice tracking",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "Tracking master.",
+              category: "voicetracking",
+            },
+            {
+              key: "voicetracking.announcements.enabled",
+              label: "Announcements",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "Announce sessions.",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    // The child sits inside its parent's row, never beside it as a sibling.
+    const parentAt = html.indexOf('id="set-voicetracking.enabled"');
+    const nestedAt = html.indexOf('<div class="kb-nested">');
+    const childAt = html.indexOf(
+      'id="set-voicetracking.announcements.enabled"',
+    );
+    expect(parentAt).toBeGreaterThan(-1);
+    expect(nestedAt).toBeGreaterThan(parentAt);
+    expect(childAt).toBeGreaterThan(nestedAt);
+    expect(html).toContain(
+      '<div class="settings-dep-hint" id="set-voicetracking.announcements.enabled-dep" role="note"',
+    );
+    expect(html).toContain(
+      'aria-describedby="set-voicetracking.announcements.enabled-help set-voicetracking.announcements.enabled-dep" disabled data-dep-locked',
+    );
+  });
+
+  it("links an unmet dependency hint on a row whose parent is on another card", () => {
     const html = renderSettingsPage({
       ...COMMON,
       groups: [
@@ -5364,30 +5488,36 @@ describe("Settings page accessibility (#854)", () => {
     expect(html).toContain(
       '<div class="settings-dep-hint" id="set-digest.include_achievements-dep" role="note"',
     );
-    expect(html).toMatch(
-      /id="set-digest\.include_achievements" aria-describedby="[^"]*set-digest\.include_achievements-dep"/,
-    );
+    // The parent is on another card, so the row has no control to describe.
+    expect(html).not.toContain('id="set-digest.include_achievements"');
+    expect(html).toContain('<a href="#section-achievements">');
   });
 
   it("exposes a cron row as a labelled group rather than pointing `for` at nothing", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
     // No <label for> — the cron picker has no single control to target.
     expect(html).not.toContain('for="set-x.schedule"');
-    expect(html).toContain('<div id="set-x.schedule-label">');
+    expect(html).toContain(
+      '<p class="kb-setting__name" id="set-x.schedule-label">',
+    );
     expect(html).toMatch(
       /<div class="cron-picker" data-mode="daily" role="group" id="set-x\.schedule" aria-labelledby="set-x\.schedule-label" aria-describedby="set-x\.schedule-help">/,
     );
   });
 
-  it("hides the redundant true/false text from the accessibility tree when the checkbox is externally labelled", () => {
+  it("hides the On/Off text of a switch from the accessibility tree", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
-    expect(html).toContain('<span class="mono" aria-hidden="true">true</span>');
+    expect(html).toContain(
+      '<span class="kb-switch__state" aria-hidden="true"></span>',
+    );
   });
 
-  it("names each per-row Reset button after its setting", () => {
+  it("names each per-row Reset button after its setting and the default it restores", () => {
     const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
-    expect(html).toContain('aria-label="Reset Enable X to its default"');
-    expect(html).toContain('aria-label="Reset Count to its default"');
+    expect(html).toContain('aria-label="Reset Enable X to its default, Off"');
+    expect(html).toContain('aria-label="Reset Count to its default, 10"');
+    expect(html).toContain('title="Reset to default: Off"');
+    expect(html).not.toContain(">Default: Off<");
   });
 
   it("marks rejected keys aria-invalid and points them at the flash banner", () => {
@@ -5412,7 +5542,9 @@ describe("Settings page accessibility (#854)", () => {
       'data-describedby-base="set-x.count-help set-x.count-warn"',
     );
     // Untouched rows stay clean.
-    expect(html).not.toMatch(/id="set-x\.enabled"[^>]*aria-invalid/);
+    expect(html).not.toContain(
+      'id="set-x.enabled" name="value_x.enabled" value="true" checked aria-labelledby="set-x.enabled-label" aria-describedby="set-x.enabled-help" aria-invalid',
+    );
   });
 
   it("omits the flash id from the description list when there is no banner to point at", () => {

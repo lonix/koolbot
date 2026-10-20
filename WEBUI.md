@@ -944,7 +944,7 @@ shared `/admin/settings/save-section` route, is audited as
 Settings page still lists and edits every key; the card is a second view of the
 same values, not a copy. When the card includes the feature's
 `<feature>.enabled` toggle, that toggle is the form's cascade master: unticking
-it greys out the rest, and saving writes only `<feature>.enabled = false`, so
+it greys out the rest (the other rows sit nested under the switch), and saving writes only `<feature>.enabled = false`, so
 turning a feature off from its page never blanks its other settings. Saving
 normally shows the result inside the card without reloading. A save that turns
 a feature on or off reloads the page instead, so the disabled banner, the Status
@@ -1105,15 +1105,34 @@ Its **Settings** card edits every `birthdays.*` key in place, with
 `birthdays.enabled` as the cascade master. Saving a new `birthdays.cron` or
 flipping the feature re-arms the birthday job straight away.
 
-On the **Settings** page, a toggle whose feature declares a hard dependency
-(`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
-inline _"Requires X enabled"_ hint until every dependency is on — the hint names
-each unmet dependency by its human label and links to its section (#666). This is
-the friendly front for the write-time validator (#663): both read the same
-`dependsOn` graph, so the greyed control and the server-side rejection never
-disagree. The greying survives an enabled parent section (a dependency lock wins
-over the per-section cascade), and Rewind toggles are never greyed this way
-because Rewind is a graceful aggregator that declares no `dependsOn`.
+**Setting rows (#1318).** The Settings page and every feature card lay each key
+out as a row: the name and a one-line description on the left, the control on
+the right, and the rest of a long description plus the dotted key behind a
+_More_ disclosure. A boolean is a **switch** (a real checkbox with
+`role="switch"`, with _On_ or _Off_ beside it); an enum of two to four short
+options is a **segmented control** (a radio group), and anything longer stays a
+select. A value that differs from its default gets a dot after the name and a
+reset button that names the default (_"Reset Period to its default, This
+month"_); the type badge and the Default column are gone. Everything is a plain
+form control, so it works without JavaScript: an unchecked switch posts nothing
+and the save handlers read a listed-but-absent key as `false`. A reset button
+posts to a small sibling form (it is not a button of the save form, so pressing
+Enter in a text field saves rather than resets).
+
+On the **Settings** page and the feature cards, a setting whose feature declares
+a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
+(an indent and a rule) instead of greying in place. While the parent is off the
+child is disabled with an inline _"Requires X enabled"_ hint, and the parent is
+always right above it (#666, #1299). A dependency that lives on another card
+cannot nest, so the row has no control at all: it names what to turn on (linked
+to its section on the Settings page) and keeps its stored value in the form, so a
+save never changes it. This is the friendly front for the write-time validator
+(#663): both read the same `dependsOn` graph, so the row and the server-side
+rejection never disagree. The lock survives an enabled parent section (a
+dependency lock wins over the per-section cascade), and Rewind toggles are never
+locked this way because Rewind is a graceful aggregator that declares no
+`dependsOn`. The Setup Wizard keeps its own row layout and gets the same
+switch and segmented controls.
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction
@@ -2950,7 +2969,7 @@ configured entirely under **Settings** (`celebrations.enabled`,
 shout-out to the configured channel the first time anyone crosses a marquee
 accolade (Voice Legend, 1000 hours, a 30-day streak, 100 quotes), reusing the
 existing achievements award detection. `celebrations.enabled` depends on
-`achievements.enabled`, so Settings greys it until achievements are on.
+`achievements.enabled`, so Settings shows it as waiting for achievements until they are on.
 
 ### User self-service (`/me/*`, both admin and user roles)
 

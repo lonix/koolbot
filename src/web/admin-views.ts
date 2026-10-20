@@ -14,6 +14,16 @@ import {
 } from "./admin-layout.js";
 import { sanitizeCronExpression } from "../utils/cron.js";
 import { pickCascadeMasterKey } from "./cascade-master.js";
+import {
+  buildSettingTree,
+  renderChangedMark,
+  renderResetControl,
+  renderSegmented,
+  renderSwitch,
+  segmentedFits,
+  splitDescription,
+  type SettingNode,
+} from "./setting-controls.js";
 import { MAX_TIER_TOP_N } from "./leaderboard-tiers.js";
 import {
   categoryMetadata,
@@ -75,19 +85,6 @@ interface CommonProps {
 
 function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
   return `<span class="tag ${on ? "tag-on" : "tag-off"}">${on ? onLabel : offLabel}</span>`;
-}
-
-function formatValue(value: unknown): string {
-  if (value === undefined || value === null) {
-    return `<span class="muted">—</span>`;
-  }
-  if (typeof value === "boolean") {
-    return tagOnOff(value, "true", "false");
-  }
-  if (value === "") {
-    return `<span class="muted">(empty)</span>`;
-  }
-  return `<span class="mono">${escapeHtml(value)}</span>`;
 }
 
 // ---------- Dashboard ----------
@@ -752,7 +749,7 @@ function renderOptionsSelect(
     : `<option value="${escapeHtml(current)}" selected>${
         current === "" ? "(choose a value)" : `(unknown) ${escapeHtml(current)}`
       }</option>`;
-  return `<select name="${valueName}"${extraAttr}>${opts}${placeholder}</select>`;
+  return `<select class="kb-select" name="${valueName}"${extraAttr}>${opts}${placeholder}</select>`;
 }
 
 /**
@@ -937,34 +934,41 @@ function renderControlInput(
   // disabled (and therefore unsubmitted) control can't be clobbered on Save.
   const lockAttr = depLocked ? " disabled data-dep-locked" : "";
 
-  // Fixed-options keys render as a single-select dropdown regardless of
-  // their underlying `type`, so operators pick from the valid set instead
-  // of typing a value the server will reject.
+  // A boolean is always a switch, even if a key ever carried options (#1318).
+  if (r.type === "boolean") {
+    return renderSwitch(
+      valueName,
+      primitive === true,
+      {
+        id: a11y.id,
+        describedBy: a11y.describedBy,
+        labelledBy: a11y.labelledBy,
+        invalid: a11y.invalid,
+        describedByBase: a11y.describedByBase,
+        disabled: depLocked,
+      },
+      isCascadeMaster ? " data-cascade-master" : "",
+    );
+  }
+  // Fixed-options keys: two to four short options are a segmented control, the
+  // rest a single-select dropdown, so operators pick from the valid set
+  // instead of typing a value the server will reject.
   if (r.options && r.options.length > 0) {
+    if (segmentedFits(r.options, currentStr)) {
+      return renderSegmented(valueName, r.options, currentStr, {
+        id: a11y.id,
+        describedBy: a11y.describedBy,
+        labelledBy: a11y.labelledBy,
+        invalid: a11y.invalid,
+        describedByBase: a11y.describedByBase,
+        disabled: depLocked,
+      });
+    }
     return renderOptionsSelect(
       valueName,
       r.options,
       currentStr,
       lockAttr + a11yAttr,
-    );
-  }
-  if (r.type === "boolean") {
-    const checked = primitive === true ? " checked" : "";
-    const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
-    // The wrapping `<label>` keeps the "true"/"false" text clickable. When the
-    // caller supplies its own `<label for>` (Settings, wizard) that text is
-    // hidden from the accessibility tree — otherwise it would be concatenated
-    // onto the real caption, naming the checkbox "Enabled true" and repeating
-    // state the checkbox already announces (#854).
-    const stateText = primitive === true ? "true" : "false";
-    const stateSpan = a11y.id
-      ? `<span class="mono" aria-hidden="true">${stateText}</span>`
-      : `<span class="mono">${stateText}</span>`;
-    return (
-      `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox"${a11yAttr} name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
-      stateSpan +
-      `</label>`
     );
   }
   if (r.type === "number") {
@@ -976,7 +980,7 @@ function renderControlInput(
       typeof r.min === "number" && Number.isFinite(r.min)
         ? ` min="${r.min}"`
         : "";
-    return `<input type="number"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}"${minAttr} required style="width:8rem"${lockAttr}>`;
+    return `<input type="number" class="kb-input"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}"${minAttr} required style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -988,7 +992,7 @@ function renderControlInput(
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
-      `<select${a11yAttr} name="${valueName}"${lockAttr}>` +
+      `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, true) +
       `</select>`
     );
@@ -1024,29 +1028,7 @@ function renderControlInput(
   // server-side `TEXT_LIMITS.configValue` cap in
   // `src/web/routes/write/helpers.ts` (#508) — kept as a literal here to avoid a
   // circular import (the write routers import this file).
-  return `<input type="text"${a11yAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
-}
-
-/**
- * Per-row Reset submit button. Lives inside the per-section save form and
- * uses HTML5 `formaction` to redirect submission to the single-key reset
- * route. Only the clicked button's `name`/`value` is sent on submission,
- * so the `key=<row-key>` it contributes does not collide with the `keys`
- * hidden inputs the section form uses to enumerate its rows.
- *
- * The visible text stays "Reset" — but every row has one, so on its own that
- * gives a screen-reader user a list of identical buttons with no way to tell
- * which setting each belongs to. `aria-label` names the row (#854).
- */
-function renderResetButton(key: string, label = ""): string {
-  const escaped = escapeHtml(key);
-  const name = escapeHtml(label || key);
-  return (
-    `<button type="submit" formaction="/admin/settings/reset" ` +
-    `name="key" value="${escaped}" class="btn btn-sm" ` +
-    `aria-label="Reset ${name} to its default" ` +
-    `style="margin-left:.4rem">Reset</button>`
-  );
+  return `<input type="text" class="kb-input"${a11yAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
 /**
@@ -1094,6 +1076,233 @@ export const SETTINGS_FLASH_ID = "settings-flash";
  */
 function renderInvalidNote(id: string): string {
   return `<div class="settings-error" id="${escapeHtml(id)}" role="alert" style="margin-top:.4rem;color:var(--err-text);font-size:.85em">Rejected — not saved. See the error message above for the reason.</div>`;
+}
+
+/**
+ * True for a control that edits through several inputs or a radio group, so
+ * the row name labels it with `aria-labelledby` instead of `<label for>`
+ * (neither a cron picker nor a radiogroup is a labelable element).
+ */
+function isGroupControl(r: SettingRow): boolean {
+  if (r.type === "cron") return true;
+  if (r.type === "boolean") return false;
+  return segmentedFits(r.options, currentStringOf(r));
+}
+
+function currentStringOf(r: SettingRow): string {
+  const v = coerceToDisplayValue(r.current);
+  return typeof v === "string" ? v : "";
+}
+
+/** A value as people read it: On/Off, an option's label, or "not set". */
+function describeSettingValue(r: SettingRow, value: unknown, max = 60): string {
+  const v = coerceToDisplayValue(value);
+  if (r.type === "boolean") return v === true ? "On" : "Off";
+  if (v === "") return "not set";
+  const text = String(v);
+  const option = r.options?.find((o) => o.value === text);
+  const shown = option ? option.label : text;
+  return shown.length > max ? `${shown.slice(0, max - 1)}…` : shown;
+}
+
+/**
+ * Whether a row's value differs from the schema default. An unset current
+ * value means the default is in force, so it never counts as changed.
+ */
+function differsFromDefault(r: SettingRow): boolean {
+  if (r.current === null || r.current === undefined) return false;
+  const norm = (v: unknown): string => {
+    const d = coerceToDisplayValue(v);
+    return r.type === "boolean" ? String(d === true) : String(d);
+  };
+  return norm(r.current) !== norm(r.defaultValue);
+}
+
+/** Everything {@link renderSettingRows} needs besides the rows. */
+interface SettingRowsContext {
+  pickers: {
+    textChannels: ChannelOption[];
+    voiceChannels: ChannelOption[];
+    categoryChannels: ChannelOption[];
+    roles: RoleOption[];
+    groupRoles?: RoleOption[];
+  };
+  /** The form's master toggle: every other row nests under it. */
+  masterKey: string | null;
+  /** On/off state of every key the rows may depend on, on or off this form. */
+  enabledByKey: Map<string, boolean>;
+  /** Id of the card's reset form, which the reset buttons submit. */
+  resetFormId: string;
+  /** Whether a dependency name links to its `#section-` anchor. */
+  linkSections: boolean;
+  /** Keys the last save rejected (Settings page only). */
+  invalidKeys?: ReadonlySet<string>;
+  /** Id of the page flash to point rejected controls at, when one shows. */
+  flashId?: string;
+}
+
+/**
+ * The hidden input that keeps a row's stored value in the form when its control
+ * is absent: the save handler coerces a missing value to `false` / `""`, so
+ * without it such a row would be blanked on every save.
+ */
+function renderValueRoundTrip(r: SettingRow): string {
+  const primitive = coerceToDisplayValue(r.current);
+  const value =
+    r.type === "boolean"
+      ? primitive === true
+        ? "true"
+        : "false"
+      : escapeHtml(primitive);
+  return `<input type="hidden" name="${escapeHtml(settingValueFieldName(r.key))}" value="${value}">`;
+}
+
+function renderMoreDisclosure(key: string, rest: string): string {
+  const restHtml = rest ? `<p>${escapeHtml(rest)}</p>` : "";
+  return (
+    `<details class="kb-disclosure kb-disclosure--inline">` +
+    `<summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>More</summary>` +
+    `<div class="kb-disclosure__body">${restHtml}<p>Setting key: <code class="kb-mono">${escapeHtml(key)}</code></p></div>` +
+    `</details>`
+  );
+}
+
+/**
+ * The rows of a settings form (#1318, design system SettingRow): name and one
+ * line left, control right, the rest behind More, and a dot with a reset button
+ * once the value differs from its default. Shared by the Settings page and the
+ * feature cards so the two cannot drift.
+ *
+ * Dependents nest under their parent in `div.kb-nested` (see
+ * `buildSettingTree`), so a control is never shown disabled without the toggle
+ * it waits for right above it. A row whose dependency lives on another form
+ * cannot be nested; it renders without a control, naming (and on the Settings
+ * page linking to) what to turn on, and keeps its stored value in the form.
+ */
+function renderSettingRows(
+  rows: SettingRow[],
+  ctx: SettingRowsContext,
+): string {
+  const inForm = new Set(rows.map((r) => r.key));
+  const tree = buildSettingTree(
+    rows,
+    ctx.masterKey,
+    (key) => getDependencies(key as keyof ConfigSchema),
+    (key) => ctx.enabledByKey.get(key) === true,
+  );
+  // `lockedBelow`: an ancestor is waiting on a dependency from another card and
+  // is off, so it has no control to switch off and the cascade script has no
+  // master to disable these rows with. They are locked here instead, which
+  // keeps them from being edited and then dropped by the save (the server
+  // writes only the master of a form whose master is off).
+  const renderNode = (
+    node: SettingNode<SettingRow>,
+    lockedBelow = false,
+  ): string => {
+    const r = node.row;
+    const unmet = unmetDependenciesFor(r.key, ctx.enabledByKey);
+    const depLocked = unmet.length > 0 || lockedBelow;
+    const offForm = unmet.some((d) => !inForm.has(d.key));
+    const lockChildren = lockedBelow || (offForm && !isEnabledValue(r.current));
+    const controlId = settingControlId(r.key);
+    const labelId = `${controlId}-label`;
+    const helpId = `${controlId}-help`;
+    const warnId = `${controlId}-warn`;
+    const depId = `${controlId}-dep`;
+    const errId = `${controlId}-err`;
+    const { short, rest } = splitDescription(r.description);
+    const warnHtml = renderWarnBelow(r, warnId);
+    const depHtml = renderDependencyHint(unmet, ctx.linkSections, depId);
+    const invalid = ctx.invalidKeys?.has(r.key) ?? false;
+    const errHtml = invalid ? renderInvalidNote(errId) : "";
+    const describedByBase = [
+      short ? helpId : "",
+      warnHtml ? warnId : "",
+      depHtml ? depId : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const describedBy = invalid
+      ? [describedByBase, errId, ctx.flashId ?? ""].filter(Boolean).join(" ")
+      : describedByBase;
+    const a11y: ControlA11y = {
+      id: controlId,
+      describedBy,
+      describedByBase,
+      invalid,
+      labelledBy: labelId,
+    };
+    const changed = !offForm && differsFromDefault(r);
+    const label = escapeHtml(r.label || r.key);
+    const mark = changed ? renderChangedMark() : "";
+    const nameHtml =
+      offForm || isGroupControl(r)
+        ? `<p class="kb-setting__name" id="${labelId}">${label}${mark}</p>`
+        : `<p class="kb-setting__name"><label id="${labelId}" for="${escapeHtml(controlId)}">${label}</label>${mark}</p>`;
+    const control = offForm
+      ? renderValueRoundTrip(r)
+      : renderSettingControl(
+          r,
+          ctx.pickers,
+          r.key === ctx.masterKey,
+          depLocked,
+          a11y,
+        ) +
+        (changed
+          ? renderResetControl(
+              r.key,
+              r.label,
+              describeSettingValue(r, r.defaultValue),
+              ctx.resetFormId,
+              describeSettingValue(r, r.defaultValue, Infinity),
+            )
+          : "");
+    const nested =
+      node.children.length > 0
+        ? `<div class="kb-nested">${node.children.map((c) => renderNode(c, lockChildren)).join("")}</div>`
+        : "";
+    const cls = depLocked ? "kb-setting kb-setting--locked" : "kb-setting";
+    return (
+      `<div class="${cls}">` +
+      `<div>${nameHtml}${short ? `<p class="kb-setting__desc" id="${helpId}">${escapeHtml(short)}</p>` : ""}</div>` +
+      `<div class="kb-setting__control">${control}</div>` +
+      `<div class="kb-setting__extra"><input type="hidden" name="keys" value="${escapeHtml(r.key)}">` +
+      `${renderMoreDisclosure(r.key, rest)}${warnHtml}${depHtml}${errHtml}${nested}</div>` +
+      `</div>`
+    );
+  };
+  return `<div class="kb-settings">${tree.map((n) => renderNode(n)).join("")}</div>`;
+}
+
+/**
+ * The two forms of a settings card: the save form around the rows, and a
+ * sibling reset form that the rows' reset buttons submit through their `form`
+ * attribute. A form cannot nest inside another, and a submit button inside
+ * the save form would become its default button (Enter in a text field would
+ * reset a row instead of saving).
+ */
+function renderSettingsForms(opts: {
+  formId: string;
+  saveAttrs: string;
+  hiddenFields: string;
+  rowsHtml: string;
+  submitLabel: string;
+  csrfToken: string;
+  returnTo?: string;
+}): string {
+  const redirect = opts.returnTo
+    ? `<input type="hidden" name="redirect" value="${escapeHtml(opts.returnTo)}">`
+    : "";
+  return `<form method="POST" action="/admin/settings/save-section"${opts.saveAttrs} id="${escapeHtml(opts.formId)}">
+    ${opts.hiddenFields}
+    ${opts.rowsHtml}
+    <div class="actions" style="margin-top:.75rem">
+      <button type="submit" class="btn btn-primary">${escapeHtml(opts.submitLabel)}</button>
+    </div>
+  </form>
+  <form id="${escapeHtml(opts.formId)}-reset" method="POST" action="/admin/settings/reset">
+    <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">${redirect}
+  </form>`;
 }
 
 export function renderSettingsPage(props: SettingsProps): string {
@@ -1144,99 +1353,37 @@ export function renderSettingsPage(props: SettingsProps): string {
       // `voicechannels.enabled`, not `voicechannels.controlpanel.enabled`).
       // When it's off, every other control in the section greys out and is
       // ignored on save — the save-section handler skips the dependents so
-      // they aren't clobbered (issue #485).
+      // they aren't clobbered (issue #485). The rows nest under it.
       const cascadeMasterKey = findCascadeMasterKey(g.rows);
-      const rows = g.rows
-        .map((r) => {
-          // Grey + disable any control whose hard dependencies aren't all on
-          // (#666). `dep-off` is a static row class (not the cascade script's
-          // `.cascade-off`), so an enabled section master can't strip the
-          // greying off a still-dependency-locked control.
-          const unmet = unmetDependenciesFor(r.key, enabledByKey);
-          const depLocked = unmet.length > 0;
-          const rowClass = depLocked ? ' class="dep-off"' : "";
-          // Every row's caption, help text and inline notes are associated
-          // with the control by id (#854) — previously the label was a bare
-          // `<strong>` in a sibling cell, so all ~318 controls announced as
-          // "edit text, blank".
-          const controlId = settingControlId(r.key);
-          const labelId = `${controlId}-label`;
-          const helpId = `${controlId}-help`;
-          const warnId = `${controlId}-warn`;
-          const depId = `${controlId}-dep`;
-          const errId = `${controlId}-err`;
-          const warnHtml = renderWarnBelow(r, warnId);
-          const depHtml = renderDependencyHint(unmet, true, depId);
-          const invalid = invalidKeys.has(r.key);
-          const errHtml = invalid ? renderInvalidNote(errId) : "";
-          const describedByBase = [
-            r.description ? helpId : "",
-            warnHtml ? warnId : "",
-            depHtml ? depId : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          const describedBy = invalid
-            ? [
-                describedByBase,
-                errId,
-                // Point at the page-level flash too, so the field carries the
-                // server's actual rejection reason and not just "rejected".
-                props.flash ? SETTINGS_FLASH_ID : "",
-              ]
-                .filter(Boolean)
-                .join(" ")
-            : describedByBase;
-          const a11y: ControlA11y = {
-            id: controlId,
-            describedBy,
-            describedByBase,
-            invalid,
-            labelledBy: labelId,
-          };
-          // Cron edits through several inputs, so it gets a labelled group
-          // (`aria-labelledby`) rather than a `<label for>` pointing at nothing.
-          const caption = `<strong>${escapeHtml(r.label || r.key)}</strong>`;
-          const captionHtml =
-            r.type === "cron"
-              ? `<div id="${labelId}">${caption}</div>`
-              : `<div><label id="${labelId}" for="${escapeHtml(controlId)}">${caption}</label></div>`;
-          return `<tr${rowClass}>
-<td>
-  ${captionHtml}
-  <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
-  <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
-</td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey, depLocked, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}${depHtml}${errHtml}</td>
-<td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td class="settings-default">${formatValue(r.defaultValue)}</td>
-<td class="muted" id="${helpId}">${escapeHtml(r.description)}</td>
-</tr>`;
-        })
-        .join("");
+      const rowsHtml = renderSettingRows(g.rows, {
+        pickers,
+        masterKey: cascadeMasterKey,
+        enabledByKey,
+        resetFormId: `form-${g.category}-reset`,
+        linkSections: true,
+        invalidKeys,
+        flashId: props.flash ? SETTINGS_FLASH_ID : undefined,
+      });
       const descHtml = meta.description
         ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
         : "";
       // One <form> per category. Save submits every row's value in one
-      // atomic request; Reset buttons inside the same form use formaction
-      // to retarget /admin/settings/reset for a single key (issue #433).
+      // atomic request; the per-row reset buttons submit the sibling reset
+      // form for a single key (issue #433).
       const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
 <div class="card" id="section-${escapeHtml(g.category)}">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
-  <form method="POST" action="/admin/settings/save-section"${scopeAttr}>
-    <input type="hidden" name="_csrf" value="${csrf}">
-    <input type="hidden" name="category" value="${escapeHtml(g.category)}">
-    <table>
-      <caption class="visually-hidden">${escapeHtml(meta.title)} settings</caption>
-      <thead><tr><th scope="col">Setting</th><th scope="col">Edit</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Description</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="actions" style="margin-top:.75rem">
-      <button type="submit" class="btn btn-primary">Save</button>
-    </div>
-  </form>
+  ${renderSettingsForms({
+    formId: `form-${g.category}`,
+    saveAttrs: scopeAttr,
+    hiddenFields: `<input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="category" value="${escapeHtml(g.category)}">`,
+    rowsHtml,
+    submitLabel: "Save",
+    csrfToken: props.csrfToken,
+  })}
 </div>`;
     })
     .join("");
@@ -1856,7 +2003,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
         depLocked,
         { id: inputId, describedBy, labelledBy: labelId },
       );
-      const labelFor = r.type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
+      const labelFor = isGroupControl(r) ? "" : ` for="${escapeHtml(inputId)}"`;
       // Human-readable label (#702) with the raw dotted key demoted to
       // monospace helper text — the same treatment the Settings page gives its
       // rows, wrapped in a `<label>` so the whole caption stays clickable.
@@ -4389,56 +4536,21 @@ export function renderFeatureSettingsCard(
   for (const r of props.settingRows) {
     enabledByKey.set(r.key, isEnabledValue(r.current));
   }
-  // Same caption / description wiring as the Settings page (#854): the
-  // control carries the row's id so the caption can be a real `<label for>`
-  // and the description cell is announced with it. Without this the in-place
-  // controls announced as "edit text, blank" (#856).
-  const rows = props.settingRows
-    .map((r) => {
-      const unmet = unmetDependenciesFor(r.key, enabledByKey);
-      const depLocked = unmet.length > 0;
-      const controlId = settingControlId(r.key);
-      const labelId = `${controlId}-label`;
-      const helpId = `${controlId}-help`;
-      const warnId = `${controlId}-warn`;
-      const depId = `${controlId}-dep`;
-      const warnHtml = renderWarnBelow(r, warnId);
-      // No `#section-` anchors to jump to on a feature page, so the hint
-      // names the dependency without linking it.
-      const depHtml = renderDependencyHint(unmet, false, depId);
-      const describedBy = [
-        r.description ? helpId : "",
-        warnHtml ? warnId : "",
-        depHtml ? depId : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const a11y: ControlA11y = {
-        id: controlId,
-        describedBy,
-        describedByBase: describedBy,
-        labelledBy: labelId,
-      };
-      const caption = `<strong>${escapeHtml(r.label || r.key)}</strong>`;
-      // Cron edits through several inputs, so it gets a labelled group
-      // (`aria-labelledby`) rather than a `<label for>` pointing at nothing.
-      const captionHtml =
-        r.type === "cron"
-          ? `<div id="${labelId}">${caption}</div>`
-          : `<div><label id="${labelId}" for="${escapeHtml(controlId)}">${caption}</label></div>`;
-      const rowClass = depLocked ? ' class="dep-off"' : "";
-      return `<tr${rowClass}>
-<td>
-  ${captionHtml}
-  <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
-  <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
-</td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === masterKey, depLocked, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}${depHtml}</td>
-<td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td class="muted" id="${helpId}">${escapeHtml(r.description)}</td>
-</tr>`;
-    })
-    .join("");
+  // The rows share the Settings page's renderer: caption and description wired
+  // to the control by id (#854, #856), `warnBelow` hints, dependents nested
+  // under their parent (#666, #1318), and reset buttons for changed values.
+  // Keyed by its first setting so two cards of one category on a page keep
+  // distinct form ids.
+  const formId = `form-${props.category}-${props.settingRows[0].key}`;
+  const rowsHtml = renderSettingRows(props.settingRows, {
+    pickers,
+    masterKey,
+    enabledByKey,
+    resetFormId: `${formId}-reset`,
+    // No `#section-` anchors to jump to on a feature page, so the hint
+    // names the dependency without linking it.
+    linkSections: false,
+  });
   const introHtml = props.intro
     ? `\n  <p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(props.intro)}</p>`
     : "";
@@ -4449,18 +4561,17 @@ export function renderFeatureSettingsCard(
   return `
 <div class="card">
   <h2>${escapeHtml(props.title ?? "Settings")}</h2>${introHtml}
-  <form method="POST" action="/admin/settings/save-section"${scopeAttr}>
-    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+  ${renderSettingsForms({
+    formId,
+    saveAttrs: scopeAttr,
+    hiddenFields: `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
     <input type="hidden" name="category" value="${escapeHtml(props.category)}">
-    <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}
-    <table>
-      <thead><tr><th scope="col">Setting</th><th scope="col">Edit</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="actions" style="margin-top:.75rem">
-      <button type="submit" class="btn btn-primary">${escapeHtml(props.submitLabel ?? "Save settings")}</button>
-    </div>
-  </form>
+    <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}`,
+    rowsHtml,
+    submitLabel: props.submitLabel ?? "Save settings",
+    csrfToken: props.csrfToken,
+    returnTo: props.returnTo,
+  })}
 </div>`;
 }
 
