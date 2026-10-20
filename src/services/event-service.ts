@@ -24,7 +24,13 @@ import {
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
-import { copyGroupSetup, type EventGroupSetup } from "./event-groups.js";
+import {
+  copyGroupSetup,
+  readSeriesGroupSetup,
+  seriesGroupSetupOf,
+  successorGroupFields,
+  type EventGroupSetup,
+} from "./event-groups.js";
 import { syncLeadsAccess } from "./event-leads-sync.js";
 import { resolveLeadsChannel } from "./event-leader-roles.js";
 import { EventNicknameTags } from "./event-nickname-tags.js";
@@ -1693,10 +1699,26 @@ export class EventService extends ScheduledService {
           const existing: IEvent | null = await Event.findOne(key);
           if (existing) return { next: existing, created: false };
           const latest = await Event.findById(previous._id);
-          // Group setup carries over like the cover, from the freshest row so a
-          // later edit of the running event reaches the next occurrence; the
-          // memberships, captains and channel ids stay behind (#1188).
-          const groupSetup = copyGroupSetup(latest ?? previous);
+          // The group setup carries over like the cover, from the freshest row
+          // (#1188), but it is the HOST'S setup for the series (#1266): the
+          // stored series setup, which only the creation of the series and a
+          // ticked "also for the next occurrences" save change. An un-ticked live
+          // edit of the running event therefore stays with that occurrence, and a
+          // leader's rename or tag never reaches the next one. A row without a
+          // series setup (made before it existed) is read as it is, with the
+          // lock off as before; its successor then carries the setup on. The
+          // memberships, leaders and channel ids stay behind either way.
+          const source = latest ?? previous;
+          const series =
+            readSeriesGroupSetup(source.seriesGroupSetup) ??
+            ({
+              ...seriesGroupSetupOf(source),
+              groupsLocked: false,
+            } as const);
+          const groupSetup = successorGroupFields(
+            series,
+            copyGroupSetup(source).channelLeadMinutes,
+          );
           const doc = new Event({
             guildId: previous.guildId,
             title: previous.title,
@@ -1722,6 +1744,7 @@ export class EventService extends ScheduledService {
             // occurrence of a plain event too.
             channelLeadMinutes: groupSetup.channelLeadMinutes,
             ...(groupSetup.groupsEnabled ? groupSetup : {}),
+            seriesGroupSetup: series,
             createdBy: previous.createdBy,
           });
           try {
@@ -1846,6 +1869,12 @@ export class EventService extends ScheduledService {
       event.seriesId = String(event._id);
       event.occurrenceIndex = 0;
       event.seriesStart = input.startTime;
+      // What the next occurrences start with (#1266): the setup the form made,
+      // or none. Later changes to a running occurrence do not move it unless the
+      // host ticks "also for the next occurrences".
+      event.seriesGroupSetup = seriesGroupSetupOf(
+        input.groups?.groupsEnabled ? input.groups : {},
+      );
     }
     await event.save();
     // Create the native event first so the announcement can carry its link.

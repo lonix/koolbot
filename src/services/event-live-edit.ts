@@ -12,7 +12,8 @@
  * removes groups (`event-live-edit-group-set.ts`). #1251 adds the Captains lobby
  * switch (`event-live-edit-captains-lobby.ts`). All are listed in
  * `LIVE_EDIT_ROWS` below. #1243 switches groups on and off
- * (`event-live-edit-groups-switch.ts`). A later step (a group's kind) only ADDS
+ * (`event-live-edit-groups-switch.ts`). #1266 adds the tick "also for the next
+ * occurrences" (`event-live-edit-series.ts`). A later step (a group's kind) only ADDS
  * ROWS (see "Extension contract").
  *
  * ## The root rules (each stated once; `__tests__/services/event-live-edit.test.ts`
@@ -173,6 +174,7 @@ import { leadersTagsRows } from "./event-live-edit-leaders-tags.js";
 import { groupSetRows } from "./event-live-edit-group-set.js";
 import { captainsLobbyRow } from "./event-live-edit-captains-lobby.js";
 import { groupsSwitchRows } from "./event-live-edit-groups-switch.js";
+import { seriesSetupRow } from "./event-live-edit-series.js";
 import {
   checkChannelLead,
   resolveGroupCountLimits,
@@ -671,6 +673,9 @@ export const LIVE_EDIT_ROWS: readonly LiveEditRow[] = [
   captainsLobbyRow,
   // Groups on or off (#1243): last, so the other rows of a save apply first.
   ...groupsSwitchRows,
+  // "Also for the next occurrences" (#1266): after everything else, so it
+  // stores the setup this save leaves behind.
+  seriesSetupRow,
 ];
 
 // ---------------------------------------------------------------

@@ -32,6 +32,7 @@ import {
   presetResolver,
 } from "../services/event-group-preset-service.js";
 import { GROUP_KIND_OPTIONS } from "./admin-views.js";
+import { renderSeriesTick } from "./host-settings-series.js";
 import {
   DEFAULT_GROUP_LABEL,
   DEFAULT_LEADER_LABEL,
@@ -135,9 +136,12 @@ function form(
   button: string,
   /** Skip the browser's own field checks (the server checks what is used). */
   noValidate = false,
+  /** The "also for the next occurrences" tick (#1266), or "". */
+  tick = "",
 ): string {
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 ${body}
+${tick}
 <button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>
 </form>`;
 }
@@ -147,7 +151,9 @@ export function renderGroupsSwitchForms(
   v: GroupsSwitchView,
   actionPath: string,
   csrfToken: string,
+  seriesTick?: boolean,
 ): string {
+  const tick = renderSeriesTick(seriesTick);
   const label = v.groupLabel.toLowerCase();
   const id = valueField(GROUPS_SWITCH_ROW_ID);
   const base = baseField(GROUPS_SWITCH_ROW_ID);
@@ -159,6 +165,8 @@ export function renderGroupsSwitchForms(
 ${hidden(id, OFF)}${hidden(base, ON)}
 <p class="muted">Switching groups off asks you to confirm first. Everybody in the group channels, you included, is moved to the main channel, then the channels are deleted and the clan tags come off the nicknames. The ${escapeHtml(label)}s and who was in them are kept, but nobody counts as in a ${escapeHtml(label)} while groups are off; switching groups on again brings them back with new channels. If somebody cannot be moved, nothing is deleted and groups stay on: the result says who, and you can save again to move the rest.</p></div>`,
       "Switch groups off",
+      false,
+      tick,
     );
     const owed = v.channelOwed
       ? form(
@@ -187,6 +195,8 @@ ${hidden(id, OFF)}${hidden(base, ON)}
 ${hidden(id, ON)}${hidden(base, OFF)}
 <p class="muted">Switching groups on brings them back as they were, with the people assigned to them (and their leaders), and creates their voice channels next to the main channel. Clan tags go back on the nicknames when tags are on and the event is running.</p></div>`,
       "Switch groups on",
+      false,
+      tick,
     );
   }
   const notice = v.presetNotice
@@ -230,6 +240,7 @@ ${hidden(base, OFF)}
     // a row the server does not use. Every row that IS used is checked by the
     // server (name, size, tag, kind) and by the row's whole-setup validation.
     true,
+    tick,
   );
 }
 

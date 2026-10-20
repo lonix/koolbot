@@ -140,6 +140,7 @@ import {
   type ConfirmationCheck,
   type LiveEditDeps,
 } from "../../services/event-live-edit.js";
+import { seriesSetupRow } from "../../services/event-live-edit-series.js";
 import {
   renderConfirmBody,
   renderResultBody,
@@ -1219,6 +1220,8 @@ function createSettingsSection(client: Client): HostSectionRenderer {
         : null,
       locked: hasGroups ? (lockGroupsRow.read(fresh) as boolean) : null,
       groupLabel: fresh.groupLabel || "Group",
+      // The tick "also for the next occurrences" (#1266) is for a series only.
+      seriesTick: seriesSetupRow.applicable(fresh) === null,
       leadersTags: leadersTagsViewOf(fresh),
       groups: hasGroups
         ? (fresh.groups ?? [])

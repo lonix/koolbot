@@ -277,8 +277,8 @@ async function confirmed(
 describe("registration and reading", () => {
   it("is the row before the groups switch (#1243), with a letters-only id", () => {
     const ids = live.LIVE_EDIT_ROWS.map((r) => r.id);
-    expect(ids[ids.length - 2]).toBe("captainsLobby");
-    expect(ids[ids.length - 1]).toBe("groupsEnabled");
+    expect(ids[ids.length - 3]).toBe("captainsLobby");
+    expect(ids[ids.length - 2]).toBe("groupsEnabled");
     expect(CAPTAINS_LOBBY_ROW_ID).toMatch(/^[A-Za-z]+$/);
   });
 
