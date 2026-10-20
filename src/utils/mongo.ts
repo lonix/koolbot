@@ -22,6 +22,27 @@ import { ConfigService } from "../services/config-service.js";
 import { DEFAULT_MONGODB_URI } from "../config/env.js";
 import logger from "./logger.js";
 
+let intentionalDisconnect = false;
+
+/**
+ * Mark the next `disconnected` events as deliberate. `gracefulShutdown` calls
+ * this right before `mongoose.connection.close()` so the guards do not warn
+ * "connection lost" for a close the bot started itself (#1295).
+ */
+export function markMongoDisconnectIntentional(): void {
+  intentionalDisconnect = true;
+}
+
+/** Whether a deliberate close is in progress (see above). */
+export function isMongoDisconnectIntentional(): boolean {
+  return intentionalDisconnect;
+}
+
+/** Test hook: clear the intentional-disconnect flag. */
+export function resetMongoDisconnectIntentional(): void {
+  intentionalDisconnect = false;
+}
+
 export class MongoConnectionGuard {
   private connected = false;
 
@@ -46,6 +67,10 @@ export class MongoConnectionGuard {
 
     mongoose.connection.on("disconnected", () => {
       this.connected = false;
+      if (intentionalDisconnect) {
+        logger.debug(`MongoDB disconnected for ${this.label} (shutdown)`);
+        return;
+      }
       logger.warn(`MongoDB connection lost for ${this.label}`);
     });
 
