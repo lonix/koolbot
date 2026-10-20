@@ -49,7 +49,10 @@ collected by Jest.
 - `a11y-routes.test.ts` runs axe over pages served through the real router.
 - `design-tokens-drift.test.ts` fails on a hex literal in `src/web` or `kb.css`, a `font-size` literal in `kb.css`, or a `var(--name)` with no token.
 - `a11y-contrast.test.ts` computes WCAG contrast ratios for the colour
-  tokens in `docs/design/tokens.json` (4.5:1 for text, 3:1 for control borders and the focus ring).
+  tokens in `docs/design/tokens.json` (4.5:1 for text, 3:1 for control borders and the focus ring). It fails when a
+  colour token has neither a pair in the test nor a `DECORATIVE` entry (with a reason), so a new token cannot skip the gate.
+- `a11y-page-coverage.test.ts` fails when a `render*Page` export under `src/web` is not called in `a11y-pages.ts`.
+  A renderer that is not a page goes in its `NOT_A_PAGE` list, with a reason.
 
 The two axe suites need a DOM, so they opt into `__tests__/jsdom-node-env.cjs`
 through a `@jest-environment` docblock — jsdom with Node's web globals
@@ -64,7 +67,7 @@ resolves, which is a subtle-breakage risk for no benefit. Bump it together
 with `jest`.
 
 **Adding a Web UI page? Add it to `__tests__/web/a11y-pages.ts`.** That module
-is the list of pages the axe scan walks; a page missing from it is not gated.
+is the list of pages the axe scan walks; `a11y-page-coverage.test.ts` fails when a page is missing from it.
 See the [Accessibility section of `WEBUI.md`](WEBUI.md#accessibility) for the
 conventions the scan enforces.
 

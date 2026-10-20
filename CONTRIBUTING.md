@@ -371,7 +371,8 @@ it — including with a keyboard and a screen reader. When you touch a page in
 Three Jest suites gate this in CI (`a11y-axe`, `a11y-routes`, `a11y-contrast`
 under `__tests__/web/`). **When you add a page renderer, add a fixture for it
 to `__tests__/web/a11y-pages.ts`** — a page that isn't listed there isn't
-scanned. The full conventions, and how the suites are wired, are in the
+scanned, and `a11y-page-coverage` fails on one. A new colour token needs a pair (or a
+`DECORATIVE` entry) in `a11y-contrast.test.ts`. The full conventions, and how the suites are wired, are in the
 [Accessibility section of `WEBUI.md`](WEBUI.md#accessibility).
 
 ## Testing Guidelines

@@ -61,6 +61,18 @@ Web UI migration and must not be re-added.
 - Settings page: Single settings or advanced configuration — it discovers keys from `defaultConfig`
   automatically, so no wiring is required
 
+## Design System (read before any Web UI or Discord-message work)
+
+`DESIGN.md` and `docs/design/` define how the Web UI and the bot's Discord messages look and read: the palette
+and type (`docs/design/tokens.json`, the single source for values), the `kb-` components (`docs/design/kb.css`,
+`docs/design/components.md`), page patterns, the four access scopes (Member, Event host, Moderator, Admin) and the
+embed rules (`docs/design/discord.md`). New pages, components and embeds follow it. Where existing code disagrees,
+the design wins and the gap is tracked in the redesign epic (#1314); do not copy an old pattern into new code.
+
+In `src/web/`, take every colour, spacing step, radius and font size from `docs/design/tokens.json` as `var(--name)`,
+never as a literal. CI gates it: a new colour token needs a contrast pair or a "decorative" entry in
+`__tests__/web/a11y-contrast.test.ts`, and a new `render*Page` export needs a fixture in `__tests__/web/a11y-pages.ts`.
+
 ## Configuration Conventions
 
 Keys use dot notation grouped by feature: `voicechannels.*`, `voicetracking.*`, `core.*`, `quotes.*`.

@@ -63,6 +63,8 @@ Fixes #
   - [ ] `SETTINGS.md` (if adding/modifying configuration)
   - [ ] `README.md` (if adding user-facing features)
   - [ ] Inline code comments for complex logic
+- [ ] UI or embed change: follows `DESIGN.md`
+- [ ] UI or embed change: screenshot attached (or the UI preview run linked)
 - [ ] I have validated markdown with `npx markdownlint "**/*.md" --ignore node_modules --ignore dist`
 
 ### Dependencies & Docker
