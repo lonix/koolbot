@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // The palette is whatever `docs/design/tokens.json` says (#1315); read it
 // here so a token edit is gated by the same ratios as the stylesheet it feeds.
@@ -140,9 +141,18 @@ const PAIRS: Pair[] = [
     "danger-hover",
     TEXT_MIN,
   ),
-  pair("neutral button label", "on-primary", "fill", TEXT_MIN),
-  pair("neutral button label (hover)", "on-primary", "fill-hover", TEXT_MIN),
+  // The default button (`.btn`, `.kb-btn`) is `text` on `fill`; the secondary
+  // one is `pill-text`; the segmented control's selected option, an avatar and
+  // a hovered pill are `on-primary` on `fill` / `fill-hover`.
+  pair("neutral button label", "text", "fill", TEXT_MIN),
+  pair("neutral button label (hover)", "text", "fill-hover", TEXT_MIN),
+  pair("secondary button label", "pill-text", "fill", TEXT_MIN),
+  pair("secondary button label (hover)", "pill-text", "fill-hover", TEXT_MIN),
+  pair("surface link in the banner", "text-secondary", "fill", TEXT_MIN),
+  pair("selected segment, avatar", "on-primary", "fill", TEXT_MIN),
+  pair("hovered pill or banner link", "on-primary", "fill-hover", TEXT_MIN),
   pair("current nav item label", "on-primary", "selected", TEXT_MIN),
+  pair("hovered nav item label", "on-primary", "chrome", TEXT_MIN),
   pair("pill text on a neutral pill", "pill-text", "fill", TEXT_MIN),
   // Notices and badges share one palette on the admin and member pages
   // (#1315): judge every pair the stylesheets use.
@@ -250,4 +260,53 @@ describe("every colour token is gated or marked decorative (#1326)", () => {
       expect(known.has(name)).toBe(true);
     }
   });
+});
+
+describe("the pairs cover the colours the stylesheets use (#1326)", () => {
+  /** `color` / `background` token pairs declared together in one CSS rule. */
+  function declaredPairs(file: string): Array<[string, string, string]> {
+    const text = fs.readFileSync(
+      fileURLToPath(new URL(file, import.meta.url)),
+      "utf8",
+    );
+    const found: Array<[string, string, string]> = [];
+    for (const chunk of text.split("}")) {
+      const open = chunk.lastIndexOf("{");
+      if (open < 0) continue;
+      const selector = chunk.slice(0, open).trim().split("\n").pop() ?? "";
+      const tokens: Record<string, string> = {};
+      for (const decl of chunk.slice(open + 1).split(";")) {
+        const colon = decl.indexOf(":");
+        if (colon < 0) continue;
+        const prop = decl.slice(0, colon).trim();
+        const value = decl.slice(colon + 1).trim();
+        const match = /^var\(--([\w-]+)\)$/.exec(value);
+        if (match && (prop === "color" || prop === "background")) {
+          tokens[prop] = match[1];
+        }
+      }
+      if (tokens.color && tokens.background) {
+        found.push([selector, tokens.color, tokens.background]);
+      }
+    }
+    return found;
+  }
+
+  const covered = new Set(PAIRS.map((p) => `${p.fg}|${p.bg}`));
+
+  for (const file of [
+    "../../docs/design/kb.css",
+    "../../src/web/admin-layout.ts",
+  ]) {
+    it(`every colour on a background in ${file.split("/").pop()} is a tested pair`, () => {
+      const rules = declaredPairs(file).filter(
+        ([, fg, bg]) => RAW_VALUES.has(fg) && RAW_VALUES.has(bg),
+      );
+      expect(rules.length).toBeGreaterThan(5);
+      const untested = rules
+        .filter(([, fg, bg]) => !covered.has(`${fg}|${bg}`))
+        .map(([selector, fg, bg]) => `${selector.slice(-60)}: ${fg} on ${bg}`);
+      expect(untested).toEqual([]);
+    });
+  }
 });
