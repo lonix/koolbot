@@ -49,7 +49,7 @@ src/
     ├── rate-limit.ts     # In-memory rate limiter
     ├── http-flash.ts     # Flash/JSON error responses shared by both surfaces
     ├── html.ts           # escapeHtml / escapeJsInAttr — the escaping boundary
-    ├── theme.ts          # Shared dark-theme colour tokens
+    ├── design-assets.ts  # Generates tokens.css from docs/design/tokens.json; serves it and kb.css
     ├── audit.ts          # recordAudit() — one WebAuditLog row per write
     ├── metrics.ts        # Prometheus /metrics registry and collectors
     ├── bootstrap-vars.ts # BOOTSTRAP_VARS / PROTECTED_KEYS (env vars, not DB keys)

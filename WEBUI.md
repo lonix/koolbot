@@ -674,7 +674,7 @@ That said:
   response middleware stamps with the nonce, so a `<script>` injected through
   unescaped content gets none and does not run; there is no inline event
   handler, destructive buttons use `data-confirm`), `style-src
-'unsafe-inline'` (the pages use `style=` attributes), same-origin
+'self' 'unsafe-inline'` (`'self'` for the two shared stylesheets, `'unsafe-inline'` because the pages use `style=` attributes), same-origin
   `connect-src`/`img-src`/`form-action`, and `frame-ancestors 'none'`.
   `Strict-Transport-Security: max-age=15552000` (180 days, no
   `includeSubDomains`, no `preload`) is sent only when `WEBUI_BASE_URL` is
@@ -3197,7 +3197,7 @@ data-flash` and the layout script focuses it on load when nothing is
 `aria-invalid`.
 
 **Keyboard focus is visible.** Both layouts (and the pre-auth / error shell
-in `views.ts`) ship one `:focus-visible` ring (`THEME.focus`, 2px, offset 2px)
+in `views.ts`) ship one `:focus-visible` ring (`--focus`, 2px, offset 2px)
 for every link, button and form control, and the admin and `/me` layouts
 mirror the sidebar / button hover surfaces for focus. Every navigated admin
 and `/me` page starts with a "Skip to content" link targeting
@@ -3217,11 +3217,16 @@ Where a chart's only data carrier is a hover `title` (the analytics heatmap),
 expose it as `role="img"` with an `aria-label` that points at the text lists
 that repeat the values.
 
-**Colours come from `THEME`.** `src/web/theme.ts` holds the palette; the
-tokens document their contrast ratios. Form-control borders use
-`THEME.control` (3.97:1, the WCAG 1.4.11 floor is 3:1), secondary text uses
-`THEME.muted` (6.8:1 on a card — the 4.5:1 floor applies to small text), and
-destructive buttons use `THEME.danger` (white text reaches 4.8:1). Don't
+**Colours come from the design tokens.** `docs/design/tokens.json` holds the
+palette and documents each token's contrast ratios; `src/web/design-assets.ts`
+turns it into `tokens.css`, which the layouts link next to `kb.css` (served from
+`/admin/_assets/` and `/me/_assets/`, public and cached by content hash, so the
+sign-in and error pages are styled too). Write `var(--name)`, never a hex
+literal. Form-control borders use `var(--control)` (3.97:1, the WCAG 1.4.11
+floor is 3:1), secondary text uses `var(--muted)` (6.8:1 on a card — the 4.5:1
+floor applies to small text), and destructive buttons use `var(--danger)`
+(white text reaches 4.8:1). Edit a value in `tokens.json` and restart (the dev
+server restarts itself) to change it on every page. Don't
 introduce a new grey for "less important" text — the previous ones
 (`#6b7280`, `#64748b`, `#b45309`) all failed.
 
@@ -3247,7 +3252,7 @@ breaks one fails the build rather than being found by a user:
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `__tests__/web/a11y-axe.test.ts`      | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
 | `__tests__/web/a11y-routes.test.ts`   | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too.                 |
-| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring.                           |
+| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every colour-token foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring.                      |
 
 The page list the axe scan walks lives in `__tests__/web/a11y-pages.ts`.
 **When you add a page renderer, add a fixture for it there** — a page that

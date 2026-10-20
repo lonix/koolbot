@@ -45,7 +45,6 @@ import {
   PERSONAL_PRESET_PREFIX,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
-import { THEME } from "./theme.js";
 import {
   MAX_GROUP_ENTRIES,
   reactionRoleGroupPresets,
@@ -444,7 +443,7 @@ export function renderDependencyHint(
   // the lock reason is announced with the field rather than only being visible
   // beside it (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
-  return `<div class="settings-dep-hint"${idAttr} role="note" style="margin-top:.4rem;color:#94a3b8;font-size:.85em">Requires ${names} enabled</div>`;
+  return `<div class="settings-dep-hint"${idAttr} role="note" style="margin-top:.4rem;color:var(--muted);font-size:.85em">Requires ${names} enabled</div>`;
 }
 
 export interface SettingsProps extends CommonProps {
@@ -1075,8 +1074,8 @@ export function renderWarnBelow(r: SettingRow, id = ""): string {
   // As with the dependency hint, an `id` lets the caller wire this into the
   // control's `aria-describedby` (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
-  // THEME.warn (#f59e0b) is 8.1:1 on the card; #b45309 was 3.47:1 (#855).
-  return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:${THEME.warn};font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+  // --warn is 8.1:1 on the card; a darker amber was 3.47:1 (#855).
+  return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:var(--warn);font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
 }
 
 /**
@@ -1094,7 +1093,7 @@ export const SETTINGS_FLASH_ID = "settings-flash";
  * `aria-describedby` so the marker is also read when the field takes focus.
  */
 function renderInvalidNote(id: string): string {
-  return `<div class="settings-error" id="${escapeHtml(id)}" role="alert" style="margin-top:.4rem;color:#fecaca;font-size:.85em">Rejected — not saved. See the error message above for the reason.</div>`;
+  return `<div class="settings-error" id="${escapeHtml(id)}" role="alert" style="margin-top:.4rem;color:var(--err-text);font-size:.85em">Rejected — not saved. See the error message above for the reason.</div>`;
 }
 
 export function renderSettingsPage(props: SettingsProps): string {
@@ -1263,7 +1262,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   // step. See `POST /admin/settings/reset-defaults` in routes/write/settings.ts.
   const confirmTarget = props.guildName ?? props.guildId;
   const dangerSection = `
-<div id="danger-zone" class="card" style="border-color:#7f1d1d">
+<div id="danger-zone" class="card" style="border-color:var(--danger)">
   <h2>Danger zone</h2>
   <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
   <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone.">
@@ -4670,16 +4669,16 @@ export function renderDigestPage(props: DigestProps): string {
 
   const body = `
 <style>
-.digest-embed{border-left:4px solid #5865f2;background:#1f2430;border-radius:4px;padding:.75rem 1rem;margin:.75rem 0}
+.digest-embed{border-left:4px solid var(--embed-brand);background:var(--chrome);border-radius:4px;padding:.75rem 1rem;margin:.75rem 0}
 .digest-embed-head{display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem;font-size:.9rem}
 .digest-embed-title{font-weight:600;margin-bottom:.25rem}
-.digest-embed-desc{color:#cbd5e1;margin-bottom:.6rem}
+.digest-embed-desc{color:var(--text-secondary);margin-bottom:.6rem}
 .digest-fields{display:flex;flex-wrap:wrap;gap:.75rem 1.5rem}
 .digest-field{flex:1 1 100%}
 .digest-field.inline{flex:1 1 28%;min-width:120px}
-.digest-field-name{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
-.digest-field-value{color:#e2e8f0}
-.digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid #2d3748;font-size:.78rem;color:#94a3b8}
+.digest-field-name{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.digest-field-value{color:var(--text)}
+.digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid var(--border);font-size:.78rem;color:var(--muted)}
 </style>
 <h1>Weekly Digest</h1>
 <p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
@@ -5833,8 +5832,8 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
             const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
             return `<div class="field-row" style="align-items:center;gap:.75rem">
 <span class="muted mono" style="min-width:6rem">${escapeHtml(d.date)}</span>
-<span style="flex:1;background:#1e293b;border-radius:4px;overflow:hidden">
-  <span style="display:block;height:1rem;width:${pct.toFixed(1)}%;background:#3b82f6"></span>
+<span style="flex:1;background:var(--heat-empty);border-radius:4px;overflow:hidden">
+  <span style="display:block;height:1rem;width:${pct.toFixed(1)}%;background:var(--embed-brand)"></span>
 </span>
 <span class="mono" style="min-width:3rem;text-align:right">${d.usageCount}</span>
 </div>`;

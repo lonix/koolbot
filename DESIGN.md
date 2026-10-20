@@ -6,7 +6,7 @@ where existing code disagrees, this document wins and the gap is tracked in the 
 | File | What it holds |
 | --- | --- |
 | [docs/design/tokens.json](docs/design/tokens.json) | Every colour, type style, spacing step, radius, shadow and layout size. The single source for values. |
-| [docs/design/kb.css](docs/design/kb.css) | The `kb-` component stylesheet. Colours, spacing, radii, shadows and layout come from the tokens; font sizes still repeat the type scale until #1315 generates type properties. |
+| [docs/design/kb.css](docs/design/kb.css) | The `kb-` component stylesheet. Colours, spacing, radii, shadows and layout come from the tokens; font sizes come from the generated `--type-<style>-size` properties. |
 | [docs/design/components.md](docs/design/components.md) | One section per component: what it is for, its markup, its rules. |
 | [docs/design/pages.md](docs/design/pages.md) | The redesigned pages, per scope, and what each shows first. |
 | [docs/design/patterns.md](docs/design/patterns.md) | Page patterns, and which component replaces each old class. |
@@ -17,7 +17,8 @@ admins configure the bot, where event hosts run their events, where moderators r
 system is the redesign of that UI and of the bot's messages in Discord: the same dark palette, with pages that lead with state and keep detail one
 click away.
 
-Load `tokens.css` (generated from `docs/design/tokens.json`), then `docs/design/kb.css`, and build pages from the `kb-` classes. Components are plain
+Load `tokens.css` (generated from `docs/design/tokens.json` by `src/web/design-assets.ts`), then `docs/design/kb.css`, and build pages from the `kb-` classes.
+The Web UI serves both from `/admin/_assets/` and `/me/_assets/` and links them from every layout. Components are plain
 HTML and CSS, rendered by the server; there is no client framework.
 
 ## Principles
@@ -61,7 +62,7 @@ The UI copy is already plain and precise; keep it that way.
 
 ## Colour
 
-The palette is the shipped one (`src/web/theme.ts` and the layout stylesheets), unchanged. Dark only.
+The palette is the shipped one, now defined once in `tokens.json` and shared by the admin and member pages. Dark only.
 
 - **Surfaces, darkest to lightest:** `bg` (page, inputs, wells, cards nested in a panel) → `surface` (panels, tiles, cards, side nav, dialogs) →
   `surface-alt` (table header, row hover) → `chrome` (top bar, nav hover, save bar) → `selected` (current nav item, info callouts, icon wells) →

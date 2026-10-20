@@ -14,7 +14,7 @@
  * Colour contrast is deliberately *not* checked here: jsdom does no layout or
  * cascade, so axe's `color-contrast` rule cannot run. The palette is gated
  * instead by `a11y-contrast.test.ts`, which computes the WCAG ratios from the
- * `THEME` tokens directly.
+ * design tokens directly.
  */
 
 import { describe, it, expect } from "@jest/globals";

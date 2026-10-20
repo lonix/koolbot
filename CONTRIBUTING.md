@@ -365,8 +365,8 @@ it — including with a keyboard and a screen reader. When you touch a page in
 - **Give every `<th>` a `scope`**, and a table whose heading isn't directly
   above it a `visually-hidden` `<caption>`.
 - **Announce dynamic outcomes** through a `role="status"` live region.
-- **Take colours from `src/web/theme.ts`.** Don't introduce a new grey for
-  "less important" text — the previous ones all failed WCAG contrast.
+- **Take colours from `docs/design/tokens.json`** (as `var(--name)`, never a hex literal; the drift test fails on one).
+  Don't introduce a new grey for "less important" text — the previous ones all failed WCAG contrast.
 
 Three Jest suites gate this in CI (`a11y-axe`, `a11y-routes`, `a11y-contrast`
 under `__tests__/web/`). **When you add a page renderer, add a fixture for it

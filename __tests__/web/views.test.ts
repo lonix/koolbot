@@ -48,10 +48,10 @@ describe("renderErrorPage (#855)", () => {
     expect(html).toContain(
       "<main><h1>Sign in required</h1><p>Run <code>/config</code> in Discord.</p></main>",
     );
-    expect(html).toContain("background:#0f1115;color:#e4e6eb");
+    expect(html).toContain("background:var(--bg);color:var(--text)");
     // Keyboard focus ring for the links these pages carry.
     expect(html).toContain(
-      "a:focus-visible,button:focus-visible{outline:2px solid #93c5fd",
+      "a:focus-visible,button:focus-visible{outline:2px solid var(--focus)",
     );
   });
 

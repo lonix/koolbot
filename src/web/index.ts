@@ -6,6 +6,7 @@ import { WebSessionService } from "../services/web-session-service.js";
 import { ensureCsrfCookie, requireCsrf } from "./csrf.js";
 import { respondFlashError } from "./http-flash.js";
 import { createRateLimiter } from "./rate-limit.js";
+import { createDesignAssetsRouter } from "./design-assets.js";
 import { webSecurityHeaders } from "./security-headers.js";
 import {
   AuthenticatedRequest,
@@ -33,6 +34,10 @@ import { createUserRouter, SelfScopeError } from "./user-routes.js";
 export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
+
+  // The shared stylesheets come first: no session, CSRF cookie or no-store,
+  // so pre-auth pages are styled and the files cache (#1315).
+  router.use("/_assets", createDesignAssetsRouter());
 
   // Security headers + no-store on every /admin response (#1149).
   router.use(webSecurityHeaders);
@@ -233,6 +238,9 @@ export function webErrorText(status: number): string {
  */
 export function createUserWebRouter(client: Client): Router {
   const router = Router();
+
+  // Shared stylesheets: public and cacheable, ahead of everything else (#1315).
+  router.use("/_assets", createDesignAssetsRouter());
 
   // Security headers + no-store on every /me response (#1149).
   router.use(webSecurityHeaders);

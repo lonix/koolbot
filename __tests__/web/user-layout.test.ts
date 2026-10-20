@@ -28,9 +28,11 @@ describe("renderUserPage accessibility (#855)", () => {
   it("ships a focus ring, a skip link and aria-current on the active nav pill", () => {
     const html = render({ active: "/me/timezone" });
     expect(html).toContain(
-      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}",
+      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}",
     );
-    expect(html).toContain(".page-nav a:focus-visible{background:#1f2937");
+    expect(html).toContain(
+      ".page-nav a:focus-visible{background:var(--chrome)",
+    );
     expect(html).toMatch(
       /<body><a class="skip-link" href="#main">Skip to content<\/a>/,
     );
@@ -53,16 +55,16 @@ describe("renderUserPage accessibility (#855)", () => {
 
   it("uses colours that clear the WCAG contrast floors", () => {
     const html = render();
-    expect(html).toContain(".banner button{background:#dc2626;");
+    expect(html).toContain(".banner button{background:var(--danger);");
     expect(html).not.toContain("#ef4444");
     expect(html).not.toContain("#6b7280");
-    // #64748b survives only as the control border (THEME.control), never as text.
-    expect(html).not.toContain("color:#64748b");
+    // --control survives only as the control border, never as text.
+    expect(html).not.toContain("color:var(--control)");
     expect(html).toContain(
-      "border:1px solid #64748b;border-radius:4px;padding:.45rem .5rem",
+      "border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem",
     );
     expect(html).toContain(
-      ".preset-grid input{background:#0f1115;color:#e4e6eb;border:1px solid #64748b;",
+      ".preset-grid input{background:var(--bg);color:var(--text);border:1px solid var(--control);",
     );
   });
 

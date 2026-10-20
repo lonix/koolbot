@@ -4,7 +4,7 @@
  * later sub-issues.
  */
 
-import { THEME } from "./theme.js";
+import { designStylesheetLinks } from "./design-assets.js";
 import { escapeHtml } from "./html.js";
 
 function pageShell(
@@ -18,24 +18,25 @@ function pageShell(
     '<meta charset="utf-8">',
     `<title>${escapeHtml(title)} — ${product}</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
+    designStylesheetLinks(product === "Koolbot" ? "/me" : "/admin"),
     "<style>",
     // Dark palette shared with the authenticated admin UI (issue #569) so the
     // pre-auth sign-in / sign-out / invalid-link pages don't flash light mode.
-    `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:${THEME.bg};color:${THEME.text};}`,
+    `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:var(--bg);color:var(--text);}`,
     "h1{margin-top:0;}",
-    `a{color:${THEME.link};text-decoration:none;}`,
+    `a{color:var(--link);text-decoration:none;}`,
     "a:hover{text-decoration:underline;}",
     "table{border-collapse:collapse;width:100%;}",
-    `th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid ${THEME.border};font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}`,
-    `th{background:${THEME.surfaceAlt};}`,
-    `code{background:${THEME.surface};padding:.1rem .3rem;border-radius:.25rem;}`,
+    `th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}`,
+    `th{background:var(--surface-alt);}`,
+    `code{background:var(--surface);padding:.1rem .3rem;border-radius:.25rem;}`,
     "nav a{margin-right:.75rem;}",
     "form{margin-top:1rem;}",
-    `button{background:${THEME.primary};color:${THEME.onPrimary};border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:600;}`,
-    `button:hover{background:${THEME.primaryHover};}`,
+    `button{background:var(--primary);color:var(--on-primary);border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:600;}`,
+    `button:hover{background:var(--primary-hover);}`,
     // Keyboard focus ring (WCAG 2.4.7, #855). The UA default is nearly
     // invisible on this dark palette.
-    `a:focus-visible,button:focus-visible{outline:2px solid ${THEME.focus};outline-offset:2px;}`,
+    `a:focus-visible,button:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}`,
     "</style></head><body>",
     // <main> gives assistive tech a landmark to jump to on these one-shot pages.
     "<main>",

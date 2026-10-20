@@ -3,7 +3,7 @@
  *
  * axe's own `color-contrast` rule can't run in the jsdom-based scan
  * (`a11y-axe.test.ts`) because jsdom does no layout or style cascade. The
- * palette is a small set of tokens in `src/web/theme.ts` though, so the
+ * palette is a small set of tokens in `docs/design/tokens.json` though, so the
  * ratios can be computed directly — which is what would have caught the six
  * contrast misses fixed in #855 (`#6b7280` at 3.6:1, `#ef4444` at 3.8:1, …)
  * before they shipped.
@@ -13,7 +13,44 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { THEME } from "../../src/web/theme.js";
+import fs from "node:fs";
+
+// The palette is whatever `docs/design/tokens.json` says (#1315); read it
+// here so a token edit is gated by the same ratios as the stylesheet it feeds.
+const TOKEN_VALUES = new Map(
+  (
+    JSON.parse(
+      fs.readFileSync(
+        new URL("../../docs/design/tokens.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { color: { tokens: Array<{ name: string; value: string }> } }
+  ).color.tokens.map((t) => [t.name, t.value]),
+);
+
+function token(name: string): string {
+  const value = TOKEN_VALUES.get(name);
+  if (!value) throw new Error(`No colour token named ${name}`);
+  return value;
+}
+
+const THEME = {
+  bg: token("bg"),
+  surface: token("surface"),
+  surfaceAlt: token("surface-alt"),
+  border: token("border"),
+  control: token("control"),
+  text: token("text"),
+  muted: token("muted"),
+  link: token("link"),
+  focus: token("focus"),
+  warn: token("warn"),
+  primary: token("primary"),
+  primaryHover: token("primary-hover"),
+  danger: token("danger"),
+  dangerHover: token("danger-hover"),
+  onPrimary: token("on-primary"),
+};
 
 /** WCAG 1.4.3 floor for body text. */
 const TEXT_MIN = 4.5;
@@ -114,6 +151,15 @@ const PAIRS: Pair[] = [
     bg: THEME.dangerHover,
     min: TEXT_MIN,
   },
+  // Notices and badges share one palette on the admin and member pages
+  // (#1315), so the member pages' old warning and error fills are gone: judge
+  // every pair the stylesheets use.
+  ...(["ok", "err", "info", "warn"] as const).map((kind) => ({
+    what: `${kind} notice text on its fill`,
+    fg: token(`${kind}-text`),
+    bg: token(`${kind}-bg`),
+    min: TEXT_MIN,
+  })),
   // Non-text: a control's edge and the focus ring only owe 3:1 (WCAG 1.4.11 /
   // 2.4.11), but they owe it against every surface they can be drawn on.
   ...SURFACES.flatMap(([surfaceName, bg]) => [
