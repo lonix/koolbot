@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
 /** Actions that mutate the room under the room lock (deferred up front). */
@@ -325,6 +326,7 @@ async function handleWaitingRoom(
     if (waitingRoom) {
       await safeReply(interaction, {
         content: `⏳ Waiting room <#${waitingRoom.id}> created! Users who join it will notify you here.`,
+        allowedMentions: NO_MENTIONS,
         flags: MessageFlags.Ephemeral,
       });
     } else {
@@ -404,6 +406,7 @@ async function handleLetIn(
       if (waitingMember.voice.channelId !== waitingRoomId) {
         await safeReply(interaction, {
           content: `⚠️ <@${waitingMember.id}> is no longer in the waiting room.`,
+          allowedMentions: NO_MENTIONS,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -413,12 +416,14 @@ async function handleLetIn(
         await waitingMember.voice.setChannel(mainChannel);
         await safeReply(interaction, {
           content: `✅ <@${waitingMember.id}> has been let into the channel!`,
+          allowedMentions: NO_MENTIONS,
           flags: MessageFlags.Ephemeral,
         });
       } catch (error) {
         logger.error("Error letting user in from the waiting room:", error);
         await safeReply(interaction, {
           content: `❌ Failed to move <@${waitingMember.id}> into the channel.`,
+          allowedMentions: NO_MENTIONS,
           flags: MessageFlags.Ephemeral,
         });
       }

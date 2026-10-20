@@ -5,6 +5,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 import {
   VoiceChannelManager,
   NotRoomOwnerError,
@@ -45,7 +46,11 @@ export async function handleVCTransferSelect(
   // edits the deferred message, dropping the select menu.
   await interaction.deferUpdate();
   const done = async (content: string): Promise<void> => {
-    await safeReply(interaction, { content, components: [] });
+    await safeReply(interaction, {
+      content,
+      components: [],
+      allowedMentions: NO_MENTIONS,
+    });
   };
 
   // Get the selected user

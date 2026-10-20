@@ -10,7 +10,7 @@ import {
 import { ConfigService } from "../services/config-service.js";
 import { discordTimestamp } from "../utils/discord-time.js";
 import logger from "../utils/logger.js";
-import { escapeDisplayText } from "../utils/allowed-mentions.js";
+import { escapeDisplayText, NO_MENTIONS } from "../utils/allowed-mentions.js";
 import { visibleChannelName } from "../utils/channel-visibility.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
@@ -141,7 +141,10 @@ async function executeTop(
       DISCORD_MESSAGE_CONTENT_LIMIT - header.length - 1,
     );
 
-    await interaction.editReply(`${header}\n${response}`);
+    await interaction.editReply({
+      content: `${header}\n${response}`,
+      allowedMentions: NO_MENTIONS,
+    });
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
     // Public on purpose: once deferred, visibility is fixed and safeReply
@@ -215,7 +218,10 @@ async function executeUser(
       }),
     ].join("\n");
 
-    await interaction.editReply(response);
+    await interaction.editReply({
+      content: response,
+      allowedMentions: NO_MENTIONS,
+    });
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
     // Public on purpose (see executeTop).

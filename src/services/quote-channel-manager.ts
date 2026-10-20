@@ -43,8 +43,9 @@ const VOTE_PERSIST_DEBOUNCE_MS = 2000;
 // stored message ID has been lost (e.g. after a reinstall wiped the config
 // row). Matching on these prevents the welcome post from being duplicated.
 const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
-const HEADER_FOOTER = "KoolBot · Quotes";
-/** The footer headers carried before #1331, still recognised so an already-posted header is found after an upgrade. */
+/** Footer of every bot post in the quote channel, header and quotes alike, so it cannot identify the header. */
+const QUOTES_FOOTER = "KoolBot · Quotes";
+/** The header-only footer from before #1331, still recognised so an already-posted header is found after an upgrade. */
 const LEGACY_HEADER_FOOTER = "KoolBot Quote System";
 
 /**
@@ -330,7 +331,7 @@ export class QuoteChannelManager {
 
   /**
    * Locate an existing bot-authored header embed in the channel by matching
-   * the known title/footer, so a lost `quotes.header_message_id` doesn't cause
+   * the known title (or the pre-#1331 header-only footer), so a lost `quotes.header_message_id` doesn't cause
    * a duplicate welcome post. Pinned messages are checked first (the header is
    * pinned by default) before falling back to a recent-message scan.
    */
@@ -347,9 +348,7 @@ export class QuoteChannelManager {
       if (msg.author.id !== botId) return false;
       return msg.embeds.some(
         (e) =>
-          e.title === HEADER_TITLE ||
-          e.footer?.text === HEADER_FOOTER ||
-          e.footer?.text === LEGACY_HEADER_FOOTER,
+          e.title === HEADER_TITLE || e.footer?.text === LEGACY_HEADER_FOOTER,
       );
     };
 
@@ -423,7 +422,7 @@ export class QuoteChannelManager {
             inline: false,
           },
         )
-        .setFooter({ text: HEADER_FOOTER })
+        .setFooter({ text: QUOTES_FOOTER })
         .setTimestamp();
 
       const headerMessage = await channel.send({ embeds: [embed] });
@@ -673,7 +672,7 @@ export class QuoteChannelManager {
         .setColor(embedColor("lore"))
         .setDescription(`"${content}"`)
         .addFields(fields)
-        .setFooter({ text: "KoolBot · Quotes" })
+        .setFooter({ text: QUOTES_FOOTER })
         .setTimestamp();
 
       const message = await channel.send({ embeds: [embed] });
@@ -799,7 +798,7 @@ export class QuoteChannelManager {
           },
           { name: "Quote ID", value: `\`${quoteId}\``, inline: true },
         )
-        .setFooter({ text: "KoolBot · Quotes" })
+        .setFooter({ text: QUOTES_FOOTER })
         .setTimestamp();
 
       await message.edit({ embeds: [embed] });
