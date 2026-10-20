@@ -77,7 +77,10 @@ PermissionsService         // re-checked on every /admin/* request
 ```
 
 - **ConfigService**: Configuration management with MongoDB persistence
-- **CommandManager**: Discord command registration and routing
+- **CommandManager**: Discord command registration and routing. `registerCommands()` first `GET`s the guild's registered commands
+  and skips the bulk-overwrite `PUT` when a normalised projection of them equals what it would send (`utils/command-diff.ts`);
+  on any doubt or error it sends the `PUT`. Guild command calls share one REST client (`utils/discord-rest.ts`) so rate-limit
+  buckets and the `RateLimited` log listener live in one place.
 - **VoiceChannelManager**: Dynamic voice channel lifecycle
 - **QuoteChannelManager**: Quote channel management and permissions
 - **ScheduledService** (base class): the cron lifecycle shared by birthdays, digest, rewind nudge, events,
