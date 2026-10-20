@@ -1,4 +1,4 @@
-import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
+import { Client, EmbedBuilder } from "discord.js";
 import { ScheduledService } from "./scheduled-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { DiscordLogger } from "./discord-logger.js";
@@ -7,6 +7,7 @@ import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindService } from "./rewind-service.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * End-of-year DM nudge for the Rewind WebUI page (#484).
@@ -22,7 +23,6 @@ import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 const DEFAULT_CRON = "0 10 30 12 *";
 const SECONDS_PER_MINUTE = 60;
-const EMBED_COLOR: ColorResolvable = "#a855f7";
 
 export interface RewindNudgeRunSummary {
   ranAt: Date;
@@ -289,7 +289,7 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
   private buildEmbed(username: string, year: number): EmbedBuilder {
     return new EmbedBuilder()
       .setTitle(`✨ Your Koolbot Rewind for ${year} is ready`)
-      .setColor(EMBED_COLOR)
+      .setColor(embedColor("lore"))
       .setDescription(
         `Hey ${escapeDisplayText(username)}, your year-in-review is waiting for you.\n\n` +
           `Open the user portal with **\`/me\`** and follow the magic link to **/me/rewind** to see your top voice and text channels, peak day, longest streak, and the badges you earned this year.\n\n` +

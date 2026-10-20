@@ -17,6 +17,7 @@ import {
   truncateText,
   DISCORD_EMBED_DESCRIPTION_LIMIT,
 } from "../utils/discord-limits.js";
+import { embedColor } from "../utils/embed-style.js";
 
 export const PAGE_SIZE = 10;
 
@@ -133,7 +134,7 @@ export async function execute(
     });
 
     const embed = new EmbedBuilder()
-      .setColor(0x6366f1)
+      .setColor(embedColor("lore"))
       .setTitle(`🛡️ Moderation history — ${targetUser.tag}`)
       .setThumbnail(targetUser.displayAvatarURL())
       .setDescription(description)

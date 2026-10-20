@@ -11,6 +11,7 @@ import {
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { VersionCheckState } from "../models/version-check-state.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Web UI update check (#1029): compares the running version with the latest
@@ -379,7 +380,7 @@ export class VersionCheckService {
           (kind === "major"
             ? " A major update may include breaking changes — read the release notes first."
             : ""),
-        color: "#2563eb",
+        color: embedColor("brand"),
         fields: [{ name: "Release notes", value: latest.url }],
       });
       // Only a posted note counts: a missing channel or failed send leaves

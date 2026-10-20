@@ -12,6 +12,7 @@ import {
 } from "../services/raid-protection-service.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { embedColor } from "../utils/embed-style.js";
 
 export const data = new SlashCommandBuilder()
   .setName("raidmode")
@@ -71,7 +72,7 @@ export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
     );
   }
   return new EmbedBuilder()
-    .setColor(status.lockdown ? 0xdc2626 : 0x22c55e)
+    .setColor(status.lockdown ? embedColor("danger") : embedColor("ok"))
     .setTitle("🛡️ Anti-raid status")
     .setDescription(lines.join("\n"));
 }

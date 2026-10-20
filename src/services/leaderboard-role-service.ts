@@ -19,6 +19,7 @@ import {
   parseLeaderboardTiers,
   type ParsedTier,
 } from "./leaderboard-tier-parse.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /** Discord's Unknown Role error: the role was deleted. */
 const UNKNOWN_ROLE = 10011;
@@ -772,7 +773,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
             summary.ranAt.getTime() / 1000,
           )}:R>`,
         )
-        .setColor(0xf1c40f);
+        .setColor(embedColor("lore"));
 
       const fields: Array<{ name: string; value: string }> = [];
       for (const tier of summary.tiers) {

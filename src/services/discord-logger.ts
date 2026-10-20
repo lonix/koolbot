@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { defaultConfig } from "./config-schema.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Discord log categories, derived from the config schema (#844): every
@@ -213,7 +214,7 @@ export class DiscordLogger {
       const embed = new EmbedBuilder()
         .setTitle(message.title)
         .setDescription(message.description)
-        .setColor(message.color || "#0099ff")
+        .setColor(message.color ?? embedColor("neutral"))
         .setTimestamp(message.timestamp || new Date());
 
       if (message.fields) {
@@ -253,7 +254,7 @@ export class DiscordLogger {
     await this.logToChannel("startup", {
       title: "🚀 Bot Started Successfully",
       description: "KoolBot has successfully started and is now online.",
-      color: "#00ff00",
+      color: embedColor("ok"),
       fields: [
         { name: "Status", value: "✅ Online", inline: true },
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
@@ -274,7 +275,7 @@ export class DiscordLogger {
     await this.logToChannel("startup", {
       title: "🛑 Bot Shutting Down",
       description: "KoolBot is shutting down gracefully.",
-      color: "#ff9900",
+      color: embedColor("warn"),
       fields: [
         { name: "Status", value: "⚠️ Shutting Down", inline: true },
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
@@ -292,7 +293,7 @@ export class DiscordLogger {
       title: "✅ Discord Registration Successful",
       description:
         "Bot has successfully registered with Discord and is ready to receive commands.",
-      color: "#00ff00",
+      color: embedColor("ok"),
       fields: [
         { name: "Status", value: "✅ Registered", inline: true },
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
@@ -314,7 +315,7 @@ export class DiscordLogger {
       title: "❌ Discord Registration Failed",
       description:
         "Bot failed to register with Discord. Check logs for details.",
-      color: "#ff0000",
+      color: embedColor("danger"),
       fields: [
         { name: "Status", value: "❌ Failed", inline: true },
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
@@ -337,7 +338,7 @@ export class DiscordLogger {
         ? "⚙️ Configuration Reloaded"
         : "❌ Configuration Reload Failed",
       description: result.message,
-      color: result.success ? "#00ff00" : "#ff0000",
+      color: result.success ? embedColor("ok") : embedColor("danger"),
       fields: [
         {
           name: "Status",
@@ -376,7 +377,7 @@ export class DiscordLogger {
         (success
           ? `${serviceName} service initialized successfully.`
           : `${serviceName} service failed to initialize.`),
-      color: success ? "#00ff00" : "#ff0000",
+      color: success ? embedColor("ok") : embedColor("danger"),
       fields: [
         { name: "Service", value: serviceName, inline: true },
         {
@@ -405,7 +406,7 @@ export class DiscordLogger {
         stats.errors.length > 0
           ? "Cleanup completed with some errors. Check details below."
           : "Voice channel cleanup completed successfully.",
-      color: stats.errors.length > 0 ? "#ff9900" : "#00ff00",
+      color: stats.errors.length > 0 ? embedColor("warn") : embedColor("ok"),
       fields: [
         {
           name: "Sessions Removed",
@@ -458,7 +459,7 @@ export class DiscordLogger {
         (connected
           ? "Successfully connected to MongoDB database."
           : "Failed to connect to MongoDB database."),
-      color: connected ? "#00ff00" : "#ff0000",
+      color: connected ? embedColor("ok") : embedColor("danger"),
       fields: [
         {
           name: "Status",
@@ -479,7 +480,7 @@ export class DiscordLogger {
     await this.logToChannel("errors", {
       title: "🚨 Error Occurred",
       description: `An error occurred in ${context}. Check logs for full details.`,
-      color: "#ff0000",
+      color: embedColor("danger"),
       fields: [
         { name: "Context", value: context, inline: true },
         { name: "Error Type", value: error.constructor.name, inline: true },
@@ -504,7 +505,7 @@ export class DiscordLogger {
     await this.logToChannel("cron", {
       title: `✅ Cron Job Completed: ${jobName}`,
       description: details || `${jobName} cron job executed successfully.`,
-      color: "#00ff00",
+      color: embedColor("ok"),
       fields: [
         { name: "Job Name", value: jobName, inline: true },
         { name: "Status", value: "✅ Success", inline: true },
@@ -521,7 +522,7 @@ export class DiscordLogger {
     await this.logToChannel("cron", {
       title: `❌ Cron Job Failed: ${jobName}`,
       description: `${jobName} cron job failed to execute.`,
-      color: "#ff0000",
+      color: embedColor("danger"),
       fields: [
         { name: "Job Name", value: jobName, inline: true },
         { name: "Status", value: "❌ Failed", inline: true },

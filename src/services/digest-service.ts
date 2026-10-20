@@ -1,4 +1,4 @@
-import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
+import { Client, EmbedBuilder } from "discord.js";
 import { ScheduledService } from "./scheduled-service.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
@@ -11,6 +11,7 @@ import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
+import { embedColor } from "../utils/embed-style.js";
 
 interface QualifyingUser {
   userId: string;
@@ -77,7 +78,6 @@ export interface DigestPreview {
 const DEFAULT_CRON = "0 9 * * 1";
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_WEEK = 7 * 24 * 60 * 60;
-const EMBED_COLOR: ColorResolvable = "#5865f2";
 
 function formatDuration(seconds: number): string {
   if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
@@ -628,7 +628,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
 
     return new EmbedBuilder()
       .setTitle("📊 Your weekly voice digest")
-      .setColor(EMBED_COLOR)
+      .setColor(embedColor("lore"))
       .setDescription(
         `Here's a snapshot of your last 7 days in voice (${weekRange}), ${escapeDisplayText(user.username)}.`,
       )

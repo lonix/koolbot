@@ -10,6 +10,7 @@ import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
+import { embedColor } from "../utils/embed-style.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -107,7 +108,7 @@ export async function execute(
     );
 
     const embed = new EmbedBuilder()
-      .setColor(0xf59e0b)
+      .setColor(embedColor("warn"))
       .setTitle("⚠️ Warning recorded")
       .setDescription(
         `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${

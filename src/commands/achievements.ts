@@ -12,6 +12,7 @@ import {
   clampToLimit,
   DISCORD_EMBED_FIELD_VALUE_LIMIT,
 } from "../utils/discord-limits.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Format the optional metadata of an accolade/achievement into the
@@ -83,7 +84,7 @@ export async function execute(
     }
 
     const embed = new EmbedBuilder()
-      .setColor(0x00ae86)
+      .setColor(embedColor("lore"))
       .setTitle(`🏆 ${targetUser.username}'s Achievements`)
       .setThumbnail(targetUser.displayAvatarURL())
       .setTimestamp();

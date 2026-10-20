@@ -18,6 +18,7 @@ import {
   REACTION_ROLE_MODES,
 } from "../models/reaction-role-config.js";
 import { MAX_GROUP_ENTRIES } from "../content/reaction-role-groups.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Grouped reaction-role generator (#1064).
@@ -433,7 +434,7 @@ export class ReactionRoleGroupService {
         ...todo.map((t) => ({ roleName: t.role!.name, emoji: t.emoji })),
       ];
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(embedColor("brand"))
         .setTitle(name)
         .setDescription(
           `React to choose your **${name}** role:\n\n${rowsAfter

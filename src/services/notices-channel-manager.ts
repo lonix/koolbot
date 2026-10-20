@@ -13,6 +13,7 @@ import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { BOT_FEATURES, BotFeatureInfo } from "../content/bot-features.js";
 import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
 import { getBotVersion } from "../utils/version.js";
+import { embedColor } from "../utils/embed-style.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // notices channel. Demoted from `notices.cleanup_interval` config key in
@@ -337,7 +338,7 @@ export class NoticesChannelManager {
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2) // Discord blurple
+        .setColor(embedColor("brand"))
         .setTitle("📢 Server Notices")
         .setDescription(
           "This channel contains important server information, rules, and helpful resources. All posts are managed by KoolBot.",

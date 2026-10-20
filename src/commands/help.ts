@@ -15,6 +15,7 @@ import {
   COMMAND_CONFIGS,
   isCommandEnabled,
 } from "../services/command-registry.js";
+import { embedColor } from "../utils/embed-style.js";
 
 export const data = new SlashCommandBuilder()
   .setName("help")
@@ -190,7 +191,7 @@ export async function execute(
       );
 
       const embed = new EmbedBuilder()
-        .setColor(isEnabled ? 0x00ff00 : 0xff0000)
+        .setColor(isEnabled ? embedColor("ok") : embedColor("danger"))
         .setTitle(`📖 Help: /${requestedCommand}`)
         .setDescription(commandInfo.description)
         .addFields(
@@ -241,7 +242,7 @@ export async function execute(
       });
 
       const embed = new EmbedBuilder()
-        .setColor(0x0099ff)
+        .setColor(embedColor("brand"))
         .setTitle("📚 KoolBot Help")
         .setDescription(
           "Here are all available commands. Use `/help <command>` for detailed information about a specific command.",

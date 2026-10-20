@@ -21,6 +21,7 @@ import {
 } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * `/remind` — personal, one-off reminders (#866).
@@ -39,8 +40,6 @@ const MAX_MESSAGE_LENGTH = 500;
 
 /** How much of a reminder's text `/remind list` shows per row. */
 const MAX_LIST_MESSAGE_LENGTH = 120;
-
-const EMBED_COLOR = 0x5865f2;
 
 export const data = new SlashCommandBuilder()
   .setName("remind")
@@ -284,7 +283,7 @@ async function handleList(
   });
 
   const embed = new EmbedBuilder()
-    .setColor(EMBED_COLOR)
+    .setColor(embedColor("warn"))
     .setTitle("⏰ Your pending reminders")
     .setDescription(
       clampToLimit(rows, DISCORD_EMBED_DESCRIPTION_LIMIT, {

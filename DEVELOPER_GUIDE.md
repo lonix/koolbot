@@ -510,7 +510,7 @@ private async cleanupUnauthorizedMessages(): Promise<void> {
 ```typescript
 // In voice-channel-announcer.ts
 const embed = new EmbedBuilder()
-  .setColor(0x5865f2)
+  .setColor(embedColor("lore"))
   .setTitle("📊 Voice Channel Statistics")
   .setDescription("Weekly voice activity stats and leaderboards posted here.")
   .addFields(
@@ -662,6 +662,7 @@ one):
 | Wait for the gateway before the first fetch | `waitForClientReady` | `src/utils/discord.ts` |
 | Reconnect Mongo before a query | `MongoConnectionGuard` | `src/utils/mongo.ts` |
 | Escape a value into HTML | `escapeHtml`, `escapeJsInAttr` | `src/web/html.ts` |
+| Pick an embed accent colour (never a hex literal; a guard test fails on one) | `embedColor(kind)` | `src/utils/embed-style.ts` |
 
 ```typescript
 import { CronJob } from "cron";

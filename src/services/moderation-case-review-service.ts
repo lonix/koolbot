@@ -12,6 +12,7 @@ import {
   DISCORD_EMBED_DESCRIPTION_LIMIT,
 } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /** Fallback for `moderation.cases.review_cron`, mirroring the schema default. */
 const DEFAULT_CRON = "0 9 * * *";
@@ -142,7 +143,7 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
           lines.join("\n"),
           DISCORD_EMBED_DESCRIPTION_LIMIT,
         ),
-        color: 0x6366f1,
+        color: embedColor("warn"),
         footer: "Decide them on the Moderation page of the Web UI",
       });
     } catch (error) {

@@ -184,6 +184,8 @@ settings need no wiring at all — the Settings page discovers them from `defaul
 Use `src/utils/logger.ts` (Winston). Discord-channel logging flows through `DiscordLogger`, governed by
 `core.*` config keys (e.g. `core.errors.enabled` + a channel id). Mirror the `core.startup.*` naming when
 adding a category. Sanitize untrusted values with `utils/log-sanitize.ts`.
+Embed accent colours come only from `embedColor(kind)` in `utils/embed-style.ts` (read from the `embed-*` tokens in
+`docs/design/tokens.json`); never write a `setColor(0x…)` literal (a guard test fails on it). A colour a community chose stays theirs.
 
 ## CI / release chain
 

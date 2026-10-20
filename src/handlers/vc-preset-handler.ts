@@ -28,6 +28,7 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
+import { embedColor } from "../utils/embed-style.js";
 
 const configService = ConfigService.getInstance();
 
@@ -130,7 +131,7 @@ function buildApplyPanel(
 } {
   const embed = new EmbedBuilder()
     .setTitle("🎛️ Voice Channel Presets")
-    .setColor(0x5865f2)
+    .setColor(embedColor("brand"))
     .setDescription(
       presets.length === 0
         ? "You have no saved presets yet. Configure your channel and click **Save current as preset** below."
@@ -197,7 +198,7 @@ function buildManagePanel(
 
   const embed = new EmbedBuilder()
     .setTitle("🎛️ Manage Presets")
-    .setColor(0xed4245)
+    .setColor(embedColor("danger"))
     .setDescription(
       selected
         ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected, true)}`
@@ -668,7 +669,7 @@ async function applyPreset(
     embeds: [
       new EmbedBuilder()
         .setTitle("✅ Preset applied")
-        .setColor(0x57f287)
+        .setColor(embedColor("ok"))
         .setDescription(
           `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset, true)}` +
             (nameSkipped

@@ -32,6 +32,7 @@ import {
 } from "./server-adoption-service.js";
 import type { WebSessionContext } from "../web/session.js";
 import { recordAudit } from "../web/audit.js";
+import { embedColor } from "../utils/embed-style.js";
 
 /**
  * Keeps role groups and their Discord roles in sync (#1021).
@@ -539,7 +540,7 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
       title: "Role groups: drift from Discord",
       description:
         "A role behind a role group changed in Discord. Review it on the Role Groups page of the web UI.",
-      color: "#e67e22",
+      color: embedColor("warn"),
       fields,
       footer: "KoolBot role group sync",
     });

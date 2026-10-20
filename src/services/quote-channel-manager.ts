@@ -26,6 +26,7 @@ import {
 } from "../utils/discord.js";
 import { quoteService } from "./quote-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
+import { embedColor } from "../utils/embed-style.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // quote channel. Demoted from `quotes.cleanup_interval` config key in
@@ -392,7 +393,7 @@ export class QuoteChannelManager {
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2) // Discord blurple
+        .setColor(embedColor("lore"))
         .setTitle("📝 Welcome to the Quote Channel!")
         .setDescription(
           "This channel is managed by KoolBot to showcase memorable quotes from server members.",
@@ -661,7 +662,7 @@ export class QuoteChannelManager {
       }
 
       const embed = new EmbedBuilder()
-        .setColor(0x0099ff)
+        .setColor(embedColor("lore"))
         .setDescription(`"${content}"`)
         .addFields(fields)
         .setFooter({ text: `ID: ${quoteId}` })
@@ -775,7 +776,7 @@ export class QuoteChannelManager {
       const normalizedAddedById = normalizeUserId(addedById);
 
       const embed = new EmbedBuilder()
-        .setColor(0x0099ff)
+        .setColor(embedColor("lore"))
         .setDescription(`"${content}"`)
         .addFields(
           {
