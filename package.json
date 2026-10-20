@@ -2,7 +2,7 @@
   "name": "koolbot",
   "version": "2.0.1",
   "type": "module",
-  "description": "A modular Discord bot with voice channel management, activity tracking, quotes, stats, and fun easter eggs",
+  "description": "Keeper Of Our Lore: a modular Discord bot with voice channel management, activity tracking, quotes, stats, and fun easter eggs",
   "main": "dist/index.js",
   "engines": {
     "node": ">=22.0.0"

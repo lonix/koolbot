@@ -1,5 +1,9 @@
 # KoolBot
 
+**KOOL** stands for **K**eeper **O**f **O**ur **L**ore.
+
+> **KoolBot: Keeper Of Our Lore.** Quotes, stats, history and logs, all yours.
+
 A powerful and modular Discord bot built with TypeScript, featuring dynamic voice channel
 management, activity tracking, automated announcements, and a browser-based admin Web UI.
 
@@ -7,6 +11,16 @@ management, activity tracking, automated announcements, and a browser-based admi
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.0.3-blue)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+
+---
+
+## The Name
+
+Lore is a community's recorded history, and a lot of what KoolBot does is keep it: quotes, name history, voice and activity stats, achievements,
+birthdays, Rewind and weekly digests, and the moderation log.
+
+"Our" is meant literally. KoolBot is self-hosted, so each community runs its own instance with its own MongoDB and owns its own data. There is no
+central service. The name is only a meaning for "Kool"; the bot, package, image and commands keep their names.
 
 ---
 

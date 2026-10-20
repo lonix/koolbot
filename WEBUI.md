@@ -1,5 +1,7 @@
 # KoolBot Web UI
 
+KoolBot: Keeper Of Our Lore. Quotes, stats, history and logs, all yours.
+
 The Web UI is the **only** admin surface for KoolBot. The old admin slash
 commands (`/config set`, `/permissions`, `/setup`, `/announce`, `/poll`,
 `/reactrole`, `/notice`, `/dbtrunk`, `/vc` and `/botstats`) were retired; their

@@ -1,5 +1,7 @@
 # Contributing to KoolBot
 
+KoolBot: Keeper Of Our Lore. Quotes, stats, history and logs, all yours.
+
 Thank you for your interest in contributing to KoolBot! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
