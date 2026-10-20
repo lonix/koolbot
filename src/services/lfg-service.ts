@@ -24,6 +24,7 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { embedColor } from "../utils/embed-style.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 
 /**
  * Ad-hoc "looking for group" posts (#957).
@@ -855,7 +856,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       // so the post stays honest between sweeps.
       embed.addFields({
         name: "Closes",
-        value: `<t:${Math.floor(post.expiresAt.getTime() / 1000)}:R>`,
+        value: discordTimestamp(post.expiresAt, "R"),
         inline: false,
       });
     }

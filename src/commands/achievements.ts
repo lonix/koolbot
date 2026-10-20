@@ -6,7 +6,7 @@ import {
 import { AchievementsService } from "../services/achievements-service.js";
 import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
-import { escapeDisplayText } from "../utils/allowed-mentions.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   clampToLimit,
@@ -78,7 +78,7 @@ export async function execute(
 
     if (!hasBadges && progress.length === 0) {
       await interaction.editReply({
-        content: `${escapeDisplayText(targetUser.username)} hasn't earned any badges yet. Keep participating in voice channels!`,
+        content: `<@${targetUser.id}> hasn't earned any badges yet. Keep participating in voice channels!`,
       });
       return;
     }
@@ -99,7 +99,7 @@ export async function execute(
           );
           if (!definition) return null;
 
-          const earnedDate = accolade.earnedAt.toLocaleDateString();
+          const earnedDate = discordTimestamp(accolade.earnedAt, "D");
           const metadataText = formatMetadata(accolade.metadata);
 
           const accoladeText = `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}*\nEarned: ${earnedDate}`;
@@ -164,7 +164,7 @@ export async function execute(
           );
           if (!definition) return null;
 
-          const earnedDate = achievement.earnedAt.toLocaleDateString();
+          const earnedDate = discordTimestamp(achievement.earnedAt, "D");
           const period = achievement.period || "N/A";
           const metadataText = formatMetadata(achievement.metadata);
 

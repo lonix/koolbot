@@ -4,9 +4,8 @@ import {
   SlashCommandUserOption,
 } from "discord.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
-import { formatTimeAgo } from "../utils/time.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 import logger from "../utils/logger.js";
-import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   HIDDEN_CHANNEL_LABEL,
@@ -50,8 +49,8 @@ export async function execute(
       );
       await interaction.editReply(
         channelName === HIDDEN_CHANNEL_LABEL
-          ? `${escapeDisplayText(targetUser.username)} is currently in ${HIDDEN_CHANNEL_LABEL}.`
-          : `${escapeDisplayText(targetUser.username)} is currently in the voice channel "${escapeDisplayText(channelName)}".`,
+          ? `<@${targetUser.id}> is currently in ${HIDDEN_CHANNEL_LABEL}.`
+          : `<@${targetUser.id}> is currently in <#${activeSession.channelId}>.`,
       );
       return;
     }
@@ -60,14 +59,13 @@ export async function execute(
 
     if (!lastSeen) {
       await interaction.editReply(
-        `${escapeDisplayText(targetUser.username)} has never been seen in a voice channel.`,
+        `<@${targetUser.id}> has never been seen in a voice channel.`,
       );
       return;
     }
 
-    const timeAgo = formatTimeAgo(lastSeen);
     await interaction.editReply(
-      `${escapeDisplayText(targetUser.username)} was last seen in a voice channel ${timeAgo}.`,
+      `<@${targetUser.id}> was last seen in a voice channel ${discordTimestamp(lastSeen, "R")}.`,
     );
   } catch (error) {
     logger.error("Error in seen command:", error);

@@ -118,7 +118,7 @@ describe("Seen Command", () => {
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
       expect(interaction.editReply.mock.calls[0][0]).toMatch(
-        /^bob was last seen in a voice channel .+\.$/,
+        /^<@user-2> was last seen in a voice channel <t:\d+:R>\.$/,
       );
     });
 
@@ -129,20 +129,20 @@ describe("Seen Command", () => {
 
       expect(interaction.deferReply).toHaveBeenCalledTimes(1);
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "bob has never been seen in a voice channel.",
+        "<@user-2> has never been seen in a voice channel.",
       );
     });
 
     // #1146: a username and a channel name are member-controlled text in a
-    // public reply; neither may ping, link or format.
-    it("escapes a hostile username and channel name", async () => {
+    // public reply. The reply names both as mentions, so neither is echoed.
+    it("never echoes a hostile username or channel name", async () => {
       const hostile = "<@555> @everyone [free](https://evil.example) **b**";
       const expectNeutral = (text: string): void => {
         expect(text).not.toContain("<@555>");
         expect(text).not.toContain("@everyone");
         expect(text).not.toContain("[free](");
-        expect(text).toContain("\\<@555\\>");
-        expect(text).toContain("\\*\\*b\\*\\*");
+        expect(text).not.toContain("**b**");
+        expect(text).toContain("<@user-2>");
       };
       mockGetActiveSession.mockReturnValue({
         channelId: "c1",
@@ -173,7 +173,7 @@ describe("Seen Command", () => {
       expect(interaction.deferReply).toHaveBeenCalledTimes(1);
       expect(mockGetUserLastSeen).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        'bob is currently in the voice channel "General".',
+        "<@user-2> is currently in <#c1>.",
       );
     });
 
@@ -188,7 +188,7 @@ describe("Seen Command", () => {
       await execute(interaction);
 
       const reply = interaction.editReply.mock.calls[0][0] as string;
-      expect(reply).toBe("bob is currently in a voice channel.");
+      expect(reply).toBe("<@user-2> is currently in a voice channel.");
       expect(reply).not.toContain("Staff Secret");
     });
 
@@ -207,9 +207,7 @@ describe("Seen Command", () => {
       await execute(interaction);
 
       const reply = interaction.editReply.mock.calls[0][0] as string;
-      expect(reply).toBe(
-        'bob is currently in the voice channel "Public Lounge".',
-      );
+      expect(reply).toBe("<@user-2> is currently in <#c1>.");
       expect(reply).not.toContain("Staff Secret");
     });
 
@@ -223,7 +221,7 @@ describe("Seen Command", () => {
       await execute(interaction);
 
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "bob is currently in a voice channel.",
+        "<@user-2> is currently in a voice channel.",
       );
     });
 

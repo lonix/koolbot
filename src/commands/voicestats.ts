@@ -8,8 +8,7 @@ import {
   TimePeriod,
 } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "../services/config-service.js";
-import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
-import { formatDateTimeInZone } from "../utils/timezone.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { visibleChannelName } from "../utils/channel-visibility.js";
@@ -131,7 +130,7 @@ async function executeTop(
       const rank = index + 1;
       const medal =
         rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}.`;
-      return `${medal} ${escapeDisplayText(user.username)}: ${formatTime(user.totalTime)}`;
+      return `${medal} <@${user.userId}>: ${formatTime(user.totalTime)}`;
     });
 
     // Up to 50 rows of "<rank> <username>: <time>" can exceed the 2000-char
@@ -187,18 +186,8 @@ async function executeUser(
       return;
     }
 
-    // Render the timestamp in the requesting user's stored timezone when
-    // set. When unset we keep the previous `toLocaleString()` output so
-    // users who never configured a zone see no change in behaviour (#524).
-    const viewerTimezone = interaction.guildId
-      ? await UserNotificationPrefsService.getInstance().getTimezone(
-          interaction.user.id,
-          interaction.guildId,
-        )
-      : null;
-    const lastSeen = viewerTimezone
-      ? formatDateTimeInZone(stats.lastSeen, viewerTimezone)
-      : stats.lastSeen.toLocaleString();
+    // Discord renders this in each reader's own timezone (#1331).
+    const lastSeen = discordTimestamp(stats.lastSeen, "f");
 
     // Sessions are appended in chronological order, so sort explicitly by
     // startTime (newest first) rather than relying on array position (#841).
@@ -207,7 +196,7 @@ async function executeUser(
       .slice(0, 5);
 
     const response = [
-      `**Voice Channel Statistics for ${escapeDisplayText(user.username)} (${period})**`,
+      `**Voice Channel Statistics for <@${user.id}> (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
       `Last Seen: ${lastSeen}`,
       "",

@@ -468,9 +468,9 @@ describe("VoiceStats Command", () => {
 
     const worstCaseUsers = (count: number) =>
       Array.from({ length: count }, (_, i) => ({
-        userId: `user-${i}`,
-        // Discord usernames are at most 32 characters.
-        username: `${"w".repeat(30)}${String(i).padStart(2, "0")}`,
+        // Discord ids are up to 19 digits; a row names the member as a mention.
+        userId: `${"9".repeat(17)}${String(i).padStart(2, "0")}`,
+        username: "ignored",
         // Five-digit hours: a long-lived guild's all-time totals.
         totalTime: 99999 * 3600 + 59 * 60,
       }));
@@ -488,10 +488,10 @@ describe("VoiceStats Command", () => {
       expect(
         content.startsWith("Top Voice Channel Users (alltime):\n🥇 "),
       ).toBe(true);
-      expect(content).toMatch(/\n…and \d+ more$/);
-      // Whatever was dropped is accounted for, so nothing silently vanishes.
+      // Rows are mentions, so even 50 worst-case rows usually fit; if any are
+      // dropped they are accounted for, so nothing silently vanishes.
       const shown = (content.match(/: 99999h 59m/g) ?? []).length;
-      const dropped = Number(/…and (\d+) more$/.exec(content)?.[1]);
+      const dropped = Number(/…and (\d+) more$/.exec(content)?.[1] ?? 0);
       expect(shown + dropped).toBe(50);
     });
 
@@ -535,19 +535,19 @@ describe("VoiceStats Command", () => {
       expect(interaction.deferReply).toHaveBeenCalledWith();
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        "Top Voice Channel Users (week):\n🥇 alice: 1h 0m",
+        "Top Voice Channel Users (week):\n🥇 <@user-1>: 1h 0m",
       );
     });
 
     // #1146: usernames come from the database and are member-controlled.
-    it("escapes hostile usernames in the leaderboard and the user header", async () => {
+    it("never echoes hostile usernames, and escapes a hostile channel name", async () => {
       const hostile = "<@555> @everyone [free](https://evil.example) **b**";
       const expectNeutral = (text: string): void => {
         expect(text).not.toContain("<@555>");
         expect(text).not.toContain("@everyone");
         expect(text).not.toContain("[free](");
-        expect(text).toContain("\\<@555\\>");
-        expect(text).toContain("\\*\\*b\\*\\*");
+        expect(text).not.toContain("**b**");
+        expect(text).toContain("<@user-1>");
       };
 
       mockGetTopUsers.mockResolvedValue([
@@ -596,8 +596,8 @@ describe("VoiceStats Command", () => {
       await execute(user);
       const text = user.editReply.mock.calls[0][0] as string;
       expectNeutral(text);
-      // Header and the recent-session line are both escaped.
-      expect(text.match(/\\<@555\\>/g)).toHaveLength(2);
+      // The header is a mention; the recent-session channel name is escaped.
+      expect(text.match(/\\<@555\\>/g)).toHaveLength(1);
     });
 
     it("top: edits the deferred reply when there is no activity", async () => {
