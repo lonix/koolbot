@@ -1,0 +1,98 @@
+name: UI Preview
+
+# Screenshots of every Web UI page for PRs that touch the Web UI (#1327), so a
+# reviewer can see the change without running the bot. A review aid, never a gate.
+#
+# Every page renderer is a pure function and the a11y fixtures hold one per
+# page, so `scripts/render-ui-preview.mjs` writes the pages to static HTML with
+# no Discord token, MongoDB or secrets. `scripts/screenshot-ui-preview.mjs`
+# photographs them with the Google Chrome that ubuntu-latest already ships
+# (playwright-core, no browser download). The base branch is rendered with the
+# same script so the job summary can list the pages whose HTML changed first.
+#
+# Runs on `pull_request` with a read-only token and uploads an artifact, so it
+# works on fork PRs as-is: no pull_request_target, no PR comment, no secrets.
+#
+# The path filter below is safe ONLY because this workflow is not a required
+# status check (`CI Success` is the single required check). A required check
+# behind a path filter would never report on PRs that skip it and block them.
+# Do not add this workflow to branch protection or a ruleset.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - src/web/**
+      - docs/design/**
+      - __tests__/web/a11y-pages.ts
+      - scripts/render-ui-preview.mjs
+      - scripts/screenshot-ui-preview.mjs
+      - scripts/ui-preview-summary.mjs
+      - .github/workflows/ui-preview.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The base branch, rendered with this PR's script to find changed pages.
+      - name: Checkout base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Render pages
+        run: node scripts/render-ui-preview.mjs --out ui-preview/head
+
+      # Best effort: a base that cannot be rendered only costs the changed-pages
+      # ordering, which the summary then says. The base reuses this checkout's
+      # node_modules (it is only rendering, not building).
+      - name: Render base branch pages
+        continue-on-error: true
+        run: |
+          cp scripts/render-ui-preview.mjs base/scripts/render-ui-preview.mjs
+          ln -s "$PWD/node_modules" base/node_modules
+          node base/scripts/render-ui-preview.mjs --out ui-preview/base
+
+      - name: Take screenshots
+        run: node scripts/screenshot-ui-preview.mjs --html ui-preview/head --out ui-preview/screenshots
+
+      - name: Upload preview artifact
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-preview
+          path: |
+            ui-preview/screenshots
+            ui-preview/head
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Write job summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: node scripts/ui-preview-summary.mjs --head ui-preview/head --base ui-preview/base --artifact-url "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"

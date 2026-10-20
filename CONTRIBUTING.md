@@ -673,6 +673,26 @@ touch .env && docker compose -f docker-compose.yml config -q && docker compose -
 docker build .
 ```
 
+### UI preview on PRs
+
+A PR that touches `src/web/**`, `docs/design/**` or `__tests__/web/a11y-pages.ts` runs the `UI Preview` workflow, so a reviewer can see
+what a Web UI change looks like without running the bot. It renders every page from the a11y fixtures to static HTML (no Discord token,
+MongoDB or secrets), screenshots each one with the runner's Chrome (a full-page PNG at 1280px wide, plus 390px for the shell and a few
+key pages), and uploads them as the `ui-preview` artifact, kept 14 days. The job summary lists the pages whose HTML differs from the base
+branch first; it compares the HTML, not the pixels, so it does not flake. It uses the read-only `pull_request` token and posts no
+comment, so it also runs on fork PRs. To review a PR, open the run's summary and download the artifact.
+
+It is not a required check and does not run on other PRs. Never add it to branch protection or a ruleset: a required check behind a path
+filter never reports on PRs that skip it, so those PRs could not merge. To render and screenshot locally (set `UI_PREVIEW_CHROME` to a
+Chrome or Chromium binary if you do not have Google Chrome installed):
+
+```bash
+node scripts/render-ui-preview.mjs --out ui-preview/head
+node scripts/screenshot-ui-preview.mjs --html ui-preview/head --out ui-preview/screenshots
+```
+
+When you add a page renderer, add its fixture to `__tests__/web/a11y-pages.ts`: that one list feeds both the a11y gate and this preview.
+
 ### Docker image tags
 
 `Docker Build and Push` publishes these tags to `ghcr.io/lonix/koolbot`:

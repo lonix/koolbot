@@ -196,6 +196,11 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
 - **`docker-check.yml`** — pre-merge Docker checks on PRs that touch Docker-related files (path-filtered): hadolint on `Dockerfile` and
   `Dockerfile.dev`, `docker compose config -q` on both compose files, and a non-pushing `linux/amd64` test build. **Not a required check**;
   the path filter is only safe for that reason, so never add it to branch protection.
+- **`ui-preview.yml`** — screenshots of every Web UI page on PRs that touch `src/web/**`, `docs/design/**` or the a11y page fixtures
+  (path-filtered): `scripts/render-ui-preview.mjs` renders the fixtures to static HTML (no bot, Mongo or secrets), playwright-core photographs
+  them with the runner's Chrome, and one `ui-preview` artifact plus a job summary (pages whose HTML differs from the base branch first)
+  come out. Read-only token, so fork PRs work. **Not a required check**; the path filter is only safe for that reason, so never add it to
+  branch protection.
 - **`actionlint.yml`** / **`zizmor`** — lint + security-audit workflow YAML when `.github/workflows/**`
   changes.
 - **`codeql.yml`** — CodeQL scan (PRs, pushes, weekly cron).
