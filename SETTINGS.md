@@ -238,7 +238,7 @@ Configure the quote management system.
   If empty, quotes post in the channel where the command was used.
 - `quotes.delete_roles` — Takes role IDs and role group references (`group:<id>`, or
   `group:<id>+` for that group and every group ranked above it). Pick them on the Quotes or Settings page;
-  the picker lists groups ahead of the roles. When empty and the server has a `staff` or `admin`
+  the picker lists groups ahead of the roles. When empty and the server has a Moderator (stored as `staff`) or Admin
   role group, deletion is limited to those groups. With no such group the behaviour is unchanged.
   A member can always delete a quote they saved themselves.
 - `quotes.header_enabled` — Displays a pinned informational header.

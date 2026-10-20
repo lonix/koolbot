@@ -122,6 +122,35 @@ describe("helpers", () => {
     expect(mod & PermissionsBitField.Flags.Administrator).toBe(0n);
   });
 
+  it("ships an Event host preset that carries only the host capability and no permission (#1316)", () => {
+    const preset = PERMISSION_PRESETS.find((p) => p.key === "event-host");
+    expect(preset?.label).toBe("Event host");
+    expect(preset?.capabilities).toEqual(["host"]);
+    // Presets only pre-fill a form: no Discord permission, no members.
+    expect(preset?.permissions).toBe("0");
+    // No other preset grants host, so nothing is granted by picking another.
+    expect(
+      PERMISSION_PRESETS.filter((p) => p.key !== "event-host").some((p) =>
+        (p.capabilities as readonly string[]).includes("host"),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts the host capability, and keeps bot exclusive (#1316)", () => {
+    expect(
+      validateGroupInput(
+        { name: "Hosts", capabilities: ["host", "staff"] },
+        [],
+      ),
+    ).toBeNull();
+    expect(
+      validateGroupInput({ name: "Hosts", capabilities: ["host", "bot"] }, []),
+    ).not.toBeNull();
+    expect(
+      validateGroupInput({ name: "Hosts", capabilities: ["hosts"] }, []),
+    ).toContain("Unknown capability");
+  });
+
   it("classifies locked roles", () => {
     expect(roleLockReason(role("g", 0), "g", 20)).toBe("everyone");
     expect(roleLockReason(role("a", 5, { managed: true }), "g", 20)).toBe(

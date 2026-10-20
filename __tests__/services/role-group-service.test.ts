@@ -9,7 +9,7 @@ const matches = (d: Doc, f: Record<string, unknown>): boolean =>
   Object.entries(f).every(([k, v]) => (k === "_id" ? d._id === v : d[k] === v));
 
 jest.unstable_mockModule("../../src/models/role-group.js", () => ({
-  ROLE_GROUP_CAPABILITIES: ["admin", "staff", "bot"],
+  ROLE_GROUP_CAPABILITIES: ["admin", "staff", "host", "bot"],
   RoleGroup: {
     find: jest.fn((f: Record<string, unknown>) => ({
       sort: async () =>
@@ -197,6 +197,52 @@ describe("queries", () => {
       await svc.memberHasCapability(member("a", ["rAdmin"]), "staff"),
     ).toBe(true);
     expect(await svc.memberHasCapability(member("v", ["rVip"]), "staff")).toBe(
+      false,
+    );
+  });
+
+  it("answers the host capability: admin implies it, staff and a plain group do not (#1316)", async () => {
+    await seed();
+    const r = await svc.create(G, {
+      name: "Hosts",
+      roleId: "rHost",
+      capabilities: ["host"],
+    });
+    expect(r.ok).toBe(true);
+    expect(await svc.memberHasCapability(member("h", ["rHost"]), "host")).toBe(
+      true,
+    );
+    // Admin implies host, as it implies staff.
+    expect(await svc.memberHasCapability(member("a", ["rAdmin"]), "host")).toBe(
+      true,
+    );
+    // Nothing else does: a moderator or a VIP does not host.
+    expect(await svc.memberHasCapability(member("m", ["rMod"]), "host")).toBe(
+      false,
+    );
+    expect(await svc.memberHasCapability(member("v", ["rVip"]), "host")).toBe(
+      false,
+    );
+    // And host implies neither staff nor admin.
+    expect(await svc.memberHasCapability(member("h", ["rHost"]), "staff")).toBe(
+      false,
+    );
+    expect(await svc.memberHasCapability(member("h", ["rHost"]), "admin")).toBe(
+      false,
+    );
+  });
+
+  it("fails closed for host when the groups can't be read (#1316)", async () => {
+    await svc.create(G, {
+      name: "Hosts",
+      roleId: "rHost",
+      capabilities: ["host"],
+    });
+    const { RoleGroup } = await import("../../src/models/role-group.js");
+    (RoleGroup.find as jest.Mock).mockImplementationOnce(() => {
+      throw new Error("db down");
+    });
+    expect(await svc.memberHasCapability(member("h", ["rHost"]), "host")).toBe(
       false,
     );
   });

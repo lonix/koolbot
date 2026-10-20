@@ -14,8 +14,35 @@ import mongoose, { Document, Schema } from "mongoose";
  */
 
 /** What a group's members may do. Features query these, not role ids. */
-export const ROLE_GROUP_CAPABILITIES = ["admin", "staff", "bot"] as const;
+export const ROLE_GROUP_CAPABILITIES = [
+  "admin",
+  "staff",
+  "host",
+  "bot",
+] as const;
 export type RoleGroupCapability = (typeof ROLE_GROUP_CAPABILITIES)[number];
+
+/**
+ * The name each capability goes by in the UI (#1316). The stored key never
+ * changes: `staff` stays `staff` in the database, in config references and in
+ * code, and is only *shown* as "Moderator". Every place that renders a
+ * capability goes through {@link capabilityLabel}.
+ */
+export const CAPABILITY_LABELS: Readonly<Record<RoleGroupCapability, string>> =
+  {
+    admin: "Admin",
+    staff: "Moderator",
+    host: "Event host",
+    bot: "Bot",
+  };
+
+/** The UI name of a capability; an unknown key is shown as stored. */
+export function capabilityLabel(capability: string): string {
+  return (
+    (CAPABILITY_LABELS as Record<string, string | undefined>)[capability] ??
+    capability
+  );
+}
 
 /** How a group reacts when its Discord role drifts from the definition (#1021). */
 export const ROLE_GROUP_SYNC_POLICIES = ["enforce", "adopt", "flag"] as const;

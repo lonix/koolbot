@@ -2,6 +2,19 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export type WebSessionRole = "admin" | "user";
 
+/**
+ * What a `/me` session may do beyond signing in (#1316). Derived from the
+ * member's role groups on EVERY request and never read from the stored
+ * `scopes` column, so removing someone from a group removes the scope on
+ * their next request. `admin` is not a scope: it is the session role.
+ *
+ * - `member`: allowed `/me` (Command permissions); every `/me` session has it.
+ * - `host`: the `host` capability (or `admin`): `/me/events*`.
+ * - `moderator`: the `staff` capability (or `admin`): `/me/moderation*`.
+ */
+export const WEB_SCOPES = ["member", "host", "moderator"] as const;
+export type WebScope = (typeof WEB_SCOPES)[number];
+
 export interface IWebSession extends Document {
   tokenHash: string;
   discordUserId: string;
@@ -14,6 +27,10 @@ export interface IWebSession extends Document {
    * #481) at read time.
    */
   role: WebSessionRole;
+  /**
+   * Legacy column: always `[]` and deliberately never trusted. The scopes a
+   * request has are resolved live from role groups (`WebSessionContext.scopes`).
+   */
   scopes: string[];
   createdAt: Date;
   expiresAt: Date;

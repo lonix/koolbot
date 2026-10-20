@@ -1439,7 +1439,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       return `<span class="tag tag-warn">unknown (role groups unavailable)</span>`;
     }
     return props.staffDefaultActive === true
-      ? `<span class="tag tag-warn">staff only (default)</span>`
+      ? `<span class="tag tag-warn">Moderators only (default)</span>`
       : `<span class="tag tag-info">open</span>`;
   };
   const groupHeaders = usedGroupRefs
@@ -1490,7 +1490,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
           props.groupsUnavailable === true
             ? "The role groups couldn't be read, so the moderation commands are refused until they can be."
             : props.staffDefaultActive === true
-              ? "Commands are open by default, except the moderation commands, which are staff only while a staff or admin role group exists."
+              ? "Commands are open by default, except the moderation commands, which are for Moderators only while a Moderator or Admin role group exists."
               : "All registered commands are open by default."
         }</div>`
       : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}${groupHeaders}</tr></thead><tbody>${matrixRows}</tbody></table>`;
@@ -1563,7 +1563,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
 
   const body = `
 <h1>Permissions</h1>
-<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one staff or admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to staff unless you set a restriction here; with no groups they stay open.</p>
+<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one Moderator or Admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to Moderators unless you set a restriction here; with no groups they stay open.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Edit</h2>

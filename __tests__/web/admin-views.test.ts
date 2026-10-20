@@ -1321,7 +1321,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       staffDefaultCommands: new Set(["warn"]),
     });
     const matrix = html.slice(html.indexOf("<caption"));
-    expect(matrix).toContain("staff only (default)");
+    expect(matrix).toContain("Moderators only (default)");
     // ...and the restricted command keeps its own status, nothing says open.
     expect(matrix).toContain('class="tag tag-warn">restricted');
     expect(matrix).not.toContain('class="tag tag-info">open');
@@ -1345,7 +1345,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
     });
     expect(html).toContain("unknown (role groups unavailable)");
     expect(html).toContain("refused until they can be");
-    expect(html).not.toContain("staff only (default)");
+    expect(html).not.toContain("Moderators only (default)");
   });
 
   it("flags the staff default on moderation commands only while it applies", () => {
@@ -1354,13 +1354,13 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       staffDefaultActive: true,
       staffDefaultCommands: new Set(["warn"]),
     });
-    expect(on).toContain("staff only (default)");
+    expect(on).toContain("Moderators only (default)");
     const off = renderPermissionsPage({
       ...base,
       staffDefaultActive: false,
       staffDefaultCommands: new Set(["warn"]),
     });
-    expect(off).not.toContain("staff only (default)");
+    expect(off).not.toContain("Moderators only (default)");
   });
 
   it("a command with its own restriction is not flagged as the default", () => {
@@ -1370,7 +1370,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       staffDefaultActive: true,
       staffDefaultCommands: new Set(["warn"]),
     });
-    expect(html).not.toContain("staff only (default)");
+    expect(html).not.toContain("Moderators only (default)");
   });
 });
 

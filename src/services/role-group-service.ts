@@ -179,8 +179,14 @@ export class RoleGroupService {
       return false;
     }
     if (capability === "bot" && !this.isBotAccount(member)) return false;
+    // `admin` implies the capabilities below it: an admin is also staff and may
+    // also host. Nothing implies `admin`, and `bot` stands alone.
     const wanted: RoleGroupCapability[] =
-      capability === "staff" ? ["staff", "admin"] : [capability];
+      capability === "staff"
+        ? ["staff", "admin"]
+        : capability === "host"
+          ? ["host", "admin"]
+          : [capability];
     return groups.some(
       (g) =>
         g.roleId !== null &&

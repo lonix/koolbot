@@ -5,6 +5,7 @@ import {
 } from "../models/command-permissions.js";
 import { ConfigService } from "./config-service.js";
 import { RoleGroupService } from "./role-group-service.js";
+import type { WebScope } from "../models/web-session.js";
 import {
   hasStaffGroup,
   resolveGroupRefs,
@@ -328,6 +329,40 @@ export class PermissionsService {
       expiresAt: now + FRESH_MEMBER_TTL_MS,
     });
     return member;
+  }
+
+  /**
+   * The `/me` scopes a member holds right now (#1316), read live from Discord
+   * and the role groups on every call (the member lookup shares the short TTL
+   * of the session's own permission re-check, so it adds no extra REST call).
+   *
+   * Always contains `member`: the caller has already passed the `me` command
+   * gate. `host` needs the `host` (or `admin`) capability and `moderator` the
+   * `staff` (or `admin`) one. Fails CLOSED: any failure to look the member or
+   * the groups up yields plain `["member"]`, never a wider set, and never
+   * throws. All-or-nothing: a failure part-way discards what was found so far.
+   */
+  public async resolveWebScopes(
+    userId: string,
+    guildId: string,
+  ): Promise<WebScope[]> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      const member = await this.fetchMemberFresh(guild, guildId, userId);
+      const groups = RoleGroupService.getInstance();
+      const isHost = await groups.memberHasCapability(member, "host");
+      const isModerator = await groups.memberHasCapability(member, "staff");
+      const scopes: WebScope[] = ["member"];
+      if (isHost) scopes.push("host");
+      if (isModerator) scopes.push("moderator");
+      return scopes;
+    } catch (error) {
+      logger.warn(
+        "Could not resolve web scopes; treating the session as member only",
+        error,
+      );
+      return ["member"];
+    }
   }
 
   /**

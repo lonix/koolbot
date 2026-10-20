@@ -76,6 +76,14 @@ export const PERMISSION_PRESETS: ReadonlyArray<{
     capabilities: ["staff"],
   },
   {
+    // Grants no Discord permission and no members: it only names the group and
+    // ticks the `host` capability (#1316). Nobody is added to it for you.
+    key: "event-host",
+    label: "Event host",
+    permissions: "0",
+    capabilities: ["host"],
+  },
+  {
     key: "vip",
     label: "VIP (cosmetic only)",
     permissions: "0",
