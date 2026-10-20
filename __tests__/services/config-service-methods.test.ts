@@ -374,10 +374,13 @@ describe("ConfigService - Methods", () => {
         expect.objectContaining({
           key: "new.key",
           value: "new-value",
-          description: "New setting",
           category: "core",
         }),
         { upsert: true, new: true, runValidators: true },
+      );
+      // The schema owns descriptions; a stored copy would freeze (#1302).
+      expect(mockFindOneAndUpdate.mock.calls[0][1]).not.toHaveProperty(
+        "description",
       );
 
       // Verify the cache was updated

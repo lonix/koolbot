@@ -414,7 +414,7 @@ export class WizardService {
           await this.configService.set(
             key,
             prior.value,
-            prior.description,
+            prior.description ?? "",
             prior.category,
             { skipDependencyCheck: true },
           );

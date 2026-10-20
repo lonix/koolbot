@@ -133,7 +133,11 @@ describe("buildSettingRows (#705)", () => {
       ],
     );
     expect(rows[0].current).toBe("General");
-    expect(rows[0].description).toBe("custom");
+    // The schema owns the description; a stored copy never wins (#1302).
+    expect(rows[0].description).not.toBe("custom");
+    expect(rows[0].description).toBe(
+      settingsMetadata["voicechannels.lobby.name"].description,
+    );
   });
 
   it("includes the reactionroles.enabled master and style options (#974)", () => {
