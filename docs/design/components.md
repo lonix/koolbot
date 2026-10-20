@@ -416,7 +416,18 @@ The larger context for an action: its options and consequences, shown at the mom
 - **Confirm** (Switch groups off): the title is the question, the body lists every consequence, the button repeats the verb in `danger`.
 - **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result ("Deal 2 people").
 - Replaces the separate confirm pages; without JavaScript the buttons still post to the existing routes.
-- Focus starts on *Cancel*; Escape closes.
+- Focus starts on the go-back button; Escape closes and focus returns to the control that opened it. `aria-labelledby` points at the title.
+
+**Wiring (`data-confirm`).** Every destructive form or button carries `data-confirm="Title?"`; `CONFIRM_SCRIPT` (`src/web/html.ts`, loaded by the admin
+and member layouts) builds the dialog from it, so the title is the whole dialog unless a list is added.
+
+- `data-confirm-list` is a JSON array of consequence strings (`confirmListAttr()` writes it). They are rendered with `textContent`, never as HTML.
+  Give a list to the high-impact actions: reset defaults, rebuild and resync, reaction-role and group delete, event cancel, birthday remove and
+  making a removal permanent. Other actions are title-only.
+- The danger button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads *Go back*, so it is never confused with a
+  *Cancel* verb such as "Cancel event".
+- Confirming submits the same form (`requestSubmit`), so the CSRF token, typed-name guards and other submit handlers are unchanged.
+- Without `showModal()` it falls back to `window.confirm()`; without JavaScript the form posts at once, as before.
 
 ### SaveBar
 

@@ -1919,6 +1919,32 @@ export function adminPages(): A11yPage[] {
         ],
         pickers: { textChannels: CHANNELS },
         flash: FLASH,
+        casesEnabled: true,
+        defaultReviewDays: 90,
+        caseGroups: {
+          overdue: [
+            {
+              id: "case1",
+              caseNumber: 1,
+              userId: "u3",
+              userLabel: "carol",
+              action: "ban",
+              status: "under_review",
+              reviewAt: "2026-01-02T00:00:00.000Z",
+              openedAt: "2025-10-02T00:00:00.000Z",
+              openedByLabel: "bob",
+              originModeratorLabel: "bob",
+              reason: "spam",
+              events: [],
+              history: [],
+              live: true,
+            },
+          ],
+          dueSoon: [],
+          scheduled: [],
+          indefinite: [],
+          recentlyResolved: [],
+        },
         filters: { action: "", userId: "" },
         rows: [
           {
