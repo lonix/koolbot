@@ -66,8 +66,8 @@ describeWithMongo("event group preset library (#1200)", () => {
       expect(catalog.state).toBe("ok");
       expect(enabledPresets(catalog).map((p) => p.id)).toEqual([
         "builtin:red-vs-blue",
-        "builtin:eve-factions",
         "builtin:wardogs",
+        "builtin:eve-factions",
       ]);
     } finally {
       // Dropping the collections dropped their unique indexes; the tests
