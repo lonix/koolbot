@@ -643,6 +643,21 @@ describe("a race", () => {
     expect((row().startTime as Date).toISOString()).toBe(START.toISOString());
   });
 
+  it("audits a rejected write as a failure before the error goes on", async () => {
+    const version = await versionOf();
+    beforeWrite = (): void => {
+      throw new Error("mongo down");
+    };
+    const r = await save({ title: "Never saved" }, { version });
+    expect(r.status).toBe(500);
+    const entry = auditRows.find(
+      (a) => (a as { action?: string }).action === "event.edit",
+    ) as { result: string; errorMessage: string };
+    expect(entry.result).toBe("failure");
+    expect(entry.errorMessage).toContain("mongo down");
+    expect(row().title).toBe("Quiz night");
+  });
+
   it("refuses while an end is in progress", async () => {
     const service = EventService.getInstance(fakeClient()) as unknown as {
       isEventBeingEnded: (id: string) => boolean;

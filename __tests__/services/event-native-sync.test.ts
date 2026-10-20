@@ -207,6 +207,21 @@ describe("NativeEventSync.syncEvent", () => {
     expect((event as { nativeEventId: string }).nativeEventId).toBe("created1");
   });
 
+  it("starts a create only for the title and start the scan read (#1298)", async () => {
+    const { guild } = makeGuild();
+    const ev = makeEvent();
+    await makeSync().syncEvent(ev, guild);
+    const filter = EventMock.findOneAndUpdate.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(filter).toMatchObject({
+      title: "Game night",
+      startTime: FUTURE,
+      nativeEventId: null,
+    });
+  });
+
   it("accepts Manage Events as well as Create Events", async () => {
     const { guild, scheduledEvents } = makeGuild({
       perms: [PermissionFlagsBits.ManageEvents],
@@ -366,6 +381,33 @@ describe("NativeEventSync.syncEvent", () => {
         guild,
       );
       expect(scheduledEvents.edit).not.toHaveBeenCalled();
+    });
+
+    it("also moves the end of a Scheduled native event whose start has passed", async () => {
+      // A late create can leave the native event Scheduled after its start.
+      const start = new Date(Date.now() - 30 * 60 * 1000);
+      const { guild, scheduledEvents } = makeGuild({
+        natives: [
+          makeNative({
+            status: GuildScheduledEventStatus.Scheduled,
+            scheduledStartTimestamp: start.getTime(),
+            scheduledEndTimestamp: start.getTime() + 60 * 60 * 1000,
+          }),
+        ],
+      });
+      await makeSync().syncEvent(
+        makeEvent({
+          nativeEventId: "n1",
+          startTime: start,
+          durationMinutes: 180,
+        }),
+        guild,
+      );
+      expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+      const patch = (
+        scheduledEvents.edit.mock.calls[0] as unknown[]
+      )[1] as Record<string, unknown>;
+      expect(Object.keys(patch).sort()).toEqual(["reason", "scheduledEndTime"]);
     });
 
     it("logs a rejected end edit once and does not throw", async () => {

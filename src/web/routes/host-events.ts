@@ -1688,16 +1688,34 @@ function registerEditRoutes(router: Router, client: Client): void {
         await fail(parsed.error);
         return;
       }
-      const result = await service().editEvent({
-        eventId,
-        guildId: session.guildId,
-        expectedVersion: field("version"),
-        changes: {
-          ...parsed.value,
-          startTime: startUnchanged ? event.startTime : parsed.value.startTime,
-          timezone: startUnchanged ? event.timezone : parsed.value.timezone,
-        },
-      });
+      let result: Awaited<ReturnType<EventService["editEvent"]>>;
+      try {
+        result = await service().editEvent({
+          eventId,
+          guildId: session.guildId,
+          expectedVersion: field("version"),
+          changes: {
+            ...parsed.value,
+            startTime: startUnchanged
+              ? event.startTime
+              : parsed.value.startTime,
+            timezone: startUnchanged ? event.timezone : parsed.value.timezone,
+          },
+        });
+      } catch (err) {
+        // A rejected write is audited before the error goes on, as `hostAction`
+        // does.
+        await recordAudit(
+          session,
+          boundAuditEntry({
+            action: "event.edit",
+            targetId: eventId,
+            result: "failure",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        throw err;
+      }
       if (!result.ok) {
         // A conflict sends the host back to a fresh form; a refusal to the panel.
         await fail(

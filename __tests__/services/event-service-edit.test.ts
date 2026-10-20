@@ -305,6 +305,52 @@ describe("EventService.editEvent", () => {
     expect(service.updateAnnouncement).not.toHaveBeenCalled();
   });
 
+  it("refuses a new title or start while a native create is unresolved, but not a new description", async () => {
+    stored = row({
+      nativeEventId: null,
+      nativeCreateStartedAt: new Date(NOW.getTime() - 60_000),
+    });
+    expect(
+      await service.editEvent(input({ title: "Renamed" }) as never),
+    ).toMatchObject({ ok: false, code: "native-pending" });
+    expect(
+      await service.editEvent(
+        input({ startTime: new Date("2030-01-01T22:00:00Z") }) as never,
+      ),
+    ).toMatchObject({ ok: false, code: "native-pending" });
+    expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(
+      await service.editEvent(input({ description: "New text" }) as never),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("conditions an identity edit on the native link, and a plain one does not", async () => {
+    stored = row({ nativeEventId: "n1", nativeCreateStartedAt: null });
+    await service.editEvent(input({ title: "Renamed" }) as never);
+    expect(EventStatics.findOneAndUpdate.mock.calls[0][0]).toMatchObject({
+      nativeEventId: "n1",
+      nativeCreateStartedAt: null,
+    });
+    await service.editEvent(input({ description: "Text" }) as never);
+    expect(EventStatics.findOneAndUpdate.mock.calls[1][0]).not.toHaveProperty(
+      "nativeEventId",
+    );
+  });
+
+  it("clears the announcement verification once the refresh has settled, even if it failed", async () => {
+    const id = "65a000000000000000000001";
+    const verified = (
+      service as unknown as { linkVerified: Map<string, string> }
+    ).linkVerified;
+    // A scan certifies the post while this edit's refresh is still running.
+    service.updateAnnouncement = jest.fn(async () => {
+      verified.set(id, "certified-by-scan");
+      throw new Error("discord down");
+    });
+    await service.editEvent(input({ title: "New" }) as never);
+    expect(verified.has(id)).toBe(false);
+  });
+
   it("answers not-found for another guild's event", async () => {
     expect(
       await service.editEvent(input({}, { guildId: "other" }) as never),
@@ -480,6 +526,14 @@ describe("the announcement refresh after a scan that held an older row (#1298)",
     // Same copy again: already verified, nothing to do.
     await service.processEvent(copy(), { id: "guild-1" }, now, windows);
     expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
+    // A zone change that keeps the instant changes the text, so it refreshes too.
+    await service.processEvent(
+      copy({ timezone: "Etc/UTC" }),
+      { id: "guild-1" },
+      now,
+      windows,
+    );
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(2);
     // The next scan reads the edited row: another title, so it must refresh.
     await service.processEvent(
       copy({ title: "Edited" }),
@@ -487,6 +541,6 @@ describe("the announcement refresh after a scan that held an older row (#1298)",
       now,
       windows,
     );
-    expect(service.updateAnnouncement).toHaveBeenCalledTimes(2);
+    expect(service.updateAnnouncement).toHaveBeenCalledTimes(3);
   });
 });

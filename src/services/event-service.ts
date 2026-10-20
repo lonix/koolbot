@@ -146,12 +146,15 @@ export function announcementContentKey(event: {
   title: string;
   description?: string | null;
   startTime: Date;
+  /** `formatEventWhen` shows the zone, so a zone change alone changes the text. */
+  timezone?: string | null;
   durationMinutes: number;
 }): string {
   return JSON.stringify([
     event.title,
     event.description ?? "",
     event.startTime.getTime(),
+    event.timezone ?? "",
     event.durationMinutes,
   ]);
 }
@@ -168,6 +171,7 @@ export type EditEventResult =
         | "locked"
         | "bad-end"
         | "past"
+        | "native-pending"
         | "unchanged";
       message: string;
     };
@@ -1989,6 +1993,18 @@ export class EventService extends ScheduledService {
     if (!hasEdit(diff)) {
       return { ok: false, code: "unchanged", message: EDIT_MESSAGES.unchanged };
     }
+    // A native create that timed out may still land in Discord, and the sync
+    // recognises it by the row's name and start. Renaming or moving the row now
+    // would make it unrecognisable and a second Discord event would be created,
+    // stranding the first one's Interested list.
+    const identityChange = want.title !== row.title || moved;
+    if (identityChange && !row.nativeEventId && row.nativeCreateStartedAt) {
+      return {
+        ok: false,
+        code: "native-pending",
+        message: EDIT_MESSAGES.nativePending,
+      };
+    }
 
     const changes: Record<string, unknown> = {};
     if (want.title !== row.title) changes.title = want.title;
@@ -2027,6 +2043,15 @@ export class EventService extends ScheduledService {
         timezone:
           (row.timezone ?? "") === "" ? { $in: ["", null] } : row.timezone,
         durationMinutes: row.durationMinutes,
+        // Paired with `markCreateStarted`, which is conditioned on the title and
+        // start: whichever of an identity edit and a native create starts first
+        // wins, and the other sees a changed row.
+        ...(identityChange
+          ? {
+              nativeEventId: row.nativeEventId ?? null,
+              nativeCreateStartedAt: row.nativeCreateStartedAt ?? null,
+            }
+          : {}),
         nativeAdopted: { $ne: true },
         seriesCancelled: { $ne: true },
       },
@@ -2039,20 +2064,28 @@ export class EventService extends ScheduledService {
     // (the native sync and the link refresh both run on every tick).
     this.linkVerified.delete(id);
     try {
-      await this.nativeSync.syncEvent(updated);
-    } catch (error) {
-      logger.error(
-        `Event ${sanitizeForLog(id)}: native sync after edit failed:`,
-        error,
-      );
-    }
-    try {
-      await this.updateAnnouncement(updated);
-    } catch (error) {
-      logger.error(
-        `Event ${sanitizeForLog(id)}: announcement refresh after edit failed:`,
-        error,
-      );
+      try {
+        await this.nativeSync.syncEvent(updated);
+      } catch (error) {
+        logger.error(
+          `Event ${sanitizeForLog(id)}: native sync after edit failed:`,
+          error,
+        );
+      }
+      try {
+        await this.updateAnnouncement(updated);
+      } catch (error) {
+        logger.error(
+          `Event ${sanitizeForLog(id)}: announcement refresh after edit failed:`,
+          error,
+        );
+      }
+    } finally {
+      // Cleared again once the refresh has settled, failed or not: an edit that
+      // paused above while a newer edit committed and a scan certified it just
+      // wrote its older row over the post, and nothing may vouch for the post
+      // until the next scan has looked at it.
+      this.linkVerified.delete(id);
     }
     logger.info(`Edited event ${sanitizeForLog(id)}`);
     return { ok: true, event: updated, diff };

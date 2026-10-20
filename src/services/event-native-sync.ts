@@ -519,6 +519,10 @@ export class NativeEventSync {
       {
         _id: event._id,
         nativeEventId: null,
+        // The identity the create is made with (#1298): a scan holding a row from
+        // before an edit must not start a create under the old name or start.
+        title: event.title,
+        startTime: event.startTime,
         state: { $in: ["scheduled", "active"] },
         $or: [
           { nativeCreateStartedAt: null },
@@ -682,7 +686,7 @@ export class NativeEventSync {
     // Whether Discord accepts it for an Active event is unverified: a failure
     // is logged once per event and the next scan tries again.
     if (
-      active &&
+      startPast &&
       !converting &&
       diff.scheduledEndTime &&
       want.end.getTime() > Date.now()
