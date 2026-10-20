@@ -47,8 +47,9 @@ collected by Jest.
 
 - `a11y-axe.test.ts` runs axe-core over every page renderer's output.
 - `a11y-routes.test.ts` runs axe over pages served through the real router.
-- `a11y-contrast.test.ts` computes WCAG contrast ratios for the `THEME`
-  palette (4.5:1 for text, 3:1 for control borders and the focus ring).
+- `design-tokens-drift.test.ts` fails on a hex literal in `src/web` or `kb.css`, a `font-size` literal in `kb.css`, or a `var(--name)` with no token.
+- `a11y-contrast.test.ts` computes WCAG contrast ratios for the colour
+  tokens in `docs/design/tokens.json` (4.5:1 for text, 3:1 for control borders and the focus ring).
 
 The two axe suites need a DOM, so they opt into `__tests__/jsdom-node-env.cjs`
 through a `@jest-environment` docblock — jsdom with Node's web globals

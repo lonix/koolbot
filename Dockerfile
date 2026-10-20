@@ -53,6 +53,9 @@ RUN npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && npm cache clean 
 # this costs nothing and pairs with `read_only: true` in docker-compose.yml.
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/dist ./dist
+# The Web UI reads docs/design/tokens.json and kb.css at runtime (src/web/design-assets.ts
+# resolves them two levels above dist/web), so ship just those two files, not the docs.
+COPY --from=builder /app/docs/design/tokens.json /app/docs/design/kb.css ./docs/design/
 COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Set environment variables

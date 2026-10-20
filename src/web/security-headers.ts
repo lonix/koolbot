@@ -11,7 +11,9 @@ import { NONCE_MARKER } from "./html.js";
  *  - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
  *    `Referrer-Policy: no-referrer`,
  *  - `Cache-Control: no-store` (every page here is authenticated or carries a
- *    one-time token / CSRF token, so a shared browser must not keep copies),
+ *    one-time token / CSRF token, so a shared browser must not keep copies).
+ *    The stylesheet router is mounted ahead of this middleware on purpose: it
+ *    carries no per-user data, needs no session and is cached by version.
  *  - `Strict-Transport-Security` only when `WEBUI_BASE_URL` is `https://`.
  *
  * CSP design. The pages are server-rendered strings with inline `<script>`
@@ -28,11 +30,14 @@ import { NONCE_MARKER } from "./html.js";
  *    escaping gets no valid nonce and does not run. This keeps the CSP a real
  *    backstop for script injection as well as for inline handlers, script-
  *    scheme URLs, external sources, framing, `<base>` and off-origin forms.
- *  - `style-src 'unsafe-inline'`: justified exception. Dozens of
- *    `style="..."` attributes and several `<style>` blocks exist; a style
- *    nonce would disable `'unsafe-inline'` for the attributes too. Style
- *    injection does not execute script, and the same-origin `connect-src`,
- *    `img-src` and `form-action` below limit what it could exfiltrate.
+ *  - `style-src 'self' 'unsafe-inline'`: `'self'` admits the two shared
+ *    stylesheets (`tokens.css`, `kb.css`, served by `design-assets.ts` from
+ *    `/admin/_assets/` and `/me/_assets/`, #1315). `'unsafe-inline'` stays as
+ *    a justified exception: dozens of `style="..."` attributes and several
+ *    `<style>` blocks exist; a style nonce would disable `'unsafe-inline'`
+ *    for the attributes too. Style injection does not execute script, and
+ *    the same-origin `connect-src`, `img-src` and `form-action` below limit
+ *    what it could exfiltrate.
  *  - `default-src 'none'` plus `connect-src 'self'` (the pages `fetch()`
  *    same-origin endpoints), `img-src 'self' data:`, `form-action 'self'`,
  *    `base-uri 'none'`, `object-src 'none'`, `frame-ancestors 'none'`.
@@ -51,7 +56,7 @@ export function buildCsp(nonce: string): string {
   return [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
-    "style-src 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "connect-src 'self'",
     "form-action 'self'",

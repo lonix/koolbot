@@ -185,7 +185,9 @@ describe("renderAdminPage", () => {
     expect(html).toContain("form.querySelectorAll('[data-a11y-tabindex]')");
     // Styling: an invalid control is outlined, and off-screen labels stay in
     // the accessibility tree.
-    expect(html).toContain('[aria-invalid="true"]{outline:2px solid #dc2626');
+    expect(html).toContain(
+      '[aria-invalid="true"]{outline:2px solid var(--danger)',
+    );
     expect(html).toContain(".visually-hidden{position:absolute");
   });
 
@@ -234,9 +236,9 @@ describe("renderAdminPage", () => {
     // One :focus-visible ring for every interactive element, plus mirrored
     // hover surfaces for the sidebar and buttons.
     expect(html).toContain(
-      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}",
+      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}",
     );
-    expect(html).toContain("nav.side a:focus-visible{background:#1f2937");
+    expect(html).toContain("nav.side a:focus-visible{background:var(--chrome)");
     // The ring rule is declared after the aria-invalid outline so it wins on
     // focus (same specificity, later wins).
     expect(html.indexOf('[aria-invalid="true"]{outline')).toBeLessThan(
@@ -270,20 +272,22 @@ describe("renderAdminPage", () => {
 
   it("uses colours that clear the WCAG contrast floors (#855)", () => {
     const html = render();
-    // Form-control borders: #2d3748 was 1.58:1 against the field.
+    // Form-control borders: the --border hairline was 1.58:1 against the field.
     expect(html).toContain(
-      "form.stack textarea,form.stack select{background:#0f1115;color:#e4e6eb;border:1px solid #64748b;",
+      "form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);",
     );
     expect(html).not.toContain(
-      "border:1px solid #2d3748;border-radius:6px;padding:.4rem .55rem",
+      "border:1px solid var(--border);border-radius:6px;padding:.4rem .55rem",
     );
     // Finish button: white on #ef4444 was 3.76:1.
-    expect(html).toContain(".banner button{background:#dc2626;");
+    expect(html).toContain(".banner button{background:var(--danger);");
     expect(html).not.toContain("#ef4444");
-    // Small muted text at 12px: #6b7280 / #64748b were < 4.5:1.
+    // Small muted text at 12px: a darker grey and --control were < 4.5:1.
     expect(html).not.toContain("#6b7280");
-    expect(html).not.toContain("#64748b;flex-shrink");
-    expect(html).toContain(".field-row .help{font-size:.75rem;color:#94a3b8;");
+    expect(html).not.toContain("var(--control);flex-shrink");
+    expect(html).toContain(
+      ".field-row .help{font-size:.75rem;color:var(--muted);",
+    );
   });
 
   it("announces the AJAX save result through a live region and focuses a post-redirect flash (#855)", () => {

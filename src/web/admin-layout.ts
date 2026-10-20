@@ -7,8 +7,8 @@
 
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getPermissionIssueCount } from "../services/bot-permission-status.js";
+import { designStylesheetLinks } from "./design-assets.js";
 import { getInactivityWindowMs } from "./session.js";
-import { THEME } from "./theme.js";
 import {
   CONFIRM_SCRIPT,
   escapeHtml,
@@ -262,40 +262,43 @@ export interface AdminPageOptions {
 }
 
 const STYLE = [
+  // kb.css is linked ahead of this sheet but the legacy pages keep their own look until each
+  // moves to the kb- classes (#1314): undo its base line-height and colour-scheme here.
+  ":root{color-scheme:normal}",
   "*,*::before,*::after{box-sizing:border-box}",
-  // Core palette is shared with the pre-auth pages via THEME (issue #569).
-  `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:${THEME.bg};color:${THEME.text}}`,
-  `a{color:${THEME.link};text-decoration:none}`,
+  // Core palette comes from tokens.css, shared with the member and pre-auth pages (issue #569).
+  `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}`,
+  `a{color:var(--link);text-decoration:none}`,
   "a:hover{text-decoration:underline}",
-  ".banner{background:#1f2937;border-bottom:1px solid #2d3748;padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:.5rem;flex-wrap:wrap}",
+  ".banner{background:var(--chrome);border-bottom:1px solid var(--border);padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:.5rem;flex-wrap:wrap}",
   ".banner .right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".banner .left{display:flex;gap:.75rem;align-items:center}",
-  ".banner .pill{background:#374151;color:#d1d5db;padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
-  ".banner a.pill-update{background:#1e3a8a;color:#bfdbfe;font-weight:600}",
-  ".banner a.pill-update:hover,.banner a.pill-update:focus-visible{background:#1d4ed8;color:#fff;text-decoration:none}",
+  ".banner .pill{background:var(--fill);color:var(--pill-text);padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
+  ".banner a.pill-update{background:var(--info-bg);color:var(--info-text);font-weight:600}",
+  ".banner a.pill-update:hover,.banner a.pill-update:focus-visible{background:var(--primary-hover);color:var(--on-primary);text-decoration:none}",
   ".banner form{display:inline;margin:0}",
-  // #dc2626 (not #ef4444) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
-  `.banner button{background:${THEME.danger};color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
-  `.banner button:hover{background:${THEME.dangerHover}}`,
-  ".banner a.surface{color:#cbd5e1;background:#374151;padding:.25rem .55rem;border-radius:4px;font-weight:600;text-decoration:none;margin-right:.5rem}",
-  ".banner a.surface:hover{background:#4b5563;color:#fff}",
+  // --danger (not --embed-danger) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
+  `.banner button{background:var(--danger);color:var(--on-primary);border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
+  `.banner button:hover{background:var(--danger-hover)}`,
+  ".banner a.surface{color:var(--text-secondary);background:var(--fill);padding:.25rem .55rem;border-radius:4px;font-weight:600;text-decoration:none;margin-right:.5rem}",
+  ".banner a.surface:hover{background:var(--fill-hover);color:var(--on-primary)}",
   ".shell{display:flex;min-height:calc(100vh - 41px)}",
-  "nav.side{background:#161a22;border-right:1px solid #2d3748;width:220px;padding:1rem .5rem;flex-shrink:0}",
+  "nav.side{background:var(--surface);border-right:1px solid var(--border);width:220px;padding:1rem .5rem;flex-shrink:0}",
   "nav.side ul{list-style:none;padding:0;margin:0}",
   // Grouped sidebar sections (#613): a muted, small uppercase heading sits
   // above each group's <ul>, consistent with the dark sidebar palette.
   "nav.side .nav-group+.nav-group{margin-top:1rem}",
-  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8}",
-  "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:#cbd5e1}",
-  "nav.side a:hover{background:#1f2937;text-decoration:none}",
-  "nav.side a.active{background:#1d2a44;color:#fff}",
+  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}",
+  "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:var(--text-secondary)}",
+  "nav.side a:hover{background:var(--chrome);text-decoration:none}",
+  "nav.side a.active{background:var(--selected);color:var(--on-primary)}",
   // Feature-gated pages whose feature is off are shown but greyed with an
   // "off" badge so they stay discoverable (#610). The active page keeps its
   // highlight even when disabled, so the greying only applies when inactive.
-  // Greyed, but still 6.8:1 on the sidebar (#6b7280 was 3.6:1 — #855).
-  `nav.side a.nav-disabled:not(.active){color:${THEME.muted}}`,
-  "nav.side a.nav-disabled:not(.active):hover{color:#cbd5e1}",
-  "nav.side a .nav-badge{float:right;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e1;background:#374151;border-radius:4px;padding:.05rem .3rem;margin-top:.1rem}",
+  // Greyed, but still 6.8:1 on the sidebar (a darker grey was 3.6:1 — #855).
+  `nav.side a.nav-disabled:not(.active){color:var(--muted)}`,
+  "nav.side a.nav-disabled:not(.active):hover{color:var(--text-secondary)}",
+  "nav.side a .nav-badge{float:right;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);background:var(--fill);border-radius:4px;padding:.05rem .3rem;margin-top:.1rem}",
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
@@ -303,41 +306,41 @@ const STYLE = [
   // The skip-link target itself shouldn't draw a ring around the whole column.
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
-  "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:#cbd5e1}",
-  ".subtitle{color:#94a3b8;margin:0 0 1rem}",
-  ".card{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
+  "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:var(--text-secondary)}",
+  ".subtitle{color:var(--muted);margin:0 0 1rem}",
+  ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
-  "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid #2d3748;vertical-align:top}",
-  "th{font-weight:600;color:#94a3b8;background:#1a1f2a}",
+  "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}",
+  "th{font-weight:600;color:var(--muted);background:var(--surface-alt)}",
   // Row headers (`<th scope="row">`, e.g. the Permissions matrix) read as
   // body cells visually; the semantics are for assistive tech (#855).
   "tbody th[scope=row]{background:transparent;color:inherit;font-weight:500}",
-  "tr:hover td,tr:hover th[scope=row]{background:#1a1f2a}",
+  "tr:hover td,tr:hover th[scope=row]{background:var(--surface-alt)}",
   // Settings page: keep editable controls inside their cell and let long
   // current/default values wrap instead of pushing the table wide (issue #489).
   "td.settings-value{min-width:12rem}",
   "td.settings-value input[type=text],td.settings-value select{width:100%;box-sizing:border-box}",
   "td.settings-default{overflow-wrap:anywhere;word-break:break-word}",
-  ".muted{color:#94a3b8}",
+  ".muted{color:var(--muted)}",
   ".mono{font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace;font-size:.85rem}",
   ".tag{display:inline-block;padding:.1rem .45rem;border-radius:4px;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
-  ".tag-on{background:#14532d;color:#bbf7d0}",
-  ".tag-off{background:#4b1e1e;color:#fecaca}",
-  ".tag-info{background:#1e3a8a;color:#bfdbfe}",
-  ".tag-warn{background:#4a3a0d;color:#fde68a}",
-  ".tag-diff-add{background:#14532d;color:#bbf7d0}",
-  ".tag-diff-change{background:#4a3a0d;color:#fde68a}",
-  ".tag-diff-reject{background:#4b1e1e;color:#fecaca}",
-  ".empty{padding:1rem;color:#94a3b8;font-style:italic}",
+  ".tag-on{background:var(--ok-bg);color:var(--ok-text)}",
+  ".tag-off{background:var(--err-bg);color:var(--err-text)}",
+  ".tag-info{background:var(--info-bg);color:var(--info-text)}",
+  ".tag-warn{background:var(--warn-bg);color:var(--warn-text)}",
+  ".tag-diff-add{background:var(--ok-bg);color:var(--ok-text)}",
+  ".tag-diff-change{background:var(--warn-bg);color:var(--warn-text)}",
+  ".tag-diff-reject{background:var(--err-bg);color:var(--err-text)}",
+  ".empty{padding:1rem;color:var(--muted);font-style:italic}",
   ".kv{display:grid;grid-template-columns:200px 1fr;gap:.4rem 1rem}",
-  ".kv dt{color:#94a3b8}",
+  ".kv dt{color:var(--muted)}",
   ".kv dd{margin:0}",
   ".notice{padding:.6rem .8rem;border-radius:6px;margin:0 0 1rem}",
-  ".notice.info{background:#1d2a44;color:#bfdbfe}",
-  ".notice.ok{background:#14532d;color:#bbf7d0}",
-  ".notice.warn{background:#4a3a0d;color:#fde68a}",
-  ".notice.err{background:#4b1e1e;color:#fecaca}",
+  ".notice.info{background:var(--selected);color:var(--info-text)}",
+  ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
+  ".notice.warn{background:var(--warn-bg);color:var(--warn-text)}",
+  ".notice.err{background:var(--err-bg);color:var(--err-text)}",
   // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
   ".notice.feature-disabled{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}",
@@ -345,33 +348,33 @@ const STYLE = [
   ".notice.feature-disabled .fd-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".notice.feature-disabled form{margin:0}",
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
-  "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:#cbd5e1}",
+  "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:var(--text-secondary)}",
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
-  // Control borders use THEME.control (3.97:1) — the hairline #2d3748 was
+  // Control borders use --control (3.97:1) — the hairline --border was
   // 1.58:1 against the field, far below the 3:1 floor (WCAG 1.4.11, #855).
-  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
+  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "form.stack textarea{resize:vertical;min-height:5rem;font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace}",
-  "form.stack fieldset{border:1px solid #2d3748;border-radius:6px;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem}",
-  "form.stack fieldset legend{color:#94a3b8;padding:0 .35rem}",
+  "form.stack fieldset{border:1px solid var(--border);border-radius:6px;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem}",
+  "form.stack fieldset legend{color:var(--muted);padding:0 .35rem}",
   ".inline-form{margin:.75rem 0 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
-  ".btn{background:#374151;color:#e4e6eb;border:0;padding:.35rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem;font-weight:600;display:inline-block;text-decoration:none}",
+  ".btn{background:var(--fill);color:var(--text);border:0;padding:.35rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem;font-weight:600;display:inline-block;text-decoration:none}",
   // `.btn` sets display, which overrides the UA rule for `hidden`; keep a
   // hidden button (a JS-only control before its script runs) out of view.
   ".btn[hidden]{display:none}",
-  ".btn:hover{background:#4b5563;text-decoration:none}",
-  ".btn-primary{background:#2563eb;color:#fff}",
-  ".btn-primary:hover{background:#1d4ed8}",
-  ".btn-secondary{background:#374151;color:#d1d5db}",
-  ".btn-secondary:hover{background:#4b5563}",
-  ".btn-danger{background:#dc2626;color:#fff}",
-  ".btn-danger:hover{background:#b91c1c}",
+  ".btn:hover{background:var(--fill-hover);text-decoration:none}",
+  ".btn-primary{background:var(--primary);color:var(--on-primary)}",
+  ".btn-primary:hover{background:var(--primary-hover)}",
+  ".btn-secondary{background:var(--fill);color:var(--pill-text)}",
+  ".btn-secondary:hover{background:var(--fill-hover)}",
+  ".btn-danger{background:var(--danger);color:var(--on-primary)}",
+  ".btn-danger:hover{background:var(--danger-hover)}",
   ".btn-sm{padding:.2rem .5rem;font-size:.75rem}",
-  ".btn[disabled],.btn[disabled]:hover{opacity:.5;cursor:not-allowed;background:#374151}",
+  ".btn[disabled],.btn[disabled]:hover{opacity:.5;cursor:not-allowed;background:var(--fill)}",
   ".actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem}",
   ".actions form{margin:0}",
   ".field-row{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.75rem}",
-  ".field-row > label{font-size:.85rem;color:#94a3b8}",
-  `.field-row .help{font-size:.75rem;color:${THEME.muted};margin-top:.15rem}`,
+  ".field-row > label{font-size:.85rem;color:var(--muted)}",
+  `.field-row .help{font-size:.75rem;color:var(--muted);margin-top:.15rem}`,
   // Cascade greying: rows whose master `.enabled` toggle is off (#485).
   ".cascade-off{opacity:.5}",
   // Dependency greying: rows whose hard `dependsOn` target is off (#666).
@@ -385,62 +388,62 @@ const STYLE = [
     "overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}",
   // A control the last save rejected (#854). The outline gives sighted users
   // the same "this field" signal that `aria-invalid` gives a screen reader.
-  '[aria-invalid="true"]{outline:2px solid #dc2626;outline-offset:1px}',
+  '[aria-invalid="true"]{outline:2px solid var(--danger);outline-offset:1px}',
   '.cron-picker[aria-invalid="true"]{outline-offset:3px}',
   // Keyboard focus (WCAG 2.4.7, #855). There were 22 `:hover` rules and no
   // `:focus` rule at all; the UA default ring is near-invisible on this
   // palette. One visible ring for every interactive element, and the nav /
   // button hover surfaces are mirrored so keyboard users get the same
   // affordance. Declared after `[aria-invalid]` so the ring wins on focus.
-  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid ${THEME.focus};outline-offset:2px}`,
-  "nav.side a:focus-visible{background:#1f2937;text-decoration:none}",
+  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
+  "nav.side a:focus-visible{background:var(--chrome);text-decoration:none}",
   ".btn:focus-visible{text-decoration:none}",
-  ".banner a.surface:focus-visible{background:#4b5563;color:#fff;text-decoration:none}",
+  ".banner a.surface:focus-visible{background:var(--fill-hover);color:var(--on-primary);text-decoration:none}",
   // Skip link: off-screen until focused, then pinned top-left so keyboard
   // users can jump past the ~20 sidebar links on every page.
-  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:${THEME.primary};color:#fff;padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
+  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
   ".wizard-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1rem}",
-  ".feature-card{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
+  ".feature-card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
   ".feature-card input{margin-top:.2rem;flex-shrink:0}",
   ".feature-card .fc-info{flex:1}",
-  ".feature-card .fc-name{font-weight:600;font-size:.9rem;color:#e4e6eb;display:block;cursor:pointer}",
-  ".feature-card .fc-desc{font-size:.75rem;color:#94a3b8;margin-top:.1rem}",
-  `select[multiple]{min-height:4rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
+  ".feature-card .fc-name{font-weight:600;font-size:.9rem;color:var(--text);display:block;cursor:pointer}",
+  ".feature-card .fc-desc{font-size:.75rem;color:var(--muted);margin-top:.1rem}",
+  `select[multiple]{min-height:4rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "td.actions{display:flex;gap:.35rem;flex-wrap:wrap}",
   "td.actions form{margin:0}",
-  ".helper{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
-  ".helper summary{cursor:pointer;color:#cbd5e1;font-weight:600}",
+  ".helper{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
+  ".helper summary{cursor:pointer;color:var(--text-secondary);font-weight:600}",
   ".helper ul{margin:.4rem 0;padding-left:1.2rem}",
   "form.inline-order{display:flex;gap:.25rem;align-items:center;margin:0}",
-  `form.inline-order input[type=number]{width:5rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}`,
+  `form.inline-order input[type=number]{width:5rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}`,
   ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
   ".edit-details form.stack{margin-top:.5rem}",
   "button[disabled]{opacity:.5;cursor:not-allowed}",
   ".cron-picker{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:wrap}",
-  `.cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px}`,
+  `.cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px}`,
   ".cron-picker input[type=time]{width:7rem}",
   ".cron-picker[hidden]{display:none}",
   // Voice-analytics heatmap (#675): a 24-column × 7-row hour×weekday grid of
   // colour-intensity cells, plus simple bar summaries for the marginals.
   ".heatgrid{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;font-size:.65rem;min-width:560px}",
-  ".heatgrid .hg-corner,.heatgrid .hg-col,.heatgrid .hg-rowlabel{color:#94a3b8;display:flex;align-items:center}",
+  ".heatgrid .hg-corner,.heatgrid .hg-col,.heatgrid .hg-rowlabel{color:var(--muted);display:flex;align-items:center}",
   ".heatgrid .hg-col{justify-content:center}",
   ".heatgrid .hg-rowlabel{padding-right:.4rem;white-space:nowrap}",
-  ".heatgrid .hg-cell{aspect-ratio:1;border-radius:2px;background:#1e293b;min-height:14px}",
-  ".heatgrid .hg-cell.peak{outline:1px solid #a5b4fc}",
+  ".heatgrid .hg-cell{aspect-ratio:1;border-radius:2px;background:var(--heat-empty);min-height:14px}",
+  ".heatgrid .hg-cell.peak{outline:1px solid var(--lore-peak)}",
   ".heat-bars{display:flex;flex-direction:column;gap:.3rem}",
   ".heat-bars .hbar{display:flex;align-items:center;gap:.5rem}",
-  ".heat-bars .hbar .lbl{width:3rem;color:#94a3b8;flex-shrink:0}",
-  ".heat-bars .hbar .track{flex:1;background:#0f1115;border:1px solid #2d3748;border-radius:4px;height:.9rem;overflow:hidden}",
-  ".heat-bars .hbar .track .fill{height:100%;background:#4338ca}",
-  `.heat-bars .hbar .val{width:6rem;text-align:right;color:${THEME.muted};flex-shrink:0;font-size:.7rem}`,
+  ".heat-bars .hbar .lbl{width:3rem;color:var(--muted);flex-shrink:0}",
+  ".heat-bars .hbar .track{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;height:.9rem;overflow:hidden}",
+  ".heat-bars .hbar .track .fill{height:100%;background:var(--lore-fill)}",
+  `.heat-bars .hbar .val{width:6rem;text-align:right;color:var(--muted);flex-shrink:0;font-size:.7rem}`,
   // Reflow (WCAG 1.4.10, #855): below ~760px the 220px sidebar would take
   // most of the viewport, so it collapses into a wrapping row of links above
   // the content and the definition grid stacks.
   "@media (max-width:760px){" +
     ".shell{flex-direction:column}" +
-    "nav.side{width:auto;border-right:0;border-bottom:1px solid #2d3748;padding:.5rem .75rem}" +
+    "nav.side{width:auto;border-right:0;border-bottom:1px solid var(--border);padding:.5rem .75rem}" +
     "nav.side .nav-group{display:inline-block;vertical-align:top;margin:.25rem 1rem .25rem 0}" +
     "nav.side .nav-group+.nav-group{margin-top:.25rem}" +
     "nav.side ul{display:flex;flex-wrap:wrap;gap:.25rem}" +
@@ -825,6 +828,8 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     '<meta name="referrer" content="strict-origin-when-cross-origin">',
     `<title>${escapeHtml(opts.title)} — Koolbot Admin</title>`,
+    // tokens.css + kb.css first, so this page-local sheet can still override them.
+    designStylesheetLinks("/admin"),
     `<style>${STYLE}</style>`,
     "</head><body>",
     // First focusable element on every page (#855). `main` carries

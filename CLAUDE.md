@@ -130,6 +130,12 @@ and type (`docs/design/tokens.json`, the single source for values), the `kb-` co
 embed rules (`docs/design/discord.md`). New pages, components and embeds follow it. Where existing code disagrees,
 the design wins and the gap is tracked in the redesign epic (#1314); do not copy an old pattern into new code.
 
+Styling in `src/web/` takes every colour, spacing step, radius and font size from `docs/design/tokens.json`, never as
+a literal. `src/web/design-assets.ts` generates `tokens.css` from it (`--<token>`, plus `--type-<style>-size|line-height|weight|letter-spacing`
+for each type style) and serves it with `kb.css` from `/admin/_assets/` and `/me/_assets/`; every layout links both. Write `var(--name)`
+in the inline `STYLE` blocks and `style=""` attributes. `__tests__/web/design-tokens-drift.test.ts` fails on a hex literal in
+`src/web` or `kb.css`, a `font-size` literal in `kb.css`, or a `var(--name)` that no token defines. There is no `theme.ts`.
+
 ### Admin surface: Web UI only (design decision — read before proposing a new command)
 
 **The Web UI is the _only_ admin surface.** Slash commands are reserved for day-to-day
