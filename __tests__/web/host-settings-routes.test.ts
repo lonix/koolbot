@@ -775,10 +775,14 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
     });
     expect(store.get(EVENT_ID)?.seriesGroupSetup).toMatchObject({
       groupsEnabled: true,
-      groupsLocked: true,
       groupLabel: "Squad",
       groups: [{ key: "g_00000001", name: "Heli <b>x</b>", size: 2 }],
     });
+    // The lock was saved for this occurrence only.
+    expect(store.get(EVENT_ID)?.groupsLocked).toBe(true);
+    expect(store.get(EVENT_ID)?.seriesGroupSetup).not.toHaveProperty(
+      "groupsLocked",
+    );
     expect(auditRows).toHaveLength(1);
   });
 

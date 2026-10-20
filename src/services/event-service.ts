@@ -1706,15 +1706,12 @@ export class EventService extends ScheduledService {
           // edit of the running event therefore stays with that occurrence, and a
           // leader's rename or tag never reaches the next one. A row without a
           // series setup (made before it existed) is read as it is, with the
-          // lock off as before; its successor then carries the setup on. The
+          // lock off; its successor then carries the setup on. The
           // memberships, leaders and channel ids stay behind either way.
           const source = latest ?? previous;
           const series =
             readSeriesGroupSetup(source.seriesGroupSetup) ??
-            ({
-              ...seriesGroupSetupOf(source),
-              groupsLocked: false,
-            } as const);
+            seriesGroupSetupOf(source);
           const groupSetup = successorGroupFields(
             series,
             copyGroupSetup(source).channelLeadMinutes,

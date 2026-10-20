@@ -2332,12 +2332,13 @@ occurrence of a repeating event starts with, until the host changes it. Nothing 
 it is the tick **Also for the next occurrences** on the forms of the host panel's **Live settings**.
 
 - **What is kept.** Whether groups are on, the number of groups, their kinds, sizes, names and default
-  tags, the group label, the leader label, the lock, **Group leaders**, leader customisation, tagging
-  and the tag position. The setup is stored on the event as the series' setup and every occurrence
+  tags, the group label, the leader label, **Group leaders**, leader customisation, tagging
+  and the tag position, and the Captains lobby as a structural group. The setup is stored on the event as the series' setup and every occurrence
   hands it on to the next one.
 - **What is not kept.** People in groups, leaders, channels and clan tags on nicknames: each occurrence
   starts with nobody assigned, no leaders (not even as defaults) and new channels. The channel creation
-  time still follows the occurrence that ended, as before.
+  time still follows the occurrence that ended, as before. The lock stays per occurrence: every
+  occurrence starts unlocked, whatever the series setup or the event before it had.
 - **The host's names, not a team's.** If a leader renamed a group during the event (for example
   "Caldari" became "Quizzzzbois"), or changed its tag, the next occurrence gets the host's name
   "Caldari" and tag again. The host's name is already stored: the first change a leader makes keeps the
@@ -2355,7 +2356,7 @@ it is the tick **Also for the next occurrences** on the forms of the host panel'
   created when the running one ends or is cancelled, from the setup the series has at that moment). A
   series that was cancelled has no next occurrence, so the tick is refused there.
 - **Series made before this.** An event from before the series' setup existed has none stored: its next
-  occurrence is made from the event as it is (with the host's names and the lock off, as before), and
+  occurrence is made from the event as it is (with the host's names, and unlocked), and
   from then on carries a stored setup like any other series.
 - **Member data.** The stored setup holds no person, so nothing is added to the member export or reset.
 

@@ -1274,6 +1274,8 @@ describe("recurring event lifecycle", () => {
       presetId: "builtin:eve",
       groupLabel: "Squad",
       leaderLabel: "Captain",
+      // Never stored by this version; a value an earlier build stored must not
+      // make the successor start locked.
       groupsLocked: true,
       captainsEnabled: true,
       captainCustomisationEnabled: true,
@@ -1329,7 +1331,9 @@ describe("recurring event lifecycle", () => {
         presetId: "builtin:eve",
         groupLabel: "Squad",
         leaderLabel: "Captain",
-        groupsLocked: true,
+        // The lock is an in-event state: every occurrence starts unlocked, even
+        // when the stored series setup (or the occurrence before) was locked.
+        groupsLocked: false,
         captainsEnabled: true,
         captainCustomisationEnabled: true,
         tagsEnabled: true,
@@ -1385,7 +1389,10 @@ describe("recurring event lifecycle", () => {
       }));
       const { service } = buildService();
       await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
-      expect(created[0].seriesGroupSetup).toEqual(series);
+      // The stored lock of an earlier build is not carried on.
+      const { groupsLocked: _ignored, ...withoutLock } = series;
+      void _ignored;
+      expect(created[0].seriesGroupSetup).toEqual(withoutLock);
       expect(created[0].seriesGroupSetup).not.toBe(series);
     });
 
@@ -1484,9 +1491,9 @@ describe("recurring event lifecycle", () => {
       });
       expect(created[0].seriesGroupSetup).toMatchObject({
         groupsEnabled: true,
-        groupsLocked: false,
         groups: [{ key: "g_a", name: "Caldari", size: 4 }],
       });
+      expect(created[0].seriesGroupSetup).not.toHaveProperty("groupsLocked");
 
       // A recurring event without groups still records "no groups", so a
       // later un-ticked switch-on of one occurrence cannot leak into the series.

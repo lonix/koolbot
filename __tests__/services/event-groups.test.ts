@@ -795,13 +795,12 @@ describe("the series group setup (#1266)", () => {
     ],
   };
 
-  it("takes the host's names and tags, the lock and the switches, and no person or channel", () => {
+  it("takes the host's names and tags and the switches, never the lock, and no person or channel", () => {
     expect(seriesGroupSetupOf(liveRow)).toEqual({
       groupsEnabled: true,
       presetId: "builtin:eve",
       groupLabel: "Squad",
       leaderLabel: "Captain",
-      groupsLocked: true,
       captainsEnabled: true,
       captainCustomisationEnabled: true,
       tagsEnabled: true,
@@ -827,11 +826,10 @@ describe("the series group setup (#1266)", () => {
     });
   });
 
-  it("keeps no groups and no lock for a series with groups off", () => {
+  it("keeps no groups for a series with groups off", () => {
     expect(seriesGroupSetupOf({ ...liveRow, groupsEnabled: false })).toEqual(
       expect.objectContaining({
         groupsEnabled: false,
-        groupsLocked: false,
         groups: [],
       }),
     );
@@ -840,7 +838,6 @@ describe("the series group setup (#1266)", () => {
       presetId: null,
       groupLabel: "Team",
       leaderLabel: "Leader",
-      groupsLocked: false,
       captainsEnabled: false,
       captainCustomisationEnabled: false,
       tagsEnabled: false,
@@ -858,7 +855,6 @@ describe("the series group setup (#1266)", () => {
       presetId: null,
       groupLabel: "Team",
       leaderLabel: "Leader",
-      groupsLocked: false,
       captainsEnabled: false,
       captainCustomisationEnabled: false,
       tagsEnabled: false,
@@ -867,6 +863,10 @@ describe("the series group setup (#1266)", () => {
     });
     const stored = seriesGroupSetupOf(liveRow);
     expect(readSeriesGroupSetup(stored)).toEqual(stored);
+    // A lock stored by an earlier build is ignored, never read back.
+    expect(
+      readSeriesGroupSetup({ ...stored, groupsLocked: true } as never),
+    ).toEqual(stored);
   });
 
   it("keeps the captains lobby as a structural group, without its channel or anybody in it", () => {
@@ -903,10 +903,12 @@ describe("the series group setup (#1266)", () => {
   });
 
   it("builds a successor's fields from it without memberships, leaders or channels", () => {
+    // The row was locked (liveRow), and so was a setup an earlier build stored:
+    // the successor starts unlocked either way.
     const fields = successorGroupFields(seriesGroupSetupOf(liveRow), 25);
     expect(fields).toMatchObject({
       groupsEnabled: true,
-      groupsLocked: true,
+      groupsLocked: false,
       channelLeadMinutes: 25,
       groupLabel: "Squad",
     });

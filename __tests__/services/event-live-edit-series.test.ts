@@ -145,7 +145,6 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
       presetId: "builtin:eve",
       groupLabel: "Squad",
       leaderLabel: "Captain",
-      groupsLocked: false,
       captainsEnabled: true,
       captainCustomisationEnabled: true,
       tagsEnabled: true,
@@ -190,15 +189,12 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
     expect(writes.map((w) => Object.keys(w.set))).toEqual([["groupsLocked"]]);
   });
 
-  it("with the tick the series setup is what the SAME save leaves behind", async () => {
+  it("a lock saved with the tick stays with this occurrence: the series setup stores no lock", async () => {
     seed();
     const out = await save([lock(true), tick]);
     expect(out).toMatchObject({ status: "done" });
     expect(store.get(EV)?.groupsLocked).toBe(true);
-    expect(
-      (store.get(EV)?.seriesGroupSetup as { groupsLocked: boolean })
-        .groupsLocked,
-    ).toBe(true);
+    expect(store.get(EV)?.seriesGroupSetup).not.toHaveProperty("groupsLocked");
     // The lock row ran first, the tick last.
     expect(writes.map((w) => Object.keys(w.set))).toEqual([
       ["groupsLocked"],
@@ -209,12 +205,11 @@ describe("the tick 'also for the next occurrences' (#1266)", () => {
   it("saving the tick again replaces the stored setup with the then-current one", async () => {
     seed();
     await save([tick]);
-    store.get(EV)!.groupsLocked = true;
+    store.get(EV)!.groupLabel = "Crew";
     await save([tick]);
     expect(
-      (store.get(EV)?.seriesGroupSetup as { groupsLocked: boolean })
-        .groupsLocked,
-    ).toBe(true);
+      (store.get(EV)?.seriesGroupSetup as { groupLabel: string }).groupLabel,
+    ).toBe("Crew");
   });
 
   it("with groups off the series is stored without groups", async () => {

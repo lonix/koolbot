@@ -759,12 +759,13 @@ export function copyGroupSetup(source: GroupSetupSource): EventGroupSetup {
 /**
  * The setup a series' next occurrences start with, taken from an event row as
  * the host has it (#1266): `copyGroupSetup`'s host-only values (a leader's
- * rename and tag customisation never get in) plus the lock. Nothing of a
+ * rename and tag customisation never get in). The lock is not part of it: it
+ * is an in-event state and every occurrence starts unlocked. Nothing of a
  * person, a membership or a channel. With groups off the groups are not kept:
  * the successor of a series without groups has none.
  */
 export function seriesGroupSetupOf(
-  source: GroupSetupSource & { groupsLocked?: boolean | null },
+  source: GroupSetupSource,
 ): ISeriesGroupSetup {
   const copy = copyGroupSetup(source);
   return {
@@ -772,7 +773,6 @@ export function seriesGroupSetupOf(
     presetId: copy.presetId,
     groupLabel: copy.groupLabel,
     leaderLabel: copy.leaderLabel,
-    groupsLocked: copy.groupsEnabled && source.groupsLocked === true,
     captainsEnabled: copy.captainsEnabled,
     captainCustomisationEnabled: copy.captainCustomisationEnabled,
     tagsEnabled: copy.tagsEnabled,
@@ -805,7 +805,6 @@ export function readSeriesGroupSetup(
     presetId: raw.presetId ?? null,
     groupLabel: raw.groupLabel || empty.groupLabel,
     leaderLabel: raw.leaderLabel || empty.leaderLabel,
-    groupsLocked: raw.groupsLocked === true,
     captainsEnabled: raw.captainsEnabled === true,
     captainCustomisationEnabled: raw.captainCustomisationEnabled === true,
     tagsEnabled: raw.tagsEnabled === true,
@@ -832,14 +831,15 @@ export function readSeriesGroupSetup(
 export function successorGroupFields(
   series: ISeriesGroupSetup,
   channelLeadMinutes: number | null,
-): EventGroupSetup & { groupsLocked: boolean } {
+): EventGroupSetup & { groupsLocked: false } {
   return {
     groupsEnabled: series.groupsEnabled,
     presetId: series.presetId,
     groupLabel: series.groupLabel,
     leaderLabel: series.leaderLabel,
     channelLeadMinutes,
-    groupsLocked: series.groupsLocked,
+    // Locking is an in-event state: every occurrence starts unlocked.
+    groupsLocked: false,
     groups: series.groups.map((g) => ({
       key: g.key,
       name: g.name,
