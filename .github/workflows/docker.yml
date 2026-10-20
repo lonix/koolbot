@@ -496,9 +496,29 @@ jobs:
             // `2026-10-20T10:02:03Z` -> `2026-10-20 10:02:03 UTC`
             const builtAt = (process.env.BUILT_AT || new Date().toISOString().slice(0, 19) + 'Z')
               .replace('T', ' ').replace('Z', ' UTC');
+            // Shared with the preview-outdated job (keep the two copies identical):
+            // rewrite a comment body into its outdated / ready form. Both strip
+            // an earlier notice first, so they are idempotent.
+            const NOTICE = /<!-- docker-preview-outdated -->[\s\S]*?<!-- \/docker-preview-outdated -->\n\n?/;
+            const markReady = (text) => text.replace(NOTICE, '').replace(/^### .*$/m, '### 🐳 Docker preview ready');
+            const markOutdated = (text, head, built, why, runUrl) => {
+              const commitUrl = (h) => `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${h}`;
+              const notice = [
+                '<!-- docker-preview-outdated -->',
+                '> [!WARNING]',
+                `> **Outdated.** The PR head is now [\`${head.slice(0, 7)}\`](${commitUrl(head)}), but the image below was built from ` +
+                  `[\`${built.slice(0, 7)}\`](${commitUrl(built)}). ${why} ([run](${runUrl})).`,
+                '<!-- /docker-preview-outdated -->',
+                '',
+              ].join('\n');
+              return text.replace(NOTICE, '')
+                .replace(/^### .*$/m, '### 🐳 Docker preview outdated')
+                .replace(/^(### .*\n\n)/m, `$1${notice}\n`);
+            };
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const tag = `pr-${number}`;
             const pinned = `${tag}-sha-${sha}`;
-            const body = [
+            const ready = [
               MARKER,
               // Machine-readable: the preview-outdated job compares this with the
               // PR head. Keep it on line 2.
@@ -524,6 +544,15 @@ jobs:
               '> Run it with its own Discord application/token, a test guild and a throwaway MongoDB, never production.',
               '> This comment is updated on every rebuild, and marked outdated when a push to the PR is not built. The images are deleted when the PR is closed.',
             ].join('\n');
+
+            // The PR may have moved while this image was building (a push that
+            // was not built, e.g. after the label was removed, gets its own
+            // run). Re-read the head just before writing so this writer and
+            // preview-outdated end in the same state whatever the order.
+            const { data: live } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+            const body = live.head.sha === fullSha
+              ? ready
+              : markOutdated(ready, live.head.sha, fullSha, 'A newer commit was pushed while this image was building', runUrl);
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               ...context.repo, issue_number: number, per_page: 100,
@@ -571,6 +600,25 @@ jobs:
             const MARKER = '<!-- docker-preview -->';
             const number = context.issue.number;
             const head = context.payload.pull_request.head.sha;
+            // Shared with the preview-outdated job (keep the two copies identical):
+            // rewrite a comment body into its outdated / ready form. Both strip
+            // an earlier notice first, so they are idempotent.
+            const NOTICE = /<!-- docker-preview-outdated -->[\s\S]*?<!-- \/docker-preview-outdated -->\n\n?/;
+            const markReady = (text) => text.replace(NOTICE, '').replace(/^### .*$/m, '### 🐳 Docker preview ready');
+            const markOutdated = (text, head, built, why, runUrl) => {
+              const commitUrl = (h) => `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${h}`;
+              const notice = [
+                '<!-- docker-preview-outdated -->',
+                '> [!WARNING]',
+                `> **Outdated.** The PR head is now [\`${head.slice(0, 7)}\`](${commitUrl(head)}), but the image below was built from ` +
+                  `[\`${built.slice(0, 7)}\`](${commitUrl(built)}). ${why} ([run](${runUrl})).`,
+                '<!-- /docker-preview-outdated -->',
+                '',
+              ].join('\n');
+              return text.replace(NOTICE, '')
+                .replace(/^### .*$/m, '### 🐳 Docker preview outdated')
+                .replace(/^(### .*\n\n)/m, `$1${notice}\n`);
+            };
             // A newer push is already in flight: its run owns the comment.
             const { data: current } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
             if (current.head.sha !== head) {
@@ -588,28 +636,23 @@ jobs:
               return;
             }
             if (built === head) {
-              core.info('The preview already matches the PR head.');
+              // The head is back on the built commit (e.g. a force-push), so an
+              // earlier outdated notice no longer applies.
+              if (NOTICE.test(existing.body)) {
+                await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body: markReady(existing.body) });
+                core.info('The preview matches the PR head again; removed the outdated notice.');
+              } else {
+                core.info('The preview already matches the PR head.');
+              }
               return;
             }
             const why = process.env.BUILD_RESULT === 'failure'
               ? 'The build for the new head failed'
               : 'No build ran for the new head (the `docker-preview` label may be missing, or the build was skipped)';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const commitUrl = (h) => `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${h}`;
-            const notice = [
-              '<!-- docker-preview-outdated -->',
-              '> [!WARNING]',
-              `> **Outdated.** The PR head is now [\`${head.slice(0, 7)}\`](${commitUrl(head)}), but the image below was built from ` +
-                `[\`${built.slice(0, 7)}\`](${commitUrl(built)}). ${why} ([run](${runUrl})).`,
-              '<!-- /docker-preview-outdated -->',
-              '',
-            ].join('\n');
-            // Drop an earlier notice so repeated runs do not stack them.
-            const base = existing.body
-              .replace(/<!-- docker-preview-outdated -->[\s\S]*?<!-- \/docker-preview-outdated -->\n\n?/, '')
-              .replace(/^### .*$/m, '### 🐳 Docker preview outdated');
-            const body = base.replace(/^(### .*\n\n)/m, `$1${notice}\n`);
-            await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            await github.rest.issues.updateComment({
+              ...context.repo, comment_id: existing.id, body: markOutdated(existing.body, head, built, why, runUrl),
+            });
 
   cleanup-preview:
     name: Delete PR preview image
