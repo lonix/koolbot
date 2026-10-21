@@ -12,14 +12,13 @@ import logger from "../../../utils/logger.js";
 import {
   EventService,
   isRecurring,
-  parseEventDateTime,
   RecurrenceDisabledError,
 } from "../../../services/event-service.js";
 import {
   EVENT_RECURRENCES,
   type EventRecurrence,
 } from "../../../models/event.js";
-import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
+import { validateEventForm } from "../../event-form.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { loadPresetResolver } from "../../../services/event-group-preset-service.js";
 import {
@@ -43,10 +42,8 @@ import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
-  parseIntInRange,
   requireSessionContext,
   asyncHandler,
-  firstLengthError,
   respondSectionFlash,
 } from "./helpers.js";
 
@@ -61,29 +58,7 @@ export function createEventsRouter(client: Client): Router {
     "/events/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const title = getString(req, "title");
-      const description = getString(req, "description");
-      const date = getString(req, "date");
-      const time = getString(req, "time");
-      const durationRaw = getString(req, "duration");
-      const tzInput = getString(req, "timezone");
       const recurrenceRaw = getString(req, "recurrence") || "none";
-
-      if (!title || !date || !time) {
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: "Title, date and time are all required.",
-        });
-        return;
-      }
-      const lengthError = firstLengthError([
-        { label: "Title", value: title, max: 100 },
-        { label: "Description", value: description, max: 1000 },
-      ]);
-      if (lengthError) {
-        flashRedirect(res, "/admin/events", { type: "err", text: lengthError });
-        return;
-      }
       if (!(EVENT_RECURRENCES as readonly string[]).includes(recurrenceRaw)) {
         flashRedirect(res, "/admin/events", {
           type: "err",
@@ -92,50 +67,28 @@ export function createEventsRouter(client: Client): Router {
         return;
       }
       const recurrence = recurrenceRaw as EventRecurrence;
-      if (tzInput && !isValidTimezone(tzInput)) {
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: `Invalid timezone: ${tzInput}`,
-        });
-        return;
-      }
-
-      const config = ConfigService.getInstance();
-      const configuredTz = await config.getString("events.timezone", "");
-      const timezone = tzInput || configuredTz;
-
-      const startTime = parseEventDateTime(date, time, timezone);
-      if (!startTime) {
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
-        });
-        return;
-      }
-      if (startTime.getTime() <= Date.now()) {
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: "The event start time must be in the future.",
-        });
-        return;
-      }
-
-      const defaultDuration = await config.getNumber(
-        "events.default_duration_minutes",
-        120,
+      // Shared with the edit form (#1298): one validator, one set of messages.
+      const parsed = await validateEventForm(
+        {
+          title: getString(req, "title"),
+          description: getString(req, "description"),
+          date: getString(req, "date"),
+          time: getString(req, "time"),
+          duration: getString(req, "duration"),
+          timezone: getString(req, "timezone"),
+        },
+        { requireFuture: true },
       );
-      let durationMinutes = defaultDuration;
-      if (durationRaw) {
-        const parsed = parseIntInRange(durationRaw, 1, 1440);
-        if (parsed === null) {
-          flashRedirect(res, "/admin/events", {
-            type: "err",
-            text: "Duration must be between 1 and 1440 minutes.",
-          });
-          return;
-        }
-        durationMinutes = parsed;
+      if (!parsed.ok) {
+        flashRedirect(res, "/admin/events", {
+          type: "err",
+          text: parsed.error,
+        });
+        return;
       }
+      const { title, description, startTime, timezone, durationMinutes } =
+        parsed.value;
+      const config = ConfigService.getInstance();
 
       // Optional Groups section (#1188). Read the cap only when groups are on,
       // so a plain event takes exactly the path it always did.
@@ -183,7 +136,7 @@ export function createEventsRouter(client: Client): Router {
           title,
           description,
           startTime,
-          timezone: resolveTimezone(timezone),
+          timezone,
           durationMinutes,
           recurrence,
           ...(groups ? { groups } : {}),

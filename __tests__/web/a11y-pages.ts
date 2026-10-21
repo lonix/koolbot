@@ -78,6 +78,10 @@ import {
   renderHostPanelBody,
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
+import {
+  renderEventEditBody,
+  type EventEditView,
+} from "../../src/web/event-edit-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import { renderEndSection } from "../../src/web/event-end-view.js";
@@ -2250,6 +2254,22 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
   };
 }
 
+function editEventView(over: Partial<EventEditView>): EventEditView {
+  return {
+    id: "65a000000000000000000001",
+    title: "Quiz night",
+    description: "Bring a friend",
+    durationMinutes: 90,
+    timezone: "Europe/Oslo",
+    date: "2099-06-01",
+    time: "20:00",
+    when: "2099-06-01 20:00 (Europe/Oslo)",
+    version: "abc123",
+    mode: "full",
+    ...over,
+  };
+}
+
 /** Every `/me` member-facing page, rendered through the user layout. */
 export function userPages(): A11yPage[] {
   const shell = (title: string, active: string, body: string): string =>
@@ -2638,6 +2658,39 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({ event: hostEvent({ state: "ended" }) }),
+      ),
+    },
+    {
+      name: "/me edit event (not started)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (start held by a running Discord event)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ startLocked: true }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (started: description and duration only)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ mode: "limited" }),
+          csrfToken: COMMON.csrfToken,
+        }),
       ),
     },
     {

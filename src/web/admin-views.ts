@@ -2906,12 +2906,18 @@ export function renderEventsPage(props: EventsProps): string {
               },
             )}</details>`
           : "";
+      // Edit (#1298): an open one-off event of our own. A series and an adopted
+      // event are not editable yet, so no link is offered for them.
+      const editLink =
+        !finished && !e.recurrence && e.nativeAdopted !== true
+          ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
+          : "";
       const actions = finished
         ? e.awaitingSuccessor
           ? `${hostLink}\n  ${seriesForm}`
           : hostLink
         : `${hostLink}
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
+  ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${

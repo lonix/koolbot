@@ -174,6 +174,34 @@ export class NativeEventSync {
   }
 
   /**
+   * The state of the native event a row is linked to, read fresh from Discord
+   * (#1298), for a start-time edit that must not move under a running card.
+   * `none`: no link, or the link is gone (nothing to keep in line). `scheduled`:
+   * still editable. `locked`: Active, finished or cancelled, whose start the
+   * mirror never moves. `unknown`: the read failed; callers fail closed.
+   */
+  public async linkedStatus(
+    event: Pick<IEvent, "guildId" | "nativeEventId">,
+  ): Promise<"none" | "scheduled" | "locked" | "unknown"> {
+    if (!event.nativeEventId) return "none";
+    try {
+      const guild = await this.client.guilds.fetch(event.guildId);
+      const native = await this.fetchNative(
+        guild,
+        event.nativeEventId,
+        null,
+        true,
+      );
+      if (!native) return "none";
+      return native.status === GuildScheduledEventStatus.Scheduled
+        ? "scheduled"
+        : "locked";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
    * Load the guild's native events once, for a whole scan. Returns null when
    * mirroring is off, and `"failed"` when the listing failed: the caller then
    * skips native sync for this tick instead of falling back to one fetch per
@@ -519,6 +547,10 @@ export class NativeEventSync {
       {
         _id: event._id,
         nativeEventId: null,
+        // The identity the create is made with (#1298): a scan holding a row from
+        // before an edit must not start a create under the old name or start.
+        title: event.title,
+        startTime: event.startTime,
         state: { $in: ["scheduled", "active"] },
         $or: [
           { nativeCreateStartedAt: null },
@@ -587,11 +619,21 @@ export class NativeEventSync {
     guild: Guild,
     nativeId: string,
     cache?: NativeCache | null,
+    force = false,
   ): Promise<GuildScheduledEvent | null> {
     if (cache) return cache.get(nativeId) ?? null;
     try {
       return await this.callApi(
-        () => guild.scheduledEvents.fetch(nativeId),
+        () =>
+          // `force` skips the manager cache: the client does not receive the
+          // scheduled-event gateway events, so a cached copy can say Scheduled
+          // for an event somebody has since started.
+          force
+            ? guild.scheduledEvents.fetch({
+                guildScheduledEvent: nativeId,
+                force: true,
+              })
+            : guild.scheduledEvents.fetch(nativeId),
         "fetch guild scheduled event",
       );
     } catch (error) {
@@ -671,6 +713,35 @@ export class NativeEventSync {
         logger.warn(
           `Native events: could not edit running event ${sanitizeForLog(native.id)}:`,
           error,
+        );
+      }
+    }
+
+    // A running event's length can be edited by the host (#1298). Discord ends
+    // an external event at its end time, so a stale end would close the card
+    // early or late. The start is locked, but the end alone is sent, as its own
+    // patch, so a rejection never blocks the name/description patch above.
+    // Whether Discord accepts it for an Active event is unverified: a failure
+    // is logged once per event and the next scan tries again.
+    if (
+      startPast &&
+      !converting &&
+      diff.scheduledEndTime &&
+      want.end.getTime() > Date.now()
+    ) {
+      try {
+        await this.callApi(
+          () =>
+            guild.scheduledEvents.edit(native.id, {
+              scheduledEndTime: diff.scheduledEndTime,
+              reason: "KoolBot event mirror",
+            } as unknown as EditOptions),
+          "edit guild scheduled event end",
+        );
+      } catch (error) {
+        this.warnOnce(
+          `active-end:${String(event._id)}`,
+          `Native events: could not move the end of running event ${sanitizeForLog(native.id)}: ${sanitizeForLog(String(error))}`,
         );
       }
     }

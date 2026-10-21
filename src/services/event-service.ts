@@ -23,6 +23,15 @@ import {
   type RsvpStatus,
 } from "../models/event.js";
 import { NativeEventSync, type NativeCache } from "./event-native-sync.js";
+import {
+  EDIT_MESSAGES,
+  diffEventEdit,
+  editModeOf,
+  eventEditVersion,
+  hasEdit,
+  type EventEditDiff,
+  type EventEditFields,
+} from "./event-edit.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import {
   copyGroupSetup,
@@ -131,6 +140,43 @@ export interface CreateEventInput {
   groups?: EventGroupSetup;
   createdBy: string;
 }
+
+/** What the announcement shows of an event, as one comparable string. */
+export function announcementContentKey(event: {
+  title: string;
+  description?: string | null;
+  startTime: Date;
+  /** `formatEventWhen` shows the zone, so a zone change alone changes the text. */
+  timezone?: string | null;
+  durationMinutes: number;
+}): string {
+  return JSON.stringify([
+    event.title,
+    event.description ?? "",
+    event.startTime.getTime(),
+    event.timezone ?? "",
+    event.durationMinutes,
+  ]);
+}
+
+/** The outcome of {@link EventService.editEvent} (#1298). */
+export type EditEventResult =
+  | { ok: true; event: IEvent; diff: EventEditDiff }
+  | {
+      ok: false;
+      code:
+        | "not-found"
+        | "refused"
+        | "conflict"
+        | "locked"
+        | "bad-end"
+        | "past"
+        | "native-pending"
+        | "native-active"
+        | "disabled"
+        | "unchanged";
+      message: string;
+    };
 
 /** Raised when a recurring event is requested while recurrence is off. */
 export class RecurrenceDisabledError extends Error {
@@ -1444,7 +1490,11 @@ export class EventService extends ScheduledService {
       if (event.state !== "scheduled" && event.state !== "active") {
         this.linkVerified.delete(id);
       } else {
-        const pair = `${event.announcementMessageId ?? ""}|${event.nativeEventId ?? ""}`;
+        // The content this copy renders is part of the key (#1298): a scan
+        // holding the row from before an edit can finish its refresh after the
+        // edit's own, overwrite the post with the old text, and must not certify
+        // it. The next scan reads the edited row, sees another key and refreshes.
+        const pair = `${event.announcementMessageId ?? ""}|${event.nativeEventId ?? ""}|${announcementContentKey(event)}`;
         if (this.linkVerified.get(id) !== pair) {
           const refreshed = await this.updateAnnouncement(event);
           if (refreshed && event.announcementMessageId) {
@@ -1878,6 +1928,217 @@ export class EventService extends ScheduledService {
     );
     logger.info(`Created event ${sanitizeForLog(String(event._id))}`);
     return event;
+  }
+
+  /**
+   * Edit an upcoming event in place (#1298). One conditional write, so an edit
+   * that loses a race with Start now, an end, a cancel or another edit changes
+   * nothing and says so (`conflict`).
+   *
+   * Nothing is timer-driven: the one-minute scan reads the row, so a new
+   * `startTime` re-arms the lead-time channel and the reminder by itself. The
+   * only thing that must be put back is `reminderSent` when the start moves.
+   * Afterwards the native Discord event is patched through the normal sync
+   * (`diffNativeFields` then `scheduledEvents.edit`, never delete and create,
+   * so the Interested list survives) and the announcement is edited in place.
+   * RSVPs, the cover, the groups and the announcement ids are not touched.
+   *
+   * `expectedVersion` is `eventEditVersion` of the row the form was built from.
+   * Does not take `withEventMoveLock` or move `liveEditRevision`: no group
+   * field changes here.
+   */
+  public async editEvent(input: {
+    eventId: string;
+    guildId: string;
+    expectedVersion: string;
+    changes: EventEditFields;
+    now?: Date;
+  }): Promise<EditEventResult> {
+    const now = input.now ?? new Date();
+    const id = canonicalEventId(input.eventId);
+    const row = id ? await this.getEvent(id) : null;
+    if (!id || !row || row.guildId !== input.guildId) {
+      return { ok: false, code: "not-found", message: "Event not found." };
+    }
+    // Fails closed, as `endEventNow` does: with events off the native sync and
+    // the repair scan are idle, so an edit would leave Discord and the
+    // announcement on a different schedule from the row.
+    if (!(await this.editsAllowed())) {
+      return { ok: false, code: "disabled", message: EDIT_MESSAGES.disabled };
+    }
+    const mode = editModeOf(row, now, this.isBeingEnded(id));
+    if (mode.mode === "refused") {
+      return { ok: false, code: "refused", message: mode.message };
+    }
+    const conflict = (): EditEventResult => ({
+      ok: false,
+      code: "conflict",
+      message: EDIT_MESSAGES.conflict,
+    });
+    if (eventEditVersion(row) !== input.expectedVersion) return conflict();
+
+    const want = input.changes;
+    const moved = want.startTime.getTime() !== row.startTime.getTime();
+    if (
+      mode.mode === "limited" &&
+      (want.title !== row.title ||
+        moved ||
+        (want.timezone ?? "") !== (row.timezone ?? ""))
+    ) {
+      return { ok: false, code: "locked", message: EDIT_MESSAGES.locked };
+    }
+    if (moved && want.startTime.getTime() <= now.getTime()) {
+      return { ok: false, code: "past", message: EDIT_MESSAGES.past };
+    }
+    // Only a change of the duration can end the event: an event the scan keeps
+    // open past its scheduled end (people still in its channels) still takes a
+    // new description.
+    if (
+      mode.mode === "limited" &&
+      want.durationMinutes !== row.durationMinutes &&
+      computeEndTime(row.startTime, want.durationMinutes).getTime() <=
+        now.getTime()
+    ) {
+      return { ok: false, code: "bad-end", message: EDIT_MESSAGES.badEnd };
+    }
+    // The mirror never moves the start of a running native event, so a start
+    // that moved here would leave Discord, the reminder and the channel on
+    // different schedules. Unreadable counts as locked.
+    if (moved && !(await this.startMayMove(row))) {
+      return {
+        ok: false,
+        code: "native-active",
+        message: EDIT_MESSAGES.nativeActive,
+      };
+    }
+    const diff = diffEventEdit(row, want);
+    if (!hasEdit(diff)) {
+      return { ok: false, code: "unchanged", message: EDIT_MESSAGES.unchanged };
+    }
+    // A native create that timed out may still land in Discord, and the sync
+    // recognises it by the row's name and start. Renaming or moving the row now
+    // would make it unrecognisable and a second Discord event would be created,
+    // stranding the first one's Interested list.
+    const identityChange = want.title !== row.title || moved;
+    if (identityChange && !row.nativeEventId && row.nativeCreateStartedAt) {
+      return {
+        ok: false,
+        code: "native-pending",
+        message: EDIT_MESSAGES.nativePending,
+      };
+    }
+
+    const changes: Record<string, unknown> = {};
+    if (want.title !== row.title) changes.title = want.title;
+    if (want.description !== (row.description ?? "")) {
+      changes.description = want.description;
+    }
+    if (moved) {
+      changes.startTime = want.startTime;
+      // Re-arm the reminder for the new start.
+      changes.reminderSent = false;
+    }
+    if ((want.timezone ?? "") !== (row.timezone ?? "")) {
+      changes.timezone = want.timezone;
+    }
+    if (want.durationMinutes !== row.durationMinutes) {
+      changes.durationMinutes = want.durationMinutes;
+    }
+
+    const updated = await Event.findOneAndUpdate(
+      {
+        _id: row._id,
+        guildId: row.guildId,
+        // The state and channel the edit was judged on: a start, end or cancel
+        // since then no longer matches. `channelId` is part of it, so the scan's
+        // lead-time creation cannot slip in between a full edit's check and write.
+        state: row.state,
+        channelId: row.channelId ?? null,
+        title: row.title,
+        description:
+          (row.description ?? "") === ""
+            ? { $in: ["", null] }
+            : row.description,
+        startTime: row.startTime,
+        // Matched like the version token reads it, so two edits that read the
+        // same version cannot both win by changing only the timezone.
+        timezone:
+          (row.timezone ?? "") === "" ? { $in: ["", null] } : row.timezone,
+        durationMinutes: row.durationMinutes,
+        // Paired with `markCreateStarted`, which is conditioned on the title and
+        // start: whichever of an identity edit and a native create starts first
+        // wins, and the other sees a changed row.
+        ...(identityChange
+          ? {
+              nativeEventId: row.nativeEventId ?? null,
+              nativeCreateStartedAt: row.nativeCreateStartedAt ?? null,
+            }
+          : {}),
+        nativeAdopted: { $ne: true },
+        seriesCancelled: { $ne: true },
+      },
+      { $set: changes },
+      { new: true },
+    );
+    if (!updated) return conflict();
+
+    // The write is done; what follows is best effort and repaired by the scan
+    // (the native sync and the link refresh both run on every tick).
+    this.linkVerified.delete(id);
+    try {
+      try {
+        await this.nativeSync.syncEvent(updated);
+      } catch (error) {
+        logger.error(
+          `Event ${sanitizeForLog(id)}: native sync after edit failed:`,
+          error,
+        );
+      }
+      try {
+        await this.updateAnnouncement(updated);
+      } catch (error) {
+        logger.error(
+          `Event ${sanitizeForLog(id)}: announcement refresh after edit failed:`,
+          error,
+        );
+      }
+    } finally {
+      // Cleared again once the refresh has settled, failed or not: an edit that
+      // paused above while a newer edit committed and a scan certified it just
+      // wrote its older row over the post, and nothing may vouch for the post
+      // until the next scan has looked at it.
+      this.linkVerified.delete(id);
+    }
+    logger.info(`Edited event ${sanitizeForLog(id)}`);
+    return { ok: true, event: updated, diff };
+  }
+
+  /** Whether events are on; false when off or when the setting cannot be read. */
+  public async editsAllowed(): Promise<boolean> {
+    try {
+      return (
+        (await this.configService.getBoolean("events.enabled", false)) === true
+      );
+    } catch (error) {
+      logger.warn("Could not read events.enabled to edit an event:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Whether the event's start may move: its linked native event, read fresh,
+   * is still Scheduled (or there is none). False when it is running, finished
+   * or cannot be read. Adopted events are refused earlier.
+   */
+  public async startMayMove(event: {
+    guildId: string;
+    nativeEventId?: string | null;
+  }): Promise<boolean> {
+    const status = await this.nativeSync.linkedStatus({
+      guildId: event.guildId,
+      nativeEventId: event.nativeEventId ?? null,
+    });
+    return status === "none" || status === "scheduled";
   }
 
   public async listEvents(guildId: string): Promise<IEvent[]> {
@@ -2743,9 +3004,22 @@ export class EventService extends ScheduledService {
           // is not yet) must win: the claim then fails and the channel is
           // removed, and the next scan decides again from the new lead. Not
           // asked of "Start now", which creates whatever the lead says.
+          // The same goes for the start time (#1298): an edit that moved it
+          // while the channel was being created wins, and the next scan decides
+          // again from the new start.
           ...(options.enforceLead
-            ? { channelLeadMinutes: event.channelLeadMinutes ?? null }
+            ? {
+                channelLeadMinutes: event.channelLeadMinutes ?? null,
+                startTime: event.startTime,
+              }
             : {}),
+          // The channel was named from this title. An edit that renamed the
+          // event while it was being created wins: the claim fails and the
+          // wrongly named channel is removed (a started event's title is
+          // locked, so it could never be fixed afterwards). Not for an adopted
+          // event, whose title is copied onto the in-memory row by the scan
+          // before it is saved.
+          ...(event.nativeAdopted === true ? {} : { title: event.title }),
         },
         { $set: { channelId: channel.id } },
       );
