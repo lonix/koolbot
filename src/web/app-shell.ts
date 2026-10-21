@@ -280,20 +280,21 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
     icon: "calendar",
     available: true,
   },
-  // Moderation. The pages are #1320; Tickets also waits for its feature.
+  // Moderation. The case page (/me/moderation/cases/:id) has no entry: it is
+  // reached from the Mod log, which stays marked there. Tickets has no page yet.
   {
     scope: "moderator",
     label: "Mod log",
     href: "/me/moderation",
     icon: "gavel",
-    available: false,
+    available: true,
   },
   {
     scope: "moderator",
     label: "Command audit",
     href: "/me/moderation/audit",
     icon: "scroll-text",
-    available: false,
+    available: true,
   },
   {
     scope: "moderator",

@@ -106,11 +106,12 @@ the console links back to **My preferences**. The display name comes from the me
 (the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
 
 On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
-(Event presets today; Your events and New event with #1319) and **Moderation** (Mod log, Command audit and, once it is on,
-Tickets, with #1320). A section appears when the person holds the scope and it has at least one page that exists. A person
-with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So today a Moderator, whose
-Moderation pages are not built yet, sees the badge and no sidebar until #1320 adds a page. Below 760px the sidebar sits
-above the content and the top bar wraps (#855).
+(Event presets today; Your events and New event with #1319) and **Moderation** (Mod log and Command audit; Tickets once
+it has a page and is on). A section appears when the person holds the scope and it has at least one page that exists. A
+person with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So a Moderator sees You
+and Moderation with a sidebar, a host and moderator sees You, Hosting and Moderation, and a plain member sees no sidebar.
+The case page (`/me/moderation/cases/:id`) has no entry of its own: it is reached from the Mod log, which stays marked
+there. Below 760px the sidebar sits above the content and the top bar wraps (#855).
 
 Every page in the Hosting or Moderation area opens with a line saying why you can see it: "You can host because you are in
 @Event hosts" names the Discord roles that grant the scope (the same role-group snapshot as the scope check, read from the

@@ -107,7 +107,7 @@ should not send its admins' browsers to a font CDN, and the native face is the f
   | --- | --- | --- | --- |
   | Member | being allowed `/me` (Command permissions) | `/me` | You: My preferences |
   | Event host | the `host` capability | `/me` | + Hosting: Your events, New event, the host panel of their own events |
-  | Moderator | the `staff` capability | `/me` | + Moderation: Mod log, Command audit, Tickets once it is on |
+  | Moderator | the `staff` capability | `/me` | + Moderation: Mod log, Command audit (built), Tickets once it has a page and is on |
   | Admin | the `admin` capability, Administrator, or server owner | `/config` | the admin console |
 
 - **Navigation:** non-admins get one section per scope in the sidebar, and no sidebar at all when they only have one. The admin console is grouped by

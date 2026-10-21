@@ -2964,7 +2964,6 @@ export function shellPages(): A11yPage[] {
         "Mod log",
         "/me/moderation",
         viewer(["member", "moderator"], modRoles),
-        everything,
       ),
     },
     {
@@ -3112,7 +3111,12 @@ function moderatorPages(
 ): A11yPage[] {
   const page = (name: string, title: string, body: string): A11yPage => ({
     name: `/me/moderation ${name}`,
-    html: shell(title, "/me/moderation", body),
+    // The Command audit page marks its own sidebar item, the others Mod log.
+    html: shell(
+      title,
+      title === "Command audit" ? "/me/moderation/audit" : "/me/moderation",
+      body,
+    ),
   });
   const auditProps = {
     reason: MOD_REASON,
