@@ -10,7 +10,7 @@
  * admin console to explain it.
  */
 
-import { escapeHtml } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, escapeHtml } from "./html.js";
 import {
   CASE_OUTCOME_LABELS,
   CASE_STATUS_LABELS,
@@ -407,6 +407,11 @@ const DECISION_CONFIRM: Partial<Record<ModerationCaseDecision, string>> = {
     "Let this member back in? KoolBot does not unban in Discord; do that there.",
 };
 
+const PERMANENT_CONFIRM_ITEMS = [
+  "The case is marked upheld and its review date is cleared.",
+  "It is not reviewed again.",
+];
+
 function caseEvents(c: CaseView): string {
   if (c.events.length === 0) {
     return '<p class="kb-muted">No decisions yet.</p>';
@@ -454,8 +459,15 @@ function reviewForm(p: ModCaseBodyProps): string {
           ? "kb-btn kb-btn--primary"
           : "kb-btn";
     // Terminal decisions ask first, with the admin page's own wording.
+    // The consequence list and the neutral tone are the admin page's, too.
+    const tone =
+      d === "permanent"
+        ? confirmListAttr(PERMANENT_CONFIRM_ITEMS)
+        : d === "readmit"
+          ? CONFIRM_NEUTRAL_ATTR
+          : "";
     const confirm = DECISION_CONFIRM[d]
-      ? ` data-confirm="${escapeHtml(DECISION_CONFIRM[d])}"`
+      ? ` data-confirm="${escapeHtml(DECISION_CONFIRM[d])}"${tone}`
       : "";
     return `<button type="submit" class="${cls}" formaction="${base}/${d}"${confirm}>${DECISION_LABELS[d]}</button>`;
   }).join("\n    ");

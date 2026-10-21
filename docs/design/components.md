@@ -414,11 +414,27 @@ The larger context for an action: its options and consequences, shown at the mom
 
 **Markup.** `dialog.kb-dialog` opened with `showModal()` → `div.kb-dialog__head` (an icon well and `h2.kb-dialog__title`), `div.kb-dialog__body`,
 `div.kb-dialog__foot` (*Cancel* ghost, then the action). The backdrop is `scrim`.
+The footer wraps and stacks on a narrow screen, and its buttons may wrap a long label, so *Go back* stays reachable (scoped to the dialog; `.kb-btn` is unchanged).
 
 - **Confirm** (Switch groups off): the title is the question, the body lists every consequence, the button repeats the verb in `danger`.
 - **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result ("Deal 2 people").
 - Replaces the separate confirm pages; without JavaScript the buttons still post to the existing routes.
-- Focus starts on *Cancel*; Escape closes.
+- Focus starts on the go-back button; Escape closes and focus returns to the control that opened it. `aria-labelledby` points at the title.
+
+**Wiring (`data-confirm`).** Every destructive form or button carries `data-confirm="Title?"`; `CONFIRM_SCRIPT` (`src/web/html.ts`, loaded by the admin
+and member layouts) builds the dialog from it, so the title is the whole dialog unless a list is added.
+
+- `data-confirm-list` is a JSON array of consequence strings (`confirmListAttr()` writes it). They are rendered with `textContent`, never as HTML.
+  Give a list to the high-impact actions: reset defaults, rebuild and resync, reaction-role and group delete, event cancel, birthday remove and
+  making a removal permanent. Other actions are title-only.
+- The confirm button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads *Go back*, so it is never confused with a
+  *Cancel* verb such as "Cancel event".
+- `data-confirm-tone` is `danger` (the default, so a site that says nothing fails closed to red) or `neutral` (the `primary` fill and its
+  `on-primary` label, a pair the #1326 contrast gate already covers). Red is for actions that delete, remove, cancel or reset; "Run now", "Apply plan",
+  "Readmit" and "Archive" are neutral. `NEUTRAL_CONFIRM_ACTIONS` in `src/web/html.ts` is the one list of neutral actions; a site that carries a
+  consequence list can never be neutral, and the drift test fails when a site's tone and that list disagree.
+- Confirming submits the same form (`requestSubmit`), so the CSRF token, typed-name guards and other submit handlers are unchanged.
+- Without `showModal()` it falls back to `window.confirm()`; without JavaScript the form posts at once, as before.
 
 ### SaveBar
 
@@ -427,5 +443,9 @@ A bar that sticks to the bottom of a form once something has changed, with a cou
 **Markup.** `div.kb-savebar[role=region][aria-label="Unsaved changes"]` → a `kb-status--warn` dot, `span.kb-savebar__text` ("2 unsaved changes"),
 *Discard* (ghost), *Save settings* (primary). Render it `hidden` and reveal it on the first `input` event.
 
+- It is `position: sticky`, which resolves against the nearest scrolling ancestor, so no ancestor of the bar may be a scroll container
+  (`overflow: auto`/`scroll`/`hidden`). On a page with a save bar, `renderAdminPage` puts `has-savebar` on `main` and the form's card is
+  `card--savebar`; both use `overflow-x: clip`. Pages without a save bar keep a scrolling `main`. The rows' `.kb-settings` container is the
+  bar's sibling and scrolls sideways; a wide table or `pre` on such a page goes in a card (which scrolls) or scrolls itself.
 - It replaces the *Save settings* buttons scattered through long forms: one save per form.
 - Without JavaScript, render it visible with "Save your changes" as the text.

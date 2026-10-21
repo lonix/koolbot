@@ -831,6 +831,13 @@ describe("case page and Review", () => {
     expect(done).not.toMatch(shown);
   });
 
+  it("carries the confirm tone and consequence list, and no save-bar class", async () => {
+    const page = await html("/cases/case-1");
+    expect(page).toContain('data-confirm-tone="neutral"');
+    expect(page).toContain("data-confirm-list=");
+    expect(page).not.toContain("has-savebar");
+  });
+
   it("labels every time on the case page as UTC", async () => {
     cases.findCase.mockResolvedValue(
       liveCase({
