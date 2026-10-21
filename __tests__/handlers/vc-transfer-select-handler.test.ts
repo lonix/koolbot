@@ -70,8 +70,9 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
     );
   });
 
-  it("escapes a hostile target name in the confirmation (#1146)", async () => {
+  it("names the target as a mention, never by a hostile name (#1146)", async () => {
     (interaction.guild!.members.fetch as jest.Mock).mockResolvedValue({
+      id: "target-id",
       displayName: "<@555> @everyone [free](https://evil.example) **b**",
       voice: { channelId: "channel-id" },
     });
@@ -88,8 +89,8 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
     expect(confirmation).not.toContain("<@555>");
     expect(confirmation).not.toContain("@everyone");
     expect(confirmation).not.toContain("[free](");
-    expect(confirmation).toContain("\\<@555\\>");
-    expect(confirmation).toContain("\\*\\*b\\*\\*");
+    expect(confirmation).not.toContain("**b**");
+    expect(confirmation).toContain("<@target-id>");
   });
 
   it("acknowledges (deferUpdate) before the locked transfer is awaited", async () => {

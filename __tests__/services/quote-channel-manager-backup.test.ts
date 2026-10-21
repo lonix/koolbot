@@ -40,7 +40,7 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
 }));
 
 const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
-const HEADER_FOOTER = "KoolBot Quote System";
+const HEADER_FOOTER = "KoolBot · Quotes";
 
 function headerMessage(id: string) {
   return {
@@ -107,6 +107,44 @@ describe("QuoteChannelManager - header idempotency & vote persistence", () => {
       };
       const result = await (manager as any).findExistingHeader(channel);
       expect(result).toEqual({ id: "h2" });
+    });
+
+    it("does not mistake ordinary bot-posted quotes for the header (#1331)", async () => {
+      // Quotes share the header's `KoolBot · Quotes` footer but have no title.
+      const quote = (id: string) => ({
+        id,
+        author: { id: "bot123" },
+        embeds: [{ title: null, footer: { text: "KoolBot · Quotes" } }],
+      });
+      const manager = await loadManager();
+      const channel = {
+        messages: {
+          fetchPinned: jest.fn().mockResolvedValue([]),
+          fetch: jest.fn().mockResolvedValue([quote("q1"), quote("q2")]),
+        },
+      };
+      const result = await (manager as any).findExistingHeader(channel);
+      expect(result).toBeNull();
+    });
+
+    it("still recognises a header posted before #1331 by its old footer", async () => {
+      const manager = await loadManager();
+      const channel = {
+        messages: {
+          fetchPinned: jest.fn().mockResolvedValue([
+            {
+              id: "old-h",
+              author: { id: "bot123" },
+              embeds: [
+                { title: "renamed", footer: { text: "KoolBot Quote System" } },
+              ],
+            },
+          ]),
+          fetch: jest.fn().mockResolvedValue([]),
+        },
+      };
+      const result = await (manager as any).findExistingHeader(channel);
+      expect(result).toEqual({ id: "old-h" });
     });
 
     it("returns null when no header exists anywhere", async () => {

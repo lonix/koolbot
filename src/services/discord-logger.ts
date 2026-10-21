@@ -257,14 +257,13 @@ export class DiscordLogger {
       color: embedColor("ok"),
       fields: [
         { name: "Status", value: "✅ Online", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         {
           name: "Environment",
           value: env.nodeEnv,
           inline: true,
         },
       ],
-      footer: "KoolBot Startup Logger",
+      footer: "KoolBot · Logs · Startup",
     });
   }
 
@@ -278,10 +277,9 @@ export class DiscordLogger {
       color: embedColor("warn"),
       fields: [
         { name: "Status", value: "⚠️ Shutting Down", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         { name: "Reason", value: "Graceful shutdown initiated", inline: true },
       ],
-      footer: "KoolBot Shutdown Logger",
+      footer: "KoolBot · Logs · Shutdown",
     });
   }
 
@@ -296,14 +294,13 @@ export class DiscordLogger {
       color: embedColor("ok"),
       fields: [
         { name: "Status", value: "✅ Registered", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         {
           name: "Guild",
           value: env.guildId || "Unknown",
           inline: true,
         },
       ],
-      footer: "KoolBot Discord Logger",
+      footer: "KoolBot · Logs · Discord",
     });
   }
 
@@ -318,10 +315,9 @@ export class DiscordLogger {
       color: embedColor("danger"),
       fields: [
         { name: "Status", value: "❌ Failed", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
-      footer: "KoolBot Discord Logger",
+      footer: "KoolBot · Logs · Discord",
     });
   }
 
@@ -345,7 +341,6 @@ export class DiscordLogger {
           value: result.success ? "✅ Success" : "❌ Failed",
           inline: true,
         },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         ...(result.commandsUpdated !== undefined
           ? [
               {
@@ -356,7 +351,7 @@ export class DiscordLogger {
             ]
           : []),
       ],
-      footer: "KoolBot Configuration Logger",
+      footer: "KoolBot · Logs · Configuration",
     });
   }
 
@@ -385,9 +380,8 @@ export class DiscordLogger {
           value: success ? "✅ Success" : "❌ Failed",
           inline: true,
         },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
       ],
-      footer: "KoolBot Service Logger",
+      footer: "KoolBot · Logs · Services",
     });
   }
 
@@ -439,7 +433,7 @@ export class DiscordLogger {
             ]
           : []),
       ],
-      footer: "KoolBot Cleanup Logger",
+      footer: "KoolBot · Logs · Cleanup",
     });
   }
 
@@ -466,10 +460,9 @@ export class DiscordLogger {
           value: connected ? "✅ Connected" : "❌ Disconnected",
           inline: true,
         },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         { name: "Database", value: "MongoDB", inline: true },
       ],
-      footer: "KoolBot Database Logger",
+      footer: "KoolBot · Logs · Database",
     });
   }
 
@@ -484,14 +477,13 @@ export class DiscordLogger {
       fields: [
         { name: "Context", value: context, inline: true },
         { name: "Error Type", value: error.constructor.name, inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         {
           name: "Error Message",
           value: error.message.substring(0, 1000),
           inline: false,
         },
       ],
-      footer: "KoolBot Error Logger",
+      footer: "KoolBot · Logs · Errors",
     });
   }
 
@@ -509,9 +501,8 @@ export class DiscordLogger {
       fields: [
         { name: "Job Name", value: jobName, inline: true },
         { name: "Status", value: "✅ Success", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
       ],
-      footer: "KoolBot Cron Logger",
+      footer: "KoolBot · Logs · Cron",
     });
   }
 
@@ -526,10 +517,9 @@ export class DiscordLogger {
       fields: [
         { name: "Job Name", value: jobName, inline: true },
         { name: "Status", value: "❌ Failed", inline: true },
-        { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
-      footer: "KoolBot Cron Logger",
+      footer: "KoolBot · Logs · Cron",
     });
   }
 

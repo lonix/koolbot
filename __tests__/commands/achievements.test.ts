@@ -396,11 +396,12 @@ describe("Achievements Command", () => {
       expect(deferReply).toHaveBeenCalledTimes(1);
       expect(editReply).toHaveBeenCalledWith({
         content:
-          "member hasn't earned any badges yet. Keep participating in voice channels!",
+          "<@user-1> hasn't earned any badges yet. Keep participating in voice channels!",
+        allowedMentions: { parse: [] },
       });
     });
 
-    it("escapes a hostile username in the no-badges reply (#1146)", async () => {
+    it("names the member as a mention, never by a hostile username (#1146)", async () => {
       const { interaction, editReply } = makeInteraction(
         "<@555> @everyone [free](https://evil.example) **b**",
       );
@@ -411,8 +412,8 @@ describe("Achievements Command", () => {
       expect(text).not.toContain("<@555>");
       expect(text).not.toContain("@everyone");
       expect(text).not.toContain("[free](");
-      expect(text).toContain("\\<@555\\>");
-      expect(text).toContain("\\*\\*b\\*\\*");
+      expect(text).not.toContain("**b**");
+      expect(text).toContain("<@user-1>");
     });
 
     it("delivers the error message via editReply once deferred", async () => {

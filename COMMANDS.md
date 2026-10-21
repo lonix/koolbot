@@ -164,12 +164,14 @@ View voice channel activity leaderboards.
 
 ```text
 Top Voice Channel Users (week):
-🥇 Alice: 24h 15m
-🥈 Bob: 18h 32m
-🥉 Charlie: 12h 45m
-4. David: 8h 20m
-5. Emma: 6h 10m
+🥇 @Alice: 24h 15m
+🥈 @Bob: 18h 32m
+🥉 @Charlie: 12h 45m
+4. @David: 8h 20m
+5. @Emma: 6h 10m
 ```
+
+Members are real mentions (shown as `@Alice` here), so Discord renders their current name.
 
 #### Subcommand: `user`
 
@@ -192,9 +194,9 @@ View personal voice channel statistics for yourself or another user.
 **Example response:**
 
 ```text
-Voice Channel Statistics for Alice (week):
+Voice Channel Statistics for @Alice (week):
 Total Time: 24h 15m
-Last Seen: 2026-01-29 12:00:00
+Last Seen: January 29, 2026 12:00 PM
 
 Recent Sessions:
 • Gaming Room: 3h 45m
@@ -228,11 +230,14 @@ Then reload commands.
 **Example response:**
 
 ```text
-👤 Alice was last seen:
-🕐 2 hours ago
-📍 In: Gaming Room
-⏱️ Duration: 3h 45m
+@Alice was last seen in a voice channel 2 hours ago.
 ```
+
+While the member is in a voice channel you can see, the reply names it as a channel mention instead
+(`@Alice is currently in #Gaming Room.`).
+
+Times in replies and embeds are Discord timestamps, so each reader sees them in their own timezone
+and format (the examples show one possible rendering).
 
 **Private channels:** if the user is in a voice channel you cannot view, the
 reply says "a voice channel" instead of naming it. `/voicestats` applies the
@@ -301,19 +306,19 @@ says nothing new was saved.
 
 🎉 First Steps - 12 hrs
 Spent your first hour in voice chat
-Earned: 2026-01-10
+Earned: January 10, 2026
 
 🎖️ Voice Veteran - 150 hrs
 Reached 100 hours in voice chat
-Earned: 2026-01-15
+Earned: January 15, 2026
 
 🏃 Marathon Runner - 6 hrs
 Completed a 4+ hour voice session
-Earned: 2026-01-12
+Earned: January 12, 2026
 
 🦋 Social Butterfly - 15 users
 Voiced with 10+ unique users
-Earned: 2026-01-14
+Earned: January 14, 2026
 
 🎯 Almost There (Progress)
 🎖️ ▰▰▰▰▰▰▰▰▱▱ Voice Veteran — 90 / 100 hrs
@@ -448,7 +453,7 @@ Edit an existing quote that you added.
 
 **Parameters:**
 
-- `id` (required) — Quote ID (in the quote footer)
+- `id` (required) — Quote ID (shown in the "Quote ID" field of the quote)
 - `text` (optional) — New quote text
 - `author` (optional) — New author
 

@@ -20,6 +20,7 @@ import {
   type ParsedTier,
 } from "./leaderboard-tier-parse.js";
 import { embedColor } from "../utils/embed-style.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 
 /** Discord's Unknown Role error: the role was deleted. */
 const UNKNOWN_ROLE = 10011;
@@ -769,9 +770,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       const embed = new EmbedBuilder()
         .setTitle("🏆 Voice Leaderboard Roles Updated")
         .setDescription(
-          `Period: **${summary.period}** · Recalculated <t:${Math.floor(
-            summary.ranAt.getTime() / 1000,
-          )}:R>`,
+          `Period: **${summary.period}** · Recalculated ${discordTimestamp(summary.ranAt, "R")}`,
         )
         .setColor(embedColor("lore"));
 
