@@ -183,6 +183,7 @@ describe("the /me sidebar shows only the viewer's own sections", () => {
 describe("every page the admin sidebar links to refuses host and moderator sessions", () => {
   let current: WebSessionContext | null = null;
   let harness: AdminHarness;
+  let readOnly: AdminHarness;
 
   const stubSession: RequestHandler = (req, _res, next): void => {
     if (current) Object.assign(req, { webSession: current });
@@ -193,10 +194,15 @@ describe("every page the admin sidebar links to refuses host and moderator sessi
     const write = createWriteRouter({} as never, stubSession);
     const read = createReadOnlyRouter({} as never, stubSession);
     harness = await startAdminHarness([write, read], "/admin");
+    // The read-only router alone: composed, the write router's gate answers
+    // every path first and would hide a nav link outside the read router's gate
+    // (as `/admin/session/ping` is, on purpose).
+    readOnly = await startAdminHarness([read], "/admin");
   });
 
   afterAll(async () => {
     await harness.close();
+    await readOnly.close();
   });
 
   const SCOPE_SETS: Array<[string, WebSessionContext["scopes"]]> = [
@@ -217,8 +223,16 @@ describe("every page the admin sidebar links to refuses host and moderator sessi
       });
       const reachable: string[] = [];
       for (const item of NAV_ITEMS) {
-        const res = await harness.get(item.href.replace(/^\/admin/, "") || "/");
-        if (res.status !== 403) reachable.push(`${item.href} -> ${res.status}`);
+        const path = item.href.replace(/^\/admin/, "") || "/";
+        for (const [name, target] of [
+          ["composed", harness],
+          ["read-only alone", readOnly],
+        ] as const) {
+          const res = await target.get(path);
+          if (res.status !== 403) {
+            reachable.push(`${item.href} (${name}) -> ${res.status}`);
+          }
+        }
       }
       expect(reachable).toEqual([]);
     },
