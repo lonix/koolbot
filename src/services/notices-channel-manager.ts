@@ -3,7 +3,7 @@ import {
   NOTICES_EVERYONE,
   toOverwriteOptions,
 } from "../utils/channel-permissions.js";
-import { Client, TextChannel, EmbedBuilder } from "discord.js";
+import { Client, TextChannel, EmbedBuilder, type Message } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -12,6 +12,7 @@ import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { BOT_FEATURES, BotFeatureInfo } from "../content/bot-features.js";
 import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
+import { describeDiscordError } from "../utils/log-sanitize.js";
 import { getBotVersion } from "../utils/version.js";
 import { embedColor } from "../utils/embed-style.js";
 
@@ -316,6 +317,8 @@ export class NoticesChannelManager {
           ) {
             headerExists = true;
             logger.debug("Notices channel header post already exists");
+            // refreshHeaderCopy never throws, so a failed edit cannot lead to a repost.
+            await this.refreshHeaderCopy(existingMessage);
             return;
           }
         } catch {
@@ -332,33 +335,75 @@ export class NoticesChannelManager {
     }
   }
 
+  /** The header embed. One source for creating the post and for keeping an existing post current. */
+  private buildHeaderEmbed(): EmbedBuilder {
+    return new EmbedBuilder()
+      .setColor(embedColor("brand"))
+      .setTitle("📢 Server notices")
+      .setDescription(
+        "Rules, game server details and help for this server. Only KoolBot posts here.",
+      )
+      .addFields(
+        {
+          name: "What you will find",
+          value:
+            "- Server rules\n- Game server details\n- Help for bot features\n- News and announcements",
+          inline: false,
+        },
+        {
+          name: "Good to know",
+          value:
+            "- You can only read this channel.\n- Only KoolBot can post here.\n- Other messages are removed.",
+          inline: false,
+        },
+      )
+      .setFooter({ text: "KoolBot · Notices" })
+      .setTimestamp();
+  }
+
+  /**
+   * Edit an existing bot-owned header in place when its copy differs from the
+   * current copy (title, description, fields, footer), so installs made before
+   * a copy change are updated once and then left alone. Message id and pin are
+   * kept. A failed edit is logged and never throws, so it cannot trigger a repost.
+   */
+  private async refreshHeaderCopy(message: Message): Promise<void> {
+    try {
+      const wanted = this.buildHeaderEmbed().toJSON();
+      const current = message.embeds?.[0];
+      const norm = (
+        fields?: { name: string; value: string; inline?: boolean }[],
+      ) =>
+        (fields ?? []).map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: f.inline ?? false,
+        }));
+      const same =
+        current !== undefined &&
+        current.title === wanted.title &&
+        current.description === wanted.description &&
+        current.footer?.text === wanted.footer?.text &&
+        JSON.stringify(norm(current.fields)) ===
+          JSON.stringify(norm(wanted.fields));
+      if (same) {
+        return;
+      }
+      await message.edit({ embeds: [this.buildHeaderEmbed()] });
+      logger.info("Updated notices channel header copy");
+    } catch (error) {
+      logger.warn(
+        `Failed to update notices channel header copy: ${describeDiscordError(error)}`,
+      );
+    }
+  }
+
   /**
    * Create the header post with information about the notices channel
    */
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
-      const embed = new EmbedBuilder()
-        .setColor(embedColor("brand"))
-        .setTitle("📢 Server Notices")
-        .setDescription(
-          "This channel contains important server information, rules, and helpful resources. All posts are managed by KoolBot.",
-        )
-        .addFields(
-          {
-            name: "📋 What's Here",
-            value:
-              "• Server rules and guidelines\n• Game server connection info\n• Bot feature help and guides\n• Important announcements",
-            inline: false,
-          },
-          {
-            name: "🔒 Channel Rules",
-            value:
-              "• This is a read-only channel\n• Only bot messages are allowed\n• All other messages will be automatically removed",
-            inline: false,
-          },
-        )
-        .setFooter({ text: "KoolBot · Notices" })
-        .setTimestamp();
+      const embed = this.buildHeaderEmbed();
 
       const headerMessage = await channel.send({ embeds: [embed] });
       logger.info(`Created notices channel header post: ${headerMessage.id}`);

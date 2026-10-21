@@ -16,6 +16,7 @@ import {
   isCommandEnabled,
 } from "../services/command-registry.js";
 import { embedColor } from "../utils/embed-style.js";
+import { getBotVersion } from "../utils/version.js";
 
 export const data = new SlashCommandBuilder()
   .setName("help")
@@ -125,7 +126,7 @@ export async function buildHelpEntries(
       logger.warn(`Failed to load help metadata for /${config.name}:`, error);
       entries.set(config.name, {
         name: config.name,
-        description: "Description unavailable (command module failed to load).",
+        description: "No description is available right now.",
         usage: `/${config.name}`,
         configKey: config.configKey,
         isEnabled: config.isEnabled,
@@ -158,6 +159,11 @@ export async function getCommandHelpEntries(): Promise<
   return entries;
 }
 
+/** Help is one of two messages that show the bot version, in the footer. */
+function helpFooter(): string {
+  return `KoolBot · Help · v${getBotVersion()}`;
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -180,7 +186,7 @@ export async function execute(
       const commandInfo = helpEntries.get(requestedCommand);
       if (!commandInfo) {
         await interaction.editReply({
-          content: `❌ Command \`/${requestedCommand}\` not found. Use \`/help\` to see all available commands.`,
+          content: `There is no command \`/${requestedCommand}\`. Use \`/help\` to see the list of commands.`,
         });
         return;
       }
@@ -192,21 +198,22 @@ export async function execute(
 
       const embed = new EmbedBuilder()
         .setColor(isEnabled ? embedColor("ok") : embedColor("danger"))
-        .setTitle(`📖 Help: /${requestedCommand}`)
+        .setTitle(`Help: /${requestedCommand}`)
         .setDescription(commandInfo.description)
         .addFields(
           { name: "Usage", value: `\`${commandInfo.usage}\``, inline: false },
           {
             name: "Status",
-            value: isEnabled ? "✅ Enabled" : "❌ Disabled",
+            value: isEnabled ? "On" : "Off",
             inline: true,
           },
         )
+        .setFooter({ text: helpFooter() })
         .setTimestamp();
 
       if (commandInfo.configKey) {
         embed.addFields({
-          name: "Config Key",
+          name: "Setting",
           value: `\`${commandInfo.configKey}\``,
           inline: true,
         });
@@ -232,26 +239,27 @@ export async function execute(
       entries.forEach(([commandName, commandInfo], index) => {
         if (enabledFlags[index]) {
           enabledCommands.push(
-            `\`/${commandName}\` - ${commandInfo.description}`,
+            `- \`/${commandName}\`: ${commandInfo.description}`,
           );
         } else {
           disabledCommands.push(
-            `\`/${commandName}\` - ${commandInfo.description}`,
+            `- \`/${commandName}\`: ${commandInfo.description}`,
           );
         }
       });
 
       const embed = new EmbedBuilder()
         .setColor(embedColor("brand"))
-        .setTitle("📚 KoolBot Help")
+        .setTitle("KoolBot help")
         .setDescription(
-          "Here are all available commands. Use `/help <command>` for detailed information about a specific command.",
+          "These are the commands you can use. Use `/help` with a command name to see more about it.",
         )
+        .setFooter({ text: helpFooter() })
         .setTimestamp();
 
       if (enabledCommands.length > 0) {
         embed.addFields({
-          name: "✅ Enabled Commands",
+          name: "Commands that are on",
           value: enabledCommands.join("\n"),
           inline: false,
         });
@@ -259,18 +267,11 @@ export async function execute(
 
       if (disabledCommands.length > 0) {
         embed.addFields({
-          name: "❌ Disabled Commands",
+          name: "Commands that are off",
           value: disabledCommands.join("\n"),
           inline: false,
         });
       }
-
-      embed.addFields({
-        name: "💡 Tip",
-        value:
-          "Use `/help <command>` to get detailed information about a specific command.",
-        inline: false,
-      });
 
       await interaction.editReply({ embeds: [embed] });
     }
