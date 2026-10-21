@@ -325,7 +325,8 @@ The header post pattern provides users with context about a channel's purpose an
 1. **Validate/Create**: Check if header exists, create if missing
 2. **Store ID**: Persist message ID to config for validation
 3. **Auto-Recreate**: Regenerate header if deleted (via cleanup job)
-4. **Keep current**: Build the embed in one function used for both creating and refreshing, and edit the existing post in place only when its copy differs (`refreshHeaderCopy`); a failed edit is logged and never reposts
+4. **Keep current**: Build the embed in one function used for both creating and refreshing. Edit the existing post in place only when
+   its copy differs (`refreshHeaderCopy`). A failed edit is logged and never reposts
 5. **Configurable**: Allow enable/disable and pin control
 
 #### Implementation Steps
