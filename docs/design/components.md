@@ -443,5 +443,9 @@ A bar that sticks to the bottom of a form once something has changed, with a cou
 **Markup.** `div.kb-savebar[role=region][aria-label="Unsaved changes"]` → a `kb-status--warn` dot, `span.kb-savebar__text` ("2 unsaved changes"),
 *Discard* (ghost), *Save settings* (primary). Render it `hidden` and reveal it on the first `input` event.
 
+- It is `position: sticky`, which resolves against the nearest scrolling ancestor, so no ancestor of the bar may be a scroll container
+  (`overflow: auto`/`scroll`/`hidden`). On a page with a save bar, `renderAdminPage` puts `has-savebar` on `main` and the form's card is
+  `card--savebar`; both use `overflow-x: clip`. Pages without a save bar keep a scrolling `main`. The rows' `.kb-settings` container is the
+  bar's sibling and scrolls sideways; a wide table or `pre` on such a page goes in a card (which scrolls) or scrolls itself.
 - It replaces the *Save settings* buttons scattered through long forms: one save per form.
 - Without JavaScript, render it visible with "Save your changes" as the text.

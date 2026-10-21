@@ -270,6 +270,52 @@ describe("renderAdminPage", () => {
     expect(html).toContain("margin:0 0 1rem;overflow-x:auto}");
   });
 
+  it("keeps the sticky save bar's ancestors from being scroll containers", () => {
+    const css = render();
+    const rule = (sel: string): string => {
+      const i = css.indexOf(`${sel}{`);
+      expect(i).toBeGreaterThan(-1);
+      return css.slice(i, css.indexOf("}", i));
+    };
+    // `overflow-x:auto|scroll|hidden` on an ancestor makes it the sticky
+    // container, so the bar would stick inside the card instead of the viewport.
+    // Without a save bar `main` keeps scrolling; with one it only clips.
+    expect(rule("main")).toContain("overflow-x:auto");
+    expect(rule("main.has-savebar")).toContain("overflow-x:clip");
+    expect(rule("main.has-savebar")).not.toMatch(
+      /overflow(-x|-y)?:(auto|scroll|hidden)/,
+    );
+    // A long unbroken value scrolls in its own block.
+    expect(rule("main pre")).toContain("overflow-x:auto");
+    expect(rule(".card.card--savebar")).toContain("overflow-x:clip");
+    expect(rule(".card.card--savebar")).not.toMatch(
+      /overflow(-x|-y)?:(auto|scroll|hidden)/,
+    );
+    // The rows scroll sideways instead, so wide pickers stay reachable.
+    expect(rule(".kb-settings")).toContain("overflow-x:auto");
+  });
+
+  it("marks <main> as has-savebar exactly when the body renders a save bar", () => {
+    const page = (body: string): string =>
+      renderAdminPage({
+        title: "T",
+        active: "/admin/settings",
+        body,
+        csrfToken: "c",
+        remainingMs: 1,
+      });
+    const mainTag = (html: string): string =>
+      html.match(/<main[^>]*>/)?.[0] ?? "";
+    expect(
+      mainTag(page('<form><div class="kb-savebar"></div></form>')),
+    ).toContain('class="has-savebar"');
+    expect(mainTag(page("<p>no bar</p>"))).not.toContain("has-savebar");
+    // Escaped user text cannot fake the marker.
+    expect(
+      mainTag(page("&quot;kb-savebar&quot; class=&quot;kb-savebar&quot;")),
+    ).not.toContain("has-savebar");
+  });
+
   it("uses colours that clear the WCAG contrast floors (#855)", () => {
     const html = render();
     // Form-control borders: the --border hairline was 1.58:1 against the field.

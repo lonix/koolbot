@@ -305,12 +305,27 @@ const STYLE = [
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
   "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+  // A scroll container is where `position:sticky` resolves, so on a page with a settings
+  // save bar `main` must not be one, or the bar sticks inside `main`/the card instead of the
+  // viewport. `renderAdminPage` adds `has-savebar` to `main` only for those pages; every
+  // other page keeps the scrolling `main` above. `clip` still stops a wide child forcing a
+  // sideways page scroll without creating a scroll container.
+  "main.has-savebar{overflow-x:clip}",
+  // A long unbroken value (a role name to retype) scrolls in its own block.
+  "main pre{overflow-x:auto}",
   // The skip-link target itself shouldn't draw a ring around the whole column.
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:var(--text-secondary)}",
   ".subtitle{color:var(--muted);margin:0 0 1rem}",
   ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
+  // A card holding a sticky save bar (settings forms) must not be a scroll container either,
+  // or the bar sticks inside the card and sits at the end of a long form.
+  ".card.card--savebar{overflow-x:clip}",
+  // The rows scroll sideways instead: `.kb-settings` is a sibling of the save bar, not an
+  // ancestor, so scrolling here leaves the bar's sticky container alone. Wide pickers and
+  // their reset buttons stay reachable on narrow screens.
+  ".kb-settings{overflow-x:auto}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}",
@@ -865,7 +880,9 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // Named so it stays distinguishable from any other nav landmark a page
     // body introduces (axe `landmark-unique`, #856).
     `<nav class="side" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
-    `<main id="main" tabindex="-1">${opts.body}</main></div>`,
+    // The body is built on the server and user text in it is HTML-escaped (quotes included), so
+    // this literal can only come from `renderSaveBar`; a false positive would only clip `main`.
+    `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
     `${scriptTag(CRON_PICKER_SCRIPT)}`,

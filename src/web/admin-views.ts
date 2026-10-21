@@ -1426,7 +1426,7 @@ export function renderSettingsPage(props: SettingsProps): string {
       // form for a single key (issue #433).
       const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
-<div class="card" id="section-${escapeHtml(g.category)}">
+<div class="card card--savebar" id="section-${escapeHtml(g.category)}">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
   ${renderSettingsForms({
@@ -4644,7 +4644,7 @@ export function renderFeatureSettingsCard(
     ? ""
     : `\n    <input type="hidden" name="no_cascade" value="1">`;
   return `
-<div class="card">
+<div class="card card--savebar">
   <h2>${escapeHtml(props.title ?? "Settings")}</h2>${introHtml}
   ${renderSettingsForms({
     formId,
