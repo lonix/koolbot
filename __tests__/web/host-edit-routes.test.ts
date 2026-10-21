@@ -942,6 +942,36 @@ describe("a form saved under a different state than it was rendered in (#1352)",
     },
   );
 
+  it.each([
+    ["missing", undefined],
+    ["unknown", "refused"],
+  ])(
+    "refuses a form whose mode is %s before validating its fields",
+    async (_n, mode) => {
+      startsInFiveMinutes();
+      const form = await formState();
+      const r = await call(EDIT, {
+        method: "POST",
+        body: {
+          title: "Quiz night",
+          description: "Bring a friend",
+          date: "2030-03-01",
+          time: "12:05",
+          timezone: "UTC",
+          // Invalid: validation would answer with the duration message.
+          duration: "0",
+          version: form.version,
+          startEditable: "1",
+          ...(mode === undefined ? {} : { mode }),
+        },
+      });
+      expect(flashOf(r.location).msg).toContain("changed since you opened");
+      expect(flashOf(r.location).msg).not.toContain("Duration");
+      expect(auditOf()?.result).toBe("failure");
+      expect(row().durationMinutes).toBe(90);
+    },
+  );
+
   it("refuses with the reason, before validating the form, when events are off", async () => {
     startsInFiveMinutes();
     const form = await formState();
