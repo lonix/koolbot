@@ -31,6 +31,7 @@ import {
   hasEdit,
   type EventEditDiff,
   type EventEditFields,
+  type RenderedMode,
 } from "./event-edit.js";
 import { sweepOrphanCovers, withCoverLock } from "./event-cover.js";
 import {
@@ -1957,7 +1958,11 @@ export class EventService extends ScheduledService {
    * so the Interested list survives) and the announcement is edited in place.
    * RSVPs, the cover, the groups and the announcement ids are not touched.
    *
-   * `expectedVersion` is `eventEditVersion` of the row the form was built from.
+   * `expectedVersion` is `eventEditVersion` of the row the form was built from,
+   * with the mode it was rendered in. The caller refuses a form rendered full
+   * for an event that is limited now before it reads any posted field; a clock
+   * step between that check and this one is safe because a limited event still
+   * refuses a changed title or start (`locked`).
    * Does not take `withEventMoveLock` or move `liveEditRevision`: no group
    * field changes here.
    */
@@ -1965,6 +1970,8 @@ export class EventService extends ScheduledService {
     eventId: string;
     guildId: string;
     expectedVersion: string;
+    /** The mode the form was rendered in; part of the token (`eventEditVersion`). */
+    renderedMode: RenderedMode;
     changes: EventEditFields;
     now?: Date;
   }): Promise<EditEventResult> {
@@ -1989,7 +1996,9 @@ export class EventService extends ScheduledService {
       code: "conflict",
       message: EDIT_MESSAGES.conflict,
     });
-    if (eventEditVersion(row) !== input.expectedVersion) return conflict();
+    if (eventEditVersion(row, input.renderedMode) !== input.expectedVersion) {
+      return conflict();
+    }
 
     const want = input.changes;
     const moved = want.startTime.getTime() !== row.startTime.getTime();

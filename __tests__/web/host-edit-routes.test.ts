@@ -206,18 +206,20 @@ function flashOf(location: string | null): { type: string; msg: string } {
   return { type: q.get("flash") ?? "", msg: q.get("msg") ?? "" };
 }
 
-/** What the edit form of the stored event carries: its version token and whether it offered the start. */
+/** What the edit form of the stored event carries: its version token, the mode it was rendered in and whether it offered the start. */
 async function formState(): Promise<{
   version: string;
   startEditable: string;
+  mode: string;
 }> {
   const r = await call(EDIT);
   const version = /name="version" value="([^"]+)"/.exec(r.text);
   const start = /name="startEditable" value="([01])"/.exec(r.text);
-  if (!version || !start) {
+  const mode = /name="mode" value="(full|limited)"/.exec(r.text);
+  if (!version || !start || !mode) {
     throw new Error(`no form state (status ${r.status})`);
   }
-  return { version: version[1], startEditable: start[1] };
+  return { version: version[1], startEditable: start[1], mode: mode[1] };
 }
 
 async function versionOf(): Promise<string> {
@@ -226,11 +228,17 @@ async function versionOf(): Promise<string> {
 
 async function save(
   body: Json,
-  init: { version?: string; startEditable?: string } = {},
+  init: { version?: string; startEditable?: string; mode?: string } = {},
 ): Promise<{ status: number; text: string; location: string | null }> {
   const state =
-    init.version !== undefined && init.startEditable !== undefined
-      ? { version: init.version, startEditable: init.startEditable }
+    init.version !== undefined &&
+    init.startEditable !== undefined &&
+    init.mode !== undefined
+      ? {
+          version: init.version,
+          startEditable: init.startEditable,
+          mode: init.mode,
+        }
       : await formState();
   return call(EDIT, {
     method: "POST",
@@ -243,6 +251,7 @@ async function save(
       duration: "90",
       version: init.version ?? state.version,
       startEditable: init.startEditable ?? state.startEditable,
+      mode: init.mode ?? state.mode,
       ...body,
     },
   });
@@ -693,6 +702,307 @@ describe("an event that has started", () => {
     const r = await save({ description: "Fixed" });
     expect(flashOf(r.location).type).toBe("ok");
     expect(row().description).toBe("Fixed");
+  });
+});
+
+/**
+ * Only `Date` is faked, so the real HTTP round trips keep working while the
+ * clock steps across an event's start.
+ */
+function fakeClock(at: Date): void {
+  jest.useFakeTimers({
+    now: at,
+    doNotFake: [
+      "hrtime",
+      "nextTick",
+      "performance",
+      "queueMicrotask",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+      "requestIdleCallback",
+      "cancelIdleCallback",
+      "setImmediate",
+      "clearImmediate",
+      "setInterval",
+      "clearInterval",
+      "setTimeout",
+      "clearTimeout",
+    ],
+  });
+}
+
+function clockTo(ms: number): void {
+  jest.setSystemTime(ms);
+}
+
+function auditOf(): { result: string; errorMessage?: string } | undefined {
+  return auditRows.find(
+    (a) => (a as { action?: string }).action === "event.edit",
+  ) as { result: string; errorMessage?: string } | undefined;
+}
+
+const STARTED_MESSAGE =
+  "This event has started since you opened the form. Reload to edit what is still open.";
+
+describe("a form saved under a different state than it was rendered in (#1352)", () => {
+  const T0 = new Date("2030-03-01T12:00:00.000Z");
+  const MINUTE = 60_000;
+
+  beforeEach(() => {
+    fakeClock(T0);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /** An event five minutes from starting, no channel yet, stored state still `scheduled`. */
+  function startsInFiveMinutes(over: Json = {}): void {
+    events[EVENT_ID] = makeEvent({
+      startTime: new Date(T0.getTime() + 5 * MINUTE),
+      ...over,
+    });
+  }
+  const startedBody = (over: Json = {}): Json => ({
+    date: "2030-03-01",
+    time: "12:05",
+    ...over,
+  });
+  /** `save`, with the form's own start as the default date and time. */
+  const saveHere = (
+    body: Json,
+    form: { version: string; startEditable: string; mode: string },
+  ): ReturnType<typeof save> => save(startedBody(body), form);
+
+  it("carries the rendered mode in the form, and the version token covers it", async () => {
+    startsInFiveMinutes();
+    const full = await formState();
+    expect(full.mode).toBe("full");
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const limited = await formState();
+    expect(limited.mode).toBe("limited");
+    expect(limited.version).not.toBe(full.version);
+  });
+
+  it("refuses a full form submitted after the start, before anything is saved, and audits it", async () => {
+    startsInFiveMinutes();
+    const form = await formState();
+    // The scan has not run: the stored row still says scheduled, no channel.
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const r = await saveHere(
+      startedBody({
+        title: "Renamed",
+        description: "New text",
+        duration: "120",
+      }),
+      form,
+    );
+    expect(flashOf(r.location)).toEqual({ type: "err", msg: STARTED_MESSAGE });
+    expect(r.location).toContain(EDIT);
+    expect(row().title).toBe("Quiz night");
+    expect(row().description).toBe("Bring a friend");
+    expect(row().durationMinutes).toBe(90);
+    expect(syncEvent).not.toHaveBeenCalled();
+    expect(updateAnnouncement).not.toHaveBeenCalled();
+    expect(auditOf()).toEqual(
+      expect.objectContaining({
+        result: "failure",
+        errorMessage: STARTED_MESSAGE,
+      }),
+    );
+  });
+
+  it("refuses it even when only the description and duration were changed", async () => {
+    startsInFiveMinutes();
+    const form = await formState();
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const r = await saveHere(
+      startedBody({ description: "New text", duration: "120" }),
+      form,
+    );
+    expect(flashOf(r.location).msg).toBe(STARTED_MESSAGE);
+    expect(row().description).toBe("Bring a friend");
+    expect(row().durationMinutes).toBe(90);
+  });
+
+  it("refuses a full form whose native start was already locked, with a posted title, after the start", async () => {
+    startsInFiveMinutes({ nativeEventId: "n1" });
+    linkedStatus.mockResolvedValue("locked");
+    const form = await formState();
+    expect(form).toMatchObject({ mode: "full", startEditable: "0" });
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const r = await saveHere(
+      { title: "Renamed", description: "New text" },
+      form,
+    );
+    expect(flashOf(r.location)).toEqual({ type: "err", msg: STARTED_MESSAGE });
+    expect(row().title).toBe("Quiz night");
+    expect(row().description).toBe("Bring a friend");
+    expect(auditOf()?.result).toBe("failure");
+  });
+
+  it("refuses a full form after the channel was created at the lead time", async () => {
+    startsInFiveMinutes();
+    const form = await formState();
+    // The scan has now created the channel and moved the row on.
+    row().channelId = "c-lead";
+    row().state = "active";
+    const r = await saveHere({ title: "Renamed" }, form);
+    expect(flashOf(r.location).type).toBe("err");
+    expect(row().title).toBe("Quiz night");
+  });
+
+  it("still saves a description and a duration from a form that was limited when opened", async () => {
+    startsInFiveMinutes();
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const form = await formState();
+    expect(form.mode).toBe("limited");
+    // Same clock, later: nothing about a limited form goes stale.
+    clockTo(T0.getTime() + 20 * MINUTE);
+    const r = await saveHere(
+      { description: "New text", duration: "120" },
+      form,
+    );
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().description).toBe("New text");
+    expect(row().durationMinutes).toBe(120);
+    expect(auditOf()?.result).toBe("success");
+  });
+
+  it("ignores a forged title, start and startEditable on a form that was limited when opened", async () => {
+    startsInFiveMinutes();
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const form = await formState();
+    const r = await saveHere(
+      {
+        title: "Forged",
+        date: "2031-01-01",
+        time: "01:00",
+        timezone: "Europe/Oslo",
+        description: "New text",
+      },
+      { ...form, startEditable: "1" },
+    );
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().title).toBe("Quiz night");
+    expect((row().startTime as Date).toISOString()).toBe(
+      new Date(T0.getTime() + 5 * MINUTE).toISOString(),
+    );
+    expect(row().timezone).toBe("UTC");
+    expect(row().description).toBe("New text");
+  });
+
+  it("does not let a full form pass as limited: a changed title is never dropped silently", async () => {
+    startsInFiveMinutes();
+    const form = await formState();
+    const r = await saveHere(
+      { title: "Renamed", description: "New text" },
+      { ...form, mode: "limited" },
+    );
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect(row().title).toBe("Quiz night");
+    expect(row().description).toBe("Bring a friend");
+  });
+
+  it("does not let a limited form pass as full", async () => {
+    startsInFiveMinutes();
+    clockTo(T0.getTime() + 6 * MINUTE);
+    const form = await formState();
+    const r = await saveHere({ title: "Renamed" }, { ...form, mode: "full" });
+    expect(flashOf(r.location).type).toBe("err");
+    expect(row().title).toBe("Quiz night");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["unknown", "refused"],
+  ])(
+    "refuses a form whose mode is %s and tells the host to reload",
+    async (_n, mode) => {
+      startsInFiveMinutes();
+      const form = await formState();
+      const r = await call(EDIT, {
+        method: "POST",
+        body: {
+          title: "Renamed",
+          description: "New text",
+          date: "2030-03-01",
+          time: "12:05",
+          timezone: "UTC",
+          duration: "90",
+          version: form.version,
+          startEditable: "1",
+          ...(mode === undefined ? {} : { mode }),
+        },
+      });
+      expect(flashOf(r.location).type).toBe("err");
+      expect(flashOf(r.location).msg).toContain("changed since you opened");
+      expect(row().title).toBe("Quiz night");
+      expect(auditOf()?.result).toBe("failure");
+    },
+  );
+
+  it("refuses with the reason, before validating the form, when events are off", async () => {
+    startsInFiveMinutes();
+    const form = await formState();
+    eventsOn = false;
+    // A blank title would otherwise be reported instead of the real reason.
+    const r = await saveHere({ title: "" }, form);
+    expect(flashOf(r.location).msg).toContain("Events are turned off");
+    expect(r.location).toContain(PANEL);
+    expect(r.location).not.toContain(EDIT);
+    expect(auditOf()?.result).toBe("failure");
+    expect(row().title).toBe("Quiz night");
+  });
+
+  it("refuses the whole save, not just the title, while the native create is unresolved", async () => {
+    startsInFiveMinutes({
+      nativeEventId: null,
+      nativeCreateStartedAt: new Date(T0.getTime() - MINUTE),
+    });
+    const form = await formState();
+    const both = await saveHere(
+      { title: "Renamed", description: "New text" },
+      form,
+    );
+    expect(flashOf(both.location).type).toBe("err");
+    expect(flashOf(both.location).msg).toContain("still being created");
+    expect(row().title).toBe("Quiz night");
+    expect(row().description).toBe("Bring a friend");
+    expect(auditOf()?.result).toBe("failure");
+    // The same form with the title as it was saves what changed.
+    const rest = await saveHere({ description: "New text" }, form);
+    expect(flashOf(rest.location).type).toBe("ok");
+    expect(row().description).toBe("New text");
+  });
+
+  it("refuses the whole save when the form offered a start that moved and the native create is unresolved", async () => {
+    startsInFiveMinutes({
+      nativeEventId: null,
+      nativeCreateStartedAt: new Date(T0.getTime() - MINUTE),
+    });
+    const form = await formState();
+    const r = await saveHere({ time: "12:30", description: "New text" }, form);
+    expect(flashOf(r.location).msg).toContain("still being created");
+    expect(row().description).toBe("Bring a friend");
+    expect((row().startTime as Date).toISOString()).toBe(
+      new Date(T0.getTime() + 5 * MINUTE).toISOString(),
+    );
+  });
+
+  it("refuses the whole save when the linked Discord event started after the form offered the start, even with the start unchanged", async () => {
+    startsInFiveMinutes({ nativeEventId: "n1" });
+    const form = await formState();
+    expect(form.startEditable).toBe("1");
+    linkedStatus.mockResolvedValue("locked");
+    const r = await saveHere(
+      { description: "New text", duration: "120" },
+      form,
+    );
+    expect(flashOf(r.location).msg).toContain("cannot move");
+    expect(row().description).toBe("Bring a friend");
+    expect(row().durationMinutes).toBe(90);
+    expect(auditOf()?.result).toBe("failure");
   });
 });
 

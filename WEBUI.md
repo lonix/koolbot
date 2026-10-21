@@ -2663,8 +2663,11 @@ new title, description, date, time, timezone and duration, with the same checks 
 who marked Interested are kept), the announcement is edited in place, and a moved start moves the lead-time channel creation and sends the reminder
 again. An event that has started (running, its channel already created, or past its start) can only change its description and duration. Finished,
 cancelled, recurring and adopted events cannot be edited: changing one occurrence of a series would change every later one. A save made on an
-out-of-date form (the event started, ended, was cancelled or edited meanwhile) changes nothing and asks you to reload. Every save is audited as
-`event.edit` with the changed fields before and after.
+out-of-date form (the event started, ended, was cancelled or edited meanwhile) changes nothing and asks you to reload. That includes a form opened
+before the start with the title and start editable and saved after it: the whole save is refused ("This event has started since you opened the form"),
+never saved without the title and start. The same holds for events turned off, a Discord event still being created (a new title or start is refused,
+and nothing else from that save is applied) and a running Discord event that holds the start. Every save is audited as `event.edit` with the changed
+fields before and after; a refusal is audited as a failure.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

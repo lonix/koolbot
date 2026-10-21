@@ -61,6 +61,8 @@ export const EDIT_MESSAGES = {
   adopted:
     "This event was adopted from a Discord scheduled event. Edit it in Discord: the bot follows it there.",
   ending: "This event is being ended right now. Reload the page.",
+  started:
+    "This event has started since you opened the form. Reload to edit what is still open.",
   conflict:
     "This event changed since you opened the form (it started, ended, was cancelled or was edited). Reload the page and try again.",
   locked:
@@ -120,17 +122,33 @@ export function editModeOf(
   return { mode: started ? "limited" : "full" };
 }
 
+/** Which fields a form offered: all of them, or description and duration only. */
+export type RenderedMode = "full" | "limited";
+
+/** A posted mode, or null when it is neither (a form from before it existed, or a forged value). */
+export function parseRenderedMode(value: string): RenderedMode | null {
+  return value === "full" || value === "limited" ? value : null;
+}
+
 /**
- * The token a form carries: a hash of the editable fields and the state they
- * were shown in. A save made on an older page (the event started, was cancelled
- * or edited meanwhile) no longer matches and is answered with "reload". Not
- * `updatedAt`: the scan and RSVP writes move that and would cause false
- * conflicts.
+ * The token a form carries: a hash of the editable fields, the state they
+ * were shown in and the mode the form was rendered in. A save made on an older
+ * page (the event started, was cancelled or edited meanwhile) no longer matches
+ * and is answered with "reload". The mode is part of it because the clock moves
+ * an event from full to limited without any stored field changing (the scan
+ * moves the state later), and because a posted mode that is not the rendered
+ * one must not pass: it would decide which posted fields are read and which are
+ * dropped. Not `updatedAt`: the scan and RSVP writes move that and would cause
+ * false conflicts.
  */
-export function eventEditVersion(event: EditableEventRef): string {
+export function eventEditVersion(
+  event: EditableEventRef,
+  renderedMode: RenderedMode,
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
+        renderedMode,
         event.state,
         event.channelId ?? null,
         event.title,
