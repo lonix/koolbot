@@ -83,15 +83,6 @@ export function checkRemindAt(
 }
 
 /**
- * Render a reminder instant as a Discord timestamp so every reader sees it
- * in their own local time. `F` is the long date+time style; `R` renders the
- * relative "in 2 hours" form.
- */
-export function discordTimestamp(date: Date, style: "F" | "R" = "F"): string {
-  return `<t:${Math.floor(date.getTime() / 1000)}:${style}>`;
-}
-
-/**
  * Resolve the configured per-member pending cap to a usable positive integer.
  *
  * `ConfigService.getNumber` hands back a stored number verbatim, so a row

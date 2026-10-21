@@ -68,7 +68,7 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("id")
-          .setDescription("The quote ID to edit (found in quote footer)")
+          .setDescription("The quote ID to edit (shown on the quote)")
           .setRequired(true),
       )
       .addStringOption((option) =>

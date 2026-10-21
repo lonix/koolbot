@@ -357,7 +357,7 @@ export class NoticesChannelManager {
             inline: false,
           },
         )
-        .setFooter({ text: "KoolBot Notices System" })
+        .setFooter({ text: "KoolBot · Notices" })
         .setTimestamp();
 
       const headerMessage = await channel.send({ embeds: [embed] });
@@ -697,7 +697,7 @@ export class NoticesChannelManager {
         .setTitle(`${categoryInfo.emoji} ${notice.title}`)
         .setDescription(notice.content)
         .setFooter({
-          text: `${categoryInfo.label} • ID: ${notice._id}`,
+          text: `KoolBot · Notices · ${categoryInfo.label}`,
         })
         .setTimestamp(notice.createdAt);
 

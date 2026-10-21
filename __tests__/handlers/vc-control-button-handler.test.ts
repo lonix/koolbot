@@ -21,12 +21,13 @@ const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
 
 const HOSTILE_NAME = "<@555> @everyone [free](https://evil.example) **b**";
 
-function expectNeutralName(text: string): void {
+/** The reply names the member or room as a mention and never echoes the name. */
+function expectNeutralName(text: string, mention: string): void {
   expect(text).not.toContain("<@555>");
   expect(text).not.toContain("@everyone");
   expect(text).not.toContain("[free](");
-  expect(text).toContain("\\<@555\\>");
-  expect(text).toContain("\\*\\*b\\*\\*");
+  expect(text).not.toContain("**b**");
+  expect(text).toContain(mention);
 }
 
 describe("VCControlButtonHandler", () => {
@@ -393,7 +394,7 @@ describe("VCControlButtonHandler", () => {
       );
     });
 
-    it("escapes a hostile waiting-user name in the let-in confirmation (#1146)", async () => {
+    it("names the waiting user as a mention in the let-in confirmation (#1146)", async () => {
       mockManagerInstance.getUserChannel.mockReturnValue({ id: "channel-id" });
       mockManagerInstance.getWaitingRoom.mockReturnValue("waiting-room-id");
       mockInteraction.customId =
@@ -415,12 +416,13 @@ describe("VCControlButtonHandler", () => {
       ].map((call) => (call[0] as { content: string }).content);
       const confirmation = sent.find((c) => c.includes("let into the channel"));
       expect(confirmation).toBeDefined();
-      expectNeutralName(confirmation!);
+      expectNeutralName(confirmation!, "<@waiting-user-id>");
     });
 
-    it("escapes a hostile waiting-room name when it is created (#1146)", async () => {
+    it("names a new waiting room as a mention, never by name (#1146)", async () => {
       mockManagerInstance.getWaitingRoom.mockReturnValue(undefined);
       mockManagerInstance.createWaitingRoom.mockResolvedValue({
+        id: "waiting-room-new",
         name: HOSTILE_NAME,
       });
       mockInteraction.customId = "vc_control_waitingroom_channel-id_owner-id";
@@ -433,7 +435,7 @@ describe("VCControlButtonHandler", () => {
       ].map((call) => (call[0] as { content: string }).content);
       const created = sent.find((c) => c.includes("Waiting room"));
       expect(created).toBeDefined();
-      expectNeutralName(created!);
+      expectNeutralName(created!, "<#waiting-room-new>");
     });
 
     it("should move user when owner is valid and user is in waiting room", async () => {

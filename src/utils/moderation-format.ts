@@ -1,4 +1,5 @@
 import { embedColor } from "./embed-style.js";
+import { discordTimestamp } from "./discord-time.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
 /**
@@ -124,7 +125,7 @@ export function formatHistorySummary(
   });
 
   const recent = summary.mostRecent
-    ? ` (most recent <t:${Math.floor(summary.mostRecent.getTime() / 1000)}:R>)`
+    ? ` (most recent ${discordTimestamp(summary.mostRecent, "R")})`
     : "";
 
   return `${parts.join(", ")}${recent}`;

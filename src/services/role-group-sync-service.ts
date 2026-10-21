@@ -542,7 +542,7 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
         "A role behind a role group changed in Discord. Review it on the Role Groups page of the web UI.",
       color: embedColor("warn"),
       fields,
-      footer: "KoolBot role group sync",
+      footer: "KoolBot · Role groups · Sync",
     });
   }
 }

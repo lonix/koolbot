@@ -65,13 +65,8 @@ const ReminderMock = Reminder as unknown as {
   deleteOne: jest.Mock;
 };
 
-const {
-  ReminderService,
-  checkRemindAt,
-  discordTimestamp,
-  resolvePendingLimit,
-  MAX_HORIZON_MS,
-} = await import("../../src/services/reminder-service.js");
+const { ReminderService, checkRemindAt, resolvePendingLimit, MAX_HORIZON_MS } =
+  await import("../../src/services/reminder-service.js");
 
 /** A syntactically valid Mongo ObjectId, for the cancel path. */
 const VALID_ID = "507f1f77bcf86cd799439011";
@@ -209,16 +204,6 @@ describe("checkRemindAt", () => {
   it("honours an explicit shorter horizon", () => {
     const at = new Date(NOW.getTime() + 2 * MINUTE);
     expect(checkRemindAt(at, NOW, MINUTE)).toBe("too-far");
-  });
-});
-
-describe("discordTimestamp", () => {
-  it("renders the long form by default", () => {
-    expect(discordTimestamp(NOW)).toBe("<t:1788264000:F>");
-  });
-
-  it("renders the relative form on request", () => {
-    expect(discordTimestamp(NOW, "R")).toBe("<t:1788264000:R>");
   });
 });
 

@@ -133,7 +133,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(member.roles.remove).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: expect.stringContaining("You now have **Gamer**"),
+          content: expect.stringContaining("You now have <@&role1>"),
           flags: MessageFlags.Ephemeral,
         }),
       );
@@ -151,7 +151,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(member.roles.add).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: expect.stringContaining("Removed **Gamer**"),
+          content: expect.stringContaining("Removed <@&role1>"),
           flags: MessageFlags.Ephemeral,
         }),
       );

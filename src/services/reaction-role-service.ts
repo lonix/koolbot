@@ -1082,7 +1082,7 @@ export class ReactionRoleService {
         .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
-          `Click the button below to toggle the **${roleName}** role and its channels.`,
+          `Click the button below to toggle the <@&${roleId}> role and its channels.`,
         )
         .setFooter({ text: "Click again to remove the role" })
         .setTimestamp();
@@ -1106,7 +1106,7 @@ export class ReactionRoleService {
         .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
-          `Use the menu below to give yourself the **${roleName}** role and its channels.`,
+          `Use the menu below to give yourself the <@&${roleId}> role and its channels.`,
         )
         .setFooter({ text: "Deselect to remove the role" })
         .setTimestamp();
@@ -1143,12 +1143,12 @@ export class ReactionRoleService {
     // Default: legacy reaction surface. The caller adds the reaction after send.
     // Description/footer track the assignment mode so a sticky mapping never
     // tells members that unreacting removes the role (it doesn't).
-    let description = `React with ${emoji} to get access to the **${roleName}** role and channels!`;
+    let description = `React with ${emoji} to get access to the <@&${roleId}> role and channels!`;
     let footer = "Remove your reaction to lose access";
     if (mode === "sticky") {
       footer = "Removing your reaction keeps the role";
     } else if (mode === "unique") {
-      description = `React with ${emoji} to get the **${roleName}** role and its channels. This clears the other roles offered on this message.`;
+      description = `React with ${emoji} to get the <@&${roleId}> role and its channels. This clears the other roles offered on this message.`;
       footer = "Reacting here swaps you to this role";
     }
 
@@ -1284,10 +1284,10 @@ export class ReactionRoleService {
     const hasRole = member.roles.cache.has(role.id);
 
     if (desired === "add" && hasRole) {
-      return `You already have **${role.name}**.`;
+      return `You already have <@&${role.id}>.`;
     }
     if (desired === "remove" && !hasRole) {
-      return `You don't have **${role.name}**.`;
+      return `You don't have <@&${role.id}>.`;
     }
 
     if (desired === "add") {
@@ -1303,7 +1303,7 @@ export class ReactionRoleService {
       if (
         (await this.forbiddenPermissionsLive(member.guild, role)).length > 0
       ) {
-        return `⚠️ **${role.name}** can't be self-assigned right now. Please ask an admin.`;
+        return `⚠️ <@&${role.id}> can't be self-assigned right now. Please ask an admin.`;
       }
     }
 
@@ -1317,12 +1317,12 @@ export class ReactionRoleService {
       if (desired === "add") {
         await member.roles.add(role);
         logger.info(`Added role ${role.name} to user ${member.user.tag}`);
-        return `✅ You now have **${role.name}**.`;
+        return `✅ You now have <@&${role.id}>.`;
       }
 
       await member.roles.remove(role);
       logger.info(`Removed role ${role.name} from user ${member.user.tag}`);
-      return `➖ Removed **${role.name}**.`;
+      return `➖ Removed <@&${role.id}>.`;
     } catch (error) {
       flip.release(); // the role did not change, so the flip is not spent
       throw error;
@@ -2071,9 +2071,7 @@ export class ReactionRoleService {
         const embed = new EmbedBuilder()
           .setColor(embedColor("brand"))
           .setTitle(`${emoji} ${role.name}`)
-          .setDescription(
-            `React with ${emoji} to get the **${role.name}** role!`,
-          )
+          .setDescription(`React with ${emoji} to get the <@&${role.id}> role!`)
           .setFooter({
             text: options.adoptionOpKey
               ? `Remove your reaction to lose the role${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${options.adoptionOpKey}`

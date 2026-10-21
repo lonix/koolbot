@@ -74,6 +74,27 @@ describe("QuoteChannelManager.postQuote - reaction failure handling", () => {
     expect(message.react).toHaveBeenCalledWith("👎");
   });
 
+  it("keeps the quote id out of the footer and in a field for /quote edit (#1331)", async () => {
+    const message = {
+      id: "msg789",
+      react: jest.fn().mockResolvedValue(undefined),
+    };
+    const channel = makeChannel(message);
+    mockClient.channels.fetch.mockResolvedValue(channel);
+
+    const manager = await loadManager();
+    await manager.postQuote("6ab39e6de2a244dae7043400", "hi", "a1", "b1");
+
+    const embed = (channel.send.mock.calls[0][0] as any).embeds[0].toJSON();
+    expect(embed.footer.text).toBe("KoolBot · Quotes");
+    expect(embed.footer.text).not.toContain("6ab39e6de2a244dae7043400");
+    expect(embed.fields).toContainEqual({
+      name: "Quote ID",
+      value: "`6ab39e6de2a244dae7043400`",
+      inline: true,
+    });
+  });
+
   it("still returns the message id when adding reactions fails", async () => {
     const message = {
       id: "msg456",

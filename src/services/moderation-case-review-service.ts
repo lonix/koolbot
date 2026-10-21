@@ -13,6 +13,7 @@ import {
 } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
 import { embedColor } from "../utils/embed-style.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 
 /** Fallback for `moderation.cases.review_cron`, mirroring the schema default. */
 const DEFAULT_CRON = "0 9 * * *";
@@ -131,9 +132,7 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
       }
       const lines = flipped.map(
         (c) =>
-          `**Case #${c.caseNumber}** · <@${c.userId}> · ${c.action} · due <t:${Math.floor(
-            (c.reviewAt ?? c.updatedAt).getTime() / 1000,
-          )}:D>`,
+          `**Case #${c.caseNumber}** · <@${c.userId}> · ${c.action} · due ${discordTimestamp(c.reviewAt ?? c.updatedAt, "D")}`,
       );
       return await discordLogger.logToChannel("moderation_review", {
         title: `🛡️ ${flipped.length} moderation case${
