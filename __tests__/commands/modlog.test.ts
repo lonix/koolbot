@@ -237,13 +237,13 @@ describe("Modlog Command", () => {
         `Case #14 — under review, due <t:${ts}:D>`,
       ],
       [
-        "a readmitted case, naming who decided",
+        "a case that let the member back in, naming who decided",
         {
           status: "lifted",
           reviewAt: null,
           events: [{ at, byUserId: "staff-9" }],
         },
-        `Case #14 — readmitted <t:${ts}:D> by <@staff-9>`,
+        `Case #14 — let back in <t:${ts}:D> by <@staff-9>`,
       ],
       [
         "a permanent case",

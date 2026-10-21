@@ -93,11 +93,11 @@ the member's role groups. The scopes are resolved from the role groups **on ever
 someone from the group removes the scope on their next request, within the same ~15 s window as the other live checks when the
 Server Members intent is off.
 
-| Scope      | Granted by (role group capability)                | Reaches                                        |
-| ---------- | ------------------------------------------------- | ---------------------------------------------- |
-| Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                           |
-| Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created  |
-| Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*` (pages arrive with #1320)    |
+| Scope      | Granted by (role group capability)                | Reaches                                          |
+| ---------- | ------------------------------------------------- | ------------------------------------------------ |
+| Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                             |
+| Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created    |
+| Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*`: Mod log, cases, Command audit |
 
 **The app shell (#1317).** Every signed-in page has the same top bar: the KoolBot name and version, then who you are (an
 avatar initial and your server display name) with a badge for each scope above Member (**Event host**, **Moderator**, **Admin**),
@@ -125,6 +125,17 @@ when no role name is available.
 - Fails closed, all or nothing: both capabilities come from one read of the role groups. If the groups or the member cannot be read
   (Discord or database error), the session is plain `member` for that request, never a partial set, and the
   event and moderation pages answer 403. The request is still served as `me` otherwise.
+- **Moderator scope (#1320).** `/me/moderation` is the Mod log for people who moderate but are not admins. The header says why they see it
+  (the Moderator role groups they are in; an administrator session says so instead). It shows three tiles (open cases, actions in the last
+  7 days, timeouts running now), the **Open cases** with a **Review** link, and the **Actions** list, filterable by kind (All, Warnings,
+  Timeouts, Bans; a kick shows under All), 50 per page. Each row links to its case at `/me/moderation/cases/:id`, where the four decisions
+  (Uphold, Extend, Make permanent, Let back in) are the same ones the admin Moderation page offers: the same service call, and an audit row
+  (`moderation.case.<decision>`) for every attempt. `/me/moderation/audit` is the Command audit, read only (no settings card, no write
+  route). A moderator cannot open a case, run the review pass, change a moderation setting or reach any `/admin` page. The log shows what
+  the admin log shows (member, moderator, action, reason); message content and attachments are never stored there. "Timeouts running now"
+  counts members whose Discord timeout has not ended, from the member cache, so it needs the Server Members intent and shows a dash
+  without it (the log does not record how long a timeout lasts). Mod-log rows carry no channel; channels appear in the Command audit.
+  Tickets will join this section when it is switched on.
 - Nothing grants the scope automatically. The **Event host** preset on the Role Groups page only pre-fills the form, and an existing
   server gains no host members from this change.
 
@@ -2713,7 +2724,7 @@ run, so you can watch the alert channel and `/raidmode status` for what it would
 Its actions show in the table above like any other: `kick` and `timeout` rows against the member, `quarantine`
 rows for the role action, and `raid lockdown` / `raid cleared` rows for each lockdown (their user column shows the
 server id, since they concern the server rather than a member), all with source `raid`. A raid kick can have a case
-opened on it like any kick, which is the place to record a review or a readmit. The action filter lists every action.
+opened on it like any kick, which is the place to record a review or letting the member back in. The action filter lists every action.
 
 With `moderation.cases.enabled` on, the page also gains a **Cases** section and a **Case** column (#908).
 In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from
@@ -2722,7 +2733,7 @@ number and status. The section groups cases into **Overdue** (review date passed
 **Scheduled** (review date further out), **No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
 who acted, the member's **prior log history** (newest 10 entries) and the case's decision trail. A live card
 offers **Uphold** (keep it, schedule the next review), **Extend** (new review date, required), **Make permanent**
-and **Readmit**; staff may decide a case before it is due. Readmit records the decision only, it does not unban in
+and **Let back in**; staff may decide a case before it is due. Let back in records the decision only, it does not unban in
 Discord. A **Run review pass now** button runs the due-review job on demand. Every decision is written to the
 Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
 naming the status it found.

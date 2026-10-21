@@ -50,7 +50,11 @@ export interface ModerationHistoryQuery {
 
 export interface RecentQuery extends ModerationHistoryQuery {
   action?: ModerationAction;
+  /** Any of these actions; combined with `action`, both must hold. */
+  actions?: readonly ModerationAction[];
   userId?: string;
+  /** Only rows created at or after this instant. */
+  since?: Date;
 }
 
 /**
@@ -117,6 +121,27 @@ export function mapAuditLogEntry(entry: {
     default:
       return null;
   }
+}
+
+/** The Mongo filter behind {@link ModerationService.getRecent} and `countRecent`. */
+function recentFilter(
+  guildId: string,
+  query: Pick<RecentQuery, "action" | "actions" | "userId" | "since">,
+): Record<string, unknown> {
+  const filter: Record<string, unknown> = { guildId };
+  if (query.action && query.actions) {
+    filter.$and = [
+      { action: query.action },
+      { action: { $in: [...query.actions] } },
+    ];
+  } else if (query.action) {
+    filter.action = query.action;
+  } else if (query.actions) {
+    filter.action = { $in: [...query.actions] };
+  }
+  if (query.userId) filter.userId = query.userId;
+  if (query.since) filter.createdAt = { $gte: query.since };
+  return filter;
 }
 
 /**
@@ -415,9 +440,7 @@ export class ModerationService {
     guildId: string,
     query: RecentQuery,
   ): Promise<IModerationLog[]> {
-    const filter: Record<string, unknown> = { guildId };
-    if (query.action) filter.action = query.action;
-    if (query.userId) filter.userId = query.userId;
+    const filter = recentFilter(guildId, query);
     return ModerationLog.find(filter)
       .sort({ createdAt: -1 })
       .skip(query.skip)
@@ -428,11 +451,9 @@ export class ModerationService {
 
   public async countRecent(
     guildId: string,
-    query: Pick<RecentQuery, "action" | "userId">,
+    query: Pick<RecentQuery, "action" | "actions" | "userId" | "since">,
   ): Promise<number> {
-    const filter: Record<string, unknown> = { guildId };
-    if (query.action) filter.action = query.action;
-    if (query.userId) filter.userId = query.userId;
+    const filter = recentFilter(guildId, query);
     return ModerationLog.countDocuments(filter).exec();
   }
 }

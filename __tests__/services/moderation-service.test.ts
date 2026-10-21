@@ -400,6 +400,44 @@ describe("ModerationService query helpers", () => {
     });
   });
 
+  it("getRecent narrows to a set of actions and a start instant", async () => {
+    const query = makeQuery([]);
+    findMock.mockReturnValueOnce(query);
+    const since = new Date("2026-01-05T00:00:00Z");
+
+    await freshService().getRecent("g1", {
+      actions: ["timeout", "untimeout"],
+      since,
+      limit: 50,
+      skip: 0,
+    });
+
+    expect(findMock).toHaveBeenCalledWith({
+      guildId: "g1",
+      action: { $in: ["timeout", "untimeout"] },
+      createdAt: { $gte: since },
+    });
+  });
+
+  it("countRecent applies the same set and start filters, and both action filters must hold", async () => {
+    countExecMock.mockResolvedValue(3);
+    const since = new Date("2026-01-05T00:00:00Z");
+    const service = freshService();
+
+    await service.countRecent("g1", { actions: ["ban", "unban"], since });
+    expect(countDocumentsMock).toHaveBeenLastCalledWith({
+      guildId: "g1",
+      action: { $in: ["ban", "unban"] },
+      createdAt: { $gte: since },
+    });
+
+    await service.countRecent("g1", { action: "ban", actions: ["warn"] });
+    expect(countDocumentsMock).toHaveBeenLastCalledWith({
+      guildId: "g1",
+      $and: [{ action: "ban" }, { action: { $in: ["warn"] } }],
+    });
+  });
+
   it("countRecent omits absent filters", async () => {
     countExecMock.mockResolvedValueOnce(7);
     const service = freshService();

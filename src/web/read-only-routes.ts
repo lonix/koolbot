@@ -121,11 +121,17 @@ import {
   resolveManagedCategory,
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
-import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
 import { RAID_CONFIG_KEYS } from "../services/raid-protection-service.js";
 import { ModerationCaseService } from "../services/moderation-case-service.js";
 import { SYSTEM_ACTOR } from "../models/moderation-case.js";
+import {
+  loadCommandAuditPage,
+  logRowUserIds,
+  readCommandAuditFilters,
+  resolveMemberLabels,
+  toModerationRows,
+} from "./moderation-log-data.js";
 import {
   buildCaseGroups,
   loadModerationCaseData,
@@ -176,7 +182,6 @@ import {
   renderSettingsPage,
   renderVoiceChannelsPage,
   type ChannelOption,
-  type CommandAuditRow,
   type ModerationRow,
   type DbTrunkHistoryRow,
   type DigestPreviewView,
@@ -2635,114 +2640,32 @@ export function createReadOnlyRouter(
       const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
       const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
 
-      const commandFilter = String(req.query.command ?? "").trim();
-      const userFilter = String(req.query.user ?? "").trim();
-      const resultFilterRaw = String(req.query.result ?? "").trim();
-      const resultFilter =
-        resultFilterRaw === "success" ||
-        resultFilterRaw === "error" ||
-        resultFilterRaw === "denied"
-          ? resultFilterRaw
-          : "";
-      const fromFilter = String(req.query.from ?? "").trim();
-      const toFilter = String(req.query.to ?? "").trim();
-
-      const query: Record<string, unknown> = { guildId: common.guildId };
-      if (commandFilter) query.commandName = commandFilter;
-      if (userFilter) query.discordUserId = userFilter;
-      if (resultFilter) query.result = resultFilter;
-
-      const dateRange: Record<string, Date> = {};
-      const parsedFrom = fromFilter ? new Date(fromFilter) : null;
-      const parsedTo = toFilter ? new Date(toFilter) : null;
-      if (parsedFrom && !Number.isNaN(parsedFrom.getTime())) {
-        dateRange.$gte = parsedFrom;
-      }
-      if (parsedTo && !Number.isNaN(parsedTo.getTime())) {
-        // Treat `to` as inclusive end-of-day so date pickers behave intuitively.
-        const inclusive = new Date(parsedTo);
-        inclusive.setHours(23, 59, 59, 999);
-        dateRange.$lte = inclusive;
-      }
-      if (Object.keys(dateRange).length > 0) {
-        query.createdAt = dateRange;
-      }
-
-      const [enabled, retentionDays, auditSettings, total, docs] =
-        await Promise.all([
-          config.getBoolean("core.command_audit.enabled", true),
-          config.getNumber("core.command_audit.retention_days", 90),
-          // Editable audit settings card (#978).
-          loadFeatureSettings(
-            client,
-            common.guildId,
-            COMMAND_AUDIT_SETTING_KEYS,
-          ),
-          DiscordCommandAuditLog.countDocuments(query).catch(() => 0),
-          DiscordCommandAuditLog.find(query)
-            .sort({ createdAt: -1 })
-            .skip((page - 1) * pageSize)
-            .limit(pageSize)
-            .lean()
-            .catch(() => [] as Array<Record<string, unknown>>),
-        ]);
-
-      // Resolve user labels from the guild member cache so the table
-      // shows names rather than raw snowflakes. One fetch per request.
-      const userIdsOnPage = new Set<string>();
-      for (const d of docs) {
-        if (typeof d.discordUserId === "string") {
-          userIdsOnPage.add(d.discordUserId);
-        }
-      }
-      const userLabels = new Map<string, string>();
-      try {
-        const guild = await client.guilds.fetch(common.guildId);
-        for (const id of userIdsOnPage) {
-          try {
-            const member = await guild.members.fetch(id);
-            userLabels.set(id, member.displayName ?? member.user.username);
-          } catch {
-            // Member left the guild or fetch failed; fall back to ID.
-          }
-        }
-      } catch (err) {
-        logger.debug("audit page user-label fetch failed", err);
-      }
+      const filters = readCommandAuditFilters(
+        req.query as Record<string, unknown>,
+      );
 
       const channelData = await fetchChannelData(client, common.guildId);
-
-      const rows: CommandAuditRow[] = docs.map((d) => {
-        const userId = String(d.discordUserId ?? "");
-        const channelId = typeof d.channelId === "string" ? d.channelId : null;
-        return {
-          createdAt:
-            d.createdAt instanceof Date
-              ? d.createdAt.toISOString()
-              : String(d.createdAt ?? ""),
-          discordUserId: userId,
-          userLabel: userLabels.get(userId) ?? userId,
-          commandName: String(d.commandName ?? ""),
-          subcommand: typeof d.subcommand === "string" ? d.subcommand : null,
-          channelId,
-          channelLabel: channelId
-            ? (channelData.names.get(channelId) ?? channelId)
-            : null,
-          result: (d.result as "success" | "error" | "denied") ?? "success",
-          errorMessage:
-            typeof d.errorMessage === "string" ? d.errorMessage : null,
-          durationMs: typeof d.durationMs === "number" ? d.durationMs : 0,
-        };
-      });
+      const [enabled, retentionDays, auditSettings, audit] = await Promise.all([
+        config.getBoolean("core.command_audit.enabled", true),
+        config.getNumber("core.command_audit.retention_days", 90),
+        // Editable audit settings card (#978).
+        loadFeatureSettings(client, common.guildId, COMMAND_AUDIT_SETTING_KEYS),
+        loadCommandAuditPage({
+          client,
+          guildId: common.guildId,
+          filters,
+          page,
+          pageSize,
+          channelNames: channelData.names,
+        }),
+      ]);
+      const { rows, total, userOptions } = audit;
 
       // Component rows (#1147) carry a fixed label, so they can be filtered too.
       const commandOptions = [
         ...Array.from(client.commands.keys()).sort(),
         ...COMPONENT_AUDIT_LABELS,
       ];
-      const userOptions = Array.from(userIdsOnPage)
-        .sort()
-        .map((id) => ({ id, label: userLabels.get(id) ?? id }));
 
       res.type("text/html").send(
         renderCommandAuditPage({
@@ -2754,13 +2677,7 @@ export function createReadOnlyRouter(
           flash: readFlash(req),
           commandOptions,
           userOptions,
-          filters: {
-            commandName: commandFilter,
-            userId: userFilter,
-            result: resultFilter,
-            from: fromFilter,
-            to: toFilter,
-          },
+          filters,
           rows,
           total,
           page,
@@ -2827,19 +2744,10 @@ export function createReadOnlyRouter(
       });
       const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
 
-      // Resolve user + moderator labels to display names. Look in the member
-      // cache first and batch the misses into a single `fetch({ user: [...] })`
-      // request rather than one awaited fetch per id — a page of 50 rows can
-      // reference up to ~100 distinct ids, and per-id fetches would be slow and
-      // rate-limit-prone. Ids that stay unresolved (member left the guild) fall
-      // back to the raw snowflake at render time.
-      const idsOnPage = new Set<string>();
-      for (const d of docs) {
-        // Anti-raid lockdown rows concern the server, so their user is the
-        // guild id (#1045): not a member, and not worth a lookup.
-        if (d.userId !== common.guildId) idsOnPage.add(d.userId);
-        if (d.moderatorId) idsOnPage.add(d.moderatorId);
-      }
+      // Resolve user + moderator labels to display names (batched, cache
+      // first; see `resolveMemberLabels`). Ids that stay unresolved fall back
+      // to the raw snowflake at render time.
+      const idsOnPage = logRowUserIds(docs, common.guildId);
       for (const c of queueCases) {
         idsOnPage.add(c.userId);
         idsOnPage.add(c.openedByUserId);
@@ -2850,56 +2758,20 @@ export function createReadOnlyRouter(
           if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
         }
       }
-      const labels = new Map<string, string>([
-        [common.guildId, "Server (anti-raid)"],
-      ]);
-      if (idsOnPage.size > 0) {
-        try {
-          const guild = await client.guilds.fetch(common.guildId);
-          const missing: string[] = [];
-          for (const id of idsOnPage) {
-            const cached = guild.members.cache.get(id);
-            if (cached) {
-              labels.set(id, cached.displayName ?? cached.user.username);
-            } else {
-              missing.push(id);
-            }
-          }
-          if (missing.length > 0) {
-            const fetched = await guild.members
-              .fetch({ user: missing })
-              .catch(() => null);
-            if (fetched) {
-              for (const [id, member] of fetched) {
-                labels.set(id, member.displayName ?? member.user.username);
-              }
-            }
-          }
-        } catch (err) {
-          logger.debug("moderation page member-label fetch failed", err);
-        }
-      }
+      const labels = await resolveMemberLabels(
+        client,
+        common.guildId,
+        idsOnPage,
+        new Map([[common.guildId, "Server (anti-raid)"]]),
+      );
 
       const labelOf = (id: string | null): string =>
         id ? (labels.get(id) ?? id) : "Unknown";
-      const rows: ModerationRow[] = docs.map((d) => ({
-        entryId: String(d._id),
-        caseNumber: casesByEntry.get(String(d._id))?.caseNumber ?? null,
-        caseStatus: casesByEntry.get(String(d._id))?.status ?? null,
-        createdAt:
-          d.createdAt instanceof Date
-            ? d.createdAt.toISOString()
-            : String(d.createdAt ?? ""),
-        userId: d.userId,
-        userLabel: labels.get(d.userId) ?? d.userId,
-        moderatorId: d.moderatorId ?? null,
-        moderatorLabel: d.moderatorId
-          ? (labels.get(d.moderatorId) ?? d.moderatorId)
-          : null,
-        action: d.action,
-        reason: d.reason ?? null,
-        source: d.source,
-      }));
+      const rows: ModerationRow[] = toModerationRows(
+        docs,
+        casesByEntry,
+        labels,
+      );
 
       // The user filter dropdown is seeded from the target users on this page.
       const userOptions = Array.from(new Set(docs.map((d) => d.userId)))

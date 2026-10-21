@@ -156,6 +156,19 @@ export class ModerationCaseService {
     return moderation && cases;
   }
 
+  /**
+   * `isEnabled` that rejects when the setting cannot be read, instead of
+   * reading as "off". For pages that say "cases are off" or "no such case":
+   * a database failure must reach the error handler, not look like that.
+   */
+  public async isEnabledStrict(): Promise<boolean> {
+    const [moderation, cases] = await Promise.all([
+      this.configService.getBooleanStrict("moderation.enabled", false),
+      this.configService.getBooleanStrict("moderation.cases.enabled", false),
+    ]);
+    return moderation && cases;
+  }
+
   /** The pre-filled review window when staff open a case. */
   public async getDefaultReviewDays(): Promise<number> {
     const days = await this.configService
@@ -442,6 +455,30 @@ export class ModerationCaseService {
       .exec();
     for (const row of rows) byId.set(String(row._id), row);
     return byId;
+  }
+
+  /** Cases still waiting on a decision (`open` or `under_review`), uncapped. */
+  public async countLiveCases(guildId: string): Promise<number> {
+    return ModerationCase.countDocuments({
+      guildId,
+      status: { $in: LIVE_CASE_STATUSES },
+    }).exec();
+  }
+
+  /**
+   * Live cases whose review date has passed, uncapped (the queue shows at most
+   * 100 per group, so its length is not a count). Same filter as the queue's
+   * overdue group.
+   */
+  public async countOverdueCases(
+    guildId: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    return ModerationCase.countDocuments({
+      guildId,
+      status: { $in: LIVE_CASE_STATUSES },
+      reviewAt: { $lte: now },
+    }).exec();
   }
 
   /** The review queue, in the order the admin page shows it. */

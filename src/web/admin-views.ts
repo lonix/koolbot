@@ -5369,6 +5369,7 @@ export interface ModerationRow {
   /** The log row's id; the "Open case" form posts it (#908). */
   entryId: string;
   /** The case opened against this row, if any. */
+  caseId?: string | null;
   caseNumber: number | null;
   caseStatus: string | null;
   createdAt: string;
@@ -5416,7 +5417,7 @@ export interface ModerationProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
-const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
+export const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
   warn: "warn",
   kick: "kick",
   ban: "ban",
@@ -5453,12 +5454,20 @@ function buildModerationQueryString(
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
-const CASE_STATUS_LABELS: Record<string, string> = {
+export const CASE_STATUS_LABELS: Record<string, string> = {
   open: "open",
   under_review: "under review",
   upheld: "upheld",
-  lifted: "readmitted",
+  lifted: "let back in",
   expired: "expired",
+};
+
+/**
+ * Display words for the outcome stored on a case event. The stored value
+ * `readmitted` stays as it is (existing data); only the shown word changes.
+ */
+export const CASE_OUTCOME_LABELS: Record<string, string> = {
+  readmitted: "let back in",
 };
 
 function caseStatusTag(status: string): string {
@@ -5514,7 +5523,7 @@ function renderCaseEvents(c: CaseView): string {
   return `<ul class="muted">${c.events
     .map((e) => {
       const what = e.outcome
-        ? escapeHtml(e.outcome)
+        ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
           ? "came due"
           : "opened";
@@ -5541,9 +5550,9 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
             "It is not reviewed again.",
           ],
         )}>Make permanent</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there."${CONFIRM_NEUTRAL_ATTR}>Readmit</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Let this member back in? KoolBot does not unban in Discord; do that there."${CONFIRM_NEUTRAL_ATTR}>Let back in</button>
       </div>
-      <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Readmit records the decision only; lift the ban in Discord yourself.</p>
+      <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Let back in records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
 }
 

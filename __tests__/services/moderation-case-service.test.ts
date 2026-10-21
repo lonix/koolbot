@@ -38,6 +38,7 @@ const caseFindOne = jest.fn();
 const caseFindOneAndUpdate = jest.fn();
 const caseExists = jest.fn();
 const caseCreate = jest.fn();
+const caseCountDocuments = jest.fn();
 const caseFind = jest.fn();
 const counterFindOneAndUpdate = jest.fn();
 const logFindOne = jest.fn();
@@ -50,6 +51,7 @@ jest.unstable_mockModule("../../src/models/moderation-case.js", () => ({
     exists: caseExists,
     create: caseCreate,
     find: caseFind,
+    countDocuments: caseCountDocuments,
   },
   ModerationCaseCounter: { findOneAndUpdate: counterFindOneAndUpdate },
   LIVE_CASE_STATUSES: ["open", "under_review"],
@@ -547,6 +549,30 @@ describe("markUnderReview", () => {
         "system",
       ),
     ).toBeNull();
+  });
+});
+
+describe("countLiveCases", () => {
+  it("counts open and under-review cases of the guild, uncapped by the queue", async () => {
+    caseCountDocuments.mockReturnValue({ exec: async () => 130 });
+    expect(await service().countLiveCases("g1")).toBe(130);
+    expect(caseCountDocuments).toHaveBeenCalledWith({
+      guildId: "g1",
+      status: { $in: ["open", "under_review"] },
+    });
+  });
+});
+
+describe("countOverdueCases", () => {
+  it("counts live cases past their review date, uncapped", async () => {
+    caseCountDocuments.mockReturnValue({ exec: async () => 125 });
+    const now = new Date("2026-06-01T00:00:00Z");
+    expect(await service().countOverdueCases("g1", now)).toBe(125);
+    expect(caseCountDocuments).toHaveBeenCalledWith({
+      guildId: "g1",
+      status: { $in: ["open", "under_review"] },
+      reviewAt: { $lte: now },
+    });
   });
 });
 
