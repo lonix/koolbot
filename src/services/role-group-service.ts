@@ -223,6 +223,45 @@ export class RoleGroupService {
     return { host: held("host", "admin"), staff: held("staff", "admin") };
   }
 
+  /**
+   * Names of the Discord roles through which a member holds the `host` and
+   * `staff` capabilities (#1317), for the "why you see this" line. Same group
+   * snapshot and same rules as `memberScopeCapabilities` (`admin` implies both);
+   * the role name is what the member sees in Discord, falling back to the stored
+   * role name and then the group's own name. `elevated` is the owner /
+   * `Administrator` shortcut, which holds both through no group at all.
+   */
+  public async memberScopeGroupNames(
+    member: GuildMember,
+  ): Promise<{ host: string[]; staff: string[]; elevated: boolean }> {
+    if (
+      member.guild.ownerId === member.id ||
+      member.permissions?.has(PermissionsBitField.Flags.Administrator)
+    ) {
+      return { host: [], staff: [], elevated: true };
+    }
+    const groups = await this.list(member.guild.id);
+    const names = (...wanted: RoleGroupCapability[]): string[] =>
+      groups
+        .filter(
+          (g) =>
+            g.roleId !== null &&
+            g.capabilities.some((c) => wanted.includes(c)) &&
+            member.roles.cache.has(g.roleId),
+        )
+        .map(
+          (g) =>
+            member.roles.cache.get(g.roleId ?? "")?.name ??
+            g.roleName ??
+            g.name,
+        );
+    return {
+      host: names("host", "admin"),
+      staff: names("staff", "admin"),
+      elevated: false,
+    };
+  }
+
   /** Does the member hold the group's role, or one of any higher group? */
   public async memberIsAtOrAbove(
     member: GuildMember,

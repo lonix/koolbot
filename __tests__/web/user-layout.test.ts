@@ -55,7 +55,10 @@ describe("renderUserPage accessibility (#855)", () => {
 
   it("uses colours that clear the WCAG contrast floors", () => {
     const html = render();
-    expect(html).toContain(".banner button{background:var(--danger);");
+    // Sign out is the neutral kb-btn of the shared top bar (no hard-coded colour here).
+    expect(html).toContain(
+      '<button type="submit" class="kb-btn kb-btn--sm">Sign out</button>',
+    );
     expect(html).not.toContain("#ef4444");
     expect(html).not.toContain("#6b7280");
     // --control survives only as the control border, never as text.

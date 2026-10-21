@@ -5,6 +5,7 @@
  */
 
 import { scriptTag } from "./html.js";
+import { renderSaveBar } from "./savebar.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
@@ -1287,6 +1288,8 @@ function renderSettingsForms(opts: {
   hiddenFields: string;
   rowsHtml: string;
   submitLabel: string;
+  /** Names the form's save bar region, which must differ per form. */
+  title: string;
   csrfToken: string;
   returnTo?: string;
 }): string {
@@ -1296,9 +1299,7 @@ function renderSettingsForms(opts: {
   return `<form method="POST" action="/admin/settings/save-section"${opts.saveAttrs} id="${escapeHtml(opts.formId)}">
     ${opts.hiddenFields}
     ${opts.rowsHtml}
-    <div class="actions" style="margin-top:.75rem">
-      <button type="submit" class="btn btn-primary">${escapeHtml(opts.submitLabel)}</button>
-    </div>
+    ${renderSaveBar(opts.submitLabel, opts.title)}
   </form>
   <form id="${escapeHtml(opts.formId)}-reset" method="POST" action="/admin/settings/reset">
     <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">${redirect}
@@ -1382,6 +1383,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     <input type="hidden" name="category" value="${escapeHtml(g.category)}">`,
     rowsHtml,
     submitLabel: "Save",
+    title: meta.title,
     csrfToken: props.csrfToken,
   })}
 </div>`;
@@ -2906,12 +2908,18 @@ export function renderEventsPage(props: EventsProps): string {
               },
             )}</details>`
           : "";
+      // Edit (#1298): an open one-off event of our own. A series and an adopted
+      // event are not editable yet, so no link is offered for them.
+      const editLink =
+        !finished && !e.recurrence && e.nativeAdopted !== true
+          ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
+          : "";
       const actions = finished
         ? e.awaitingSuccessor
           ? `${hostLink}\n  ${seriesForm}`
           : hostLink
         : `${hostLink}
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
+  ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
@@ -4569,6 +4577,7 @@ export function renderFeatureSettingsCard(
     <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}`,
     rowsHtml,
     submitLabel: props.submitLabel ?? "Save settings",
+    title: props.title ?? "Settings",
     csrfToken: props.csrfToken,
     returnTo: props.returnTo,
   })}

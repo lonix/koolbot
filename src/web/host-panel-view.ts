@@ -8,7 +8,7 @@
  */
 
 import { escapeHtml } from "./html.js";
-import { hostControlsAvailable } from "./host-panel-shared.js";
+import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 
 export type HostSectionId =
@@ -113,6 +113,8 @@ export interface HostPanelEvent {
    */
   captainsLobby?: { hasChannel: boolean } | null;
   groups: HostPanelGroup[];
+  /** The event can be edited (#1298): open, not recurring, not adopted. */
+  editable?: boolean;
   /** What the last group-channel pass could not do (#1190): warnings and
    * per-group failures, as plain text. Absent or empty when all is well. */
   groupNotices?: string[];
@@ -275,7 +277,7 @@ export function renderHostPanelBody(opts: {
   const e = opts.event;
   return `<h1>Host panel</h1>
 <p class="subtitle"><strong>${escapeHtml(e.title)}</strong> · <a href="/me/">Back to overview</a></p>
-${renderSummary(e)}
+${e.editable ? `<p><a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></p>\n` : ""}${renderSummary(e)}
 ${renderGroups(e)}
 ${renderControls(e, opts.controls ?? {})}`;
 }

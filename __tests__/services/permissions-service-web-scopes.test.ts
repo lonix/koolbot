@@ -188,3 +188,75 @@ describe("resolveWebScopes (#1316)", () => {
     expect(listGroups).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("resolveWebScopeReasons (#1317)", () => {
+  const named = (
+    roles: Record<string, string>,
+    opts: { admin?: boolean; owner?: boolean } = {},
+  ): unknown => {
+    const base = member([], opts) as { roles: unknown };
+    base.roles = {
+      cache: new Map(Object.entries(roles).map(([id, name]) => [id, { name }])),
+    };
+    return base;
+  };
+  const reasonsOf = (m: unknown) => {
+    fetchMember.mockResolvedValue(m);
+    return service.resolveWebScopeReasons("user1", GUILD);
+  };
+  const none = { host: [], staff: [], elevated: false };
+
+  it("names the Discord roles that grant each scope", async () => {
+    expect(
+      await reasonsOf(named({ rHost: "Event hosts", rMod: "Moderators" })),
+    ).toEqual({
+      host: ["Event hosts"],
+      staff: ["Moderators"],
+      elevated: false,
+    });
+  });
+
+  it("lists nothing for a plain member or a role with no capability", async () => {
+    expect(await reasonsOf(named({ rVip: "VIP" }))).toEqual(none);
+  });
+
+  it("an admin group counts for both scopes", async () => {
+    expect(await reasonsOf(named({ rAdmin: "Admins" }))).toEqual({
+      host: ["Admins"],
+      staff: ["Admins"],
+      elevated: false,
+    });
+  });
+
+  it("falls back to the stored role name, then the group name", async () => {
+    listGroups.mockResolvedValue([
+      { ...group("Host", "rHost", ["host"]), roleName: "stored" },
+      group("Mod", "rMod", ["staff"]),
+    ]);
+    expect(await reasonsOf(member(["rHost", "rMod"]))).toEqual({
+      host: ["stored"],
+      staff: ["Mod"],
+      elevated: false,
+    });
+  });
+
+  it("flags an Administrator or the owner as elevated, with no group read", async () => {
+    listGroups.mockClear();
+    expect(await reasonsOf(named({}, { admin: true }))).toEqual({
+      host: [],
+      staff: [],
+      elevated: true,
+    });
+    expect(await reasonsOf(named({}, { owner: true }))).toMatchObject({
+      elevated: true,
+    });
+    expect(listGroups).not.toHaveBeenCalled();
+  });
+
+  it("is cosmetic: any failure gives no reasons instead of throwing", async () => {
+    listGroups.mockRejectedValue(new Error("mongo down"));
+    expect(await reasonsOf(named({ rHost: "Event hosts" }))).toEqual(none);
+    fetchMember.mockRejectedValue(new Error("503"));
+    expect(await service.resolveWebScopeReasons("user1", GUILD)).toEqual(none);
+  });
+});
