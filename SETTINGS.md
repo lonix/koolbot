@@ -1251,11 +1251,11 @@ status` shows the action the open lockdown is running. A lockdown restored after
   the case into the review queue (and posts to `core.moderation_review.*`, if
   set). Staff then **uphold** it (keep the removal, schedule the next
   review), **extend** it (new review date), **make it permanent**, or
-  **readmit** the member. Every decision is kept in the case's own trail, so
+  **let the member back in**. Every decision is kept in the case's own trail, so
   the next time the member appears the moderator sees _"two warnings →
   timeout → removed → reviewed → allowed back"_ instead of reconstructing it.
   A case records the decision only: KoolBot never unbans for you, so lift a
-  ban in Discord yourself after readmitting. `/modlog` shows each case's state
+  ban in Discord yourself after letting them back in. `/modlog` shows each case's state
   under its kick or ban. Cases only open by hand, and nothing closes one
   automatically.
 - **Cases and retention:** the daily prune skips every log entry a case

@@ -144,7 +144,7 @@ const discordDate = (date: Date): string =>
 /**
  * One-line case state shown under a kick/ban in `/modlog` (#908), e.g.
  * `Case #14 — under review, due <t:…:D>` or
- * `Case #9 — readmitted <t:…:D> by <@123>`. Terminal cases name who made the
+ * `Case #9 — let back in <t:…:D> by <@123>`. Terminal cases name who made the
  * final call, because "who let them back in?" is what the line is for.
  */
 export function formatCaseLine(c: CaseLineSource): string {
@@ -165,7 +165,7 @@ export function formatCaseLine(c: CaseLineSource): string {
     case "upheld":
       return `${head} made permanent${decided}`;
     case "lifted":
-      return `${head} readmitted${decided}`;
+      return `${head} let back in${decided}`;
     case "expired":
       return `${head} expired`;
     default:

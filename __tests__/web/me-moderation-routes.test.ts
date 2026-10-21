@@ -767,7 +767,7 @@ describe("case page and Review", () => {
     ).toBe(true);
     expect(
       page.includes(
-        'formaction="/me/moderation/cases/case-1/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there."',
+        'formaction="/me/moderation/cases/case-1/readmit" data-confirm="Let this member back in? KoolBot does not unban in Discord; do that there."',
       ),
     ).toBe(true);
     expect(page.split(' data-confirm="').length - 1).toBe(2);
@@ -778,6 +778,32 @@ describe("case page and Review", () => {
     const page = await html("/cases/case-1");
     expect(page.includes("formaction")).toBe(false);
     expect(page.includes("nothing left to review")).toBe(true);
+  });
+
+  it('says "Let back in", never "Readmit", on the live and resolved case pages', async () => {
+    const shown = /(?<!\/)readmit/i; // the route value `/readmit` stays internal
+    const live = await html("/cases/case-1");
+    expect(live).toContain(">Let back in</button>");
+    expect(live).toContain("Let this member back in?");
+    expect(live).not.toMatch(shown);
+    // A case closed before this wording stores `readmitted`; it shows the new words.
+    cases.findCase.mockResolvedValue(
+      liveCase({
+        status: "lifted",
+        events: [
+          {
+            at: new Date("2026-02-01T10:00:00Z"),
+            byUserId: MOD,
+            to: "lifted",
+            outcome: "readmitted",
+            note: null,
+          },
+        ],
+      }),
+    );
+    const done = await html("/cases/case-1");
+    expect(done).toContain("let back in by Mod Mia");
+    expect(done).not.toMatch(shown);
   });
 
   it("answers 404 for an unknown case and while cases are off", async () => {

@@ -129,7 +129,7 @@ when no role name is available.
   (the Moderator role groups they are in; an administrator session says so instead). It shows three tiles (open cases, actions in the last
   7 days, timeouts running now), the **Open cases** with a **Review** link, and the **Actions** list, filterable by kind (All, Warnings,
   Timeouts, Bans; a kick shows under All), 50 per page. Each row links to its case at `/me/moderation/cases/:id`, where the four decisions
-  (Uphold, Extend, Make permanent, Readmit) are the same ones the admin Moderation page offers: the same service call, and an audit row
+  (Uphold, Extend, Make permanent, Let back in) are the same ones the admin Moderation page offers: the same service call, and an audit row
   (`moderation.case.<decision>`) for every attempt. `/me/moderation/audit` is the Command audit, read only (no settings card, no write
   route). A moderator cannot open a case, run the review pass, change a moderation setting or reach any `/admin` page. The log shows what
   the admin log shows (member, moderator, action, reason); message content and attachments are never stored there. "Timeouts running now"
@@ -2724,7 +2724,7 @@ run, so you can watch the alert channel and `/raidmode status` for what it would
 Its actions show in the table above like any other: `kick` and `timeout` rows against the member, `quarantine`
 rows for the role action, and `raid lockdown` / `raid cleared` rows for each lockdown (their user column shows the
 server id, since they concern the server rather than a member), all with source `raid`. A raid kick can have a case
-opened on it like any kick, which is the place to record a review or a readmit. The action filter lists every action.
+opened on it like any kick, which is the place to record a review or letting the member back in. The action filter lists every action.
 
 With `moderation.cases.enabled` on, the page also gains a **Cases** section and a **Case** column (#908).
 In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from
@@ -2733,7 +2733,7 @@ number and status. The section groups cases into **Overdue** (review date passed
 **Scheduled** (review date further out), **No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
 who acted, the member's **prior log history** (newest 10 entries) and the case's decision trail. A live card
 offers **Uphold** (keep it, schedule the next review), **Extend** (new review date, required), **Make permanent**
-and **Readmit**; staff may decide a case before it is due. Readmit records the decision only, it does not unban in
+and **Let back in**; staff may decide a case before it is due. Let back in records the decision only, it does not unban in
 Discord. A **Run review pass now** button runs the due-review job on demand. Every decision is written to the
 Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
 naming the status it found.

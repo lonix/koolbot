@@ -2448,7 +2448,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.cases.enabled": {
     label: "Moderation cases enabled",
     description:
-      "Let staff open a case against a kick or ban with an optional review date, then record the outcome (uphold, extend, make permanent, readmit) from the Moderation page. Requires moderation.enabled. Cases and the log history behind them are exempt from retention pruning.",
+      "Let staff open a case against a kick or ban with an optional review date, then record the outcome (uphold, extend, make permanent, let back in) from the Moderation page. Requires moderation.enabled. Cases and the log history behind them are exempt from retention pruning.",
     category: "moderation",
     type: "boolean",
   },

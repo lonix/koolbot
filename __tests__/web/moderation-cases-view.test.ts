@@ -160,9 +160,41 @@ describe("Cases section", () => {
       );
     }
     expect(html).toContain('name="_csrf" value="tok-123"');
-    // The destructive ones ask first, and readmit says it does not unban.
+    // The destructive ones ask first, and "Let back in" says it does not unban.
     expect(html).toContain("Make this removal permanent?");
     expect(html).toContain("KoolBot does not unban in Discord");
+  });
+
+  it('says "Let back in", never "Readmit", on the admin page', () => {
+    const shown = /(?<!\/)readmit/i; // the route value `/readmit` stays internal
+    const live = render({
+      casesEnabled: true,
+      caseGroups: groups({ overdue: [card()] }),
+    });
+    expect(live).toContain(">Let back in</button>");
+    expect(live).not.toMatch(shown);
+    const done = render({
+      casesEnabled: true,
+      caseGroups: groups({
+        recentlyResolved: [
+          card({
+            status: "lifted",
+            live: false,
+            events: [
+              {
+                at: "2026-02-01T00:00:00.000Z",
+                byLabel: "Staff",
+                to: "lifted",
+                outcome: "readmitted",
+                note: null,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+    expect(done).toContain("let back in");
+    expect(done).not.toMatch(shown);
   });
 
   it("offers no actions on a resolved case", () => {

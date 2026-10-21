@@ -243,7 +243,7 @@ describe("POST /moderation/cases/:id/<decision>", () => {
     ["uphold", "upheld"],
     ["extend", "extended"],
     ["permanent", "made permanent"],
-    ["readmit", "readmitted"],
+    ["readmit", "was let back in"],
   ])(
     "%s calls the service as the session and audits it",
     async (decision, word) => {

@@ -12,6 +12,7 @@
 
 import { escapeHtml } from "./html.js";
 import {
+  CASE_OUTCOME_LABELS,
   CASE_STATUS_LABELS,
   MODERATION_ACTION_LABELS,
   type CommandAuditRow,
@@ -387,7 +388,7 @@ const DECISION_LABELS: Record<ModerationCaseDecision, string> = {
   uphold: "Uphold",
   extend: "Extend",
   permanent: "Make permanent",
-  readmit: "Readmit",
+  readmit: "Let back in",
 };
 
 /** Confirmation before a decision that closes the case; same text as the admin page. */
@@ -395,7 +396,7 @@ const DECISION_CONFIRM: Partial<Record<ModerationCaseDecision, string>> = {
   permanent:
     "Make this removal permanent? The case closes with no further review.",
   readmit:
-    "Record readmission? KoolBot does not unban in Discord; do that there.",
+    "Let this member back in? KoolBot does not unban in Discord; do that there.",
 };
 
 function caseEvents(c: CaseView): string {
@@ -405,7 +406,7 @@ function caseEvents(c: CaseView): string {
   return `<ul>${c.events
     .map((e) => {
       const what = e.outcome
-        ? escapeHtml(e.outcome)
+        ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
           ? "came due"
           : "opened";
@@ -464,7 +465,7 @@ function reviewForm(p: ModCaseBodyProps): string {
   <div class="kb-toolbar">
     ${buttons}
   </div>
-  <p class="kb-help">Make permanent closes the case with no further review. Readmit records the decision only; KoolBot does not lift the ban in Discord, do that there.</p>
+  <p class="kb-help">Make permanent closes the case with no further review. Let back in records the decision only; KoolBot does not lift the ban in Discord, do that there.</p>
 </form>`;
 }
 

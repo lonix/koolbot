@@ -38,7 +38,7 @@ const DECISION_PAST_TENSE: Record<ModerationCaseDecision, string> = {
   uphold: "upheld",
   extend: "extended",
   permanent: "made permanent",
-  readmit: "readmitted",
+  readmit: "was let back in",
 };
 
 export type ReviewDate =
