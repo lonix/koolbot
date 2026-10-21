@@ -851,6 +851,16 @@ describe("dialog footer keeps both actions reachable (Copilot, #1345)", () => {
       () => has(".kb-dialog__foot .kb-btn", /max-width:\s*100%/),
     ],
     [
+      "title may shrink and break an unbroken name",
+      () =>
+        has(".kb-dialog__title", /min-width:\s*0/) &&
+        has(".kb-dialog__title", /overflow-wrap:\s*anywhere/),
+    ],
+    [
+      "body breaks an unbroken name",
+      () => has(".kb-dialog__body", /overflow-wrap:\s*anywhere/),
+    ],
+    [
       "shared .kb-btn is untouched",
       () => has(".kb-btn", /white-space:\s*nowrap/),
     ],
