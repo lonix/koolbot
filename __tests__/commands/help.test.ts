@@ -7,6 +7,7 @@ import {
   usageFromCommand,
 } from "../../src/commands/help.js";
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
+import { getBotVersion } from "../../src/utils/version.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import {
   ApplicationCommandOptionType,
@@ -126,7 +127,7 @@ describe("Help Command", () => {
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
-              title: "📚 KoolBot Help",
+              title: "KoolBot help",
             }),
           }),
         ]),
@@ -142,7 +143,7 @@ describe("Help Command", () => {
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
-              title: "📖 Help: /ping",
+              title: "Help: /ping",
             }),
           }),
         ]),
@@ -157,7 +158,8 @@ describe("Help Command", () => {
       await execute(mockInteraction as ChatInputCommandInteraction);
 
       expect(mockInteraction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("Command `/nonexistent` not found"),
+        content:
+          "There is no command `/nonexistent`. Use `/help` to see the list of commands.",
       });
     });
 
@@ -204,7 +206,7 @@ describe("Help Command", () => {
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
-              title: "📖 Help: /ping",
+              title: "Help: /ping",
             }),
           }),
         ]),
@@ -222,7 +224,7 @@ describe("Help Command", () => {
           embeds: expect.arrayContaining([
             expect.objectContaining({
               data: expect.objectContaining({
-                title: `📖 Help: /${name}`,
+                title: `Help: /${name}`,
               }),
             }),
           ]),
@@ -237,14 +239,55 @@ describe("Help Command", () => {
         .embeds[0];
       const listed = embed.data.fields
         .filter((field: { name: string }) =>
-          /Enabled Commands|Disabled Commands/.test(field.name),
+          /Commands that are (on|off)/.test(field.name),
         )
         .map((field: { value: string }) => field.value)
         .join("\n");
 
       for (const { name } of COMMAND_CONFIGS) {
-        expect(listed).toContain(`\`/${name}\` - `);
+        expect(listed).toContain(`- \`/${name}\`: `);
       }
+    });
+
+    it("uses the plain-English copy for the command list (#1332)", async () => {
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      const data = (mockInteraction.editReply as jest.Mock).mock.calls[0][0]
+        .embeds[0].data;
+      expect(data.title).toBe("KoolBot help");
+      expect(data.description).toBe(
+        "These are the commands you can use. Use `/help` with a command name to see more about it.",
+      );
+      expect(data.footer.text).toBe(`KoolBot · Help · v${getBotVersion()}`);
+      expect(data.timestamp).toBeTruthy();
+      const names = data.fields.map((f: { name: string }) => f.name);
+      expect(names).toContain("Commands that are on");
+      // No emoji in field names, no repeated tip.
+      for (const name of names) expect(name).toMatch(/^[A-Za-z]/);
+      expect(names).not.toContain("💡 Tip");
+      // Command lines are `-` list items: name, colon, description.
+      const lines = data.fields.flatMap((f: { value: string }) =>
+        f.value.split("\n"),
+      );
+      for (const line of lines) expect(line).toMatch(/^- `\/[a-z]+`: .+/);
+    });
+
+    it("uses the plain-English copy for one command (#1332)", async () => {
+      (mockInteraction.options!.getString as jest.Mock).mockReturnValue("ping");
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      const data = (mockInteraction.editReply as jest.Mock).mock.calls[0][0]
+        .embeds[0].data;
+      expect(data.footer.text).toBe(`KoolBot · Help · v${getBotVersion()}`);
+      expect(data.fields.map((f: { name: string }) => f.name)).toEqual([
+        "Usage",
+        "Status",
+        "Setting",
+      ]);
+      expect(
+        data.fields.find((f: { name: string }) => f.name === "Status").value,
+      ).toMatch(/^(On|Off)$/);
     });
 
     it("should handle multiple known commands", async () => {
@@ -316,7 +359,7 @@ describe("Help Command", () => {
       );
       expect(entries.get(failing)).toEqual({
         name: failing,
-        description: expect.stringContaining("unavailable"),
+        description: "No description is available right now.",
         usage: `/${failing}`,
         configKey: "quotes.enabled",
       });

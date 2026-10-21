@@ -746,6 +746,55 @@ describe("NoticesChannelManager", () => {
     });
   });
 
+  describe("header post copy (#1332)", () => {
+    const postHeader = async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      manager.configService = {
+        getBoolean: jest.fn(async () => false),
+        set: jest.fn(async () => undefined),
+      };
+      const channel = {
+        send: jest.fn(async () => ({ id: "header1", pin: jest.fn() })),
+      };
+      await manager.createHeaderPost(channel);
+      return (channel.send.mock.calls[0] as any)[0].embeds[0].data;
+    };
+
+    it("uses the plain-English title, description and fields", async () => {
+      const data = await postHeader();
+
+      expect(data.title).toBe("📢 Server notices");
+      expect(data.description).toBe(
+        "Rules, game server details and help for this server. Only KoolBot posts here.",
+      );
+      expect(data.fields).toEqual([
+        {
+          name: "What you will find",
+          value:
+            "- Server rules\n- Game server details\n- Help for bot features\n- News and announcements",
+          inline: false,
+        },
+        {
+          name: "Good to know",
+          value:
+            "- You can only read this channel.\n- Only KoolBot can post here.\n- Other messages are removed.",
+          inline: false,
+        },
+      ]);
+      expect(data.footer.text).toBe("KoolBot · Notices");
+    });
+
+    it("has no boilerplate, no emoji in field names and no bullet characters", async () => {
+      const data = await postHeader();
+
+      expect(data.description).not.toContain("managed by");
+      for (const field of data.fields) {
+        expect(field.name).toMatch(/^[A-Za-z]/);
+        expect(field.value).not.toContain("•");
+      }
+    });
+  });
+
   describe("reload callback lifecycle (#1007)", () => {
     it("initialize() registers the reload callback and stop() removes it", async () => {
       const manager = NoticesChannelManager.getInstance(mockClient) as any;

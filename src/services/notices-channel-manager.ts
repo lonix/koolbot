@@ -339,21 +339,21 @@ export class NoticesChannelManager {
     try {
       const embed = new EmbedBuilder()
         .setColor(embedColor("brand"))
-        .setTitle("📢 Server Notices")
+        .setTitle("📢 Server notices")
         .setDescription(
-          "This channel contains important server information, rules, and helpful resources. All posts are managed by KoolBot.",
+          "Rules, game server details and help for this server. Only KoolBot posts here.",
         )
         .addFields(
           {
-            name: "📋 What's Here",
+            name: "What you will find",
             value:
-              "• Server rules and guidelines\n• Game server connection info\n• Bot feature help and guides\n• Important announcements",
+              "- Server rules\n- Game server details\n- Help for bot features\n- News and announcements",
             inline: false,
           },
           {
-            name: "🔒 Channel Rules",
+            name: "Good to know",
             value:
-              "• This is a read-only channel\n• Only bot messages are allowed\n• All other messages will be automatically removed",
+              "- You can only read this channel.\n- Only KoolBot can post here.\n- Other messages are removed.",
             inline: false,
           },
         )

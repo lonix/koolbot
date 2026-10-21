@@ -112,19 +112,21 @@ description and a usage line such as `/quote <add|edit|export|import|reset> [opt
 
 ```text
 # List all commands
-📚 KoolBot Help
-✅ Enabled Commands
-/ping - Replies with Pong!
-/help - Get help with KoolBot commands
-/quote - Manage quotes in the quote channel
+KoolBot help
+These are the commands you can use. Use `/help` with a command name to see more about it.
+Commands that are on
+- `/ping`: Replies with Pong!
+- `/help`: Get help with KoolBot commands
+- `/quote`: Manage quotes in the quote channel
 ...
+Footer: KoolBot · Help · v<version>
 
 # Specific command help
-📖 Help: /modlog
+Help: /modlog
 View a member's moderation history
 Usage: /modlog <user> [page]
-Status: ✅ Enabled
-Config Key: moderation.enabled
+Status: On
+Setting: moderation.enabled
 ```
 
 ---
