@@ -682,13 +682,19 @@ MongoDB or secrets), renders the base branch the same way, and compares the HTML
 only what the PR changes, with the runner's Chrome (a full-page PNG at 1280px wide, plus 390px for the shell and a few key pages), and
 uploads them as the `ui-preview` artifact, kept 14 days:
 
-- one or a few pages changed: `changed/` holds `<page>.base.png` (before) and `<page>.png` (after) for those pages only;
-- the shared stylesheet or tokens changed, so every page differs: `sample/` holds before and after for a representative sample
-  (dashboard, one settings page, one `/me` page, the 390px reflow pages) and `all-pages/` holds every page (after only);
+- up to 12 existing pages changed (`MAX_LISTED_PAGES` in `scripts/ui-preview-plan.mjs`): `changed/` holds `<page>.base.png` (before) and
+  `<page>.png` (after) for those pages only. Pages the PR adds do not count towards the 12;
+- the shared stylesheet or tokens changed, or more than 12 existing pages changed through a shared layout or script change (the stylesheet
+  is the same): `sample/` holds before and after for a representative sample (dashboard, one settings page, one `/me` page, the 390px
+  reflow pages) and `all-pages/` holds every page (after only). In the shared-change case the sample pages that changed come first, and
+  pages the PR adds (up to 6, no before image) are shown too;
 - nothing differs: no screenshots, only `manifest.json` and `plan.json`.
 
 A same-repo PR also gets one sticky `ui-preview` comment, rewritten on pushes that touch UI files, with the head commit it was built for, the time
-(UTC), the artifact link and the list of changed pages. The screenshots are rendered from the PR merged with the current base branch, so a branch that
+(UTC), the artifact link and the list of changed pages. The comment states its mode in one line, with the reason when it is a fallback
+(for example "54 of 79 pages changed through a shared change (not the stylesheet), more than 12 pages, so a sample is shown" or "All 87 pages
+changed: the shared stylesheet changed"). A list is capped at 40 lines; beyond that the comment says the full list is in `plan.json` in the
+artifact. The screenshots are rendered from the PR merged with the current base branch, so a branch that
 is behind `main` can differ from its own head. A separate small job posts it with `pull-requests: write`; the screenshots job keeps a read-only token,
 and the comment text is built there and only posted by the other job, which runs no repository code. A fork PR gets the artifact and the job summary
 but no comment (and does not fail): there is no `pull_request_target` and no secret. To review a PR, open its `ui-preview` comment and download the
