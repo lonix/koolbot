@@ -9,8 +9,8 @@ import { ConfigService } from "../services/config-service.js";
 import {
   ReminderService,
   checkRemindAt,
-  discordTimestamp,
 } from "../services/reminder-service.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
 import { parseDuration } from "../utils/time.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";

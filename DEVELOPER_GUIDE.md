@@ -688,6 +688,7 @@ one):
 | Reconnect Mongo before a query | `MongoConnectionGuard` | `src/utils/mongo.ts` |
 | Escape a value into HTML | `escapeHtml`, `escapeJsInAttr` | `src/web/html.ts` |
 | Pick an embed accent colour (never a hex literal; a guard test fails on one) | `embedColor(kind)` | `src/utils/embed-style.ts` |
+| Show a time in a Discord message (never `toLocaleString()` and friends; a guard test fails on one; footers read `KoolBot · <Feature>` with no "System" and no id) | `discordTimestamp(date, style)` | `src/utils/discord-time.ts` |
 
 ```typescript
 import { CronJob } from "cron";

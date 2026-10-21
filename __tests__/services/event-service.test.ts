@@ -53,6 +53,7 @@ const {
   effectiveEndTime,
   canonicalEventId,
   formatEventWhen,
+  formatEventWhenDiscord,
   computeOccurrenceStart,
   isRecurring,
   recurrenceLabel,
@@ -333,6 +334,14 @@ describe("formatEventWhen", () => {
       timezone: "America/New_York",
     };
     expect(formatEventWhen(event)).toBe("2026-07-04 20:00 (America/New_York)");
+  });
+});
+
+describe("formatEventWhenDiscord", () => {
+  it("renders Discord timestamps, so each reader sees their own timezone", () => {
+    expect(
+      formatEventWhenDiscord({ startTime: new Date("2026-07-05T00:00:00Z") }),
+    ).toBe("<t:1783209600:f> (<t:1783209600:R>)");
   });
 });
 

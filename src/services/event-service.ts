@@ -56,6 +56,7 @@ import {
   type ExpectChannels,
 } from "./event-teardown.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
+import { discordTimestamp } from "../utils/discord-time.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { embedColor } from "../utils/embed-style.js";
@@ -317,13 +318,26 @@ export function shouldCleanupChannel(
   return now.getTime() >= effectiveEndTime(event).getTime() + graceMs;
 }
 
-/** Human-readable start line, e.g. `2026-07-04 20:00 (Europe/London)`. */
+/**
+ * The start line for text the Web UI shows, e.g. `2026-07-04 20:00
+ * (Europe/London)`. Messages posted in Discord use
+ * {@link formatEventWhenDiscord} instead.
+ */
 export function formatEventWhen(event: {
   startTime: Date;
   timezone: string;
 }): string {
   const zone = resolveTimezone(event.timezone);
   return `${formatInTimeZone(event.startTime, zone, "yyyy-MM-dd HH:mm")} (${zone})`;
+}
+
+/**
+ * The start line for a Discord message: a timestamp each reader sees in their
+ * own timezone, plus the relative form (#1331), e.g.
+ * `<t:1783195200:f> (<t:1783195200:R>)`.
+ */
+export function formatEventWhenDiscord(event: { startTime: Date }): string {
+  return `${discordTimestamp(event.startTime, "f")} (${discordTimestamp(event.startTime, "R")})`;
 }
 
 /** Link to a native scheduled event; Discord renders it as an event card. */
@@ -2585,7 +2599,7 @@ export class EventService extends ScheduledService {
         : event.state === "ended"
           ? `📅 **${event.title}** (ended)`
           : `📅 **${event.title}**`,
-      `🕒 ${formatEventWhen(event)}`,
+      `🕒 ${formatEventWhenDiscord(event)}`,
     ];
     if (event.description) lines.push(event.description);
     if (isRecurring(event)) {
@@ -2628,7 +2642,7 @@ export class EventService extends ScheduledService {
           : `📅 ${event.title}`,
       )
       .addFields(
-        { name: "When", value: formatEventWhen(event), inline: false },
+        { name: "When", value: formatEventWhenDiscord(event), inline: false },
         {
           name: "✅ Going",
           value: String(counts.going),
@@ -2939,7 +2953,7 @@ export class EventService extends ScheduledService {
     // notifies whoever marked Interested. Legacy RSVPs (events created before
     // native-only events) are still pinged, as shipped in 2.0.0.
     const content =
-      `⏰ **${event.title}** starts at ${formatEventWhen(event)}.${where}${link}` +
+      `⏰ **${event.title}** starts at ${formatEventWhenDiscord(event)}.${where}${link}` +
       (mentions ? `\n${mentions}` : "");
 
     // The channel fetch above is an await: an older, still-open copy sends no

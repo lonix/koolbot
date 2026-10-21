@@ -712,7 +712,7 @@ export class QuoteService {
         }
 
         await this.model.create({
-          // Preserve the original _id when valid so footer IDs survive a
+          // Preserve the original _id when valid so the quote IDs survive a
           // reinstall; otherwise let Mongo assign a fresh one.
           ...(validId ? { _id: entry.id } : {}),
           content: entry.content,

@@ -4,9 +4,9 @@ import {
   SlashCommandUserOption,
 } from "discord.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
-import { formatTimeAgo } from "../utils/time.js";
+import { discordTimestamp } from "../utils/discord-time.js";
+import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 import logger from "../utils/logger.js";
-import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
   HIDDEN_CHANNEL_LABEL,
@@ -48,27 +48,30 @@ export async function execute(
         interaction,
         activeSession.channelId,
       );
-      await interaction.editReply(
-        channelName === HIDDEN_CHANNEL_LABEL
-          ? `${escapeDisplayText(targetUser.username)} is currently in ${HIDDEN_CHANNEL_LABEL}.`
-          : `${escapeDisplayText(targetUser.username)} is currently in the voice channel "${escapeDisplayText(channelName)}".`,
-      );
+      await interaction.editReply({
+        content:
+          channelName === HIDDEN_CHANNEL_LABEL
+            ? `<@${targetUser.id}> is currently in ${HIDDEN_CHANNEL_LABEL}.`
+            : `<@${targetUser.id}> is currently in <#${activeSession.channelId}>.`,
+        allowedMentions: NO_MENTIONS,
+      });
       return;
     }
 
     const lastSeen = await tracker.getUserLastSeen(targetUser.id);
 
     if (!lastSeen) {
-      await interaction.editReply(
-        `${escapeDisplayText(targetUser.username)} has never been seen in a voice channel.`,
-      );
+      await interaction.editReply({
+        content: `<@${targetUser.id}> has never been seen in a voice channel.`,
+        allowedMentions: NO_MENTIONS,
+      });
       return;
     }
 
-    const timeAgo = formatTimeAgo(lastSeen);
-    await interaction.editReply(
-      `${escapeDisplayText(targetUser.username)} was last seen in a voice channel ${timeAgo}.`,
-    );
+    await interaction.editReply({
+      content: `<@${targetUser.id}> was last seen in a voice channel ${discordTimestamp(lastSeen, "R")}.`,
+      allowedMentions: NO_MENTIONS,
+    });
   } catch (error) {
     logger.error("Error in seen command:", error);
     // Public on purpose: once deferred, visibility is fixed and safeReply
