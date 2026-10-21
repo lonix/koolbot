@@ -7,6 +7,7 @@ import {
   Client,
   TextChannel,
   EmbedBuilder,
+  type Message,
   MessageReaction,
   User,
   PartialMessageReaction,
@@ -27,6 +28,8 @@ import {
 import { quoteService } from "./quote-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { embedColor } from "../utils/embed-style.js";
+import { describeDiscordError } from "../utils/log-sanitize.js";
+import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // quote channel. Demoted from `quotes.cleanup_interval` config key in
@@ -47,6 +50,21 @@ const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
 const QUOTES_FOOTER = "KoolBot · Quotes";
 /** The header-only footer from before #1331, still recognised so an already-posted header is found after an upgrade. */
 const LEGACY_HEADER_FOOTER = "KoolBot Quote System";
+
+/**
+ * True when an embed is the quote channel header: its unique title, or the
+ * pre-#1331 header-only footer. The shared `KoolBot · Quotes` footer is on
+ * every quote post too, so it never counts, and a quote post is never taken
+ * for the header.
+ */
+function isHeaderEmbed(embed: {
+  title?: string | null;
+  footer?: { text?: string } | null;
+}): boolean {
+  return (
+    embed.title === HEADER_TITLE || embed.footer?.text === LEGACY_HEADER_FOOTER
+  );
+}
 
 /**
  * Normalize a Discord user ID from various formats to a clean numeric ID
@@ -297,6 +315,8 @@ export class QuoteChannelManager {
             existingMessage.author.id === this.client.user?.id
           ) {
             logger.debug("Quote channel header post already exists");
+            // refreshHeaderCopy never throws, so a failed edit cannot lead to a repost.
+            await this.refreshHeaderCopy(existingMessage);
             return;
           }
         } catch {
@@ -319,6 +339,7 @@ export class QuoteChannelManager {
           "Message ID of the quote channel header post",
           "quotes",
         );
+        await this.refreshAdoptedHeader(channel, existingHeader.id);
         return;
       }
 
@@ -346,10 +367,7 @@ export class QuoteChannelManager {
       embeds: { title?: string | null; footer?: { text?: string } | null }[];
     }): boolean => {
       if (msg.author.id !== botId) return false;
-      return msg.embeds.some(
-        (e) =>
-          e.title === HEADER_TITLE || e.footer?.text === LEGACY_HEADER_FOOTER,
-      );
+      return msg.embeds.some((e) => isHeaderEmbed(e));
     };
 
     try {
@@ -371,6 +389,97 @@ export class QuoteChannelManager {
     }
 
     return null;
+  }
+
+  /** The header embed. One source for creating the post and for keeping an existing post current. */
+  private buildHeaderEmbed(): EmbedBuilder {
+    return new EmbedBuilder()
+      .setColor(embedColor("lore"))
+      .setTitle("📝 Welcome to the Quote Channel!")
+      .setDescription(
+        "This channel is managed by KoolBot to showcase memorable quotes from server members.",
+      )
+      .addFields(
+        {
+          name: "📥 How to Add a Quote",
+          value:
+            'Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:"Great quote!" author:@Alice`',
+          inline: false,
+        },
+        {
+          name: "👍 How to Vote",
+          value:
+            "React with 👍 or 👎 to show your appreciation (or not!) for quotes.",
+          inline: false,
+        },
+        {
+          name: "🔒 Channel Rules",
+          value:
+            "• Only bot messages are allowed here\n• All other messages will be automatically removed\n• Browse and enjoy past quotes by scrolling up!",
+          inline: false,
+        },
+      )
+      .setFooter({ text: QUOTES_FOOTER })
+      .setTimestamp();
+  }
+
+  /**
+   * Edit an existing bot-owned header in place when its copy differs from the
+   * current copy (title, description, fields, footer), so installs made before
+   * a copy change are updated once and then left alone. Message id, pin and
+   * `quotes.header_message_id` are kept. A failed edit is logged and never
+   * throws, deletes or reposts. A message that is not the header (for example
+   * a quote post a stored id points at by mistake) is left untouched.
+   */
+  private async refreshHeaderCopy(message: Message): Promise<void> {
+    try {
+      const current = message.embeds?.[0];
+      if (current === undefined || !isHeaderEmbed(current)) {
+        return;
+      }
+      const wanted = this.buildHeaderEmbed().toJSON();
+      const norm = (
+        fields?: { name: string; value: string; inline?: boolean }[],
+      ): { name: string; value: string; inline: boolean }[] =>
+        (fields ?? []).map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: f.inline ?? false,
+        }));
+      const same =
+        current.title === wanted.title &&
+        current.description === wanted.description &&
+        current.footer?.text === wanted.footer?.text &&
+        JSON.stringify(norm(current.fields)) ===
+          JSON.stringify(norm(wanted.fields));
+      if (same) {
+        return;
+      }
+      await message.edit({
+        embeds: [this.buildHeaderEmbed()],
+        allowedMentions: NO_MENTIONS,
+      });
+      logger.info("Updated quote channel header copy");
+    } catch (error) {
+      logger.warn(
+        `Failed to update quote channel header copy: ${describeDiscordError(error)}`,
+      );
+    }
+  }
+
+  /** Fetch a header found by the channel scan and bring it up to date. Never throws. */
+  private async refreshAdoptedHeader(
+    channel: TextChannel,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      const message = await channel.messages.fetch(messageId);
+      await this.refreshHeaderCopy(message);
+    } catch (error) {
+      logger.warn(
+        `Could not load the quote channel header to refresh it: ${describeDiscordError(error)}`,
+      );
+    }
   }
 
   /**
@@ -396,36 +505,12 @@ export class QuoteChannelManager {
    */
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
-      const embed = new EmbedBuilder()
-        .setColor(embedColor("lore"))
-        .setTitle("📝 Welcome to the Quote Channel!")
-        .setDescription(
-          "This channel is managed by KoolBot to showcase memorable quotes from server members.",
-        )
-        .addFields(
-          {
-            name: "📥 How to Add a Quote",
-            value:
-              'Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:"Great quote!" author:@Alice`',
-            inline: false,
-          },
-          {
-            name: "👍 How to Vote",
-            value:
-              "React with 👍 or 👎 to show your appreciation (or not!) for quotes.",
-            inline: false,
-          },
-          {
-            name: "🔒 Channel Rules",
-            value:
-              "• Only bot messages are allowed here\n• All other messages will be automatically removed\n• Browse and enjoy past quotes by scrolling up!",
-            inline: false,
-          },
-        )
-        .setFooter({ text: QUOTES_FOOTER })
-        .setTimestamp();
+      const embed = this.buildHeaderEmbed();
 
-      const headerMessage = await channel.send({ embeds: [embed] });
+      const headerMessage = await channel.send({
+        embeds: [embed],
+        allowedMentions: NO_MENTIONS,
+      });
       logger.info(`Created quote channel header post: ${headerMessage.id}`);
 
       // Pin the message if enabled
