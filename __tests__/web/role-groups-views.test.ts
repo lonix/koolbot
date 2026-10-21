@@ -509,6 +509,12 @@ describe("renderAdminFixPage", () => {
     ...over,
   });
 
+  it("leaves <main> scrolling: this page has no save bar", () => {
+    const main = renderAdminFixPage(p()).match(/<main[^>]*>/)?.[0] ?? "";
+    expect(main).toContain('id="main"');
+    expect(main).not.toContain("has-savebar");
+  });
+
   it("previews the plan and offers apply with the choices carried over", () => {
     const html = renderAdminFixPage(p());
     expect(html).toContain('action="/admin/role-groups/admin-fix/apply"');

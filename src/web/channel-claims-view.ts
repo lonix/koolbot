@@ -3,7 +3,7 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
-import { scriptTag } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import {
   renderAdoptionDiff,
@@ -332,7 +332,7 @@ function renderPlan(props: ClaimsPageProps, csrf: string): string {
     plan.plan.operations.length > 0;
   const form =
     applicable && props.previewToken
-      ? `<form method="POST" action="/admin/adopt/claims/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back.">${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="token" value="${escapeHtml(props.previewToken)}">${renderDestructiveConfirm(plan.plan)}<button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
+      ? `<form method="POST" action="/admin/adopt/claims/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="token" value="${escapeHtml(props.previewToken)}">${renderDestructiveConfirm(plan.plan)}<button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
       : "";
   return `${extra}${advice}${renderAdoptionDiff(plan.plan)}${form}`;
 }

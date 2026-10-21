@@ -23,8 +23,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const MARKER = "<!-- ui-preview -->";
-/** The pages listed in the comment before it says "and N more". */
+/**
+ * The pages listed in the comment before it points at plan.json for the rest.
+ * 40 lines of at most ~0.6 KB stay far below GitHub's 65536 character limit.
+ */
 export const MAX_LISTED = 40;
+/** Hard ceiling for the whole comment; the footer is dropped past it. */
+export const MAX_COMMENT_CHARS = 60000;
+const MORE = (n, what) =>
+  `- and ${n} more ${what}; the full list is in ${code("plan.json")} in the artifact`;
 
 /** A Markdown code span that survives backticks, newlines and very long names. */
 export function code(text) {
@@ -62,7 +69,7 @@ function pageLine(page, { base }) {
 function list(pages, opts) {
   const lines = pages.slice(0, MAX_LISTED).map((p) => pageLine(p, opts));
   if (pages.length > MAX_LISTED) {
-    lines.push(`- and ${pages.length - MAX_LISTED} more`);
+    lines.push(MORE(pages.length - MAX_LISTED, "pages"));
   }
   return lines;
 }
@@ -101,6 +108,8 @@ export function buildComment(
   const sampleLines = (withBase) => {
     // A page the PR adds has no base render, so it has no before shot.
     const added = new Set(withBase ? plan.added.map((p) => p.file) : []);
+    const shown = new Set(plan.sample.map((p) => p.file));
+    const unshown = plan.added.filter((p) => !shown.has(p.file)).length;
     return [
       `Highlighted sample, in ${code("sample/")}${withBase ? " (before and after)" : ""}:`,
       "",
@@ -112,6 +121,11 @@ export function buildComment(
         plan.sample.filter((p) => added.has(p.file)),
         { base: false },
       ).map((l) => `${l} (new page, no before)`),
+      ...(unshown > 0 && plan.reason === "shared"
+        ? [
+            `- and ${unshown} more new page${unshown === 1 ? "" : "s"} (no before), listed in ${code("plan.json")}`,
+          ]
+        : []),
       "",
       `Every page is in ${code("all-pages/")} (after only).`,
     ];
@@ -129,20 +143,25 @@ export function buildComment(
       ...sampleLines(false),
     );
   } else if (plan.mode === "all") {
-    const why = plan.cssChanged.length
-      ? `the shared stylesheet changed (${plan.cssChanged.map(code).join(", ")})`
-      : "the HTML of every page differs";
-    lines.push(
-      `All ${plan.total} pages changed: ${why}.`,
-      "",
-      ...sampleLines(true),
-    );
+    if (plan.reason === "shared") {
+      const addedFiles = new Set(plan.added.map((p) => p.file));
+      const n = plan.changed.filter((p) => !addedFiles.has(p.file)).length;
+      lines.push(
+        `${n} of ${plan.total} pages changed through a shared change (not the stylesheet), more than ${plan.maxListed ?? "the limit of"} pages, so a sample is shown.`,
+      );
+    } else {
+      const why = plan.cssChanged.length
+        ? `the shared stylesheet changed (${plan.cssChanged.map(code).join(", ")})`
+        : "the HTML of every page differs";
+      lines.push(`All ${plan.total} pages changed: ${why}.`);
+    }
+    lines.push("", ...sampleLines(true));
   } else {
     const n = plan.changed.length;
     if (n > 0) {
       const added = new Set(plan.added.map((p) => p.file));
       lines.push(
-        `${n} of ${plan.total} pages changed, in ${code("changed/")} (before ${code(".base.png")}, after ${code(".png")}):`,
+        `Changed pages only: ${n} of ${plan.total} pages changed, in ${code("changed/")} (before ${code(".base.png")}, after ${code(".png")}):`,
         "",
         ...list(
           plan.changed.filter((p) => !added.has(p.file)),
@@ -162,6 +181,9 @@ export function buildComment(
       `${plan.removed.length} page${plan.removed.length === 1 ? "" : "s"} no longer rendered:`,
       "",
       ...plan.removed.slice(0, MAX_LISTED).map((p) => `- ${code(p.name)}`),
+      ...(plan.removed.length > MAX_LISTED
+        ? [MORE(plan.removed.length - MAX_LISTED, "pages")]
+        : []),
     );
   }
 
@@ -171,7 +193,11 @@ export function buildComment(
       "> Updated on pushes that touch UI files. Rendered from this PR merged with the current base branch, built for the commit above. Screenshots are rendered from fixtures, so no bot, database or secrets are involved.",
     );
   }
-  return lines.join("\n") + "\n";
+  const body = lines.join("\n") + "\n";
+  return body.length <= MAX_COMMENT_CHARS
+    ? body
+    : body.slice(0, MAX_COMMENT_CHARS) +
+        `\n\n(cut to fit GitHub's comment limit; see ${code("plan.json")} in the artifact)\n`;
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {

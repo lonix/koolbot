@@ -147,6 +147,93 @@ describe("UI preview page selection (#1341)", () => {
   });
 });
 
+describe("UI preview threshold (#1351)", () => {
+  const page = (name: string, sha256: string, mobile = false) => ({
+    name,
+    file: `${name}.html`,
+    sha256,
+    mobile,
+  });
+  const names = (pages: { name: string }[]) => pages.map((p) => p.name);
+  const assets = { "kb.css": "x" };
+  const N = planner.MAX_LISTED_PAGES as number;
+  const filler = (n: number, sha = "1") =>
+    Array.from({ length: n }, (_, i) => page(`Page ${i}`, sha));
+  // 40 stable pages (so "every page changed" never applies) + Dashboard
+  const stable = [...filler(40), page("Dashboard", "d", true)];
+  const withChanged = (
+    count: number,
+    extraHead: ReturnType<typeof page>[] = [],
+  ) => {
+    const headPages = stable.map((p, i) =>
+      i < count ? { ...p, sha256: "new" } : p,
+    );
+    return planner.plan(
+      { pages: [...headPages, ...extraHead], assets },
+      { pages: stable, assets },
+    );
+  };
+
+  it("has a documented, positive threshold", () => {
+    expect(Number.isInteger(N) && N > 0).toBe(true);
+  });
+
+  it("keeps the changed/ listing at exactly the threshold", () => {
+    const out = withChanged(N);
+    expect(out.mode).toBe("some");
+    expect(out.reason).toBeUndefined();
+    expect(out.changed).toHaveLength(N);
+  });
+
+  it("falls back to the sample one page over the threshold", () => {
+    const out = withChanged(N + 1);
+    expect(out.mode).toBe("all");
+    expect(out.reason).toBe("shared");
+    expect(out.cssChanged).toEqual([]);
+    const sets = planner.shotSets(out);
+    expect(sets.map((s: { folder: string }) => s.folder)).toEqual([
+      "sample",
+      "all-pages",
+    ]);
+    expect(sets[0].base).toBe(true);
+    expect(sets[1].pages).toBeNull();
+  });
+
+  it("puts changed sample pages first", () => {
+    // Dashboard is last in `stable`, so it only changes when everything before does
+    const headPages = stable.map((p, i) =>
+      i < N || p.name === "Dashboard" ? { ...p, sha256: "new" } : p,
+    );
+    const out = planner.plan(
+      { pages: headPages, assets },
+      { pages: stable, assets },
+    );
+    expect(out.reason).toBe("shared");
+    expect(names(out.sample)[0]).toBe("Dashboard");
+  });
+
+  it("does not count added pages towards the threshold, and still shows them", () => {
+    const added = Array.from({ length: 20 }, (_, i) => page(`New ${i}`, "n"));
+    const under = withChanged(2, added);
+    expect(under.mode).toBe("some");
+    expect(under.added).toHaveLength(20);
+    const over = withChanged(N + 1, added);
+    expect(over.reason).toBe("shared");
+    const shown = names(over.sample).filter((n: string) => n.startsWith("New"));
+    expect(shown).toHaveLength(planner.MAX_ADDED_SHOWN);
+    expect(names(over.added)).toHaveLength(20);
+  });
+
+  it("leaves the stylesheet case as it was", () => {
+    const out = planner.plan(
+      { pages: stable, assets: { "kb.css": "new" } },
+      { pages: stable, assets },
+    );
+    expect(out.mode).toBe("all");
+    expect(out.reason).toBe("stylesheet");
+  });
+});
+
 describe("UI preview comment (#1341)", () => {
   const now = new Date("2026-10-20T18:02:33Z");
   const sha = "0123456789abcdef0123456789abcdef01234567";
@@ -336,5 +423,106 @@ describe("UI preview comment (#1341)", () => {
     }) as string;
     expect(summary).not.toContain(comment.MARKER);
     expect(summary.startsWith("## UI preview")).toBe(true);
+  });
+});
+
+describe("UI preview comment modes and size (#1351)", () => {
+  const ctx = {
+    artifactUrl: "https://github.com/o/r/actions/runs/1/artifacts/2",
+    sha: "0123456789abcdef0123456789abcdef01234567",
+    repoUrl: "https://github.com/o/r",
+    now: new Date("2026-10-20T18:02:33Z"),
+  };
+  const entry = (name: string, mobile = false) => ({
+    name,
+    file: `${name.toLowerCase().replace(/\W+/g, "-")}.html`,
+    mobile,
+  });
+  const base = {
+    total: 79,
+    changed: [] as ReturnType<typeof entry>[],
+    added: [] as ReturnType<typeof entry>[],
+    removed: [] as ReturnType<typeof entry>[],
+    cssChanged: [] as string[],
+    sample: [entry("Dashboard", true)],
+  };
+  const many = Array.from({ length: 54 }, (_, i) => entry(`P${i}`));
+
+  it("states the shared-change reason and never says stylesheet changed", () => {
+    const body = comment.buildComment(
+      { ...base, mode: "all", reason: "shared", maxListed: 12, changed: many },
+      ctx,
+    ) as string;
+    expect(body).toContain(
+      "54 of 79 pages changed through a shared change (not the stylesheet), more than 12 pages, so a sample is shown.",
+    );
+    expect(body).not.toContain("shared stylesheet changed");
+    expect(body).toContain("`all-pages/`");
+    expect(body).toContain("- `Dashboard`: `dashboard.base.png`");
+    expect(body).not.toContain("`P0`");
+  });
+
+  it("keeps the stylesheet wording for a stylesheet change", () => {
+    const body = comment.buildComment(
+      { ...base, mode: "all", reason: "stylesheet", cssChanged: ["kb.css"] },
+      ctx,
+    ) as string;
+    expect(body).toContain(
+      "All 79 pages changed: the shared stylesheet changed (`kb.css`).",
+    );
+  });
+
+  it("states the mode in the changed-pages listing", () => {
+    const body = comment.buildComment(
+      { ...base, mode: "some", changed: [entry("Polls")] },
+      ctx,
+    ) as string;
+    expect(body).toContain("Changed pages only: 1 of 79 pages changed");
+  });
+
+  it("lists new pages in the collapsed mode and counts the ones not shown", () => {
+    const added = [entry("Fresh"), entry("Hidden")];
+    const body = comment.buildComment(
+      {
+        ...base,
+        mode: "all",
+        reason: "shared",
+        maxListed: 12,
+        changed: [...many, ...added],
+        added,
+        sample: [entry("Dashboard", true), entry("Fresh")],
+      },
+      ctx,
+    ) as string;
+    expect(body).toContain("54 of 79 pages changed");
+    expect(body).toContain("- `Fresh`: `fresh.png` (new page, no before)");
+    expect(body).toContain("- and 1 more new page (no before)");
+    expect(body).toContain("`plan.json`");
+  });
+
+  it("points at plan.json instead of silently cutting a long list", () => {
+    const long = Array.from({ length: 70 }, (_, i) => entry(`Q${i}`));
+    const body = comment.buildComment(
+      { ...base, mode: "some", changed: long, removed: long },
+      ctx,
+    ) as string;
+    expect(body).toContain(
+      "- and 30 more pages; the full list is in `plan.json` in the artifact",
+    );
+    expect(body.match(/and 30 more pages/g)).toHaveLength(2);
+  });
+
+  it("stays well inside GitHub's comment limit with long hostile names", () => {
+    const name = "x`".repeat(300);
+    const huge = Array.from({ length: 2000 }, (_, i) => ({
+      ...entry(`${name}${i}`, true),
+      file: `${"f".repeat(200)}${i}.html`,
+    }));
+    const body = comment.buildComment(
+      { ...base, mode: "some", changed: huge, removed: huge },
+      ctx,
+    ) as string;
+    expect(body.length).toBeLessThan(65536);
+    expect(body.length).toBeLessThanOrEqual(comment.MAX_COMMENT_CHARS + 200);
   });
 });

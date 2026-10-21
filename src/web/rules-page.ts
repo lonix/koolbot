@@ -1,5 +1,5 @@
 import type { Client, GuildBasedChannel } from "discord.js";
-import { scriptTag } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
 import { env } from "../config/env.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import logger from "../utils/logger.js";
@@ -170,7 +170,7 @@ function renderStatus(p: RulesPageProps, csrf: string): string {
   <p class="muted">Turn the feature on and pick the channel, role and texts on the <a href="/admin/settings">Settings</a> page. Make the rules channel read-only for members in Discord.</p>
   <div class="row">
     <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="btn btn-primary"${p.enabled && p.channelId ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
-    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord.">${csrf}<button type="submit" class="btn"${p.roleId ? "" : " disabled"}>Record current role holders as accepted</button></form>
+    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="btn"${p.roleId ? "" : " disabled"}>Record current role holders as accepted</button></form>
   </div>
 </div>`;
 }
@@ -235,7 +235,7 @@ function renderPlan(p: RulesPageProps, csrf: string): string {
       )
       .join("");
   const apply = rulesPlanIsApplicable(plan)
-    ? `<form method="POST" action="/admin/rules/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first.">${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button></form>`
+    ? `<form method="POST" action="/admin/rules/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button></form>`
     : plan.plan.operations.length === 0 && plan.extraErrors.length === 0
       ? `<p class="muted">Nothing to change: the server already matches.</p>`
       : "";

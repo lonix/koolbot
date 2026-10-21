@@ -4,7 +4,7 @@
  * without a Discord client or MongoDB.
  */
 
-import { scriptTag } from "./html.js";
+import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import { renderSaveBar } from "./savebar.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
@@ -118,6 +118,59 @@ function formatUtc(date: Date | null | undefined): string {
 }
 
 const CHANGELOG_URL = "https://github.com/lonix/koolbot/blob/main/CHANGELOG.md";
+
+/** Consequence lists for the confirmation dialogs (#1343); see `confirmListAttr`. */
+export const REACTION_ROLE_DELETE_ITEMS: readonly string[] = [
+  "The reaction message is deleted.",
+  "If no other mapping uses the role, the role is deleted and members lose it.",
+  "If no other mapping uses the role, its category is deleted with every channel in it, including channels added by hand and their history.",
+  "If another mapping uses the role, the role and category are kept.",
+  "This cannot be undone.",
+];
+const REACTION_ROLE_DELETE_LIST = confirmListAttr(REACTION_ROLE_DELETE_ITEMS);
+export const REACTION_ROLE_GROUP_DELETE_ITEMS: readonly string[] = [
+  "The shared reaction message is deleted.",
+  "If the bot created every mapping, the group's category is deleted with every channel in it, including channels added by hand and their history.",
+  "If any mapping uses an existing category, that category and its channels are kept.",
+  "Roles the bot created are deleted; reused roles, and roles a mapping outside the group still uses, are kept.",
+  "This cannot be undone.",
+];
+const REACTION_ROLE_GROUP_DELETE_LIST = confirmListAttr(
+  REACTION_ROLE_GROUP_DELETE_ITEMS,
+);
+const EVENT_CANCEL_COMMON = [
+  "Its announcement post is updated to show it as cancelled.",
+  "Channels the bot made for it are removed.",
+];
+/** Discord's side of a cancel depends on event sync and on who made the event. */
+function eventCancelDiscordLine(adopted: boolean): string {
+  return adopted
+    ? "Its Discord event was adopted, so it is left unchanged in Discord."
+    : "With event sync on, its Discord event is cancelled, or marked completed if it has already started.";
+}
+export function eventCancelItems(
+  adopted: boolean,
+  recurring: boolean,
+): string[] {
+  return [
+    recurring
+      ? "This occurrence is marked cancelled and stops running."
+      : "The event is marked cancelled and stops running.",
+    ...EVENT_CANCEL_COMMON,
+    eventCancelDiscordLine(adopted),
+    ...(recurring ? ["The series continues with its next occurrence."] : []),
+  ];
+}
+function eventCancelList(adopted: boolean, recurring: boolean): string {
+  return confirmListAttr(eventCancelItems(adopted, recurring));
+}
+export const EVENT_CANCEL_SERIES_ITEMS: readonly string[] = [
+  "Every unfinished occurrence of the series is marked cancelled, and no further ones are created.",
+  "Their announcement posts are updated to show them as cancelled.",
+  "Channels the bot made for them are removed.",
+  "With event sync on, Discord events the bot created are cancelled or marked completed; adopted Discord events are left unchanged.",
+];
+const EVENT_CANCEL_SERIES_LIST = confirmListAttr(EVENT_CANCEL_SERIES_ITEMS);
 
 /**
  * Dashboard "Version" card (#1029): running vs latest release, the update
@@ -1312,7 +1365,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 
   const actionBar = `
 <div class="actions">
-  <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status.">
+  <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status."${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${csrf}">
     <button type="submit" class="btn">Reload commands</button>
   </form>
@@ -1373,7 +1426,7 @@ export function renderSettingsPage(props: SettingsProps): string {
       // form for a single key (issue #433).
       const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
-<div class="card" id="section-${escapeHtml(g.category)}">
+<div class="card card--savebar" id="section-${escapeHtml(g.category)}">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
   ${renderSettingsForms({
@@ -1414,7 +1467,14 @@ export function renderSettingsPage(props: SettingsProps): string {
 <div id="danger-zone" class="card" style="border-color:var(--danger)">
   <h2>Danger zone</h2>
   <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
-  <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone.">
+  <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone."${confirmListAttr(
+    [
+      "Every setting is rewritten to its built-in default, including channels, roles and feature switches.",
+      "Stored keys that are no longer in the schema are deleted.",
+      "Bootstrap and environment values (Discord token, Mongo URI, Web UI session) are not touched.",
+      "Scheduled jobs restart from the defaults; reload commands yourself afterwards.",
+    ],
+  )}>
     <input type="hidden" name="_csrf" value="${csrf}">
     <label>Type <code>${escapeHtml(confirmTarget)}</code> to confirm:
       <input type="text" name="confirm" autocomplete="off" placeholder="${escapeHtml(confirmTarget)}" required>
@@ -2888,7 +2948,7 @@ export function renderEventsPage(props: EventsProps): string {
   const tableRows = props.rows
     .map((e) => {
       const finished = e.state === "cancelled" || e.state === "ended";
-      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?">${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
+      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?"${EVENT_CANCEL_SERIES_LIST}>${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
       // A finished occurrence still awaiting its successor (e.g. recurrence
       // was switched off meanwhile) keeps the series live: allow stopping it.
       // The host panel lives on the member surface (#1189); an admin may open
@@ -2922,7 +2982,7 @@ export function renderEventsPage(props: EventsProps): string {
   ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${eventCancelList(e.nativeAdopted === true, Boolean(e.recurrence))}>${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
       const channelCell = e.channelId
@@ -3375,7 +3435,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     // Grouped mappings share a message/category/channel, so they can only be
     // torn down as a unit — offer a single group-delete instead of the
     // per-mapping archive/delete controls.
-    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" data-confirm="Permanently delete the whole role group ${jsName} belongs to? This removes the roles the bot created for it (reused roles, and roles still used by another mapping, are kept) and its shared category/channel.">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" data-confirm="Permanently delete the whole role group ${jsName} belongs to? This removes the roles the bot created for it (reused roles, and roles still used by another mapping, are kept) and its shared category/channel."${REACTION_ROLE_GROUP_DELETE_LIST}>${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
   } else if (!managed) {
     // Bound mappings point at a pre-existing role and may share a picker
     // message, so they are removed per-mapping (message + emoji) and never
@@ -3385,10 +3445,10 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     // Managed rows are keyed by their stable mapping id, not roleName, so
     // identically named pickers can't collide (#813).
     actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Unarchive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel."${REACTION_ROLE_DELETE_LIST}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   } else {
-    actions = `<form method="POST" action="/admin/reaction-roles/archive" data-confirm="Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/archive" data-confirm="Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved."${CONFIRM_NEUTRAL_ATTR}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" data-confirm="Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel."${REACTION_ROLE_DELETE_LIST}>${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   }
 
   const typeTag = managed
@@ -3710,7 +3770,12 @@ ${renderFeatureSettingsCard({
     <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
     <dt>Total notices</dt><dd>${props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message.">
+  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
+    [
+      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
+      "Every notice is posted again from the saved list.",
+    ],
+  )}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary">Resync notices to channel</button>
     <span class="muted">Deletes and reposts every notice message in the channel.</span>
@@ -3850,7 +3915,12 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", feature
     <dt>Header post</dt><dd>${props.headerMessageId ? `<span class="mono">${escapeHtml(props.headerMessageId)}</span> <span class="muted">(auto-managed)</span>` : '<span class="muted">none</span>'}</dd>
     <dt>${props.search ? "Matching quotes" : "Total quotes"}</dt><dd>${props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes.">
+  <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
+    [
+      "Every message in the quote channel is deleted, including anything that is not a quote.",
+      "The header and every quote are posted again, with their saved votes.",
+    ],
+  )}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
     <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
@@ -4005,7 +4075,14 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
-  <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted.">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
+  <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted."${confirmListAttr(
+    [
+      "The saved birthday is removed.",
+      "Any birthday role they hold is taken back.",
+      "The bot's birthday posts about them are deleted.",
+      "If the role or a post cannot be undone, the birthday is kept so you can retry.",
+    ],
+  )}>${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
 </td>
 </tr>`;
     })
@@ -4062,7 +4139,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", feat
     <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron)}</dd>
     <dt>Stored birthdays</dt><dd>${props.listUnavailable ? '<span class="muted">unavailable</span>' : props.total}</dd>
   </dl>
-  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?">
+  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -4567,7 +4644,7 @@ export function renderFeatureSettingsCard(
     ? ""
     : `\n    <input type="hidden" name="no_cascade" value="1">`;
   return `
-<div class="card">
+<div class="card card--savebar">
   <h2>${escapeHtml(props.title ?? "Settings")}</h2>${introHtml}
   ${renderSettingsForms({
     formId,
@@ -4821,7 +4898,7 @@ ${renderFeatureSettingsCard({
     <button type="submit" name="preview" value="1" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Preview digest</button>
     <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
   </form>
-  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?">
+  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${sendDisabled ? " disabled" : ""}>Send now</button>
     <span class="muted">${sendHint}</span>
@@ -5043,7 +5120,7 @@ ${renderFeatureSettingsCard({
 <div class="card">
   <h2>Current holders</h2>
   ${holdersHtml}
-  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately.">
+  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately."${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
@@ -5458,8 +5535,13 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
       <div class="inline-form">
         <button type="submit" class="btn btn-sm">Uphold</button>
         <button type="submit" class="btn btn-sm" formaction="${base}/extend">Extend</button>
-        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="Make this removal permanent? The case closes with no further review.">Make permanent</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there.">Readmit</button>
+        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="Make this removal permanent? The case closes with no further review."${confirmListAttr(
+          [
+            "The case is marked upheld and its review date is cleared.",
+            "It is not reviewed again.",
+          ],
+        )}>Make permanent</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Record readmission? KoolBot does not unban in Discord; do that there."${CONFIRM_NEUTRAL_ATTR}>Readmit</button>
       </div>
       <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Readmit records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
@@ -5510,7 +5592,7 @@ ${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days
   return `<div class="card">
   <h2>Cases</h2>
   <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided when it came due. Escalation stays a human decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?">
+  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?"${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
     <button type="submit" class="btn btn-sm">Run review pass now</button>
   </form>
