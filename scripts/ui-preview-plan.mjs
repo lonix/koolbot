@@ -9,9 +9,13 @@
  *
  * `mode`:
  *   none     nothing differs: no screenshots, only the manifest is uploaded
- *   some     only the pages in `changed` (head and base screenshots)
- *   all      the stylesheet differs, or every page's HTML does: a representative
- *            `sample` is highlighted and the full set goes in `all-pages/`
+ *   some     only the pages in `changed` (head and base screenshots), while at
+ *            most MAX_LISTED_PAGES existing pages changed
+ *   all      a representative `sample` is highlighted and the full set goes in
+ *            `all-pages/`. `reason` says why: `stylesheet` (the stylesheet differs),
+ *            `every-page` (every page's HTML differs) or `shared` (more than
+ *            MAX_LISTED_PAGES existing pages changed without the stylesheet
+ *            changing, i.e. a shared layout or script change, #1351)
  *   no-base  the base could not be rendered, so nothing can be told apart; treated like `all`
  *
  * Usage: node scripts/ui-preview-plan.mjs --head <dir> [--base <dir>] --out <plan.json>
@@ -31,6 +35,35 @@ export const SAMPLE_PAGES = [
   "/me overview",
   ...MOBILE_PAGES,
 ];
+
+/**
+ * The most existing pages listed one by one in `some` mode. Above this a
+ * change to shared layout code would flood the comment, so the sample is shown
+ * instead (#1351). Pages the PR adds do not count towards it.
+ */
+export const MAX_LISTED_PAGES = 12;
+
+/** The most new pages (no before image) shown in the sample beyond the usual sample. */
+export const MAX_ADDED_SHOWN = 6;
+
+/**
+ * The sample for the `shared` fallback: usual sample pages that changed first,
+ * then the rest of the usual sample, then pages the PR adds (capped), so a PR
+ * that adds pages is not reduced to a generic sample.
+ */
+function sharedSample(head, changed, added, brief) {
+  const usual = head.pages.filter((p) => SAMPLE_PAGES.includes(p.name));
+  const changedFiles = new Set(changed.map((p) => p.file));
+  const ordered = [
+    ...usual.filter((p) => changedFiles.has(p.file)),
+    ...usual.filter((p) => !changedFiles.has(p.file)),
+  ];
+  const have = new Set(ordered.map((p) => p.file));
+  const extra = added
+    .filter((p) => !have.has(p.file))
+    .slice(0, MAX_ADDED_SHOWN);
+  return [...ordered, ...extra].map(brief);
+}
 
 export function plan(head, base) {
   const brief = (p) => ({ name: p.name, file: p.file, mobile: !!p.mobile });
@@ -64,11 +97,23 @@ export function plan(head, base) {
     .filter((f) => head.assets?.[f] !== base.assets?.[f])
     .sort();
 
-  if (
-    out.cssChanged.length > 0 ||
-    (out.changed.length > 0 && out.changed.length === head.pages.length)
+  const addedFiles = new Set(out.added.map((p) => p.file));
+  const changedExisting = out.changed.filter((p) => !addedFiles.has(p.file));
+
+  if (out.cssChanged.length > 0) {
+    out.mode = "all";
+    out.reason = "stylesheet";
+  } else if (
+    out.changed.length > 0 &&
+    out.changed.length === head.pages.length
   ) {
     out.mode = "all";
+    out.reason = "every-page";
+  } else if (changedExisting.length > MAX_LISTED_PAGES) {
+    out.mode = "all";
+    out.reason = "shared";
+    out.maxListed = MAX_LISTED_PAGES;
+    out.sample = sharedSample(head, out.changed, out.added, brief);
   } else if (out.changed.length > 0 || out.removed.length > 0) {
     out.mode = "some";
   }
