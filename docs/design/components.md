@@ -11,12 +11,14 @@ The bar across the top of every signed-in page: the KoolBot name and version on 
 session and the way out.
 
 **Markup.** `header.kb-topbar` → `a.kb-topbar__brand` (name and `span.kb-topbar__motto`), `span.kb-pill.kb-mono` with the version, and
-`div.kb-topbar__end`, which starts with `span.kb-whoami` (avatar initial, display name, one ScopeBadge per scope above Member).
+`div.kb-topbar__end`, which starts with `span.kb-whoami` (avatar initial, `span.kb-whoami__name` with the display name, one ScopeBadge per scope above Member).
 
 - Admin console: whoami, a ghost link to *My preferences*, the session timer, then *Finish* (small danger button: it ends the admin session).
 - Everyone else: whoami, *Admin console* (only for admins who opened `/me`), the timer, then *Sign out*.
 - When a newer release exists, an `a.kb-pill.kb-pill--info` follows the version pill.
 - Under five minutes left, `is-low` turns the timer `warn`.
+- The bar wraps at every width and grows in height (`min-height`, never a fixed `height`); the identity group shrinks (`min-width: 0`) and the name breaks
+  anywhere and stops at `18rem`, so a long nickname with three badges never scrolls the page sideways.
 
 ### SideNav
 

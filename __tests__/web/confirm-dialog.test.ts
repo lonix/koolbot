@@ -20,6 +20,7 @@ import {
   NONCE_MARKER,
   scriptTag,
 } from "../../src/web/html.js";
+import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
 import { applyNonce, buildCsp } from "../../src/web/security-headers.js";
 import {
   EVENT_CANCEL_SERIES_ITEMS,
@@ -711,6 +712,108 @@ describe("CSP and nonce", () => {
       expect(d.querySelectorAll("script")).toHaveLength(0);
     } finally {
       unload();
+    }
+  });
+});
+
+describe("confirm dialog next to the settings save bar (#1346)", () => {
+  // One form with a save bar and a data-confirm submit button of its own
+  // (formaction), as a settings section with a destructive row action would be.
+  function mountSettingsForm(): {
+    form: HTMLFormElement;
+    name: HTMLInputElement;
+    reset: HTMLButtonElement;
+    bar: HTMLElement;
+    submits: Event[];
+  } {
+    document.body.innerHTML =
+      `<form id="s" method="POST" action="/admin/settings/save-section">` +
+      `<input type="hidden" name="_csrf" value="tok">` +
+      `<input type="text" name="value_x.name" value="Lobby">` +
+      `<button id="reset" type="submit" formaction="/admin/settings/reset" ` +
+      `data-confirm="Reset this setting?"${confirmListAttr(["It returns to its default."])}>Reset</button>` +
+      `${renderSaveBar("Save settings", "X")}</form>`;
+    const form = document.getElementById("s") as HTMLFormElement;
+    const submits: Event[] = [];
+    // Registered after the save bar's own listener: records what reaches the
+    // browser and keeps jsdom from navigating.
+    form.addEventListener("submit", (e) => {
+      submits.push(e);
+      e.preventDefault();
+    });
+    return {
+      form,
+      name: form.querySelector<HTMLInputElement>("input[name='value_x.name']")!,
+      reset: document.getElementById("reset") as HTMLButtonElement,
+      bar: form.querySelector<HTMLElement>("[data-savebar]")!,
+      submits,
+    };
+  }
+
+  it("asks first, re-submits the same form once, and leaves the save bar working", () => {
+    installDialogStandIn();
+    const unloadConfirm = load(CONFIRM_SCRIPT);
+    try {
+      const w = mountSettingsForm();
+      // Load the save bar after the form's own listener order is settled; the
+      // bar's submit snapshot listener must see the confirmed submit.
+      new Function(SAVEBAR_SCRIPT)();
+      expect(w.bar.hidden).toBe(true);
+
+      w.name.value = "Hangout";
+      w.name.dispatchEvent(new window.Event("input", { bubbles: true }));
+      expect(w.bar.hidden).toBe(false);
+      expect(document.querySelector("[data-savebar-text]")?.textContent).toBe(
+        "1 unsaved change",
+      );
+
+      // The dialog gates the click: nothing is submitted yet, bar untouched.
+      w.reset.click();
+      const d = dialog();
+      expect(d).not.toBeNull();
+      expect(w.submits).toHaveLength(0);
+      expect(w.bar.hidden).toBe(false);
+
+      // Go back: still nothing submitted and the edit is kept.
+      buttons(d!).back.click();
+      expect(w.submits).toHaveLength(0);
+      expect(w.name.value).toBe("Hangout");
+      expect(w.bar.hidden).toBe(false);
+
+      // Confirm: exactly one submit, on this form, from the reset button.
+      w.reset.click();
+      buttons(dialog()!).ok.click();
+      expect(w.submits).toHaveLength(1);
+      expect(w.submits[0].target).toBe(w.form);
+      expect((w.submits[0] as SubmitEvent).submitter).toBe(w.reset);
+
+      // The AJAX save's `kb-saved` still commits the baseline and hides the bar.
+      w.form.dispatchEvent(new window.Event("kb-saved"));
+      expect(w.bar.hidden).toBe(true);
+      expect(document.querySelector("[data-savebar-text]")?.textContent).toBe(
+        "0 unsaved changes",
+      );
+      expect(dialog()).toBeNull();
+    } finally {
+      unloadConfirm();
+      removeDialogStandIn();
+    }
+  });
+
+  it("does not ask when the plain save button is used", () => {
+    installDialogStandIn();
+    const unloadConfirm = load(CONFIRM_SCRIPT);
+    try {
+      const w = mountSettingsForm();
+      new Function(SAVEBAR_SCRIPT)();
+      w.name.value = "Hangout";
+      w.name.dispatchEvent(new window.Event("input", { bubbles: true }));
+      w.bar.querySelector<HTMLButtonElement>("button[type=submit]")!.click();
+      expect(dialog()).toBeNull();
+      expect(w.submits).toHaveLength(1);
+    } finally {
+      unloadConfirm();
+      removeDialogStandIn();
     }
   });
 });

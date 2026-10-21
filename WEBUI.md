@@ -78,8 +78,8 @@ What changes per session:
 - **Administrator runs `/config`.** They get a session with `role:admin`.
   The DM mentions both entry points. They land on `/admin/` by default,
   but every admin page header carries a "My preferences" link that takes
-  them to `/me/` without re-running `/config`. The `/me/*` layout in turn
-  carries a "Back to admin panel" link.
+  them to `/me/` without re-running `/config`. The `/me/*` top bar in turn
+  carries an "Admin console" link (admins only).
 - **A `/me/*` handler can only read/write the signed-in user's own rows.**
   This is enforced by the `assertSelfScope` helper (see
   `src/web/user-routes.ts`) and applies to admin-role sessions too — an
@@ -98,6 +98,24 @@ Server Members intent is off.
 | Member     | being allowed `/me` (Command permissions)         | `/me/*` self-service                           |
 | Event host | `host` (shown **Event host**); `admin` implies it | `/me/events*`; still only events they created  |
 | Moderator  | `staff` (shown **Moderator**); `admin` implies it | `/me/moderation*` (pages arrive with #1320)    |
+
+**The app shell (#1317).** Every signed-in page has the same top bar: the KoolBot name and version, then who you are (an
+avatar initial and your server display name) with a badge for each scope above Member (**Event host**, **Moderator**, **Admin**),
+the session timer, and **Sign out** (**Finish** in the admin console). An admin on `/me` also gets an **Admin console** link;
+the console links back to **My preferences**. The display name comes from the member the session check already fetched
+(the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
+
+On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
+(Event presets today; Your events and New event with #1319) and **Moderation** (Mod log, Command audit and, once it is on,
+Tickets, with #1320). A section appears when the person holds the scope and it has at least one page that exists. A person
+with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So today a Moderator, whose
+Moderation pages are not built yet, sees the badge and no sidebar until #1320 adds a page. Below 760px the sidebar sits
+above the content and the top bar wraps (#855).
+
+Every page in the Hosting or Moderation area opens with a line saying why you can see it: "You can host because you are in
+@Event hosts" names the Discord roles that grant the scope (the same role-group snapshot as the scope check, read from the
+cache), "...because you are an Administrator" for admins and the server owner, and "...because you hold the Event host role"
+when no role name is available.
 
 - A host reaches only events they created (`isEventHost`); an admin session reaches every event. A member who is not in a host group gets 403
   on `/me/events*`, even for an event they created earlier.
@@ -905,7 +923,7 @@ available_ (with the kind: major, minor or patch), or _couldn't check_. It also
 links to the release notes and has a **Check now** button. When an update is
 available, the card shows how to update for Docker Compose, plain Docker and
 source installs, and warns that a major update may include breaking changes.
-Every admin page shows the running version in the top banner, plus an _Update
+Every admin page shows the running version in the top bar, plus an _Update
 available_ badge when the instance is behind.
 
 The check runs at startup, every 12 hours and on **Check now** (at most once a
@@ -2626,6 +2644,15 @@ at the claim; if the delete fails or the bot restarts, the scan finishes it with
 ended, or is being ended, answers "could not be cancelled: it is ended" (admin page), is not counted by a series cancel and
 spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
+
+**Edit** (#1298) opens the create form pre-filled, on the host panel's own address (`/me/events/<id>/host/edit`), for an upcoming or running one-off
+event. An administrator can edit any event; a host with the Event host role only the events they created. A scheduled event with no channel yet takes a
+new title, description, date, time, timezone and duration, with the same checks as the create form. The Discord event is patched in place (so the people
+who marked Interested are kept), the announcement is edited in place, and a moved start moves the lead-time channel creation and sends the reminder
+again. An event that has started (running, its channel already created, or past its start) can only change its description and duration. Finished,
+cancelled, recurring and adopted events cannot be edited: changing one occurrence of a series would change every later one. A save made on an
+out-of-date form (the event started, ended, was cancelled or edited meanwhile) changes nothing and asks you to reload. Every save is audited as
+`event.edit` with the changed fields before and after.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

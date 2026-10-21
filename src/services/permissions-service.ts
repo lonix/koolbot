@@ -367,6 +367,27 @@ export class PermissionsService {
   }
 
   /**
+   * Why a member holds the `host` / `moderator` web scopes (#1317): the names
+   * of the Discord roles that grant them, for the "why you see this" line.
+   * Uses the same member lookup (and so the same short cache) as
+   * `resolveWebScopes`, so it adds no Discord call. Cosmetic: any failure
+   * returns no reasons and the page falls back to the capability's own name.
+   */
+  public async resolveWebScopeReasons(
+    userId: string,
+    guildId: string,
+  ): Promise<{ host: string[]; staff: string[]; elevated: boolean }> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      const member = await this.fetchMemberFresh(guild, guildId, userId);
+      return await RoleGroupService.getInstance().memberScopeGroupNames(member);
+    } catch (error) {
+      logger.warn("Could not resolve why a web scope is held", error);
+      return { host: [], staff: [], elevated: false };
+    }
+  }
+
+  /**
    * Whether the member currently holds the Administrator permission, read
    * live from Discord. A definitive Unknown Guild/Member answer is `false`;
    * any other lookup failure throws `PermissionCheckError` so callers can

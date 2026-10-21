@@ -78,6 +78,10 @@ import {
   renderHostPanelBody,
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
+import {
+  renderEventEditBody,
+  type EventEditView,
+} from "../../src/web/event-edit-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import { renderEndSection } from "../../src/web/event-end-view.js";
@@ -85,6 +89,11 @@ import {
   renderLeadersSection,
   type LeadersViewData,
 } from "../../src/web/host-leaders-view.js";
+import {
+  SHELL_NAV,
+  type ShellNavItem,
+  type ShellViewer,
+} from "../../src/web/app-shell.js";
 import {
   renderConsent,
   renderErrorPage,
@@ -810,6 +819,23 @@ export function adminPages(): A11yPage[] {
         guildId: "g1",
         guildName: "Test Guild",
       }),
+    },
+    {
+      // The state the save bar script leaves behind after two edits: the bar
+      // shown with its count and Discard (#1330). The scripts do not run under
+      // axe, so the markup is put in that state here.
+      name: "Settings (save bar with unsaved changes)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+      })
+        .split("Save your changes")
+        .join("2 unsaved changes")
+        .split(" data-savebar-discard hidden>")
+        .join(" data-savebar-discard>"),
     },
     {
       name: "Settings (rejected value)",
@@ -2276,6 +2302,22 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
   };
 }
 
+function editEventView(over: Partial<EventEditView>): EventEditView {
+  return {
+    id: "65a000000000000000000001",
+    title: "Quiz night",
+    description: "Bring a friend",
+    durationMinutes: 90,
+    timezone: "Europe/Oslo",
+    date: "2099-06-01",
+    time: "20:00",
+    when: "2099-06-01 20:00 (Europe/Oslo)",
+    version: "abc123",
+    mode: "full",
+    ...over,
+  };
+}
+
 /** Every `/me` member-facing page, rendered through the user layout. */
 export function userPages(): A11yPage[] {
   const shell = (title: string, active: string, body: string): string =>
@@ -2667,6 +2709,39 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me edit event (not started)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (start held by a running Discord event)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ startLocked: true }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (started: description and duration only)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ mode: "limited" }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
       name: "/me birthday",
       html: shell(
         "Birthday",
@@ -2821,7 +2896,93 @@ const REWIND = {
   pollVotesCast: 12,
 };
 
+/**
+ * The app shell (#1317) for each scope combination: top bar, scope badges, the
+ * sidebar (or its absence) and the "why you see this" line. `renderUserPage`
+ * is given the viewer directly; `userPages()` above covers the admin on `/me`.
+ */
+export function shellPages(): A11yPage[] {
+  const viewer = (
+    scopes: ShellViewer["scopes"],
+    reasons?: ShellViewer["reasons"],
+  ): ShellViewer => ({
+    displayName: "Kari Nordmann",
+    role: "user",
+    scopes,
+    reasons,
+  });
+  // Every page built, so the Moderation section and Tickets are scanned too.
+  const everything = SHELL_NAV.map((item) => ({
+    ...item,
+    available: true,
+    featureKey: undefined,
+  }));
+  const page = (
+    title: string,
+    active: string,
+    v: ShellViewer,
+    navRegistry?: readonly ShellNavItem[],
+  ): string =>
+    renderUserPage({
+      title,
+      active,
+      body: `<h1>${title}</h1><p>Page content.</p>`,
+      csrfToken: COMMON.csrfToken,
+      remainingMs: COMMON.remainingMs,
+      isAdmin: v.role === "admin",
+      viewer: v,
+      navRegistry,
+    });
+  const hostRoles = { host: ["Event hosts"], staff: [], elevated: false };
+  const modRoles = { host: [], staff: ["Moderators"], elevated: false };
+
+  return [
+    {
+      name: "shell: member only (no sidebar)",
+      html: page("My preferences", "/me/", viewer(["member"])),
+    },
+    {
+      name: "shell: host (You and Hosting) with why line",
+      html: page(
+        "Event presets",
+        "/me/events/presets",
+        viewer(["member", "host"], hostRoles),
+      ),
+    },
+    {
+      name: "shell: moderator (You and Moderation) with why line",
+      html: page(
+        "Mod log",
+        "/me/moderation",
+        viewer(["member", "moderator"], modRoles),
+        everything,
+      ),
+    },
+    {
+      name: "shell: host and moderator, every section",
+      html: page(
+        "Your events",
+        "/me/events",
+        viewer(["member", "host", "moderator"], {
+          host: ["Event hosts", "Crew"],
+          staff: ["Moderators"],
+          elevated: false,
+        }),
+        everything,
+      ),
+    },
+    {
+      name: "shell: admin on /me with the Admin console link",
+      html: page("My preferences", "/me/", {
+        displayName: "Ola <Admin>",
+        role: "admin",
+        scopes: ["member", "host", "moderator"],
+      }),
+    },
+  ];
+}
+
 /** Every page the a11y gate scans. */
 export function allPages(): A11yPage[] {
-  return [...adminPages(), ...userPages(), ...preAuthPages()];
+  return [...adminPages(), ...userPages(), ...shellPages(), ...preAuthPages()];
 }

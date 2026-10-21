@@ -5,7 +5,7 @@
  *  - `assertSelfScope`: a session may only act on its own (userId, guildId);
  *    admins on `/me/*` see their own data, not someone else's.
  *  - The `/me` index handler renders for both admin and user-role sessions.
- *  - The "Back to admin panel" link only appears for admin-role sessions.
+ *  - The "Admin console" link only appears for admin-role sessions.
  *  - The CSRF-protected `/me/finish` revokes the session and clears the cookie.
  */
 
@@ -237,13 +237,13 @@ describe("createUserRouter / index page", () => {
   it("renders the index for a user-role session without the admin link", async () => {
     const html = await dispatchIndex("user");
     expect(html).toContain("My preferences");
-    expect(html).not.toContain("Back to admin panel");
+    expect(html).not.toContain("Admin console");
   });
 
   it("renders the index for an admin-role session WITH the admin link", async () => {
     const html = await dispatchIndex("admin");
     expect(html).toContain("My preferences");
-    expect(html).toContain("Back to admin panel");
+    expect(html).toContain("Admin console");
     expect(html).toContain('href="/admin/"');
   });
 
