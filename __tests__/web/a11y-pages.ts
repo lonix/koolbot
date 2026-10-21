@@ -90,6 +90,11 @@ import {
   type LeadersViewData,
 } from "../../src/web/host-leaders-view.js";
 import {
+  SHELL_NAV,
+  type ShellNavItem,
+  type ShellViewer,
+} from "../../src/web/app-shell.js";
+import {
   renderConsent,
   renderErrorPage,
   renderInvalidLink,
@@ -2865,7 +2870,93 @@ const REWIND = {
   pollVotesCast: 12,
 };
 
+/**
+ * The app shell (#1317) for each scope combination: top bar, scope badges, the
+ * sidebar (or its absence) and the "why you see this" line. `renderUserPage`
+ * is given the viewer directly; `userPages()` above covers the admin on `/me`.
+ */
+export function shellPages(): A11yPage[] {
+  const viewer = (
+    scopes: ShellViewer["scopes"],
+    reasons?: ShellViewer["reasons"],
+  ): ShellViewer => ({
+    displayName: "Kari Nordmann",
+    role: "user",
+    scopes,
+    reasons,
+  });
+  // Every page built, so the Moderation section and Tickets are scanned too.
+  const everything = SHELL_NAV.map((item) => ({
+    ...item,
+    available: true,
+    featureKey: undefined,
+  }));
+  const page = (
+    title: string,
+    active: string,
+    v: ShellViewer,
+    navRegistry?: readonly ShellNavItem[],
+  ): string =>
+    renderUserPage({
+      title,
+      active,
+      body: `<h1>${title}</h1><p>Page content.</p>`,
+      csrfToken: COMMON.csrfToken,
+      remainingMs: COMMON.remainingMs,
+      isAdmin: v.role === "admin",
+      viewer: v,
+      navRegistry,
+    });
+  const hostRoles = { host: ["Event hosts"], staff: [], elevated: false };
+  const modRoles = { host: [], staff: ["Moderators"], elevated: false };
+
+  return [
+    {
+      name: "shell: member only (no sidebar)",
+      html: page("My preferences", "/me/", viewer(["member"])),
+    },
+    {
+      name: "shell: host (You and Hosting) with why line",
+      html: page(
+        "Event presets",
+        "/me/events/presets",
+        viewer(["member", "host"], hostRoles),
+      ),
+    },
+    {
+      name: "shell: moderator (You and Moderation) with why line",
+      html: page(
+        "Mod log",
+        "/me/moderation",
+        viewer(["member", "moderator"], modRoles),
+        everything,
+      ),
+    },
+    {
+      name: "shell: host and moderator, every section",
+      html: page(
+        "Your events",
+        "/me/events",
+        viewer(["member", "host", "moderator"], {
+          host: ["Event hosts", "Crew"],
+          staff: ["Moderators"],
+          elevated: false,
+        }),
+        everything,
+      ),
+    },
+    {
+      name: "shell: admin on /me with the Admin console link",
+      html: page("My preferences", "/me/", {
+        displayName: "Ola <Admin>",
+        role: "admin",
+        scopes: ["member", "host", "moderator"],
+      }),
+    },
+  ];
+}
+
 /** Every page the a11y gate scans. */
 export function allPages(): A11yPage[] {
-  return [...adminPages(), ...userPages(), ...preAuthPages()];
+  return [...adminPages(), ...userPages(), ...shellPages(), ...preAuthPages()];
 }

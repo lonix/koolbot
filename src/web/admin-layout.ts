@@ -16,8 +16,13 @@ import {
   escapeJsInAttr,
   scriptTag,
 } from "./html.js";
-import { getBotVersion } from "../utils/version.js";
-import { formatVersion } from "../utils/semver.js";
+import {
+  SESSION_LOW_MS,
+  renderTopBar,
+  renderVersionPill,
+  resolveViewer,
+  type ShellViewer,
+} from "./app-shell.js";
 
 // Re-exported from session.ts so the renderer and the cookie middleware
 // share a single source of truth for the inactivity sliding window.
@@ -232,7 +237,7 @@ export function setAdminUpdateBadgeProvider(
 }
 
 function renderVersionPills(): string {
-  const running = `<span class="pill mono" title="Running version">${escapeHtml(formatVersion(getBotVersion()))}</span>`;
+  const running = renderVersionPill();
   let badge: AdminUpdateBadge | null;
   try {
     badge = updateBadgeProvider?.() ?? null;
@@ -243,7 +248,7 @@ function renderVersionPills(): string {
   if (!badge) return running;
   return (
     running +
-    `<a class="pill pill-update" href="/admin/#version" title="A newer KoolBot release is available">` +
+    `<a class="kb-pill kb-pill--info" href="/admin/#version" title="A newer KoolBot release is available">` +
     `Update available: ${escapeHtml(badge.latest)} (${escapeHtml(badge.kind)})</a>`
   );
 }
@@ -260,6 +265,11 @@ export interface AdminPageOptions {
    * nav filtering working unchanged).
    */
   navFeatureStatus?: NavFeatureStatus;
+  /**
+   * Who is looking (#1317). Normally omitted: the session middleware sets the
+   * request's viewer (see `app-shell.ts`); an admin stand-in is the fallback.
+   */
+  viewer?: ShellViewer;
 }
 
 const STYLE = [
@@ -271,19 +281,10 @@ const STYLE = [
   `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}`,
   `a{color:var(--link);text-decoration:none}`,
   "a:hover{text-decoration:underline}",
-  ".banner{background:var(--chrome);border-bottom:1px solid var(--border);padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:.5rem;flex-wrap:wrap}",
-  ".banner .right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
-  ".banner .left{display:flex;gap:.75rem;align-items:center}",
-  ".banner .pill{background:var(--fill);color:var(--pill-text);padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
-  ".banner a.pill-update{background:var(--info-bg);color:var(--info-text);font-weight:600}",
-  ".banner a.pill-update:hover,.banner a.pill-update:focus-visible{background:var(--primary-hover);color:var(--on-primary);text-decoration:none}",
-  ".banner form{display:inline;margin:0}",
-  // --danger (not --embed-danger) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
-  `.banner button{background:var(--danger);color:var(--on-primary);border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
-  `.banner button:hover{background:var(--danger-hover)}`,
-  ".banner a.surface{color:var(--text-secondary);background:var(--fill);padding:.25rem .55rem;border-radius:4px;font-weight:600;text-decoration:none;margin-right:.5rem}",
-  ".banner a.surface:hover{background:var(--fill-hover);color:var(--on-primary)}",
-  ".shell{display:flex;min-height:calc(100vh - 41px)}",
+  // The top bar is the shared kb-topbar (app-shell.ts, #1317), reflowing at 760px in kb.css; only
+  // its Finish form needs a reset here.
+  ".kb-topbar form{margin:0}",
+  ".shell{display:flex;min-height:calc(100vh - var(--topbar-height))}",
   "nav.side{background:var(--surface);border-right:1px solid var(--border);width:220px;padding:1rem .5rem;flex-shrink:0}",
   "nav.side ul{list-style:none;padding:0;margin:0}",
   // Grouped sidebar sections (#613): a muted, small uppercase heading sits
@@ -404,7 +405,6 @@ const STYLE = [
   `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
   "nav.side a:focus-visible{background:var(--chrome);text-decoration:none}",
   ".btn:focus-visible{text-decoration:none}",
-  ".banner a.surface:focus-visible{background:var(--fill-hover);color:var(--on-primary);text-decoration:none}",
   // Skip link: off-screen until focused, then pinned top-left so keyboard
   // users can jump past the ~20 sidebar links on every page.
   `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
@@ -488,6 +488,8 @@ const SCRIPT =
   "function expire(){if(fired)return;fired=true;window.location.href='/admin/'}" +
   "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
   "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
+  // Under five minutes the wrapper (`.kb-session`) turns warn.
+  `if(el.parentNode&&el.parentNode.classList)el.parentNode.classList.toggle('is-low',r<${SESSION_LOW_MS});` +
   // When the countdown hits 0, navigate to /admin/. The session middleware
   // will reject the now-expired cookie and render the scaffold's 401 page.
   "if(r<=0)expire()}" +
@@ -846,22 +848,19 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // First focusable element on every page (#855). `main` carries
     // `tabindex="-1"` so the fragment jump also moves keyboard focus.
     '<a class="skip-link" href="#main">Skip to content</a>',
-    // A `<header>` banner landmark rather than a bare div, so the session
-    // countdown / Finish button aren't stranded outside every landmark
-    // (axe `region`, #856).
-    '<header class="banner">',
-    `<div class="left"><strong>Koolbot Admin</strong>${renderVersionPills()}</div>`,
-    '<div class="right">',
-    // "My preferences" link to the parallel `/me` surface added in #481.
-    // The same session covers both surfaces; clicking this never forces
-    // a re-sign-in and never burns a new magic-link token.
-    '<a class="surface" href="/me/">My preferences</a>',
-    "Session expires in ",
-    `<span id="session-countdown" data-remaining-ms="${remainingMs}" data-inactivity-ms="${inactivityMs}" class="mono">--:--</span> · `,
-    '<form method="POST" action="/admin/finish">',
-    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<button type="submit">Finish</button>',
-    "</form></div></header>",
+    // A `<header>` banner landmark (the top bar), so the session countdown and
+    // Finish aren't stranded outside every landmark (axe `region`, #856). The
+    // "My preferences" link goes to the parallel `/me` surface (#481): the same
+    // session covers both, so it never forces a re-sign-in or burns a new token.
+    renderTopBar({
+      viewer: resolveViewer(opts.viewer, true),
+      surface: "admin",
+      home: "/admin/",
+      brandExtraHtml: renderVersionPills(),
+      csrfToken: opts.csrfToken,
+      remainingMs,
+      inactivityMs,
+    }),
     '<div class="shell">',
     // Named so it stays distinguishable from any other nav landmark a page
     // body introduces (axe `landmark-unique`, #856).

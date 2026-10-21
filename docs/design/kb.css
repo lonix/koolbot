@@ -24,11 +24,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .kb-demo--col { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
 
 /* ---------- Shell ---------- */
-.kb-topbar { display: flex; align-items: center; gap: var(--space-3); height: var(--topbar-height); padding: 0 var(--space-4); background: var(--chrome); border-bottom: 1px solid var(--border); font-size: var(--type-description-size); }
+.kb-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: var(--topbar-height); padding: var(--space-1) var(--space-4); background: var(--chrome); border-bottom: 1px solid var(--border); font-size: var(--type-description-size); }
 .kb-topbar__brand { display: flex; align-items: baseline; gap: var(--space-2); color: var(--text); font-weight: 700; font-size: var(--type-panel-title-size); text-decoration: none; }
 .kb-topbar__brand:hover { text-decoration: none; }
 .kb-topbar__motto { font-weight: 400; font-size: var(--type-help-size); color: var(--muted); }
-.kb-topbar__end { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+.kb-topbar__end { margin-left: auto; min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .kb-session { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0 var(--space-2); color: var(--muted); font-family: var(--font-mono); font-size: var(--type-description-size); }
 .kb-session.is-low { color: var(--warn); }
 .kb-shell { display: flex; min-height: calc(100vh - var(--topbar-height)); }
@@ -463,7 +463,8 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 /* ---------- Scopes: who you are signed in as, and what each section is for ---------- */
 .kb-scope { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem 0.1rem 0.4rem; border: 1px solid var(--control); border-radius: var(--radius-pill); color: var(--text-secondary); font-size: var(--type-help-size); font-weight: 600; line-height: 1.4; white-space: nowrap; }
 .kb-scope .kb-icon { width: 0.85rem; height: 0.85rem; color: var(--muted); }
-.kb-whoami { display: inline-flex; align-items: center; gap: var(--space-2); padding-right: var(--space-2); margin-right: var(--space-1); border-right: 1px solid var(--border); font-weight: 600; color: var(--text); }
+.kb-whoami { display: inline-flex; flex-wrap: wrap; align-items: center; min-width: 0; max-width: 100%; gap: var(--space-2); padding-right: var(--space-2); margin-right: var(--space-1); border-right: 1px solid var(--border); font-weight: 600; color: var(--text); }
+.kb-whoami__name { min-width: 0; max-width: 18rem; overflow-wrap: anywhere; }
 .kb-whoami .kb-avatar { width: 1.6rem; height: 1.6rem; }
 .kb-sidenav__heading .kb-icon { width: 0.8rem; height: 0.8rem; margin-right: 0.3rem; vertical-align: -0.1em; }
 

@@ -165,7 +165,7 @@ export function createMeEventPresetsRouter(client: Client): Router {
       res.type("text/html").send(
         renderUserPage({
           title: "My event presets",
-          active: "/me/",
+          active: "/me/events/presets",
           body: renderMyEventPresetsBody({
             csrfToken: csrfOf(req),
             presets,
