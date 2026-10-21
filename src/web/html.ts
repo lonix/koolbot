@@ -130,7 +130,7 @@ export const NEUTRAL_CONFIRM_ACTIONS: readonly RegExp[] = [
   /^\/admin\/digest\/send-now$/,
   /^\/admin\/leaderboard-roles\/run-now$/,
   /^\/admin\/moderation\/cases\/run-review$/,
-  /^\/admin\/moderation\/cases\/[^/]+\/readmit$/,
+  /^\/(?:admin|me)\/moderation\/cases\/[^/]+\/readmit$/,
   /^\/admin\/reaction-roles\/archive$/,
   /^\/admin\/rules\/sync$/,
   /^\/admin\/rules\/apply$/,

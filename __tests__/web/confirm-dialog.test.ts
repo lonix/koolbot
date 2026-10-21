@@ -9,6 +9,7 @@
  * stand-in that opens, closes and fires `close` the way a browser does. The
  * markup is built and read through the DOM only (no HTML string filtering).
  */
+import * as fs from "node:fs";
 import { describe, it, expect, jest, afterEach } from "@jest/globals";
 import { axe, toHaveNoViolations } from "jest-axe";
 import {
@@ -816,4 +817,101 @@ describe("confirm dialog next to the settings save bar (#1346)", () => {
       removeDialogStandIn();
     }
   });
+});
+
+describe("dialog footer keeps both actions reachable (Copilot, #1345)", () => {
+  // jsdom has no layout, so the stylesheet rules are the contract.
+  const css = fs.readFileSync("docs/design/kb.css", "utf8");
+  const rules = (selector: string): string[] =>
+    Array.from(css.matchAll(/(^|\n)([^{}\n]+)\{([^}]*)\}/g))
+      .filter((m) => m[2].trim() === selector)
+      .map((m) => m[3]);
+  const has = (selector: string, decl: RegExp): boolean =>
+    rules(selector).some((body) => decl.test(body));
+  const NARROW = /@media \(max-width: 30rem\) \{ \.kb-dialog__foot \{([^}]*)\}/;
+
+  const checks: Array<[string, () => boolean]> = [
+    ["footer wraps", () => has(".kb-dialog__foot", /flex-wrap:\s*wrap/)],
+    [
+      "footer stacks when narrow",
+      () => /flex-direction:\s*column/.test(NARROW.exec(css)?.[1] ?? ""),
+    ],
+    [
+      "dialog buttons wrap their label",
+      () => has(".kb-dialog__foot .kb-btn", /white-space:\s*normal/),
+    ],
+    [
+      "dialog buttons grow with the label",
+      () =>
+        has(".kb-dialog__foot .kb-btn", /height:\s*auto/) &&
+        has(".kb-dialog__foot .kb-btn", /min-height:\s*var\(--button-height\)/),
+    ],
+    [
+      "dialog buttons never exceed the dialog",
+      () => has(".kb-dialog__foot .kb-btn", /max-width:\s*100%/),
+    ],
+    [
+      "shared .kb-btn is untouched",
+      () => has(".kb-btn", /white-space:\s*nowrap/),
+    ],
+  ];
+
+  for (const [name, ok] of checks) {
+    it(`css: ${name}`, () => expect(ok()).toBe(true));
+  }
+
+  it("notices when a rule is removed", () => {
+    const strip = (re: RegExp): string => css.replace(re, "");
+    for (const re of [
+      /\.kb-dialog__foot \{ flex-wrap: wrap; \}/,
+      /@media \(max-width: 30rem\) \{[^\n]*\}\s*\}/,
+      /white-space: normal;/,
+    ]) {
+      expect(strip(re)).not.toBe(css);
+    }
+  });
+
+  it("the dialog rules use tokens, not literal sizes or colours", () => {
+    const body = rules(".kb-dialog__foot .kb-btn").join(" ");
+    expect(body).not.toMatch(/#[0-9a-f]{3,8}\b|\d+px|font-size/i);
+  });
+
+  it("the longest trigger label on any fixture page stays within the reviewed bound", () => {
+    installDialogStandIn();
+    let longest = "";
+    try {
+      for (const page of allPages()) {
+        installDocumentForAxe(page.html);
+        for (const el of Array.from(
+          document.querySelectorAll<HTMLElement>("[data-confirm]"),
+        )) {
+          const btn = el.matches("button,input")
+            ? el
+            : el.querySelector<HTMLElement>("button[type=submit]");
+          const label = (btn?.textContent ?? "").trim();
+          if (label.length > longest.length) longest = label;
+        }
+      }
+    } finally {
+      removeDialogStandIn();
+    }
+    // Wrapping handles longer labels, but a new one beyond this deserves a
+    // look at the dialog on a phone: raise the bound deliberately.
+    expect(longest.length).toBeGreaterThan(20);
+    expect(longest.length).toBeLessThanOrEqual(45);
+  });
+});
+
+describe("neutral readmit action on both surfaces", () => {
+  it.each([
+    "/admin/moderation/cases/abc/readmit",
+    "/me/moderation/cases/case-1/readmit",
+  ])("%s is neutral", (a) => expect(isNeutralConfirmAction(a)).toBe(true));
+  it.each([
+    "/admin/moderation/cases/abc/permanent",
+    "/me/moderation/cases/abc/permanent",
+    "/other/moderation/cases/abc/readmit",
+    "/me/moderation/cases/a/b/readmit",
+    "/me/moderation/cases//readmit",
+  ])("%s is not", (a) => expect(isNeutralConfirmAction(a)).toBe(false));
 });

@@ -414,6 +414,7 @@ The larger context for an action: its options and consequences, shown at the mom
 
 **Markup.** `dialog.kb-dialog` opened with `showModal()` → `div.kb-dialog__head` (an icon well and `h2.kb-dialog__title`), `div.kb-dialog__body`,
 `div.kb-dialog__foot` (*Cancel* ghost, then the action). The backdrop is `scrim`.
+The footer wraps and stacks on a narrow screen, and its buttons may wrap a long label, so *Go back* stays reachable (scoped to the dialog; `.kb-btn` is unchanged).
 
 - **Confirm** (Switch groups off): the title is the question, the body lists every consequence, the button repeats the verb in `danger`.
 - **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result ("Deal 2 people").
