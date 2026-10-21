@@ -156,6 +156,12 @@ import {
   renderResultBody,
   renderSettingsSection,
 } from "../host-settings-view.js";
+import {
+  CONFIRM_ONLY_HEADER,
+  CONFIRM_ONLY_VALUE,
+  CONFIRM_PAGE_HEADER,
+  CONFIRM_PAGE_VALUE,
+} from "../confirm-fetch.js";
 import { leadersTagsViewOf } from "../host-settings-leaders-tags-view.js";
 import {
   buildGroupsSwitchView,
@@ -273,6 +279,12 @@ export interface HostActionResult {
    * here, before the page is sent. The page is never cached (it has a token).
    */
   page?: string;
+  /**
+   * `page` is the live edit's confirmation page (#1344): the response carries
+   * `CONFIRM_PAGE_HEADER`, which the panel script requires before it opens a
+   * dialog from a fetched answer. Set by nothing else.
+   */
+  confirmPage?: boolean;
 }
 
 export interface HostActionOptions {
@@ -343,6 +355,9 @@ export function hostAction(
           : (result.errorMessage ?? result.message),
       });
       if (result.page !== undefined) {
+        if (result.confirmPage === true) {
+          res.set(CONFIRM_PAGE_HEADER, CONFIRM_PAGE_VALUE);
+        }
         res
           .status(200)
           .set("Cache-Control", "no-store")
@@ -1325,6 +1340,8 @@ function registerSettingsActions(router: Router, client: Client): void {
       const rawBody = req.body;
       const csrfToken = getCsrfToken(req);
       const eventId = String(event._id);
+      // The panel script's fetch asks for a confirmation or nothing (#1344).
+      const confirmOnly = req.get(CONFIRM_ONLY_HEADER) === CONFIRM_ONLY_VALUE;
       // A chosen preset is resolved from the server's catalog (#1241): the
       // content of a preset is never taken from the client.
       const prepared = await prepareGroupEditBody(
@@ -1369,6 +1386,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         eventId,
         deps: createLiveEditDeps(client),
         submission: parsed.entries,
+        requireConfirmation: confirmOnly,
       });
       const result = describeLiveEditOutcome(outcome);
       if (outcome.status !== "needs-confirmation") return result;
@@ -1397,6 +1415,7 @@ function registerSettingsActions(router: Router, client: Client): void {
       const flags = await readMeSurfaceFlags();
       return {
         ...result,
+        confirmPage: true,
         page: renderUserPage({
           title: `Confirm changes: ${event.title}`,
           active: "/me/events",

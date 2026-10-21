@@ -89,7 +89,8 @@ export default [
     files: [
       '__tests__/web/a11y-*.ts',
       '__tests__/web/confirm-script.test.ts',
-      '__tests__/web/confirm-dialog.test.ts'
+      '__tests__/web/confirm-dialog.test.ts',
+      '__tests__/web/confirm-fetch.test.ts'
     ],
     languageOptions: {
       globals: {
@@ -106,7 +107,8 @@ export default [
         'Document': 'readonly',
         'EventListener': 'readonly',
         'EventTarget': 'readonly',
-        'FormData': 'readonly'
+        'FormData': 'readonly',
+        'RequestInit': 'readonly'
       }
     }
   }

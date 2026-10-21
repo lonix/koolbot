@@ -10,7 +10,8 @@
  * of the form. Everything dynamic goes through `escapeHtml`.
  */
 
-import { escapeHtml } from "./html.js";
+import { escapeHtml, scriptTag } from "./html.js";
+import { CONFIRM_FETCH_SCRIPT, CONFIRM_PAGE_MARKER } from "./confirm-fetch.js";
 import { renderSeriesTick } from "./host-settings-series.js";
 import {
   CHANNEL_LEAD_MAX,
@@ -125,7 +126,8 @@ ${renderSeriesTick(d.seriesTick)}
 </form>
 ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : renderGroups(d)}
 ${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
-${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}`;
+${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
+${scriptTag(CONFIRM_FETCH_SCRIPT)}`;
 }
 
 export interface ConfirmChangeView {
@@ -177,12 +179,13 @@ export function renderConfirmBody(d: ConfirmViewData): string {
     )
     .join("");
   const reasons = d.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
-  return `<section class="card" id="host-settings-confirm" aria-labelledby="host-settings-confirm-h">
+  // The markers are what the panel's fetch-and-upgrade reads (`confirm-fetch.ts`, #1344).
+  return `<section class="card" id="host-settings-confirm" aria-labelledby="host-settings-confirm-h" data-confirm-page="${CONFIRM_PAGE_MARKER}">
 <h2 id="host-settings-confirm-h">Confirm these changes</h2>
-<div class="notice warn" role="status"><ul>${reasons}</ul></div>
+<div class="notice warn" role="status"><ul data-confirm-reasons>${reasons}</ul></div>
 <p>If you confirm, exactly these changes are made:</p>
-<ul>${changes}</ul>
-<form method="POST" action="${escapeHtml(d.actionPath)}">${hidden("_csrf", d.csrfToken)}${hidden("token", d.token)}
+<ul data-confirm-changes>${changes}</ul>
+<form method="POST" action="${escapeHtml(d.actionPath)}" data-confirm-form>${hidden("_csrf", d.csrfToken)}${hidden("token", d.token)}
 <button type="submit">Confirm and save</button>
 <a href="${escapeHtml(d.panelPath)}">Cancel</a>
 </form>

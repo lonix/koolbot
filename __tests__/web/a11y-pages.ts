@@ -91,6 +91,10 @@ import {
   type EventEditView,
 } from "../../src/web/event-edit-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
+import {
+  renderConfirmBody,
+  renderSettingsSection,
+} from "../../src/web/host-settings-view.js";
 import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import { renderEndSection } from "../../src/web/event-end-view.js";
 import {
@@ -2412,6 +2416,88 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+      ),
+    },
+    {
+      // The two always-confirmed forms (#1344): switch groups off and remove
+      // groups, each with its empty live region for a fetch problem.
+      name: "/me host panel settings (groups on: switch off and remove)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderSettingsSection({
+          csrfToken: COMMON.csrfToken,
+          actionPath: (name) =>
+            `/me/events/65a000000000000000000001/host/${name}`,
+          blocker: null,
+          leadMinutes: 30,
+          leadReadOnly: "The channels already exist.",
+          locked: false,
+          groupLabel: "Team",
+          groups: [],
+          groupEdit: {
+            groupLabel: "Team",
+            presets: [],
+            presetNotice: null,
+            presetBase: "[]",
+            addKey: "g_00000003",
+            groups: [
+              {
+                key: "g_00000001",
+                kind: "team",
+                name: "Red",
+                marker: "",
+                size: null,
+                memberCount: 2,
+                overSize: false,
+                namePending: false,
+                sizePending: false,
+                hasChannel: true,
+              },
+              {
+                key: "g_00000002",
+                kind: "team",
+                name: "Blue",
+                marker: "",
+                size: 4,
+                memberCount: 0,
+                overSize: false,
+                namePending: false,
+                sizePending: false,
+                hasChannel: false,
+              },
+            ],
+          },
+          groupsSwitch: {
+            on: true,
+            groupLabel: "Team",
+            channelOwed: false,
+            blocked: null,
+            kept: [],
+            presets: [],
+            presetNotice: null,
+            groupCount: 2,
+            channelCount: 1,
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me host panel settings confirmation",
+      html: shell(
+        "Confirm changes: Quiz night",
+        "/me/",
+        renderConfirmBody({
+          csrfToken: COMMON.csrfToken,
+          actionPath:
+            "/me/events/65a000000000000000000001/host/settings-confirm",
+          panelPath: "/me/events/65a000000000000000000001/host",
+          token: "signed.token",
+          reasons: [
+            "Switching groups off: Red (2 assigned); Blue (nobody assigned).",
+          ],
+          changes: [{ label: "Groups", from: "on", to: "off" }],
+        }),
       ),
     },
     {

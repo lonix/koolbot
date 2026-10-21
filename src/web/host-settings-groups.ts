@@ -16,6 +16,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
 import { GROUP_KIND_OPTIONS } from "./admin-views.js";
 import { renderSeriesTick } from "./host-settings-series.js";
 import {
@@ -210,13 +211,14 @@ export function renderGroupSetForms(
   const remove =
     listed.length <= 1
       ? `<div class="field"><p class="muted">An event keeps at least one ${escapeHtml(label)}, so the last one cannot be removed.</p></div>`
-      : `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
+      : `<form method="POST" action="${escapeHtml(actionPath)}"${CONFIRM_FETCH_ATTR}>${hidden("_csrf", csrfToken)}
 <fieldset class="field"><legend>Remove ${escapeHtml(label)}s</legend>
 ${boxes}
 ${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
 <p class="muted">Tick the ${escapeHtml(label)}s to remove. You are asked to confirm first. Everybody in a removed ${escapeHtml(label)}'s channel, you included, is moved to the main channel, its members are unassigned (their clan tags come off), and then the channel is deleted. If somebody cannot be moved, that ${escapeHtml(label)} is kept and the result says why: save again to move the rest.</p></fieldset>
 ${tick}
 <button type="submit">Remove selected</button>
+${confirmFetchError()}
 </form>`;
   const kinds = GROUP_KIND_OPTIONS.map(
     ([value, text]) =>
