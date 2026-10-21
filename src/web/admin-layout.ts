@@ -8,6 +8,7 @@
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { designStylesheetLinks } from "./design-assets.js";
+import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { getInactivityWindowMs } from "./session.js";
 import {
   CONFIRM_SCRIPT,
@@ -723,10 +724,15 @@ const SETTINGS_SAVE_SCRIPT =
   // paths only.
   "var rl=r.json&&typeof r.json==='object'?r.json.reload:null;" +
   "if(typeof rl==='string'&&rl.indexOf('/admin/')===0&&rl.indexOf('//')<0){window.location.assign(rl);return}" +
+  // An accepted save (2xx, nothing rejected) tells the save bar the form's
+  // values are now the saved ones (#1330).
+  "var rej=r.json&&Object.prototype.toString.call(r.json.invalidKeys)==='[object Array]'&&r.json.invalidKeys.length>0;" +
+  "var saved=okStatus&&!rej&&!(r.json&&r.json.type==='err');" +
+  "function done(){if(saved){try{form.dispatchEvent(new Event('kb-saved'))}catch(e){}}}" +
   "if(typeof jt==='string'&&jt){" +
   "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
-  "applyResult(form,r.json,n?n.id:'');return}" +
-  "if(okStatus){show(form,'ok','Saved.');clearInvalid(form);return}" +
+  "applyResult(form,r.json,n?n.id:'');done();return}" +
+  "if(okStatus){show(form,'ok','Saved.');clearInvalid(form);done();return}" +
   // Non-2xx with no usable JSON: surface the status plus any readable text.
   "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +
   "var msg='Save failed ('+r.status+').';" +
@@ -866,6 +872,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,
     `${scriptTag(SETTINGS_SAVE_SCRIPT)}`,
+    `${scriptTag(SAVEBAR_SCRIPT)}`,
     `${scriptTag(INVALID_FOCUS_SCRIPT)}`,
     "</body></html>",
   ].join("");

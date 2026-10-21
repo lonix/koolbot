@@ -5,6 +5,7 @@
  */
 
 import { scriptTag } from "./html.js";
+import { renderSaveBar } from "./savebar.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
@@ -1287,6 +1288,8 @@ function renderSettingsForms(opts: {
   hiddenFields: string;
   rowsHtml: string;
   submitLabel: string;
+  /** Names the form's save bar region, which must differ per form. */
+  title: string;
   csrfToken: string;
   returnTo?: string;
 }): string {
@@ -1296,9 +1299,7 @@ function renderSettingsForms(opts: {
   return `<form method="POST" action="/admin/settings/save-section"${opts.saveAttrs} id="${escapeHtml(opts.formId)}">
     ${opts.hiddenFields}
     ${opts.rowsHtml}
-    <div class="actions" style="margin-top:.75rem">
-      <button type="submit" class="btn btn-primary">${escapeHtml(opts.submitLabel)}</button>
-    </div>
+    ${renderSaveBar(opts.submitLabel, opts.title)}
   </form>
   <form id="${escapeHtml(opts.formId)}-reset" method="POST" action="/admin/settings/reset">
     <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">${redirect}
@@ -1382,6 +1383,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     <input type="hidden" name="category" value="${escapeHtml(g.category)}">`,
     rowsHtml,
     submitLabel: "Save",
+    title: meta.title,
     csrfToken: props.csrfToken,
   })}
 </div>`;
@@ -4575,6 +4577,7 @@ export function renderFeatureSettingsCard(
     <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}`,
     rowsHtml,
     submitLabel: props.submitLabel ?? "Save settings",
+    title: props.title ?? "Settings",
     csrfToken: props.csrfToken,
     returnTo: props.returnTo,
   })}

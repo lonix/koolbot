@@ -816,6 +816,23 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The state the save bar script leaves behind after two edits: the bar
+      // shown with its count and Discard (#1330). The scripts do not run under
+      // axe, so the markup is put in that state here.
+      name: "Settings (save bar with unsaved changes)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+      })
+        .split("Save your changes")
+        .join("2 unsaved changes")
+        .split(" data-savebar-discard hidden>")
+        .join(" data-savebar-discard>"),
+    },
+    {
       name: "Settings (rejected value)",
       html: renderSettingsPage({
         ...COMMON,
