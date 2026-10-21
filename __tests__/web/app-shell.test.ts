@@ -142,10 +142,15 @@ describe("nav registry rules", () => {
   });
 
   it("drops a section with nothing to show and needs two sections for a sidebar", () => {
-    // Today no moderation page is built, so a moderator has one section.
-    expect(hasSideNav(sectionsFor(moderator))).toBe(false);
-    expect(hasSideNav(sectionsFor(moderator, BUILT))).toBe(true);
+    // A moderator has Moderation (Mod log, Command audit) beside You.
+    expect(hasSideNav(sectionsFor(moderator))).toBe(true);
+    expect(hasSideNav(sectionsFor(member))).toBe(false);
     expect(hasSideNav(sectionsFor(member, BUILT))).toBe(false);
+    // A section with no visible item drops out, leaving one: no sidebar.
+    const noModeration = SHELL_NAV.map((i) =>
+      i.scope === "moderator" ? { ...i, available: false } : i,
+    );
+    expect(hasSideNav(sectionsFor(moderator, noModeration))).toBe(false);
   });
 
   it("names the sections after the scopes", () => {
@@ -196,12 +201,38 @@ describe("sidebar per scope (non-admin /me)", () => {
     expect(badges(doc)).toEqual(["Event host", "Moderator"]);
   });
 
-  it("uses the real registry: a host gets a sidebar today, a moderator does not yet", () => {
+  it("uses the real registry: host, moderator, both and member", () => {
     expect(headings(userPage(host))).toEqual(["You", "Hosting"]);
     expect(links(userPage(host))).toEqual(["My preferences", "Event presets"]);
-    expect(userPage(moderator).querySelector(".kb-sidenav")).toBeNull();
-    // ...but the Moderator badge is shown either way.
+    // A moderator now sees You and Moderation and a sidebar; Tickets has no
+    // page yet, so it never renders.
+    expect(headings(userPage(moderator))).toEqual(["You", "Moderation"]);
+    expect(links(userPage(moderator))).toEqual([
+      "My preferences",
+      "Mod log",
+      "Command audit",
+    ]);
     expect(badges(userPage(moderator))).toEqual(["Moderator"]);
+    expect(headings(userPage(both))).toEqual(["You", "Hosting", "Moderation"]);
+    expect(links(userPage(both))).toEqual([
+      "My preferences",
+      "Event presets",
+      "Mod log",
+      "Command audit",
+    ]);
+    expect(userPage(member).querySelector(".kb-sidenav")).toBeNull();
+  });
+
+  it("marks the right item on each moderator page, live registry", () => {
+    const current = (active: string): string[] =>
+      Array.from(
+        userPage(moderator, { active }).querySelectorAll(
+          ".kb-sidenav a[aria-current='page']",
+        ),
+      ).map((a) => text(a).trim());
+    expect(current("/me/moderation")).toEqual(["Mod log"]);
+    expect(current("/me/moderation/cases/abc")).toEqual(["Mod log"]);
+    expect(current("/me/moderation/audit")).toEqual(["Command audit"]);
   });
 
   it("marks the current page and nothing else", () => {
@@ -279,7 +310,7 @@ describe("top bar", () => {
     const link = doc.querySelector(".kb-topbar a[href='/admin/']");
     expect(text(link).trim()).toBe("Admin console");
     expect(badges(doc)).toEqual(["Event host", "Moderator", "Admin"]);
-    expect(headings(doc)).toEqual(["You", "Hosting"]);
+    expect(headings(doc)).toEqual(["You", "Hosting", "Moderation"]);
   });
 
   it("falls back to a stand-in viewer from isAdmin when none is known", () => {

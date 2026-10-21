@@ -152,6 +152,7 @@ export function createMeModerationRouter(client: Client): Router {
     title: string,
     body: string,
     status = 200,
+    active: string = MOD_BASE,
   ): Promise<void> => {
     const session = (req as AuthenticatedRequest).webSession;
     const flags = await readMeSurfaceFlags();
@@ -161,7 +162,7 @@ export function createMeModerationRouter(client: Client): Router {
       .send(
         renderUserPage({
           title,
-          active: MOD_BASE,
+          active,
           body,
           csrfToken: csrfOf(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -489,6 +490,8 @@ export function createMeModerationRouter(client: Client): Router {
           page: audit.page,
           pageSize: PAGE_SIZE,
         }),
+        200,
+        `${MOD_BASE}/audit`,
       );
     }),
   );
