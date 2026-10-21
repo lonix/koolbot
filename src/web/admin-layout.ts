@@ -304,13 +304,20 @@ const STYLE = [
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
-  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+  // `clip`, not `auto`: a scroll container is where `position:sticky` resolves, so
+  // `auto` here pinned the settings save bar to `main` (which never scrolls) instead
+  // of the viewport. `clip` still stops a wide child forcing a sideways page scroll
+  // and creates no scroll container; wide tables scroll inside their own `.card`.
+  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:clip}",
   // The skip-link target itself shouldn't draw a ring around the whole column.
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:var(--text-secondary)}",
   ".subtitle{color:var(--muted);margin:0 0 1rem}",
   ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
+  // A card holding a sticky save bar (settings forms) must not be a scroll container either,
+  // or the bar sticks inside the card and sits at the end of a long form.
+  ".card.card--savebar{overflow-x:clip}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}",

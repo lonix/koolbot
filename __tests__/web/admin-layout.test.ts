@@ -265,9 +265,23 @@ describe("renderAdminPage", () => {
     expect(html).toContain("nav.side{width:auto;border-right:0;");
     // Wide tables scroll inside their container, not the page.
     expect(html).toContain(
-      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:clip}",
     );
     expect(html).toContain("margin:0 0 1rem;overflow-x:auto}");
+  });
+
+  it("keeps the sticky save bar's ancestors from being scroll containers", () => {
+    const css = render();
+    const rule = (sel: string): string => {
+      const i = css.indexOf(`${sel}{`);
+      expect(i).toBeGreaterThan(-1);
+      return css.slice(i, css.indexOf("}", i));
+    };
+    // `overflow-x:auto|scroll|hidden` on an ancestor makes it the sticky
+    // container, so the bar would stick inside the card instead of the viewport.
+    expect(rule("main")).toContain("overflow-x:clip");
+    expect(rule("main")).not.toMatch(/overflow(-x|-y)?:(auto|scroll|hidden)/);
+    expect(rule(".card.card--savebar")).toContain("overflow-x:clip");
   });
 
   it("uses colours that clear the WCAG contrast floors (#855)", () => {

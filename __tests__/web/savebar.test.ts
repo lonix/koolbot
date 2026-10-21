@@ -124,6 +124,22 @@ describe("the save bar markup (no JavaScript)", () => {
     expect(text()).toBe("Save your changes");
   });
 
+  it("sits in a card that opts out of scrolling, so sticky reaches the viewport", () => {
+    mount(cardHtml());
+    expect(bar().closest(".card")?.classList.contains("card--savebar")).toBe(
+      true,
+    );
+    const doc = new DOMParser().parseFromString(
+      pageHtml([{ category: "x", rows: ROWS }]),
+      "text/html",
+    );
+    for (const b of doc.querySelectorAll("[data-savebar]")) {
+      expect(b.closest(".card")?.classList.contains("card--savebar")).toBe(
+        true,
+      );
+    }
+  });
+
   it("keeps Save a plain submit button the AJAX save script still finds", () => {
     mount(cardHtml());
     const save = saveForm().querySelector(
