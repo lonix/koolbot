@@ -15,9 +15,12 @@ import type { IModerationLog } from "../models/moderation-log.js";
 import type { IModerationCase } from "../models/moderation-case.js";
 import type { CommandAuditRow, ModerationRow } from "./admin-views.js";
 
+/** Discord's cap on user ids per batched guild-member fetch. */
+const MEMBER_FETCH_BATCH = 100;
+
 /**
  * Display names for the given user ids. The member cache answers first and the
- * misses are batched into one `fetch({ user: [...] })`, because a page of 50
+ * misses are batched into `fetch({ user: [...] })` calls of at most 100, because a page of 50
  * rows can reference ~100 distinct ids and per-id fetches would be slow and
  * rate-limit-prone. Ids that stay unresolved (the member left) are simply
  * absent, so callers fall back to the raw snowflake. Never throws.
@@ -41,9 +44,11 @@ export async function resolveMemberLabels(
         missing.push(id);
       }
     }
-    if (missing.length > 0) {
+    // Discord accepts at most 100 ids per request. Each batch stands alone:
+    // one that fails leaves its own ids as raw ids and keeps the others' names.
+    for (let i = 0; i < missing.length; i += MEMBER_FETCH_BATCH) {
       const fetched = await guild.members
-        .fetch({ user: missing })
+        .fetch({ user: missing.slice(i, i + MEMBER_FETCH_BATCH) })
         .catch(() => null);
       if (fetched) {
         for (const [id, member] of fetched) {

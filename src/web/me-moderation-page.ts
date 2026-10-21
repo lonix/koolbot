@@ -141,7 +141,12 @@ function caseStatusBadge(status: string): string {
   return `<span class="kb-badge ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
 }
 
-const day = (iso: string | null): string => (iso ? iso.slice(0, 10) : "");
+/**
+ * A UTC instant as `2026-10-21 07:30 UTC` (DESIGN.md: times carry their zone).
+ * Every date and time on the moderator pages goes through this one helper.
+ */
+const stamp = (iso: string | null): string =>
+  iso ? `${iso.slice(0, 16).replace("T", " ")} UTC` : "";
 
 // ---------- Mod log ----------
 
@@ -268,7 +273,7 @@ function renderOpenCases(p: ModLogBodyProps): string {
       .map((c) => {
         const href = `${MOD_BASE}/cases/${encodeURIComponent(c.id)}`;
         const review = c.reviewAt
-          ? `${escapeHtml(day(c.reviewAt))}${c.due ? ' <span class="kb-badge kb-badge--warn">Due</span>' : ""}`
+          ? `${escapeHtml(stamp(c.reviewAt))}${c.due ? ' <span class="kb-badge kb-badge--warn">Due</span>' : ""}`
           : '<span class="kb-muted">No date</span>';
         return `<tr>
 <th scope="row"><a href="${href}">#${c.caseNumber}</a></th>
@@ -330,7 +335,7 @@ function renderActions(p: ModLogBodyProps): string {
               ? '<span class="kb-muted">Unavailable</span>'
               : '<span class="kb-muted">—</span>';
         return `<tr>
-<td class="kb-mono">${escapeHtml(r.createdAt.slice(0, 16).replace("T", " "))}</td>
+<td class="kb-mono">${escapeHtml(stamp(r.createdAt))}</td>
 <th scope="row" title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</th>
 <td>${actionBadge(r.action)}</td>
 <td>${moderator}</td>
@@ -413,7 +418,7 @@ function caseEvents(c: CaseView): string {
         : e.to === "under_review"
           ? "came due"
           : "opened";
-      return `<li><span class="kb-mono">${escapeHtml(day(e.at))}</span> ${what} by ${escapeHtml(e.byLabel)}${
+      return `<li><span class="kb-mono">${escapeHtml(stamp(e.at))}</span> ${what} by ${escapeHtml(e.byLabel)}${
         e.note ? `: ${escapeHtml(e.note)}` : ""
       }</li>`;
     })
@@ -430,7 +435,7 @@ function caseHistory(c: CaseView): string {
   return `<ul>${c.history
     .map(
       (h) =>
-        `<li><span class="kb-mono">${escapeHtml(day(h.createdAt))}</span> ${actionBadge(h.action)} ${
+        `<li><span class="kb-mono">${escapeHtml(stamp(h.createdAt))}</span> ${actionBadge(h.action)} ${
           h.reason
             ? escapeHtml(h.reason.slice(0, 200))
             : '<span class="kb-muted">no reason</span>'
@@ -482,9 +487,9 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
   );
   const review = c.live
     ? c.reviewAt
-      ? escapeHtml(day(c.reviewAt))
+      ? escapeHtml(stamp(c.reviewAt))
       : "No review date"
-    : `Closed ${escapeHtml(day(c.events[c.events.length - 1]?.at ?? null))}`;
+    : `Closed ${escapeHtml(stamp(c.events[c.events.length - 1]?.at ?? null))}`;
   return `${head}
 <div class="kb-stack">
 <section class="kb-panel" aria-labelledby="case-h">
@@ -493,7 +498,7 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
     <dl class="kb-kv">
       <dt>Member</dt><dd title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</dd>
       <dt>Review</dt><dd>${review}</dd>
-      <dt>Opened</dt><dd>${escapeHtml(day(c.openedAt))} by ${escapeHtml(c.openedByLabel)}</dd>${
+      <dt>Opened</dt><dd>${escapeHtml(stamp(c.openedAt))} by ${escapeHtml(c.openedByLabel)}</dd>${
         c.originModeratorLabel
           ? `\n      <dt>Action by</dt><dd>${escapeHtml(c.originModeratorLabel)}</dd>`
           : ""
@@ -617,7 +622,7 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
               r.subcommand ? ` ${escapeHtml(r.subcommand)}` : ""
             }`;
             return `<tr>
-<td class="kb-mono">${escapeHtml(r.createdAt.slice(0, 16).replace("T", " "))}</td>
+<td class="kb-mono">${escapeHtml(stamp(r.createdAt))}</td>
 <th scope="row" title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</th>
 <td class="kb-mono">${cmd}</td>
 <td>${channelMention(r.channelLabel ?? r.channelId)}</td>

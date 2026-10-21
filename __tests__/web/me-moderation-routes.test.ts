@@ -710,6 +710,11 @@ describe("a failed read is never shown as empty or zero", () => {
     expect(page.includes("No command invocations match.")).toBe(false);
   });
 
+  it("labels the time in the audit table and the actions table as UTC", async () => {
+    expect(await html("/audit")).toContain("2026-01-03 09:30 UTC");
+    expect(await html("/")).toContain("2026-01-01 10:00 UTC");
+  });
+
   it("shows 'unavailable' in the audit header, never '0 rows', when the count fails", async () => {
     auditCount.mockReturnValue(Promise.reject(new Error("db down")));
     const page = await html("/audit");
@@ -824,6 +829,27 @@ describe("case page and Review", () => {
     const done = await html("/cases/case-1");
     expect(done).toContain("let back in by Mod Mia");
     expect(done).not.toMatch(shown);
+  });
+
+  it("labels every time on the case page as UTC", async () => {
+    cases.findCase.mockResolvedValue(
+      liveCase({
+        events: [
+          {
+            at: new Date("2026-01-05T08:15:00Z"),
+            byUserId: MOD,
+            to: "open",
+            outcome: null,
+            note: null,
+          },
+        ],
+        reviewAt: new Date("2026-03-12T09:00:00Z"),
+      }),
+    );
+    const page = await html("/cases/case-1");
+    expect(page).toContain("2026-01-02 10:00 UTC"); // opened
+    expect(page).toContain("2026-01-05 08:15 UTC"); // decision trail
+    expect(page).toContain("2026-03-12 09:00 UTC"); // next review
   });
 
   it("answers 404 for an unknown case and while cases are off", async () => {
