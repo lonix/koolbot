@@ -255,7 +255,7 @@ Current coverage thresholds (`coverageThreshold.global` in `jest.config.js`):
 | Metric | Floor |
 | --- | ---: |
 | Statements | 78% |
-| Branches | 72% |
+| Branches | 78% |
 | Functions | 84% |
 | Lines | 79% |
 
