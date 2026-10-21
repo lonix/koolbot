@@ -234,7 +234,10 @@ function renderTiles(p: ModLogBodyProps): string {
   const actions = tile({
     label: "Actions, last 7 days",
     value: count(t.actionsLast7Days),
-    detail: "Every logged action",
+    detail:
+      t.actionsLast7Days === null
+        ? "Could not be read."
+        : "Every logged action",
     href: "#actions",
   });
   const timeouts = tile({
@@ -662,7 +665,7 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
   </div>
 </section>
 <section class="kb-panel" aria-labelledby="audit-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title" id="audit-h">Invocations</h2><span class="kb-panel__meta">${p.total} ${plural(p.total, "row", "rows")}, newest first</span></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="audit-h">Invocations</h2><span class="kb-panel__meta">${p.unavailable ? "unavailable" : `${p.total} ${plural(p.total, "row", "rows")}, newest first`}</span></header>
   ${table}
   <footer class="kb-panel__foot"><span>Read only. Command arguments and submitted text are not recorded.</span></footer>
   ${foot}

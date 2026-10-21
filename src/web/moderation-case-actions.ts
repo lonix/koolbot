@@ -149,7 +149,16 @@ export async function decideCase(args: {
     return { type: "err", text };
   };
 
-  if (!(await cases.isEnabled())) {
+  // A failed read of the switch is not "turned off": say it could not be read.
+  let enabled: boolean;
+  try {
+    enabled = await cases.isEnabledStrict();
+  } catch {
+    return refuse(
+      "Could not check whether moderation cases are on. Try again in a moment.",
+    );
+  }
+  if (!enabled) {
     return refuse("Moderation cases are turned off.");
   }
   const lengthError = firstLengthError([

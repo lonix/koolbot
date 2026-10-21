@@ -59,6 +59,7 @@ jest.unstable_mockModule(
     ModerationCaseService: {
       getInstance: (): unknown => ({
         isEnabled: mockIsEnabled,
+        isEnabledStrict: mockIsEnabled,
         openCase: mockOpenCase,
         decide: mockDecide,
       }),

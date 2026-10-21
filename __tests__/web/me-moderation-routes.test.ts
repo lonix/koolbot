@@ -42,7 +42,7 @@ const moderation = {
   getHistory: fn(),
 };
 const cases = {
-  isEnabled: fn(),
+  isEnabledStrict: fn(),
   countLiveCases: fn(),
   countOverdueCases: fn(),
   getQueue: fn(),
@@ -72,6 +72,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       getBoolean: async (key: string, fallback: boolean) =>
+        key in config ? config[key] : fallback,
+      getBooleanStrict: async (key: string, fallback: boolean) =>
         key in config ? config[key] : fallback,
       getNumber: async (_key: string, fallback: number) => fallback,
       getString: async () => "",
@@ -242,7 +244,7 @@ beforeEach(() => {
   });
   moderation.getRecent.mockResolvedValue([logRow()]);
   moderation.getHistory.mockResolvedValue([]);
-  cases.isEnabled.mockResolvedValue(true);
+  cases.isEnabledStrict.mockResolvedValue(true);
   cases.countLiveCases.mockResolvedValue(3);
   cases.countOverdueCases.mockResolvedValue(1);
   cases.getQueue.mockResolvedValue({
@@ -445,6 +447,17 @@ describe("tiles", () => {
     expect(cases.countOverdueCases).toHaveBeenCalledWith(GUILD);
   });
 
+  it("says the 7-day action count could not be read instead of a bare dash", async () => {
+    moderation.countRecent.mockImplementation((_g: unknown, o: unknown) =>
+      (o as { since?: Date }).since
+        ? Promise.reject(new Error("db down"))
+        : Promise.resolve(3),
+    );
+    const page = await html("/");
+    expect(page.includes("Could not be read.")).toBe(true);
+    expect(page.includes("Every logged action")).toBe(false);
+  });
+
   it("says the overdue count could not be read, never none, when its read fails", async () => {
     cases.countOverdueCases.mockRejectedValue(new Error("db down"));
     const page = await html("/");
@@ -590,7 +603,7 @@ describe("actions", () => {
   it("shows an empty state, and none of the case column without cases", async () => {
     moderation.getRecent.mockResolvedValue([]);
     moderation.countRecent.mockResolvedValue(0);
-    cases.isEnabled.mockResolvedValue(false);
+    cases.isEnabledStrict.mockResolvedValue(false);
     const page = await html("/?kind=warnings");
     expect(page.includes("No warnings logged.")).toBe(true);
     expect(page.includes('id="open-cases"')).toBe(false);
@@ -668,7 +681,7 @@ describe("a failed read is never shown as empty or zero", () => {
   });
 
   it("does not turn a failed case-switch read into 'cases are off'", async () => {
-    cases.isEnabled.mockImplementation(rejected);
+    cases.isEnabledStrict.mockImplementation(rejected);
     expect((await harness.get("/")).status).toBe(500);
     expect((await harness.get("/cases/case-1")).status).toBe(500);
   });
@@ -695,6 +708,13 @@ describe("a failed read is never shown as empty or zero", () => {
     const page = await html("/audit");
     expect(page.includes("The command audit could not be read.")).toBe(true);
     expect(page.includes("No command invocations match.")).toBe(false);
+  });
+
+  it("shows 'unavailable' in the audit header, never '0 rows', when the count fails", async () => {
+    auditCount.mockReturnValue(Promise.reject(new Error("db down")));
+    const page = await html("/audit");
+    expect(page.includes(">unavailable</span>")).toBe(true);
+    expect(page.includes("0 rows")).toBe(false);
   });
 
   it("says the command audit is unavailable when its rows cannot be read", async () => {
@@ -809,7 +829,7 @@ describe("case page and Review", () => {
   it("answers 404 for an unknown case and while cases are off", async () => {
     cases.findCase.mockResolvedValue(null);
     expect((await harness.get("/cases/nope")).status).toBe(404);
-    cases.isEnabled.mockResolvedValue(false);
+    cases.isEnabledStrict.mockResolvedValue(false);
     expect((await harness.get("/cases/case-1")).status).toBe(404);
     expect(cases.findCase).toHaveBeenCalledTimes(1);
   });
@@ -904,7 +924,7 @@ describe("case page and Review", () => {
     });
 
     it("cases switched off", async () => {
-      cases.isEnabled.mockResolvedValue(false);
+      cases.isEnabledStrict.mockResolvedValue(false);
       await harness.post("/cases/case-1/readmit", { note: secret });
       const entry = only();
       expect(entry).toMatchObject({
@@ -945,7 +965,7 @@ describe("case page and Review", () => {
   });
 
   it("refuses to decide while cases are off", async () => {
-    cases.isEnabled.mockResolvedValue(false);
+    cases.isEnabledStrict.mockResolvedValue(false);
     const res = await harness.post("/cases/case-1/uphold", {});
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.msg).toBe("Moderation cases are turned off.");

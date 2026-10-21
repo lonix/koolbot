@@ -199,7 +199,9 @@ export function createMeModerationRouter(client: Client): Router {
       const reason = await moderatorReason(client, session);
       const kind = parseModLogKind(req.query.kind);
       const requestedPage = pageOf(req);
-      const enabled = await ConfigService.getInstance().getBoolean(
+      // Strict reads: a failed lookup goes to the error handler instead of
+      // reading as "moderation is off" or "cases are off".
+      const enabled = await ConfigService.getInstance().getBooleanStrict(
         "moderation.enabled",
         false,
       );
@@ -235,8 +237,7 @@ export function createMeModerationRouter(client: Client): Router {
       const cases = ModerationCaseService.getInstance(client);
       const actions = MOD_LOG_KIND_ACTIONS[kind];
       const since = new Date(Date.now() - 7 * MS_PER_DAY);
-      // A failed read of the switch is an error, not "cases are off".
-      const casesEnabled = await cases.isEnabled();
+      const casesEnabled = await cases.isEnabledStrict();
 
       // A failed read is "unavailable", never an empty list or a zero count:
       // the empty state is for a read that succeeded and found nothing.
@@ -366,7 +367,7 @@ export function createMeModerationRouter(client: Client): Router {
       const { guildId } = session;
       const reason = await moderatorReason(client, session);
       const cases = ModerationCaseService.getInstance(client);
-      const casesEnabled = await cases.isEnabled();
+      const casesEnabled = await cases.isEnabledStrict();
       // A failed lookup must not read as "no such case": it is left to throw.
       const found = casesEnabled
         ? await cases.findCase(guildId, String(req.params.id))
@@ -459,7 +460,7 @@ export function createMeModerationRouter(client: Client): Router {
       );
       const channelData = await fetchChannelData(client, guildId);
       const [enabled, audit] = await Promise.all([
-        config.getBoolean("core.command_audit.enabled", true),
+        config.getBooleanStrict("core.command_audit.enabled", true),
         loadCommandAuditPage({
           client,
           guildId,

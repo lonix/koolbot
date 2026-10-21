@@ -156,6 +156,19 @@ export class ModerationCaseService {
     return moderation && cases;
   }
 
+  /**
+   * `isEnabled` that rejects when the setting cannot be read, instead of
+   * reading as "off". For pages that say "cases are off" or "no such case":
+   * a database failure must reach the error handler, not look like that.
+   */
+  public async isEnabledStrict(): Promise<boolean> {
+    const [moderation, cases] = await Promise.all([
+      this.configService.getBooleanStrict("moderation.enabled", false),
+      this.configService.getBooleanStrict("moderation.cases.enabled", false),
+    ]);
+    return moderation && cases;
+  }
+
   /** The pre-filled review window when staff open a case. */
   public async getDefaultReviewDays(): Promise<number> {
     const days = await this.configService
