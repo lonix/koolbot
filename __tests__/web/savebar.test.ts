@@ -145,6 +145,16 @@ describe("the save bar markup (no JavaScript)", () => {
     }
   });
 
+  it("marks the Settings page's <main> as has-savebar", () => {
+    const doc = new DOMParser().parseFromString(
+      pageHtml([{ category: "x", rows: ROWS }]),
+      "text/html",
+    );
+    expect(doc.querySelector("main")?.classList.contains("has-savebar")).toBe(
+      true,
+    );
+  });
+
   it("keeps Save a plain submit button the AJAX save script still finds", () => {
     mount(cardHtml());
     const save = saveForm().querySelector(

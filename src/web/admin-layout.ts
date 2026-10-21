@@ -304,11 +304,15 @@ const STYLE = [
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
-  // `clip`, not `auto`: a scroll container is where `position:sticky` resolves, so
-  // `auto` here pinned the settings save bar to `main` (which never scrolls) instead
-  // of the viewport. `clip` still stops a wide child forcing a sideways page scroll
-  // and creates no scroll container; wide tables scroll inside their own `.card`.
-  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:clip}",
+  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+  // A scroll container is where `position:sticky` resolves, so on a page with a settings
+  // save bar `main` must not be one, or the bar sticks inside `main`/the card instead of the
+  // viewport. `renderAdminPage` adds `has-savebar` to `main` only for those pages; every
+  // other page keeps the scrolling `main` above. `clip` still stops a wide child forcing a
+  // sideways page scroll without creating a scroll container.
+  "main.has-savebar{overflow-x:clip}",
+  // A long unbroken value (a role name to retype) scrolls in its own block.
+  "main pre{overflow-x:auto}",
   // The skip-link target itself shouldn't draw a ring around the whole column.
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
@@ -876,7 +880,9 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // Named so it stays distinguishable from any other nav landmark a page
     // body introduces (axe `landmark-unique`, #856).
     `<nav class="side" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
-    `<main id="main" tabindex="-1">${opts.body}</main></div>`,
+    // The body is built on the server and user text in it is HTML-escaped (quotes included), so
+    // this literal can only come from `renderSaveBar`; a false positive would only clip `main`.
+    `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
     `${scriptTag(CRON_PICKER_SCRIPT)}`,

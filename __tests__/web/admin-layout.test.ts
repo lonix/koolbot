@@ -265,7 +265,7 @@ describe("renderAdminPage", () => {
     expect(html).toContain("nav.side{width:auto;border-right:0;");
     // Wide tables scroll inside their container, not the page.
     expect(html).toContain(
-      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:clip}",
+      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
     );
     expect(html).toContain("margin:0 0 1rem;overflow-x:auto}");
   });
@@ -279,14 +279,41 @@ describe("renderAdminPage", () => {
     };
     // `overflow-x:auto|scroll|hidden` on an ancestor makes it the sticky
     // container, so the bar would stick inside the card instead of the viewport.
-    expect(rule("main")).toContain("overflow-x:clip");
-    expect(rule("main")).not.toMatch(/overflow(-x|-y)?:(auto|scroll|hidden)/);
+    // Without a save bar `main` keeps scrolling; with one it only clips.
+    expect(rule("main")).toContain("overflow-x:auto");
+    expect(rule("main.has-savebar")).toContain("overflow-x:clip");
+    expect(rule("main.has-savebar")).not.toMatch(
+      /overflow(-x|-y)?:(auto|scroll|hidden)/,
+    );
+    // A long unbroken value scrolls in its own block.
+    expect(rule("main pre")).toContain("overflow-x:auto");
     expect(rule(".card.card--savebar")).toContain("overflow-x:clip");
     expect(rule(".card.card--savebar")).not.toMatch(
       /overflow(-x|-y)?:(auto|scroll|hidden)/,
     );
     // The rows scroll sideways instead, so wide pickers stay reachable.
     expect(rule(".kb-settings")).toContain("overflow-x:auto");
+  });
+
+  it("marks <main> as has-savebar exactly when the body renders a save bar", () => {
+    const page = (body: string): string =>
+      renderAdminPage({
+        title: "T",
+        active: "/admin/settings",
+        body,
+        csrfToken: "c",
+        remainingMs: 1,
+      });
+    const mainTag = (html: string): string =>
+      html.match(/<main[^>]*>/)?.[0] ?? "";
+    expect(
+      mainTag(page('<form><div class="kb-savebar"></div></form>')),
+    ).toContain('class="has-savebar"');
+    expect(mainTag(page("<p>no bar</p>"))).not.toContain("has-savebar");
+    // Escaped user text cannot fake the marker.
+    expect(
+      mainTag(page("&quot;kb-savebar&quot; class=&quot;kb-savebar&quot;")),
+    ).not.toContain("has-savebar");
   });
 
   it("uses colours that clear the WCAG contrast floors (#855)", () => {
