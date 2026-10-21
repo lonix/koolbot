@@ -137,6 +137,11 @@ describe("the save bar markup (no JavaScript)", () => {
       expect(b.closest(".card")?.classList.contains("card--savebar")).toBe(
         true,
       );
+      // The scrolling rows container is the bar's sibling, never its ancestor.
+      expect(b.closest(".kb-settings")).toBeNull();
+      expect(
+        b.parentElement?.querySelector(":scope > .kb-settings"),
+      ).not.toBeNull();
     }
   });
 

@@ -318,6 +318,10 @@ const STYLE = [
   // A card holding a sticky save bar (settings forms) must not be a scroll container either,
   // or the bar sticks inside the card and sits at the end of a long form.
   ".card.card--savebar{overflow-x:clip}",
+  // The rows scroll sideways instead: `.kb-settings` is a sibling of the save bar, not an
+  // ancestor, so scrolling here leaves the bar's sticky container alone. Wide pickers and
+  // their reset buttons stay reachable on narrow screens.
+  ".kb-settings{overflow-x:auto}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}",

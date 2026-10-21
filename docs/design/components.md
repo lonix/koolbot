@@ -429,6 +429,6 @@ A bar that sticks to the bottom of a form once something has changed, with a cou
 
 - It is `position: sticky`, which resolves against the nearest scrolling ancestor, so no ancestor of the bar may be a scroll container
   (`overflow: auto`/`scroll`/`hidden`). `main` and the form's card (`card--savebar`) use `overflow-x: clip` for that reason; a wide table
-  scrolls inside its own wrapper, not in an ancestor of the bar.
+  scrolls inside its own wrapper, not in an ancestor of the bar. The rows' `.kb-settings` container is the bar's sibling and may scroll sideways.
 - It replaces the *Save settings* buttons scattered through long forms: one save per form.
 - Without JavaScript, render it visible with "Save your changes" as the text.

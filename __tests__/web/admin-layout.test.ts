@@ -282,6 +282,11 @@ describe("renderAdminPage", () => {
     expect(rule("main")).toContain("overflow-x:clip");
     expect(rule("main")).not.toMatch(/overflow(-x|-y)?:(auto|scroll|hidden)/);
     expect(rule(".card.card--savebar")).toContain("overflow-x:clip");
+    expect(rule(".card.card--savebar")).not.toMatch(
+      /overflow(-x|-y)?:(auto|scroll|hidden)/,
+    );
+    // The rows scroll sideways instead, so wide pickers stay reachable.
+    expect(rule(".kb-settings")).toContain("overflow-x:auto");
   });
 
   it("uses colours that clear the WCAG contrast floors (#855)", () => {
