@@ -267,6 +267,56 @@ describe("validateSelection", () => {
     ).toBeNull();
   });
 
+  it.each([
+    [
+      "promoting a staff role to Admins",
+      ["staff"],
+      { admin: ["mod"] },
+      "Admin",
+    ],
+    ["promoting a host role to Admins", ["host"], { admin: ["mod"] }, "Admin"],
+    [
+      "adding host to a staff role",
+      ["staff"],
+      { staff: ["mod"], host: ["mod"] },
+      "Event host",
+    ],
+    [
+      "moving a host role to Moderators",
+      ["host"],
+      { staff: ["mod"] },
+      "Moderator",
+    ],
+  ] as const)(
+    "refuses %s while a feature hands the role out",
+    (_n, caps, pick, label) => {
+      const featureUses = new Map([["mod", ["Rules"]]]);
+      const groups = [group({ roleId: "mod", capabilities: [...caps] })];
+      expect(
+        validateSelection(ctx(groups, { featureUses }), { ...none, ...pick }),
+      ).toMatch(new RegExp(`can't gain.*${label}`));
+    },
+  );
+
+  it("allows a feature role to keep what it holds, including what admin implies", () => {
+    const featureUses = new Map([["mod", ["Rules"]]]);
+    const staff = [group({ roleId: "mod", capabilities: ["staff"] })];
+    expect(
+      validateSelection(ctx(staff, { featureUses }), {
+        ...none,
+        staff: ["mod"],
+      }),
+    ).toBeNull();
+    // an admin role already holds Moderator and Event host through admin
+    const admin = [group({ roleId: "mod", capabilities: ["admin", "staff"] })];
+    expect(
+      validateSelection(ctx(admin, { featureUses }), {
+        ...none,
+        admin: ["mod"],
+      }),
+    ).toBeNull();
+  });
+
   it("accepts a clean pick", () => {
     expect(validateSelection(ctx([]), { ...none, staff: ["mod"] })).toBeNull();
   });

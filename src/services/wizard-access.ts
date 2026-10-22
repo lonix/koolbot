@@ -64,6 +64,16 @@ export function scopesOf(caps: readonly RoleGroupCapability[]): AccessScope[] {
   return out;
 }
 
+/** What holding these scopes lets someone do: admin implies Moderator and Event host. */
+export function effectiveScopes(scopes: readonly AccessScope[]): AccessScope[] {
+  const out = new Set<AccessScope>(scopes);
+  if (out.has("admin")) {
+    out.add("staff");
+    out.add("host");
+  }
+  return ACCESS_SCOPES.filter((s) => out.has(s));
+}
+
 /**
  * Capabilities a set of scopes writes. The admin preset carries `staff` as
  * well (`PERMISSION_PRESETS`), so an admin group reads as staff everywhere.
@@ -280,18 +290,23 @@ export function validateSelection(
     }
   }
   // A role a feature hands out (rules, birthday, leaderboard, raid quarantine,
-  // reaction roles) can't gain a scope: everyone the feature qualifies would
-  // receive it. Roles already mapped are left as they are.
-  const mapped = new Set(
-    ACCESS_SCOPES.flatMap((scope) => currentMapping(ctx.groups)[scope]),
-  );
-  for (const scope of ACCESS_SCOPES) {
-    for (const id of sel[scope]) {
-      const uses = ctx.featureUses.get(id);
-      if (uses && uses.length > 0 && !mapped.has(id)) {
-        const name = roles.get(id)?.name ?? id;
-        return `@${name} is handed out by ${uses.join(", ")}, so it can't be mapped to Admins, Moderators or Event hosts: everyone that feature qualifies would get that access. Pick a different role, or change that feature first.`;
-      }
+  // reaction roles) can't gain ANY access it doesn't already hold: everyone
+  // the feature qualifies would receive it. What it holds now is left alone;
+  // an extra scope (host to staff, anything to admin, which implies the rest)
+  // is refused. This covers create, update and moves between scopes.
+  const now = currentMapping(ctx.groups);
+  for (const [id, uses] of ctx.featureUses) {
+    if (uses.length === 0) continue;
+    const held = effectiveScopes(
+      ACCESS_SCOPES.filter((s) => now[s].includes(id)),
+    );
+    const wanted = effectiveScopes(
+      ACCESS_SCOPES.filter((s) => sel[s].includes(id)),
+    );
+    const added = wanted.filter((s) => !held.includes(s));
+    if (added.length > 0) {
+      const name = roles.get(id)?.name ?? id;
+      return `@${name} is handed out by ${uses.join(", ")}, so it can't gain ${added.map(scopeLabel).join(" or ")} access: everyone that feature qualifies would get it. Pick a different role, or change that feature first.`;
     }
   }
   // The wizard never removes `admin` from a group. Taking it away goes through

@@ -869,6 +869,38 @@ describe("a role a feature hands out to members", () => {
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
   });
 
+  it("can't be promoted from Moderators to Admins at Apply, and nothing is written", async () => {
+    stored = [
+      group({ id: "g-1", name: "Mods", roleId: MOD, capabilities: ["staff"] }),
+    ];
+    featureUsesSpy.mockResolvedValue(new Map([[MOD, ["Rules"]]]));
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [MOD], staff: [], host: [] }),
+    );
+    const res = await postApply();
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "can't gain Admin",
+    );
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("can't gain Event host on top of Moderator when a feature hands it out", async () => {
+    stored = [
+      group({ id: "g-1", name: "Mods", roleId: MOD, capabilities: ["staff"] }),
+    ];
+    featureUsesSpy.mockResolvedValue(new Map([[MOD, ["Rules"]]]));
+    mockGetSession.mockReturnValue(wizardState(undefined));
+    const res = await harness.post("/wizard/access", {
+      roles_staff: MOD,
+      roles_host: MOD,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "gain Event host",
+    );
+    expect(mockSetAccess).not.toHaveBeenCalled();
+  });
+
   it("leaves a role that is already mapped alone", async () => {
     stored = [
       group({ id: "g-1", name: "Mods", roleId: MOD, capabilities: ["staff"] }),
