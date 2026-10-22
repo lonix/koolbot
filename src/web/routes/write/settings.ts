@@ -869,6 +869,15 @@ export function createSettingsRouter(client: Client): Router {
           rows.push({ key, status: "rejected", reason: "unknown key" });
           continue;
         }
+        // An export made before #1304 still carries the bot's own message ids.
+        if (isManagedSetting(key)) {
+          rows.push({
+            key,
+            status: "rejected",
+            reason: "managed by KoolBot, not imported",
+          });
+          continue;
+        }
         // Surface type-mismatch in the preview so a silent drop at apply
         // isn't the first sign the user sees.
         const coerced = coerceConfigValue(key, value);
@@ -956,6 +965,10 @@ export function createSettingsRouter(client: Client): Router {
         }
         if (!(key in defaultConfig)) {
           failed.push({ key, reason: "unknown" });
+          continue;
+        }
+        if (isManagedSetting(key)) {
+          failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
         const coerced = coerceConfigValue(key, value);

@@ -1889,7 +1889,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "rules.message_id": {
     label: "Rules message ID",
     description:
-      "Managed by KoolBot: the ID of the posted rules message. Shown here for reference; post or re-post the message from the Rules page.",
+      "Managed by KoolBot: the ID of the posted rules message. Shown here for reference. The Rules page's button edits the message, or posts a new one when it was deleted or the channel changed.",
     category: "rules",
     type: "string",
     managed: { channelKey: "rules.channel_id" },

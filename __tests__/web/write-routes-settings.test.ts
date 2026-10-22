@@ -1939,6 +1939,33 @@ describe("POST /settings/import (preview)", () => {
     // Previewing must not write anything.
     expect(mockConfigSet).not.toHaveBeenCalled();
   });
+
+  it("skips the bot's own message ids from an older export, saying why (#1304)", async () => {
+    const res = await harness.post("/settings/import", {
+      yaml: [
+        "quotes.max_length: 500",
+        "quotes.header_message_id: '123456789012345678'",
+      ].join("\n"),
+    });
+    const html = await res.text();
+    expect(html).toContain("managed by KoolBot, not imported");
+    expect(html).not.toContain("type mismatch (managed");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("applies the rest of an import and leaves a managed id alone (#1304)", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: [
+        "quotes.max_length: 500",
+        "quotes.header_message_id: '123456789012345678'",
+      ].join("\n"),
+    });
+    const written = mockConfigSet.mock.calls.map(
+      (c) => (c as unknown as [string])[0],
+    );
+    expect(written).toContain("quotes.max_length");
+    expect(written).not.toContain("quotes.header_message_id");
+  });
 });
 
 describe("POST /settings/import/apply with role groups (#1023)", () => {
