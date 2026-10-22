@@ -94,6 +94,47 @@ export async function resolveManagedCategory(
 }
 
 /**
+ * The configured lobby channel ID (`voicechannels.lobby.channel_id`), but only
+ * when it still resolves to a voice channel inside the managed category, like
+ * every name-based lobby lookup. Null means "identify the lobby by name".
+ */
+export async function resolveConfiguredLobbyId(
+  guild: Guild | null | undefined,
+): Promise<string | null> {
+  const id = (
+    await configService.getString("voicechannels.lobby.channel_id", "")
+  ).trim();
+  if (!id || !guild?.channels?.cache) return null;
+  const channel = guild.channels.cache.get(id);
+  if (!channel || channel.type !== ChannelType.GuildVoice) return null;
+  const category = await resolveManagedCategory(guild);
+  if (!category || channel.parentId !== category.id) return null;
+  return id;
+}
+
+/**
+ * Is this the lobby members join to spawn a channel? By ID when the ID is
+ * configured and resolves, otherwise by the (legacy-aware) lobby name. Needs
+ * no manager instance and no registry row: a reused or name-matched lobby is
+ * never recorded as managed. `isTrackedRoom` lets the manager rule out rooms
+ * it created for members, which can be renamed to the lobby's name (#1148).
+ */
+export async function isLobbyByIdentity(
+  channel: { id: string; name: string; guild?: Guild },
+  isTrackedRoom?: (channelId: string) => boolean,
+): Promise<boolean> {
+  const lobbyId = await resolveConfiguredLobbyId(channel.guild);
+  if (lobbyId) return channel.id === lobbyId;
+  if (isTrackedRoom?.(channel.id)) return false;
+  return (
+    channel.name ===
+    (await resolveLobbyChannelName((key, defaultValue) =>
+      configService.getString(key, defaultValue),
+    ))
+  );
+}
+
+/**
  * Remove one matching pair of surrounding quotes (e.g. a value supplied as
  * `LOBBY_CHANNEL_NAME="Lobby"`). Quotes inside the name are never touched.
  */
@@ -478,15 +519,7 @@ export class VoiceChannelManager {
   private async resolveLobbyChannelId(
     guild: Guild | null | undefined,
   ): Promise<string | null> {
-    const id = (
-      await configService.getString("voicechannels.lobby.channel_id", "")
-    ).trim();
-    if (!id || !guild?.channels?.cache) return null;
-    const channel = guild.channels.cache.get(id);
-    if (!channel || channel.type !== ChannelType.GuildVoice) return null;
-    const category = await resolveManagedCategory(guild);
-    if (!category || channel.parentId !== category.id) return null;
-    return id;
+    return resolveConfiguredLobbyId(guild);
   }
 
   /** The lobby channel when it is configured by ID and still exists. */
@@ -506,12 +539,7 @@ export class VoiceChannelManager {
     name: string;
     guild?: Guild;
   }): Promise<boolean> {
-    const lobbyId = await this.resolveLobbyChannelId(channel.guild);
-    if (lobbyId) return channel.id === lobbyId;
-    // Name fallback (no usable lobby ID configured): a room KoolBot created
-    // for a member is never the lobby, whatever it has been renamed to (#1148).
-    if (this.isTrackedRoom(channel.id)) return false;
-    return channel.name === (await this.getLobbyChannelName());
+    return isLobbyByIdentity(channel, (id) => this.isTrackedRoom(id));
   }
 
   /**

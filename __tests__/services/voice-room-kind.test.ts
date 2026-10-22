@@ -22,6 +22,14 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
 const { classifyVoiceRoom } =
   await import("../../src/services/voice-room-kind.js");
 
+const room = {
+  guildId: "g1",
+  channelId: "c1",
+  channelName: "Somewhere",
+};
+const notLobby = (): Promise<boolean> => Promise.resolve(false);
+const isLobby = (): Promise<boolean> => Promise.resolve(true);
+
 function managedReturns(row: unknown): void {
   mockManagedFindOne.mockReturnValue({
     lean: () => Promise.resolve(row),
@@ -36,20 +44,31 @@ describe("classifyVoiceRoom (#1420)", () => {
 
   it("calls a managed channel or waiting room dynamic", async () => {
     managedReturns({ kind: "channel" });
-    expect(await classifyVoiceRoom("g1", "c1")).toBe("dynamic");
+    expect(await classifyVoiceRoom(room, notLobby)).toBe("dynamic");
     managedReturns({ kind: "waiting_room" });
-    expect(await classifyVoiceRoom("g1", "c1")).toBe("dynamic");
+    expect(await classifyVoiceRoom(room, notLobby)).toBe("dynamic");
   });
 
-  it("calls the join-to-create lobby a lobby", async () => {
+  it("calls a recorded lobby a lobby", async () => {
     managedReturns({ kind: "lobby" });
-    expect(await classifyVoiceRoom("g1", "c1")).toBe("lobby");
+    expect(await classifyVoiceRoom(room, notLobby)).toBe("lobby");
+  });
+
+  it("calls the lobby a lobby even with no registry row (reused or name-matched)", async () => {
+    managedReturns(null);
+    expect(await classifyVoiceRoom(room, isLobby)).toBe("lobby");
+    expect(mockEventExists).not.toHaveBeenCalled();
+  });
+
+  it("does not let the lobby identity override a recorded member room", async () => {
+    managedReturns({ kind: "channel" });
+    expect(await classifyVoiceRoom(room, isLobby)).toBe("dynamic");
   });
 
   it("calls an event main or group channel an event channel", async () => {
     managedReturns(null);
     mockEventExists.mockResolvedValue({ _id: "e1" } as never);
-    expect(await classifyVoiceRoom("g1", "c1")).toBe("event");
+    expect(await classifyVoiceRoom(room, notLobby)).toBe("event");
     expect(mockEventExists).toHaveBeenCalledWith({
       guildId: "g1",
       $or: [{ "groups.channelId": "c1" }, { channelId: "c1" }],
@@ -59,14 +78,16 @@ describe("classifyVoiceRoom (#1420)", () => {
   it("calls a channel the bot did not create permanent", async () => {
     managedReturns(null);
     mockEventExists.mockResolvedValue(null as never);
-    expect(await classifyVoiceRoom("g1", "c1")).toBe("permanent");
+    expect(await classifyVoiceRoom(room, notLobby)).toBe("permanent");
   });
 
   it("returns undefined, not a guess, without a guild or when the lookup fails", async () => {
-    expect(await classifyVoiceRoom(undefined, "c1")).toBeUndefined();
+    expect(
+      await classifyVoiceRoom({ ...room, guildId: undefined }, notLobby),
+    ).toBeUndefined();
     mockManagedFindOne.mockImplementation(() => {
       throw new Error("db down");
     });
-    expect(await classifyVoiceRoom("g1", "c1")).toBeUndefined();
+    expect(await classifyVoiceRoom(room, notLobby)).toBeUndefined();
   });
 });

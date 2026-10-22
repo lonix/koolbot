@@ -779,22 +779,16 @@ export class VoiceChannelTracker {
         return;
       }
 
-      // Read while the room still exists; its records go with it (#1420).
-      const roomKind = await this.classifyRoom(guildId, channelId);
-      // That await yields, so repeat the purge-generation check just before
-      // the session is installed (#916).
-      if (this.purgeGeneration(member.id) !== generation) {
-        return;
-      }
-
-      this.activeSessions.set(member.id, {
+      // Installed before the room-kind lookup below, so the session starts at
+      // the join and a disconnect or switch during the lookup finds it (#1420).
+      const session: VoiceSession = {
         startTime: new Date(),
         channelId,
         channelName,
         publicAtStart: isPublic,
-        roomKind,
         guildId,
-      });
+      };
+      this.activeSessions.set(member.id, session);
 
       // Initialize encountered users Set with current channel members
       const encounteredSet = new Set<string>();
@@ -840,6 +834,21 @@ export class VoiceChannelTracker {
         logger.info(
           `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}, initial users: ${encounteredSet.size}`,
         );
+      }
+
+      // Read while the room still exists; its records go with it (#1420). The
+      // kind goes onto this very session object, and only while it is still
+      // the member's active session: a disconnect or a switch during the
+      // lookup must neither get a session back nor inherit this room's kind.
+      // A session that ended before the lookup finished keeps no kind.
+      const roomKind = await this.classifyRoom({
+        guildId,
+        guild,
+        channelId,
+        channelName,
+      });
+      if (roomKind && this.activeSessions.get(member.id) === session) {
+        session.roomKind = roomKind;
       }
     } catch (error: unknown) {
       logger.error("Error starting voice tracking:", error);
