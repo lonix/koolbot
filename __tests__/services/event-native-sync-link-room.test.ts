@@ -543,6 +543,54 @@ describe("activating the linked voice event (#1421, Copilot round 3)", () => {
     expect(activations(b.scheduledEvents.edit)).toHaveLength(0);
   });
 
+  it("transient room lookup failure + native event moved to ANOTHER channel: not activated, not converted", async () => {
+    const { guild, rest, scheduledEvents, channels } = makeGuild([
+      startedScheduled({ channelId: "elsewhere" }),
+    ]);
+    channels.fetch.mockRejectedValue(new Error("socket hang up"));
+    await makeSync().syncEvent(startedEvent(), guild);
+    expect(activations(scheduledEvents.edit)).toHaveLength(0);
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("transient room lookup failure + native event in the stored room: still activated", async () => {
+    const { guild, scheduledEvents, channels } = makeGuild([
+      startedScheduled(),
+    ]);
+    channels.fetch.mockRejectedValue(new Error("socket hang up"));
+    await makeSync().syncEvent(startedEvent(), guild);
+    expect(activations(scheduledEvents.edit)).toHaveLength(1);
+  });
+
+  describe("link switch off", () => {
+    beforeEach(() => {
+      config.getBoolean.mockImplementation(
+        async (k: string) => k !== "events.native.link_room",
+      );
+    });
+
+    it("an existing link that is Scheduled past its start is still activated", async () => {
+      const { guild, scheduledEvents } = makeGuild([startedScheduled()]);
+      await makeSync().syncEvent(startedEvent(), guild);
+      expect(activations(scheduledEvents.edit)).toHaveLength(1);
+    });
+
+    it("but not when the native channel is not the stored room", async () => {
+      const { guild, scheduledEvents } = makeGuild([
+        startedScheduled({ channelId: "elsewhere" }),
+      ]);
+      await makeSync().syncEvent(startedEvent(), guild);
+      expect(activations(scheduledEvents.edit)).toHaveLength(0);
+    });
+
+    it("and not before the start", async () => {
+      const { guild, scheduledEvents } = makeGuild([voiceNative(ROOM)]);
+      await makeSync().syncEvent(makeEvent({ channelId: ROOM }), guild);
+      expect(activations(scheduledEvents.edit)).toHaveLength(0);
+    });
+  });
+
   it("leaves an already Active native event alone", async () => {
     const { guild, scheduledEvents } = makeGuild([
       startedScheduled({ status: GuildScheduledEventStatus.Active }),

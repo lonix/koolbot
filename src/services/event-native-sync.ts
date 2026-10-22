@@ -942,9 +942,15 @@ export class NativeEventSync {
    * a voice scheduled event stays Scheduled until it is set Active, unlike an
    * external one that starts at its start time, so members would miss the
    * native start notification. Only for a Scheduled native event that is a
-   * voice event in the room KoolBot wants, and never before the start time.
-   * Best-effort: never throws, warned once per event, retried each scan until
-   * the native event is Active (or no longer wanted linked).
+   * voice event in the row's STORED main room (`event.channelId`), and never
+   * before the start time. Deliberately not tied to the wanted room or to
+   * `events.native.link_room`: the wanted room is replaced by the native
+   * event's own channel when the room lookup fails transiently (that must not
+   * authorise starting an event an admin moved elsewhere), and the switch only
+   * controls creating NEW links, so an existing link that the switch left
+   * behind past its start (a started event is never converted back) must still
+   * be started or it would never start. Best-effort: never throws, warned once
+   * per event, retried each scan until the native event is Active.
    */
   private async activateLinked(
     event: IEvent,
@@ -954,9 +960,9 @@ export class NativeEventSync {
   ): Promise<void> {
     if (native.status !== GuildScheduledEventStatus.Scheduled) return;
     if (
-      !want.voiceChannelId ||
+      !event.channelId ||
       native.entityType !== GuildScheduledEventEntityType.Voice ||
-      native.channelId !== want.voiceChannelId
+      native.channelId !== event.channelId
     ) {
       return;
     }
