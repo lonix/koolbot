@@ -51,6 +51,7 @@ import {
   EDIT_MESSAGES,
   editModeOf,
   eventEditVersion,
+  parseRenderedMode,
   type EditMode,
 } from "../../services/event-edit.js";
 import { renderEventEditBody } from "../event-edit-view.js";
@@ -1635,7 +1636,7 @@ function registerEditRoutes(router: Router, client: Client): void {
                 date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
                 time: formatInTimeZone(event.startTime, zone, "HH:mm"),
                 when: formatEventWhen(event),
-                version: eventEditVersion(event),
+                version: eventEditVersion(event, mode.mode),
                 mode: mode.mode,
                 startLocked,
               },
@@ -1687,16 +1688,41 @@ function registerEditRoutes(router: Router, client: Client): void {
         await fail(mode.message, hostPanelPath(eventId));
         return;
       }
+      // Everything that would make a save partial is refused here, before any
+      // posted field is read or normalized: a save must either apply every
+      // field the form offered or change nothing and say why.
+      // Events off: the service would refuse too, but only after the form was
+      // validated, so a bad field would hide the reason.
+      if (!(await service().editsAllowed())) {
+        await fail(EDIT_MESSAGES.disabled, hostPanelPath(eventId));
+        return;
+      }
       const field = (name: string): string => bodyString(req, name).trim();
+      // The mode the form was rendered in. It is covered by the version token
+      // (a forged value no longer matches), so it can be trusted to say which
+      // fields the form offered. A form without one predates it: reload.
+      const rendered = parseRenderedMode(field("mode"));
+      if (rendered === null) {
+        await fail(EDIT_MESSAGES.conflict);
+        return;
+      }
+      // Rendered with the title (and start) editable, but the event is limited
+      // now (the start passed, or the channel was created, and the stored state
+      // may not have moved yet): refuse, or the title and start would be
+      // dropped while the description and duration saved and the host saw
+      // "saved".
+      if (rendered === "full" && mode.mode === "limited") {
+        await fail(EDIT_MESSAGES.started);
+        return;
+      }
       const zone = zoneOf(event);
       const shown = {
         date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
         time: formatInTimeZone(event.startTime, zone, "HH:mm"),
       };
-      // A started event keeps its title and start: whatever was posted for them
-      // is ignored, and the service refuses a change anyway.
-      const full = mode.mode === "full";
-      // Same for a start the running Discord event holds in place.
+      // A form that was limited when rendered never had the title or start
+      // fields: whatever was posted for them is forged and ignored.
+      const full = rendered === "full";
       // Whether the start may move NOW, and whether the form that was submitted
       // offered it. A form that offered it while the Discord event has since
       // started (or cannot be read) is stale: refuse it before anything is
@@ -1739,6 +1765,7 @@ function registerEditRoutes(router: Router, client: Client): void {
           eventId,
           guildId: session.guildId,
           expectedVersion: field("version"),
+          renderedMode: rendered,
           changes: {
             ...parsed.value,
             startTime: startUnchanged

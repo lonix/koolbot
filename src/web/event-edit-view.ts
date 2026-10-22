@@ -31,7 +31,10 @@ export interface EventEditView {
   time: string;
   /** Pre-formatted start line, for the started view. */
   when: string;
-  /** `eventEditVersion` of the row shown; the save is refused if it moved on. */
+  /**
+   * `eventEditVersion` of the row shown, with `mode`; the save is refused if it
+   * moved on.
+   */
   version: string;
   mode: "full" | "limited";
   /**
@@ -101,6 +104,7 @@ export function renderEventEditBody(opts: {
 <form method="POST" action="${escapeHtml(panel)}/edit" data-event-edit-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
   <input type="hidden" name="version" value="${escapeHtml(e.version)}">
+  <input type="hidden" name="mode" value="${full ? "full" : "limited"}">
   <input type="hidden" name="startEditable" value="${full && !e.startLocked ? "1" : "0"}">
   <section class="kb-panel" aria-labelledby="edit-event-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="edit-event-h">Event details</h2></header>

@@ -49,8 +49,13 @@ const {
   shouldSendReminder,
   computeEndTime,
 } = await import("../../src/services/event-service.js");
-const { editModeOf, eventEditVersion, diffEventEdit, hasEdit } =
-  await import("../../src/services/event-edit.js");
+const {
+  editModeOf,
+  eventEditVersion,
+  diffEventEdit,
+  hasEdit,
+  parseRenderedMode,
+} = await import("../../src/services/event-edit.js");
 
 const MIN = 60 * 1000;
 const NOW = new Date("2030-01-01T12:00:00Z");
@@ -113,8 +118,8 @@ describe("editModeOf", () => {
 
 describe("eventEditVersion and diffEventEdit", () => {
   it("moves with every editable field and with the state, not with anything else", () => {
-    const base = eventEditVersion(row());
-    expect(eventEditVersion(row({ reminderSent: false }))).toBe(base);
+    const base = eventEditVersion(row(), "full");
+    expect(eventEditVersion(row({ reminderSent: false }), "full")).toBe(base);
     for (const over of [
       { title: "x" },
       { description: "x" },
@@ -124,7 +129,21 @@ describe("eventEditVersion and diffEventEdit", () => {
       { state: "active" },
       { channelId: "c" },
     ]) {
-      expect(eventEditVersion(row(over))).not.toBe(base);
+      expect(eventEditVersion(row(over), "full")).not.toBe(base);
+    }
+  });
+
+  it("moves with the mode the form was rendered in", () => {
+    expect(eventEditVersion(row(), "full")).not.toBe(
+      eventEditVersion(row(), "limited"),
+    );
+  });
+
+  it("parses a posted mode, and nothing else", () => {
+    expect(parseRenderedMode("full")).toBe("full");
+    expect(parseRenderedMode("limited")).toBe("limited");
+    for (const bad of ["", "FULL", "refused", "full ", "1"]) {
+      expect(parseRenderedMode(bad)).toBeNull();
     }
   });
 
@@ -186,10 +205,14 @@ describe("EventService.editEvent", () => {
     EventService.reset();
   });
 
+  // The form of the stored row, rendered in the mode the row has at NOW.
+  const renderedModeOfStored = (): "full" | "limited" =>
+    editModeOf(stored, NOW).mode === "full" ? "full" : "limited";
   const input = (changes: Record<string, unknown>, over = {}) => ({
     eventId: "65a000000000000000000001",
     guildId: "guild-1",
-    expectedVersion: eventEditVersion(stored),
+    expectedVersion: eventEditVersion(stored, renderedModeOfStored()),
+    renderedMode: renderedModeOfStored(),
     now: NOW,
     changes: {
       title: stored.title,
@@ -243,6 +266,32 @@ describe("EventService.editEvent", () => {
     expect(
       (EventStatics.findOneAndUpdate.mock.calls[1][1] as { $set: object }).$set,
     ).toMatchObject({ reminderSent: false });
+  });
+
+  it("refuses a form whose token was made for the other mode, so a posted mode cannot be forged", async () => {
+    // A full form posted as limited would have its title silently dropped by
+    // the caller; a limited form posted as full would have it read.
+    const asLimited = await service.editEvent(
+      input(
+        { title: "New" },
+        {
+          renderedMode: "limited",
+          expectedVersion: eventEditVersion(stored, "full"),
+        },
+      ) as never,
+    );
+    expect(asLimited).toMatchObject({ ok: false, code: "conflict" });
+    const asFull = await service.editEvent(
+      input(
+        { description: "New" },
+        {
+          renderedMode: "full",
+          expectedVersion: eventEditVersion(stored, "limited"),
+        },
+      ) as never,
+    );
+    expect(asFull).toMatchObject({ ok: false, code: "conflict" });
+    expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a moved start or a new title on a started event, writing nothing", async () => {
