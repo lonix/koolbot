@@ -575,6 +575,61 @@ describe("member operations", () => {
   });
 });
 
+describe("ServerAdoptionService.startApply startup", () => {
+  it("settles `started` once the snapshot is saved, while the first Discord write is still pending", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const order: string[] = [];
+    const create = h.deps.store.create;
+    h.deps.store.create = async (rec) => {
+      order.push("snapshot");
+      return create(rec);
+    };
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const createRole = h.deps.gateway.createRole;
+    h.deps.gateway.createRole = async (input) => {
+      order.push("createRole");
+      await gate;
+      return createRole(input);
+    };
+    const job = h.service.startApply(p, opts);
+    await job.started; // resolves although createRole has not finished
+    expect(order[0]).toBe("snapshot");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(order).toEqual(["snapshot", "createRole"]);
+    expect(job.status).toBe("running");
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.service.getJob(job.id)?.status).toBe("done");
+  });
+
+  it("rejects `started` when the busy-server lock refuses, and writes nothing", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    h.deps.store.create = async () => {
+      throw new Error("Another apply or rollback is already running");
+    };
+    const job = h.service.startApply(p, opts);
+    expect(job.status).toBe("running"); // startApply itself did not throw
+    await expect(job.started).rejects.toThrow(/already running/);
+    expect(h.service.getJob(job.id)?.status).toBe("failed");
+    expect(h.calls.some((c) => c.startsWith("createRole"))).toBe(false);
+  });
+
+  it("does not reject `started` for a failure after the apply began", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    h.failOn.add("createRole:New");
+    const job = h.service.startApply(p, opts);
+    await expect(job.started).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.service.getJob(job.id)?.result?.status).toBe("partial");
+  });
+});
+
 describe("ServerAdoptionService.rollback", () => {
   it("restores roles, overwrites, config, deleted channels and member grants", async () => {
     const h = harness();

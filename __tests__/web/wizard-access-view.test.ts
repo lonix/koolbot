@@ -26,6 +26,75 @@ describe("renderWizardSteps", () => {
   });
 });
 
+describe("renderAccessReview, Event host role", () => {
+  it("lists the engine's operations and says what happens next", () => {
+    const html = renderAccessReview([], null, [], {
+      planId: "abc",
+      operations: ['Create role "Event host"'],
+      problems: [],
+    });
+    expect(html).toContain("<h2>Event host role</h2>");
+    expect(html).toContain("Create role &quot;Event host&quot;");
+    expect(html).toContain("background job");
+    expect(html).not.toContain("No role mapping changes.");
+  });
+
+  it("blocks with the reasons, in an alert, and shows no operations", () => {
+    const html = renderAccessReview([], null, [], {
+      planId: null,
+      operations: ['Create role "Event host"'],
+      problems: [
+        "The bot needs the Manage Roles permission for these changes.",
+      ],
+    });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Manage Roles");
+    expect(html).toContain("Not created.");
+    expect(html).not.toContain("<li>Create role");
+  });
+
+  it("escapes what the engine reports", () => {
+    const html = renderAccessReview([], null, [], {
+      planId: "abc",
+      operations: ["<img src=x onerror=alert(1)>"],
+      problems: [],
+    });
+    expect(html).not.toContain("<img");
+  });
+});
+
+describe("renderWizardConfirmPage, Event host role", () => {
+  const props = {
+    csrfToken: "tok",
+    remainingMs: 60_000,
+    pending: [] as Array<[string, unknown]>,
+    metadata: {},
+  };
+
+  it("posts the plan id back and enables Apply when only the role is created", () => {
+    const html = renderWizardConfirmPage({
+      ...props,
+      hostRole: {
+        planId: "0123456789abcdef01234567",
+        operations: ['Create role "Event host"'],
+        problems: [],
+      },
+    });
+    expect(html).toContain(
+      'name="hostPlanId" value="0123456789abcdef01234567"',
+    );
+    expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
+  });
+
+  it("disables Apply while the role has problems", () => {
+    const html = renderWizardConfirmPage({
+      ...props,
+      hostRole: { planId: "x", operations: [], problems: ["Not possible."] },
+    });
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+  });
+});
+
 describe("renderAccessReview", () => {
   it("escapes a role name", () => {
     const html = renderAccessReview(
@@ -73,17 +142,70 @@ describe("renderWizardAccessPage", () => {
     expect(html).toContain('name="_csrf" value="tok"');
   });
 
-  it("offers a pointer to Role groups while no Event host role exists", () => {
-    const none = renderWizardAccessPage({
-      ...base,
-      options: [{ id: "1", name: "Mods", managed: false, position: 1 }],
+  describe("Create @Event host", () => {
+    const options = [{ id: "1", name: "Mods", managed: false, position: 1 }];
+
+    it("offers a switch when no Event host role exists", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        hostCreate: { available: true },
+      });
+      expect(html).toContain("Create @Event host");
+      expect(html).toMatch(
+        /<input type="checkbox" role="switch" name="create_host" value="1" aria-describedby="access-host-create-help">/,
+      );
+      expect(html).toContain('id="access-host-create-help"');
     });
-    expect(none).toContain("no Event host role yet");
-    const has = renderWizardAccessPage({
-      ...base,
-      options: [{ id: "2", name: "Event host", managed: false, position: 1 }],
+
+    it("shows the switch on when it was chosen", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        hostCreate: { available: true },
+        createHost: true,
+      });
+      expect(html).toMatch(/name="create_host"[^>]*checked/);
     });
-    expect(has).not.toContain("no Event host role yet");
+
+    it("disables the switch and says why when it can't be created", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        hostCreate: {
+          available: false,
+          reason: "permission",
+          message:
+            "The bot needs the Manage Roles permission to create a role.",
+        },
+        createHost: true,
+      });
+      expect(html).toMatch(/name="create_host"[^>]*disabled/);
+      expect(html).not.toMatch(/name="create_host"[^>]*checked/);
+      expect(html).toContain("The bot needs the Manage Roles permission");
+    });
+
+    it("offers nothing when the role already exists", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        hostCreate: {
+          available: false,
+          reason: "exists",
+          message: "An Event host role already exists. Pick it above.",
+        },
+      });
+      expect(html).not.toContain("create_host");
+    });
+
+    it("offers nothing when the roles could not be read", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options: null,
+        hostCreate: { available: true },
+      });
+      expect(html).not.toContain("create_host");
+    });
   });
 
   it("does not promise what Discord's command permissions would block", () => {

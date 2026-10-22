@@ -51,6 +51,8 @@ import {
   EDIT_MESSAGES,
   editModeOf,
   eventEditVersion,
+  isSeriesRow,
+  parseEditScope,
   parseRenderedMode,
   type EditMode,
 } from "../../services/event-edit.js";
@@ -1639,6 +1641,15 @@ function registerEditRoutes(router: Router, client: Client): void {
                 version: eventEditVersion(event, mode.mode),
                 mode: mode.mode,
                 startLocked,
+                ...(isSeriesRow(event)
+                  ? {
+                      series: {
+                        cadence: isRecurring(event)
+                          ? recurrenceLabel(event.recurrence)
+                          : "regularly",
+                      },
+                    }
+                  : {}),
               },
               csrfToken,
             }),
@@ -1706,6 +1717,13 @@ function registerEditRoutes(router: Router, client: Client): void {
         await fail(EDIT_MESSAGES.conflict);
         return;
       }
+      // A recurring event's edit must say how far it reaches. A missing or
+      // unknown value is refused, never read as one of the two.
+      const scope = isSeriesRow(event) ? parseEditScope(field("scope")) : null;
+      if (isSeriesRow(event) && scope === null) {
+        await fail(EDIT_MESSAGES.scope);
+        return;
+      }
       // Rendered with the title (and start) editable, but the event is limited
       // now (the start passed, or the channel was created, and the stored state
       // may not have moved yet): refuse, or the title and start would be
@@ -1766,6 +1784,7 @@ function registerEditRoutes(router: Router, client: Client): void {
           guildId: session.guildId,
           expectedVersion: field("version"),
           renderedMode: rendered,
+          scope,
           changes: {
             ...parsed.value,
             startTime: startUnchanged
@@ -1801,7 +1820,11 @@ function registerEditRoutes(router: Router, client: Client): void {
         boundAuditEntry({
           action: "event.edit",
           targetId: eventId,
-          details: { before: result.diff.before, after: result.diff.after },
+          details: {
+            before: result.diff.before,
+            after: result.diff.after,
+            ...(result.scope ? { scope: result.scope } : {}),
+          },
           result: "success",
         }),
       );

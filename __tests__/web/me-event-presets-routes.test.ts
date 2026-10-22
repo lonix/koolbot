@@ -428,7 +428,7 @@ describe("the Captains lobby tick on the hosts' page (#1263)", () => {
       /<input type="checkbox" name="groups_captains_lobby" value="1" checked>/,
     );
     // Two group rows and the template the script clones; the lobby has no row.
-    expect(html.split("<fieldset data-group-row>").length - 1).toBe(3);
+    expect(html.split("<div data-group-row ").length - 1).toBe(3);
     expect(html).toContain('name="lobby_name" value="Leader lobby"');
   });
 
