@@ -261,8 +261,16 @@ function renderForm(props: ClaimsPageProps, csrf: string): string {
   const categories = sortChannels(
     scan.channels.filter((c) => c.kind === "category"),
   );
+  // A channel whose category is not in the scan is listed with the
+  // uncategorised ones, as the Server scan tree does, so every channel the scan
+  // offers *Claim* on has a row here.
+  const categoryIds = new Set(categories.map((c) => c.id));
   const loose = sortChannels(
-    (byParent.get(null) ?? []).filter((c) => c.kind !== "category"),
+    scan.channels.filter(
+      (c) =>
+        c.kind !== "category" &&
+        (c.parentId === null || !categoryIds.has(c.parentId)),
+    ),
   );
   const rows: string[] = [];
   for (const cat of categories) {
