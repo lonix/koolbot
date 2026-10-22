@@ -49,7 +49,7 @@ export const EVENT_WHEN_SCRIPT = scriptTag(
     "var picks=form.querySelectorAll('[data-when-pick]');" +
     "function val(){var w=form.elements['when'];return w?String(w.value||'pick'):'pick'}" +
     "function sync(){var pick=val()==='pick';" +
-    "Array.prototype.forEach.call(picks,function(p){p.hidden=!pick;" +
+    "Array.prototype.forEach.call(picks,function(p){p.hidden=!pick;p.style.display=pick?'':'none';" +
     "Array.prototype.forEach.call(p.querySelectorAll('input[name=date],input[name=time]'),function(i){i.required=pick})})}" +
     "form.addEventListener('change',function(e){if(e.target&&e.target.name==='when')sync()});" +
     "sync()})();",

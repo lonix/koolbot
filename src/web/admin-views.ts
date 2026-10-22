@@ -2981,7 +2981,7 @@ export const EVENT_GROUPS_SCRIPT =
   "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
   "errBox.hidden=true;" +
   "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
-  "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
+  "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit'||(el.type==='radio'&&!el.checked))return;" +
   "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
