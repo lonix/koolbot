@@ -74,7 +74,7 @@ describe("automaticGrantBlockReason (#1145)", () => {
     expect(
       automaticGrantBlockReason(
         { id: "1", ...role(PermissionFlagsBits.ManageMessages) },
-        ["2"],
+        [{ roleId: "2", groupName: "Admins" }],
       ),
     ).toBeNull();
   });
