@@ -935,7 +935,19 @@ The folded list opens on a switched-off feature's own page, and is otherwise rem
 open or closed per browser. The routes did not change with the names (Command permissions
 is still `/admin/permissions`, Presence `/admin/bot-status`, Environment `/admin/bootstrap`).
 
-The **Dashboard** has a **Version** card (#1029) that shows the running version
+The **Dashboard** (#1322) opens with four tiles, each linking to the page where you act:
+Version, Discord (connected, members, in voice now), Database (connected, a few counts) and
+Permissions (the number of missing bot permissions, warned when above zero). **Needs you**
+lists the problems from Bot permissions and the last Server scan, one row each with a button
+to the page that fixes it, and is left out when there is nothing. **This week in voice** is
+the last 7 days by weekday (only when voice tracking is on) and links to Voice analytics.
+**Features** lists every feature with On or Off and its config key, each linking to its own
+page: nothing is switched on the Dashboard. Every source is read on its own with a time
+limit, so one that fails or is slow says "unavailable" in its own card and never takes the
+page down or reads as zero. The Dashboard never starts a Server scan: it lists what a scan
+read in the last minute found, and the Server scan page is where you run one.
+
+The Dashboard's **Version** panel (#1029) shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
 available_ (with the kind: major, minor or patch), or _couldn't check_. It also
 links to the release notes and has a **Check now** button. When an update is

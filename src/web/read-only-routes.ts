@@ -70,7 +70,12 @@ import {
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
 import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
-import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
+import {
+  cachedScan,
+  peekNewestScan,
+  scanCacheKey,
+} from "./server-scan-cache.js";
+import { loadDashboardData } from "./dashboard-data.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -144,7 +149,10 @@ import {
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
-import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
+import {
+  getGuildVoiceHeatmap,
+  queryGuildVoiceHeatmap,
+} from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
@@ -957,62 +965,81 @@ export function createReadOnlyRouter(
     "/",
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
+      const guildId = common.guildId;
+      const adminUserId = req.webSession?.discordUserId;
 
-      let guildName: string | null = null;
-      let memberCount: number | null = null;
-      let voiceUsers: number | null = null;
-      try {
-        const guild = await client.guilds.fetch(common.guildId);
-        guildName = guild.name;
-        memberCount = guild.memberCount;
-        voiceUsers = guild.voiceStates.cache.filter(
-          (s) => s.channelId !== null,
-        ).size;
-      } catch (err) {
-        logger.debug("dashboard guild fetch failed", err);
-      }
-
-      const featureKeys: Array<{ key: string; label: string }> = [
-        { key: "voicechannels.enabled", label: "Voice Channels" },
-        { key: "voicetracking.enabled", label: "Voice Tracking" },
-        { key: "quotes.enabled", label: "Quotes" },
-        { key: "achievements.enabled", label: "Achievements" },
-        { key: "announcements.enabled", label: "Announcements" },
-        { key: "polls.enabled", label: "Polls" },
-        { key: "reactionroles.enabled", label: "Reaction Roles" },
-        { key: "notices.enabled", label: "Notices" },
-      ];
-      const features = await Promise.all(
-        featureKeys.map(async (f) => ({
-          ...f,
-          on: await config.getBoolean(f.key, false),
-        })),
-      );
-
-      const [announcements, pollSchedules, pollItems, reactionRoles, notices] =
-        await Promise.all([
-          ScheduledAnnouncement.countDocuments({
-            guildId: common.guildId,
-          }).catch(() => 0),
-          PollSchedule.countDocuments({ guildId: common.guildId }).catch(
-            () => 0,
-          ),
-          PollItem.countDocuments({ guildId: common.guildId }).catch(() => 0),
-          ReactionRoleConfig.countDocuments({
-            guildId: common.guildId,
-            isArchived: false,
-          }).catch(() => 0),
-          Notice.countDocuments({}).catch(() => 0),
-        ]);
-
-      const mongoState =
-        ["disconnected", "connected", "connecting", "disconnecting"][
-          mongoose.connection.readyState
-        ] ?? "unknown";
+      // Every source is read on its own and bounded (`loadDashboardData`): one
+      // that fails or is slow is "unavailable" in its own card, never the page.
+      const data = await loadDashboardData({
+        navFeatureStatus: common.navFeatureStatus,
+        guild: async () => {
+          const guild = await client.guilds.fetch(guildId);
+          return {
+            id: guildId,
+            name: guild.name,
+            memberCount: guild.memberCount,
+            voiceUsers: guild.voiceStates.cache.filter(
+              (s) => s.channelId !== null,
+            ).size,
+            botTag: client.user?.tag ?? null,
+            connected: client.isReady(),
+          };
+        },
+        mongoState: () =>
+          ["disconnected", "connected", "connecting", "disconnecting"][
+            mongoose.connection.readyState
+          ] ?? "unknown",
+        counts: async () => {
+          const count = (work: PromiseLike<number>): Promise<number | null> =>
+            Promise.resolve(work).catch(() => null);
+          const [
+            announcements,
+            pollSchedules,
+            pollItems,
+            reactionRoles,
+            notices,
+          ] = await Promise.all([
+            count(ScheduledAnnouncement.countDocuments({ guildId })),
+            count(PollSchedule.countDocuments({ guildId })),
+            count(PollItem.countDocuments({ guildId })),
+            count(
+              ReactionRoleConfig.countDocuments({ guildId, isArchived: false }),
+            ),
+            count(Notice.countDocuments({})),
+          ]);
+          return {
+            announcements,
+            pollSchedules,
+            pollItems,
+            reactionRoles,
+            notices,
+          };
+        },
+        // Cached for 30 s and never throws; a page is not held up for it.
+        permissions: () => checkBotPermissions(client, guildId),
+        // Only a scan that has already finished: the Dashboard never starts one
+        // (a scan is a round of Discord reads and spends the scan limiter).
+        recentScan: () =>
+          // Newest of the plain and the ownership-hints scan, not the plain one first.
+          peekNewestScan([
+            scanCacheKey(guildId, adminUserId, false),
+            scanCacheKey(guildId, adminUserId, true),
+          ]),
+        voiceTrackingEnabled: () =>
+          common.navFeatureStatus["voicetracking.enabled"] === true,
+        voiceWeek: () => {
+          const end = new Date();
+          // The strict read: a failed query is "unavailable", not an empty week.
+          return queryGuildVoiceHeatmap(
+            new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000),
+            end,
+            getServerTimezone(),
+          );
+        },
+      });
 
       // Update check (#1029): re-read the enable flag so a Settings save shows
-      // up at once, then use the cached result — the dashboard never waits on
+      // up at once, then use the cached result: the dashboard never waits on
       // GitHub.
       const versionService = VersionCheckService.getInstance(client);
       await versionService.refreshEnabled();
@@ -1021,22 +1048,7 @@ export function createReadOnlyRouter(
       res.type("text/html").send(
         renderDashboardPage({
           ...common,
-          guild: {
-            id: common.guildId,
-            name: guildName,
-            memberCount,
-            voiceUsers,
-            botTag: client.user?.tag ?? null,
-          },
-          mongoState,
-          counts: {
-            announcements,
-            pollSchedules,
-            pollItems,
-            reactionRoles,
-            notices,
-          },
-          features,
+          data,
           version,
           flash: readFlash(req),
         }),
