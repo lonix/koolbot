@@ -1296,7 +1296,8 @@ Links) are not covered yet.
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
-  Role group cannot grant Administrator (the Admin preset does). If the role holds it, the row names
+  Role group cannot grant Administrator (the Admin preset does; the Event host and VIP presets grant no permissions and need
+  none here). If the role holds it, the row names
   the permissions the switched-on features need that the role itself lacks, to be given
   before Administrator is removed, and says to check the permissions that are used but not
   checked here and any channel overwrite that denies something (they apply again once
