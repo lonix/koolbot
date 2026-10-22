@@ -24,6 +24,7 @@
 
 import { ChannelType } from "discord.js";
 import { escapeHtml } from "./html.js";
+import { ICONS } from "./icons.js";
 
 /** What a channel is, as far as a label is concerned. */
 export type ChannelKind =
@@ -73,7 +74,7 @@ interface KindInfo {
   group: string;
   /** Unicode glyph for places SVG cannot go; `#` for text, as Discord does. */
   glyph: string;
-  /** Children of the 24x24 Lucide `svg` (ISC licence, copied from lucide-static). */
+  /** Children of the 24x24 Lucide `svg` (ISC licence, lucide-static 1.61.0; hash, megaphone, volume-2 and triangle-alert come from `ICONS`). */
   icon: string;
 }
 
@@ -82,25 +83,19 @@ const KINDS: Record<ChannelKind, KindInfo> = {
     label: "Text channel",
     group: "Text channels",
     glyph: "#",
-    icon:
-      `<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/>` +
-      `<line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>`,
+    icon: ICONS.hash,
   },
   announcement: {
     label: "Announcement channel",
     group: "Text channels",
     glyph: "📢",
-    icon:
-      `<path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>` +
-      `<path d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14"/><path d="M8 6v8"/>`,
+    icon: ICONS.megaphone,
   },
   voice: {
     label: "Voice channel",
     group: "Voice channels",
     glyph: "🔊",
-    icon:
-      `<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>` +
-      `<path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>`,
+    icon: ICONS["volume-2"],
   },
   stage: {
     label: "Stage channel",
@@ -133,9 +128,7 @@ const KINDS: Record<ChannelKind, KindInfo> = {
   },
 };
 
-const ALERT_ICON =
-  `<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>` +
-  `<path d="M12 9v4"/><path d="M12 17h.01"/>`;
+const ALERT_ICON = ICONS["triangle-alert"];
 
 function svg(children: string, label: string): string {
   return `<svg class="kb-icon" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}" focusable="false">${children}</svg>`;
