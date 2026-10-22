@@ -2,7 +2,8 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   cachedScan,
   peekScan,
-  peekNewestScan,
+  peekLastScan,
+  DASHBOARD_SCAN_RETENTION_MS,
   resetScanCache,
   scanCacheKey,
   SCAN_CACHE_TTL_MS,
@@ -217,7 +218,7 @@ describe("peekScan (#1322)", () => {
   });
 });
 
-describe("peekNewestScan (#1322 review)", () => {
+describe("peekLastScan (#1415)", () => {
   const finish = async (
     key: string,
     name: string,
@@ -226,34 +227,76 @@ describe("peekNewestScan (#1322 review)", () => {
     await cachedScan(key, async () => scanOf(name), { now: c.now });
     await flush();
   };
+  const keys = ["g:a:plain", "g:a:sampled"];
 
-  it("returns the non-plain scan when it finished later", async () => {
+  it("returns the scan that finished last, with when, whichever kind it was", async () => {
     const c = clock();
     await finish("g:a:plain", "plain", c);
     c.set(1_000 + 5_000);
     await finish("g:a:sampled", "sampled", c);
-    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)?.guildName).toBe(
-      "sampled",
-    );
-  });
-
-  it("returns the plain scan when it finished later", async () => {
-    const c = clock();
+    expect(peekLastScan(keys, c.now)).toMatchObject({
+      scan: { guildName: "sampled" },
+      readAt: 6_000,
+    });
+    resetScanCache();
+    c.set(1_000);
     await finish("g:a:sampled", "sampled", c);
     c.set(1_000 + 5_000);
     await finish("g:a:plain", "plain", c);
-    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)?.guildName).toBe(
-      "plain",
-    );
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("plain");
   });
 
-  it("ignores a stale scan even if it is the only newer-listed one, and a pending one", async () => {
+  it("outlives the one-minute window but not the retention", async () => {
     const c = clock();
     await finish("g:a:plain", "plain", c);
     c.set(1_000 + SCAN_CACHE_TTL_MS + 1);
-    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)).toBeNull();
-    const d = deferred();
-    void cachedScan("g:a:sampled", () => d.promise, { now: c.now });
-    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)).toBeNull();
+    expect(peekScan("g:a:plain", c.now)).toBeNull();
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("plain");
+    c.set(1_000 + DASHBOARD_SCAN_RETENTION_MS - 1);
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("plain");
+    c.set(1_000 + DASHBOARD_SCAN_RETENTION_MS);
+    expect(peekLastScan(keys, c.now)).toBeNull();
+  });
+
+  it("is kept after the cache entry is swept, and is not served by cachedScan", async () => {
+    const c = clock();
+    await finish("g:a:plain", "plain", c);
+    c.set(1_000 + SCAN_CACHE_TTL_MS + 1);
+    const load = jest.fn(async () => scanOf("again"));
+    // A later request sweeps the expired entry and starts its own scan.
+    void cachedScan("g:a:plain", load, { now: c.now });
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("plain");
+  });
+
+  it("keeps the previous scan while a refresh is pending or fails, and ignores a pending first scan", async () => {
+    const c = clock();
+    const d0 = deferred();
+    void cachedScan("g:a:sampled", () => d0.promise, { now: c.now });
+    expect(peekLastScan(keys, c.now)).toBeNull();
+    await finish("g:a:plain", "plain", c);
+    c.set(2_000);
+    void cachedScan("g:a:plain", async () => Promise.reject(new Error("x")), {
+      now: c.now,
+      refresh: true,
+    });
+    await flush();
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("plain");
+  });
+
+  it("does not let a slow older scan replace a newer one", async () => {
+    const c = clock();
+    const slow = deferred();
+    void cachedScan("g:a:plain", () => slow.promise, { now: c.now });
+    c.set(2_000);
+    void cachedScan("g:a:plain", async () => scanOf("newer"), {
+      now: c.now,
+      refresh: true,
+    });
+    await flush();
+    c.set(3_000);
+    slow.resolve(scanOf("older"));
+    await flush();
+    expect(peekLastScan(keys, c.now)?.scan.guildName).toBe("newer");
   });
 });

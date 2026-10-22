@@ -20,6 +20,15 @@ import type { ServerScan } from "../services/server-scan-service.js";
 
 export const SCAN_CACHE_TTL_MS = 60_000;
 export const SCAN_PENDING_MAX_MS = 5 * 60_000;
+/**
+ * How long the Dashboard keeps listing the problems of the last finished scan
+ * (#1415), counted from when that scan finished. Longer than the minute a scan
+ * is shared for, because the Dashboard never starts one: a minute would leave
+ * its rows empty almost always. Short enough that a problem the admin has
+ * since fixed does not linger for long; the rows say how old the scan is and
+ * link to *Scan again*. It is only ever read, never a reason to skip a scan.
+ */
+export const DASHBOARD_SCAN_RETENTION_MS = 30 * 60_000;
 const MAX_ENTRIES = 8;
 
 interface Entry {
@@ -32,6 +41,40 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>();
+
+/**
+ * The last finished scan per key, kept apart from `entries` so the one-minute
+ * sharing window above does not also bound what the Dashboard may mention.
+ * `cachedScan` never serves from here.
+ */
+interface Retained {
+  scan: ServerScan;
+  startedAt: number;
+  doneAt: number;
+}
+const retained = new Map<string, Retained>();
+
+function retain(
+  key: string,
+  scan: ServerScan,
+  startedAt: number,
+  doneAt: number,
+): void {
+  const prev = retained.get(key);
+  // A slow scan that started before the kept one, but finished after it, read
+  // older data and must not replace it.
+  if (prev && prev.startedAt > startedAt) return;
+  for (const [k, r] of retained) {
+    if (doneAt - r.doneAt >= DASHBOARD_SCAN_RETENTION_MS) retained.delete(k);
+  }
+  retained.delete(key);
+  retained.set(key, { scan, startedAt, doneAt });
+  while (retained.size > MAX_ENTRIES) {
+    const oldest = retained.keys().next().value;
+    if (oldest === undefined) break;
+    retained.delete(oldest);
+  }
+}
 
 export function scanCacheKey(
   guildId: string,
@@ -101,6 +144,7 @@ export function cachedScan(
     (done) => {
       entry.doneAt = clock();
       entry.value = done;
+      retain(key, done, entry.startedAt, entry.doneAt);
     },
     () => {
       if (entries.get(key) === entry) entries.delete(key);
@@ -124,27 +168,36 @@ export function peekScan(
   return now() - e.doneAt < SCAN_CACHE_TTL_MS ? e.value : null;
 }
 
+export interface RetainedScan {
+  scan: ServerScan;
+  /** When the scan finished, in the cache clock's milliseconds. */
+  readAt: number;
+}
+
 /**
- * The newest fresh finished scan among `keys` (the plain and the ownership-hints
- * scan of one admin are separate entries), by when each finished. Like
- * `peekScan` it never starts or waits for a scan.
+ * The most recently finished scan among `keys` (the plain and the
+ * ownership-hints scan of one admin are separate entries) that finished within
+ * `DASHBOARD_SCAN_RETENTION_MS`, with when it finished. Unlike `peekScan` it
+ * outlives the one-minute sharing window. It never starts or waits for a scan
+ * and never touches the limiter.
  */
-export function peekNewestScan(
+export function peekLastScan(
   keys: readonly string[],
   now: () => number = Date.now,
-): ServerScan | null {
-  let best: { scan: ServerScan; doneAt: number } | null = null;
+): RetainedScan | null {
+  const at = now();
+  let best: RetainedScan | null = null;
   for (const key of keys) {
-    const e = entries.get(key);
-    if (!e || e.doneAt === null || e.value === null) continue;
-    if (now() - e.doneAt >= SCAN_CACHE_TTL_MS) continue;
-    if (!best || e.doneAt > best.doneAt)
-      best = { scan: e.value, doneAt: e.doneAt };
+    const r = retained.get(key);
+    if (!r || at - r.doneAt >= DASHBOARD_SCAN_RETENTION_MS) continue;
+    if (!best || r.doneAt > best.readAt)
+      best = { scan: r.scan, readAt: r.doneAt };
   }
-  return best ? best.scan : null;
+  return best;
 }
 
 /** Drop everything; for tests. */
 export function resetScanCache(): void {
   entries.clear();
+  retained.clear();
 }

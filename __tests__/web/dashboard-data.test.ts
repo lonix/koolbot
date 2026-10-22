@@ -9,6 +9,7 @@ import {
   dashboardFeatures,
   loadDashboardData,
   permissionRows,
+  scanAge,
   scanRows,
   uncheckedFeatures,
   withTimeout,
@@ -38,6 +39,8 @@ function report(over: Partial<BotPermissionReport> = {}): BotPermissionReport {
   };
 }
 
+const READ_AT = Date.UTC(2026, 9, 22, 8, 0, 0);
+
 const server = { kind: "server", id: null, name: "Guild" } as const;
 
 function sources(over: Partial<DashboardSources> = {}): DashboardSources {
@@ -60,6 +63,7 @@ function sources(over: Partial<DashboardSources> = {}): DashboardSources {
     }),
     permissions: async () => report(),
     recentScan: () => null,
+    now: () => READ_AT + 12 * 60_000 + 30_000,
     voiceTrackingEnabled: () => false,
     voiceWeek: async () => {
       throw new Error("not read when voice tracking is off");
@@ -181,7 +185,7 @@ describe("loadDashboardData", () => {
               { feature: ref("Voice rooms"), target: server, note: "n" },
             ],
           }),
-        recentScan: () => busyScan(),
+        recentScan: () => ({ scan: busyScan(), readAt: READ_AT }),
       }),
     );
     expect(d.permissions).toEqual({
@@ -194,12 +198,17 @@ describe("loadDashboardData", () => {
       "Bot lacks Manage Roles server-wide",
       "The bot is not requesting the GuildMembers intent",
     ]);
-    expect(d.scanReadAt).toBe("2026-10-07T00:00:00Z");
+    expect(d.scanReadAt).toBe(new Date(READ_AT).toISOString());
+    // Every scan row says how old the scan is; the permission rows do not.
+    expect(d.needsYou[1].detail).toBe("Found by a Server scan 12 minutes ago.");
   });
 
   it("keeps the scan's permission blockers when the permission check did not answer", async () => {
     const d = await loadDashboardData(
-      sources({ permissions: never, recentScan: () => busyScan() }),
+      sources({
+        permissions: never,
+        recentScan: () => ({ scan: busyScan(), readAt: READ_AT }),
+      }),
     );
     expect(d.needsYou.map((r) => r.title)).toEqual([
       "KoolBot lacks Manage Roles",
@@ -209,6 +218,25 @@ describe("loadDashboardData", () => {
       severity: "blocker",
       href: "/admin/bot-permissions",
     });
+  });
+
+  it("lists a scan read long after the one-minute cache window, with its age", async () => {
+    const d = await loadDashboardData(
+      sources({
+        now: () => READ_AT + 29 * 60_000,
+        recentScan: () => ({ scan: busyScan(), readAt: READ_AT }),
+      }),
+    );
+    expect(d.needsYou.map((r) => r.detail)).toEqual([
+      "Found by a Server scan 29 minutes ago.",
+      "Found by a Server scan 29 minutes ago.",
+    ]);
+  });
+
+  it("lists nothing from a scan the source has expired", async () => {
+    const d = await loadDashboardData(sources({ recentScan: () => null }));
+    expect(d.needsYou).toEqual([]);
+    expect(d.scanReadAt).toBeNull();
   });
 
   it("survives a scan peek that throws", async () => {
@@ -221,6 +249,18 @@ describe("loadDashboardData", () => {
     );
     expect(d.needsYou).toEqual([]);
     expect(d.scanReadAt).toBeNull();
+  });
+});
+
+describe("scanAge", () => {
+  it("says minutes, then hours, and never a negative age", () => {
+    const at = 10 * 60_000;
+    expect(scanAge(at, at + 5_000)).toBe("less than a minute ago");
+    expect(scanAge(at, at - 5_000)).toBe("less than a minute ago");
+    expect(scanAge(at, at + 60_000)).toBe("1 minute ago");
+    expect(scanAge(at, at + 12 * 60_000)).toBe("12 minutes ago");
+    expect(scanAge(at, at + 60 * 60_000)).toBe("1 hour ago");
+    expect(scanAge(at, at + 150 * 60_000)).toBe("2 hours ago");
   });
 });
 

@@ -71,14 +71,14 @@ export function busyDashboard(): DashboardData {
       {
         severity: "blocker",
         title: "KoolBot lacks Manage Roles",
-        detail: "Found by the last Server scan.",
+        detail: "Found by a Server scan 12 minutes ago.",
         href: "/admin/adopt",
         action: "Open Server scan",
       },
       {
         severity: "warning",
         title: "The bot is not requesting the GuildMembers intent",
-        detail: "Found by the last Server scan.",
+        detail: "Found by a Server scan 12 minutes ago.",
         href: "/admin/adopt",
         action: "Open Server scan",
       },

@@ -101,8 +101,13 @@ export interface DashboardSources {
   mongoState: () => string;
   counts: () => Promise<DatabaseCounts>;
   permissions: () => Promise<BotPermissionReport>;
-  /** A finished, fresh scan, or null. Never starts one. */
-  recentScan: () => ServerScan | null;
+  /**
+   * The last finished scan still within the Dashboard's retention, with when it
+   * finished (ms), or null. Never starts one.
+   */
+  recentScan: () => { scan: ServerScan; readAt: number } | null;
+  /** The clock, for the age shown beside the scan's rows. */
+  now?: () => number;
   voiceTrackingEnabled: () => boolean;
   voiceWeek: () => Promise<GuildVoiceHeatmap>;
   navFeatureStatus: NavFeatureStatus;
@@ -205,6 +210,16 @@ function coveredByReport(code: string, report: BotPermissionReport): boolean {
   return false;
 }
 
+/** "12 minutes ago": how long ago a scan was read, for the rows it produced. */
+export function scanAge(readAt: number, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - readAt) / 60_000));
+  if (minutes < 1) return "less than a minute ago";
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+}
+
 /**
  * Blockers and warnings from the last Server scan. A finding the permission
  * report already has a row for is left out; every other one stays, so a
@@ -213,6 +228,7 @@ function coveredByReport(code: string, report: BotPermissionReport): boolean {
 export function scanRows(
   scan: ServerScan,
   report: BotPermissionReport | null,
+  age = "",
 ): NeedsYouRow[] {
   return scan.readiness.issues
     .filter((i) => i.severity === "error" || i.severity === "warning")
@@ -220,7 +236,9 @@ export function scanRows(
     .map((i) => ({
       severity: i.severity === "error" ? "blocker" : "warning",
       title: i.message,
-      detail: "Found by the last Server scan.",
+      detail: age
+        ? `Found by a Server scan ${age}.`
+        : "Found by the last Server scan.",
       href: fixedOnBotPermissions(i.code)
         ? BOT_PERMISSIONS_HREF
         : SERVER_SCAN_HREF,
@@ -284,7 +302,7 @@ export async function loadDashboardData(
         reason: report.state === "unavailable" ? report.reason : undefined,
       };
 
-  const scan = ((): ServerScan | null => {
+  const scan = ((): { scan: ServerScan; readAt: number } | null => {
     try {
       return src.recentScan();
     } catch {
@@ -294,7 +312,13 @@ export async function loadDashboardData(
 
   const needsYou = [
     ...(permissionsRead ? permissionRows(permissionsRead) : []),
-    ...(scan ? scanRows(scan, permissionsRead) : []),
+    ...(scan
+      ? scanRows(
+          scan.scan,
+          permissionsRead,
+          scanAge(scan.readAt, (src.now ?? Date.now)()),
+        )
+      : []),
   ];
 
   return {
@@ -303,7 +327,7 @@ export async function loadDashboardData(
     counts,
     permissions,
     needsYou,
-    scanReadAt: scan ? scan.scannedAt : null,
+    scanReadAt: scan ? new Date(scan.readAt).toISOString() : null,
     voice:
       voice === null
         ? null

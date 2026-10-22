@@ -217,7 +217,7 @@ describe("GET /admin/", () => {
     await start(clientWith(ALL));
     await dashboard();
     expect(scan).not.toHaveBeenCalled();
-    expect(await dashboard()).not.toContain("Found by the last Server scan.");
+    expect(await dashboard()).not.toContain("Found by a Server scan");
 
     await cachedScan(scanCacheKey("guild-1", "admin-1", false), async () =>
       busyScan(),
@@ -227,6 +227,32 @@ describe("GET /admin/", () => {
     expect(scan).not.toHaveBeenCalled();
     expect(html).toContain("The bot is not requesting the GuildMembers intent");
     expect(html).toContain('href="/admin/adopt">Open Server scan');
+    expect(html).toContain("Found by a Server scan less than a minute ago.");
+  });
+
+  it("keeps listing a scan after the cache's minute, and drops it after the retention", async () => {
+    jest.useFakeTimers({
+      doNotFake: ["setTimeout", "setImmediate", "nextTick"],
+    });
+    try {
+      jest.setSystemTime(new Date("2026-10-22T08:00:00Z"));
+      await start(clientWith(ALL));
+      await cachedScan(scanCacheKey("guild-1", "admin-1", false), async () =>
+        busyScan(),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      jest.setSystemTime(new Date("2026-10-22T08:12:00Z"));
+      scan.mockClear();
+      let html = await dashboard();
+      expect(html).toContain("Found by a Server scan 12 minutes ago.");
+      expect(scan).not.toHaveBeenCalled();
+      jest.setSystemTime(new Date("2026-10-22T08:31:00Z"));
+      html = await dashboard();
+      expect(html).not.toContain("Found by a Server scan");
+      expect(scan).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("lists the newest finished scan, whether it was the plain or the hints one", async () => {
