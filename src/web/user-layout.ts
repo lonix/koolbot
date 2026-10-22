@@ -10,7 +10,6 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
-import { ChannelType } from "discord.js";
 import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
@@ -606,6 +605,8 @@ export interface RewindBodyOptions {
     duration: string;
     date: string;
     channelName: string | null;
+    /** Discord type of the session's channel (voice or stage); null when it no longer resolves. */
+    channelType: number | null;
   } | null;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
@@ -912,7 +913,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     ? `<div class="value">${escapeHtml(opts.longestSession.duration)}</div>` +
       `<div class="detail">on ${escapeHtml(opts.longestSession.date)}` +
       (opts.longestSession.channelName
-        ? ` in ${channelMention({ name: opts.longestSession.channelName, type: ChannelType.GuildVoice })}`
+        ? ` in ${channelMention({ name: opts.longestSession.channelName, type: opts.longestSession.channelType })}`
         : "") +
       "</div>"
     : '<div class="value">—</div>';

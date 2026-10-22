@@ -699,6 +699,7 @@ describe("/me/rewind", () => {
     summary: unknown; // What RewindService.getInstance(...).getSummary should resolve to
     defaultYear?: number; // What getDefaultRewindYear resolves to (bare route only)
     rewindEnabled?: boolean; // Feature gate `rewind.enabled` (#608); defaults to enabled
+    channelTypes?: Record<string, number>; // Channel id -> Discord type in the client cache (#1303)
   }): Promise<{
     statusCode: number;
     body: string;
@@ -761,7 +762,16 @@ describe("/me/rewind", () => {
       getDefaultRewindYear,
     } as never);
 
-    const mockClient = {} as never;
+    const mockClient = {
+      channels: {
+        cache: new Map(
+          Object.entries(opts.channelTypes ?? {}).map(([id, type]) => [
+            id,
+            { id, type },
+          ]),
+        ),
+      },
+    } as never;
     const { createSessionMiddleware } =
       await import("../../src/web/session.js");
     const requireSession = createSessionMiddleware(mockClient);
@@ -837,6 +847,7 @@ describe("/me/rewind", () => {
     const out = await dispatchRewind({
       pathSuffix: "",
       summary: makeSummary({ year: new Date().getUTCFullYear() }),
+      channelTypes: { c1: ChannelType.GuildVoice },
     });
     expect(out.statusCode).toBe(200);
     expect(out.body).toContain("Rewind");
@@ -850,6 +861,58 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("on 2026-03-14 in "); // date + channel
     expect(out.body).toContain('aria-label="Voice channel"'); // #1303
     expect(out.body).toContain("General</span>");
+  });
+
+  it("labels a longest session in a Stage channel as a stage channel (#1303)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({ year: new Date().getUTCFullYear() }),
+      channelTypes: { c1: ChannelType.GuildStageVoice },
+    });
+    expect(out.body).toContain('aria-label="Stage channel"');
+    expect(out.body).not.toContain('aria-label="Voice channel"');
+  });
+
+  it("shows a longest-session channel that is gone as unavailable (#1303)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({ year: new Date().getUTCFullYear() }),
+    });
+    expect(out.body).toContain("General (unavailable)");
+  });
+
+  it("resolves the type of channels in a snapshot frozen before channel types were stored (#1303)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({
+        year: new Date().getUTCFullYear(),
+        messagesSent: 42,
+        // No `channelType` field at all, as in an older snapshot.
+        topTextChannels: [
+          { channelId: "t1", channelName: "general-chat", count: 30 },
+          { channelId: "t2", channelName: "news", count: 9 },
+          { channelId: "t3", channelName: "old-room", count: 2 },
+          {
+            channelId: "t4",
+            channelName: "kept-null",
+            channelType: null,
+            count: 1,
+          },
+        ],
+        peakMessageDay: { date: "2026-02-01", count: 12 },
+      }),
+      channelTypes: {
+        t1: ChannelType.GuildText,
+        t2: ChannelType.GuildAnnouncement,
+        t4: ChannelType.GuildText, // cached now, but the stored null is kept
+        c1: ChannelType.GuildVoice,
+      },
+    });
+    expect(out.body).toContain('aria-label="Announcement channel"');
+    expect(out.body).toContain("general-chat</span>");
+    expect(out.body).not.toContain("general-chat (unavailable)");
+    expect(out.body).toContain("old-room (unavailable)");
+    expect(out.body).toContain("kept-null (unavailable)");
   });
 
   it("renders a specific past year when the route param is present", async () => {

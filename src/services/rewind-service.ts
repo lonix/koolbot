@@ -55,8 +55,12 @@ export interface RewindCompanion {
 export interface RewindTextChannel {
   channelId: string;
   channelName: string;
-  /** Discord channel type, so the page labels it by kind (#1303); null when the channel no longer resolves. */
-  channelType: number | null;
+  /**
+   * Discord channel type, so the page labels it by kind (#1303); null when the
+   * channel no longer resolves. Absent on snapshots frozen before #1303, which
+   * the route resolves from `channelId`.
+   */
+  channelType?: number | null;
   count: number;
 }
 

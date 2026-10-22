@@ -3357,6 +3357,7 @@ const REWIND = {
     duration: "3 hr 5 min",
     date: "2026-01-03",
     channelName: "Lounge",
+    channelType: ChannelType.GuildStageVoice,
   },
   longestStreakDays: 6,
   longestStreakRange: { startDate: "2026-01-01", endDate: "2026-01-06" },
