@@ -109,6 +109,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule("../../src/web/read-only-routes.js", () => ({
   fetchChannelData: async () => ({
     names: new Map([["c-1", "general"]]),
+    types: new Map([["c-1", 0]]), // ChannelType.GuildText
   }),
 }));
 
@@ -1013,9 +1014,11 @@ describe("command audit (read only)", () => {
   it("lists invocations with the channel as a mention-style label", async () => {
     const page = await html("/audit");
     expect(page.includes("/warn")).toBe(true);
-    expect(page.includes('<span class="kb-mention">#general</span>')).toBe(
-      true,
-    );
+    expect(
+      page.includes(
+        '<span class="kb-mention"><svg class="kb-icon" viewBox="0 0 24 24" role="img" aria-label="Text channel"',
+      ) && page.includes("general</span>"),
+    ).toBe(true);
     expect(page.includes("Read only.")).toBe(true);
   });
 

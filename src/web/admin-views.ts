@@ -6,6 +6,14 @@
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import {
+  channelGroupLabel,
+  channelMention,
+  channelText,
+  missingText,
+  roleText,
+} from "./discord-labels.js";
+import { ChannelType } from "discord.js";
+import {
   ACTION_WORDS,
   CASE_OUTCOME_WORDS,
   CASE_STATUS_WORDS,
@@ -574,7 +582,7 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
  *
  * Stored IDs that aren't in the live options list (channel was deleted,
  * role was renamed and the cache is stale, …) are surfaced as
- * `(missing) <id>` options that stay `selected` on render. Without this
+ * `⚠ <id> (unavailable)` options that stay `selected` on render. Without this
  * the browser would default the single-select to the first option
  * (typically the "(none)" row) and an operator could silently clear the
  * setting by saving the form without touching the control.
@@ -582,7 +590,6 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
 function buildOptionsHtml(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
-  prefix: string,
   includeNoneRow: boolean,
 ): string {
   const parts: string[] = [];
@@ -591,19 +598,44 @@ function buildOptionsHtml(
     parts.push(`<option value=""${noneSel}>(none)</option>`);
   }
   const knownIds = new Set(options.map((o) => o.id));
+  // Channels are grouped the way Discord's autocomplete groups them (#1303):
+  // one <optgroup> per kind, in the order the kinds first appear.
+  const groups = new Map<string, string[]>();
   for (const opt of options) {
     const sel = selected.has(opt.id) ? " selected" : "";
+    const html = `<option value="${escapeHtml(opt.id)}"${sel}>${escapeHtml(optionText(opt))}</option>`;
+    if (!isChannelOption(opt)) {
+      parts.push(html);
+      continue;
+    }
+    const group = channelGroupLabel(opt.type);
+    const members = groups.get(group);
+    if (members) members.push(html);
+    else groups.set(group, [html]);
+  }
+  for (const [label, members] of groups) {
     parts.push(
-      `<option value="${escapeHtml(opt.id)}"${sel}>${prefix}${escapeHtml(opt.name)}</option>`,
+      `<optgroup label="${escapeHtml(label)}">${members.join("")}</optgroup>`,
     );
   }
   for (const id of selected) {
     if (id === "" || knownIds.has(id)) continue;
     parts.push(
-      `<option value="${escapeHtml(id)}" selected>(missing) ${escapeHtml(id)}</option>`,
+      `<option value="${escapeHtml(id)}" selected>${escapeHtml(missingText(id))}</option>`,
     );
   }
   return parts.join("");
+}
+
+function isChannelOption(o: ChannelOption | RoleOption): o is ChannelOption {
+  return "type" in o;
+}
+
+/** Plain-text label of one picker option: a channel by kind, a role as `@Name`. */
+function optionText(o: ChannelOption | RoleOption): string {
+  return isChannelOption(o)
+    ? channelText(o, o.parentName ?? undefined)
+    : roleText(o.name);
 }
 
 /**
@@ -864,22 +896,23 @@ function rolesFor(
  * Render a compact, readable summary of the currently-selected entries below a
  * multi-select. A `<select multiple>` buries its picks among unselected rows,
  * and a long voice-exclusion list otherwise reads as an unseparated blob
- * (issue #611); this surfaces them as a clean, comma-separated `#name` /
- * `@name` list. Ids no longer in the live option set render as a `(missing)`
- * entry followed by the raw id, so a stale selection is visible rather than
- * silently dropped (mirroring the `(missing)` option label `buildOptionsHtml`
+ * (issue #611); this surfaces them as a clean, comma-separated list labelled
+ * by kind (`# general`, `🔊 Lobby`, `@Moderators`, #1303). Ids no longer in the
+ * live option set render as `⚠ <id> (unavailable)`, so a stale selection is
+ * visible rather than silently dropped (the same label `buildOptionsHtml`
  * emits). Returns an empty string when nothing is selected.
  */
 function renderSelectionSummary(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
-  prefix: string,
 ): string {
   if (selected.size === 0) return "";
-  const byId = new Map(options.map((o) => [o.id, o.name]));
+  const byId = new Map<string, ChannelOption | RoleOption>(
+    (options as Array<ChannelOption | RoleOption>).map((o) => [o.id, o]),
+  );
   const tokens = Array.from(selected).map((id) => {
-    const name = byId.get(id);
-    return name ? `${prefix}${name}` : `(missing) ${id}`;
+    const opt = byId.get(id);
+    return opt ? optionText(opt) : missingText(id);
   });
   return (
     `<div class="settings-selected muted" style="margin-top:.4rem;font-size:.85em">` +
@@ -1065,11 +1098,10 @@ function renderControlInput(
         : r.type === "category"
           ? pickers.categoryChannels
           : rolesFor(r, pickers);
-    const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, prefix, true) +
+      buildOptionsHtml(options, selected, true) +
       `</select>`
     );
   }
@@ -1078,7 +1110,6 @@ function renderControlInput(
       r.type === "channel_list"
         ? channelOptionsFor(r, pickers)
         : rolesFor(r, pickers);
-    const prefix = r.type === "role_list" ? "@" : "#";
     const selected = new Set(
       currentStr
         .split(",")
@@ -1087,9 +1118,9 @@ function renderControlInput(
     );
     return (
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, prefix, false) +
+      buildOptionsHtml(options, selected, false) +
       `</select>` +
-      renderSelectionSummary(options, selected, prefix)
+      renderSelectionSummary(options, selected)
     );
   }
   if (r.type === "cron") {
@@ -2223,6 +2254,8 @@ ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGap
 export interface AnnouncementRow {
   id: string;
   channelName: string;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   cron: string;
   enabled: boolean;
   messagePreview: string;
@@ -2234,6 +2267,10 @@ export interface AnnouncementRow {
 export interface ChannelOption {
   id: string;
   name: string;
+  /** Discord channel type: decides the icon and the group the option is listed under (#1303). */
+  type: ChannelType;
+  /** Name of the category the channel sits in, shown after the name where the control cannot show it separately. */
+  parentName?: string | null;
 }
 
 export interface RoleOption {
@@ -2416,23 +2453,19 @@ function channelOptionsHtml(
   options: ChannelOption[],
   selectedId?: string,
 ): string {
-  const rendered = options.map(
-    (c) =>
-      `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
-  );
-  // Preserve a selected channel that's no longer in the list (deleted, or the
-  // bot lost access). Without a matching <option> the browser would default to
-  // the first channel, so editing only the cron/duration would silently
-  // reassign the schedule's channel on submit. Keep the saved id selectable.
-  if (selectedId && !options.some((c) => c.id === selectedId)) {
-    rendered.unshift(
-      `<option value="${escapeHtml(selectedId)}" selected>#${escapeHtml(selectedId)} (unavailable)</option>`,
-    );
-  }
-  if (rendered.length === 0) {
+  if (options.length === 0 && !selectedId) {
     return `<option value="">(no text channels available)</option>`;
   }
-  return rendered.join("");
+  // buildOptionsHtml keeps a selected channel that's no longer in the list
+  // (deleted, or the bot lost access) as a selected "unavailable" option.
+  // Without a matching <option> the browser would default to the first
+  // channel, so editing only the cron/duration would silently reassign the
+  // schedule's channel on submit.
+  return buildOptionsHtml(
+    options,
+    new Set(selectedId ? [selectedId] : []),
+    false,
+  );
 }
 
 function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
@@ -2444,13 +2477,13 @@ function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   // clear the role by defaulting the select back to "(none)".
   if (selectedId && !options.some((r) => r.id === selectedId)) {
     out.push(
-      `<option value="${escapeHtml(selectedId)}" selected>@${escapeHtml(selectedId)} (unavailable)</option>`,
+      `<option value="${escapeHtml(selectedId)}" selected>${escapeHtml(missingText(selectedId))}</option>`,
     );
   }
   out.push(
     ...options.map(
       (r) =>
-        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
+        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>${escapeHtml(roleText(r.name))}</option>`,
     ),
   );
   return out.join("");
@@ -2501,7 +2534,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     .map(
       (a) => `<tr>
 <td class="mono">${escapeHtml(a.id)}</td>
-<td>#${escapeHtml(a.channelName)}</td>
+<td>${channelMention({ name: a.channelName, type: a.channelType })}</td>
 <td class="mono">${escapeHtml(a.cron)}</td>
 <td>${tagOnOff(a.enabled)}</td>
 <td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="muted mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
@@ -3227,6 +3260,8 @@ export interface PollScheduleRow {
   id: string;
   channelId: string;
   channelName: string;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   cron: string;
   durationHours: number;
   pingRoleId: string | null;
@@ -3314,7 +3349,7 @@ export function renderPollsPage(props: PollsProps): string {
     .map(
       (s) => `<tr>
 <td class="mono">${escapeHtml(s.id)}</td>
-<td>#${escapeHtml(s.channelName)}</td>
+<td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
 <td>${s.pingRoleName ? `@${escapeHtml(s.pingRoleName)}` : '<span class="muted">none</span>'}</td>
@@ -3483,7 +3518,10 @@ export interface ReactionRoleRow {
   roleName: string;
   roleId: string;
   categoryName: string;
+  /** Discord types of the category, channel and picker channel; null when one no longer resolves. */
+  categoryType: ChannelType | null;
   channelName: string;
+  channelType: ChannelType | null;
   messageId: string;
   /**
    * Name of the channel the picker message was posted in, remembered with the
@@ -3491,6 +3529,7 @@ export interface ReactionRoleRow {
    * up in the configured `reactionroles.message_channel_id`.
    */
   pickerChannelName?: string | null;
+  pickerChannelType?: ChannelType | null;
   /**
    * Whether the bot auto-created the role + category + channel for this
    * mapping. Bound mappings (issue #813) point at a pre-existing role and set
@@ -3505,7 +3544,7 @@ export interface ReactionRoleRow {
 
 export interface ReactionRolesProps extends CommonProps {
   enabled: boolean;
-  configChannel: { name: string; id: string } | null;
+  configChannel: { name: string; id: string; type: ChannelType | null } | null;
   active: ReactionRoleRow[];
   archived: ReactionRoleRow[];
   /**
@@ -3558,7 +3597,13 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     ? `<span class="tag tag-on">managed</span>`
     : `<span class="tag">bound</span>`;
   const channelCell =
-    rr.channelName === "—" ? "—" : `#${escapeHtml(rr.channelName)}`;
+    rr.channelName === "—"
+      ? "—"
+      : channelMention({ name: rr.channelName, type: rr.channelType });
+  const categoryCell =
+    rr.categoryName === "—"
+      ? "—"
+      : channelMention({ name: rr.categoryName, type: rr.categoryType });
 
   const modeCell = rr.groupId
     ? `${escapeHtml(rr.mode)} <span class="tag">group</span>`
@@ -3568,9 +3613,9 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 <td class="mono">${escapedEmoji}</td>
 <td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
 <td>${typeTag}</td>
-<td>${escapeHtml(rr.categoryName)}</td>
+<td>${categoryCell}</td>
 <td>${channelCell}</td>
-<td class="mono">${escapedMessageId}${rr.pickerChannelName ? `<div class="muted">in #${escapeHtml(rr.pickerChannelName)}</div>` : ""}</td>
+<td class="mono">${escapedMessageId}${rr.pickerChannelName ? `<div class="muted">in ${channelMention({ name: rr.pickerChannelName, type: rr.pickerChannelType })}</div>` : ""}</td>
 <td>${modeCell}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
@@ -3623,7 +3668,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.configChannel
-      ? { text: `Message channel #${props.configChannel.name}` }
+      ? {
+          text: `Message channel ${channelText({ name: props.configChannel.name, type: props.configChannel.type })}`,
+        }
       : {
           text: "No message channel set",
           warn: true,
@@ -3780,7 +3827,7 @@ export interface NoticeCategoryOption {
 
 export interface NoticesProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   total: number;
   /**
    * The editable `notices.*` settings rendered in place on the page (#972),
@@ -3859,7 +3906,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -3937,7 +3986,7 @@ export interface QuoteRow {
 
 export interface QuotesProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   /** The auto-managed `quotes.header_message_id`, shown read-only. */
   headerMessageId: string;
   /**
@@ -4026,7 +4075,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -4126,7 +4177,7 @@ export interface BirthdayPreviewView {
 
 export interface BirthdaysProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   role: { name: string; id: string } | null;
   cron: string;
   /** Every `birthdays.*` key, rendered in place on the page (#986). */
@@ -4267,7 +4318,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -4876,7 +4929,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
         : `<span class="tag tag-warn">dynamic</span>`;
       const live = ch.isLive ? ' <span class="tag tag-warn">LIVE</span>' : "";
       return `<tr>
-<td>${escapeHtml(ch.name)}${live}</td>
+<td>${channelMention({ name: ch.name, type: ChannelType.GuildVoice })}${live}</td>
 <td>${tag}</td>
 <td>${ch.memberCount}</td>
 <td class="muted">${escapeHtml(ch.customName ?? "")}</td>
@@ -5396,6 +5449,8 @@ export interface CommandAuditRow {
   subcommand: string | null;
   channelId: string | null;
   channelLabel: string | null;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   result: "success" | "error" | "denied";
   errorMessage: string | null;
   durationMs: number;
@@ -5493,7 +5548,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
 <td class="muted mono">${escapeHtml(r.createdAt)}</td>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
 <td class="mono">${cmd}</td>
-<td class="muted">${escapeHtml(r.channelLabel ?? r.channelId ?? "—")}</td>
+<td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType }) : "—"}</td>
 <td>${resultTag(r.result)}</td>
 <td class="muted">${r.durationMs}ms</td>
 <td class="muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>

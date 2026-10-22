@@ -1,5 +1,6 @@
-import type { Client, GuildBasedChannel } from "discord.js";
+import type { ChannelType, Client, GuildBasedChannel } from "discord.js";
 import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
+import { channelMention } from "./discord-labels.js";
 import { env } from "../config/env.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import logger from "../utils/logger.js";
@@ -55,7 +56,7 @@ export interface RulesPageData {
   intentMissing: boolean;
   /** The rollout plan, only when the admin asked for a preview. */
   plan: RulesPlan | null;
-  channels: Array<{ id: string; name: string }>;
+  channels: Array<{ id: string; name: string; type: ChannelType }>;
   roleName: string | null;
   unavailable: string | null;
 }
@@ -63,7 +64,7 @@ export interface RulesPageData {
 /** Channels offered as gate targets: threads have no overwrites of their own. */
 export function gateableChannels(
   channels: Array<GuildBasedChannel | null | undefined>,
-): Array<{ id: string; name: string }> {
+): Array<{ id: string; name: string; type: ChannelType }> {
   return channels
     .filter(
       (c): c is GuildBasedChannel =>
@@ -71,7 +72,7 @@ export function gateableChannels(
         !c.isThread() &&
         (c.isTextBased() || c.isVoiceBased() || c.isThreadOnly()),
     )
-    .map((c) => ({ id: c.id, name: c.name }))
+    .map((c) => ({ id: c.id, name: c.name, type: c.type }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -180,7 +181,7 @@ function renderRollout(p: RulesPageProps, csrf: string): string {
   const channelBoxes = p.channels
     .map(
       (c) =>
-        `<label class="check"><input type="checkbox" name="gate" value="${escapeHtml(c.id)}"${gated.has(c.id) ? " checked" : ""}> #${escapeHtml(c.name)}</label>`,
+        `<label class="check"><input type="checkbox" name="gate" value="${escapeHtml(c.id)}"${gated.has(c.id) ? " checked" : ""}> ${channelMention({ name: c.name, type: c.type })}</label>`,
     )
     .join("");
   const form = `<form method="GET" action="/admin/rules" class="stack">

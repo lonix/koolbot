@@ -670,6 +670,8 @@ async function commonFromReq(req: AuthenticatedRequest): Promise<{
 
 interface ChannelData {
   names: Map<string, string>;
+  /** Discord type per channel id, for labelling a stored id by kind (#1303). */
+  types: Map<string, ChannelType>;
   textChannels: ChannelOption[];
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
@@ -695,6 +697,7 @@ export async function fetchChannelData(
   guildId: string,
 ): Promise<ChannelData> {
   const names = new Map<string, string>();
+  const types = new Map<string, ChannelType>();
   const textChannels: ChannelOption[] = [];
   const voiceChannels: ChannelOption[] = [];
   const categoryChannels: ChannelOption[] = [];
@@ -705,18 +708,25 @@ export async function fetchChannelData(
       if (!ch?.id) continue;
       const name = ch.name ?? ch.id;
       names.set(ch.id, name);
+      types.set(ch.id, ch.type);
+      const option: ChannelOption = {
+        id: ch.id,
+        name,
+        type: ch.type,
+        parentName: ch.parent?.name ?? null,
+      };
       if (
         ch.type === ChannelType.GuildText ||
         ch.type === ChannelType.GuildAnnouncement
       ) {
-        textChannels.push({ id: ch.id, name });
+        textChannels.push(option);
       } else if (
         ch.type === ChannelType.GuildVoice ||
         ch.type === ChannelType.GuildStageVoice
       ) {
-        voiceChannels.push({ id: ch.id, name });
+        voiceChannels.push(option);
       } else if (ch.type === ChannelType.GuildCategory) {
-        categoryChannels.push({ id: ch.id, name });
+        categoryChannels.push(option);
       }
     }
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
@@ -725,7 +735,7 @@ export async function fetchChannelData(
   } catch (err) {
     logger.debug("fetchChannelData failed", err);
   }
-  return { names, textChannels, voiceChannels, categoryChannels };
+  return { names, types, textChannels, voiceChannels, categoryChannels };
 }
 
 /**
@@ -1336,6 +1346,7 @@ export function createReadOnlyRouter(
       const rows = announcements.map((a) => ({
         id: String(a._id),
         channelName: channelData.names.get(a.channelId) ?? a.channelId,
+        channelType: channelData.types.get(a.channelId) ?? null,
         cron: a.cronSchedule,
         enabled: a.enabled,
         messagePreview:
@@ -1576,6 +1587,7 @@ export function createReadOnlyRouter(
             id: String(s._id),
             channelId: s.channelId,
             channelName: channelData.names.get(s.channelId) ?? s.channelId,
+            channelType: channelData.types.get(s.channelId) ?? null,
             cron: s.cronSchedule,
             durationHours: s.pollDuration,
             pingRoleId: s.roleIdToPing ?? null,
@@ -1642,6 +1654,8 @@ export function createReadOnlyRouter(
       // be absent — fall back to an em dash so the table renders cleanly.
       const resolveChannel = (id?: string | null): string =>
         id ? (channelNames.get(id) ?? id) : "—";
+      const typeOf = (id?: string | null): ChannelType | null =>
+        id ? (channelData.types.get(id) ?? null) : null;
       const shape = (rr: {
         _id?: unknown;
         emoji: string;
@@ -1662,11 +1676,14 @@ export function createReadOnlyRouter(
         roleName: rr.roleName,
         roleId: rr.roleId,
         categoryName: resolveChannel(rr.categoryId),
+        categoryType: typeOf(rr.categoryId),
         channelName: resolveChannel(rr.channelId),
+        channelType: typeOf(rr.channelId),
         messageId: rr.messageId,
         pickerChannelName: rr.messageChannelId
           ? (channelNames.get(rr.messageChannelId) ?? rr.messageChannelId)
           : null,
+        pickerChannelType: typeOf(rr.messageChannelId),
         autoCreated: rr.autoCreated ?? true,
         mode: rr.mode ?? "toggle",
         groupId: rr.groupId ?? null,
@@ -1684,6 +1701,7 @@ export function createReadOnlyRouter(
             ? {
                 name: channelNames.get(configChannelId) ?? configChannelId,
                 id: configChannelId,
+                type: channelData.types.get(configChannelId) ?? null,
               }
             : null,
           active: active.map(shape),
@@ -1754,7 +1772,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelData.types.get(channelId) ?? null,
+              }
             : null,
           total: notices.length,
           settingRows,
@@ -1807,8 +1829,10 @@ export function createReadOnlyRouter(
           : await quoteService.listQuotes(page, pageSize, search);
 
       const channelNames = new Map<string, string>();
+      const channelTypes = new Map<string, ChannelType>();
       for (const c of quoteSettings.pickers.textChannels ?? []) {
         channelNames.set(c.id, c.name);
+        channelTypes.set(c.id, c.type);
       }
 
       // Show names rather than raw snowflakes: one batched member fetch per
@@ -1854,7 +1878,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelTypes.get(channelId) ?? null,
+              }
             : null,
           headerMessageId,
           settingRows: quoteSettings.settingRows,
@@ -1920,8 +1948,10 @@ export function createReadOnlyRouter(
       );
 
       const channelNames = new Map<string, string>();
+      const channelTypes = new Map<string, ChannelType>();
       for (const c of birthdaySettings.pickers.textChannels ?? []) {
         channelNames.set(c.id, c.name);
+        channelTypes.set(c.id, c.type);
       }
       const roleNames = new Map<string, string>();
       for (const r of birthdaySettings.pickers.roles ?? []) {
@@ -1968,7 +1998,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelTypes.get(channelId) ?? null,
+              }
             : null,
           role: roleId
             ? { name: roleNames.get(roleId) ?? roleId, id: roleId }
@@ -2226,9 +2260,18 @@ export function createReadOnlyRouter(
         await guild.channels.fetch();
         for (const ch of guild.channels.cache.values()) {
           if (ch?.type === ChannelType.GuildCategory) {
-            categoryChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+            categoryChannels.push({
+              id: ch.id,
+              name: ch.name ?? ch.id,
+              type: ch.type,
+            });
           } else if (ch?.type === ChannelType.GuildVoice) {
-            voiceChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+            voiceChannels.push({
+              id: ch.id,
+              name: ch.name ?? ch.id,
+              type: ch.type,
+              parentName: ch.parent?.name ?? null,
+            });
           }
         }
         categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
@@ -2695,6 +2738,7 @@ export function createReadOnlyRouter(
           page,
           pageSize,
           channelNames: channelData.names,
+          channelTypes: channelData.types,
         }),
       ]);
       const { rows, total, userOptions } = audit;
