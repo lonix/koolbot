@@ -12,6 +12,14 @@ management, activity tracking, automated announcements, and a browser-based admi
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
+> [!NOTE]
+> These docs follow `main`, which can describe features that are not released yet. Running a release? Read the
+> [docs for the latest release][docs-latest], or pick your version under [Documentation for older versions](#documentation-for-older-versions).
+
+<!-- x-release-please-start-version -->
+[docs-latest]: https://github.com/lonix/koolbot/tree/v2.0.1
+<!-- x-release-please-end -->
+
 ---
 
 ## The Name
@@ -454,6 +462,46 @@ docker compose exec bot sh
 docker compose logs -f mongodb
 ```
 
+### Choosing an image tag
+
+The shipped `docker-compose.yml` runs `ghcr.io/lonix/koolbot:latest`, so `docker compose pull` always moves you to the newest
+release, a new major version included. If you would rather upgrade on your own schedule, set the `bot.image` tag to one of these:
+
+| Tag | You get | What `docker compose pull` does |
+| --- | --- | --- |
+| `latest` (default) | The newest release | Moves to every new release, including major versions |
+| `X` (e.g. `2`) | The newest `X.*` release | Takes new features and fixes, never a new major version |
+| `X.Y` (e.g. `2.0`) | The newest `X.Y.*` release | Takes fixes only |
+| `X.Y.Z` (e.g. `2.0.1`) | Exactly that release | Nothing; you upgrade by editing the tag |
+| `nightly` | The head of `main`, unreleased | Moves every night; for testing, not for a community you care about |
+
+For example, to stay on one exact release:
+
+<!-- x-release-please-start-version -->
+```yaml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:2.0.1
+```
+<!-- x-release-please-end -->
+
+To upgrade a pinned install:
+
+1. Read the [changelog](CHANGELOG.md) for every release between yours and the new one.
+2. [Back up your data](#configuration--data-backup). A newer version may migrate the database, and an older one is not guaranteed
+   to read it afterwards.
+3. Change the `bot.image` tag in `docker-compose.yml`.
+4. Pull the new image and restart:
+
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
+
+Pinned to an older release? Read the docs for that version, from
+[Documentation for older versions](#documentation-for-older-versions). Keep the current `docker-compose.yml`, though: it carries
+security defaults (such as publishing the Web UI on loopback only) that older tags do not.
+
 ### Exposing the Web UI
 
 The default `docker-compose.yml` publishes port 3000 **on the host's
@@ -686,6 +734,19 @@ docker compose restart mongodb
 - **[CHANGELOG.md](CHANGELOG.md)** — Version history (managed by release-please)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines for developers
 - **[SECURITY.md](SECURITY.md)** — Security policy and vulnerability reporting
+
+### Documentation for older versions
+
+Every release tag is a snapshot of the code and its docs together, so the docs at a tag describe exactly what that release
+shipped. Older release lines get no further patches, so each one links to its last release.
+
+| Version | Docs |
+| --- | --- |
+| Latest release | [v2.0.1][docs-latest] <!-- x-release-please-version --> |
+| 1.2 | [v1.2.2](https://github.com/lonix/koolbot/tree/v1.2.2) |
+| 1.1 | [v1.1.0](https://github.com/lonix/koolbot/tree/v1.1.0) |
+| 1.0 | [v1.0.0](https://github.com/lonix/koolbot/tree/v1.0.0) |
+| 0.x and every patch release | [All release tags](https://github.com/lonix/koolbot/tags) |
 
 ---
 
