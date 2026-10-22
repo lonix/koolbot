@@ -52,6 +52,7 @@ import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
+import { renderWizardAccessPage } from "../../src/web/wizard-access-view.js";
 import type {
   BotPermissionReport,
   FeatureCheck,
@@ -1183,6 +1184,35 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard access",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: ["r-admin"], staff: ["r-mod"], host: [] },
+        options: [
+          { id: "r-admin", name: "Admins", managed: false, position: 8 },
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+          { id: "r-vip", name: "VIP", managed: false, position: 2 },
+        ],
+        gaps: [
+          {
+            feature: "events",
+            scope: "host",
+            message: "Events is on and nobody can host yet.",
+          },
+        ],
+        flash: FLASH,
+      }),
+    },
+    {
+      name: "Setup wizard access, roles unavailable",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: null,
+        gaps: [],
+      }),
+    },
+    {
       name: "Setup wizard confirm",
       html: renderWizardConfirmPage({
         ...COMMON,
@@ -1193,6 +1223,36 @@ export function adminPages(): A11yPage[] {
             category: "voicechannels",
           },
         },
+        accessChanges: [
+          {
+            kind: "create",
+            roleId: "r-mod",
+            roleName: "Moderator",
+            groupId: null,
+            groupName: "Moderator",
+            scopesBefore: [],
+            scopesAfter: ["staff"],
+            capabilitiesBefore: [],
+            capabilitiesAfter: ["staff"],
+          },
+        ],
+        accessGaps: [
+          {
+            feature: "events",
+            scope: "host",
+            message: "Events is on and nobody can host yet.",
+          },
+        ],
+      }),
+    },
+    {
+      name: "Setup wizard confirm, role mapping blocked",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        accessProblem: "A role you picked no longer exists in Discord.",
       }),
     },
     {

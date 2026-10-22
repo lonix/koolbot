@@ -19,7 +19,7 @@ import {
 import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
-import { parseTierConfig, TIERS_KEY } from "../../leaderboard-tiers.js";
+import { grantedRoleIds } from "../../../services/role-grants.js";
 import type { WizardApplyResult } from "../../../services/wizard-service.js";
 import {
   defaultConfig,
@@ -767,17 +767,13 @@ export async function findGroupRoleReuse(
   }
 }
 
-/** Settings whose value is a role a group may already back (#1023). */
-const GROUP_GUARDED_ROLE_KEYS = new Set(["birthdays.role_id", TIERS_KEY]);
-
-/** Role ids a guarded setting value names (empty for any other key). */
-function guardedRoleIds(key: string, value: unknown): string[] {
-  if (!GROUP_GUARDED_ROLE_KEYS.has(key) || typeof value !== "string") {
-    return [];
-  }
-  return key === TIERS_KEY
-    ? parseTierConfig(value).tiers.map((t) => t.roleId)
-    : [value.trim()].filter(Boolean);
+/**
+ * Role ids a role-granting setting's value names (empty for any other key).
+ * Driven by the shared list in `role-grants.ts`, so every setting a feature
+ * hands a role out through gets the same guards.
+ */
+export function guardedRoleIds(key: string, value: unknown): string[] {
+  return grantedRoleIds(key, value);
 }
 
 /**

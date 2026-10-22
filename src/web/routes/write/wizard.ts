@@ -11,6 +11,30 @@ import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { WizardService } from "../../../services/wizard-service.js";
+import { RoleGroupService } from "../../../services/role-group-service.js";
+import {
+  accessFingerprint,
+  accessGaps,
+  accessRoleOverlap,
+  applyAccessChanges,
+  currentMapping,
+  diffAccess,
+  emptySelection,
+  normaliseSelection,
+  pickableRoles,
+  readAccessContext,
+  rollbackAccess,
+  validateSelection,
+  ACCESS_SCOPES,
+  type AccessChange,
+  type AccessContext,
+  type AccessDeps,
+  type AccessGap,
+  type AccessSelection,
+  type AccessUndo,
+} from "../../../services/wizard-access.js";
+import { ROLE_GRANTING_SETTINGS } from "../../../services/role-grants.js";
+import { renderWizardAccessPage } from "../../wizard-access-view.js";
 import {
   defaultConfig,
   settingsMetadata,
@@ -35,6 +59,7 @@ import {
 import { ROLE_GROUP_SETTING_KEYS } from "../../../services/role-group-access.js";
 import {
   flashRedirect,
+  flashRedirectQuery,
   requireSessionContext,
   asyncHandler,
   getCsrfFromReq,
@@ -45,12 +70,79 @@ import {
   wizardApplyFailureMessage,
   coerceConfigValue,
   findGroupRoleReuseForSetting,
+  guardedRoleIds,
   findPowerfulRoleForSetting,
   truncateFlash,
 } from "./helpers.js";
 
+/** A role id as Discord sends it: digits only. Anything else is ignored. */
+const SNOWFLAKE = /^\d{1,25}$/;
+
+function pickedRoles(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
+  return [...new Set(list.map(String).filter((id) => SNOWFLAKE.test(id)))];
+}
+
+/** The first pending role setting that names a role the Access step maps. */
+function pendingConfigOverlap(
+  configuration: Record<string, unknown>,
+  selection: AccessSelection,
+): string | null {
+  for (const [key, value] of Object.entries(configuration)) {
+    const hit = accessRoleOverlap(selection, guardedRoleIds(key, value), key);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Features whose scope the Access step can leave without anybody to run it. */
+const GAP_FEATURES = ["events", "moderation"] as const;
+
 export function createWizardRouter(client: Client): Router {
   const router = Router();
+
+  async function readAccess(session: {
+    guildId: string;
+    discordUserId: string;
+  }): Promise<AccessContext> {
+    const guild = await client.guilds.fetch(session.guildId);
+    return readAccessContext(guild);
+  }
+
+  /**
+   * Which gap-prone features end up switched on: what the admin set in this
+   * wizard run, else the stored value for a feature being configured; a
+   * feature left unticked is switched off by Apply.
+   */
+  async function enabledGapFeatures(state: {
+    selectedFeatures: string[];
+    configuration: Record<string, unknown>;
+  }): Promise<Set<string>> {
+    const out = new Set<string>();
+    const config = ConfigService.getInstance();
+    for (const fk of GAP_FEATURES) {
+      const key = `${fk}.enabled`;
+      const pending = state.configuration[key];
+      const on =
+        pending !== undefined
+          ? isEnabledValue(pending)
+          : state.selectedFeatures.includes(fk)
+            ? await config.getBoolean(key, false)
+            : false;
+      if (on) out.add(fk);
+    }
+    return out;
+  }
+
+  /** The tools `applyAccessChanges` writes through, audited to this session. */
+  function accessDeps(session: Parameters<typeof recordAudit>[0]): AccessDeps {
+    return {
+      groups: RoleGroupService.getInstance(),
+      audit: async (entry): Promise<void> => {
+        await recordAudit(session, entry);
+      },
+    };
+  }
 
   // ============================================================
   // Setup Wizard (issue #383)
@@ -77,8 +169,60 @@ export function createWizardRouter(client: Client): Router {
         const features = existing.selectedFeatures;
         const stepParam = req.query.step;
 
+        if (typeof stepParam === "string" && stepParam === "access") {
+          // The groups and Discord are read live, and a failed read is said
+          // out loud: an empty list would look like "nobody is mapped".
+          let ctx: AccessContext | null = null;
+          try {
+            ctx = await readAccess(session);
+          } catch (err) {
+            logger.warn("wizard: access step could not read the server", err);
+          }
+          const selection =
+            existing.access ??
+            (ctx ? currentMapping(ctx.groups) : emptySelection());
+          res.type("text/html").send(
+            renderWizardAccessPage({
+              csrfToken,
+              remainingMs,
+              navFeatureStatus,
+              selection,
+              options: ctx ? pickableRoles(ctx) : null,
+              gaps: ctx
+                ? accessGaps(await enabledGapFeatures(existing), selection)
+                : [],
+              flash,
+            }),
+          );
+          return;
+        }
+
         if (typeof stepParam === "string" && stepParam === "confirm") {
           const pending = Object.entries(existing.configuration);
+          let accessChanges: AccessChange[] = [];
+          let accessProblem: string | null = null;
+          let gaps: AccessGap[] = [];
+          let fingerprint: string | undefined;
+          if (existing.access) {
+            try {
+              const ctx = await readAccess(session);
+              accessProblem = validateSelection(ctx, existing.access);
+              accessChanges = diffAccess(
+                ctx.groups,
+                ctx.roles,
+                existing.access,
+              );
+              fingerprint = accessFingerprint(accessChanges);
+              gaps = accessGaps(
+                await enabledGapFeatures(existing),
+                existing.access,
+              );
+            } catch (err) {
+              logger.warn("wizard: review could not read the server", err);
+              accessProblem =
+                "Discord or the role groups could not be read, so the role mapping can't be checked.";
+            }
+          }
           res.type("text/html").send(
             renderWizardConfirmPage({
               csrfToken,
@@ -86,6 +230,11 @@ export function createWizardRouter(client: Client): Router {
               navFeatureStatus,
               pending,
               metadata: settingsMetadata,
+              accessChanges,
+              accessProblem,
+              accessGaps: gaps,
+              accessFingerprint: fingerprint,
+              flash,
             }),
           );
           return;
@@ -279,6 +428,77 @@ export function createWizardRouter(client: Client): Router {
         details: { features, replacedExisting, discardedKeys },
         result: "success",
       });
+      res.redirect(303, "/admin/wizard?step=access");
+    }),
+  );
+
+  // The Access step (#1321). Saving only remembers the picks in the wizard
+  // session; roles and role groups are written by Apply, after the review.
+  router.post(
+    "/wizard/access",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const wizard = WizardService.getInstance();
+      const state = wizard.getSession(session.discordUserId, session.guildId);
+      if (!state) {
+        flashRedirect(res, "/admin/wizard", {
+          type: "warn",
+          text: "Wizard session expired. Please start again.",
+        });
+        return;
+      }
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const selection: AccessSelection = normaliseSelection({
+        admin: pickedRoles(body["roles_admin"]),
+        staff: pickedRoles(body["roles_staff"]),
+        host: pickedRoles(body["roles_host"]),
+      });
+      const stay = (text: string): void => {
+        res.redirect(
+          303,
+          `/admin/wizard?step=access&${flashRedirectQuery({ type: "warn", text })}`,
+        );
+      };
+      let problem: string | null;
+      try {
+        const ctx = await readAccess(session);
+        problem =
+          validateSelection(ctx, selection) ??
+          pendingConfigOverlap(state.configuration, selection);
+      } catch (err) {
+        logger.warn("wizard: access picks could not be checked", err);
+        await recordAudit(session, {
+          action: "wizard.access",
+          details: { selection },
+          result: "failure",
+          errorMessage: "Discord or the role groups could not be read",
+        });
+        stay(
+          "Discord or the role groups could not be read, so nothing was saved. Try again in a moment.",
+        );
+        return;
+      }
+      if (problem) {
+        await recordAudit(session, {
+          action: "wizard.access",
+          details: { selection },
+          result: "failure",
+          errorMessage: problem,
+        });
+        stay(problem);
+        return;
+      }
+      wizard.setAccess(session.discordUserId, session.guildId, selection);
+      await recordAudit(session, {
+        action: "wizard.access",
+        details: {
+          selection,
+          counts: Object.fromEntries(
+            ACCESS_SCOPES.map((sc) => [sc, selection[sc].length]),
+          ),
+        },
+        result: "success",
+      });
       res.redirect(303, "/admin/wizard?step=0");
     }),
   );
@@ -345,7 +565,14 @@ export function createWizardRouter(client: Client): Router {
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse = coerced.ok
-          ? ((await findGroupRoleReuseForSetting(
+          ? ((state.access
+              ? accessRoleOverlap(
+                  state.access,
+                  guardedRoleIds(k, coerced.value),
+                  k,
+                )
+              : null) ??
+            (await findGroupRoleReuseForSetting(
               session.guildId,
               k,
               coerced.value,
@@ -434,7 +661,7 @@ export function createWizardRouter(client: Client): Router {
       // while another admin links one of the chosen roles to a role group
       // (#1023). Check again right before anything is written, and apply
       // nothing if a role has become group-backed.
-      for (const key of ["birthdays.role_id", "leaderboard_roles.tiers"]) {
+      for (const { key } of ROLE_GRANTING_SETTINGS) {
         if (!(key in state.configuration)) continue;
         const before = await ConfigService.getInstance()
           .get(key)
@@ -442,6 +669,13 @@ export function createWizardRouter(client: Client): Router {
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse =
+          (state.access
+            ? accessRoleOverlap(
+                state.access,
+                guardedRoleIds(key, state.configuration[key]),
+                key,
+              )
+            : null) ??
           (await findGroupRoleReuseForSetting(
             session.guildId,
             key,
@@ -496,6 +730,122 @@ export function createWizardRouter(client: Client): Router {
         }
       }
 
+      const confirmFailure = (text: string): void => {
+        const msg = truncateFlash(text);
+        const qs = new globalThis.URLSearchParams({
+          step: "confirm",
+          flash: "err",
+          msg,
+          sig: signFlash("err", msg),
+        }).toString();
+        res.redirect(303, `/admin/wizard?${qs}`);
+      };
+
+      // Role access (#1321) goes first: it is the part that can be undone, so
+      // a failure further on can put it back. It is checked against the live
+      // server again, and nothing is written if any check fails.
+      let accessUndo: AccessUndo[] = [];
+      let accessGuildId = session.guildId;
+      let accessApplied: AccessChange[] = [];
+      if (state.access) {
+        let ctx: AccessContext;
+        try {
+          ctx = await readAccess(session);
+        } catch (err) {
+          const text = err instanceof Error ? err.message : "Unknown error";
+          logger.error("Wizard apply: server could not be read", err);
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: {
+              stage: "access",
+              keys: Object.keys(state.configuration),
+            },
+            result: "failure",
+            errorMessage: `Discord or the role groups could not be read: ${text}`,
+          });
+          confirmFailure(
+            "Nothing was applied: Discord or the role groups could not be read. Try again in a moment.",
+          );
+          return;
+        }
+        accessGuildId = ctx.guildId;
+        const problem = validateSelection(ctx, state.access);
+        if (problem) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: {
+              stage: "access",
+              keys: Object.keys(state.configuration),
+            },
+            result: "failure",
+            errorMessage: problem,
+          });
+          confirmFailure(
+            `Nothing was applied. ${problem} Go back to Access and fix it.`,
+          );
+          return;
+        }
+        const changes = diffAccess(ctx.groups, ctx.roles, state.access);
+        // Apply only what Review showed. If the groups changed since (another
+        // admin edited one), the recomputed changes differ: stop and re-review.
+        const shown = (req.body as Record<string, unknown> | undefined)
+          ?.accessFingerprint;
+        if (shown !== accessFingerprint(changes)) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: { stage: "access", reason: "review-out-of-date" },
+            result: "failure",
+            errorMessage: "The role groups changed since Review",
+          });
+          confirmFailure(
+            "Nothing was applied: the role groups changed since you opened Review. Look at the updated list and apply again.",
+          );
+          return;
+        }
+        if (changes.length > 0) {
+          const written = await applyAccessChanges(
+            accessDeps(session),
+            ctx,
+            changes,
+          );
+          if (!written.ok) {
+            await recordAudit(session, {
+              action: "wizard.apply",
+              details: {
+                stage: "access",
+                rolledBack: written.rolledBack,
+                stuck: written.stuck,
+              },
+              result: "failure",
+              errorMessage: written.error,
+            });
+            confirmFailure(
+              written.stuck.length > 0
+                ? `Nothing else was applied. ${written.error} These could not be undone and are live: ${written.stuck.join(", ")}. Check Role groups.`
+                : `Nothing was applied. ${written.error} ${
+                    written.rolledBack > 0
+                      ? "The role groups written before it were undone."
+                      : "No role group was written."
+                  }`,
+            );
+            return;
+          }
+          accessUndo = written.undo;
+          accessApplied = written.applied;
+        }
+      }
+      const undoAccess = async (): Promise<string> => {
+        if (accessUndo.length === 0) return "";
+        const back = await rollbackAccess(
+          accessDeps(session),
+          accessGuildId,
+          accessUndo,
+        );
+        return back.stuck.length > 0
+          ? ` The role mapping could not be fully undone and is live for: ${back.stuck.join(", ")}. Check Role groups.`
+          : " The role mapping was undone too.";
+      };
+
       const pendingKeys = Object.keys(state.configuration);
       try {
         const result = await wizard.applyConfiguration(
@@ -512,6 +862,7 @@ export function createWizardRouter(client: Client): Router {
             rolledBackKeys: result.rolledBackKeys,
             revertFailedKeys: result.revertFailedKeys,
             reloadFailed: result.reloadFailed ?? false,
+            accessGroups: accessApplied.map((c) => c.groupId ?? c.groupName),
           },
           result: result.success ? "success" : "failure",
           errorMessage: result.success
@@ -522,7 +873,11 @@ export function createWizardRouter(client: Client): Router {
           wizard.endSession(session.discordUserId, session.guildId);
           flashRedirect(res, "/admin/settings", {
             type: "ok",
-            text: `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}.`,
+            text: `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
+              accessApplied.length > 0
+                ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
+                : ""
+            }.`,
           });
           return;
         }
@@ -531,7 +886,9 @@ export function createWizardRouter(client: Client): Router {
         // keys (if any) could not be reverted and are therefore live — and
         // keep the session so they can retry from the confirm step instead
         // of losing their input.
-        const failureMsg = truncateFlash(wizardApplyFailureMessage(result));
+        const failureMsg = truncateFlash(
+          wizardApplyFailureMessage(result) + (await undoAccess()),
+        );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
           flash: "err",
@@ -542,6 +899,7 @@ export function createWizardRouter(client: Client): Router {
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Wizard apply failed", err);
+        const accessNote = await undoAccess();
         await recordAudit(session, {
           action: "wizard.apply",
           details: { keys: pendingKeys },
@@ -551,7 +909,7 @@ export function createWizardRouter(client: Client): Router {
         wizard.endSession(session.discordUserId, session.guildId);
         flashRedirect(res, "/admin/settings", {
           type: "err",
-          text: `Wizard failed: ${text}`,
+          text: `Wizard failed: ${text}${accessNote}`,
         });
       }
     }),

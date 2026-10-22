@@ -582,6 +582,17 @@ describe("powerful roles can't be handed out automatically (#1145)", () => {
     expect(mockConfigSet).toHaveBeenCalledTimes(1);
     expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
   });
+
+  it.each(["rules.role_id", "moderation.raid.quarantine_role_id"])(
+    "refuses a powerful role as %s in an import (#1321)",
+    async (key) => {
+      await harness.post("/settings/import/apply", {
+        yaml: ["quotes.max_length: 500", `${key}: "${POWERFUL}"`].join("\n"),
+      });
+      expect(mockConfigSet).toHaveBeenCalledTimes(1);
+      expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
+    },
+  );
 });
 
 describe("POST /settings/reset", () => {
@@ -1892,6 +1903,63 @@ describe("POST /settings/import/apply with role groups (#1023)", () => {
     });
     expect(mockConfigSet).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["rules.role_id", "rules"],
+    ["moderation.raid.quarantine_role_id", "moderation"],
+  ])(
+    "refuses a group's role as %s in an import, and applies the rest (#1321)",
+    async (key) => {
+      const res = await harness.post("/settings/import/apply", {
+        yaml: ["quotes.max_length: 500", `${key}: "777777777777777777"`].join(
+          "\n",
+        ),
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        key,
+      );
+      expect(mockConfigSet).toHaveBeenCalledTimes(1);
+      expect(mockConfigSet.mock.calls[0]).toContain("quotes.max_length");
+      expect(lastAudit()).toMatchObject({
+        details: { applied: 1, failed: 1 },
+      });
+    },
+  );
+
+  it.each(["rules.role_id", "moderation.raid.quarantine_role_id"])(
+    "still applies a role no group backs as %s in an import (#1321)",
+    async (key) => {
+      await harness.post("/settings/import/apply", {
+        yaml: `${key}: "888888888888888888"`,
+      });
+      expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["rules.role_id", "rules"],
+    ["moderation.raid.quarantine_role_id", "moderation"],
+  ])(
+    "refuses a group's role as %s from a section save and from Settings (#1321)",
+    async (key, category) => {
+      const section = await harness.post("/settings/save-section", {
+        category,
+        keys: [key],
+        [`value_${key}`]: "777777777777777777",
+      });
+      expect(parseFlashRedirect(section.headers.get("location")).type).toBe(
+        "err",
+      );
+      const single = await harness.post("/settings/set", {
+        key,
+        value: "777777777777777777",
+      });
+      expect(parseFlashRedirect(single.headers.get("location")).type).toBe(
+        "err",
+      );
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("POST /settings/import/apply", () => {
