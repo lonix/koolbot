@@ -76,3 +76,8 @@ export function grantSetting(key: string): RoleGrantSetting | undefined {
 export function grantedRoleIds(key: string, value: unknown): string[] {
   return grantSetting(key)?.roleIds(value) ?? [];
 }
+
+/** Is this a setting a feature hands a role out through? */
+export function isRoleGrantingSetting(key: string): boolean {
+  return grantSetting(key) !== undefined;
+}

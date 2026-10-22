@@ -43,7 +43,7 @@ import {
   findGroupRoleReuseForSetting,
   findPowerfulRoleForSetting,
 } from "./helpers.js";
-import { TIERS_KEY } from "../../leaderboard-tiers.js";
+import { isRoleGrantingSetting } from "../../../services/role-grants.js";
 import {
   rearmScheduledServices,
   rearmFailureNote,
@@ -498,7 +498,7 @@ export function createSettingsRouter(client: Client): Router {
       // changed value is checked, so an existing collision doesn't block
       // unrelated saves of the same section.
       for (const c of coerced) {
-        if (!(c.key === "birthdays.role_id" || c.key === TIERS_KEY)) continue;
+        if (!isRoleGrantingSetting(c.key)) continue;
         const before = await ConfigService.getInstance()
           .get(c.key)
           .catch(() => undefined);
@@ -935,17 +935,16 @@ export function createSettingsRouter(client: Client): Router {
       // import that names one is refused for that key only.
       const afterGroupCheck: typeof toWrite = [];
       for (const item of toWrite) {
-        const reuse =
-          item.key === "birthdays.role_id" || item.key === TIERS_KEY
-            ? await findGroupRoleReuseForSetting(
-                session.guildId,
-                item.key,
-                item.value,
-                await config.get(item.key).catch(() => undefined),
-              )
-            : null;
+        const reuse = isRoleGrantingSetting(item.key)
+          ? await findGroupRoleReuseForSetting(
+              session.guildId,
+              item.key,
+              item.value,
+              await config.get(item.key).catch(() => undefined),
+            )
+          : null;
         const powerful =
-          !reuse && (item.key === "birthdays.role_id" || item.key === TIERS_KEY)
+          !reuse && isRoleGrantingSetting(item.key)
             ? await findPowerfulRoleForSetting(
                 client,
                 session.guildId,
