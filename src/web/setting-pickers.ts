@@ -144,7 +144,7 @@ export function renderColourInput(
   return (
     `<span class="kb-colour" data-colour>` +
     (legacy
-      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(current)}" data-colour-mirror${lock}>`
+      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(current)}" data-colour-mirror data-stored="${escapeHtml(current)}"${lock}>`
       : "") +
     `<input type="color" class="kb-colour__swatch" data-colour-input${attr("id", a.id)}` +
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
@@ -169,10 +169,22 @@ export const COLOUR_INPUT_SCRIPT =
   "function parts(el){var box=el.closest('[data-colour]');if(!box)return null;" +
   "return{box:box,color:box.querySelector('[data-colour-input]'),def:box.querySelector('[data-colour-default]'),mirror:box.querySelector('[data-colour-mirror]')}}" +
   "function sync(p){if(!p.color||!p.def||p.def.hasAttribute('data-dep-locked'))return;p.color.disabled=p.def.checked}" +
+  // The mirror holds the stored non-colour until a colour is picked. A pick
+  // that lands back on the swatch's first colour is "no pick", so the stored
+  // text returns: the save bar cannot see a hidden field change.
+  "function mirrorFor(p){if(p.mirror)p.mirror.value=p.color.value===p.color.defaultValue?p.mirror.getAttribute('data-stored'):p.color.value}" +
+  // Capture phase: the save bar listens on the form while bubbling, so it must
+  // find the swatch and the box already in step. Discard's restoring events
+  // (`kbRestore`) are not picks: the box and the mirror go back together.
   "document.addEventListener('input',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-input]'))return;" +
-  "var p=parts(el);if(!p)return;if(p.def&&p.def.checked){p.def.checked=false;sync(p);p.def.dispatchEvent(new Event('change',{bubbles:true}))}" +
-  "if(p.mirror)p.mirror.value=el.value});" +
-  "document.addEventListener('change',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-default]'))return;var p=parts(el);if(p)sync(p)});" +
+  "var p=parts(el);if(!p)return;" +
+  "if(e.kbRestore){if(p.mirror)p.mirror.value=p.mirror.getAttribute('data-stored');sync(p);return}" +
+  "if(p.def&&p.def.checked){p.def.checked=false;sync(p);p.def.dispatchEvent(new Event('change',{bubbles:true}))}" +
+  "mirrorFor(p)},true);" +
+  "document.addEventListener('change',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-default]'))return;var p=parts(el);" +
+  "if(!p)return;if(e.kbRestore&&p.mirror)p.mirror.value=p.mirror.getAttribute('data-stored');sync(p)},true);" +
+  // After a save the stored value is whatever was posted.
+  "document.addEventListener('kb-saved',function(e){Array.prototype.forEach.call(e.target.querySelectorAll('[data-colour-mirror]'),function(m){m.setAttribute('data-stored',m.value)})},true);" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-colour]'),function(box){sync(parts(box))})" +
   "})();";
 

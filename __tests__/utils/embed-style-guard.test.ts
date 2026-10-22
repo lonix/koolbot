@@ -23,6 +23,8 @@ const ALLOWED: Record<string, string> = {
   "content/notice-categories.ts":
     "per-category colours of the notice board; the community's own palette",
   "services/role-group-plan.ts": "0xffffff is the Discord role-colour maximum",
+  "utils/setting-formats.ts":
+    "#99aab5 is the swatch a colour input shows for 'use Discord's default role colour' (a colour input cannot be empty); not an embed colour",
 };
 
 /** 6-digit hex number (0xRRGGBB) or a "#rrggbb" string literal. */
