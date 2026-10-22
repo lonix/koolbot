@@ -144,7 +144,7 @@ export function renderColourInput(
   return (
     `<span class="kb-colour" data-colour>` +
     (legacy
-      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(current)}" data-colour-mirror>`
+      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(current)}" data-colour-mirror${lock}>`
       : "") +
     `<input type="color" class="kb-colour__swatch" data-colour-input${attr("id", a.id)}` +
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +

@@ -11,6 +11,7 @@
  */
 
 import { ChannelType, PermissionFlagsBits } from "discord.js";
+import { settingsMetadata } from "../../src/services/config-schema.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -1285,7 +1286,11 @@ export function adminPages(): A11yPage[] {
           "events.timezone": "",
           "events.channel_prefix": "📅",
         },
-        metadata: {},
+        metadata: {
+          "events.enabled": settingsMetadata["events.enabled"],
+          "events.timezone": settingsMetadata["events.timezone"],
+          "events.channel_prefix": settingsMetadata["events.channel_prefix"],
+        },
         defaultValues: {
           "events.enabled": false,
           "events.timezone": "",
@@ -1645,6 +1650,28 @@ export function adminPages(): A11yPage[] {
         announcementConfigured: false,
         timezone: "Europe/Stockholm",
         settingRows: [
+          {
+            key: "events.timezone",
+            label: "Event timezone (IANA)",
+            current: "",
+            defaultValue: "",
+            type: "string",
+            description:
+              "IANA timezone used to interpret the start time of an event. Empty falls back to the server timezone.",
+            category: "events",
+            format: "timezone",
+          },
+          {
+            key: "events.channel_prefix",
+            label: "Event channel name prefix",
+            current: "📅",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Prefix prepended to the event title when naming the temporary voice channel.",
+            category: "events",
+            format: "emoji",
+          },
           {
             key: "events.enabled",
             label: "Events enabled",
@@ -2387,7 +2414,31 @@ export function adminPages(): A11yPage[] {
             channelId: "v2",
           },
         ],
-        settingRows: SETTING_ROWS.slice(0, 4),
+        settingRows: [
+          ...SETTING_ROWS.slice(0, 4),
+          {
+            key: "voicechannels.channel.prefix",
+            label: "Per-user channel name prefix",
+            current: "🎮",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Prefix prepended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "emoji",
+          },
+          {
+            key: "voicechannels.channel.suffix",
+            label: "Per-user channel name suffix",
+            current: "",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Suffix appended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "emoji",
+          },
+        ],
         categoryChannels: CATEGORIES,
         flash: FLASH,
       }),

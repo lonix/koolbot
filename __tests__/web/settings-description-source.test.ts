@@ -123,3 +123,36 @@ describe("buildSettingRows description source (#1302)", () => {
     expect(row.description).toBe(ORPHAN_TEXT);
   });
 });
+
+describe("picker settings reach the rendered pages (#1426)", () => {
+  const KEYS = [
+    "events.timezone",
+    "events.channel_prefix",
+    "reactionroles.group_role_colour",
+    "voicechannels.channel.prefix",
+    "voicechannels.channel.suffix",
+  ];
+
+  it("carries each key's format on the rows the feature pages build", () => {
+    expect(
+      Object.fromEntries(
+        buildSettingRows(KEYS, []).map((r) => [r.key, r.format]),
+      ),
+    ).toEqual({
+      "events.timezone": "timezone",
+      "events.channel_prefix": "emoji",
+      "reactionroles.group_role_colour": "colour",
+      "voicechannels.channel.prefix": "emoji",
+      "voicechannels.channel.suffix": "emoji",
+    });
+  });
+
+  it("renders them as pickers on the Settings page", async () => {
+    const html = await (await harness.get("/settings")).text();
+    expect(html).toContain(
+      '<select class="kb-select" id="set-events.timezone"',
+    );
+    expect(html).toContain('type="color"');
+    expect(html).toContain("data-emoji-field");
+  });
+});

@@ -562,6 +562,16 @@ describe("detectNamingConvention", () => {
     expect(n.categoryEmojiPrefix).toBe(true);
     expect(n.suggestedPrefix).toBe("🎮 | ");
   });
+  it("does not suggest a prefix the Settings page would refuse (#1426)", () => {
+    // Crossed swords with a variation selector, a space, a bar and a space is
+    // six code points, over the four a prefix may hold.
+    const n = detectNamingConvention(
+      ["⚔️ | general", "⚔️ | chat", "⚔️ | clips"],
+      [],
+    );
+    expect(n.pattern).toBe("emoji-separator");
+    expect(n.suggestedPrefix).toBeNull();
+  });
   it("detects lower-kebab", () => {
     const n = detectNamingConvention(
       ["general-chat", "off-topic", "memes"],

@@ -1,4 +1,4 @@
-/* global Document, HTMLInputElement, HTMLSelectElement, HTMLElement, HTMLButtonElement */
+/* global Document, HTMLFormElement, HTMLInputElement, HTMLSelectElement, HTMLElement, HTMLButtonElement */
 /**
  * The timezone select, colour input and emoji field of #1426: the server rules,
  * the markup (read through a DOM, never regular expressions over HTML) and the
@@ -29,12 +29,14 @@ import {
   pickableMarkers,
 } from "../../src/web/event-group-form.js";
 import {
+  readSettingField,
   renderSettingsPage,
   type SettingRow,
 } from "../../src/web/admin-views.js";
 import { renderNewEventBody } from "../../src/web/event-new-view.js";
 import { renderEventEditBody } from "../../src/web/event-edit-view.js";
 import { listSupportedTimezones } from "../../src/utils/timezone.js";
+import { allPages } from "./a11y-pages.js";
 
 function doc(html: string): Document {
   return new JSDOM(`<!doctype html><body>${html}</body>`).window.document;
@@ -463,6 +465,15 @@ describe("renderColourInput", () => {
     expect(p.def.disabled).toBe(true);
   });
 
+  it("a locked legacy colour posts one value: the round trip, not the mirror too", () => {
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${renderColourInput("value_c", "use_default_c", "red", { disabled: true })}` +
+        `<input type="hidden" name="value_c" value="red"></form></body>`,
+    );
+    const form = dom.window.document.querySelector("form") as HTMLFormElement;
+    expect(new dom.window.FormData(form).getAll("value_c")).toEqual(["red"]);
+  });
+
   it("is a labelled control", () => {
     const d = doc(
       renderColourInput("value_c", "use_default_c", "", { id: "x" }),
@@ -548,6 +559,76 @@ describe("COLOUR_INPUT_SCRIPT", () => {
     expect(el<HTMLInputElement>(dom, "[data-colour-default]").disabled).toBe(
       true,
     );
+  });
+});
+
+describe("what the browser posts after the colour script ran", () => {
+  function posted(dom: JSDOM): Record<string, string> {
+    const form = dom.window.document.querySelector("form") as HTMLFormElement;
+    return Object.fromEntries(
+      [...new dom.window.FormData(form).entries()].map(([k, v]) => [
+        k,
+        String(v),
+      ]),
+    );
+  }
+
+  it("ticking Use default on a stored non-colour saves the default, not the old text", () => {
+    const dom = boot(
+      renderColourInput(
+        "value_reactionroles.group_role_colour",
+        "use_default_reactionroles.group_role_colour",
+        "red",
+      ),
+      [COLOUR_INPUT_SCRIPT],
+    );
+    const def = dom.window.document.querySelector(
+      "[data-colour-default]",
+    ) as HTMLInputElement;
+    def.checked = true;
+    def.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    const body = posted(dom);
+    expect(readSettingField(body, "reactionroles.group_role_colour")).toBe("");
+    expect(
+      readSettingField(
+        { "value_reactionroles.group_role_colour": "red" },
+        "reactionroles.group_role_colour",
+      ),
+    ).toBe("red");
+  });
+
+  it("picking a colour on a stored non-colour replaces it and leaves Use default off", () => {
+    const dom = boot(
+      renderColourInput(
+        "value_reactionroles.group_role_colour",
+        "use_default_reactionroles.group_role_colour",
+        "red",
+      ),
+      [COLOUR_INPUT_SCRIPT],
+    );
+    const swatch = dom.window.document.querySelector(
+      "[data-colour-input]",
+    ) as HTMLInputElement;
+    swatch.value = "#123456";
+    swatch.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    const body = posted(dom);
+    expect(readSettingField(body, "reactionroles.group_role_colour")).toBe(
+      "#123456",
+    );
+  });
+
+  it("an untouched stored colour posts as it was", () => {
+    const dom = boot(
+      renderColourInput(
+        "value_reactionroles.group_role_colour",
+        "use_default_reactionroles.group_role_colour",
+        "#a95f55",
+      ),
+      [COLOUR_INPUT_SCRIPT],
+    );
+    expect(
+      readSettingField(posted(dom), "reactionroles.group_role_colour"),
+    ).toBe("#a95f55");
   });
 });
 
@@ -773,5 +854,38 @@ describe("the event forms", () => {
     expect(sel.tagName).toBe("SELECT");
     expect(sel.value).toBe("Mars/Olympus");
     expect(sel.options[0].textContent).toBe("Current (Mars/Olympus)");
+  });
+});
+
+describe("the accessibility fixtures (#1426)", () => {
+  const pages = allPages();
+  const html = (name: string): string => {
+    const page = pages.find((p) => p.name === name);
+    if (!page) throw new Error(`no fixture named ${name}`);
+    return page.html;
+  };
+
+  it("scan every page that now shows a picker, with the picker in it", () => {
+    const withPickers: Array<[string, string[]]> = [
+      [
+        "Settings (timezone select, colour input, emoji fields)",
+        ["data-tz-search", "data-colour-default", "data-emoji-field"],
+      ],
+      [
+        "Settings (pickers holding values they cannot produce, rejected)",
+        ["(custom)", "data-colour-mirror", "data-emoji-field"],
+      ],
+      [
+        "Setup wizard step (timezone and emoji settings)",
+        ["data-tz-search", "data-emoji-field"],
+      ],
+      ["Events", ["data-tz-search"]],
+      ["Voice channels", ["data-emoji-field"]],
+      ["/me new event", ["data-tz-search"]],
+      ["/me edit event (not started)", ["data-tz-search"]],
+    ];
+    for (const [name, markers] of withPickers) {
+      for (const marker of markers) expect(html(name)).toContain(marker);
+    }
   });
 });
