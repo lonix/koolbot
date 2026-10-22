@@ -61,7 +61,7 @@ and warns when a switched-on feature has nobody to run it.
 | Old (`admin-layout.ts`, `user-layout.ts`) | Now |
 | --- | --- |
 | `.banner`, `.pill`, `a.surface` | TopBar with whoami and ScopeBadges |
-| `nav.side`, `.nav-group-heading`, `.nav-badge`, `.nav-disabled` | SideNav: scope sections, or the console grouped by task with *Turned off* folded |
+| `nav.side`, `.nav-group-heading`, `.nav-badge`, `.nav-disabled` | SideNav: scope sections, or the console grouped by task with *N turned off* folded |
 | `h1` + `.subtitle` | PageHeader |
 | `.page-nav` | Tabs (switched-off features not rendered) |
 | `.card` | Panel |

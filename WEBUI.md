@@ -891,43 +891,49 @@ No dashboard JSON ships with the bot — wire these up to taste:
 
 ### Admin panel (`/admin/*`, admin-role sessions only)
 
-| Page                  | Replaces                                                                                            |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| **Dashboard**         | `/botstats`                                                                                         |
-| **Settings**          | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
-| **Permissions**       | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
-| **Setup Wizard**      | `/setup wizard`                                                                                     |
-| **Announcements**     | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
-| **Birthdays**         | (new — upcoming list, edit/remove, message preview, **Run now**) + editable `birthdays.*` settings  |
-| **Events**            | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
-| **Polls**             | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
-| **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
-| **Notices**           | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
-| **Quotes**            | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
-| **Bot Permissions**   | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
-| **Bot Status**        | (new — edit the "Watching …" presence message pools)                                                |
-| **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
-| **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
-| **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
-| **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
-| **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
-| **Channel Claims**    | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
-| **Channel Manager**   | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
-| **Adopt Events**      | (new — adopt existing Discord scheduled events as KoolBot events; plan → preview → apply)           |
-| **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
-| **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
-| **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
-| **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
-| **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
-| **Tickets**           | (new — `/ticket` overview: claim / close / reopen) + editable `tickets.*` settings                  |
-| **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
+| Page                    | Replaces                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **Dashboard**           | `/botstats`                                                                                         |
+| **All settings**        | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
+| **Command permissions** | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
+| **Setup wizard**        | `/setup wizard`                                                                                     |
+| **Announcements**       | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
+| **Birthdays**           | (new — upcoming list, edit/remove, message preview, **Run now**) + editable `birthdays.*` settings  |
+| **Events**              | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
+| **Polls**               | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
+| **Reaction roles**      | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
+| **Notices**             | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
+| **Quotes**              | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
+| **Bot permissions**     | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
+| **Presence**            | (new — edit the "Watching …" presence message pools)                                                |
+| **Voice channels**      | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
+| **Weekly digest**       | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
+| **Leaderboard roles**   | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
+| **Role groups**         | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
+| **Rules**               | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
+| **Channel claims**      | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
+| **Channel manager**     | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
+| **Adopt Events**        | (new — adopt existing Discord scheduled events as KoolBot events; plan → preview → apply)           |
+| **Voice analytics**     | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
+| **Database**            | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Command audit**       | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
+| **Command metrics**     | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
+| **Moderation**          | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
+| **Tickets**             | (new — `/ticket` overview: claim / close / reopen) + editable `tickets.*` settings                  |
+| **Environment**         | (new — read-only env diagnostics)                                                                   |
 
-The sidebar groups the pages under three headings, in this order: **Info**
-(Dashboard, Bot Status, Bot Permissions, Database, Command Audit, Command Metrics, Moderation,
-Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
-(Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
-Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature pages that
-are switched off sort to the bottom of their group.
+The sidebar groups the pages by what you are trying to do (#1296), in this order:
+**Dashboard** on its own at the top; **Features** (the switched-on features, A to Z:
+Announcements, Birthdays, Events, Leaderboard roles, Moderation, Notices, Polls, Quotes,
+Reaction roles, Rules, Tickets, Voice analytics, Voice channels, Weekly digest);
+**Access** (Command permissions, Role groups, Bot permissions); **Server setup**
+(Setup wizard, Server scan, Channel claims, Channel manager, Adoption history); **Bot**
+(Presence, Database, Environment, Command audit, Command metrics); and **All settings**
+pinned at the bottom. Features that are switched off are not listed with the others: they
+fold into **N turned off** under Features, so each one stays one click from being enabled.
+The folded list opens on a switched-off feature's own page, and is otherwise remembered
+open or closed per browser. The routes did not change with the names (Command permissions
+is still `/admin/permissions`, Presence `/admin/bot-status`, Environment `/admin/bootstrap`).
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
@@ -1178,7 +1184,7 @@ _"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
 
-The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
+The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
 not have to guess why a feature does nothing. It is read-only and writes nothing
 to Discord. For each missing permission it shows where it is missing (server-wide,
@@ -1209,12 +1215,12 @@ Links) are not covered yet.
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
   be reached the page says it is using the bot's cached view; a feature that cannot
   be checked is listed as _could not be checked_, never as fine.
-- **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
+- **Status indicator.** The **Bot permissions** entry in the sidebar shows a badge
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
 
-The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
+The **Presence** page (`/admin/bot-status`, formerly Bot Status) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
 are in voice: the _empty_, _one user_, and _multiple users_ pools. Each
 pool has an add / edit / remove / reorder list plus a paste-a-list

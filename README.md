@@ -225,10 +225,10 @@ page and click **Reload commands to Discord**.
 
 KoolBot has a **two-tier** configuration model:
 
-| Tier                | Stored in | Edited via                                 | Picked up                  |
-| ------------------- | --------- | ------------------------------------------ | -------------------------- |
-| Bootstrap / secrets | `.env`    | Edit the file on the host                  | Bot restart                |
-| Feature settings    | MongoDB   | Web UI **Settings**, **Permissions**, etc. | Saved immediately (note ↓) |
+| Tier                | Stored in | Edited via                                             | Picked up                  |
+| ------------------- | --------- | ------------------------------------------------------ | -------------------------- |
+| Bootstrap / secrets | `.env`    | Edit the file on the host                              | Bot restart                |
+| Feature settings    | MongoDB   | Web UI **All settings**, **Command permissions**, etc. | Saved immediately (note ↓) |
 
 > ↓ Plain feature toggles take effect on the next read. A few
 > services (cron schedules, channel managers) cache derived state and
@@ -243,7 +243,7 @@ Web UI's Settings page once the bot is running.
 
 1. Run `/config` in Discord.
 2. Open the DM'd link.
-3. Click **Setup Wizard** in the navigation.
+3. Click **Setup wizard** in the navigation.
 4. Pick the features you want (voice channels, voice tracking, quotes,
    achievements, logging, etc.) and the wizard fills in the relevant
    settings for you.
