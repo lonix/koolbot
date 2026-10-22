@@ -103,6 +103,7 @@ describe("notification availability (#1292)", () => {
     stored({
       "achievements.enabled": true,
       "digest.enabled": true,
+      "rewind.enabled": true,
       "rewind.nudge.enabled": true,
     });
     expect(await readMeNotificationAvailability(ON)).toEqual({
@@ -132,7 +133,7 @@ describe("notification availability (#1292)", () => {
   });
 
   it("needs the nudge AND the Rewind page for the Rewind row", async () => {
-    stored({ "rewind.nudge.enabled": true });
+    stored({ "rewind.enabled": true, "rewind.nudge.enabled": true });
     expect((await readMeNotificationAvailability(ON)).rewind).toBe(true);
     // Nudge on, page off: the DM would link to a 404, so no row.
     expect(
@@ -140,7 +141,7 @@ describe("notification availability (#1292)", () => {
         .rewind,
     ).toBe(false);
     // Page on, nudge off.
-    stored({ "rewind.nudge.enabled": false });
+    stored({ "rewind.enabled": true, "rewind.nudge.enabled": false });
     expect((await readMeNotificationAvailability(ON)).rewind).toBe(false);
   });
 

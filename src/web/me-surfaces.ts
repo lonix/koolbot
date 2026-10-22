@@ -87,7 +87,8 @@ export async function readMeNotificationAvailability(
   return {
     achievements: achievements && achievementDms,
     digest,
-    // The DM links to /me/rewind, so it needs the Rewind page on as well.
+    // `nudge` already includes the Rewind page; the flag keeps this row
+    // aligned with the page gate even if the helper changes.
     rewind: flags.rewindEnabled && nudge,
   };
 }

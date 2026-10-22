@@ -661,14 +661,14 @@ off) still renders cleanly with the remaining sections hidden.
 
 The feature and the end-of-year DM nudge have **separate** switches
 (#608). `rewind.enabled` gates the page itself; `rewind.nudge.enabled`
-gates the December DM independently. Following the repo's opt-in
+gates the December DM, which also needs the page on (#1292). Following the repo's opt-in
 convention, both default to `false` — set `rewind.enabled = true` to
 expose the page.
 
 | Setting                | Default          | Description                                                                                                                                                                                          |
 | ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, `/me/rewind` answers 404 and its tab, card and notification row are not shown (#1292) |
-| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled`                                                                                       |
+| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Only runs while `rewind.enabled` is on too, since the page it links to answers 404 otherwise (#1292)                  |
 | `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                 |
 | `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                       |
 

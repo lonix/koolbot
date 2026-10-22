@@ -1381,6 +1381,8 @@ export interface PrivacyDataRow {
 export interface PrivacyPageBodyOptions {
   /** `privacy.enabled` — when false the download is refused, so hide it. */
   featureEnabled: boolean;
+  /** `rewind.enabled` — the recap link is left out while Rewind is off (#1292). Omitted keeps it. */
+  rewindEnabled?: boolean;
   /** Collections the export includes, in registry order. */
   included: PrivacyDataRow[];
   /** Collections deliberately left out, with the reason. */
@@ -1583,8 +1585,11 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     "<h2>Download your data</h2>",
     "<p>One JSON file with every row Koolbot holds that is about <strong>you</strong> — " +
       "your voice history, activity counters, preferences, quotes, RSVPs and reminders. " +
-      "It is a record, not a recap: for the readable version of your year, see " +
-      '<a href="/me/rewind">Rewind</a>.</p>',
+      "It is a record" +
+      (opts.rewindEnabled === false
+        ? "."
+        : ', not a recap: for the readable version of your year, see <a href="/me/rewind">Rewind</a>.') +
+      "</p>",
     `<p class="muted">Long histories are capped at ${opts.maxItems} entries per collection; ` +
       "anything clipped is listed under <code>truncated</code> in the file. Each download is " +
       "recorded in the server's Web UI audit log.</p>",

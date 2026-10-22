@@ -15,9 +15,17 @@ describe("isRewindNudgeEnabled (#608, #1292)", () => {
     ).toBe(false);
     expect(
       await isRewindNudgeEnabled(
-        reader({ "rewind.enabled": false, "rewind.nudge.enabled": true }),
+        reader({ "rewind.enabled": true, "rewind.nudge.enabled": true }),
       ),
     ).toBe(true);
+  });
+
+  it("is off while the Rewind page is off, even with the nudge switch on (#1292)", async () => {
+    expect(
+      await isRewindNudgeEnabled(
+        reader({ "rewind.enabled": false, "rewind.nudge.enabled": true }),
+      ),
+    ).toBe(false);
   });
 
   it("inherits rewind.enabled when the nudge switch was never stored", async () => {

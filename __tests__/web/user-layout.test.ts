@@ -12,6 +12,7 @@ import {
   renderUserVoiceBody,
   renderUserNotificationsBody,
   renderUserTimezoneBody,
+  renderUserPrivacyBody,
   USER_NAV_ITEMS,
 } from "../../src/web/user-layout.js";
 
@@ -263,5 +264,28 @@ describe("notifications page with nothing to offer (#1292)", () => {
     expect(html).toContain("kb-empty__title");
     expect(html).not.toContain("<form");
     expect(html).not.toContain("Save preferences");
+  });
+});
+
+describe("privacy page does not link to Rewind while it is off (#1292)", () => {
+  const base = {
+    featureEnabled: true,
+    included: [],
+    excluded: [],
+    maxItems: 100,
+    reset: { enabled: false, cooldownHours: 0, csrfToken: "c" },
+    trackingOptOut: { offered: false, optedOutAt: null, csrfToken: "c" },
+  } as unknown as Parameters<typeof renderUserPrivacyBody>[0];
+
+  it("drops the recap sentence and link", () => {
+    const html = renderUserPrivacyBody({ ...base, rewindEnabled: false });
+    expect(html).not.toContain("/me/rewind");
+    expect(html).not.toContain(">Rewind</a>");
+    expect(html).toContain("It is a record.");
+  });
+
+  it("keeps it while Rewind is on", () => {
+    const html = renderUserPrivacyBody({ ...base, rewindEnabled: true });
+    expect(html).toContain('<a href="/me/rewind">Rewind</a>');
   });
 });

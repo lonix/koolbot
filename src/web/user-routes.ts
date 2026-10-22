@@ -1616,6 +1616,7 @@ export function createUserRouter(
           active: "/me/privacy",
           body: renderUserPrivacyBody({
             featureEnabled: flags.privacyEnabled,
+            rewindEnabled: flags.rewindEnabled,
             included: summariseByCollection(EXPORTABLE_USER_DATA),
             excluded: summariseByCollection(EXCLUDED_USER_DATA),
             maxItems,

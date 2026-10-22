@@ -1,7 +1,8 @@
 /**
  * Whether the end-of-year Rewind nudge DM is on. One rule for the nudge job
  * and for `/me/notifications`, which offers the toggle only while the DM can
- * be sent.
+ * be sent. It needs the Rewind page (`rewind.enabled`) too: the DM links to
+ * it and the page answers 404 while off (#1292).
  *
  * Keys off the dedicated `rewind.nudge.enabled` toggle (#608), falling back
  * to the legacy `rewind.enabled` value for installs that opted into the nudge
@@ -20,6 +21,9 @@ export type BooleanReader = (
 export async function isRewindNudgeEnabled(
   read: BooleanReader,
 ): Promise<boolean> {
-  const legacy = await read("rewind.enabled", false);
-  return read("rewind.nudge.enabled", legacy);
+  const page = await read("rewind.enabled", false);
+  // The DM links to /me/rewind, which answers 404 while the page is off
+  // (#1292), so a nudge without the page has nowhere to send anyone.
+  if (!page) return false;
+  return read("rewind.nudge.enabled", page);
 }
