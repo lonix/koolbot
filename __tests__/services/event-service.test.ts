@@ -58,6 +58,8 @@ const {
   isRecurring,
   recurrenceLabel,
   RecurrenceDisabledError,
+  ImpromptuNotReadyError,
+  IMPROMPTU_START_BUFFER_MS,
 } = await import("../../src/services/event-service.js");
 
 const MIN = 60 * 1000;
@@ -1131,6 +1133,99 @@ describe("recurring event lifecycle", () => {
     });
     expect(created[0].recurrence).toBe("none");
     expect(created[0].seriesId ?? null).toBeNull();
+  });
+
+  describe("impromptu events (#1305)", () => {
+    const base = {
+      guildId: "guild-1",
+      title: "Right now",
+      description: "",
+      timezone: "UTC",
+      durationMinutes: 60,
+      createdBy: "host-1",
+    };
+
+    function withCategory(
+      service: InstanceType<typeof EventService>,
+      categoryId: string,
+    ): void {
+      (
+        service as unknown as { configService: { getString: jest.Mock } }
+      ).configService.getString = jest.fn(async () => categoryId);
+    }
+
+    it("createEvent marks an impromptu event and skips its reminder", async () => {
+      const { service } = buildService();
+      await service.createEvent({
+        ...base,
+        startTime: new Date("2026-07-10T20:00:00Z"),
+        impromptu: true,
+      });
+      expect(created[0].impromptu).toBe(true);
+      expect(created[0].reminderSent).toBe(true);
+    });
+
+    it("a planned event is unchanged: no flag, reminder still due", async () => {
+      const { service } = buildService();
+      await service.createEvent({
+        ...base,
+        startTime: new Date("2026-07-10T20:00:00Z"),
+      });
+      expect(created[0]).not.toHaveProperty("impromptu");
+      expect(created[0].reminderSent).toBe(false);
+    });
+
+    it("createImpromptuEvent starts a few seconds ahead, one-off, then runs Start now", async () => {
+      const { service } = buildService();
+      withCategory(service, "cat-1");
+      const startNow = jest
+        .spyOn(service, "startEventNow")
+        .mockImplementation(async () => ({ _id: "new-1" }) as never);
+      const now = new Date("2026-07-10T20:00:00Z");
+      const result = await service.createImpromptuEvent(base, now);
+      expect(created).toHaveLength(1);
+      expect((created[0].startTime as Date).getTime()).toBe(
+        now.getTime() + IMPROMPTU_START_BUFFER_MS,
+      );
+      expect(created[0].recurrence).toBe("none");
+      // A Now event is a plain one-off: the series edit code never sees a series.
+      expect(isRecurring(created[0] as never)).toBe(false);
+      expect(created[0].seriesId ?? null).toBeNull();
+      expect(created[0].impromptu).toBe(true);
+      expect(startNow).toHaveBeenCalledWith("new-1", "guild-1");
+      expect(result.started).toBe(true);
+    });
+
+    it("reports started: false, keeping the row, when Start now cannot make the channel", async () => {
+      const { service } = buildService();
+      withCategory(service, "cat-1");
+      jest.spyOn(service, "startEventNow").mockResolvedValue(null);
+      const result = await service.createImpromptuEvent(base);
+      expect(created).toHaveLength(1);
+      expect(result.started).toBe(false);
+      expect(result.event).toBe(created[0]);
+    });
+
+    it("treats a throwing Start now like one that could not start", async () => {
+      const { service } = buildService();
+      withCategory(service, "cat-1");
+      jest
+        .spyOn(service, "startEventNow")
+        .mockRejectedValue(new Error("discord down"));
+      const result = await service.createImpromptuEvent(base);
+      expect(result.started).toBe(false);
+    });
+
+    it("creates nothing without a channel category", async () => {
+      const { service } = buildService();
+      withCategory(service, "");
+      const startNow = jest.spyOn(service, "startEventNow");
+      await expect(service.createImpromptuEvent(base)).rejects.toBeInstanceOf(
+        ImpromptuNotReadyError,
+      );
+      expect(created).toHaveLength(0);
+      expect(startNow).not.toHaveBeenCalled();
+    });
   });
 
   it("createEvent refuses a recurring event while recurrence is disabled", async () => {
@@ -2576,6 +2671,27 @@ describe("link announcement and legacy RSVP compatibility (#1175)", () => {
     expect(payload.embeds).toEqual([]);
     expect(payload.components).toEqual([]);
     expect(payload.allowedMentions).toEqual({ parse: [] });
+  });
+
+  it("an impromptu event says it is happening now until it finishes (#1305)", () => {
+    const open = svc().buildAnnouncementPayload(row({ impromptu: true }));
+    expect(open.content).toContain("Happening now");
+    expect(open.content).not.toContain("<t:");
+    // A planned event, and an impromptu one once it is over, show the time.
+    expect(svc().buildAnnouncementPayload(row()).content).toContain("<t:");
+    for (const state of ["ended", "cancelled"]) {
+      const done = svc().buildAnnouncementPayload(
+        row({ impromptu: true, state }),
+      ).content;
+      expect(done).not.toContain("Happening now");
+      expect(done).toContain("<t:");
+    }
+    // Still active (channel made) is still happening now.
+    expect(
+      svc().buildAnnouncementPayload(
+        row({ impromptu: true, state: "active", channelId: "c-1" }),
+      ).content,
+    ).toContain("Happening now");
   });
 
   it("omits the link when there is no native event, and for a finished event", () => {

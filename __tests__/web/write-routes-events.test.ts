@@ -28,6 +28,8 @@ import {
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockCreateEvent = jest.fn<() => Promise<unknown>>();
+const mockCreateImpromptu =
+  jest.fn<(input: unknown, now?: Date) => Promise<unknown>>();
 const mockCancelEvent = jest.fn<() => Promise<unknown>>();
 const mockStartEventNow = jest.fn<() => Promise<unknown>>();
 const mockCancelSeries = jest.fn<() => Promise<unknown>>();
@@ -70,6 +72,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   EventService: {
     getInstance: (): unknown => ({
       createEvent: mockCreateEvent,
+      createImpromptuEvent: mockCreateImpromptu,
       cancelEvent: mockCancelEvent,
       cancelSeries: mockCancelSeries,
       startEventNow: mockStartEventNow,
@@ -102,6 +105,10 @@ beforeEach(async () => {
   mockConfigGetString.mockResolvedValue("UTC");
   mockConfigGetNumber.mockResolvedValue(120);
   mockCreateEvent.mockResolvedValue({ _id: "event-1" });
+  mockCreateImpromptu.mockResolvedValue({
+    event: { _id: "event-1", startTime: new Date() },
+    started: true,
+  });
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -200,6 +207,68 @@ describe("POST /events/create — validation", () => {
       expect(mockCreateEvent).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("POST /events/create — When (#1305)", () => {
+  it("Now creates and starts the event and opens its host panel", async () => {
+    const flash = await createEvent({ title: "Right now", when: "now" });
+    expect(flash.path).toBe("/me/events/event-1/host");
+    expect(flash.type).toBe("ok");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+    expect(mockCreateImpromptu.mock.calls[0][0]).toMatchObject({
+      guildId: session.guildId,
+      title: "Right now",
+      createdBy: session.discordUserId,
+    });
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.create",
+      result: "success",
+      details: { via: "admin", when: "now", startedNow: true },
+    });
+  });
+
+  it("Now flashes an error, keeping the host panel link, when the channels were not made", async () => {
+    mockCreateImpromptu.mockResolvedValue({
+      event: { _id: "event-1", startTime: new Date() },
+      started: false,
+    });
+    const flash = await createEvent({ title: "Right now", when: "now" });
+    expect(flash.path).toBe("/me/events/event-1/host");
+    expect(flash.type).toBe("err");
+  });
+
+  it("Now cannot repeat: a recurrence is refused, not dropped", async () => {
+    const flash = await createEvent({
+      title: "Right now",
+      when: "now",
+      recurrence: "weekly",
+    });
+    expect(flash.path).toBe("/admin/events");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("cannot repeat");
+    expect(mockCreateImpromptu).not.toHaveBeenCalled();
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("In 30 min is a planned event that starts 30 minutes out", async () => {
+    const before = Date.now();
+    const flash = await createEvent({ title: "Soon", when: "30" });
+    expect(flash.path).toBe("/admin/events");
+    expect(flash.type).toBe("ok");
+    const input = mockCreateEvent.mock.calls[0][0] as { startTime: Date };
+    expect(input.startTime.getTime()).toBeGreaterThanOrEqual(
+      before + 30 * 60_000,
+    );
+    expect(mockCreateImpromptu).not.toHaveBeenCalled();
+  });
+
+  it("an admin may still repeat a planned event", async () => {
+    const { date, time } = futureDateTime();
+    await createEvent({ title: "Weekly", date, time, recurrence: "weekly" });
+    expect(mockCreateEvent.mock.calls[0][0]).toMatchObject({
+      recurrence: "weekly",
+    });
+  });
 });
 
 describe("POST /events/create — success", () => {

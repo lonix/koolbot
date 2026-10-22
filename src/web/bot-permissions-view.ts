@@ -22,6 +22,7 @@
  */
 
 import { PermissionFlagsBits } from "discord.js";
+import { icon as sharedIcon, toneIcon } from "./icons.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -50,18 +51,19 @@ export function describeTarget(target: PermissionTarget): string {
   return `in the ${target.kind} “${escapeHtml(target.name)}”`;
 }
 
-/** Lucide icons (ISC licence), inlined: children of a 24x24 `svg.kb-icon`. */
-const ICON_PATHS = {
-  ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
-  missing:
-    '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
-  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-  off: '<path d="M5 12h14"/>',
-  chev: '<polyline points="9 6 15 12 9 18"/>',
+/** This view's status words mapped to the shared icons. */
+const STATUS_ICONS = {
+  ok: "circle-check",
+  missing: "circle-x",
+  warn: "triangle-alert",
+  off: "minus",
+  chev: "chevron-right",
 } as const;
 
-function icon(name: keyof typeof ICON_PATHS, extra = ""): string {
-  return `<svg class="kb-icon${extra}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICON_PATHS[name]}</svg>`;
+function icon(name: keyof typeof STATUS_ICONS, extra = ""): string {
+  return sharedIcon(STATUS_ICONS[name], {
+    className: extra.trim() || undefined,
+  });
 }
 
 /** The row for `ROLE_ABOVE_BOT` checks (the role hierarchy, not a permission bit). */
@@ -435,7 +437,7 @@ function calloutHtml(
   title: string,
   text?: string,
 ): string {
-  return `<div class="kb-callout kb-callout--${tone}" role="status">${icon(tone === "ok" ? "ok" : "warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${text ? `<p class="kb-callout__text">${escapeHtml(text)}</p>` : ""}</div></div>`;
+  return `<div class="kb-callout kb-callout--${tone}" role="status">${toneIcon(tone === "ok" ? "ok" : "warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${text ? `<p class="kb-callout__text">${escapeHtml(text)}</p>` : ""}</div></div>`;
 }
 
 function fixPanel(report: BotPermissionReport): string {

@@ -139,6 +139,46 @@ beforeEach(() => {
   EventMock.exists.mockResolvedValue(null);
 });
 
+describe("buildNativeFields, impromptu (#1305)", () => {
+  const start = new Date("2026-07-04T20:00:00Z");
+  it("leads the description with the happening-now note", () => {
+    const f = buildNativeFields(
+      {
+        title: "Now",
+        description: "Bring snacks",
+        startTime: start,
+        durationMinutes: 60,
+        impromptu: true,
+      } as never,
+      "Somewhere",
+    );
+    expect(f.description).toBe("Happening now.\n\nBring snacks");
+    const bare = buildNativeFields(
+      {
+        title: "Now",
+        description: "",
+        startTime: start,
+        durationMinutes: 60,
+        impromptu: true,
+      } as never,
+      "Somewhere",
+    );
+    expect(bare.description).toBe("Happening now.");
+  });
+  it("leaves a planned event's description alone", () => {
+    const f = buildNativeFields(
+      {
+        title: "Planned",
+        description: "Bring snacks",
+        startTime: start,
+        durationMinutes: 60,
+      } as never,
+      "Somewhere",
+    );
+    expect(f.description).toBe("Bring snacks");
+  });
+});
+
 describe("buildNativeFields", () => {
   it("clamps name, description and location to Discord's limits", () => {
     const f = buildNativeFields(

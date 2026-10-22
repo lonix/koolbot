@@ -48,7 +48,15 @@ export type EventFormResult =
  */
 export async function validateEventForm(
   fields: EventFormFields,
-  opts: { requireFuture: boolean; fallbackDuration?: number },
+  opts: {
+    requireFuture: boolean;
+    fallbackDuration?: number;
+    /**
+     * A start decided by the "When" choice (#1305): the date and time fields
+     * are then neither required nor read. Still checked to be in the future.
+     */
+    startOverride?: Date;
+  },
 ): Promise<EventFormResult> {
   const {
     title,
@@ -58,8 +66,13 @@ export async function validateEventForm(
     duration,
     timezone: tzInput,
   } = fields;
-  if (!title || !date || !time) {
-    return { ok: false, error: "Title, date and time are all required." };
+  if (opts.startOverride ? !title : !title || !date || !time) {
+    return {
+      ok: false,
+      error: opts.startOverride
+        ? "A title is required."
+        : "Title, date and time are all required.",
+    };
   }
   const lengthError = firstLengthError([
     { label: "Title", value: title, max: EVENT_TITLE_MAX },
@@ -74,7 +87,8 @@ export async function validateEventForm(
   const configuredTz = await config.getString("events.timezone", "");
   const timezone = tzInput || configuredTz;
 
-  const startTime = parseEventDateTime(date, time, timezone);
+  const startTime =
+    opts.startOverride ?? parseEventDateTime(date, time, timezone);
   if (!startTime) {
     return {
       ok: false,

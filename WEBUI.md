@@ -106,7 +106,7 @@ the console links back to **My preferences**. The display name comes from the me
 (the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
 
 On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
-(Event presets today; Your events and New event with #1319) and **Moderation** (Mod log and Command audit; Tickets once
+(New event and Event presets today; Your events with #1319) and **Moderation** (Mod log and Command audit; Tickets once
 it has a page and is on). A section appears when the person holds the scope and it has at least one page that exists. A
 person with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So a Moderator sees You
 and Moderation with a sidebar, a host and moderator sees You, Hosting and Moderation, and a plain member sees no sidebar.
@@ -1634,6 +1634,23 @@ lifecycle controls — **Start now** (spin the event up immediately) and
 actions. Every row has a **Host panel** link (see below). A
 **Schedule a new event** form (native date and time inputs) creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
+
+**When** (#1305). The form opens with a **When** choice: **Now**, **In 15 min**, **In 30 min**, **In 1 hour** or **Pick date & time**
+(the default, so a planned event is created exactly as before; the date and time fields hide for the other choices). The minute options
+create a planned event that starts that long from now. **Now** creates the event and runs Start now at once: the event voice channel and
+the group channels are created straight away (the `events.create_lead_minutes` lead time is skipped), the announcement reads "Happening
+now" instead of a time, no reminder is sent, and you land on the host panel. The start is stored 30 seconds ahead, because Discord refuses
+a scheduled event that starts in the past; the Discord event is created with that start and its description begins "Happening now." and
+Discord starts it on its own. If no channel category is set, nothing is created and the page says so; if the event is created but its
+channels cannot be made, the host panel opens with an error and the bot keeps trying every minute. An event that starts now cannot
+repeat. The duration defaults to `events.default_duration_minutes`; **End now** on the host panel ends it early as usual.
+
+**Hosts create events too** (#1305). An event host (the `host` capability) creates events of their own at `/me/events/new` (the
+**New event** link in the Hosting section, shown while Events is on; the page answers 404 while it is off). It is the same form and the
+same Groups block, without **Repeat** (a host's events do not repeat) and without an announcement-channel choice (the server's
+`events.announcement_channel_id` is used). The event is owned by the signed-in host (`createdBy` and the server come from the session, never
+from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
+(`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
 The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
 folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.

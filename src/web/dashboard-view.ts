@@ -11,11 +11,10 @@
  * `unavailable` (see `dashboard-data.ts`) and says so in its own card; a value
  * that could not be read is never drawn as 0. Every dynamic value is escaped.
  *
- * Icons: only the alert icon is used, from `feature-page.ts`.
- * #1369: replace it with the shared icon helper once that lands.
+ * Icons: only the alert icon is used, from the shared helper (`icons.ts`).
  */
 
-import { ALERT_ICON } from "./feature-page.js";
+import { icon } from "./icons.js";
 import { escapeHtml } from "./html.js";
 import { DAY_NAMES } from "../services/rewind-service.js";
 import { formatVersion } from "../utils/semver.js";
@@ -139,7 +138,7 @@ export function renderVersionCard(
     : "";
 
   const instructions = v.updateKind
-    ? `<details class="kb-disclosure"><summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>How to update</summary><div class="kb-disclosure__body">
+    ? `<details class="kb-disclosure"><summary>${icon("chevron-right", { className: "kb-chev" })}How to update</summary><div class="kb-disclosure__body">
     <p>Docker Compose (the published image):</p>
     <pre class="kb-mono">docker compose pull &amp;&amp; docker compose up -d</pre>
     <p>Plain Docker: <span class="kb-mono">docker pull ghcr.io/lonix/koolbot:latest</span>, then recreate the container.</p>
@@ -180,7 +179,7 @@ function tile(opts: {
 }): string {
   const cls = `kb-tile${opts.warn ? " kb-tile--warn" : ""}`;
   return `<a class="${cls}" href="${escapeHtml(opts.href)}">
-  <div class="kb-tile__top"><span class="kb-overline">${escapeHtml(opts.label)}</span>${opts.top ?? ""}${opts.warn ? ALERT_ICON : ""}</div>
+  <div class="kb-tile__top"><span class="kb-overline">${escapeHtml(opts.label)}</span>${opts.top ?? ""}${opts.warn ? icon("triangle-alert") : ""}</div>
   <div class="kb-tile__value">${opts.value}</div>
   <div class="kb-tile__detail">${escapeHtml(opts.detail)}</div>
 </a>`;
@@ -326,7 +325,7 @@ const SEVERITY_BADGE: Record<NeedsYouRow["severity"], string> = {
 };
 
 function needsYouRow(r: NeedsYouRow): string {
-  return `<li>${ALERT_ICON}<span class="kb-list__main"><span>${escapeHtml(r.title)}</span><span class="kb-muted">${escapeHtml(r.detail)}</span></span>${SEVERITY_BADGE[r.severity]}<a class="kb-btn kb-btn--sm" href="${escapeHtml(r.href)}">${escapeHtml(r.action)}</a></li>`;
+  return `<li>${icon("triangle-alert")}<span class="kb-list__main"><span>${escapeHtml(r.title)}</span><span class="kb-muted">${escapeHtml(r.detail)}</span></span>${SEVERITY_BADGE[r.severity]}<a class="kb-btn kb-btn--sm" href="${escapeHtml(r.href)}">${escapeHtml(r.action)}</a></li>`;
 }
 
 /** Hidden (empty string) when nothing needs the admin. */
