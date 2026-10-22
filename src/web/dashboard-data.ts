@@ -179,18 +179,44 @@ export function permissionRows(report: BotPermissionReport): NeedsYouRow[] {
   });
 }
 
+const flat = (name: string): string =>
+  name.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
 /**
- * Blockers and warnings from the last Server scan. When the permission check
- * answered, the ones whose fix is on Bot permissions are left out: they are the
- * same problems and already have a row each.
+ * Whether the permission report already has a row for this scan finding. The
+ * report covers the permissions its registry lists and the roles a feature is
+ * bound to; the scan also reports permissions the registry leaves out (posting
+ * in channels) and the general "roles above the bot" warning. Those have no row
+ * there, so they stay.
+ */
+function coveredByReport(code: string, report: BotPermissionReport): boolean {
+  if (code.startsWith("missing-")) {
+    const wanted = flat(code.slice("missing-".length));
+    return report.problems.some((p) =>
+      p.permission.split(" or ").some((n) => flat(n) === wanted),
+    );
+  }
+  if (code.startsWith("bound-role-unmanageable-")) {
+    const id = code.slice("bound-role-unmanageable-".length);
+    return report.problems.some(
+      (p) => p.permission === ROLE_ABOVE_BOT && p.target.id === id,
+    );
+  }
+  return false;
+}
+
+/**
+ * Blockers and warnings from the last Server scan. A finding the permission
+ * report already has a row for is left out; every other one stays, so a
+ * blocker the report cannot see is never hidden.
  */
 export function scanRows(
   scan: ServerScan,
-  permissionsAnswered: boolean,
+  report: BotPermissionReport | null,
 ): NeedsYouRow[] {
   return scan.readiness.issues
     .filter((i) => i.severity === "error" || i.severity === "warning")
-    .filter((i) => !(permissionsAnswered && fixedOnBotPermissions(i.code)))
+    .filter((i) => !(report?.available && coveredByReport(i.code, report)))
     .map((i) => ({
       severity: i.severity === "error" ? "blocker" : "warning",
       title: i.message,
@@ -204,6 +230,17 @@ export function scanRows(
     }));
 }
 
+/** Switched-on features the check could not look at, each counted once. */
+export function uncheckedFeatures(report: BotPermissionReport): number {
+  const ids = new Set<string>(report.unknown.map((u) => u.feature.id));
+  for (const c of report.checks) {
+    if (c.enabled && (c.outcome === "unchecked" || c.outcome === "unknown")) {
+      ids.add(c.feature.id);
+    }
+  }
+  return ids.size;
+}
+
 function summarise(report: BotPermissionReport): Read<PermissionsSummary> {
   if (!report.available) {
     return { state: "unavailable", reason: report.reason ?? undefined };
@@ -212,7 +249,7 @@ function summarise(report: BotPermissionReport): Read<PermissionsSummary> {
     state: "ok",
     value: {
       problems: report.problems.length,
-      unchecked: report.unknown.length,
+      unchecked: uncheckedFeatures(report),
     },
   };
 }
@@ -246,7 +283,6 @@ export async function loadDashboardData(
         state: "unavailable",
         reason: report.state === "unavailable" ? report.reason : undefined,
       };
-  const answered = permissions.state === "ok";
 
   const scan = ((): ServerScan | null => {
     try {
@@ -258,7 +294,7 @@ export async function loadDashboardData(
 
   const needsYou = [
     ...(permissionsRead ? permissionRows(permissionsRead) : []),
-    ...(scan ? scanRows(scan, answered) : []),
+    ...(scan ? scanRows(scan, permissionsRead) : []),
   ];
 
   return {

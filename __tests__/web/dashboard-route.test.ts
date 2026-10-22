@@ -75,7 +75,17 @@ const heatmap = jest.fn<
 jest.unstable_mockModule(
   "../../src/services/voice-activity-analytics.js",
   () => ({
-    getGuildVoiceHeatmap: heatmap,
+    // The Dashboard reads the strict query, so a failed aggregation rejects.
+    queryGuildVoiceHeatmap: heatmap,
+    // The lenient read the Voice analytics page uses: an empty week on failure.
+    getGuildVoiceHeatmap: async () => ({
+      matrix: [],
+      byHour: [],
+      byDay: [0, 0, 0, 0, 0, 0, 0],
+      totalMinutes: 0,
+      peak: null,
+      timeZone: "UTC",
+    }),
   }),
 );
 

@@ -85,6 +85,24 @@ describe("DashboardPage", () => {
     expect(html).toContain("1 <small>issue</small>");
   });
 
+  it("does not say everything is in place while a switched-on feature was not checked", () => {
+    const html = page({
+      ...calmDashboard(),
+      permissions: { state: "ok", value: { problems: 0, unchecked: 2 } },
+    });
+    expect(html).toContain("Partly checked");
+    expect(html).toContain(
+      "2 switched-on features could not be fully checked.",
+    );
+    expect(html).not.toContain("is in place");
+    expect(html).not.toContain("kb-tile--warn");
+  });
+
+  it("opens Scan again with a refresh, so it does not show the cached scan", () => {
+    const html = page(busyDashboard());
+    expect(html).toContain('<a href="/admin/adopt?refresh=1">Scan again</a>');
+  });
+
   it("says a source could not be read instead of showing zero", () => {
     const html = page(busyDashboard());
     expect(html).toContain("The server could not be read from Discord.");

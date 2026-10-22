@@ -94,38 +94,51 @@ export function buildGuildHeatmap(
 /**
  * Run the guild-wide heatmap aggregation over sessions whose `startTime`
  * falls in `[start, end)`, bucketed in the resolved server timezone. A query
- * failure degrades to an empty heatmap so the admin page still renders.
+ * failure rejects: a caller that must tell "nothing recorded" from "could not
+ * be read" (the Dashboard, #1322) uses this one.
+ */
+export async function queryGuildVoiceHeatmap(
+  start: Date,
+  end: Date,
+  timeZone?: string | null,
+): Promise<GuildVoiceHeatmap> {
+  const zone = resolveTimezone(timeZone);
+  const rows = await VoiceChannelTracking.aggregate<HeatmapAggregateRow>([
+    { $unwind: "$sessions" },
+    {
+      $match: {
+        "sessions.startTime": { $gte: start, $lt: end },
+        "sessions.duration": { $gt: 0 },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          dow: {
+            $dayOfWeek: { date: "$sessions.startTime", timezone: zone },
+          },
+          hour: { $hour: { date: "$sessions.startTime", timezone: zone } },
+        },
+        totalSeconds: { $sum: "$sessions.duration" },
+      },
+    },
+  ]);
+  return buildGuildHeatmap(rows, zone);
+}
+
+/**
+ * The same read, where a query failure degrades to an empty heatmap so the
+ * Voice analytics page still renders.
  */
 export async function getGuildVoiceHeatmap(
   start: Date,
   end: Date,
   timeZone?: string | null,
 ): Promise<GuildVoiceHeatmap> {
-  const zone = resolveTimezone(timeZone);
   try {
-    const rows = await VoiceChannelTracking.aggregate<HeatmapAggregateRow>([
-      { $unwind: "$sessions" },
-      {
-        $match: {
-          "sessions.startTime": { $gte: start, $lt: end },
-          "sessions.duration": { $gt: 0 },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            dow: {
-              $dayOfWeek: { date: "$sessions.startTime", timezone: zone },
-            },
-            hour: { $hour: { date: "$sessions.startTime", timezone: zone } },
-          },
-          totalSeconds: { $sum: "$sessions.duration" },
-        },
-      },
-    ]);
-    return buildGuildHeatmap(rows, zone);
+    return await queryGuildVoiceHeatmap(start, end, timeZone);
   } catch (error) {
     logger.error("getGuildVoiceHeatmap aggregation failed:", error);
-    return emptyGuildHeatmap(zone);
+    return emptyGuildHeatmap(resolveTimezone(timeZone));
   }
 }

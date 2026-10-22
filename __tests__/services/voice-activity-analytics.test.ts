@@ -6,8 +6,14 @@ jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({
   VoiceChannelTracking: { aggregate: jest.fn() },
 }));
 
-const { buildGuildHeatmap, emptyGuildHeatmap } =
-  await import("../../src/services/voice-activity-analytics.js");
+const {
+  buildGuildHeatmap,
+  emptyGuildHeatmap,
+  getGuildVoiceHeatmap,
+  queryGuildVoiceHeatmap,
+} = await import("../../src/services/voice-activity-analytics.js");
+const { VoiceChannelTracking } =
+  await import("../../src/models/voice-channel-tracking.js");
 
 describe("voice-activity-analytics (#675 Part B)", () => {
   describe("emptyGuildHeatmap", () => {
@@ -78,6 +84,28 @@ describe("voice-activity-analytics (#675 Part B)", () => {
       );
       expect(hm.totalMinutes).toBe(0);
       expect(hm.peak).toBeNull();
+    });
+  });
+
+  describe("a failed aggregation (#1322)", () => {
+    const aggregate = VoiceChannelTracking.aggregate as unknown as jest.Mock<
+      () => Promise<unknown>
+    >;
+    const from = new Date("2026-10-01T00:00:00Z");
+    const to = new Date("2026-10-08T00:00:00Z");
+
+    it("rejects from the strict read, so a caller can say it is unavailable", async () => {
+      aggregate.mockRejectedValueOnce(new Error("mongo down"));
+      await expect(queryGuildVoiceHeatmap(from, to, "UTC")).rejects.toThrow(
+        "mongo down",
+      );
+    });
+
+    it("still degrades to an empty heatmap for the analytics page", async () => {
+      aggregate.mockRejectedValueOnce(new Error("mongo down"));
+      const hm = await getGuildVoiceHeatmap(from, to, "UTC");
+      expect(hm.totalMinutes).toBe(0);
+      expect(hm.timeZone).toBe("UTC");
     });
   });
 });

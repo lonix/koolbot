@@ -18,11 +18,12 @@ Read-only: no switches here. Cards are as tall as their content.
 
 **As built (#1322).** Each source is read on its own with a 2.5 s limit (`src/web/dashboard-data.ts`): one that fails or is slow becomes
 *unavailable* in its own card and never reads as 0, and the page is the same without it. The Permissions tile counts the problems of the
-switched-on features, as the navigation badge does; a check that did not answer says *Not checked*. *Needs you* shows at most six rows and
+switched-on features, as the navigation badge does; a check that did not answer says *Not checked*, and while a switched-on feature could not be fully checked the tile says *Partly checked*
+rather than that everything is in place. *Needs you* shows at most six rows and
 then one line that links to Bot permissions. It also lists the blockers and warnings of a Server scan, but only one that finished in the last
-minute: the Dashboard never starts a scan, so the Server scan page is where one is run. A scan problem that is a missing permission or role
-position is left out, because the permission check already has a row for it. *This week in voice* is the last 7 days, shown only while voice
-tracking is on. *Features* is the sidebar's own list (switched on first, then off, each A to Z). The right column also holds the *Version*
+minute: the Dashboard never starts a scan, so the Server scan page is where one is run. A scan problem is left out only when the permission check has a row for the same permission or role; one it
+cannot see (posting in channels, the general roles-above-the-bot warning) stays. *This week in voice* is the last 7 days, shown only while voice
+tracking is on; a failed query says it could not be read instead of showing an empty week. *Features* is the sidebar's own list (switched on first, then off, each A to Z). The right column also holds the *Version*
 panel with its *Check now* button, the one form on the page, which sets nothing. The alert icons use the markup from `feature-page.ts` until the
 shared icon helper (#1369) replaces it.
 

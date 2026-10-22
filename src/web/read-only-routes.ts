@@ -145,7 +145,10 @@ import {
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
-import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
+import {
+  getGuildVoiceHeatmap,
+  queryGuildVoiceHeatmap,
+} from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
@@ -1009,7 +1012,8 @@ export function createReadOnlyRouter(
           common.navFeatureStatus["voicetracking.enabled"] === true,
         voiceWeek: () => {
           const end = new Date();
-          return getGuildVoiceHeatmap(
+          // The strict read: a failed query is "unavailable", not an empty week.
+          return queryGuildVoiceHeatmap(
             new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000),
             end,
             getServerTimezone(),

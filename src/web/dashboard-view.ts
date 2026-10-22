@@ -280,18 +280,27 @@ function permissionsTile(data: DashboardData): string {
   const { problems, unchecked } = data.permissions.value;
   const tail =
     unchecked > 0
-      ? ` ${plural(unchecked, "feature")} could not be checked.`
+      ? `${plural(unchecked, "switched-on feature")} could not be fully checked.`
       : "";
+  // Nothing missing is only "in place" when everything was looked at.
+  const detail =
+    problems > 0
+      ? `Permissions that switched-on features need are missing. ${tail}`
+      : unchecked > 0
+        ? `No missing permission found in what could be checked. ${tail}`
+        : "Everything the switched-on features need is in place.";
   return tile({
     label: "Permissions",
     href: BOT_PERMISSIONS_HREF,
     warn: problems > 0,
-    top: problems > 0 ? badge("Needs fixing", "warn") : undefined,
-    value: `${problems} <small>${problems === 1 ? "issue" : "issues"}</small>`,
-    detail:
+    top:
       problems > 0
-        ? `Permissions that switched-on features need are missing.${tail}`
-        : `Everything the switched-on features need is in place.${tail}`,
+        ? badge("Needs fixing", "warn")
+        : unchecked > 0
+          ? badge("Partly checked", "info")
+          : undefined,
+    value: `${problems} <small>${problems === 1 ? "issue" : "issues"}</small>`,
+    detail: detail.trim(),
   });
 }
 
@@ -331,7 +340,7 @@ function renderNeedsYou(data: DashboardData): string {
       ? `<li><span class="kb-list__main kb-muted">${plural(more, "more problem")} not listed here.</span><a class="kb-btn kb-btn--sm" href="${BOT_PERMISSIONS_HREF}">Open Bot permissions</a></li>`
       : "";
   const foot = data.scanReadAt
-    ? `Server scan rows come from the scan read ${escapeHtml(data.scanReadAt.slice(0, 16).replace("T", " "))} UTC. <a href="${SERVER_SCAN_HREF}">Scan again</a>`
+    ? `Server scan rows come from the scan read ${escapeHtml(data.scanReadAt.slice(0, 16).replace("T", " "))} UTC. <a href="${SERVER_SCAN_HREF}?refresh=1">Scan again</a>`
     : "";
   return panel(
     "p-needs",

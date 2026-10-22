@@ -10,6 +10,7 @@ import {
   loadDashboardData,
   permissionRows,
   scanRows,
+  uncheckedFeatures,
   withTimeout,
   type DashboardSources,
 } from "../../src/web/dashboard-data.js";
@@ -249,7 +250,7 @@ describe("permissionRows and scanRows", () => {
   });
 
   it("points a scan row at the page that fixes it", () => {
-    const rows = scanRows(busyScan(), false);
+    const rows = scanRows(busyScan(), null);
     expect(rows.map((r) => [r.severity, r.href])).toEqual([
       ["blocker", "/admin/bot-permissions"],
       ["warning", "/admin/adopt"],
@@ -273,5 +274,113 @@ describe("dashboardFeatures", () => {
     });
     // A feature the nav status does not name reads as off, never as on.
     expect(dashboardFeatures({}).every((x) => !x.on)).toBe(true);
+  });
+});
+
+describe("scan findings the permission report has no row for stay (#1322 review)", () => {
+  const scanWith = (
+    issues: Array<{ code: string; severity: "error" | "warning" }>,
+  ): ReturnType<typeof busyScan> => {
+    const scan = busyScan();
+    scan.readiness.issues = issues.map((i) => ({
+      ...i,
+      message: i.code,
+      help: "h",
+    }));
+    return scan;
+  };
+
+  it("keeps a missing permission the registry does not list, and the general role-order warning", () => {
+    const rows = scanRows(
+      scanWith([
+        { code: "missing-SendMessages", severity: "error" },
+        { code: "role-hierarchy-low", severity: "warning" },
+        { code: "missing-ManageRoles", severity: "error" },
+      ]),
+      report({
+        problems: [
+          { permission: "Manage Roles", target: server, features: [] },
+        ],
+      }),
+    );
+    // Only Manage Roles has a row on the permission report.
+    expect(rows.map((r) => r.title)).toEqual([
+      "missing-SendMessages",
+      "role-hierarchy-low",
+    ]);
+  });
+
+  it("drops a bound-role finding only for the role the report names", () => {
+    const rows = scanRows(
+      scanWith([
+        { code: "bound-role-unmanageable-7", severity: "error" },
+        { code: "bound-role-unmanageable-8", severity: "error" },
+      ]),
+      report({
+        problems: [
+          {
+            permission: ROLE_ABOVE_BOT,
+            target: { kind: "role", id: "7", name: "Staff" },
+            features: [],
+          },
+        ],
+      }),
+    );
+    expect(rows.map((r) => r.title)).toEqual(["bound-role-unmanageable-8"]);
+  });
+
+  it("matches an either-or permission row by each of its names", () => {
+    const rows = scanRows(
+      scanWith([{ code: "missing-ManageEvents", severity: "error" }]),
+      report({
+        problems: [
+          {
+            permission: "Create Events or Manage Events",
+            target: server,
+            features: [],
+          },
+        ],
+      }),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("keeps every finding when the report is unavailable", () => {
+    const rows = scanRows(
+      scanWith([{ code: "missing-ManageRoles", severity: "error" }]),
+      report({ available: false }),
+    );
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe("uncheckedFeatures", () => {
+  it("counts unknown results and enabled features nothing was checked for, once each", () => {
+    const check = (
+      id: string,
+      enabled: boolean,
+      outcome: "ok" | "unchecked" | "unknown",
+    ): never =>
+      ({
+        feature: ref(id),
+        kind: "permission",
+        enabled,
+        outcome,
+        target: null,
+        missing: [],
+      }) as never;
+    expect(
+      uncheckedFeatures(
+        report({
+          unknown: [{ feature: ref("a"), target: server, note: "n" }],
+          checks: [
+            check("a", true, "unknown"),
+            check("b", true, "unchecked"),
+            check("c", false, "unchecked"),
+            check("d", true, "ok"),
+          ],
+        }),
+      ),
+    ).toBe(2);
   });
 });
