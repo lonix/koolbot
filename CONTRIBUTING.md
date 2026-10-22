@@ -561,9 +561,10 @@ commits are pushed.
 ### Docs and released versions
 
 The docs on `main` describe `main`, so they can run ahead of the newest release. The README sends readers who run a release to
-the docs at their tag instead. release-please bumps the `[docs-latest]` link and the "Latest release" row in every release PR
-(`extra-files` in `release-please-config.json`, plus the `x-release-please-*` markers in `README.md`), so do not edit those
-versions by hand.
+the docs at their tag instead. release-please bumps every marked version in `README.md` in each release PR: the `[docs-latest]` link, the "Latest
+release" row, the Quick Start download links and the pinned-tag example (`extra-files` in `release-please-config.json`, plus the
+`x-release-please-*` markers). Do not edit those versions by hand, and keep one version per marked line: release-please
+replaces only the first one it finds on a line.
 
 When a release starts a new minor or major line (say 2.0.1 → 2.1.0), add the line it replaces to the "Documentation for older
 versions" table in `README.md` in a `docs:` PR right after the release, linked to that line's last tag:

@@ -38,10 +38,11 @@ KoolBot is designed for simple deployment. You only need two files to get starte
 
 ### 1. **Download Required Files**
 
-Download these two files to a new directory:
+Download these two files to a new directory. The links point at the latest release, so the files match the image you will run:
 
-- [`docker-compose.yml`](https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml)
-- [`.env.example`](https://raw.githubusercontent.com/lonix/koolbot/main/.env.example)
+<!-- x-release-please-start-version -->
+- [`docker-compose.yml`](https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/docker-compose.yml)
+- [`.env.example`](https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/.env.example)
 
 ```bash
 # Create a directory for KoolBot
@@ -49,9 +50,10 @@ mkdir koolbot
 cd koolbot
 
 # Download the files
-curl -O https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/lonix/koolbot/main/.env.example
+curl -O https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/docker-compose.yml
+curl -O https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/.env.example
 ```
+<!-- x-release-please-end -->
 
 Or manually download from GitHub and save to your `koolbot` directory.
 
@@ -461,6 +463,40 @@ docker compose exec bot sh
 # View MongoDB logs
 docker compose logs -f mongodb
 ```
+
+### Choosing an image tag
+
+The shipped `docker-compose.yml` runs `ghcr.io/lonix/koolbot:latest`, so `docker compose pull` always moves you to the newest
+release, a new major version included. If you would rather upgrade on your own schedule, set the `bot.image` tag to one of these:
+
+| Tag | You get | What `docker compose pull` does |
+| --- | --- | --- |
+| `latest` (default) | The newest release | Moves to every new release, including major versions |
+| `X` (e.g. `2`) | The newest `X.*` release | Takes new features and fixes, never a new major version |
+| `X.Y` (e.g. `2.0`) | The newest `X.Y.*` release | Takes fixes only |
+| `X.Y.Z` (e.g. `2.0.1`) | Exactly that release | Nothing; you upgrade by editing the tag |
+| `nightly` | The head of `main`, unreleased | Moves every night; for testing, not for a community you care about |
+
+For example, to stay on one exact release:
+
+<!-- x-release-please-start-version -->
+```yaml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:2.0.1
+```
+<!-- x-release-please-end -->
+
+To upgrade a pinned install:
+
+1. Read the [changelog](CHANGELOG.md) for every release between yours and the new one.
+2. [Back up your data](#configuration--data-backup). A newer version may migrate the database, and an older one is not guaranteed
+   to read it afterwards.
+3. Change the tag, then run `docker compose pull` and `docker compose up -d`.
+
+Pinned to an older release? Read the docs for that version, from
+[Documentation for older versions](#documentation-for-older-versions), and take `docker-compose.yml` and `.env.example` from the
+same tag.
 
 ### Exposing the Web UI
 
