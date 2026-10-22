@@ -123,8 +123,9 @@ should not send its admins' browsers to a font CDN, and the native face is the f
 
 ## Iconography
 
-Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loaded from a CDN. 24×24 viewBox, 2px stroke, round caps and joins,
-`currentColor`, drawn at 16px (`kb-icon`) or 20px (`kb-icon--lg`). The files are in the **Icons** asset group.
+Interface and page icons are Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loaded from a CDN. 24×24 viewBox, 2px stroke,
+round caps and joins, `currentColor`, drawn at 16px (`kb-icon`) or 20px (`kb-icon--lg`). The files are in the **Icons** asset group. Marks of games
+and services follow *Brand icons*, and every icon enters the repo as *Pulling icons into the repo* says (both below).
 
 | Page | Icon | Page | Icon |
 | --- | --- | --- | --- |
@@ -151,6 +152,53 @@ Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, 
 `wrench` (maintenance), `server` (servers).
 
 KoolBot has no logo; the name is set in type in the TopBar.
+
+### Brand icons
+
+A game, platform, social network or voice app is shown with its own mark, next to its name and never instead of it. Marks come from one source per
+need, in this order, so a mark added in two years looks like one added today:
+
+1. **Tabler Icons, the outline `brand-*` set** (MIT, `@tabler/icons`). Drawn on Lucide's grid and stroke (24×24, 2px, round caps and joins), so a
+   mark sits beside an interface icon without looking pasted in. Among its 376 brands: Discord, Steam, Twitch, YouTube, X, Reddit, Facebook,
+   Instagram, TikTok, Bluesky, Mastodon, Kick, Minecraft and Xbox.
+2. **Simple Icons** (CC0, `simple-icons`), only for a brand Tabler does not have, such as Counter-Strike, PlayStation, Mumble or TeamSpeak. These
+   are solid marks: draw them with `kb-icon--filled` at the same size, and switch to Tabler's once Tabler adds the brand.
+3. **Neither has it: ask upstream first.** Request the mark from Simple Icons, which takes marks from a brand's official assets, checks its
+   guidelines and publishes a clean one-colour 24×24 file. Or ask Tabler for an outline mark. Until it lands, use the stand-in (5).
+4. **A mark the brand supplies itself**, only with proof that the brand's terms allow exactly how we draw it: in our software, redistributed,
+   in one colour, at icon size, symbol only. Every point is listed in [CONTRIBUTING.md → Adding an icon](CONTRIBUTING.md#adding-an-icon). If any
+   point is unclear, the answer is no.
+5. **Otherwise** the Lucide icon for the kind of thing: `gamepad-2` for a game, `headphones` for a voice app, `globe` for a website.
+
+- Never draw, trace or edit a mark, and never take one from a font, another icon set or a fan site. A brand's own file is used only under 4.
+- Marks are `currentColor` like every other icon, never in brand colours: colour would be the only thing telling two marks apart, and the palette
+  stays ours.
+- The name is always written next to the mark, and the mark is `aria-hidden`.
+- A mark is a trademark: the licence covers the SVG, not the mark. Use it only to say which game or service something is, unaltered, never as
+  decoration or as if it were KoolBot's own.
+- **Names:** Lucide icons keep Lucide's name (`gamepad-2`). Every mark is `brand-<name>` whichever source it comes from (`brand-discord` from Tabler,
+  `brand-mumble` from Simple Icons), so code asks for a brand the same way and moving it to another source changes no caller.
+
+Game servers: `brand-minecraft` (Tabler), `brand-counter-strike` (Simple Icons), and `gamepad-2` for Factorio, Other game and LinuxGSM games
+without a mark of their own.
+
+### Pulling icons into the repo
+
+Icons are code and are kept like code: pinned, listed and reproducible (#1390).
+
+- **From the published package only**, at a pinned version: `lucide-static`, `@tabler/icons`, `simple-icons`. Never from a website, a CDN, a design
+  file or another project, and never edited by hand. The one exception is a brand-supplied mark (*Brand icons*, 4). Its file is committed under
+  `src/web/icons/acquired/`, with its proof in the manifest.
+- **One module renders every icon** (`icon(name)`, #1369). No view keeps its own copy of path data.
+- **One manifest lists every icon in use** (`src/web/icons/manifest.json`): our name, the source and the source's name. `npm run icons:pull`
+  copies each listed icon from the pinned packages, so updating a source is a version bump and a re-pull, and every changed drawing shows in review.
+- **The pull keeps only the drawing.** The outer `svg` attributes, `<title>` and Tabler's invisible bounding-box path are dropped; the module adds
+  `kb-icon` and `aria-hidden`.
+- **Licences ship with the icons**, in `THIRD_PARTY_NOTICES.md` (#1392): the ISC (Lucide) and MIT (Tabler) notices, Simple Icons (CC0) by name,
+  and each brand-supplied mark's terms, marked as not covered by KoolBot's licence.
+- **Only what is used.** An icon is pulled with the first page or message that shows it, and removed with the last.
+- **A new source** needs this section changed first. It must have an open licence that allows copying into the repo, a versioned package that is
+  still maintained, and a style that matches one of the sources above.
 
 ## Accessibility
 
