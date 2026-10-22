@@ -118,6 +118,42 @@ describe("renderLeadersTagsFields", () => {
     expect(html).toContain('value="Cap&quot;tain"');
   });
 
+  it("nests the leader label, customisation and lobby under Leaders, and the tag position and team tags under Clan tags", () => {
+    const html = renderLeadersTagsFields(view);
+    const leaders = html.slice(
+      html.indexOf("<legend>Leaders</legend>"),
+      html.indexOf("<legend>Clan tags</legend>"),
+    );
+    const tags = html.slice(html.indexOf("<legend>Clan tags</legend>"));
+    const nestedOf = (part: string): string => {
+      const i = part.indexOf('<div class="kb-nested"');
+      expect(i).toBeGreaterThan(0);
+      return part.slice(i);
+    };
+    // The parent switch sits above its children, never inside them.
+    expect(leaders.indexOf('name="s_captainsEnabled"')).toBeLessThan(
+      leaders.indexOf('<div class="kb-nested"'),
+    );
+    const lc = nestedOf(leaders);
+    for (const name of [
+      "s_leaderLabel",
+      "s_captainCustomisationEnabled",
+      "s_captainsLobby",
+    ]) {
+      expect(lc).toContain(`name="${name}"`);
+    }
+    expect(lc).not.toContain('name="s_captainsEnabled"');
+    expect(tags.indexOf('name="s_tagsEnabled"')).toBeLessThan(
+      tags.indexOf('<div class="kb-nested"'),
+    );
+    const tc = nestedOf(tags);
+    expect(tc).toContain('name="s_tagsSuffix"');
+    expect(tc).toContain("s_groupTags_g_00000001");
+    expect(tc).not.toContain('name="s_tagsEnabled"');
+    // Every field name is still posted by the one form.
+    expect(html).toContain('name="b_tagsEnabled"');
+  });
+
   describe("the Captains lobby switch (#1251)", () => {
     const viewWith = (
       over: Record<string, unknown>,

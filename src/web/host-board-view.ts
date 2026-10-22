@@ -281,7 +281,6 @@ function renderDialogAction(
 
 function renderRandomisePanel(d: HostBoardData): string {
   const label = d.groupLabel.toLowerCase();
-  const n = d.connectedCount;
   return postForm(
     d,
     "randomise",
@@ -291,7 +290,7 @@ function renderRandomisePanel(d: HostBoardData): string {
       `<label><input type="radio" name="mode" value="unassigned" checked><span>Only people not in a ${escapeHtml(label)}</span></label>` +
       `<label><input type="radio" name="mode" value="everyone"><span>Everyone connected</span></label>` +
       `</div><p class="kb-help">Everyone connected deals people who are already placed again.</p></fieldset>` +
-      `<div class="kb-row">${sizedButton(`Deal ${plural(n, "person", "people")}`, { primary: true })}</div>`,
+      `<div class="kb-row">${sizedButton(`Deal people into ${label}s`, { primary: true })}</div>`,
     ' class="kb-stack"',
   );
 }

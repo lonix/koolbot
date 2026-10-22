@@ -373,6 +373,11 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 .kb-board__who { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .kb-board__menu { flex-basis: 100%; }
 .kb-board__person.is-dragging { opacity: 0.5; }
+/* A column can be as narrow as 11rem: the foot wraps, its form takes the full row when it must, and a long button label wraps inside the column. */
+.kb-board__foot { flex-wrap: wrap; }
+.kb-board__foot form { max-width: 100%; }
+.kb-board__foot .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.kb-board__where { min-width: 0; overflow-wrap: anywhere; }
 .kb-board__col.is-over { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 
 /* ---------- Side nav: pinned item ---------- */

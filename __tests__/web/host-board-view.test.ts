@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, jest } from "@jest/globals";
+import { readFileSync } from "node:fs";
 import {
   renderHostBoard,
   HOST_BOARD_SCRIPT,
@@ -123,9 +124,10 @@ describe("the toolbar", () => {
     expect(html).toContain("no longer changes who is in which team");
   });
 
-  it("names the people Randomise deals and offers both modes", () => {
-    const html = renderHostBoard(data({ connectedCount: 1 }));
-    expect(html).toContain("Deal 1 person");
+  it("offers both modes, and its action label states no count (the default mode skips people already in a team)", () => {
+    const html = renderHostBoard(data({ connectedCount: 2 }));
+    expect(html).toContain(">Deal people into teams<");
+    expect(html).not.toMatch(/Deal \d+ /);
     expect(html).toContain('name="mode" value="unassigned" checked');
     expect(html).toContain('name="mode" value="everyone"');
   });
@@ -188,6 +190,15 @@ describe("the board", () => {
     expect(html).toContain("2 people, limit 2");
     expect(html).toContain('aria-label="2 of 2 places taken"');
     expect(html).toContain("Nobody here yet.");
+  });
+
+  it("lets a column foot wrap so a reset form never overflows a narrow column", () => {
+    const css = readFileSync(
+      new URL("../../docs/design/kb.css", import.meta.url),
+      "utf8",
+    );
+    expect(css).toMatch(/\.kb-board__foot \{ flex-wrap: wrap; \}/);
+    expect(css).toMatch(/\.kb-board__foot \.kb-btn \{[^}]*white-space: normal/);
   });
 
   it("escapes every name, tag and token", () => {

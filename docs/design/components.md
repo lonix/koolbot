@@ -445,7 +445,8 @@ The larger context for an action: its options and consequences, shown at the mom
 The footer wraps and stacks on a narrow screen, and its buttons may wrap a long label, so *Go back* stays reachable (scoped to the dialog; `.kb-btn` is unchanged).
 
 - **Confirm** (Switch groups off): the title is the question, the body lists every consequence, the button repeats the verb in `danger`.
-- **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result ("Deal 2 people").
+- **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result
+  without a count that a choice in the dialog could make wrong ("Deal people into teams").
 - Replaces the separate confirm pages; without JavaScript the buttons still post to the existing routes.
 - Focus starts on the go-back button; Escape closes and focus returns to the control that opened it. `aria-labelledby` points at the title.
 

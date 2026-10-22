@@ -152,6 +152,7 @@ ${onOff(
   },
   "Turning leaders off hides the Leaders section and removes the leaders-only channel access at once. Who was chosen is kept, and comes back when you turn leaders on again.",
 )}
+<div class="kb-nested" id="host-settings-leaders-children">
 <div class="field"><label for="host-settings-leader-label">What leaders are called</label>
 <input id="host-settings-leader-label" type="text" maxlength="${GROUP_LABEL_MAX}" name="${escapeHtml(valueField("leaderLabel"))}" value="${escapeHtml(d.leaderLabel)}">
 ${hidden(baseField("leaderLabel"), d.leaderLabel)}</div>
@@ -164,6 +165,7 @@ ${onOff(
   "Only has an effect while leaders are on. Turning it off removes the Customise button at once and refuses a form that is already open. The names and tags leaders chose are kept; reset a team in the Customise section to put the originals back.",
 )}
 ${renderLobby(d)}
+</div>
 </fieldset>
 <fieldset class="field"><legend>Clan tags</legend>
 ${onOff(
@@ -177,6 +179,7 @@ ${onOff(
   },
   "Nicknames follow in the background, a few every second, so a big team takes a moment. Original nicknames are kept and always put back.",
 )}
+<div class="kb-nested" id="host-settings-tags-children">
 ${onOff(
   "tagsSuffix",
   "host-settings-tags-position",
@@ -186,5 +189,6 @@ ${onOff(
   "Only has an effect while clan tags are on.",
 )}
 ${renderTeamTags(d)}
+</div>
 </fieldset>`;
 }
