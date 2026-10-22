@@ -479,6 +479,15 @@ describe("the edit page", () => {
     });
     const r = await page(EDIT);
     expect(r.text).toContain("Replace cover");
+    // One primary button per view (docs/design/components.md): Save changes.
+    // The cover buttons are neutral and danger.
+    const main = r.text.slice(
+      r.text.indexOf("<main"),
+      r.text.indexOf("</main>"),
+    );
+    expect(main.match(/kb-btn--primary/g)).toHaveLength(1);
+    expect(main).toMatch(/class="kb-btn kb-btn--primary">Save changes/);
+    expect(main).toMatch(/class="kb-btn">Replace cover/);
     expect(r.text).toContain(`action="${REMOVE}"`);
     expect(r.text).toMatch(/belongs to the whole series/);
   });

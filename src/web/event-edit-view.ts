@@ -104,7 +104,7 @@ function renderCoverPanel(
             <input class="kb-input" id="edit-cover-file" type="file" accept="image/png,image/jpeg,image/gif">
           </div>
         </div>
-        <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">${cover.hasCover ? "Replace cover" : "Upload cover"}</button> <span class="cover-msg kb-help" role="status" aria-live="polite"></span></div>
+        <div class="kb-row"><button type="submit" class="kb-btn">${cover.hasCover ? "Replace cover" : "Upload cover"}</button> <span class="cover-msg kb-help" role="status" aria-live="polite"></span></div>
       </form>
       ${remove}
       ${adminLink}
