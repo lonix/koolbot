@@ -1,0 +1,205 @@
+import type { ServerScan } from "../../src/services/server-scan-service.js";
+
+/**
+ * A server scan with something on every tab of the Server scan page (#1323):
+ * a blocker, a warning and a note, suggestions that link out, a role the bot
+ * cannot manage, custom channel permissions, a catalogued, a custom and an
+ * unknown bot, and a native scheduled event. Shared by the axe fixtures and
+ * the UI preview.
+ */
+export function busyScan(): ServerScan {
+  const flags = {
+    afk: false,
+    rules: false,
+    system: false,
+    publicUpdates: false,
+    webhookFed: false,
+    followed: false,
+    announcement: false,
+    forum: false,
+    stage: false,
+    onboardingDefault: false,
+  };
+  const bot = {
+    roleIds: [],
+    overwriteChannelIds: ["c1"],
+    isKoolBot: false,
+  };
+  return {
+    guildId: "g1",
+    guildName: "Guild",
+    scannedAt: "2026-10-07T00:00:00Z",
+    scanned: { config: { "moderation.enabled": true } } as never,
+    roles: [
+      {
+        id: "r1",
+        name: "Mod",
+        color: 0x3498db,
+        position: 3,
+        managed: false,
+        isEveryone: false,
+        permissions: [],
+        memberCount: 2,
+        memberCountApproximate: true,
+        botId: null,
+        botCanManage: false,
+        usedBy: ["moderation"],
+        onboardingManaged: false,
+      },
+      {
+        id: "r2",
+        name: "@everyone",
+        color: 0,
+        position: 0,
+        managed: false,
+        isEveryone: true,
+        permissions: [],
+        memberCount: 40,
+        memberCountApproximate: false,
+        botId: null,
+        botCanManage: false,
+        usedBy: [],
+        onboardingManaged: false,
+      },
+    ],
+    channels: [
+      {
+        id: "c0",
+        name: "Community",
+        kind: "category",
+        typeName: "GuildCategory",
+        parentId: null,
+        parentName: null,
+        syncedToParent: null,
+        position: 0,
+        overwrites: [],
+        usedBy: [],
+        featureGuess: null,
+        gatedByRoleIds: [],
+        ownerHint: null,
+        flags,
+      },
+      {
+        id: "c1",
+        name: "quotes",
+        kind: "text",
+        typeName: "GuildText",
+        parentId: "c0",
+        parentName: "Community",
+        syncedToParent: false,
+        position: 1,
+        overwrites: [
+          {
+            id: "r1",
+            type: "role",
+            label: "Mod",
+            allow: ["ViewChannel"],
+            deny: ["SendMessages"],
+          },
+        ],
+        usedBy: ["quotes"],
+        featureGuess: null,
+        gatedByRoleIds: ["r1"],
+        ownerHint: null,
+        flags: { ...flags, webhookFed: true },
+      },
+    ],
+    bots: [
+      {
+        ...bot,
+        userId: "155149108183695360",
+        tag: "Dyno#1",
+        verified: true,
+      },
+      {
+        ...bot,
+        userId: "300000000000000004",
+        tag: "Homemade#1",
+        verified: false,
+      },
+      {
+        ...bot,
+        userId: "300000000000000002",
+        tag: "Mystery#1",
+        verified: true,
+      },
+    ],
+    readiness: {
+      botUserId: "b",
+      botRoleIds: [],
+      highestRoleId: null,
+      highestRoleName: "KoolBot",
+      highestRolePosition: 2,
+      roleCount: 5,
+      administrator: false,
+      permissions: [
+        { name: "ManageRoles", granted: false, purpose: "p", required: true },
+      ],
+      rolesAboveBot: [],
+      membersIntent: false,
+      issues: [
+        {
+          code: "missing-ManageRoles",
+          severity: "error",
+          message: "KoolBot lacks Manage Roles",
+          help: "h",
+        },
+        {
+          code: "members-intent-off",
+          severity: "warning",
+          message: "The bot is not requesting the GuildMembers intent",
+          help: "h",
+        },
+        {
+          code: "note",
+          severity: "info",
+          message: "A role above the bot is managed by another bot",
+          help: "h",
+        },
+      ],
+      ready: false,
+    },
+    community: {
+      community: true,
+      features: [],
+      rulesChannelId: "c1",
+      systemChannelId: null,
+      publicUpdatesChannelId: null,
+      onboardingEnabled: true,
+      onboardingRoleIds: ["r1"],
+      onboardingChannelIds: [],
+      onboardingPrompts: [{ title: "Pick", roleIds: ["r1"] }],
+    },
+    naming: {
+      pattern: "lower-kebab",
+      separator: "-",
+      confidence: 0.8,
+      samples: [],
+      categoryEmojiPrefix: true,
+      suggestedPrefix: "🔊",
+      suggestedSuffix: null,
+    },
+    scheduledEvents: [
+      {
+        id: "e1",
+        name: "Game night",
+        startsAt: "2026-11-01T18:00:00.000Z",
+        status: "1",
+        channelId: null,
+        endsAt: null,
+        description: "",
+        creatorId: null,
+        creatorIsBot: null,
+        entityType: "external",
+        recurring: false,
+      },
+    ],
+    suggestions: [
+      { code: "afk-not-excluded", message: "Exclude the AFK channel" },
+      { code: "fed-channel-c1", message: "quotes is fed by a webhook" },
+      { code: "naming-prefix", message: "Consider a voice prefix" },
+    ],
+    webhooks: { known: false, list: [], unavailable: "missing-permission" },
+    partial: ["webhooks"],
+  };
+}

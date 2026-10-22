@@ -56,6 +56,11 @@ Server scan, Overview tab. The read-only inventory of `adopt-view.ts`, reordered
 
 The full role, channel and bot tables live in their tabs. The ownership-hints switch in the header replaces the `?sample=1` link.
 
+**As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the ownership-hints switch is a GET form, so
+the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
+no icon yet: the shared icon helper in `app-shell.ts` has none of the alert icons. The Channels tab is still a flat table; the tree, filters and
+*Claim* are tracked in #1364.
+
 ### ServerScanChannelsPage
 
 Server scan, Channels tab. The channels as Discord shows them, categories with their channels under them. Each row shows what uses the channel (green

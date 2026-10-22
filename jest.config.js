@@ -45,7 +45,7 @@ export default {
       branches: 78,
       functions: 84,
       lines: 79,
-      statements: 78,
+      statements: 84,
     },
   },
   testTimeout: 10000,
