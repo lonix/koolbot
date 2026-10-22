@@ -1246,6 +1246,18 @@ Links) are not covered yet.
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
   be reached the page says it is using the bot's cached view; a feature that cannot
   be checked is shown as _Not checked_, never as fine.
+- **All Discord permissions.** A folded card at the bottom of the page lists every Discord
+  permission with whether the bot's role holds it (the role's own server-wide list, without
+  channel overwrites, and not widened by Administrator) and what KoolBot does with it:
+  _checked in the table above_, _used, not checked on this page_ (posting, moderation and
+  the overwrite permissions of read-only channels, each with what for), or _not used by
+  KoolBot_. A permission that is not classified yet (a flag Discord added later) is shown as
+  such, never as unused. Administrator is not required: if the role holds it, the row names
+  the permissions the switched-on features need that the role itself lacks, to be given
+  before Administrator is removed. The classification is in
+  `src/services/bot-permission-flags.ts`; a test fails when discord.js gains a flag that is
+  not listed. There is no re-authorise link yet: whether Discord applies new bits to the
+  bot's existing role is not verified (#1366).
 - **Status indicator.** The **Bot permissions** entry in the sidebar shows a badge
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
