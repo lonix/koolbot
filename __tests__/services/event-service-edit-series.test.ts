@@ -50,6 +50,7 @@ const {
   parseEditScope,
   nextSeriesTemplate,
   isSeriesRow,
+  seriesWriteFilter,
   EDIT_MESSAGES,
 } = await import("../../src/services/event-edit.js");
 
@@ -116,6 +117,54 @@ describe("series edit rules (pure)", () => {
     ]) {
       expect(eventEditVersion(series(over), "full")).not.toBe(base);
     }
+  });
+
+  it("covers every series field of the version token in the write filter", () => {
+    // The token and the conditional write must not drift: whatever moves the
+    // token for a series row must change what the write matches. `nextSpawned`
+    // is the one exception, by design: a row that has it is refused before the
+    // write, and the filter always requires it not to be set.
+    const tpl = {
+      title: "x",
+      description: "d",
+      durationMinutes: 1,
+      timezone: "UTC",
+    };
+    const base = series();
+    const cases: Array<Record<string, unknown>> = [
+      { seriesStart: new Date("2030-01-04T21:00:00Z") },
+      { seriesTemplate: tpl },
+    ];
+    for (const over of cases) {
+      expect(eventEditVersion(series(over), "full")).not.toBe(
+        eventEditVersion(base, "full"),
+      );
+      expect(seriesWriteFilter(series(over))).not.toEqual(
+        seriesWriteFilter(base),
+      );
+    }
+    // Each template field counts.
+    const withTpl = series({ seriesTemplate: tpl });
+    for (const field of [
+      "title",
+      "description",
+      "durationMinutes",
+      "timezone",
+    ]) {
+      const changed = series({
+        seriesTemplate: {
+          ...tpl,
+          [field]: field === "durationMinutes" ? 2 : "y",
+        },
+      });
+      expect(eventEditVersion(changed, "full")).not.toBe(
+        eventEditVersion(withTpl, "full"),
+      );
+      expect(seriesWriteFilter(changed)).not.toEqual(
+        seriesWriteFilter(withTpl),
+      );
+    }
+    expect(seriesWriteFilter(base)).toMatchObject({ seriesTemplate: null });
   });
 
   it("keeps an earlier one-off rename out of a 'following' template", () => {

@@ -73,7 +73,15 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
       if (!row) return null;
       for (const [k, want] of Object.entries(filter)) {
         if (k === "_id") continue;
-        if (!same(row[k], want)) return null;
+        const actual = k.includes(".")
+          ? k
+              .split(".")
+              .reduce<unknown>(
+                (o, p) => (o as Json | null | undefined)?.[p],
+                row,
+              )
+          : row[k];
+        if (!same(actual, want)) return null;
       }
       Object.assign(row, update.$set);
       return clone(row);
@@ -1221,6 +1229,30 @@ describe("a recurring event", () => {
     });
     expect(row().seriesStart).toEqual(new Date("2099-06-01T19:30:00.000Z"));
     expect(row().startTime).toEqual(new Date("2099-06-01T19:30:00.000Z"));
+  });
+
+  it("refuses a stale save when only the stored template changed meanwhile (a series rename, then the row restored)", async () => {
+    // Another host renames the series ("This and following"), then restores
+    // this row's title ("This occurrence"): every row field is back to what
+    // the stale form saw, but the template now holds the series-wide rename.
+    const renamed = {
+      title: "Series renamed",
+      description: "Bring a friend",
+      durationMinutes: 90,
+      timezone: "UTC",
+    };
+    const form = await formState();
+    beforeWrite = () => {
+      row().seriesTemplate = renamed;
+    };
+    const r = await save(
+      { time: "19:30", scope: "occurrence" },
+      { ...form, mode: form.mode },
+    );
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect(row().seriesTemplate).toEqual(renamed);
+    expect(row().startTime).toEqual(START);
   });
 
   it("refuses an occurrence whose successor already exists", async () => {

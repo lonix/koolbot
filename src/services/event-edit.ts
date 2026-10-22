@@ -251,6 +251,39 @@ export function eventEditVersion(
     .slice(0, 24);
 }
 
+/**
+ * The series part of the conditional write of an edit (#1298): everything of a
+ * recurring row that `eventEditVersion` covers and the row's own five fields do
+ * not (the anchor, the successor marker and the template). It sits next to the
+ * token on purpose, and a test walks the same cases through both, so a field
+ * added to one cannot be forgotten in the other.
+ *
+ * The template is matched field by field: a stored template one edit has
+ * written, then restored in its row fields by another, still differs here, so
+ * the stale save is a conflict and cannot overwrite it. An absent template
+ * matches `null`, which Mongo reads as missing too.
+ */
+export function seriesWriteFilter(
+  event: EditableEventRef,
+): Record<string, unknown> {
+  // A missing and an empty string read the same, as in the version token.
+  const text = (value: string | null | undefined): unknown =>
+    value === "" || value == null ? { $in: ["", null] } : value;
+  const t = event.seriesTemplate;
+  return {
+    seriesStart: event.seriesStart ?? null,
+    nextSpawned: { $ne: true },
+    ...(t
+      ? {
+          "seriesTemplate.title": t.title,
+          "seriesTemplate.description": text(t.description),
+          "seriesTemplate.durationMinutes": t.durationMinutes,
+          "seriesTemplate.timezone": text(t.timezone),
+        }
+      : { seriesTemplate: null }),
+  };
+}
+
 /** The fields that differ, before and after, ready for the audit log. */
 export interface EventEditDiff {
   before: Record<string, string | number>;

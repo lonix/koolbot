@@ -32,6 +32,7 @@ import {
   isSeriesRow,
   nextSeriesTemplate,
   parseEditScope,
+  seriesWriteFilter,
   type EditScope,
   type EventEditDiff,
   type EventEditFields,
@@ -2253,12 +2254,7 @@ export class EventService extends ScheduledService {
           : {}),
         // A successor that appeared since (or a moved anchor) means the series
         // has moved on from what the scope was judged against.
-        ...(series
-          ? {
-              seriesStart: row.seriesStart ?? null,
-              nextSpawned: { $ne: true },
-            }
-          : {}),
+        ...(series ? seriesWriteFilter(row) : {}),
         nativeAdopted: { $ne: true },
         seriesCancelled: { $ne: true },
       },
