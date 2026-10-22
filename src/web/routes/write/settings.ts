@@ -15,6 +15,7 @@ import { BotStatusService } from "../../../services/bot-status-service.js";
 import { CommandManager } from "../../../services/command-manager.js";
 import {
   defaultConfig,
+  isManagedSetting,
   settingsMetadata,
 } from "../../../services/config-schema.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
@@ -211,6 +212,26 @@ export function createSettingsRouter(client: Client): Router {
           {
             type: "err",
             text: `Unknown setting: ${key || "(empty)"}.`,
+          },
+          [],
+          reopen,
+        );
+        return;
+      }
+
+      if (isManagedSetting(key)) {
+        await recordAudit(session, {
+          action: "setting.reset",
+          targetId: key,
+          result: "failure",
+          errorMessage: "managed key",
+        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: "err",
+            text: `Cannot reset ${key}: it is managed by KoolBot.`,
           },
           [],
           reopen,
@@ -760,12 +781,14 @@ export function createSettingsRouter(client: Client): Router {
         const all = await config.getAll();
         const exportObj: Record<string, unknown> = {};
         // Start from defaults so every public key has a value.
+        // Bot-managed message ids are state, not settings: importing one
+        // would point the bot at a message that may no longer exist (#1304).
         for (const [k, v] of Object.entries(defaultConfig)) {
-          if (!PROTECTED_KEYS.has(k)) exportObj[k] = v;
+          if (!PROTECTED_KEYS.has(k) && !isManagedSetting(k)) exportObj[k] = v;
         }
         // Overlay with DB values.
         for (const entry of all) {
-          if (!PROTECTED_KEYS.has(entry.key))
+          if (!PROTECTED_KEYS.has(entry.key) && !isManagedSetting(entry.key))
             exportObj[entry.key] = entry.value;
         }
         const yamlContent = yaml.dump(exportObj, { sortKeys: true });

@@ -1058,6 +1058,58 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // A bounded number box and bot-managed values: text with a jump link, no
+      // field to submit (#1304).
+      name: "Settings (bounded number, bot-managed message id)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "quotes",
+            rows: [
+              {
+                key: "quotes.max_length",
+                label: "Maximum quote length (characters)",
+                current: 500,
+                defaultValue: 1000,
+                type: "number",
+                description: "Maximum length of a single quote in characters.",
+                category: "quotes",
+                min: 1,
+                max: 4000,
+              },
+              {
+                key: "quotes.header_message_id",
+                label: "Header message ID (auto-managed)",
+                current: "333333333333333333",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Auto-managed message ID of the quote channel header post.",
+                category: "quotes",
+                managed: { channelKey: "quotes.channel_id" },
+                jumpUrl:
+                  "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333",
+              },
+              {
+                key: "rules.message_id",
+                label: "Rules message ID",
+                current: "",
+                defaultValue: "",
+                type: "string",
+                description: "Managed by KoolBot.",
+                category: "rules",
+                managed: { channelKey: "rules.channel_id" },
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       // The state the save bar script leaves behind after two edits: the bar
       // shown with its count and Discard (#1330). The scripts do not run under
       // axe, so the markup is put in that state here.

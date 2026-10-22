@@ -1178,6 +1178,23 @@ and the save handlers read a listed-but-absent key as `false`. A reset button
 posts to a small sibling form (it is not a button of the save form, so pressing
 Enter in a text field saves rather than resets).
 
+**Numbers that cannot be wrong (#1304).** Every `number` setting declares a `min` and a `max` in `settingsMetadata`
+(a drift test fails on a key without both, or on a default outside its range). The control is a text box with
+`inputmode="numeric"` and `pattern="[0-9]*"`, not `type="number"`, because Safari and Firefox let letters into
+`type="number"` and ignore `pattern` on it. A small script (`src/web/number-input.ts`) drops anything but digits as
+they are typed or pasted and keeps the form from submitting outside `data-min`..`data-max`. The server checks again in
+`coerceConfigValue`, which every write path shares (single save, section save, YAML import, wizard, adoption plans): a
+word, a decimal, `1e3` or an out-of-range value is refused with a message such as "must be at most 25" and nothing is
+stored. A value already stored above a newly declared maximum shows as invalid and blocks the save of its section
+until it is fixed.
+
+**Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the
+id of a message the bot posted. The Settings page shows them as text with a _Jump to message_ link (built from the
+setting that names the channel), without a field and without an entry in the form's `keys`, so saving the section
+cannot blank them. The write routes refuse them, a YAML export leaves them out, and a per-key reset is refused. The
+feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, so it
+stays a text field.
+
 On the **Settings** page and the feature cards, a setting whose feature declares
 a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
 (an indent and a rule) instead of greying in place. While the parent is off the

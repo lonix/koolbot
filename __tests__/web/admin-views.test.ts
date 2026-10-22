@@ -537,7 +537,7 @@ describe("renderSettingsPage", () => {
     expect(html).not.toContain('class="settings-warn"');
   });
 
-  it("renders number controls as required with the declared min so a cleared field is refused client-side (#835)", () => {
+  it("renders number controls as required digit-only boxes carrying the declared bounds (#835, #1304)", () => {
     const html = renderSettingsPage({
       ...COMMON,
       groups: [
@@ -552,6 +552,7 @@ describe("renderSettingsPage", () => {
               description: "",
               category: "voicetracking",
               min: 0,
+              max: 36500,
             },
             {
               key: "quotes.max_length",
@@ -566,15 +567,19 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(html).toMatch(
-      /<input type="number"[^>]*name="value_voicetracking\.cleanup\.retention\.detailed_sessions_days"[^>]*value="400" min="0" required/,
+      /<input type="text"[^>]*name="value_voicetracking\.cleanup\.retention\.detailed_sessions_days" value="400" inputmode="numeric"[^>]*pattern="\[0-9\]\*" maxlength="5"[^>]*data-number data-min="0" data-max="36500" required/,
     );
-    // A key without a declared min is still required but carries no bound.
+    // `type="number"` lets letters in on Safari and Firefox and ignores
+    // `pattern`, so no number setting may render as one (#1304).
+    expect(html).not.toMatch(/<input type="number"[^>]*name="value_/);
+    // A key without declared bounds is still required but carries none.
     const quotesInput = html.match(
-      /<input type="number"[^>]*name="value_quotes\.max_length"[^>]*>/,
+      /<input type="text"[^>]*name="value_quotes\.max_length"[^>]*>/,
     )?.[0];
     expect(quotesInput).toBeDefined();
     expect(quotesInput).toContain(" required");
-    expect(quotesInput).not.toContain(" min=");
+    expect(quotesInput).not.toContain("data-min=");
+    expect(quotesInput).not.toContain("data-max=");
   });
 
   it("renders the action bar and import textarea", () => {
@@ -2338,7 +2343,7 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
   it("renders presets.max_per_user as a number input with its current value", () => {
     const html = render(vcRows({ "voicechannels.presets.max_per_user": 7 }));
     expect(html).toMatch(
-      /<input type="number"[^>]*name="value_voicechannels\.presets\.max_per_user" value="7"/,
+      /<input type="text"[^>]*name="value_voicechannels\.presets\.max_per_user" value="7" inputmode="numeric"/,
     );
   });
 
@@ -3734,9 +3739,9 @@ describe("renderFeatureSettingsCard (#971)", () => {
       '<input type="checkbox" role="switch" id="set-x.flag" name="value_x.flag" value="true" checked',
     );
     expect(html).toContain(
-      '<input type="number" class="kb-input" id="set-x.count"',
+      '<input type="text" class="kb-input" id="set-x.count"',
     );
-    expect(html).toContain('min="1"');
+    expect(html).toContain('data-min="1"');
     expect(html).toContain(
       '<input type="text" class="kb-input" id="set-x.name"',
     );
@@ -4272,7 +4277,7 @@ describe("renderWizardStepPage", () => {
     );
     expect(html).toContain('name="value_quotes.max_length" value="500"');
     expect(html).toContain(
-      'type="number" class="kb-input" id="wiz-quotes.max_length"',
+      'type="text" class="kb-input" id="wiz-quotes.max_length"',
     );
     expect(html).toContain('value="Lobby"');
     expect(html).toContain("Enable VC");
@@ -5443,7 +5448,7 @@ describe("Settings page accessibility (#854)", () => {
       '<input type="checkbox" role="switch" id="set-x.enabled"',
     );
     expect(html).toContain(
-      '<input type="number" class="kb-input" id="set-x.count"',
+      '<input type="text" class="kb-input" id="set-x.count"',
     );
   });
 

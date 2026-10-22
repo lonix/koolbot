@@ -122,6 +122,68 @@ export function renderSegmented(
   );
 }
 
+// ---------- Numbers ----------
+
+/** How many characters a whole number up to `max` (and its sign) can take. */
+function numberMaxLength(
+  min: number | undefined,
+  max: number | undefined,
+): number {
+  const digits = max === undefined ? 9 : String(Math.abs(max)).length;
+  return digits + (min !== undefined && min < 0 ? 1 : 0);
+}
+
+/**
+ * A bounded whole number (#1304). A `type="number"` input lets letters in on
+ * Safari and Firefox and ignores `pattern`, so this is a text input with
+ * `inputmode="numeric"` (the digit keypad on phones) and `pattern`, plus
+ * `data-min` / `data-max` that `NUMBER_INPUT_SCRIPT` (number-input.ts) turns into a range
+ * check and a digit filter. Without the script the pattern and `maxlength`
+ * still hold, and the server refuses anything out of range either way.
+ */
+export function renderNumberInput(
+  name: string,
+  value: string | number,
+  bounds: { min?: number; max?: number },
+  a: ControlAttrs = {},
+): string {
+  const { min, max } = bounds;
+  const signed = min !== undefined && min < 0;
+  const range =
+    min !== undefined && max !== undefined
+      ? `Whole number from ${min} to ${max}`
+      : "Whole number";
+  return (
+    `<input type="text" class="kb-input"${attr("id", a.id)}` +
+    `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
+    ` name="${escapeHtml(name)}" value="${escapeHtml(value)}"` +
+    ` inputmode="numeric" autocomplete="off" pattern="${signed ? "-?[0-9]*" : "[0-9]*"}"` +
+    ` maxlength="${numberMaxLength(min, max)}" title="${escapeHtml(range)}" data-number` +
+    `${min !== undefined ? ` data-min="${min}"` : ""}${max !== undefined ? ` data-max="${max}"` : ""}` +
+    ` required style="width:8rem"${a.disabled ? " disabled data-dep-locked" : ""}>`
+  );
+}
+
+// ---------- Bot-managed values ----------
+
+/**
+ * The value of a bot-managed key (the id of a message the bot posted) as text
+ * with a jump link, never an input (#1304). `jumpUrl` is absent when the
+ * message or its channel is not known.
+ */
+export function renderManagedValue(
+  messageId: string,
+  jumpUrl: string | undefined,
+): string {
+  if (!messageId) {
+    return `<span class="kb-help">Not posted yet. KoolBot sets this when it posts the message.</span>`;
+  }
+  const link = jumpUrl
+    ? ` <a class="kb-chip" href="${escapeHtml(jumpUrl)}" target="_blank" rel="noopener noreferrer">Jump to message</a>`
+    : "";
+  return `<span class="kb-mono">${escapeHtml(messageId)}</span>${link}`;
+}
+
 // ---------- Setting rows ----------
 
 /** Inline icon for the reset button: a counter-clockwise arrow. */
