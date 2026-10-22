@@ -141,12 +141,13 @@ Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loade
 | Rules | `book-open` | Bot permissions | `shield-check` |
 | Reaction roles | `smile-plus` | Command metrics | `chart-column` |
 | Database | `database` | Environment | `server-cog` |
-| All settings | `sliders-horizontal` | | |
+| All settings | `sliders-horizontal` | Game servers | `gamepad-2` |
 
 Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, `chevron-right` (disclosures, links out of a row), `chevron-down`
 (*More*), `external-link`, `user`, `log-out`, `clock`, `bell`, `hash` (text channel), `volume-2` (voice channel), `crown` (team leader), `tag`,
 `settings` (a feature's settings section), `shuffle` (Randomise), `arrow-right-left` (move people), `lock`, `lock-open`, `plus`, `trash-2`,
-`shield-half` (staff scope).
+`shield-half` (staff scope), `grip-vertical` (drag handle), `ellipsis` (a row's menu), `refresh-cw` (check again), `zap` (test a connection),
+`wrench` (maintenance), `server` (servers).
 
 KoolBot has no logo; the name is set in type in the TopBar.
 
