@@ -6,7 +6,7 @@
  * middleware lives at that single mount point, not here.
  */
 
-import express, { Router } from "express";
+import { Router } from "express";
 import { Client } from "discord.js";
 import { EventService, isRecurring } from "../../../services/event-service.js";
 import {
@@ -15,10 +15,13 @@ import {
   redirectToHostPanel,
 } from "../../event-create.js";
 import {
-  COVER_MAX_BYTES,
   removeEventCover,
   setEventCover,
 } from "../../../services/event-cover.js";
+import {
+  COVER_TOO_LARGE_TEXT,
+  coverUploadBody,
+} from "../../event-cover-upload.js";
 import { summariseEnd } from "../../../services/event-teardown.js";
 import {
   END_CONFIRM_FIELD,
@@ -71,42 +74,21 @@ export function createEventsRouter(client: Client): Router {
   // Cover image (#1181)
   // ============================================================
 
-  // The page script POSTs the file's raw bytes (not multipart, and not through
-  // the 256 KB urlencoded parser the router mounts globally) with the CSRF
-  // token in `X-CSRF-Token`. The body is parsed here, inside the router, so it
-  // only happens after the session, admin-role and CSRF checks have passed, and
-  // only for this route, with its own byte cap.
-  const coverBody = express.raw({
-    type: "application/octet-stream",
-    limit: COVER_MAX_BYTES,
-  });
-
+  // The upload body is parsed by the shared `coverUploadBody` (also used by the
+  // host's edit page), here inside the router: only after the session,
+  // admin-role and CSRF checks have passed, and only for this route.
   router.post(
     "/events/:id/cover",
-    (req, res, next) => {
-      coverBody(req, res, (err?: unknown) => {
-        if (!err) {
-          next();
-          return;
-        }
-        const status = (err as { status?: number } | null)?.status;
-        if (status === 413) {
-          respondSectionFlash(
-            req,
-            res,
-            {
-              type: "err",
-              text: `The image is too large. The maximum is ${COVER_MAX_BYTES / (1024 * 1024)} MB.`,
-            },
-            "/admin/events",
-            [],
-            true,
-          );
-          return;
-        }
-        next(err);
-      });
-    },
+    coverUploadBody((req, res) => {
+      respondSectionFlash(
+        req,
+        res,
+        { type: "err", text: COVER_TOO_LARGE_TEXT },
+        "/admin/events",
+        [],
+        true,
+      );
+    }),
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);

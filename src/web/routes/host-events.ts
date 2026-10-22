@@ -30,6 +30,7 @@ import {
   type Request,
   type Response,
 } from "express";
+import { Buffer } from "buffer";
 import { Client } from "discord.js";
 import logger from "../../utils/logger.js";
 import {
@@ -56,7 +57,19 @@ import {
   parseRenderedMode,
   type EditMode,
 } from "../../services/event-edit.js";
-import { renderEventEditBody } from "../event-edit-view.js";
+import {
+  renderEventEditBody,
+  type EventEditCover,
+} from "../event-edit-view.js";
+import {
+  COVER_TOO_LARGE_TEXT,
+  coverUploadBody,
+} from "../event-cover-upload.js";
+import {
+  coverIneligibleReason,
+  removeEventCover,
+  setEventCover,
+} from "../../services/event-cover.js";
 import { validateEventForm } from "../event-form.js";
 import { renderErrorPage } from "../views.js";
 import { isEventHost } from "../event-host.js";
@@ -75,6 +88,7 @@ import {
   readSignedFlash,
   signFlash,
   truncateFlash,
+  wantsJson,
 } from "../http-flash.js";
 import { sanitizeForLog } from "../../utils/log-sanitize.js";
 import { randomBytes } from "node:crypto";
@@ -1652,6 +1666,10 @@ function registerEditRoutes(router: Router, client: Client): void {
             title: `Edit event: ${event.title}`,
             active: "/me/events",
             body: renderEventEditBody({
+              cover: coverViewOf(event),
+              ...(session.role === "admin"
+                ? { adminEventsHref: "/admin/events" }
+                : {}),
               event: {
                 id: eventId,
                 title: event.title,
@@ -1859,6 +1877,148 @@ function registerEditRoutes(router: Router, client: Client): void {
   });
 }
 
+/** What the edit page's cover panel shows for this event (#1393). */
+function coverViewOf(event: IEvent): EventEditCover {
+  const reason = coverIneligibleReason(event);
+  if (reason) return { kind: "unavailable", reason };
+  return {
+    kind: "editable",
+    hasCover: !!event.coverHash,
+    series: !!event.seriesId,
+  };
+}
+
+/**
+ * The host's cover image (#1393): `POST <panel>/cover` (raw bytes, CSRF in the
+ * `X-CSRF-Token` header, like the admin route) and `POST <panel>/cover/remove`,
+ * behind the same gate as the other host routes (CSRF, host scope, creator or
+ * admin). Storage, the size cap, the signature check and the eligibility rules
+ * (adopted, detached, finished events) are `services/event-cover.ts`, shared
+ * with `/admin/events/:id/cover`. The cover belongs to the whole series, so a
+ * host editing one occurrence changes the cover of every occurrence; the page
+ * says so. Audited as `event.host.cover-set` / `event.host.cover-remove`.
+ */
+function registerCoverRoutes(router: Router, client: Client): void {
+  const answer = (
+    req: Request,
+    res: Response,
+    eventId: string,
+    flash: UserFlashMessage,
+  ): void => {
+    const to = `${hostPanelPath(eventId)}/edit`;
+    if (wantsJson(req)) {
+      const text = truncateFlash(flash.text);
+      const qs = new globalThis.URLSearchParams({
+        flash: flash.type,
+        msg: text,
+        sig: signFlash(flash.type, text),
+      }).toString();
+      res.status(200).json({ type: flash.type, text, reload: `${to}?${qs}` });
+      return;
+    }
+    redirectWithFlash(res, to, flash);
+  };
+
+  // Everything both routes check after the body is read: Events on, and a
+  // fresh read of the event (the gate's copy is from before the upload).
+  const load = async (
+    hreq: HostRequest,
+  ): Promise<{ event: IEvent } | { refusal: string }> => {
+    const service = EventService.getInstance(client);
+    if (!(await service.editsAllowed())) {
+      return { refusal: EDIT_MESSAGES.disabled };
+    }
+    const fresh = await service.getEvent(String(hreq.hostEvent._id));
+    if (!fresh || !isEventHost(hreq.hostSession, fresh)) {
+      return { refusal: "This event is no longer available." };
+    }
+    return { event: fresh };
+  };
+
+  router.post(
+    "/cover",
+    coverUploadBody((req, res) => {
+      const { hostEvent } = req as HostRequest;
+      answer(req, res, String(hostEvent._id), {
+        type: "err",
+        text: COVER_TOO_LARGE_TEXT,
+      });
+    }),
+    (req, res, next: NextFunction) => {
+      const hreq = req as HostRequest;
+      const session = hreq.hostSession;
+      const eventId = String(hreq.hostEvent._id);
+      const body: unknown = req.body;
+      const data = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
+      void (async (): Promise<void> => {
+        const loaded = await load(hreq);
+        if ("refusal" in loaded) {
+          await recordAudit(
+            session,
+            boundAuditEntry({
+              action: "event.host.cover-set",
+              targetId: eventId,
+              details: { bytes: data.length },
+              result: "failure",
+              errorMessage: loaded.refusal,
+            }),
+          );
+          answer(req, res, eventId, { type: "err", text: loaded.refusal });
+          return;
+        }
+        const result = await setEventCover(loaded.event, data);
+        await recordAudit(
+          session,
+          boundAuditEntry({
+            action: "event.host.cover-set",
+            targetId: eventId,
+            details: result.ok
+              ? { mime: result.mime, bytes: result.bytes, hash: result.hash }
+              : { bytes: data.length },
+            result: result.ok ? "success" : "failure",
+            errorMessage: result.ok ? null : result.error,
+          }),
+        );
+        answer(req, res, eventId, {
+          type: result.ok ? "ok" : "err",
+          text: result.ok
+            ? `Cover image saved${loaded.event.seriesId ? " for the whole series" : ""}. It reaches the Discord event within a minute.`
+            : `Cover image rejected: ${result.error}`,
+        });
+      })().catch(next);
+    },
+  );
+
+  router.post("/cover/remove", (req, res, next: NextFunction) => {
+    const hreq = req as HostRequest;
+    const session = hreq.hostSession;
+    const eventId = String(hreq.hostEvent._id);
+    void (async (): Promise<void> => {
+      const loaded = await load(hreq);
+      const result =
+        "refusal" in loaded
+          ? ({ ok: false, error: loaded.refusal } as const)
+          : await removeEventCover(loaded.event);
+      await recordAudit(
+        session,
+        boundAuditEntry({
+          action: "event.host.cover-remove",
+          targetId: eventId,
+          result: result.ok ? "success" : "failure",
+          errorMessage: result.ok ? null : result.error,
+        }),
+      );
+      const series = "event" in loaded && !!loaded.event.seriesId;
+      answer(req, res, eventId, {
+        type: result.ok ? "ok" : "err",
+        text: result.ok
+          ? `Cover image removed${series ? " for the whole series" : ""}. It is cleared on the Discord event within a minute.`
+          : `Could not remove the cover: ${result.error}`,
+      });
+    })().catch(next);
+  });
+}
+
 /**
  * `POST /cancel` (#1319): cancel a planned event from "Your events". Only this
  * event, never a series (a host's events do not repeat; an admin's series is
@@ -1970,6 +2130,8 @@ export function createHostEventsRouter(client: Client): Router {
   registerSettingsActions(router, client);
   // Editing the event itself (#1298): `GET` and `POST` `/edit`.
   registerEditRoutes(router, client);
+  // The cover image on the edit page (#1393).
+  registerCoverRoutes(router, client);
   // Cancelling a planned event from "Your events" (#1319).
   registerCancelAction(router, client);
 

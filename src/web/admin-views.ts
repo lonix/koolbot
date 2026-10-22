@@ -66,6 +66,7 @@ import {
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import { COVER_MAX_BYTES } from "../services/event-cover.js";
+import { EVENT_COVER_UPLOAD_SCRIPT } from "./event-cover-upload.js";
 import {
   CHANNEL_LEAD_MAX,
   CHANNEL_LEAD_MIN,
@@ -2548,41 +2549,6 @@ function renderExpected(e: EventRow): string {
   }
   return html;
 }
-
-// Cover upload (#1181). The router has no multipart parser (and its urlencoded
-// parser stops at 256 KB), so the chosen file's raw bytes are POSTed with fetch
-// to the event's cover route, with the CSRF token in a header. The server
-// answers with the usual JSON flash plus a `reload` URL, which is followed so
-// the result shows as a flash; a failure before that (CSRF, network) is shown
-// next to the control. The size is checked here first only to spare the upload;
-// the server checks size and the real file signature again.
-const EVENT_COVER_UPLOAD_SCRIPT =
-  "(function(){" +
-  "var forms=document.querySelectorAll('form[data-cover-upload]');" +
-  "Array.prototype.forEach.call(forms,function(form){" +
-  "var file=form.querySelector('input[type=file]');" +
-  "var msg=form.querySelector('.cover-msg');" +
-  "var btn=form.querySelector('button[type=submit]');" +
-  "var tok=form.querySelector('input[name=_csrf]');" +
-  "var max=parseInt(form.getAttribute('data-max-bytes'),10)||0;" +
-  "function note(t){if(msg)msg.textContent=t}" +
-  "form.addEventListener('submit',function(e){" +
-  "e.preventDefault();" +
-  "var f=file&&file.files&&file.files[0];" +
-  "if(!f){note('Choose an image first.');return}" +
-  "if(max&&f.size>max){note('That file is too large (max '+Math.floor(max/1048576)+' MB).');return}" +
-  "if(typeof fetch!=='function'){note('This browser cannot upload the image.');return}" +
-  "if(btn)btn.disabled=true;note('Uploading\\u2026');" +
-  "fetch(form.getAttribute('action'),{method:'POST',credentials:'same-origin',cache:'no-store'," +
-  "headers:{'Content-Type':'application/octet-stream','Accept':'application/json'," +
-  "'X-Requested-With':'fetch','X-CSRF-Token':tok?tok.value:''},body:f})" +
-  ".then(function(res){var status=res.status;return res.text().then(function(t){" +
-  "var d=null;try{d=JSON.parse(t)}catch(x){}return{status:status,json:d}})})" +
-  ".then(function(r){if(btn)btn.disabled=false;var d=r.json;" +
-  "if(d&&typeof d.reload==='string'&&d.reload.indexOf('/admin/')===0&&d.reload.indexOf('//')<0){window.location.assign(d.reload);return}" +
-  "note(d&&typeof d.text==='string'&&d.text?d.text:'Upload failed ('+r.status+').')})" +
-  ".catch(function(){if(btn)btn.disabled=false;note('Upload failed. Check your connection and try again.')})" +
-  "})})})();";
 
 function renderCoverCell(
   e: EventRow,

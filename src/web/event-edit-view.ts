@@ -9,7 +9,9 @@
  * only the description and duration; see `services/event-edit.ts`.
  */
 
-import { escapeHtml } from "./html.js";
+import { escapeHtml, scriptTag } from "./html.js";
+import { COVER_MAX_BYTES } from "../services/event-cover.js";
+import { EVENT_COVER_UPLOAD_SCRIPT } from "./event-cover-upload.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import {
   EVENT_DESCRIPTION_MAX,
@@ -50,6 +52,67 @@ export interface EventEditView {
   series?: { cadence: string };
 }
 
+/**
+ * The cover image panel (#1393). `editable`: the host can set, replace or remove
+ * it; `series`: the event repeats, and the one cover is shared by every
+ * occurrence. `unavailable`: why not (adopted, no longer mirrored, finished).
+ */
+export type EventEditCover =
+  | { kind: "editable"; hasCover: boolean; series: boolean }
+  | { kind: "unavailable"; reason: string };
+
+/** The cover panel. A separate form from the details above: its save is not part of "Save changes". */
+function renderCoverPanel(
+  id: string,
+  cover: EventEditCover,
+  csrfToken: string,
+  adminHref: string | null,
+): string {
+  const panel = hostPanelPath(id);
+  const adminLink = adminHref
+    ? `<p class="kb-help">Administrators can also manage it from <a href="${escapeHtml(adminHref)}">Events in the admin area</a>.</p>`
+    : "";
+  if (cover.kind === "unavailable") {
+    return `<section class="kb-panel" aria-labelledby="edit-cover-h">
+    <header class="kb-panel__head"><h2 class="kb-panel__title" id="edit-cover-h">Cover image</h2></header>
+    <div class="kb-panel__body kb-stack">
+      <p class="kb-help">${escapeHtml(cover.reason)}</p>
+      ${adminLink}
+    </div>
+  </section>`;
+  }
+  const maxMb = COVER_MAX_BYTES / (1024 * 1024);
+  const scope = cover.series
+    ? `<p class="kb-help">This event repeats. The cover belongs to the whole series: it is shown on every occurrence, whether you edit this occurrence or this and following above.</p>`
+    : "";
+  const remove = cover.hasCover
+    ? `<form method="POST" action="${escapeHtml(panel)}/cover/remove" data-confirm="Remove the cover image${cover.series ? " from the whole series" : ""}?">
+        <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+        <button type="submit" class="kb-btn kb-btn--danger">Remove cover</button>
+      </form>`
+    : "";
+  return `<section class="kb-panel" aria-labelledby="edit-cover-h">
+    <header class="kb-panel__head"><h2 class="kb-panel__title" id="edit-cover-h">Cover image</h2></header>
+    <div class="kb-panel__body kb-stack">
+      <p class="kb-help">${cover.hasCover ? "A cover image is set." : "No cover image yet."} It is shown on the Discord event within a minute of saving.</p>
+      ${scope}
+      <form method="POST" action="${escapeHtml(panel)}/cover" class="kb-stack" data-cover-upload data-max-bytes="${COVER_MAX_BYTES}">
+        <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+        <div class="kb-fields">
+          <div class="kb-field">
+            <label class="kb-label" for="edit-cover-file">Image (PNG, JPEG or GIF, up to ${maxMb} MB)</label>
+            <input class="kb-input" id="edit-cover-file" type="file" accept="image/png,image/jpeg,image/gif">
+          </div>
+        </div>
+        <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">${cover.hasCover ? "Replace cover" : "Upload cover"}</button> <span class="cover-msg kb-help" role="status" aria-live="polite"></span></div>
+      </form>
+      ${remove}
+      ${adminLink}
+    </div>
+  </section>
+  ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}`;
+}
+
 /** The scope question of a recurring event (#1298): no option is pre-chosen. */
 function renderScopeField(cadence: string): string {
   return `<div class="kb-fields">
@@ -67,6 +130,10 @@ function renderScopeField(cadence: string): string {
 export function renderEventEditBody(opts: {
   event: EventEditView;
   csrfToken: string;
+  /** Left out when the page has no cover panel (events off). */
+  cover?: EventEditCover;
+  /** Set for an administrator: a link to the admin Events page. */
+  adminEventsHref?: string;
 }): string {
   const e = opts.event;
   const panel = hostPanelPath(e.id);
@@ -147,5 +214,6 @@ export function renderEventEditBody(opts: {
     </div>
     ${foot}
   </section>
-</form>`;
+</form>
+${opts.cover ? renderCoverPanel(e.id, opts.cover, opts.csrfToken, opts.adminEventsHref ?? null) : ""}`;
 }
