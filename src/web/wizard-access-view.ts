@@ -93,18 +93,18 @@ const SCOPE_COPY: readonly ScopeCopy[] = [
       "Do everything Moderators and Event hosts can",
     ],
     cannot: [],
-    help: "The owner and anyone with Discord's Administrator permission are always admins.",
+    help: "The owner and anyone with Discord's Administrator permission are always admins. Discord only lets /config run for members with the Administrator permission, unless you allow it for a role under Server settings, Integrations. Removing an admin role is done on Role groups.",
   },
   {
     scope: "staff",
     title: "Moderators",
     how: "Sign in to their own pages with /me.",
-    can: [
-      "Read the moderation log and warn members",
-      "Use the moderation commands in Discord",
+    can: ["Read the moderation log and cases in the Web UI"],
+    cannot: [
+      "Change settings",
+      "Run /warn unless Discord grants them Moderate Members",
     ],
-    cannot: ["Change settings"],
-    help: "",
+    help: "A mapped role does not give any Discord permission. Slash commands stay limited by Discord's own permissions.",
   },
   {
     scope: "host",
@@ -124,7 +124,7 @@ function canList(can: readonly string[], cannot: readonly string[]): string {
     ...can.map((t) => `<li>${CHECK_ICON}<span>${escapeHtml(t)}</span></li>`),
     ...cannot.map(
       (t) =>
-        `<li class="is-not">${MINUS_ICON}<span>Cannot: ${escapeHtml(t.toLowerCase())}</span></li>`,
+        `<li class="is-not">${MINUS_ICON}<span>Cannot: ${escapeHtml(t.charAt(0).toLowerCase() + t.slice(1))}</span></li>`,
     ),
   ];
   return `<ul class="kb-access__can">${items.join("")}</ul>`;

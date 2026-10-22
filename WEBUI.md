@@ -1185,10 +1185,10 @@ Members card that points to Command permissions to narrow `/me`. Re-running the 
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
 capabilities, and only links existing roles: it does not create or change a role in Discord. Nothing is written when
 you save the step. The picks wait in the wizard session and are applied from **Review**, which lists the role
-groups it will create or change. Apply checks the roles against Discord again, writes the groups one at a time with
-an audit entry each, and undoes them if a write fails or the settings that follow fail to apply, so a mapping is
+groups it will create or change. Apply checks the roles against Discord again, refuses if the role groups changed since Review,
+writes the groups one at a time with an audit entry each, and undoes them if a write fails or the settings that follow fail to apply, so a mapping is
 never reported as saved while half of it is. It refuses a managed role, a role at or above the bot's, a role behind
-a bot group, and removing the admin role you sign in with. A callout says when Events or Moderation is on and no
+a bot group, and removing `admin` from a group (that goes through Role groups, where it is reviewed). A callout says when Events or Moderation is on and no
 role is mapped to run it. To create an Event host role, use the Event host preset on Role groups first.
 
 The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord

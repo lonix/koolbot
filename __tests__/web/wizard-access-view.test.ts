@@ -86,6 +86,15 @@ describe("renderWizardAccessPage", () => {
     expect(has).not.toContain("no Event host role yet");
   });
 
+  it("does not promise what Discord's command permissions would block", () => {
+    const html = renderWizardAccessPage({ ...base, options: [] });
+    expect(html).toContain(
+      "Discord only lets /config run for members with the Administrator permission",
+    );
+    expect(html).toContain("does not give any Discord permission");
+    expect(html).not.toContain("warn members");
+  });
+
   it("keeps a saved role that can no longer be picked, selected", () => {
     const html = renderWizardAccessPage({
       ...base,

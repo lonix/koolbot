@@ -79,6 +79,10 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const { accessFingerprint, diffAccess } =
+  await import("../../src/services/wizard-access.js");
+type AccessSelection =
+  import("../../src/services/wizard-access.js").AccessSelection;
 const { RoleGroupService } =
   await import("../../src/services/role-group-service.js");
 const { createWizardRouter } =
@@ -114,8 +118,6 @@ const ABOVE_BOT = "100000000000000005";
 
 let roles: Map<string, FakeRole>;
 let rolesFetchError: Error | null;
-let viewerRoles: string[];
-let viewerElevated: boolean;
 
 const client = {
   user: { id: "bot" },
@@ -132,13 +134,6 @@ const client = {
       },
       members: {
         me: { id: "bot", roles: { highest: { position: 10 } } },
-        fetch: async (): Promise<unknown> => ({
-          id: "admin-1",
-          permissions: { has: (): boolean => viewerElevated },
-          roles: {
-            cache: new Map(viewerRoles.map((id) => [id, { id }])),
-          },
-        }),
       },
     }),
   },
@@ -202,8 +197,6 @@ beforeEach(async () => {
   mockGetBoolean.mockImplementation(async () => false);
   nextId = 1;
   rolesFetchError = null;
-  viewerElevated = true;
-  viewerRoles = [];
   roles = new Map([
     [GUILD, role(GUILD, "@everyone", 0)],
     [MOD, role(MOD, "Moderator", 5)],
@@ -261,6 +254,17 @@ afterEach(async () => {
   await harness.close();
   jest.restoreAllMocks();
 });
+
+/** Apply as the Review form posts it: with the fingerprint of what Review showed. */
+function postApply(fingerprint?: string): ReturnType<AdminHarness["post"]> {
+  const state = mockGetSession() as { access?: AccessSelection } | null;
+  const shown =
+    fingerprint ??
+    (state?.access
+      ? accessFingerprint(diffAccess(stored, [...roles.values()], state.access))
+      : "");
+  return harness.post("/wizard/apply", { accessFingerprint: shown });
+}
 
 const okConfig = {
   success: true,
@@ -425,9 +429,7 @@ describe("POST /wizard/access", () => {
     expect(mockSetAccess).not.toHaveBeenCalled();
   });
 
-  it("refuses to remove the admin role the signed-in admin holds", async () => {
-    viewerElevated = false;
-    viewerRoles = [ADMIN];
+  it("refuses to remove admin from a group, even for the owner", async () => {
     stored = [
       group({
         id: "g-1",
@@ -439,7 +441,7 @@ describe("POST /wizard/access", () => {
     mockGetSession.mockReturnValue(wizardState(undefined));
     const res = await harness.post("/wizard/access", { roles_staff: MOD });
     expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "admin role you sign in with",
+      "Role groups",
     );
     expect(mockSetAccess).not.toHaveBeenCalled();
   });
@@ -460,6 +462,21 @@ describe("GET /wizard?step=confirm", () => {
     expect(html).toContain('Creates the role group "Moderator"');
     expect(html).toContain("@Moderator");
     expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
+  });
+
+  it("posts the fingerprint of what it shows back with Apply", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [], staff: [MOD], host: [] }),
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    const want = accessFingerprint(
+      diffAccess(stored, [...roles.values()], {
+        admin: [],
+        staff: [MOD],
+        host: [],
+      }),
+    );
+    expect(html).toContain(`name="accessFingerprint" value="${want}"`);
   });
 
   it("blocks Apply and says why when the mapping is no longer valid", async () => {
@@ -497,7 +514,7 @@ describe("POST /wizard/apply with a role mapping", () => {
   it("writes each group, audits each, then applies the settings", async () => {
     mockGetSession.mockReturnValue(wizardState(picks));
     mockApplyConfiguration.mockResolvedValue(okConfig);
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("ok");
     expect(flash.msg).toContain("2 role group changes");
@@ -535,7 +552,7 @@ describe("POST /wizard/apply with a role mapping", () => {
       wizardState({ admin: [], staff: [MOD], host: [HOST] }),
     );
     mockApplyConfiguration.mockResolvedValue(okConfig);
-    await harness.post("/wizard/apply");
+    await postApply();
     expect(updateSpy).not.toHaveBeenCalled(); // Moderator is already mapped
     expect(createSpy).toHaveBeenCalledTimes(1); // only Event host is new
   });
@@ -548,7 +565,7 @@ describe("POST /wizard/apply with a role mapping", () => {
       wizardState({ admin: [], staff: [], host: [] }),
     );
     mockApplyConfiguration.mockResolvedValue(okConfig);
-    await harness.post("/wizard/apply");
+    await postApply();
     expect(updateSpy).toHaveBeenCalledWith(
       GUILD,
       "g-1",
@@ -560,7 +577,7 @@ describe("POST /wizard/apply with a role mapping", () => {
   it("does not touch role groups when the Access step was not saved", async () => {
     mockGetSession.mockReturnValue(wizardState(undefined));
     mockApplyConfiguration.mockResolvedValue(okConfig);
-    await harness.post("/wizard/apply");
+    await postApply();
     expect(listSpy).not.toHaveBeenCalled();
     expect(createSpy).not.toHaveBeenCalled();
     expect(mockApplyConfiguration).toHaveBeenCalled();
@@ -569,7 +586,7 @@ describe("POST /wizard/apply with a role mapping", () => {
   it("writes nothing and applies nothing when Discord can't be read", async () => {
     rolesFetchError = new Error("discord down");
     mockGetSession.mockReturnValue(wizardState(picks));
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("Nothing was applied");
@@ -582,7 +599,7 @@ describe("POST /wizard/apply with a role mapping", () => {
   it("checks the roles again and writes nothing when one went away since the review", async () => {
     roles.delete(HOST);
     mockGetSession.mockReturnValue(wizardState(picks));
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.msg).toContain("no longer exists");
     expect(createSpy).not.toHaveBeenCalled();
@@ -605,7 +622,7 @@ describe("POST /wizard/apply with a role mapping", () => {
         return { ok: true, group: created };
       })
       .mockRejectedValueOnce(new Error("mongo down"));
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("mongo down");
@@ -634,7 +651,7 @@ describe("POST /wizard/apply with a role mapping", () => {
       ok: false,
       error: "That name is already in use.",
     });
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("already in use");
@@ -660,7 +677,7 @@ describe("POST /wizard/apply with a role mapping", () => {
       })
       .mockRejectedValueOnce(new Error("mongo down"));
     removeSpy.mockRejectedValue(new Error("still down"));
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("could not be undone and are live");
@@ -680,7 +697,7 @@ describe("POST /wizard/apply with a role mapping", () => {
       rolledBackKeys: [],
       revertFailedKeys: [],
     });
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("step=confirm");
     const flash = parseFlashRedirect(location);
@@ -693,7 +710,7 @@ describe("POST /wizard/apply with a role mapping", () => {
   it("puts the mapping back when applying the settings throws", async () => {
     mockGetSession.mockReturnValue(wizardState(picks));
     mockApplyConfiguration.mockRejectedValue(new Error("mongo down"));
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("mongo down");
@@ -720,14 +737,12 @@ describe("POST /wizard/apply with a role mapping", () => {
       rolledBackKeys: [],
       revertFailedKeys: [],
     });
-    await harness.post("/wizard/apply");
+    await postApply();
     expect(stored[0].capabilities).toEqual(["staff"]);
     expect(updateSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses to drop the admin role the applying admin signs in with", async () => {
-    viewerElevated = false;
-    viewerRoles = [ADMIN];
+  it("refuses to remove admin from a group at Apply and writes nothing", async () => {
     stored = [
       group({
         id: "g-1",
@@ -739,12 +754,48 @@ describe("POST /wizard/apply with a role mapping", () => {
     mockGetSession.mockReturnValue(
       wizardState({ admin: [], staff: [MOD], host: [] }),
     );
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "admin role you sign in with",
+      "Role groups",
     );
     expect(updateSpy).not.toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("applies nothing when the groups changed after Review, and says to review again", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [], staff: [MOD], host: [] }),
+    );
+    const reviewed = accessFingerprint(
+      diffAccess(stored, [...roles.values()], {
+        admin: [],
+        staff: [MOD],
+        host: [],
+      }),
+    );
+    // Another admin maps Event host to a group while Review is open.
+    stored = [
+      group({ id: "g-9", name: "Hosts", roleId: HOST, capabilities: ["host"] }),
+    ];
+    const res = await postApply(reviewed);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("changed since you opened Review");
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("applies nothing when Review's fingerprint is missing", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [], staff: [MOD], host: [] }),
+    );
+    const res = await harness.post("/wizard/apply");
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Review",
+    );
+    expect(createSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -781,7 +832,7 @@ describe("a role used by a feature setting in the same run", () => {
     mockGetSession.mockReturnValue(
       wizardState(picks, ["birthdays"], { "birthdays.role_id": MOD }),
     );
-    const res = await harness.post("/wizard/apply");
+    const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.msg).toContain("Nothing was applied");
     expect(createSpy).not.toHaveBeenCalled();

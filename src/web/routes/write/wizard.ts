@@ -13,6 +13,7 @@ import { ConfigService } from "../../../services/config-service.js";
 import { WizardService } from "../../../services/wizard-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
+  accessFingerprint,
   accessGaps,
   accessRoleOverlap,
   applyAccessChanges,
@@ -104,7 +105,7 @@ export function createWizardRouter(client: Client): Router {
     discordUserId: string;
   }): Promise<AccessContext> {
     const guild = await client.guilds.fetch(session.guildId);
-    return readAccessContext(guild, session.discordUserId);
+    return readAccessContext(guild);
   }
 
   /**
@@ -200,6 +201,7 @@ export function createWizardRouter(client: Client): Router {
           let accessChanges: AccessChange[] = [];
           let accessProblem: string | null = null;
           let gaps: AccessGap[] = [];
+          let fingerprint: string | undefined;
           if (existing.access) {
             try {
               const ctx = await readAccess(session);
@@ -209,6 +211,7 @@ export function createWizardRouter(client: Client): Router {
                 ctx.roles,
                 existing.access,
               );
+              fingerprint = accessFingerprint(accessChanges);
               gaps = accessGaps(
                 await enabledGapFeatures(existing),
                 existing.access,
@@ -229,6 +232,7 @@ export function createWizardRouter(client: Client): Router {
               accessChanges,
               accessProblem,
               accessGaps: gaps,
+              accessFingerprint: fingerprint,
               flash,
             }),
           );
@@ -781,6 +785,22 @@ export function createWizardRouter(client: Client): Router {
           return;
         }
         const changes = diffAccess(ctx.groups, ctx.roles, state.access);
+        // Apply only what Review showed. If the groups changed since (another
+        // admin edited one), the recomputed changes differ: stop and re-review.
+        const shown = (req.body as Record<string, unknown> | undefined)
+          ?.accessFingerprint;
+        if (shown !== accessFingerprint(changes)) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: { stage: "access", reason: "review-out-of-date" },
+            result: "failure",
+            errorMessage: "The role groups changed since Review",
+          });
+          confirmFailure(
+            "Nothing was applied: the role groups changed since you opened Review. Look at the updated list and apply again.",
+          );
+          return;
+        }
         if (changes.length > 0) {
           const written = await applyAccessChanges(
             accessDeps(session),

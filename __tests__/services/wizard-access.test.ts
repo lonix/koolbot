@@ -6,6 +6,7 @@
 
 import { describe, it, expect, jest } from "@jest/globals";
 import {
+  accessFingerprint,
   accessGaps,
   accessRoleOverlap,
   applyAccessChanges,
@@ -72,7 +73,6 @@ function ctx(groups: RoleGroupView[], over: Partial<AccessContext> = {}) {
     roles,
     guildId: GUILD,
     botHighest: 10,
-    viewer: { elevated: true, roleIds: [] },
     ...over,
   } as AccessContext;
 }
@@ -256,28 +256,46 @@ describe("validateSelection", () => {
     expect(validateSelection(ctx([]), { ...none, staff: ["mod"] })).toBeNull();
   });
 
-  it("won't let a non-elevated admin drop the role they sign in with", () => {
+  it("never removes admin from a group, however it is asked", () => {
     const groups = [group({ roleId: "admin", capabilities: ["admin"] })];
-    const viewer = { elevated: false, roleIds: ["admin"] };
     expect(
-      validateSelection(ctx(groups, { viewer }), { ...none, staff: ["mod"] }),
-    ).toContain("admin role you sign in with");
+      validateSelection(ctx(groups), { ...none, staff: ["mod"] }),
+    ).toContain("Role groups");
+    expect(validateSelection(ctx(groups), none)).toContain("Role groups");
     expect(
-      validateSelection(ctx(groups, { viewer }), {
-        ...none,
-        admin: ["admin"],
-      }),
+      validateSelection(ctx(groups), { ...none, host: ["admin"] }),
+    ).toContain("Role groups");
+    expect(
+      validateSelection(ctx(groups), { ...none, admin: ["admin"] }),
     ).toBeNull();
   });
+});
 
-  it("lets the owner or an Administrator change the admin mapping freely", () => {
-    const groups = [group({ roleId: "admin", capabilities: ["admin"] })];
-    expect(
-      validateSelection(
-        ctx(groups, { viewer: { elevated: true, roleIds: ["admin"] } }),
-        none,
-      ),
-    ).toBeNull();
+describe("accessFingerprint", () => {
+  const change = (roleId: string): AccessChange => ({
+    kind: "create",
+    roleId,
+    roleName: roleId,
+    groupId: null,
+    groupName: roleId,
+    scopesBefore: [],
+    scopesAfter: ["host"],
+    capabilitiesBefore: [],
+    capabilitiesAfter: ["host"],
+  });
+
+  it("is the same for the same changes in any order, and differs when one differs", () => {
+    expect(accessFingerprint([change("a"), change("b")])).toBe(
+      accessFingerprint([change("b"), change("a")]),
+    );
+    expect(accessFingerprint([change("a")])).not.toBe(
+      accessFingerprint([change("a"), change("b")]),
+    );
+    expect(accessFingerprint([])).toBe(accessFingerprint([]));
+    const other = { ...change("a"), capabilitiesAfter: ["staff" as const] };
+    expect(accessFingerprint([other])).not.toBe(
+      accessFingerprint([change("a")]),
+    );
   });
 });
 

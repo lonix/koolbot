@@ -1,4 +1,5 @@
-import { PermissionsBitField, type Guild } from "discord.js";
+import type { Guild } from "discord.js";
+import { createHash } from "node:crypto";
 import logger from "../utils/logger.js";
 import {
   capabilityLabel,
@@ -183,19 +184,12 @@ export function diffAccess(
   return changes;
 }
 
-export interface AccessViewer {
-  /** The applying admin is the owner or holds Administrator. */
-  elevated: boolean;
-  roleIds: readonly string[];
-}
-
 export interface AccessContext {
   groups: RoleGroupView[];
   roles: AccessRole[];
   guildId: string;
   /** Position of the bot's highest role: a role at or above it can't be linked. */
   botHighest: number;
-  viewer: AccessViewer;
 }
 
 /**
@@ -205,14 +199,12 @@ export interface AccessContext {
  */
 export async function readAccessContext(
   guild: Guild,
-  userId: string,
   service: Pick<RoleGroupService, "list"> = RoleGroupService.getInstance(),
 ): Promise<AccessContext> {
-  const [groups, roleMap, me, member] = await Promise.all([
+  const [groups, roleMap, me] = await Promise.all([
     service.list(guild.id),
     guild.roles.fetch(),
     guild.members.me ?? guild.members.fetchMe(),
-    guild.members.fetch(userId),
   ]);
   return {
     groups,
@@ -224,12 +216,6 @@ export async function readAccessContext(
       position: r.position,
     })),
     botHighest: me.roles.highest.position,
-    viewer: {
-      elevated:
-        guild.ownerId === member.id ||
-        member.permissions.has(PermissionsBitField.Flags.Administrator),
-      roleIds: [...member.roles.cache.keys()],
-    },
   };
 }
 
@@ -285,14 +271,14 @@ export function validateSelection(
       }
     }
   }
-  // Never let the wizard take away the admin access of the person applying it.
-  if (!ctx.viewer.elevated) {
-    const mine = new Set(ctx.viewer.roleIds);
-    const hadAdmin = currentMapping(ctx.groups).admin.some((id) =>
-      mine.has(id),
-    );
-    if (hadAdmin && !sel.admin.some((id) => mine.has(id))) {
-      return "This would remove the admin role you sign in with. Keep one of your own roles under Admins.";
+  // The wizard never removes `admin` from a group. Taking it away goes through
+  // a reviewed role plan on Role groups: the group's live Administrator bit is
+  // only preserved while it carries `admin`, and a later sync could strip it.
+  const keep = new Set(sel.admin);
+  for (const id of currentMapping(ctx.groups).admin) {
+    if (!keep.has(id)) {
+      const name = roles.get(id)?.name ?? id;
+      return `@${name} is an admin role. Removing it from Admins is done on Role groups, where the change is reviewed first; keep it under Admins here.`;
     }
   }
   return null;
@@ -623,4 +609,26 @@ export async function applyAccessChanges(
     }
   }
   return { ok: true, applied, undo };
+}
+
+/**
+ * A short fingerprint of the changes Review showed. Apply recomputes the
+ * changes from the live groups and refuses when this no longer matches, so a
+ * group another admin changed while Review was open is never silently undone.
+ */
+export function accessFingerprint(changes: readonly AccessChange[]): string {
+  const canonical = changes
+    .map((c) => [
+      c.kind,
+      c.roleId,
+      c.groupId,
+      c.groupName,
+      c.capabilitiesBefore.join(),
+      c.capabilitiesAfter.join(),
+    ])
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  return createHash("sha256")
+    .update(JSON.stringify(canonical))
+    .digest("hex")
+    .slice(0, 32);
 }

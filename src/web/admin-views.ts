@@ -2140,6 +2140,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessProblem?: string | null;
   /** Switched-on features with nobody mapped to run them. */
   accessGaps?: AccessGap[];
+  /** What Review showed; posted back so Apply can tell if it went stale. */
+  accessFingerprint?: string;
   flash?: FlashMessage | null;
 }
 
@@ -2177,6 +2179,7 @@ ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGap
 <div class="actions">
   <form method="POST" action="/admin/wizard/apply">
     <input type="hidden" name="_csrf" value="${csrf}">
+    ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
     <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
