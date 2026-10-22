@@ -49,6 +49,11 @@ import {
 } from "../../src/web/me-moderation-page.js";
 import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
+import {
+  UPDATE_AVAILABLE,
+  busyDashboard,
+  calmDashboard,
+} from "./dashboard-fixtures.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
@@ -675,44 +680,21 @@ const CLAIMS_DESTRUCTIVE_PLAN = {
 export function adminPages(): A11yPage[] {
   return [
     {
+      // Everything read, nothing to fix, and the update-available Version panel (#1029).
       name: "Dashboard",
       html: renderDashboardPage({
         ...COMMON,
-        guild: {
-          id: "g1",
-          name: "Test Guild",
-          memberCount: 42,
-          voiceUsers: 3,
-          botTag: "Koolbot#0001",
-        },
-        mongoState: "connected",
-        counts: {
-          announcements: 1,
-          pollSchedules: 2,
-          pollItems: 3,
-          reactionRoles: 4,
-          notices: 5,
-        },
-        features: [
-          { key: "voicechannels.enabled", label: "Voice Channels", on: true },
-          { key: "polls.enabled", label: "Polls", on: false },
-        ],
-        // Update-available state (#1029): the fullest card — kind tag, major
-        // warning, release links, update instructions and "Check now".
-        version: {
-          enabled: true,
-          running: "1.2.2",
-          latest: {
-            version: "v2.0.0",
-            url: "https://github.com/lonix/koolbot/releases/tag/v2.0.0",
-            publishedAt: new Date("2026-09-01T12:00:00Z"),
-            fetchedAt: new Date("2026-09-24T08:00:00Z"),
-          },
-          status: "update-available",
-          updateKind: "major",
-          lastAttemptAt: new Date("2026-09-24T08:00:00Z"),
-          lastError: null,
-        },
+        data: calmDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
+      // Problems, a recent scan and sources that could not be read (#1322).
+      name: "Dashboard with problems",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: busyDashboard(),
+        version: { ...UPDATE_AVAILABLE, status: "error", lastError: "offline" },
       }),
     },
     {

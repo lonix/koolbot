@@ -85,8 +85,9 @@ import type {
 import type { TicketStatus } from "../models/ticket.js";
 import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
-import { formatVersion } from "../utils/semver.js";
 import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
+import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
+import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
@@ -113,33 +114,15 @@ function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
 // ---------- Dashboard ----------
 
 export interface DashboardProps extends CommonProps {
-  guild: {
-    name: string | null;
-    id: string;
-    memberCount: number | null;
-    voiceUsers: number | null;
-    botTag: string | null;
-  };
-  mongoState: string;
-  counts: {
-    announcements: number;
-    pollSchedules: number;
-    pollItems: number;
-    reactionRoles: number;
-    notices: number;
-  };
-  features: Array<{ key: string; label: string; on: boolean }>;
-  /** Update-check result (#1029). Omitted → the card is not rendered. */
+  /** What the page reads, each source on its own (see `dashboard-data.ts`). */
+  data: DashboardData;
+  /** Update-check result (#1029). Omitted: the Version tile says nothing is known. */
   version?: VersionCheckSnapshot;
   flash?: FlashMessage | null;
 }
 
-function formatUtc(date: Date | null | undefined): string {
-  if (!date || Number.isNaN(date.getTime())) return "—";
-  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-const CHANGELOG_URL = "https://github.com/lonix/koolbot/blob/main/CHANGELOG.md";
+// The Version panel moved with the Dashboard (#1322); the name stays importable from here.
+export { renderVersionCard };
 
 /** Consequence lists for the confirmation dialogs (#1343); see `confirmListAttr`. */
 export const REACTION_ROLE_DELETE_ITEMS: readonly string[] = [
@@ -194,159 +177,16 @@ export const EVENT_CANCEL_SERIES_ITEMS: readonly string[] = [
 ];
 const EVENT_CANCEL_SERIES_LIST = confirmListAttr(EVENT_CANCEL_SERIES_ITEMS);
 
-/**
- * Dashboard "Version" card (#1029): running vs latest release, the update
- * state, a "Check now" button and, when behind, how to update. A failed
- * check is a state of the card ("couldn't check", with the last good
- * result), never an error page.
- */
-export function renderVersionCard(
-  v: VersionCheckSnapshot,
-  csrfToken: string,
-): string {
-  const running = formatVersion(v.running);
-  const statusTag = ((): string => {
-    switch (v.status) {
-      case "disabled":
-        return `<span class="tag tag-off">check off</span>`;
-      case "unchecked":
-        return `<span class="tag tag-info">not checked yet</span>`;
-      case "error":
-        return `<span class="tag tag-off">couldn't check</span>`;
-      case "unknown-running":
-        return `<span class="tag tag-warn">running version unknown</span>`;
-      case "up-to-date":
-        return `<span class="tag tag-on">up to date</span>`;
-      case "ahead":
-        return `<span class="tag tag-info">newer than latest release</span>`;
-      case "update-available":
-        return `<span class="tag tag-warn">update available</span>`;
-    }
-  })();
-
-  if (!v.enabled) {
-    return `
-<div class="card" id="version">
-  <h2>Version</h2>
-  <dl class="kv">
-    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
-    <dt>Status</dt><dd>${statusTag}</dd>
-  </dl>
-  <p class="muted">The update check is off (<span class="mono">core.updatecheck.enabled</span>), so only the running version is shown. Turn it on in <a href="/admin/settings#section-core">Settings</a>.</p>
-</div>`;
-  }
-
-  const latest = v.latest;
-  const kindTag = v.updateKind
-    ? ` <span class="tag ${v.updateKind === "major" ? "tag-off" : "tag-info"}">${escapeHtml(v.updateKind)}</span>`
-    : "";
-  const latestHtml = latest
-    ? `<span class="mono">${escapeHtml(latest.version)}</span>${kindTag}` +
-      (latest.publishedAt
-        ? ` <span class="muted">released ${escapeHtml(formatUtc(latest.publishedAt))}</span>`
-        : "")
-    : `<span class="muted">—</span>`;
-
-  const errorNotice =
-    v.status === "error"
-      ? `<div class="notice warn">Couldn't check for updates: ${escapeHtml(v.lastError ?? "unknown error")}` +
-        (latest
-          ? ` Showing the last successful result, fetched ${escapeHtml(formatUtc(latest.fetchedAt))}.`
-          : "") +
-        `</div>`
-      : "";
-
-  const majorNotice =
-    v.updateKind === "major"
-      ? `<div class="notice warn">This is a <strong>major</strong> update and may include breaking changes. Read the release notes before updating.</div>`
-      : "";
-
-  const links = latest
-    ? `<p><a href="${escapeHtml(latest.url)}" rel="noopener noreferrer" target="_blank">Release notes for ${escapeHtml(latest.version)}</a> · <a href="${CHANGELOG_URL}" rel="noopener noreferrer" target="_blank">CHANGELOG</a></p>`
-    : "";
-
-  const instructions = v.updateKind
-    ? `
-  <details class="helper">
-    <summary>How to update</summary>
-    <p>Docker Compose (the published image):</p>
-    <pre class="mono">docker compose pull &amp;&amp; docker compose up -d</pre>
-    <p>Plain Docker: <span class="mono">docker pull ghcr.io/lonix/koolbot:latest</span>, then recreate the container.</p>
-    <p>From source:</p>
-    <pre class="mono">git pull &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; npm start</pre>
-    <p class="muted">See <a href="https://github.com/lonix/koolbot#-docker-management" rel="noopener noreferrer" target="_blank">Docker Management</a> in the README for details.</p>
-  </details>`
-    : "";
-
-  return `
-<div class="card" id="version">
-  <h2>Version</h2>
-  ${errorNotice}${majorNotice}
-  <dl class="kv">
-    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
-    <dt>Latest release</dt><dd>${latestHtml}</dd>
-    <dt>Status</dt><dd>${statusTag}</dd>
-    <dt>Last checked</dt><dd>${escapeHtml(formatUtc(latest?.fetchedAt ?? null))}</dd>
-  </dl>
-  ${links}${instructions}
-  <form method="POST" action="/admin/version/check" class="inline-form">
-    <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
-    <button type="submit" class="btn btn-secondary">Check now</button>
-    <span class="muted">Anonymous request for public release data; nothing about this instance is sent.</span>
-  </form>
-</div>`;
-}
-
 export function renderDashboardPage(props: DashboardProps): string {
-  const featuresHtml = props.features
-    .map(
-      (f) =>
-        `<tr><td>${escapeHtml(f.label)}</td><td>${tagOnOff(f.on)}</td>` +
-        `<td class="mono muted">${escapeHtml(f.key)}</td></tr>`,
-    )
-    .join("");
-
-  const body = `
-<h1>Dashboard</h1>
-<p class="subtitle">Read-only overview of the bot's current state.</p>
-${renderFlash(props.flash)}
-${props.version ? renderVersionCard(props.version, props.csrfToken) : ""}
-
-<div class="card">
-  <h2>Discord</h2>
-  <dl class="kv">
-    <dt>Guild</dt><dd>${escapeHtml(props.guild.name ?? "(unknown)")} <span class="muted mono">${escapeHtml(props.guild.id)}</span></dd>
-    <dt>Members</dt><dd>${props.guild.memberCount ?? "—"}</dd>
-    <dt>In voice now</dt><dd>${props.guild.voiceUsers ?? "—"}</dd>
-    <dt>Bot user</dt><dd>${escapeHtml(props.guild.botTag ?? "(not ready)")}</dd>
-  </dl>
-</div>
-
-<div class="card">
-  <h2>Database</h2>
-  <dl class="kv">
-    <dt>Connection</dt><dd>${tagOnOff(props.mongoState === "connected", props.mongoState, props.mongoState)}</dd>
-    <dt>Scheduled announcements</dt><dd>${props.counts.announcements}</dd>
-    <dt>Poll schedules</dt><dd>${props.counts.pollSchedules}</dd>
-    <dt>Poll questions</dt><dd>${props.counts.pollItems}</dd>
-    <dt>Active reaction roles</dt><dd>${props.counts.reactionRoles}</dd>
-    <dt>Notices</dt><dd>${props.counts.notices}</dd>
-  </dl>
-</div>
-
-<div class="card">
-  <h2>Features</h2>
-  <table>
-    <caption class="visually-hidden">Feature enablement</caption>
-    <thead><tr><th scope="col">Feature</th><th scope="col">Status</th><th scope="col">Config key</th></tr></thead>
-    <tbody>${featuresHtml}</tbody>
-  </table>
-</div>
-`;
   return renderAdminPage({
     title: "Dashboard",
     active: "/admin/",
-    body,
+    body: renderDashboardBody({
+      data: props.data,
+      version: props.version,
+      csrfToken: props.csrfToken,
+      flashHtml: renderFlash(props.flash),
+    }),
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
     navFeatureStatus: props.navFeatureStatus,

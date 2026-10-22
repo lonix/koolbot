@@ -27,6 +27,8 @@ interface Entry {
   startedAt: number;
   /** When the scan succeeded; null while it is pending. */
   doneAt: number | null;
+  /** The finished scan, kept so `peekScan` can read it without waiting. */
+  value: ServerScan | null;
 }
 
 const entries = new Map<string, Entry>();
@@ -85,7 +87,7 @@ export function cachedScan(
   } catch (err) {
     scan = Promise.reject(err);
   }
-  const entry: Entry = { scan, startedAt: now, doneAt: null };
+  const entry: Entry = { scan, startedAt: now, doneAt: null, value: null };
   entries.delete(key);
   entries.set(key, entry);
   while (entries.size > MAX_ENTRIES) {
@@ -96,14 +98,30 @@ export function cachedScan(
   // Only this entry's own outcome counts: a refresh or an eviction may have
   // replaced it while the scan ran.
   scan.then(
-    () => {
+    (done) => {
       entry.doneAt = clock();
+      entry.value = done;
     },
     () => {
       if (entries.get(key) === entry) entries.delete(key);
     },
   );
   return scan;
+}
+
+/**
+ * The finished scan for `key`, if there is one and it is still fresh. It never
+ * starts a scan, never waits for a pending one and never touches the limiter,
+ * so a page that only wants to mention what the last scan found (the Dashboard,
+ * #1322) costs no Discord traffic.
+ */
+export function peekScan(
+  key: string,
+  now: () => number = Date.now,
+): ServerScan | null {
+  const e = entries.get(key);
+  if (!e || e.doneAt === null || e.value === null) return null;
+  return now() - e.doneAt < SCAN_CACHE_TTL_MS ? e.value : null;
 }
 
 /** Drop everything; for tests. */

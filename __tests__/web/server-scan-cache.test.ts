@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   cachedScan,
+  peekScan,
   resetScanCache,
   scanCacheKey,
   SCAN_CACHE_TTL_MS,
@@ -179,5 +180,38 @@ describe("cachedScan (#1323)", () => {
     expect(load).toHaveBeenCalledTimes(20);
     cachedScan("k0", load, { now: c.now });
     expect(load).toHaveBeenCalledTimes(21);
+  });
+});
+
+describe("peekScan (#1322)", () => {
+  it("returns a finished fresh scan, and nothing once the window has passed", async () => {
+    const c = clock();
+    expect(peekScan("k", c.now)).toBeNull();
+    const scan = await cachedScan("k", async () => scanOf("a"), { now: c.now });
+    await flush();
+    expect(peekScan("k", c.now)).toBe(scan);
+    c.set(1_000 + SCAN_CACHE_TTL_MS - 1);
+    expect(peekScan("k", c.now)).not.toBeNull();
+    c.set(1_000 + SCAN_CACHE_TTL_MS);
+    expect(peekScan("k", c.now)).toBeNull();
+  });
+
+  it("never starts a scan and does not wait for a pending one", async () => {
+    expect(peekScan("nothing")).toBeNull();
+    const d = deferred();
+    void cachedScan("pending", () => d.promise);
+    expect(peekScan("pending")).toBeNull();
+    d.resolve(scanOf("done"));
+    await flush();
+    expect(peekScan("pending")?.guildName).toBe("done");
+  });
+
+  it("does not return a scan that failed", async () => {
+    const d = deferred();
+    const pending = cachedScan("bad", () => d.promise);
+    d.reject(new Error("no"));
+    await pending?.catch(() => undefined);
+    await flush();
+    expect(peekScan("bad")).toBeNull();
   });
 });

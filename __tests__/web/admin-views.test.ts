@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import { calmDashboard } from "./dashboard-fixtures.js";
 import {
   findCascadeMasterKey,
   findFeatureMasterKey,
@@ -109,7 +110,7 @@ describe("renderVersionCard (#1029)", () => {
       },
       "tok",
     );
-    expect(html).toContain("couldn't check");
+    expect(html).toContain("couldn&#39;t check");
     expect(html).toContain("Rate-limited by GitHub &lt;soon&gt;.");
     expect(html).toContain("last successful result");
     expect(html).toContain("v2.1.0");
@@ -137,25 +138,7 @@ describe("renderVersionCard (#1029)", () => {
   });
 
   it("is rendered on the dashboard only when a snapshot is passed", () => {
-    const props = {
-      ...COMMON,
-      guild: {
-        id: "g1",
-        name: "G",
-        memberCount: 1,
-        voiceUsers: 0,
-        botTag: null,
-      },
-      mongoState: "connected",
-      counts: {
-        announcements: 0,
-        pollSchedules: 0,
-        pollItems: 0,
-        reactionRoles: 0,
-        notices: 0,
-      },
-      features: [],
-    };
+    const props = { ...COMMON, data: calmDashboard() };
     expect(renderDashboardPage(props)).not.toContain('id="version"');
     expect(renderDashboardPage({ ...props, version: base })).toContain(
       'id="version"',
@@ -164,34 +147,17 @@ describe("renderVersionCard (#1029)", () => {
 });
 
 describe("renderDashboardPage", () => {
-  it("renders feature toggles with status tags", () => {
-    const html = renderDashboardPage({
-      ...COMMON,
-      guild: {
-        id: "g1",
-        name: "Test Guild",
-        memberCount: 42,
-        voiceUsers: 3,
-        botTag: "Bot#0001",
-      },
-      mongoState: "connected",
-      counts: {
-        announcements: 1,
-        pollSchedules: 2,
-        pollItems: 3,
-        reactionRoles: 4,
-        notices: 5,
-      },
-      features: [
-        { key: "voicechannels.enabled", label: "Voice Channels", on: true },
-        { key: "polls.enabled", label: "Polls", on: false },
-      ],
-    });
+  it("lists every feature with its state, key and page, and has no switch", () => {
+    const html = renderDashboardPage({ ...COMMON, data: calmDashboard() });
     expect(html).toContain("Test Guild");
-    expect(html).toContain("Bot#0001");
+    expect(html).toContain("Koolbot#0001");
     expect(html).toContain("voicechannels.enabled");
-    expect(html).toContain('class="tag tag-on">ON');
-    expect(html).toContain('class="tag tag-off">OFF');
+    expect(html).toContain('<a class="kb-list__link" href="/admin/polls">');
+    expect(html).toContain('class="kb-badge kb-badge--on">On');
+    expect(html).toContain('class="kb-badge kb-badge--off">Off');
+    // Features are switched on their own page, never here (design principle 8).
+    expect(html).not.toContain("kb-switch");
+    expect(html).not.toContain('role="switch"');
   });
 });
 
