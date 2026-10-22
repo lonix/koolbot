@@ -412,6 +412,9 @@ describe("applyAccessChanges and rollbackAccess", () => {
       create("mod", "Moderator"),
     ]);
     expect(res.ok).toBe(false);
+    // The failed reorder may have half-applied, so the order is put back too.
+    expect(groups.reorder).toHaveBeenCalledTimes(2);
+    if (!res.ok) expect(res.stuck).toEqual(["the group order"]);
     expect(groups.remove).toHaveBeenCalledWith(GUILD, "new-1");
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({

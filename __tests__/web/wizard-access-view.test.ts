@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import { renderWizardConfirmPage } from "../../src/web/admin-views.js";
 import {
   renderAccessReview,
   renderWizardAccessPage,
@@ -92,5 +93,31 @@ describe("renderWizardAccessPage", () => {
       options: [],
     });
     expect(html).toContain('<option value="404" selected>');
+  });
+});
+
+describe("renderWizardConfirmPage Apply button", () => {
+  const base = {
+    csrfToken: "tok",
+    remainingMs: 60_000,
+    metadata: {},
+  };
+  const applyDisabled = (html: string): boolean =>
+    /<button[^>]*disabled[^>]*>Apply/.test(html);
+
+  it("is disabled when there is nothing to apply", () => {
+    expect(
+      applyDisabled(
+        renderWizardConfirmPage({ ...base, pending: [], accessChanges: [] }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is enabled when a setting is pending", () => {
+    expect(
+      applyDisabled(
+        renderWizardConfirmPage({ ...base, pending: [["a.enabled", true]] }),
+      ),
+    ).toBe(false);
   });
 });

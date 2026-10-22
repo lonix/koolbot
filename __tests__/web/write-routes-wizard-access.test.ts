@@ -33,6 +33,9 @@ const mockGetSession = jest.fn<() => unknown>();
 const mockSetAccess = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
+const mockGetBoolean = jest.fn<
+  (key: string, fallback: boolean) => Promise<boolean>
+>(async () => false);
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -68,7 +71,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       get: jest.fn(async () => null),
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
-      getBoolean: jest.fn(async () => false),
+      getBoolean: mockGetBoolean,
       getAll: jest.fn(async () => []),
       registerReloadCallback: jest.fn(),
     }),
@@ -195,6 +198,7 @@ function lastAuditFor(action: string): Record<string, unknown> {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  mockGetBoolean.mockImplementation(async () => false);
   nextId = 1;
   rolesFetchError = null;
   viewerElevated = true;
@@ -320,6 +324,24 @@ describe("GET /wizard?step=access", () => {
     );
     const html = await (await harness.get("/wizard?step=access")).text();
     expect(html).toContain("Events is on and nobody can host yet.");
+  });
+
+  it("warns for a feature being configured that is already on in the store", async () => {
+    mockGetBoolean.mockImplementation(async (key) => key === "events.enabled");
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [], staff: [], host: [] }, ["events"]),
+    );
+    const html = await (await harness.get("/wizard?step=access")).text();
+    expect(html).toContain("Events is on and nobody can host yet.");
+  });
+
+  it("does not warn for a stored-on feature the wizard run leaves unticked, since Apply switches it off", async () => {
+    mockGetBoolean.mockImplementation(async (key) => key === "events.enabled");
+    mockGetSession.mockReturnValue(
+      wizardState({ admin: [], staff: [], host: [] }, ["quotes"]),
+    );
+    const html = await (await harness.get("/wizard?step=access")).text();
+    expect(html).not.toContain("nobody can host yet");
   });
 
   it("does not warn once an Event host role is picked", async () => {
