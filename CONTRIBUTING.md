@@ -296,6 +296,39 @@ repo and is never fetched from anywhere. To add or update a bot:
 5. Run `npm test`: `__tests__/content/known-bots.test.ts` validates the shape and that every referenced config key exists in
    `defaultConfig`.
 
+### Adding an icon
+
+Icons follow `DESIGN.md` → Iconography (*Brand icons* and *Pulling icons into the repo*). Take an icon from a package, never from the web. A brand's
+own file is accepted only when you can **prove** we may use it exactly the way KoolBot draws it.
+
+1. **Look in this order:**
+   - Lucide, for interface and page icons.
+   - Tabler's outline `brand-*` set, for the mark of a game, platform or service.
+   - Simple Icons, for a mark Tabler does not have.
+
+   If one has it, add a line to `src/web/icons/manifest.json`, run `npm run icons:pull`, and commit both (tooling: #1390). Never paste path data
+   into a view or a game file.
+2. **None has it: ask upstream first.** Open a request with [Simple Icons](https://github.com/simple-icons/simple-icons), linking the brand's
+   official asset, or with [Tabler](https://github.com/tabler/tabler-icons) for an outline mark. Link the request in your PR and use the Lucide
+   stand-in (`gamepad-2`, `headphones`, `globe`) until it lands. Simple Icons has a popularity threshold, so a niche game may not qualify. Only
+   then is step 3 worth trying.
+3. **A brand-supplied mark needs proof on every point.** Link the evidence in the PR and record it in the manifest entry:
+   - **Use:** the brand's published terms allow its mark in third-party software, to refer to its product. Terms for press or editorial use
+     only do not count.
+   - **Redistribution:** the terms allow the file to ship in a public open-source repository, and in Docker images that others download and run.
+   - **Colour:** the brand offers a one-colour version, or its terms allow the mark in a single colour that is not theirs. KoolBot draws every
+     mark in `currentColor`, the text colour, which follows the theme.
+   - **Size and shape:** the terms allow the symbol on its own, without the wordmark, at 16 to 20px in a square box. No minimum size, clear space
+     or background rule that this would break.
+   - **Changes:** the only changes are scaling into a 24×24 `viewBox` and stripping metadata. If the terms forbid even that, the mark is out.
+   - **Record:** the URL of the file, the URL of the terms, the date you retrieved both, and a copy or archived link of the terms. The copy goes in
+     `THIRD_PARTY_NOTICES.md` (#1392), marked as not covered by KoolBot's licence.
+
+   If any point is unclear, or the terms only say "contact us", the answer is no: keep the stand-in and the upstream request. A maintainer checks
+   every point in review before merging.
+4. A brand-supplied mark lives in `src/web/icons/acquired/<name>.svg` and is named `brand-<name>`, like any other mark. It is replaced by the
+   upstream version as soon as Simple Icons or Tabler publishes one.
+
 ### Adding New Commands
 
 Register a new command in **one** place: the `COMMAND_CONFIGS` list in `src/services/command-registry.ts`.
