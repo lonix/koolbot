@@ -8,7 +8,7 @@ import {
 } from "../models/role-group.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import { ConfigService } from "./config-service.js";
-import { parseTierConfig, TIERS_KEY } from "../web/leaderboard-tiers.js";
+import { ROLE_GRANTING_SETTINGS } from "./role-grants.js";
 import {
   validateGroupInput,
   type GroupInput,
@@ -16,8 +16,6 @@ import {
 } from "./role-group-plan.js";
 import type { ScannedState } from "./server-adoption-planner.js";
 import type { ScannedMember } from "./role-group-sync.js";
-
-const BIRTHDAY_ROLE_KEY = "birthdays.role_id";
 
 /**
  * Role groups (#1020): admin-defined, ranked handles on Discord roles, plus
@@ -651,14 +649,11 @@ export class RoleGroupService {
       uses.set(roleId, list);
     };
     const config = ConfigService.getInstance();
-    const tiers = parseTierConfig(
-      await config.getStringStrict(TIERS_KEY, ""),
-    ).tiers;
-    for (const t of tiers) add(t.roleId, "Leaderboard Roles");
-    add(
-      (await config.getStringStrict(BIRTHDAY_ROLE_KEY, "")).trim(),
-      "Birthdays",
-    );
+    // Every setting a feature hands a role out through (role-grants.ts).
+    for (const setting of ROLE_GRANTING_SETTINGS) {
+      const value = await config.getStringStrict(setting.key, "");
+      for (const id of setting.roleIds(value)) add(id, setting.feature);
+    }
     const reactionRoleIds = (await ReactionRoleConfig.distinct("roleId", {
       guildId,
     })) as Array<string | null>;

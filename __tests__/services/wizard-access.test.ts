@@ -72,6 +72,7 @@ function ctx(groups: RoleGroupView[], over: Partial<AccessContext> = {}) {
     groups,
     roles,
     guildId: GUILD,
+    featureUses: new Map<string, string[]>(),
     botHighest: 10,
     ...over,
   } as AccessContext;
@@ -250,6 +251,20 @@ describe("validateSelection", () => {
         host: ["host"],
       }),
     ).toContain("gate-only");
+  });
+
+  it("refuses a role a feature hands out, but not one already mapped", () => {
+    const featureUses = new Map([["mod", ["Rules"]]]);
+    expect(
+      validateSelection(ctx([], { featureUses }), { ...none, staff: ["mod"] }),
+    ).toContain("handed out by Rules");
+    const mapped = [group({ roleId: "mod", capabilities: ["staff"] })];
+    expect(
+      validateSelection(ctx(mapped, { featureUses }), {
+        ...none,
+        staff: ["mod"],
+      }),
+    ).toBeNull();
   });
 
   it("accepts a clean pick", () => {

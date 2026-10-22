@@ -188,6 +188,8 @@ export interface AccessContext {
   groups: RoleGroupView[];
   roles: AccessRole[];
   guildId: string;
+  /** Roles a feature hands out on its own, by role id, with the feature names. */
+  featureUses: Map<string, string[]>;
   /** Position of the bot's highest role: a role at or above it can't be linked. */
   botHighest: number;
 }
@@ -199,15 +201,21 @@ export interface AccessContext {
  */
 export async function readAccessContext(
   guild: Guild,
-  service: Pick<RoleGroupService, "list"> = RoleGroupService.getInstance(),
+  service: Pick<
+    RoleGroupService,
+    "list" | "featureRoleUses"
+  > = RoleGroupService.getInstance(),
 ): Promise<AccessContext> {
-  const [groups, roleMap, me] = await Promise.all([
+  const [groups, featureUses, roleMap, me] = await Promise.all([
     service.list(guild.id),
+    // Unreadable feature settings fail the read, so nothing is decided blind.
+    service.featureRoleUses(guild.id),
     guild.roles.fetch(),
     guild.members.me ?? guild.members.fetchMe(),
   ]);
   return {
     groups,
+    featureUses,
     guildId: guild.id,
     roles: [...roleMap.values()].map((r) => ({
       id: r.id,
@@ -268,6 +276,21 @@ export function validateSelection(
       }
       if (group && (group.gateOnly || group.unlinked)) {
         return `@${role.name} backs a gate-only or unlinked group on Role groups, so it can't carry a scope here.`;
+      }
+    }
+  }
+  // A role a feature hands out (rules, birthday, leaderboard, raid quarantine,
+  // reaction roles) can't gain a scope: everyone the feature qualifies would
+  // receive it. Roles already mapped are left as they are.
+  const mapped = new Set(
+    ACCESS_SCOPES.flatMap((scope) => currentMapping(ctx.groups)[scope]),
+  );
+  for (const scope of ACCESS_SCOPES) {
+    for (const id of sel[scope]) {
+      const uses = ctx.featureUses.get(id);
+      if (uses && uses.length > 0 && !mapped.has(id)) {
+        const name = roles.get(id)?.name ?? id;
+        return `@${name} is handed out by ${uses.join(", ")}, so it can't be mapped to Admins, Moderators or Event hosts: everyone that feature qualifies would get that access. Pick a different role, or change that feature first.`;
       }
     }
   }

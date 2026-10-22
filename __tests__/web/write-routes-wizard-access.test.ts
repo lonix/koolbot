@@ -173,6 +173,7 @@ const svc = RoleGroupService.getInstance();
 let createSpy: jest.SpiedFunction<typeof svc.create>;
 let updateSpy: jest.SpiedFunction<typeof svc.update>;
 let removeSpy: jest.SpiedFunction<typeof svc.remove>;
+let featureUsesSpy: jest.SpiedFunction<typeof svc.featureRoleUses>;
 let listSpy: jest.SpiedFunction<typeof svc.list>;
 let nextId = 1;
 
@@ -208,6 +209,9 @@ beforeEach(async () => {
   stored = [];
   mockGetSession.mockReturnValue(null);
   jest.spyOn(svc, "groupBackedRoles").mockResolvedValue([]);
+  featureUsesSpy = jest
+    .spyOn(svc, "featureRoleUses")
+    .mockResolvedValue(new Map());
   listSpy = jest.spyOn(svc, "list").mockImplementation(async () => [...stored]);
   createSpy = jest
     .spyOn(svc, "create")
@@ -835,6 +839,88 @@ describe("a role used by a feature setting in the same run", () => {
     const res = await postApply();
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.msg).toContain("Nothing was applied");
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("a role a feature hands out to members", () => {
+  const picks = { admin: [], staff: [MOD], host: [] };
+
+  it("can't be mapped when a saved setting hands it out (rules acceptance role)", async () => {
+    featureUsesSpy.mockResolvedValue(new Map([[MOD, ["Rules"]]]));
+    mockGetSession.mockReturnValue(wizardState(undefined));
+    const res = await harness.post("/wizard/access", { roles_staff: MOD });
+    expect(res.headers.get("location")).toContain("step=access");
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "handed out by Rules",
+    );
+    expect(mockSetAccess).not.toHaveBeenCalled();
+  });
+
+  it("is checked again at Apply, so a setting saved after the Access step still blocks", async () => {
+    mockGetSession.mockReturnValue(wizardState(picks));
+    featureUsesSpy.mockResolvedValue(new Map([[MOD, ["Rules"]]]));
+    const res = await postApply();
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "handed out by Rules",
+    );
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("leaves a role that is already mapped alone", async () => {
+    stored = [
+      group({ id: "g-1", name: "Mods", roleId: MOD, capabilities: ["staff"] }),
+    ];
+    featureUsesSpy.mockResolvedValue(new Map([[MOD, ["Rules"]]]));
+    mockGetSession.mockReturnValue(wizardState(undefined));
+    const res = await harness.post("/wizard/access", { roles_staff: MOD });
+    expect(res.headers.get("location")).toBe("/admin/wizard?step=0");
+  });
+
+  it.each([
+    ["rules.role_id", "rules"],
+    ["moderation.raid.quarantine_role_id", "moderation"],
+  ])(
+    "can't be mapped when %s in this run uses it, at the Access step",
+    async (key, feature) => {
+      mockGetSession.mockReturnValue(
+        wizardState(undefined, [feature], { [key]: MOD }),
+      );
+      const res = await harness.post("/wizard/access", { roles_staff: MOD });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        key,
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    },
+  );
+
+  it("is dropped from the rules settings step (the wizard has no raid quarantine step)", async () => {
+    mockGetSession.mockReturnValue(wizardState(picks, ["rules"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_rules.enabled": "true",
+      "value_rules.role_id": MOD,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Access step",
+    );
+    expect(mockAddConfiguration.mock.calls.map((c) => c[2])).not.toContain(
+      "rules.role_id",
+    );
+  });
+
+  it.each([
+    ["rules.role_id", "rules"],
+    ["moderation.raid.quarantine_role_id", "moderation"],
+  ])("blocks Apply before any write when %s uses it", async (key, feature) => {
+    mockGetSession.mockReturnValue(
+      wizardState(picks, [feature], { [key]: MOD }),
+    );
+    const res = await postApply();
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Nothing was applied",
+    );
     expect(createSpy).not.toHaveBeenCalled();
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
   });

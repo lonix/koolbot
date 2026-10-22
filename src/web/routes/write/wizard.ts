@@ -33,6 +33,7 @@ import {
   type AccessSelection,
   type AccessUndo,
 } from "../../../services/wizard-access.js";
+import { ROLE_GRANTING_SETTINGS } from "../../../services/role-grants.js";
 import { renderWizardAccessPage } from "../../wizard-access-view.js";
 import {
   defaultConfig,
@@ -660,7 +661,7 @@ export function createWizardRouter(client: Client): Router {
       // while another admin links one of the chosen roles to a role group
       // (#1023). Check again right before anything is written, and apply
       // nothing if a role has become group-backed.
-      for (const key of ["birthdays.role_id", "leaderboard_roles.tiers"]) {
+      for (const { key } of ROLE_GRANTING_SETTINGS) {
         if (!(key in state.configuration)) continue;
         const before = await ConfigService.getInstance()
           .get(key)
