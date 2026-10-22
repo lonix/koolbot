@@ -20,7 +20,7 @@ describe("actionLabel", () => {
     expect(actionLabel("warn")).toContain("Warn");
     expect(actionLabel("kick")).toContain("Kick");
     expect(actionLabel("ban")).toContain("Ban");
-    expect(actionLabel("unban")).toContain("Unban");
+    expect(actionLabel("unban")).toContain("Ban lifted");
     expect(actionLabel("timeout")).toContain("Timeout");
     expect(actionLabel("untimeout")).toContain("lifted");
   });
@@ -45,8 +45,8 @@ describe("formatHistorySummary (#907)", () => {
     mostRecent: null,
   };
 
-  it("says so when there is no prior history", () => {
-    expect(formatHistorySummary(empty)).toBe("No prior entries");
+  it("says so when there is no earlier history", () => {
+    expect(formatHistorySummary(empty)).toBe("No earlier entries");
   });
 
   it("renders the issue's example shape", () => {
@@ -84,7 +84,7 @@ describe("formatHistorySummary (#907)", () => {
     };
 
     expect(formatHistorySummary(summary)).toBe(
-      "1 warn, 1 timeout, 1 ban, 1 unban",
+      "1 warn, 1 timeout, 1 ban, 1 ban lifted",
     );
   });
 

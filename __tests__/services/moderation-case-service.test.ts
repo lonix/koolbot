@@ -465,7 +465,7 @@ describe("decide", () => {
     expect(loser.reason).toBeInstanceOf(ModerationCaseError);
     expect(loser.reason.code).toBe("status-changed");
     expect(loser.reason.foundStatus).toBe("lifted");
-    expect(loser.reason.message).toContain("lifted");
+    expect(loser.reason.message).toContain("let back in");
   });
 });
 

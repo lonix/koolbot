@@ -241,10 +241,10 @@ describe("POST /moderation/cases/:id/<decision>", () => {
     harness.post(`/moderation/cases/${CASE}/${decision}`, body);
 
   it.each([
-    ["uphold", "upheld"],
-    ["extend", "extended"],
-    ["permanent", "made permanent"],
-    ["readmit", "was let back in"],
+    ["uphold", "kept out for now. The next review is set."],
+    ["extend", "put off. The next review is set."],
+    ["permanent", "kept out for good. It is not reviewed again."],
+    ["readmit", "closed: the member was let back in."],
   ])(
     "%s calls the service as the session and audits it",
     async (decision, word) => {
@@ -252,7 +252,7 @@ describe("POST /moderation/cases/:id/<decision>", () => {
         await decide(decision, { next_review_in_days: "60", note: "reviewed" }),
       );
       expect(flash).toMatchObject({ path: "/admin/moderation", type: "ok" });
-      expect(flash.msg).toBe(`Case #14 ${word}.`);
+      expect(flash.msg).toBe(`Case #14 ${word}`);
 
       expect(mockDecide.mock.calls[0][0]).toMatchObject({
         guildId: "guild-1",
@@ -292,13 +292,13 @@ describe("POST /moderation/cases/:id/<decision>", () => {
 
   it("flashes an illegal transition instead of returning a 500", async () => {
     mockDecide.mockRejectedValue(
-      new MockCaseError("terminal", "Case #14 is already lifted."),
+      new MockCaseError("terminal", "Case #14 is already closed: let back in."),
     );
     const res = await decide("readmit");
     expect(res.status).toBe(303);
     expect(flashOf(res)).toMatchObject({
       type: "err",
-      msg: "Case #14 is already lifted.",
+      msg: "Case #14 is already closed: let back in.",
     });
     expect(lastAudit()).toMatchObject({
       action: "moderation.case.readmit",
@@ -308,10 +308,10 @@ describe("POST /moderation/cases/:id/<decision>", () => {
 
   it("tells the loser of a race which status the case was found in", async () => {
     mockDecide.mockRejectedValue(
-      new MockCaseError("status-changed", "Case #14 was already lifted."),
+      new MockCaseError("status-changed", "Case #14 changed while you were looking: it is now \"let back in\"."),
     );
     expect(flashOf(await decide("permanent")).msg).toBe(
-      "Case #14 was already lifted.",
+      "Case #14 changed while you were looking: it is now \"let back in\".",
     );
   });
 });

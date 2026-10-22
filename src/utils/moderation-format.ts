@@ -1,6 +1,12 @@
 import { embedColor } from "./embed-style.js";
 import { discordTimestamp } from "./discord-time.js";
 import type { ModerationAction } from "../models/moderation-log.js";
+import type { ModerationCaseStatus } from "../models/moderation-case.js";
+import {
+  ACTION_WORDS,
+  CASE_STATUS_WORDS,
+  capitalise,
+} from "./moderation-labels.js";
 
 /**
  * Shared rendering helpers for moderation-log rows (#728, #907).
@@ -10,30 +16,23 @@ import type { ModerationAction } from "../models/moderation-log.js";
  * "prior history" summary live here rather than in any one caller.
  */
 
-/** Emoji + label shown for each action. */
+/** Emoji shown before each action's label. */
+const ACTION_EMOJI: Record<ModerationAction, string> = {
+  warn: "⚠️",
+  kick: "👢",
+  ban: "🔨",
+  unban: "🕊️",
+  timeout: "⏳",
+  untimeout: "✅",
+  quarantine: "🚧",
+  raid_lockdown: "🛡️",
+  raid_clear: "🛡️",
+};
+
+/** Emoji + label shown for each action; the label is the Web UI's word. */
 export function actionLabel(action: ModerationAction): string {
-  switch (action) {
-    case "warn":
-      return "⚠️ Warn";
-    case "kick":
-      return "👢 Kick";
-    case "ban":
-      return "🔨 Ban";
-    case "unban":
-      return "🕊️ Unban";
-    case "timeout":
-      return "⏳ Timeout";
-    case "untimeout":
-      return "✅ Timeout lifted";
-    case "quarantine":
-      return "🚧 Quarantine";
-    case "raid_lockdown":
-      return "🛡️ Raid lockdown on";
-    case "raid_clear":
-      return "🛡️ Raid lockdown off";
-    default:
-      return action;
-  }
+  const word = ACTION_WORDS[action];
+  return word ? `${ACTION_EMOJI[action]} ${capitalise(word)}` : action;
 }
 
 /**
@@ -66,7 +65,7 @@ const ACTION_NOUNS: Record<ModerationAction, readonly [string, string]> = {
   kick: ["kick", "kicks"],
   ban: ["ban", "bans"],
   untimeout: ["timeout lifted", "timeouts lifted"],
-  unban: ["unban", "unbans"],
+  unban: ["ban lifted", "bans lifted"],
   quarantine: ["quarantine", "quarantines"],
   raid_lockdown: ["raid lockdown", "raid lockdowns"],
   raid_clear: ["raid lockdown lifted", "raid lockdowns lifted"],
@@ -114,7 +113,7 @@ export function formatHistorySummary(
   summary: ModerationHistorySummary,
 ): string {
   if (summary.total === 0) {
-    return "No prior entries";
+    return "No earlier entries";
   }
 
   const parts = ACTION_SUMMARY_ORDER.flatMap((action) => {
@@ -134,7 +133,7 @@ export function formatHistorySummary(
 /** The fields of a moderation case the `/modlog` line reads. */
 export interface CaseLineSource {
   caseNumber: number;
-  status: "open" | "under_review" | "upheld" | "lifted" | "expired";
+  status: ModerationCaseStatus;
   reviewAt: Date | null;
   events: ReadonlyArray<{ at: Date; byUserId: string }>;
 }
@@ -144,7 +143,7 @@ const discordDate = (date: Date): string =>
 
 /**
  * One-line case state shown under a kick/ban in `/modlog` (#908), e.g.
- * `Case #14 — under review, due <t:…:D>` or
+ * `Case #14 — needs a decision, review date <t:…:D>` or
  * `Case #9 — let back in <t:…:D> by <@123>`. Terminal cases name who made the
  * final call, because "who let them back in?" is what the line is for.
  */
@@ -157,18 +156,18 @@ export function formatCaseLine(c: CaseLineSource): string {
   switch (c.status) {
     case "open":
       return c.reviewAt
-        ? `${head} open, review ${discordDate(c.reviewAt)}`
-        : `${head} open, no review date`;
+        ? `${head} ${CASE_STATUS_WORDS.open}, review date ${discordDate(c.reviewAt)}`
+        : `${head} ${CASE_STATUS_WORDS.open}, no review date`;
     case "under_review":
       return c.reviewAt
-        ? `${head} under review, due ${discordDate(c.reviewAt)}`
-        : `${head} under review`;
+        ? `${head} ${CASE_STATUS_WORDS.under_review}, review date ${discordDate(c.reviewAt)}`
+        : `${head} ${CASE_STATUS_WORDS.under_review}`;
     case "upheld":
-      return `${head} made permanent${decided}`;
+      return `${head} ${CASE_STATUS_WORDS.upheld}${decided}`;
     case "lifted":
-      return `${head} let back in${decided}`;
+      return `${head} ${CASE_STATUS_WORDS.lifted}${decided}`;
     case "expired":
-      return `${head} expired`;
+      return `${head} ${CASE_STATUS_WORDS.expired}`;
     default:
       return `${head} ${String(c.status)}`;
   }

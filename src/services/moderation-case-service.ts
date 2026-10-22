@@ -1,6 +1,10 @@
 import { Client } from "discord.js";
 import { isValidObjectId, type Types } from "mongoose";
 import logger from "../utils/logger.js";
+import {
+  CASE_STATUS_WORDS,
+  REVIEW_JOB_NOTE,
+} from "../utils/moderation-labels.js";
 import { ConfigService } from "./config-service.js";
 import {
   ModerationCase,
@@ -305,7 +309,7 @@ export class ModerationCaseService {
     if (TERMINAL_CASE_STATUSES.includes(current.status)) {
       throw new ModerationCaseError(
         "terminal",
-        `Case #${current.caseNumber} is already ${current.status}.`,
+        `Case #${current.caseNumber} is already closed: ${CASE_STATUS_WORDS[current.status]}.`,
         current.status,
       );
     }
@@ -316,7 +320,7 @@ export class ModerationCaseService {
       if (!reviewAt && transition.reviewDate === "required") {
         throw new ModerationCaseError(
           "review-date-required",
-          "Extending a case needs a new review date.",
+          "Deciding later needs a new review date.",
         );
       }
       if (reviewAt && reviewAt.getTime() <= Date.now()) {
@@ -379,7 +383,7 @@ export class ModerationCaseService {
       from: "open",
       to: "under_review",
       outcome: null,
-      note: "Review came due",
+      note: REVIEW_JOB_NOTE,
     };
     return ModerationCase.findOneAndUpdate(
       {
@@ -413,7 +417,7 @@ export class ModerationCaseService {
     const message =
       found.status === expected
         ? `Case #${found.caseNumber} was just decided by someone else. Reload the page to see the latest.`
-        : `Case #${found.caseNumber} was already ${found.status.replace("_", " ")}.`;
+        : `Case #${found.caseNumber} changed while you were looking: it is now "${CASE_STATUS_WORDS[found.status]}". Reload the page to see the latest.`;
     return new ModerationCaseError("status-changed", message, found.status);
   }
 

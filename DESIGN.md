@@ -11,6 +11,7 @@ where existing code disagrees, this document wins and the gap is tracked in the 
 | [docs/design/pages.md](docs/design/pages.md) | The redesigned pages, per scope, and what each shows first. |
 | [docs/design/patterns.md](docs/design/patterns.md) | Page patterns, and which component replaces each old class. |
 | [docs/design/discord.md](docs/design/discord.md) | Embeds, replies, buttons and direct messages in Discord. |
+| [docs/design/labels.md](docs/design/labels.md) | The reviewed moderation words (old to new), shared by the Web UI and Discord. |
 
 KoolBot is a self-hosted Discord bot: **K**eeper **O**f **O**ur **L**ore. Each community runs its own instance and owns its data. The Web UI is where
 admins configure the bot, where event hosts run their events, where moderators read the log, and where members manage their own preferences. This
