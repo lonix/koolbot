@@ -143,9 +143,9 @@ export function createMeNewEventRouter(client: Client): Router {
             setupNotice,
             // `?when=now` is Start now on Your events; anything else is the default.
             initialWhen:
-              parseEventWhen(
-                typeof req.query.when === "string" ? req.query.when : "",
-              ) ?? "pick",
+              req.query.when === "now" && parseEventWhen("now") === "now"
+                ? "now"
+                : "pick",
           }),
           csrfToken: csrfOf(req),
           remainingMs: getDisplayedRemainingMs(session),
