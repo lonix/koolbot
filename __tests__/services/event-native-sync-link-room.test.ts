@@ -222,8 +222,11 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
     expect(scheduledEvents.edit).not.toHaveBeenCalled();
   });
 
-  it("Groups on: only the main room is linked, never a group room", async () => {
-    const { guild, rest } = makeGuild([makeNative()]);
+  // OWNER DECISION NEEDED (#1421): an event with group rooms is not linked
+  // (LINK_ROOM_WITH_GROUPS = false) because the main room can empty while the
+  // session goes on in the group rooms.
+  it("Groups with group rooms: stays external with the text, no voice PATCH (empty main room, occupied group rooms)", async () => {
+    const { guild, rest, scheduledEvents } = makeGuild([makeNative()]);
     await makeSync().syncEvent(
       makeEvent({
         channelId: ROOM,
@@ -235,11 +238,36 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
       }),
       guild,
     );
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("Groups switched on after the link: the link is put back to the text", async () => {
+    const { guild, rest, scheduledEvents } = makeGuild([voiceNative(ROOM)]);
+    await makeSync().syncEvent(
+      makeEvent({
+        channelId: ROOM,
+        groupsEnabled: true,
+        groups: [{ key: "a", channelId: "grp1" }],
+      }),
+      guild,
+    );
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({
+        entityType: GuildScheduledEventEntityType.External,
+      }),
+    );
+  });
+
+  it("Groups on but no group defined: a plain event, still links", async () => {
+    const { guild, rest } = makeGuild([makeNative()]);
+    await makeSync().syncEvent(
+      makeEvent({ channelId: ROOM, groupsEnabled: true, groups: [] }),
+      guild,
+    );
     expect(rest.patch).toHaveBeenCalledTimes(1);
-    const init = (rest.patch.mock.calls[0] as unknown[])[1] as {
-      body: { channel_id: string };
-    };
-    expect(init.body.channel_id).toBe(ROOM);
   });
 
   it("Groups on but the main room not created yet: nothing is linked", async () => {
@@ -462,6 +490,89 @@ describe("link-room review fixes (#1421, Copilot round 1)", () => {
         entityMetadata: { location: "New place" },
       }),
     );
+  });
+});
+
+describe("activating the linked voice event (#1421, Copilot round 3)", () => {
+  const startedScheduled = (overrides = {}) =>
+    voiceNative(ROOM, {
+      scheduledStartTimestamp: PAST.getTime(),
+      scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
+      ...overrides,
+    });
+  const startedEvent = () =>
+    makeEvent({ channelId: ROOM, startTime: PAST, state: "active" });
+  const activations = (edit: jest.Mock) =>
+    edit.mock.calls.filter(
+      (c) =>
+        (c[1] as { status?: number }).status ===
+        GuildScheduledEventStatus.Active,
+    );
+
+  it("moves a linked Scheduled native event to Active once the start is reached", async () => {
+    const { guild, scheduledEvents } = makeGuild([startedScheduled()]);
+    await makeSync().syncEvent(startedEvent(), guild);
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({ status: GuildScheduledEventStatus.Active }),
+    );
+  });
+
+  it("does not activate before the start time", async () => {
+    const { guild, scheduledEvents } = makeGuild([voiceNative(ROOM)]);
+    await makeSync().syncEvent(makeEvent({ channelId: ROOM }), guild);
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("does not activate an event that is not linked (external, or no room wanted)", async () => {
+    const a = makeGuild([
+      makeNative({
+        scheduledStartTimestamp: PAST.getTime(),
+        scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
+      }),
+    ]);
+    await makeSync().syncEvent(startedEvent(), a.guild);
+    expect(activations(a.scheduledEvents.edit)).toHaveLength(0);
+
+    // Voice event in some other channel while the row has no room.
+    const b = makeGuild([startedScheduled({ channelId: "other" })]);
+    await makeSync().syncEvent(
+      makeEvent({ channelId: null, startTime: PAST, state: "active" }),
+      b.guild,
+    );
+    expect(activations(b.scheduledEvents.edit)).toHaveLength(0);
+  });
+
+  it("leaves an already Active native event alone", async () => {
+    const { guild, scheduledEvents } = makeGuild([
+      startedScheduled({ status: GuildScheduledEventStatus.Active }),
+    ]);
+    await makeSync().syncEvent(startedEvent(), guild);
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("a rejected activation is retried each scan, warned once, and never throws", async () => {
+    const { guild, scheduledEvents } = makeGuild([startedScheduled()]);
+    scheduledEvents.edit.mockRejectedValue(new Error("no"));
+    const sync = makeSync();
+    await expect(
+      sync.syncEvent(startedEvent(), guild),
+    ).resolves.toBeUndefined();
+    await expect(
+      sync.syncEvent(startedEvent(), guild),
+    ).resolves.toBeUndefined();
+    expect(activations(scheduledEvents.edit)).toHaveLength(2);
+    expect(
+      logger.warn.mock.calls.filter((c) =>
+        String(c[0]).includes("start linked"),
+      ),
+    ).toHaveLength(1);
+    expect(logger.error).not.toHaveBeenCalled();
+
+    // Then it works: the next scan activates and stops once Active.
+    scheduledEvents.edit.mockResolvedValue({});
+    await sync.syncEvent(startedEvent(), guild);
+    expect(activations(scheduledEvents.edit)).toHaveLength(3);
   });
 });
 

@@ -210,6 +210,21 @@ type ApiCaller = <T>(
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
+/**
+ * OWNER DECISION NEEDED (#1421): may an event with group rooms be linked to its
+ * main room? Claimed, unverified: Discord completes a voice-linked event a few
+ * minutes after its channel empties, and sending everyone to their group rooms
+ * empties the main room while the session goes on. Until that is settled the
+ * answer is no: such an event stays external with the location text. Set this
+ * to true to revert to "link the main room, also with Groups on".
+ */
+const LINK_ROOM_WITH_GROUPS = false;
+
+/** True for an event that has group rooms (Groups on and at least one group). */
+function hasGroupRooms(event: IEvent): boolean {
+  return event.groupsEnabled === true && (event.groups?.length ?? 0) > 0;
+}
+
 export class NativeEventSync {
   private readonly warned = new Set<string>();
   private createsThisScan = 0;
@@ -491,7 +506,11 @@ export class NativeEventSync {
     // Link the MAIN room only (#1421): `channelId` is the event's own room;
     // group rooms live in `groups[].channelId` and are never linked. A row
     // with no room yet (or none any more) keeps the text.
-    if (event.channelId && (await this.linkRoomEnabled())) {
+    if (
+      event.channelId &&
+      (LINK_ROOM_WITH_GROUPS || !hasGroupRooms(event)) &&
+      (await this.linkRoomEnabled())
+    ) {
       want.voiceChannelId = event.channelId;
     }
     return want;
@@ -793,6 +812,10 @@ export class NativeEventSync {
     }
 
     const want = await this.wantedFieldsFor(event, guild, native);
+    // A voice event does not start by itself (an external one does), so the
+    // linked one is activated at the start time whether or not anything else
+    // differs.
+    await this.activateLinked(event, guild, native, want);
     const diff = diffNativeFields(native, want);
     if (Object.keys(diff).length === 0) {
       await this.syncCover(event, guild, native.id);
@@ -912,6 +935,53 @@ export class NativeEventSync {
     }
 
     await this.syncCover(event, guild, native.id);
+  }
+
+  /**
+   * Start a linked voice event at its start time (#1421). Claimed, unverified:
+   * a voice scheduled event stays Scheduled until it is set Active, unlike an
+   * external one that starts at its start time, so members would miss the
+   * native start notification. Only for a Scheduled native event that is a
+   * voice event in the room KoolBot wants, and never before the start time.
+   * Best-effort: never throws, warned once per event, retried each scan until
+   * the native event is Active (or no longer wanted linked).
+   */
+  private async activateLinked(
+    event: IEvent,
+    guild: Guild,
+    native: GuildScheduledEvent,
+    want: NativeEventFields,
+  ): Promise<void> {
+    if (native.status !== GuildScheduledEventStatus.Scheduled) return;
+    if (
+      !want.voiceChannelId ||
+      native.entityType !== GuildScheduledEventEntityType.Voice ||
+      native.channelId !== want.voiceChannelId
+    ) {
+      return;
+    }
+    if (want.start.getTime() > Date.now()) return;
+    const key = `activate:${String(event._id)}`;
+    try {
+      await this.callApi(
+        () =>
+          guild.scheduledEvents.edit(native.id, {
+            status: GuildScheduledEventStatus.Active,
+            reason: "KoolBot event mirror: start linked voice event",
+          }),
+        "start guild scheduled event",
+        { quiet: true },
+      );
+      this.warned.delete(key);
+      logger.info(
+        `Native events: started linked event ${sanitizeForLog(native.id)}`,
+      );
+    } catch (error) {
+      this.warnOnce(
+        key,
+        `Native events: could not start linked event ${sanitizeForLog(native.id)} (retried each scan): ${sanitizeForLog(String(error))}`,
+      );
+    }
   }
 
   /**

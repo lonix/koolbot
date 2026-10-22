@@ -1984,7 +1984,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.native.link_room": {
     label: "Link the native event to the voice room",
     description:
-      "When the event's main voice room is created (shortly before the start), point the Discord scheduled event at that room instead of the location text. With event groups only the main room is linked. If Discord refuses the change the text stays and the bot tries again on the next scan. Turn this off to keep the native event external with the text only (an existing link is put back to the text).",
+      "When the event's main voice room is created (shortly before the start), point the Discord scheduled event at that room instead of the location text. An event that has group rooms is not linked and keeps the text. A linked event is started at its start time and Discord may complete it early if the room empties (the card then stays finished). If Discord refuses the change the text stays and the bot tries again on the next scan. Turn this off to keep the native event external with the text only (an existing link is put back to the text).",
     category: "events",
     type: "boolean",
   },

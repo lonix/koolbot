@@ -867,11 +867,14 @@ channel.
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
   KoolBot has no Going / Maybe / Can't buttons and sends no start-time ping. The native event is an _external_ event
-  whose location is `events.native.location` until the event's main voice room is created (`events.create_lead_minutes` before the
-  start). Then, with `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to
-  it; with event groups only the main room is linked. If the room never gets created, or Discord refuses the switch, the text
-  stays (a refusal is logged and retried on the next scan). A native event that an admin switched to another channel by hand is
-  put back (to the room, or to the text when there is no room). After the event ends nothing more is done: a finished Discord event drops off.
+  whose location is `events.native.location` until the event's main voice room is created (`events.create_lead_minutes` before the start). Then, with
+  `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to it. An event that has group rooms
+  (Groups on and at least one group) is not linked and keeps the text, because its main room can empty while the session goes on in the group rooms.
+  The bot starts a linked event (status Active) when its start time is reached, retrying each scan. Discord may complete a linked event on its own
+  when its room empties for a while; the card then stays finished, and KoolBot ignores a Completed native event as it does for any finished one. If
+  the room never gets created, or Discord refuses the switch, the text stays (a refusal is logged and retried on the next scan). A native event that
+  an admin switched to another channel by hand is put back (to the room, or to the text when there is no room). After the event ends nothing more is
+  done: a finished Discord event drops off.
   KoolBot is the source of truth: edits to the title, description, start or duration are pushed to Discord, cancelling
   an event cancels the native one, and a finished event completes it. Recurring events stay KoolBot's own: the bot
   creates each occurrence and mirrors it as its own one-off native event. The bot needs **Create Events** (or **Manage
