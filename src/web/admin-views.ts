@@ -14,6 +14,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
+import { icon } from "./icons.js";
 import { renderSaveBar } from "./savebar.js";
 import {
   CHEVRON_ICON,
@@ -1237,7 +1238,7 @@ function renderMoreDisclosure(key: string, rest: string): string {
   const restHtml = rest ? `<p>${escapeHtml(rest)}</p>` : "";
   return (
     `<details class="kb-disclosure kb-disclosure--inline">` +
-    `<summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>More</summary>` +
+    `<summary>${icon("chevron-right", { className: "kb-chev" })}More</summary>` +
     `<div class="kb-disclosure__body">${restHtml}<p>Setting key: <code class="kb-mono">${escapeHtml(key)}</code></p></div>` +
     `</details>`
   );

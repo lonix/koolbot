@@ -1,3 +1,4 @@
+import { icon, toneIcon } from "./icons.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -44,10 +45,8 @@ export function renderWizardSteps(current: WizardStepId): string {
   return `<ol class="kb-steps-bar" aria-label="Setup wizard steps">${items}</ol>`;
 }
 
-const CHECK_ICON =
-  '<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="5 12 10 17 19 7"/></svg>';
-const MINUS_ICON =
-  '<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="6" y1="12" x2="18" y2="12"/></svg>';
+const CHECK_ICON = icon("check");
+const MINUS_ICON = icon("minus");
 
 function callout(
   kind: "" | "warn" | "ok" | "err",
@@ -56,7 +55,7 @@ function callout(
   role: "status" | "alert" = "status",
 ): string {
   const cls = kind ? `kb-callout kb-callout--${kind}` : "kb-callout";
-  return `<div class="${cls}" role="${role}"><div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${
+  return `<div class="${cls}" role="${role}">${toneIcon(kind)}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${
     text ? `<p class="kb-callout__text">${escapeHtml(text)}</p>` : ""
   }</div></div>`;
 }

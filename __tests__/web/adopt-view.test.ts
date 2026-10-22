@@ -7,6 +7,7 @@ import {
   type ScanTab,
 } from "../../src/web/adopt-view.js";
 import { escapeHtml } from "../../src/web/html.js";
+import { toneIcon } from "../../src/web/icons.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../../src/utils/guild-members-intent.js";
 import type { ServerScan } from "../../src/services/server-scan-service.js";
 
@@ -346,6 +347,19 @@ describe("Server scan tabs (#1323)", () => {
       "/admin/settings#section-voicetracking",
     );
     expect(suggestionAction("something-else")).toBeNull();
+  });
+
+  it('gives issue rows and callouts their tone icon, hidden from assistive technology, never a bare "!"', () => {
+    const html = mainOf(page("overview"));
+    expect(html).toContain(
+      `<div class="kb-issue__icon kb-issue__icon--err" aria-hidden="true">${toneIcon("err")}</div>`,
+    );
+    expect(html).not.toContain('aria-hidden="true">!</div>');
+    expect(html).toMatch(
+      new RegExp(
+        `kb-callout kb-callout--err" role="alert">\\s*${toneIcon("err").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      ),
+    );
   });
 
   it("keeps the troubleshooting link on a blocker, links permission blockers to Bot permissions, and folds notes", () => {

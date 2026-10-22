@@ -1,4 +1,5 @@
 import { URLSearchParams } from "node:url";
+import { icon, toneIcon } from "./icons.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -150,7 +151,7 @@ function callout(
 ): string {
   const role = kind === "err" || kind === "warn" ? "alert" : "status";
   return `<div class="kb-callout${kind ? ` kb-callout--${kind}` : ""}" role="${role}">
-  <div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${text ? `<p class="kb-callout__text">${text}</p>` : ""}</div>${actions ? `<div class="kb-callout__actions">${actions}</div>` : ""}
+  ${toneIcon(kind)}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p>${text ? `<p class="kb-callout__text">${text}</p>` : ""}</div>${actions ? `<div class="kb-callout__actions">${actions}</div>` : ""}
 </div>`;
 }
 
@@ -168,7 +169,7 @@ function panel(
 }
 
 function disclosure(label: string, hint: string, body: string): string {
-  return `<details class="kb-disclosure"><summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>${escapeHtml(label)}${hint ? `<span class="kb-disclosure__hint">${escapeHtml(hint)}</span>` : ""}</summary><div class="kb-disclosure__body">${body}</div></details>`;
+  return `<details class="kb-disclosure"><summary>${icon("chevron-right", { className: "kb-chev" })}${escapeHtml(label)}${hint ? `<span class="kb-disclosure__hint">${escapeHtml(hint)}</span>` : ""}</summary><div class="kb-disclosure__body">${body}</div></details>`;
 }
 
 // ---- derived facts ----------------------------------------------------------
@@ -316,7 +317,7 @@ function renderIssue(i: ReadinessIssue): string {
     ? `<p><a href="${BOT_PERMISSIONS_PAGE}">Open Bot permissions</a></p>`
     : "";
   return `<article class="kb-issue">
-  <div class="kb-issue__icon${sev === "err" ? " kb-issue__icon--err" : ""}" aria-hidden="true">!</div>
+  <div class="kb-issue__icon${sev === "err" ? " kb-issue__icon--err" : ""}" aria-hidden="true">${toneIcon(sev)}</div>
   <div>
     <div class="kb-issue__head"><h3 class="kb-issue__title">${escapeHtml(i.message)}</h3>${badge(SEVERITY_LABEL[i.severity], sev === "err" ? "off" : "warn")}</div>
   </div>

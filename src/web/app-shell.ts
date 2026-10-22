@@ -23,6 +23,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ConfigSchema } from "../services/config-schema.js";
 import type { WebScope } from "../models/web-session.js";
 import { escapeHtml } from "./html.js";
+import { icon, type IconName } from "./icons.js";
 import { getBotVersion } from "../utils/version.js";
 import { formatVersion } from "../utils/semver.js";
 
@@ -107,52 +108,6 @@ function holds(viewer: ShellViewer, scope: WebScope): boolean {
   );
 }
 
-// ---- icons -----------------------------------------------------------------
-
-/**
- * Lucide icons (ISC licence), copied from `lucide-static` and inlined, never
- * loaded from a CDN. Children of the 24x24 `svg`; the `kb-icon` class draws it.
- */
-const ICONS = {
-  user:
-    `<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>` +
-    `<circle cx="12" cy="7" r="4"/>`,
-  calendar:
-    `<path d="M8 2v4"/><path d="M16 2v4"/>` +
-    `<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>`,
-  "calendar-plus":
-    `<path d="M8 2v4"/><path d="M16 2v4"/>` +
-    `<path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8"/>` +
-    `<path d="M3 10h18"/><path d="M16 19h6"/><path d="M19 16v6"/>`,
-  "shield-half":
-    `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>` +
-    `<path d="M12 22V2"/>`,
-  "user-cog":
-    `<circle cx="18" cy="15" r="3"/><circle cx="9" cy="7" r="4"/>` +
-    `<path d="M10 15H6a4 4 0 0 0-4 4v2"/>` +
-    `<path d="m21.7 16.4-.9-.3"/><path d="m15.2 13.9-.9-.3"/>` +
-    `<path d="m16.6 18.7.3-.9"/><path d="m19.1 12.2.3-.9"/>` +
-    `<path d="m19.6 18.7-.4-1"/><path d="m16.8 12.3-.4-1"/>` +
-    `<path d="m14.3 16.6 1-.4"/><path d="m20.7 13.8 1-.4"/>`,
-  gavel:
-    `<path d="m14.5 12.5-8 8a2.119 2.119 0 1 1-3-3l8-8"/>` +
-    `<path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/>` +
-    `<path d="m21 11-8-8"/>`,
-  "scroll-text":
-    `<path d="M15 12h-5"/><path d="M15 8h-5"/>` +
-    `<path d="M19 17V5a2 2 0 0 0-2-2H4"/>` +
-    `<path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>`,
-  ticket:
-    `<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>` +
-    `<path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>`,
-} as const;
-
-export type ShellIcon = keyof typeof ICONS;
-
-function icon(name: ShellIcon): string {
-  return `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
-}
-
 // ---- scopes ----------------------------------------------------------------
 
 interface ScopeInfo {
@@ -160,7 +115,7 @@ interface ScopeInfo {
   badge: string;
   /** Sidebar section heading. */
   section: string;
-  icon: ShellIcon;
+  icon: IconName;
   /** The verb phrase of the "why you see this" line. */
   can: string;
   /** What to call the capability when no role name is known. */
@@ -208,7 +163,7 @@ export function scopeOfPath(path: string): WebScope {
   return "member";
 }
 
-function scopeBadge(label: string, name: ShellIcon): string {
+function scopeBadge(label: string, name: IconName): string {
   return `<span class="kb-scope">${icon(name)}${escapeHtml(label)}</span>`;
 }
 
@@ -230,7 +185,7 @@ export interface ShellNavItem {
   scope: WebScope;
   label: string;
   href: string;
-  icon: ShellIcon;
+  icon: IconName;
   /**
    * `<feature>.enabled` key for pages that exist only while a feature is on.
    * Unlike the admin nav, an item gated this way is hidden, not greyed, until
@@ -348,7 +303,7 @@ function isVisible(item: ShellNavItem, status?: ShellFeatureStatus): boolean {
 export interface ShellSection {
   scope: WebScope;
   title: string;
-  icon: ShellIcon;
+  icon: IconName;
   items: ShellNavItem[];
 }
 

@@ -8,14 +8,10 @@
  */
 
 import { escapeHtml } from "./html.js";
-
-const ALERT_ICON =
-  `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
-  `<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>` +
-  `<path d="M12 9v4"/><path d="M12 17h.01"/></svg>`;
+import { icon } from "./icons.js";
 
 /** The disclosure chevron; `.kb-disclosure[open]` turns it down. */
-export const CHEVRON_ICON = `<svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>`;
+export const CHEVRON_ICON = icon("chevron-right", { className: "kb-chev" });
 
 /** One fact on the status line. */
 export interface StatusChip {
@@ -52,7 +48,7 @@ export function renderStatusLine(opts: {
       ? `<span class="kb-mono">${escapeHtml(c.text)}</span>`
       : escapeHtml(c.text);
     const cls = c.warn ? "kb-chip kb-chip--warn" : "kb-chip";
-    const inner = `${c.warn ? ALERT_ICON : ""}${text}`;
+    const inner = `${c.warn ? icon("triangle-alert") : ""}${text}`;
     return c.href
       ? `<a class="${cls}" href="${escapeHtml(c.href)}">${inner}</a>`
       : `<span class="${cls}">${inner}</span>`;
