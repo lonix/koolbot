@@ -562,7 +562,7 @@ commits are pushed.
 
 The docs on `main` describe `main`, so they can run ahead of the newest release. The README sends readers who run a release to
 the docs at their tag instead. release-please bumps every marked version in `README.md` in each release PR: the `[docs-latest]` link, the "Latest
-release" row, the Quick Start download links and the pinned-tag example (`extra-files` in `release-please-config.json`, plus the
+release" row and the pinned-tag example (`extra-files` in `release-please-config.json`, plus the
 `x-release-please-*` markers). Do not edit those versions by hand, and keep one version per marked line: release-please
 replaces only the first one it finds on a line.
 
@@ -570,6 +570,10 @@ When a release starts a new minor or major line (say 2.0.1 → 2.1.0), add the l
 versions" table in `README.md` in a `docs:` PR right after the release, linked to that line's last tag:
 `| 2.0 | [v2.0.1](https://github.com/lonix/koolbot/tree/v2.0.1) |`. release-please can only rewrite version numbers, not add
 rows, so this is the one manual step. Patch releases need nothing.
+
+The Quick Start downloads `docker-compose.yml` and `.env.example` from `main`, not from a tag, on purpose: install hardening
+(such as the loopback-only Web UI port) lands there first and works with the released image, and a tag would hand new installs
+the older defaults until the next release.
 
 ## Pull Request Process
 

@@ -38,11 +38,10 @@ KoolBot is designed for simple deployment. You only need two files to get starte
 
 ### 1. **Download Required Files**
 
-Download these two files to a new directory. The links point at the latest release, so the files match the image you will run:
+Download these two files to a new directory:
 
-<!-- x-release-please-start-version -->
-- [`docker-compose.yml`](https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/docker-compose.yml)
-- [`.env.example`](https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/.env.example)
+- [`docker-compose.yml`](https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml)
+- [`.env.example`](https://raw.githubusercontent.com/lonix/koolbot/main/.env.example)
 
 ```bash
 # Create a directory for KoolBot
@@ -50,10 +49,9 @@ mkdir koolbot
 cd koolbot
 
 # Download the files
-curl -O https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/docker-compose.yml
-curl -O https://raw.githubusercontent.com/lonix/koolbot/v2.0.1/.env.example
+curl -O https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/lonix/koolbot/main/.env.example
 ```
-<!-- x-release-please-end -->
 
 Or manually download from GitHub and save to your `koolbot` directory.
 
@@ -501,8 +499,8 @@ To upgrade a pinned install:
    ```
 
 Pinned to an older release? Read the docs for that version, from
-[Documentation for older versions](#documentation-for-older-versions), and take `docker-compose.yml` and `.env.example` from the
-same tag.
+[Documentation for older versions](#documentation-for-older-versions). Keep the current `docker-compose.yml`, though: it carries
+security defaults (such as publishing the Web UI on loopback only) that older tags do not.
 
 ### Exposing the Web UI
 
