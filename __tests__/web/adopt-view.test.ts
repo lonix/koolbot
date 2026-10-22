@@ -403,7 +403,7 @@ describe("Server scan tabs (#1323)", () => {
     expect(roles).toContain("4+");
     const channels = mainOf(page("channels"));
     expect(channels).toContain("SendMessages");
-    expect(channels).toContain(">quotes</th>");
+    expect(channels).toContain("#quotes</span></th>");
     const bots = mainOf(page("bots"));
     expect(bots).toContain("Dyno#1");
     const discord = mainOf(page("discord"));

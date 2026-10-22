@@ -51,6 +51,7 @@ import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
+import { channelsScan, scanChannel } from "./channels-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
 import { renderWizardAccessPage } from "../../src/web/wizard-access-view.js";
 import type {
@@ -872,6 +873,43 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The tree: uncategorised channels, a category with its voice channel
+      // last, Custom permissions, overwrites and Claim (#1364).
+      name: "Server scan (channels, tree)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: true,
+        tab: "channels",
+        scan: channelsScan(),
+      }),
+    },
+    {
+      name: "Server scan (channels, could be claimed)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "channels",
+        filter: "claimable",
+        scan: channelsScan(),
+      }),
+    },
+    {
+      name: "Server scan (channels, nothing matches)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "channels",
+        filter: "used",
+        scan: {
+          ...busyScan(),
+          channels: [scanChannel({ id: "1", name: "general" })],
+        },
+      }),
+    },
+    {
       name: "Server scan (other bots, with problems)",
       html: renderAdoptPage({
         ...COMMON,
@@ -925,6 +963,26 @@ export function adminPages(): A11yPage[] {
     {
       name: "Channel claims",
       html: renderChannelClaimsPage(claimsProps()),
+    },
+    {
+      // Arriving from the Server scan's Claim link (#1364).
+      name: "Channel claims with a prefilled feature",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          claims: [
+            {
+              channelId: "10",
+              action: "leave",
+              bindKey: "voicechannels.category_id",
+            },
+          ],
+          prefill: {
+            channelId: "10",
+            channelName: "Games",
+            featureLabel: "Voice channels category",
+          },
+        }),
+      ),
     },
     {
       // Destructive section and its separate confirmation in the apply form.

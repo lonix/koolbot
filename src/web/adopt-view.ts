@@ -11,6 +11,7 @@ import type {
   ScanSeverity,
   ServerScan,
 } from "../services/server-scan-service.js";
+import { claimKeyFor, featureTarget } from "../services/channel-claims.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import {
   buildBotReplacementReport,
@@ -36,6 +37,7 @@ const ISSUES = "https://github.com/lonix/koolbot/issues";
 
 const SCAN_PAGE = "/admin/adopt";
 const BOT_PERMISSIONS_PAGE = "/admin/bot-permissions";
+const CLAIMS_PAGE = "/admin/adopt/claims";
 
 export const SCAN_TABS = [
   "overview",
@@ -54,6 +56,17 @@ export function parseScanTab(raw: unknown): ScanTab {
     : "overview";
 }
 
+export const CHANNEL_FILTERS = ["all", "used", "claimable", "custom"] as const;
+export type ChannelFilter = (typeof CHANNEL_FILTERS)[number];
+
+/** The filter a `?filter=` value names; anything unknown shows every channel. */
+export function parseChannelFilter(raw: unknown): ChannelFilter {
+  return typeof raw === "string" &&
+    (CHANNEL_FILTERS as readonly string[]).includes(raw)
+    ? (raw as ChannelFilter)
+    : "all";
+}
+
 export interface AdoptPageProps {
   csrfToken: string;
   remainingMs: number;
@@ -64,6 +77,8 @@ export interface AdoptPageProps {
   /** Channel ownership hints (reads recent messages) are on. */
   sampled: boolean;
   tab: ScanTab;
+  /** Channels tab: which channels to list. Defaults to all. */
+  filter?: ChannelFilter;
 }
 
 const SEVERITY_LABEL: Record<ScanSeverity, string> = {
@@ -167,8 +182,13 @@ function panel(
 </section>`;
 }
 
-function disclosure(label: string, hint: string, body: string): string {
-  return `<details class="kb-disclosure"><summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>${escapeHtml(label)}${hint ? `<span class="kb-disclosure__hint">${escapeHtml(hint)}</span>` : ""}</summary><div class="kb-disclosure__body">${body}</div></details>`;
+function disclosure(
+  label: string,
+  hint: string,
+  body: string,
+  opts: { inline?: boolean } = {},
+): string {
+  return `<details class="kb-disclosure${opts.inline ? " kb-disclosure--inline" : ""}"><summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>${escapeHtml(label)}${hint ? `<span class="kb-disclosure__hint">${escapeHtml(hint)}</span>` : ""}</summary><div class="kb-disclosure__body">${body}</div></details>`;
 }
 
 // ---- derived facts ----------------------------------------------------------
@@ -203,16 +223,25 @@ function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
   const meta = scan
     ? `<p class="kb-pagehead__meta"><span>Read from Discord ${escapeHtml(scannedLabel(scan.scannedAt))}</span><span>Ownership hints read recent messages, so they are slower.</span></p>`
     : "";
+  const filter = props.tab === "channels" ? (props.filter ?? "all") : "all";
   const tabField =
-    props.tab === "overview"
+    (props.tab === "overview"
       ? ""
-      : `<input type="hidden" name="tab" value="${escapeHtml(props.tab)}">`;
+      : `<input type="hidden" name="tab" value="${escapeHtml(props.tab)}">`) +
+    (filter === "all"
+      ? ""
+      : `<input type="hidden" name="filter" value="${escapeHtml(filter)}">`);
   const hints = scan
     ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end">${tabField}
       <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1"${props.sampled ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Channel ownership hints</label>
       <button type="submit" class="kb-btn kb-btn--sm">Apply</button>
     </form>
-    <a class="kb-btn kb-btn--sm" href="${escapeHtml(scanHref(props.tab, props.sampled, { refresh: "1" }))}">Scan again</a>`
+    <a class="kb-btn kb-btn--sm" href="${escapeHtml(
+      scanHref(props.tab, props.sampled, {
+        ...(filter === "all" ? {} : { filter }),
+        refresh: "1",
+      }),
+    )}">Scan again</a>`
     : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
@@ -481,30 +510,179 @@ function renderOverwrites(c: ScanChannel): string {
     .join("");
 }
 
-function renderChannels(scan: ServerScan): string {
+/** What Discord calls a channel of this shape, for the word next to its name. */
+function kindWord(c: ScanChannel): string {
+  if (c.kind === "category") return "Category";
+  if (c.flags.stage) return "Stage";
+  if (c.kind === "voice") return "Voice";
+  if (c.flags.forum) return "Forum";
+  if (c.flags.announcement) return "Announcement";
+  return "Text";
+}
+
+/**
+ * A category or channel the way Discord labels it: categories in capitals,
+ * text channels with a `#`. The kind icons and the shared Mention helper are
+ * #1303, which replaces this one function; until then a visually hidden word
+ * says the kind to a screen reader and a muted word to everyone else.
+ */
+function scanChannelLabel(c: ScanChannel): string {
+  const name = escapeHtml(c.name);
+  const word = kindWord(c);
+  if (c.kind === "category") {
+    return `<span class="kb-mention kb-mention--category"><span class="kb-visually-hidden">${word} </span>${name}</span>`;
+  }
+  if (word === "Text") {
+    return `<span class="kb-mention"><span class="kb-visually-hidden">${word} channel </span>#${name}</span>`;
+  }
+  return `<span class="kb-mention"><span class="kb-visually-hidden">${word} channel </span>${name}</span> <span class="kb-muted">${word}</span>`;
+}
+
+/** What a "looks like" guess is called in the row, e.g. `voicetracking` is Voice stats. */
+const GUESS_LABELS: Record<string, string> = {
+  quotes: "Quotes",
+  announcements: "Announcements",
+  voicetracking: "Voice stats",
+  birthdays: "Birthdays",
+  tickets: "Tickets",
+  polls: "Polls",
+  lfg: "Looking for group",
+  moderation: "Moderation log",
+  notices: "Notices",
+  reactionroles: "Reaction roles",
+  voicechannels: "Voice lobby",
+};
+
+const CHANNEL_FILTER_LABELS: Record<ChannelFilter, string> = {
+  all: "All",
+  used: "Used by KoolBot",
+  claimable: "Could be claimed",
+  custom: "Custom permissions",
+};
+
+/** The Channel claims link for a row, with the channel and feature filled in. */
+export function claimHref(channelId: string, featureKey: string): string {
+  const q = new URLSearchParams({ channel: channelId, feature: featureKey });
+  return `${CLAIMS_PAGE}?${q.toString()}#claim-${encodeURIComponent(channelId)}`;
+}
+
+function channelMatches(c: ScanChannel, filter: ChannelFilter): boolean {
+  switch (filter) {
+    case "used":
+      return c.usedBy.length > 0;
+    case "claimable":
+      return claimKeyFor(c) !== null;
+    case "custom":
+      return c.syncedToParent === false;
+    default:
+      return true;
+  }
+}
+
+/** Discord's order: text-like channels first, then voice and stage, each by position. */
+function inDiscordOrder(list: ScanChannel[]): ScanChannel[] {
+  const voiceLike = (c: ScanChannel): number => (c.kind === "voice" ? 1 : 0);
+  return list
+    .slice()
+    .sort((a, b) => voiceLike(a) - voiceLike(b) || a.position - b.position);
+}
+
+interface TreeRow {
+  channel: ScanChannel;
+  /** A child, indented under its category. */
+  child: boolean;
+}
+
+/**
+ * The channels as Discord lists them: channels outside any category first,
+ * then each category with its channels under it. A channel whose category is
+ * not in the scan counts as outside any category, so it is never dropped. A
+ * filter keeps a category as a heading while any of its channels match.
+ */
+function treeRows(scan: ServerScan, filter: ChannelFilter): TreeRow[] {
+  const categories = scan.channels
+    .filter((c) => c.kind === "category")
+    .sort((a, b) => a.position - b.position);
+  const categoryIds = new Set(categories.map((c) => c.id));
+  const rows: TreeRow[] = [];
+  const loose = scan.channels.filter(
+    (c) =>
+      c.kind !== "category" && (!c.parentId || !categoryIds.has(c.parentId)),
+  );
+  for (const c of inDiscordOrder(loose)) {
+    if (channelMatches(c, filter)) rows.push({ channel: c, child: false });
+  }
+  for (const cat of categories) {
+    const kids = inDiscordOrder(
+      scan.channels.filter(
+        (c) => c.kind !== "category" && c.parentId === cat.id,
+      ),
+    ).filter((c) => channelMatches(c, filter));
+    if (!channelMatches(cat, filter) && kids.length === 0) continue;
+    rows.push({ channel: cat, child: false });
+    for (const k of kids) rows.push({ channel: k, child: true });
+  }
+  return rows;
+}
+
+function renderChannelRow(row: TreeRow, roleName: Map<string, string>): string {
+  const c = row.channel;
+  const claimKey = claimKeyFor(c);
+  const target = claimKey ? featureTarget(claimKey) : undefined;
+  const bits: string[] = [];
+  if (c.usedBy.length) bits.push(chips(c.usedBy));
+  if (c.featureGuess && c.usedBy.length === 0) {
+    const label = GUESS_LABELS[c.featureGuess] ?? c.featureGuess;
+    const claim =
+      claimKey && target
+        ? ` <a class="kb-btn kb-btn--sm" href="${escapeHtml(claimHref(c.id, claimKey))}">Claim<span class="kb-visually-hidden"> ${escapeHtml(c.name)} as ${escapeHtml(target.label)}</span></a>`
+        : "";
+    bits.push(
+      `<span class="kb-muted">looks like ${escapeHtml(label)}</span>${claim}`,
+    );
+  }
+  const flags = flagTags(c.flags);
+  if (flags.length) bits.push(badges(flags));
+  if (c.syncedToParent === false)
+    bits.push(badge("Custom permissions", "warn"));
+  const notes: string[] = [];
+  if (c.gatedByRoleIds.length)
+    notes.push(
+      `gated by: ${c.gatedByRoleIds.map((id) => roleName.get(id) ?? id).join(", ")}`,
+    );
+  if (c.ownerHint)
+    notes.push(
+      `mostly posted by ${c.ownerHint.botTag} (${Math.round(c.ownerHint.share * 100)}%)`,
+    );
+  const overwrites = c.overwrites.length
+    ? disclosure(
+        plural(c.overwrites.length, "overwrite", "overwrites"),
+        "",
+        renderOverwrites(c),
+        { inline: true },
+      )
+    : `<span class="kb-muted">none</span>`;
+  const rowClass = c.kind === "category" ? ' class="kb-tree__cat"' : "";
+  const headClass = row.child ? ' class="kb-tree__child"' : "";
+  return `<tr${rowClass}><th scope="row"${headClass}>${scanChannelLabel(c)}</th><td>${bits.join(" ")}${notes.length ? `<div class="kb-muted">${escapeHtml(notes.join("; "))}</div>` : ""}</td><td>${overwrites}</td></tr>`;
+}
+
+function renderChannels(
+  scan: ServerScan,
+  filter: ChannelFilter,
+  sampled: boolean,
+): string {
   const roleName = new Map(scan.roles.map((r) => [r.id, r.name]));
-  const rows = scan.channels
-    .map((c) => {
-      const sync =
-        c.syncedToParent === null
-          ? `<span class="kb-muted">—</span>`
-          : c.syncedToParent
-            ? "synced"
-            : badge("custom", "warn");
-      const notes: string[] = [];
-      if (c.featureGuess && c.usedBy.length === 0)
-        notes.push(`looks like: ${c.featureGuess}`);
-      if (c.gatedByRoleIds.length)
-        notes.push(
-          `gated by: ${c.gatedByRoleIds.map((id) => roleName.get(id) ?? id).join(", ")}`,
-        );
-      if (c.ownerHint)
-        notes.push(
-          `mostly posted by ${c.ownerHint.botTag} (${Math.round(c.ownerHint.share * 100)}%)`,
-        );
-      return `<tr><th scope="row">${escapeHtml(c.name)}</th><td>${escapeHtml(c.typeName)}</td><td>${escapeHtml(c.parentName ?? "—")}</td><td>${sync}</td><td>${renderOverwrites(c)}</td><td>${chips(c.usedBy)} ${badges(flagTags(c.flags))}${notes.length ? `<div class="kb-muted">${escapeHtml(notes.join("; "))}</div>` : ""}</td></tr>`;
-    })
-    .join("");
+  const rows = treeRows(scan, filter);
+  const filters = CHANNEL_FILTERS.map((f) => {
+    const n = scan.channels.filter((c) => channelMatches(c, f)).length;
+    const href = scanHref(
+      "channels",
+      sampled,
+      f === "all" ? {} : { filter: f },
+    );
+    return `<a href="${escapeHtml(href)}"${f === filter ? ' aria-current="true"' : ""}>${CHANNEL_FILTER_LABELS[f]} <span class="kb-badge kb-badge--count">${n}</span></a>`;
+  }).join("\n  ");
   const webhookNote = scan.webhooks.known
     ? ""
     : callout(
@@ -519,8 +697,17 @@ function renderChannels(scan: ServerScan): string {
           ? `<a class="kb-btn kb-btn--sm" href="${BOT_PERMISSIONS_PAGE}">Open Bot permissions</a>`
           : "",
       );
+  const none = scan.channels.length === 0;
+  const body =
+    rows.length === 0
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${none ? "No channels were found." : "No channels match this filter."}</p>${none ? "" : `<p class="kb-empty__text"><a href="${escapeHtml(scanHref("channels", sampled))}">Show all channels</a></p>`}</div></div>`
+      : `<div class="kb-panel__body kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Categories and channels</caption><thead><tr><th scope="col">Channel</th><th scope="col">What uses it</th><th scope="col">Permissions</th></tr></thead><tbody>${rows.map((r) => renderChannelRow(r, roleName)).join("")}</tbody></table></div>`;
   return `${webhookNote}
-<section class="kb-panel" aria-labelledby="p-channels"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-channels">Categories and channels</h2><span class="kb-panel__meta">${scan.channels.length}</span></header><div class="kb-panel__body kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Categories and channels</caption><thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Parent</th><th scope="col">Permissions</th><th scope="col">Overwrites</th><th scope="col">Used by / notes</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+<section class="kb-panel" aria-labelledby="p-channels"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-channels">Categories and channels</h2><span class="kb-panel__meta">${rows.length}</span></header>
+  <nav class="kb-tabs" aria-label="Filter channels">
+  ${filters}
+  </nav>
+  ${body}</section>`;
 }
 
 // ---- Other bots -------------------------------------------------------------
@@ -702,12 +889,17 @@ function renderPartial(scan: ServerScan): string {
     : "";
 }
 
-function renderTab(scan: ServerScan, tab: ScanTab, sampled: boolean): string {
+function renderTab(
+  scan: ServerScan,
+  tab: ScanTab,
+  sampled: boolean,
+  filter: ChannelFilter,
+): string {
   switch (tab) {
     case "roles":
       return renderRoles(scan);
     case "channels":
-      return renderChannels(scan);
+      return renderChannels(scan, filter, sampled);
     case "bots":
       return renderBots(scan);
     case "discord":
@@ -723,7 +915,7 @@ export function renderAdoptPage(props: AdoptPageProps): string {
     ? `${renderTabs(scan, props)}
 <div class="kb-stack" id="scan-${props.tab}">
 ${renderPartial(scan)}
-${renderTab(scan, props.tab, props.sampled)}
+${renderTab(scan, props.tab, props.sampled, props.filter ?? "all")}
 </div>`
     : callout(
         "err",
