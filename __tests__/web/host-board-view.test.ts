@@ -284,10 +284,25 @@ describe("the board", () => {
     expect(html).toContain('name="group" value="g_b"');
   });
 
-  it("says so when there is no team at all", () => {
-    const html = renderHostBoard(data({ teams: [], loose: [] }));
+  it("with no team, keeps the people and Move people, and switches off only what needs a team", () => {
+    const html = renderHostBoard(
+      data({ teams: [], sendableTeams: 0, waitingForChannel: 0 }),
+    );
     expect(html).toContain("There is no team to put people in yet");
-    expect(html).not.toContain("kb-board__col");
+    // The member list stays, without a team menu that has nothing to offer.
+    expect(html).toContain('id="host-board-loose"');
+    expect(html).toContain("Cal");
+    expect(html).not.toContain('data-board-do="assign"');
+    // Move people still opens and its forms are there.
+    expect(html).toContain(`action="${PANEL}/return-to-main"`);
+    expect(html).toContain(`action="${PANEL}/move-one"`);
+    // Randomise and Send to teams are off, with the reason.
+    expect(html).not.toContain(`action="${PANEL}/randomise"`);
+    expect(html).toMatch(
+      /disabled aria-disabled="true" aria-describedby="host-board-notes">Randomise…/,
+    );
+    expect(html).toMatch(/disabled aria-disabled="true"[^>]*>Send to teams</);
+    expect(html).toContain("Randomise and Send to teams need a team");
   });
 
   it("uses only kb- classes and no inline handler", () => {

@@ -415,6 +415,32 @@ describe("the toolbar's moves (Send to teams, Move people)", () => {
     }
   });
 
+  it("with only an open group and no team, still lists the connected people and offers Move people; Randomise and Send are off", async () => {
+    events[EVENT_ID] = makeEvent({
+      groups: [
+        {
+          key: "g_open",
+          name: "Spectators",
+          kind: "open",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: CH_OPEN,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    const r = await call(PANEL);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('id="host-board-loose"');
+    expect(r.text).toContain(`action="${PANEL}/return-to-main"`);
+    expect(r.text).toContain(`action="${PANEL}/move-one"`);
+    expect(r.text).toContain('<option value="g_open">');
+    expect(r.text).not.toContain(`action="${PANEL}/randomise"`);
+    expect(r.text).toMatch(/disabled aria-disabled="true"[^>]*>Send to teams</);
+  });
+
   it("is not on the page for an event without groups", async () => {
     events[EVENT_ID] = makeEvent({ groupsEnabled: false, groups: [] });
     const r = await call(PANEL);

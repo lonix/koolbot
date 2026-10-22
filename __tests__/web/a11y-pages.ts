@@ -3422,11 +3422,11 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
-      name: "/me host panel (board, no team groups)",
+      name: "/me host panel (board, no team groups, people and Move people kept)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        boardPage(boardData({ teams: [], loose: [], connectedCount: 0 })),
+        boardPage(boardData({ teams: [], sendableTeams: 0 })),
       ),
     },
     {

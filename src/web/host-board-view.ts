@@ -174,7 +174,7 @@ function renderMenu(
     (canAssign
       ? `<div class="kb-field"><label class="kb-label" for="${escapeHtml(selectId)}">${escapeHtml(d.groupLabel)} for ${escapeHtml(p.name)}</label>` +
         `<select class="kb-select" id="${escapeHtml(selectId)}" name="group">${blank}${options}</select></div>`
-      : `<p class="kb-help">Not available: the voice state could not be read.</p>`) +
+      : `<p class="kb-help">${d.presenceOk ? `There is no ${escapeHtml(label)} to move this person to yet.` : "Not available: the voice state could not be read."}</p>`) +
     `<div class="kb-row">` +
     (canAssign
       ? `<button class="kb-btn kb-btn--sm kb-btn--primary" type="submit" data-board-do="assign">${team === null ? "Add to " : "Move to "}${escapeHtml(label)}${hiddenName}</button>`
@@ -215,7 +215,7 @@ function renderPerson(
 <span class="kb-avatar" aria-hidden="true">${escapeHtml(initial(p.name))}</span>
 <span class="kb-board__who">${escapeHtml(p.name)}</span>${crown}
 <span class="kb-board__where">${where}</span>
-${renderMenu(d, p, team)}
+${team === null && !(d.presenceOk && d.teams.length > 0) ? "" : renderMenu(d, p, team)}
 </li>`;
 }
 
@@ -386,8 +386,13 @@ function renderLock(d: HostBoardData): string {
 function renderNotes(d: HostBoardData): string {
   const label = d.groupLabel.toLowerCase();
   const notes: string[] = [];
+  if (d.teams.length === 0) {
+    notes.push(
+      `Randomise and Send to ${label}s need a ${label}: there is none yet.`,
+    );
+  }
   if (d.moveBlocker) notes.push(d.moveBlocker);
-  else if (d.sendableTeams === 0) {
+  else if (d.sendableTeams === 0 && d.teams.length > 0) {
     notes.push(
       `No ${label} has a voice channel yet, so there is nowhere to send people.`,
     );
@@ -409,16 +414,16 @@ function renderNotes(d: HostBoardData): string {
 export function renderHostBoard(d: HostBoardData): string {
   const label = d.groupLabel.toLowerCase();
   const hasTeams = d.teams.length > 0;
-  if (!hasTeams) {
-    return `<section class="kb-stack" id="host-board" aria-labelledby="host-board-h">
-<h2 class="kb-visually-hidden" id="host-board-h">${escapeHtml(d.groupLabel)}s</h2>
-<div class="kb-callout" role="note"><div class="kb-callout__body"><p class="kb-callout__title">There is no ${escapeHtml(label)} to put people in yet.</p><p class="kb-callout__text">Add one under Change the groups, further down this page.</p></div></div>
-</section>`;
-  }
+  // No team group (only open groups, or none): the toolbar and the people stay,
+  // because Move people (the main and open channels are destinations) and taking
+  // people out of a team do not need a team. Only what needs a team is off.
+  const noTeams = hasTeams
+    ? ""
+    : `<div class="kb-callout" role="note"><div class="kb-callout__body"><p class="kb-callout__title">There is no ${escapeHtml(label)} to put people in yet.</p><p class="kb-callout__text">Add one under Change the groups, further down this page. Until then you can still move people between the event's voice channels.</p></div></div>`;
   const presenceNotice = d.presenceOk
     ? ""
     : `<div class="kb-callout kb-callout--warn" role="note"><div class="kb-callout__body"><p class="kb-callout__text">The bot could not read who is in the voice channels, so adding people to a ${escapeHtml(label)} and randomising are off. You can still take people out of a ${escapeHtml(label)}.</p></div></div>`;
-  const randomiseOff = !d.presenceOk;
+  const randomiseOff = !d.presenceOk || !hasTeams;
   const randomise = randomiseOff
     ? `<button class="kb-btn" type="button" disabled aria-disabled="true" aria-describedby="host-board-notes">Randomise…</button>`
     : renderDialogAction(
@@ -461,9 +466,10 @@ ${send}
   return `<section class="kb-stack" id="host-board" aria-labelledby="host-board-h">
 <h2 class="kb-visually-hidden" id="host-board-h">${escapeHtml(d.groupLabel)}s</h2>
 ${presenceNotice}
+${noTeams}
 ${toolbar}
 ${renderNotes(d)}
-<p class="kb-help">Put a person in a ${escapeHtml(label)} with the Move menu next to their name. With a mouse you can also drag them to another column.</p>
+${hasTeams ? `<p class="kb-help">Put a person in a ${escapeHtml(label)} with the Move menu next to their name. With a mouse you can also drag them to another column.</p>` : ""}
 <p class="kb-visually-hidden" id="host-board-status" role="status" aria-live="polite"></p>
 <div class="kb-board" id="host-board-columns">
 ${columns}
