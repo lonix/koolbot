@@ -580,7 +580,7 @@ commits are pushed.
    npx markdownlint "**/*.md" --ignore node_modules --ignore dist
    ```
 
-4. **Update documentation** if needed:
+4. **Update documentation** if needed, written as [DESIGN.md → Writing docs](DESIGN.md#writing-docs) says:
    - `COMMANDS.md` for new commands
    - `SETTINGS.md` for new configuration options
    - `README.md` for user-facing features

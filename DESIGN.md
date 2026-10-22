@@ -1,7 +1,8 @@
 # Design system
 
-How KoolBot's Web UI and its messages in Discord look, read and are put together. New pages, components and embeds follow this document;
-where existing code disagrees, this document wins and the gap is tracked in the v2.1 Web UI redesign epic (#1314).
+How KoolBot's Web UI and its messages in Discord look, read and are put together, and how its docs are written (*Writing docs*). New pages,
+components, embeds and docs follow this document; where existing code disagrees, this document wins and the gap is tracked in the v2.1 Web UI
+redesign epic (#1314).
 
 | File | What it holds |
 | --- | --- |
@@ -60,6 +61,35 @@ The UI copy is already plain and precise; keep it that way.
 - **Discord's own names verbatim**: permission names (*Manage Nicknames*), channel names including their emoji (📅 Testing). Emoji appear only when
   they are Discord content, never as UI decoration.
 - **Ids and keys in mono**, after the human name: Koolbot Dev `1361410364620804136`, `voicechannels.enabled`.
+
+## Writing docs
+
+The Markdown docs (README, SETTINGS, WEBUI, COMMANDS, TROUBLESHOOTING, the contributor guides and the `.github` templates) speak with the same voice as
+the Web UI, in the shapes GitHub readers expect. Everything under *Content* applies; this section adds what is specific to Markdown on GitHub.
+
+- **Headings in sentence case, without emoji or bold.** GitHub's own docs do the same. An emoji turns `#quick-start` into `#-quick-start` and is
+  read aloud by screen readers ("rocket").
+- **Open with one sentence:** who the doc is for and what it covers. Long reference docs may keep a table of contents; shorter ones rely on GitHub's
+  outline button.
+- **UI names exactly as the UI shows them now, in bold:** **Command permissions**, **Environment**, with → for a path: **Bot** → **Environment**. A
+  rename in the UI updates the docs in the same PR.
+- **Keys, ids, commands, file names and environment variables in code** (`voicechannels.enabled`, `/config`, `.env`), after the human name where
+  there is one.
+- **Callouts are GitHub alerts**, never an emoji or a bold "Note:": `> [!NOTE]` for information, `> [!TIP]` for a better way, `> [!IMPORTANT]` for
+  what to know before going on, `> [!WARNING]` for a risk to data or setup, `> [!CAUTION]` for what cannot be undone. At most one per section; its
+  first sentence states the fact.
+- **Detail on demand** in `<details><summary>`, like the Disclosure: long tables, rare cases, full examples.
+- **Steps are numbered and verb-first**, one action each. A command goes in a fenced block that names its language (`bash`, `env`, `yaml`), and
+  never prints a secret.
+- **Troubleshooting entries read like an IssueRow:** a heading that says what you see ("The bot won't start"), then **What you see**, **Why** and
+  **Fix**.
+- **Emoji only as Discord content:** example bot output, or a channel name that carries one. Never as bullets, checkmarks or decoration.
+- **British spelling** in prose. Code, keys, HTTP headers and quoted names keep their own spelling (`Authorization`, `color`).
+- **Settings in `.env` are environment settings**, after the **Environment** page that shows them (the code still says bootstrap).
+- **Links are relative** (`SETTINGS.md#voice-channels`). When a heading changes, its links change in the same PR; markdownlint checks the links
+  inside a file.
+- **Screenshots** come from the UI preview fixtures or the design mockups, never a real server, and the alt text says what the picture shows.
+- **Out of scope:** `CHANGELOG.md` (written by release-please) and past release notes, which stay as written.
 
 ## Colour
 
