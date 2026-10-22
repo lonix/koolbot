@@ -20,9 +20,10 @@ Read-only: no switches here. Cards are as tall as their content.
 in its own card and never reads as 0, and the page is the same without it. The Permissions tile counts the problems of the switched-on features, as
 the navigation badge does; a check that did not answer says *Not checked*, and while a switched-on feature could not be fully checked the tile says
 *Partly checked* rather than that everything is in place. *Needs you* shows at most six rows and then one line that links to Bot permissions. It also
-lists the blockers and warnings of a Server scan, but only one that finished in the last minute: the Dashboard never starts a scan, so the Server scan
-page is where one is run. A scan problem is left out only when the permission check has a row for the same permission or role; one it cannot see
-(posting in channels, the general roles-above-the-bot warning) stays. *This week in voice* is the last 7 days, shown only while voice tracking is on;
+lists the blockers and warnings of the last Server scan, kept for 30 minutes after it finished (`DASHBOARD_SCAN_RETENTION_MS`, #1415) and each
+row saying how old the scan is: the Dashboard never starts a scan, so the Server scan page is where one is run. A scan problem is left out only when the
+permission check has a row for the same permission or role; one it cannot see (posting in channels, the general roles-above-the-bot warning) stays. *This
+week in voice* is the last 7 days, shown only while voice tracking is on;
 a failed query says it could not be read instead of showing an empty week. *Features* is the sidebar's own list (switched on first, then off, each A
 to Z). The right column also holds the *Version* panel with its *Check now* button, the one form on the page, which sets nothing. The alert icons use
 the markup from `feature-page.ts` until the shared icon helper (#1369) replaces it.

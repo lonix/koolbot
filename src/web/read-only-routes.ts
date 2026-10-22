@@ -74,11 +74,7 @@ import {
   parseScanTab,
   renderAdoptPage,
 } from "./adopt-view.js";
-import {
-  cachedScan,
-  peekNewestScan,
-  scanCacheKey,
-} from "./server-scan-cache.js";
+import { cachedScan, peekLastScan, scanCacheKey } from "./server-scan-cache.js";
 import { loadDashboardData } from "./dashboard-data.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
@@ -1021,11 +1017,12 @@ export function createReadOnlyRouter(
         },
         // Cached for 30 s and never throws; a page is not held up for it.
         permissions: () => checkBotPermissions(client, guildId),
-        // Only a scan that has already finished: the Dashboard never starts one
-        // (a scan is a round of Discord reads and spends the scan limiter).
+        // Only a scan that has already finished, kept for the Dashboard's own
+        // retention (#1415): it never starts one (a scan is a round of Discord
+        // reads and spends the scan limiter).
         recentScan: () =>
           // Newest of the plain and the ownership-hints scan, not the plain one first.
-          peekNewestScan([
+          peekLastScan([
             scanCacheKey(guildId, adminUserId, false),
             scanCacheKey(guildId, adminUserId, true),
           ]),

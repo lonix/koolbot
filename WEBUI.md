@@ -944,8 +944,10 @@ the last 7 days by weekday (only when voice tracking is on) and links to Voice a
 **Features** lists every feature with On or Off and its config key, each linking to its own
 page: nothing is switched on the Dashboard. Every source is read on its own with a time
 limit, so one that fails or is slow says "unavailable" in its own card and never takes the
-page down or reads as zero. The Dashboard never starts a Server scan: it lists what a scan
-read in the last minute found, and the Server scan page is where you run one.
+page down or reads as zero. The Dashboard never starts a Server scan: it lists what the last
+scan found for up to 30 minutes after it finished, each row saying how long ago that scan was
+read (for example "Found by a Server scan 12 minutes ago"), and the Server scan page is where
+you run a new one. The scan page itself still shares one scan for a minute (#1415).
 
 The Dashboard's **Version** panel (#1029) shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
