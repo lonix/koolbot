@@ -229,6 +229,35 @@ describe("GET /admin/", () => {
     expect(html).toContain('href="/admin/adopt">Open Server scan');
   });
 
+  it("lists the newest finished scan, whether it was the plain or the hints one", async () => {
+    await start(clientWith(ALL));
+    const scanSaying = (message: string): ReturnType<typeof busyScan> => {
+      const s = busyScan();
+      s.readiness.issues = [
+        { code: "x", severity: "warning", message, help: "h" },
+      ];
+      return s;
+    };
+    const plain = scanCacheKey("guild-1", "admin-1", false);
+    const hints = scanCacheKey("guild-1", "admin-1", true);
+    const pause = (): Promise<void> => new Promise((r) => setTimeout(r, 15));
+
+    await cachedScan(plain, async () => scanSaying("OLD plain finding"));
+    await pause();
+    await cachedScan(hints, async () => scanSaying("NEW hints finding"));
+    let html = await dashboard();
+    expect(html).toContain("NEW hints finding");
+    expect(html).not.toContain("OLD plain finding");
+
+    resetScanCache();
+    await cachedScan(hints, async () => scanSaying("OLD hints finding"));
+    await pause();
+    await cachedScan(plain, async () => scanSaying("NEW plain finding"));
+    html = await dashboard();
+    expect(html).toContain("NEW plain finding");
+    expect(html).not.toContain("OLD hints finding");
+  });
+
   it("still renders when Discord cannot be read, saying so instead of showing zeros", async () => {
     await start({
       user: null,

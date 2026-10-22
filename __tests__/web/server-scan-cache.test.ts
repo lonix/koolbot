@@ -2,6 +2,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   cachedScan,
   peekScan,
+  peekNewestScan,
   resetScanCache,
   scanCacheKey,
   SCAN_CACHE_TTL_MS,
@@ -213,5 +214,46 @@ describe("peekScan (#1322)", () => {
     await pending?.catch(() => undefined);
     await flush();
     expect(peekScan("bad")).toBeNull();
+  });
+});
+
+describe("peekNewestScan (#1322 review)", () => {
+  const finish = async (
+    key: string,
+    name: string,
+    c: ReturnType<typeof clock>,
+  ): Promise<void> => {
+    await cachedScan(key, async () => scanOf(name), { now: c.now });
+    await flush();
+  };
+
+  it("returns the non-plain scan when it finished later", async () => {
+    const c = clock();
+    await finish("g:a:plain", "plain", c);
+    c.set(1_000 + 5_000);
+    await finish("g:a:sampled", "sampled", c);
+    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)?.guildName).toBe(
+      "sampled",
+    );
+  });
+
+  it("returns the plain scan when it finished later", async () => {
+    const c = clock();
+    await finish("g:a:sampled", "sampled", c);
+    c.set(1_000 + 5_000);
+    await finish("g:a:plain", "plain", c);
+    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)?.guildName).toBe(
+      "plain",
+    );
+  });
+
+  it("ignores a stale scan even if it is the only newer-listed one, and a pending one", async () => {
+    const c = clock();
+    await finish("g:a:plain", "plain", c);
+    c.set(1_000 + SCAN_CACHE_TTL_MS + 1);
+    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)).toBeNull();
+    const d = deferred();
+    void cachedScan("g:a:sampled", () => d.promise, { now: c.now });
+    expect(peekNewestScan(["g:a:plain", "g:a:sampled"], c.now)).toBeNull();
   });
 });

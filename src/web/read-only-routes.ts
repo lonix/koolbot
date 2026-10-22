@@ -70,7 +70,11 @@ import {
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
 import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
-import { cachedScan, peekScan, scanCacheKey } from "./server-scan-cache.js";
+import {
+  cachedScan,
+  peekNewestScan,
+  scanCacheKey,
+} from "./server-scan-cache.js";
 import { loadDashboardData } from "./dashboard-data.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
@@ -1006,8 +1010,11 @@ export function createReadOnlyRouter(
         // Only a scan that has already finished: the Dashboard never starts one
         // (a scan is a round of Discord reads and spends the scan limiter).
         recentScan: () =>
-          peekScan(scanCacheKey(guildId, adminUserId, false)) ??
-          peekScan(scanCacheKey(guildId, adminUserId, true)),
+          // Newest of the plain and the ownership-hints scan, not the plain one first.
+          peekNewestScan([
+            scanCacheKey(guildId, adminUserId, false),
+            scanCacheKey(guildId, adminUserId, true),
+          ]),
         voiceTrackingEnabled: () =>
           common.navFeatureStatus["voicetracking.enabled"] === true,
         voiceWeek: () => {

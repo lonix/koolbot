@@ -124,6 +124,26 @@ export function peekScan(
   return now() - e.doneAt < SCAN_CACHE_TTL_MS ? e.value : null;
 }
 
+/**
+ * The newest fresh finished scan among `keys` (the plain and the ownership-hints
+ * scan of one admin are separate entries), by when each finished. Like
+ * `peekScan` it never starts or waits for a scan.
+ */
+export function peekNewestScan(
+  keys: readonly string[],
+  now: () => number = Date.now,
+): ServerScan | null {
+  let best: { scan: ServerScan; doneAt: number } | null = null;
+  for (const key of keys) {
+    const e = entries.get(key);
+    if (!e || e.doneAt === null || e.value === null) continue;
+    if (now() - e.doneAt >= SCAN_CACHE_TTL_MS) continue;
+    if (!best || e.doneAt > best.doneAt)
+      best = { scan: e.value, doneAt: e.doneAt };
+  }
+  return best ? best.scan : null;
+}
+
 /** Drop everything; for tests. */
 export function resetScanCache(): void {
   entries.clear();
