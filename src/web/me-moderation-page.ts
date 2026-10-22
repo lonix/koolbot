@@ -26,7 +26,6 @@ import {
 } from "../utils/moderation-labels.js";
 import type { CaseView } from "./moderation-case-groups.js";
 import { CASE_DECISIONS } from "./moderation-case-actions.js";
-import type { ModerationCaseDecision } from "../services/moderation-case-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
 export const MOD_BASE = "/me/moderation";

@@ -106,7 +106,7 @@ const RETIRED_ON_MODERATION: ReadonlyArray<readonly [string, RegExp]> = [
   ["Overdue", /\boverdue\b/i],
   ["Due soon", /\bdue soon\b/i],
   ["came due", /\bcame due\b/i],
-  ["Due (badge)", /(^|\n)\s*Due\s*($|\n)/],
+  ["Due (badge)", /\bDue\b/],
   ["Recently resolved", /\brecently resolved\b/i],
   ["review pass", /\breview pass\b/i],
   ["Prior history / entries", /\bprior (history|entries)\b/i],

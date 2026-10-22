@@ -1153,7 +1153,7 @@ command override in **Server Settings → Integrations → KoolBot**. See
 | `moderation.cases.default_review_days` | `90`        | Review date pre-filled (days from now) when staff open a case                                                                                                                                                      |
 | `moderation.cases.retention_days`      | `0`         | Days to keep a resolved case, counted from its last decision. `0` keeps resolved cases forever. Open cases are never pruned, and a resolved case is kept at least as long as `moderation.cases.history_grace_days` |
 | `moderation.cases.history_grace_days`  | `365`       | How long after a case resolves its member's log history stays exempt from pruning. `0` protects it for as long as the case exists                                                                                  |
-| `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases need a decision. Requires `moderation.cases.enabled`                                                                                                                  |
+| `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases need a decision. Requires `moderation.cases.enabled`                                                                                                                      |
 | `core.moderation_review.channel_id`    | `""`        | Text channel that receives that summary. Nothing is posted while this is empty                                                                                                                                     |
 
 Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
@@ -2124,8 +2124,8 @@ apply to the next log message — no restart is needed.
 | `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
 | `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Configuration reloads and their outcome                                                                   |
 | `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks)                                         |
-| `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                  |
-| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)             |
+| `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                |
+| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)                 |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 | `core.role_groups.enabled` / `core.role_groups.channel_id`             | bool / channel | `false` / `""` | Role group drift (a role edited or deleted in Discord) and what the sync did about it                     |
 
