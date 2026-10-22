@@ -400,6 +400,36 @@ describe("uploading a cover", () => {
   });
 });
 
+describe("storage that throws", () => {
+  it("audits a failed set for the actor, forwards the error, and leaves the rows alone", async () => {
+    imageUpsert.mockRejectedValueOnce(new Error("mongo down"));
+    const r = await upload(COVER, PNG);
+    expect(r.status).toBe(500);
+    expect(lastAudit()).toMatchObject({
+      action: "event.host.cover-set",
+      targetId: EVENT_ID,
+      result: "failure",
+      errorMessage: "mongo down",
+      discordUserId: CREATOR,
+    });
+    // The image is written first, so the rows were never pointed at it.
+    expect(eventUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("audits a failed remove for the actor and forwards the error", async () => {
+    events[EVENT_ID] = makeEvent({ coverHash: "abc" });
+    imageDelete.mockRejectedValueOnce(new Error("mongo down"));
+    const r = await form(REMOVE);
+    expect(r.status).toBe(500);
+    expect(lastAudit()).toMatchObject({
+      action: "event.host.cover-remove",
+      targetId: EVENT_ID,
+      result: "failure",
+      errorMessage: "mongo down",
+    });
+  });
+});
+
 describe("removing a cover", () => {
   it("clears the rows and deletes the image, and returns to the edit page", async () => {
     events[EVENT_ID] = makeEvent({ coverHash: "abc" });

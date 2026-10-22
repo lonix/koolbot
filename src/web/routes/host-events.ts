@@ -1919,6 +1919,31 @@ function registerCoverRoutes(router: Router, client: Client): void {
     redirectWithFlash(res, to, flash);
   };
 
+  // A storage call that throws (Mongo down, a partial write) is audited as a
+  // failure naming the actor before the error goes on, as the edit save does.
+  // The service orders its writes so a throw never leaves a row naming a
+  // missing image: a set stores the image first and then points the rows at it
+  // (a throw in between leaves an unreferenced image, replaced by the next
+  // upload or swept when the event finishes); a remove detaches the rows first
+  // and then deletes the image (a throw leaves an unreferenced image, deleted
+  // by a retry or the same sweep).
+  const auditThrown = async (
+    session: WebSessionContext,
+    action: string,
+    eventId: string,
+    err: unknown,
+  ): Promise<void> => {
+    await recordAudit(
+      session,
+      boundAuditEntry({
+        action,
+        targetId: eventId,
+        result: "failure",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  };
+
   // Everything both routes check after the body is read: Events on, and a
   // fresh read of the event (the gate's copy is from before the upload).
   const load = async (
@@ -1966,7 +1991,13 @@ function registerCoverRoutes(router: Router, client: Client): void {
           answer(req, res, eventId, { type: "err", text: loaded.refusal });
           return;
         }
-        const result = await setEventCover(loaded.event, data);
+        let result: Awaited<ReturnType<typeof setEventCover>>;
+        try {
+          result = await setEventCover(loaded.event, data);
+        } catch (err) {
+          await auditThrown(session, "event.host.cover-set", eventId, err);
+          throw err;
+        }
         await recordAudit(
           session,
           boundAuditEntry({
@@ -1995,10 +2026,17 @@ function registerCoverRoutes(router: Router, client: Client): void {
     const eventId = String(hreq.hostEvent._id);
     void (async (): Promise<void> => {
       const loaded = await load(hreq);
-      const result =
-        "refusal" in loaded
-          ? ({ ok: false, error: loaded.refusal } as const)
-          : await removeEventCover(loaded.event);
+      let result: Awaited<ReturnType<typeof removeEventCover>>;
+      if ("refusal" in loaded) {
+        result = { ok: false, error: loaded.refusal };
+      } else {
+        try {
+          result = await removeEventCover(loaded.event);
+        } catch (err) {
+          await auditThrown(session, "event.host.cover-remove", eventId, err);
+          throw err;
+        }
+      }
       await recordAudit(
         session,
         boundAuditEntry({
