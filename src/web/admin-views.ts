@@ -99,6 +99,7 @@ import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
 import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
+import type { HostReview } from "../services/wizard-host-role.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
 interface CommonProps {
@@ -2035,14 +2036,17 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessGaps?: AccessGap[];
   /** What Review showed; posted back so Apply can tell if it went stale. */
   accessFingerprint?: string;
+  /** The plan for creating the Event host role (#1365), when it was chosen. */
+  hostRole?: HostReview | null;
   flash?: FlashMessage | null;
 }
 
 export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
   const accessChanges = props.accessChanges ?? [];
+  const hostRole = props.hostRole ?? null;
   const nothingToApply =
-    props.pending.length === 0 && accessChanges.length === 0;
+    props.pending.length === 0 && accessChanges.length === 0 && !hostRole;
   const rows =
     props.pending.length === 0
       ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
@@ -2062,7 +2066,7 @@ ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
-${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [])}
+${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
 <div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
@@ -2073,7 +2077,8 @@ ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGap
   <form method="POST" action="/admin/wizard/apply">
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem ? " disabled" : ""}>Apply</button>
+    ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || (hostRole && hostRole.problems.length > 0) ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">

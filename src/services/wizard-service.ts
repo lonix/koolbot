@@ -61,6 +61,11 @@ export interface WizardState {
    * leaves the role mapping alone.
    */
   access?: AccessSelection;
+  /**
+   * *Create @Event host* was chosen on the Access step (#1365). Held like the
+   * picks: the role is created by Apply, through the adoption engine.
+   */
+  createHost?: boolean;
 }
 
 /**
@@ -224,10 +229,12 @@ export class WizardService {
     userId: string,
     guildId: string,
     access: AccessSelection | undefined,
+    createHost = false,
   ): boolean {
     const state = this.getSession(userId, guildId);
     if (!state) return false;
     state.access = access;
+    state.createHost = access !== undefined && createHost;
     return this.updateSession(userId, guildId, state);
   }
 

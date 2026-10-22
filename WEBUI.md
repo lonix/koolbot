@@ -1221,14 +1221,33 @@ step comes right after you pick features and maps Discord roles to who can do wh
 (`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a multi-select of roles, and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
-capabilities, and only links existing roles: it does not create or change a role in Discord. Nothing is written when
+capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the
+Event host (below). Nothing is written when
 you save the step. The picks wait in the wizard session and are applied from **Review**, which lists the role
 groups it will create or change. Apply checks the roles against Discord again, refuses if the role groups changed since Review,
 writes the groups one at a time with an audit entry each, and undoes them if a write fails or the settings that follow fail to apply, so a mapping is
 never reported as saved while half of it is. It refuses a managed role, a role at or above the bot's, a role behind
 a bot group, a role a feature hands out to members (rules, birthday, leaderboard tiers, raid quarantine, reaction roles),
 and removing `admin` from a group (that goes through Role groups, where it is reviewed). A callout says when Events or
-Moderation is on and no role is mapped to run it. To create an Event host role, use the Event host preset on Role groups first.
+Moderation is on and no role is mapped to run it.
+
+When no Event host role exists (no role of that name in Discord, no group carrying `host`), the Event hosts card offers
+**Create @Event host**: a role with no Discord permissions and nobody in it, mapped to the `host` capability. Ticking it
+only saves the choice in the wizard session. **Review** lists what the adoption engine would do (a single role create) and
+carries the plan id. Roles are only ever created through the engine, never with a direct Discord call: Apply recomputes
+the plan from the live server and refuses, before writing anything, if the plan id no longer matches, if the plan holds
+anything besides that one role (drift or reorders on other groups belong on Role groups), or if the bot lacks Manage
+Roles (the card and the Access step refuse it up front as well). The role is created last: after the role mapping and the
+settings have applied, Apply saves the Event host group (with no role yet), plans again from the saved groups, starts the
+engine's background job only if that plan is the one Review showed, and goes to `/admin/role-groups?job=…`, which shows
+the job's outcome and links the group to the new role when it finishes. Apply waits until the job is committed (past
+the busy-server lock and the live checks, before the first Discord write). If the group can't be saved or the job can't
+start, the group is removed again; once the job is committed it is never removed. The new group ranks strictly below
+every other group, so it is never inside another group's "group and above"; if a group already has rank 0 the card
+refuses until the order is re-saved on Role groups. A new group is only ever linked to a role created after it was
+saved. When the role was not created, the message says the settings and mapping are live.
+A job that fails in Discord leaves the group without a role, which does not count as mapped; finish it on Role groups.
+The group write and the role creation each get an audit entry.
 
 The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do

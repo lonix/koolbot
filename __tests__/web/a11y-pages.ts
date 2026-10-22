@@ -1196,6 +1196,36 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard access, create Event host offered",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: [
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+        ],
+        gaps: [],
+        hostCreate: { available: true },
+        createHost: true,
+      }),
+    },
+    {
+      name: "Setup wizard access, create Event host refused",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: [
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+        ],
+        gaps: [],
+        hostCreate: {
+          available: false,
+          reason: "permission",
+          message:
+            "The bot needs the Manage Roles permission to create a role. Give it that in Discord, or pick an existing role instead.",
+        },
+      }),
+    },
+    {
       name: "Setup wizard access, roles unavailable",
       html: renderWizardAccessPage({
         ...COMMON,
@@ -1235,6 +1265,36 @@ export function adminPages(): A11yPage[] {
             message: "Events is on and nobody can host yet.",
           },
         ],
+      }),
+    },
+    {
+      name: "Setup wizard confirm, Event host role",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        hostRole: {
+          planId: "0123456789abcdef01234567",
+          operations: ['Create role "Event host"'],
+          problems: [],
+        },
+      }),
+    },
+    {
+      name: "Setup wizard confirm, Event host role blocked",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        hostRole: {
+          planId: null,
+          operations: [],
+          problems: [
+            "The bot needs the Manage Roles permission for these changes.",
+          ],
+        },
       }),
     },
     {

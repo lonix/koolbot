@@ -40,7 +40,20 @@ const mockGetBoolean = jest.fn<
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
+  recordAuditOrThrow: mockRecordAudit,
 }));
+
+const mockStartApply = jest.fn<(...a: unknown[]) => { id: string }>();
+jest.unstable_mockModule(
+  "../../src/services/server-adoption-service.js",
+  () => ({
+    ServerAdoptionService: {
+      getInstance: async (): Promise<unknown> => ({
+        startApply: mockStartApply,
+      }),
+    },
+  }),
+);
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -96,6 +109,7 @@ interface FakeRole {
   managed: boolean;
   position: number;
   permissions: { bitfield: bigint };
+  color: number;
 }
 const role = (
   id: string,
@@ -108,6 +122,7 @@ const role = (
   managed,
   position,
   permissions: { bitfield: 0n },
+  color: 0,
 });
 
 const MOD = "100000000000000001";
@@ -115,9 +130,12 @@ const HOST = "100000000000000002";
 const ADMIN = "100000000000000003";
 const BOOSTER = "100000000000000004";
 const ABOVE_BOT = "100000000000000005";
+const BOTROLE = "100000000000000006";
+const JOB = "11111111-1111-4111-8111-111111111111";
 
 let roles: Map<string, FakeRole>;
 let rolesFetchError: Error | null;
+let botCanManageRoles = true;
 
 const client = {
   user: { id: "bot" },
@@ -131,9 +149,20 @@ const client = {
           return roles;
         },
         cache: roles,
+        fetchMemberCounts: async (): Promise<Map<string, number>> => new Map(),
       },
       members: {
-        me: { id: "bot", roles: { highest: { position: 10 } } },
+        me: {
+          id: "bot",
+          roles: {
+            highest: { position: 10 },
+            cache: new Map([[BOTROLE, {}]]),
+          },
+          permissions: { has: (): boolean => botCanManageRoles },
+        },
+        fetch: async (): Promise<unknown> => ({
+          roles: { cache: new Map() },
+        }),
       },
     }),
   },
@@ -181,8 +210,9 @@ function wizardState(
   access: unknown,
   selectedFeatures: string[] = ["quotes"],
   configuration: Record<string, unknown> = {},
+  createHost = false,
 ): Record<string, unknown> {
-  return { selectedFeatures, configuration, access };
+  return { selectedFeatures, configuration, access, createHost };
 }
 
 function lastAuditFor(action: string): Record<string, unknown> {
@@ -205,7 +235,17 @@ beforeEach(async () => {
     [ADMIN, role(ADMIN, "Admins", 8)],
     [BOOSTER, role(BOOSTER, "Booster", 3, true)],
     [ABOVE_BOT, role(ABOVE_BOT, "Owner team", 11)],
+    [
+      BOTROLE,
+      {
+        ...role(BOTROLE, "KoolBot", 10, true),
+        permissions: { bitfield: 1n << 28n }, // Manage Roles
+      },
+    ],
   ]);
+  botCanManageRoles = true;
+  mockStartApply.mockReset();
+  mockStartApply.mockReturnValue({ id: JOB });
   stored = [];
   mockGetSession.mockReturnValue(null);
   jest.spyOn(svc, "groupBackedRoles").mockResolvedValue([]);
@@ -222,7 +262,7 @@ beforeEach(async () => {
         roleId: input.roleId ?? null,
         roleName: input.roleName ?? null,
         capabilities: [...(input.capabilities ?? [])] as Group["capabilities"],
-        rank: stored.length + 1,
+        rank: input.rank ?? stored.length + 1,
       });
       stored.unshift(created);
       return { ok: true, group: created };
@@ -377,6 +417,7 @@ describe("POST /wizard/access", () => {
       session.discordUserId,
       session.guildId,
       { admin: [], staff: [MOD], host: [HOST] },
+      false,
     );
     expect(createSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
@@ -393,6 +434,7 @@ describe("POST /wizard/access", () => {
       session.discordUserId,
       session.guildId,
       { admin: [ADMIN], staff: [], host: [] },
+      false,
     );
   });
 
@@ -955,5 +997,323 @@ describe("a role a feature hands out to members", () => {
     );
     expect(createSpy).not.toHaveBeenCalled();
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("Create @Event host (#1365)", () => {
+  const none = { admin: [], staff: [], host: [] };
+
+  beforeEach(() => {
+    roles.delete(HOST); // a server with no Event host role
+  });
+
+  /** Open Review and read the plan id it posts back with Apply. */
+  async function reviewedPlanId(
+    state: Record<string, unknown>,
+  ): Promise<string> {
+    mockGetSession.mockReturnValue(state);
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    const hit = /name="hostPlanId" value="([0-9a-f]{24})"/.exec(html);
+    expect(hit).not.toBeNull();
+    return (hit as RegExpExecArray)[1];
+  }
+
+  async function applyWith(
+    state: Record<string, unknown>,
+    hostPlanId: string,
+  ): ReturnType<AdminHarness["post"]> {
+    mockGetSession.mockReturnValue(state);
+    const shown = accessFingerprint(
+      diffAccess(stored, [...roles.values()], state.access as AccessSelection),
+    );
+    return harness.post("/wizard/apply", {
+      accessFingerprint: shown,
+      hostPlanId,
+    });
+  }
+
+  const hostAudits = (): string[] =>
+    mockRecordAudit.mock.calls
+      .map((c) => (c[1] as { action: string }).action)
+      .filter((a) => a.startsWith("wizard.access.host"));
+
+  describe("the Access step", () => {
+    it("offers to create the role when none exists, and says what it does", async () => {
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).toMatch(/name="create_host" value="1"[^>]*>/);
+      expect(html).not.toMatch(/name="create_host"[^>]*disabled/);
+      expect(html).toContain("adds nobody to it");
+    });
+
+    it("shows the choice as made when it was ticked earlier", async () => {
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).toMatch(/name="create_host"[^>]*checked/);
+    });
+
+    it("does not offer it when an Event host role exists", async () => {
+      roles.set(HOST, role(HOST, "Event host", 4));
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).not.toContain("create_host");
+    });
+
+    it("disables it with the reason when the bot can't manage roles", async () => {
+      botCanManageRoles = false;
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).toMatch(/name="create_host"[^>]*disabled/);
+      expect(html).toContain("Manage Roles");
+    });
+
+    it("counts the pending create as someone to host", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(none, ["events"], { "events.enabled": true }, true),
+      );
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).not.toContain("nobody can host yet");
+    });
+
+    it("keeps the choice in the wizard session and writes nothing", async () => {
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const res = await harness.post("/wizard/access", { create_host: "1" });
+      expect(res.headers.get("location")).toBe("/admin/wizard?step=0");
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        session.guildId,
+        none,
+        true,
+      );
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockStartApply).not.toHaveBeenCalled();
+    });
+
+    it("refuses it when the bot lacks Manage Roles", async () => {
+      botCanManageRoles = false;
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const res = await harness.post("/wizard/access", { create_host: "1" });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("Manage Roles");
+      expect(mockSetAccess).not.toHaveBeenCalled();
+      expect(lastAuditFor("wizard.access")).toMatchObject({
+        result: "failure",
+      });
+    });
+
+    it("refuses it when an Event host role already exists", async () => {
+      roles.set(HOST, role(HOST, "Event host", 4));
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const res = await harness.post("/wizard/access", { create_host: "1" });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "already exists",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("refuses it together with picked Event host roles", async () => {
+      roles.set("100000000000000007", role("100000000000000007", "Crew", 3));
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const res = await harness.post("/wizard/access", {
+        create_host: "1",
+        roles_host: "100000000000000007",
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "not both",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Review", () => {
+    it("lists what the engine would do and posts the plan id", async () => {
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain("Create role &quot;Event host&quot;");
+      expect(html).toMatch(/name="hostPlanId" value="[0-9a-f]{24}"/);
+      expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("blocks Apply when the bot can't manage roles", async () => {
+      botCanManageRoles = false;
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain("Manage Roles");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+    });
+
+    it("blocks Apply when the plan holds changes the wizard did not cause", async () => {
+      stored = [
+        group({
+          id: "g-1",
+          name: "Moderator",
+          roleId: MOD,
+          permissions: String(1n << 28n),
+          capabilities: ["staff"],
+        }),
+      ];
+      mockGetSession.mockReturnValue(
+        wizardState(
+          { admin: [], staff: [MOD], host: [] },
+          ["quotes"],
+          {},
+          true,
+        ),
+      );
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain("other pending role changes");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+    });
+  });
+
+  describe("Apply", () => {
+    const state = (): Record<string, unknown> =>
+      wizardState(none, ["quotes"], {}, true);
+
+    it("saves the group, starts the job and goes to it", async () => {
+      mockApplyConfiguration.mockResolvedValue(okConfig);
+      const id = await reviewedPlanId(state());
+      const res = await applyWith(state(), id);
+      const location = res.headers.get("location") ?? "";
+      expect(location).toContain("/admin/role-groups?");
+      expect(location).toContain(`job=${JOB}`);
+      expect(parseFlashRedirect(location).msg).toContain(
+        "Event host role is being created",
+      );
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy).toHaveBeenCalledWith(
+        GUILD,
+        expect.objectContaining({
+          name: "Event host",
+          roleId: null,
+          permissions: "0",
+          capabilities: ["host"],
+        }),
+      );
+      expect(mockStartApply).toHaveBeenCalledTimes(1);
+      const plan = mockStartApply.mock.calls[0][0] as {
+        id: string;
+        operations: Array<{ type: string; name: string }>;
+      };
+      expect(plan.id).toBe(id);
+      expect(plan.operations).toHaveLength(1);
+      expect(plan.operations[0]).toMatchObject({
+        type: "role.create",
+        name: "Event host",
+      });
+      expect(hostAudits()).toEqual([
+        "wizard.access.host-group",
+        "wizard.access.host-role",
+      ]);
+      expect(mockApplyConfiguration).toHaveBeenCalled();
+      expect(mockEndSession).toHaveBeenCalled();
+    });
+
+    it("runs the Access writes and the host plan together, and the plans agree", async () => {
+      mockApplyConfiguration.mockResolvedValue(okConfig);
+      const both = (): Record<string, unknown> =>
+        wizardState(
+          { admin: [], staff: [MOD], host: [] },
+          ["quotes"],
+          {},
+          true,
+        );
+      const id = await reviewedPlanId(both());
+      const res = await applyWith(both(), id);
+      expect(res.headers.get("location")).toContain(`job=${JOB}`);
+      expect(createSpy).toHaveBeenCalledTimes(2);
+      expect(createSpy.mock.calls[0][1]).toMatchObject({ roleId: MOD });
+      expect(createSpy.mock.calls[1][1]).toMatchObject({ roleId: null });
+      expect(mockStartApply).toHaveBeenCalledTimes(1);
+    });
+
+    it("writes nothing when the plan id is not the one Review showed", async () => {
+      const res = await applyWith(state(), "0".repeat(24));
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("Nothing was applied");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+      expect(mockStartApply).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when no plan id was posted", async () => {
+      await applyWith(state(), "");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockStartApply).not.toHaveBeenCalled();
+    });
+
+    it("refuses before any write when the bot lost Manage Roles", async () => {
+      const id = await reviewedPlanId(state());
+      botCanManageRoles = false;
+      const res = await applyWith(state(), id);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "Manage Roles",
+      );
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("refuses before any write when an Event host role appeared meanwhile", async () => {
+      const id = await reviewedPlanId(state());
+      roles.set(HOST, role(HOST, "Event host", 4));
+      const res = await applyWith(state(), id);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "already exists",
+      );
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("removes the group and says the role was not created when the job can't start", async () => {
+      mockApplyConfiguration.mockResolvedValue(okConfig);
+      mockStartApply.mockImplementation(() => {
+        throw new Error("another apply is running");
+      });
+      const id = await reviewedPlanId(state());
+      const res = await applyWith(state(), id);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.path).toBe("/admin/role-groups");
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("was not created");
+      expect(flash.msg).toContain("another apply is running");
+      expect(flash.msg).toContain("Wizard applied");
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+      expect(stored).toEqual([]);
+      expect(hostAudits()).toContain("wizard.access.host-group.rollback");
+    });
+
+    it("does not start the role when the settings fail to apply", async () => {
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "write failed",
+      });
+      const id = await reviewedPlanId(state());
+      await applyWith(state(), id);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockStartApply).not.toHaveBeenCalled();
+      expect(mockEndSession).not.toHaveBeenCalled();
+    });
+  });
+
+  it("leaves a group whose role was never created out of the mapping", async () => {
+    // A job that failed in Discord leaves the group with no role. It must not
+    // read as mapped, and the card says the group is waiting for its role.
+    stored = [
+      group({
+        id: "g-1",
+        name: "Event host",
+        roleId: null,
+        capabilities: ["host"],
+      }),
+    ];
+    mockGetSession.mockReturnValue(wizardState(undefined));
+    const html = await (await harness.get("/wizard?step=access")).text();
+    expect(html).not.toMatch(/<option[^>]*selected/);
+    expect(html).toContain("waiting for its role");
   });
 });
