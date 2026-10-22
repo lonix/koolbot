@@ -15,6 +15,14 @@ import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
 import { getBotVersion } from "../utils/version.js";
 import { embedColor } from "../utils/embed-style.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
+import {
+  notReady,
+  repostManagedMessage,
+  staleRepost,
+  unexpectedRepostFailure,
+  type RepostResult,
+} from "./managed-message-repost.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // notices channel. Demoted from `notices.cleanup_interval` config key in
@@ -109,6 +117,8 @@ export class NoticesChannelManager {
   private generation = 0;
   private initPromise: Promise<void> | null = null;
   private noticeRun: Promise<void> | null = null;
+  /** Serialises a channel resync and a header re-post (#1428). */
+  private readonly channelLock = createKeyedLock();
   private noticeRerunPending = false;
   // Status messages the bot posted or replaced but could not delete (the
   // delete failed, typically alongside a failed save during an outage). Nothing
@@ -403,39 +413,98 @@ export class NoticesChannelManager {
    */
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
-      const embed = this.buildHeaderEmbed();
-
-      const headerMessage = await channel.send({ embeds: [embed] });
-      logger.info(`Created notices channel header post: ${headerMessage.id}`);
-
-      // Pin the message if enabled
-      const pinEnabled = await this.configService.getBoolean(
-        "notices.header_pin_enabled",
-        true,
-      );
-      if (pinEnabled) {
-        try {
-          await headerMessage.pin();
-          logger.info("Pinned notices channel header post");
-        } catch (error) {
-          logger.warn(
-            "Failed to pin header post (missing permissions?):",
-            error,
-          );
-        }
-      }
+      const headerMessage = await this.sendHeaderMessage(channel);
 
       // Store the header message ID
-      await this.configService.set(
-        "notices.header_message_id",
-        headerMessage.id,
-        "Message ID of the notices channel header post",
-        "notices",
-      );
+      await this.storeHeaderId(headerMessage.id);
     } catch (error) {
       logger.error("Error creating header post:", error);
     }
   }
+
+  /** Send the header embed and pin it when pinning is on. Throws if the send fails; a failed pin is only logged. */
+  private async sendHeaderMessage(channel: TextChannel): Promise<Message> {
+    const headerMessage = await channel.send({
+      embeds: [this.buildHeaderEmbed()],
+    });
+    logger.info(`Created notices channel header post: ${headerMessage.id}`);
+
+    // Pin the message if enabled
+    const pinEnabled = await this.configService.getBoolean(
+      "notices.header_pin_enabled",
+      true,
+    );
+    if (pinEnabled) {
+      try {
+        await headerMessage.pin();
+        logger.info("Pinned notices channel header post");
+      } catch (error) {
+        logger.warn("Failed to pin header post (missing permissions?):", error);
+      }
+    }
+    return headerMessage;
+  }
+
+  private async storeHeaderId(id: string): Promise<void> {
+    await this.configService.set(
+      "notices.header_message_id",
+      id,
+      "Message ID of the notices channel header post",
+      "notices",
+    );
+  }
+
+  /**
+   * Post the header again and take the old one down (#1428). Posts first,
+   * stores the new id, deletes the old message last, so a failure at any step
+   * never leaves two live headers. Queued behind a resync and behind another
+   * re-post: a resync that deleted "every bot message but the header" while
+   * a re-post sat between "sent" and "stored" would delete the new header.
+   * `expectedId` (the id the admin's page showed) makes a second submit of the
+   * same form a no-op. Never throws.
+   */
+  public async repostHeader(expectedId?: string): Promise<RepostResult> {
+    return this.channelLock.run("channel", async () => {
+      try {
+        if (!(await this.configService.getBoolean("notices.enabled", false))) {
+          return notReady("Turn on Notices in Settings first.");
+        }
+        if (
+          !(await this.configService.getBoolean("notices.header_enabled", true))
+        ) {
+          return notReady(
+            "The header is switched off. Turn on the header post in the Notices settings first.",
+          );
+        }
+        const channel = await this.getNoticesChannel();
+        if (!channel) {
+          return notReady(
+            "The notices channel isn't set or can't be found. Check the channel in the Notices settings.",
+          );
+        }
+        const oldId = (
+          await this.configService.getString("notices.header_message_id", "")
+        ).trim();
+        if (expectedId !== undefined && expectedId.trim() !== oldId) {
+          return staleRepost();
+        }
+        return await repostManagedMessage({
+          channel,
+          botUserId: this.client.user?.id,
+          oldId,
+          send: () => this.sendHeaderMessage(channel),
+          store: (id) => this.storeHeaderId(id),
+          label: "notices channel header",
+        });
+      } catch (error) {
+        logger.error(
+          `Re-posting the notices channel header failed: ${describeDiscordError(error)}`,
+        );
+        return unexpectedRepostFailure();
+      }
+    });
+  }
+
   /**
    * Ensure the bot info notice exists with current enabled features
    * This auto-generates a notice listing bot features with examples
@@ -790,6 +859,12 @@ export class NoticesChannelManager {
    * Clears existing notices and reposts all
    */
   public async syncNotices(): Promise<void> {
+    // Queued with a header re-post, which could otherwise lose its new header
+    // to the delete-everything-but-the-header pass below.
+    return this.channelLock.run("channel", () => this.runSyncNotices());
+  }
+
+  private async runSyncNotices(): Promise<void> {
     try {
       logger.info("Syncing notices to channel...");
 

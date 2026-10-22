@@ -764,6 +764,13 @@ export interface SettingMetadata {
    */
   managed?: { channelKey: keyof ConfigSchema };
   /**
+   * Set on a key that is edited only through its own editor (the leaderboard
+   * tiers), where the raw stored text is easy to break (#1428). The All
+   * settings table leaves it out. The value is unchanged otherwise: it is
+   * still stored, exported, imported and reset like any other key.
+   */
+  editedElsewhere?: boolean;
+  /**
    * Set when the rest of the feature page renders from this value (beyond the
    * `*.enabled` flags, which always reload): saving it from a feature page's
    * card reloads the page so nothing keeps describing the old value (#1090).
@@ -2321,6 +2328,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       'Comma-separated "topN:roleId" pairs (e.g. "1:111,3:222,10:333"). Each tier independently assigns the role to users whose rank is ≤ N. Admins pick any positions; nothing is hardcoded.',
     category: "leaderboard_roles",
     type: "string",
+    editedElsewhere: true,
   },
   "leaderboard_roles.announcement_channel_id": {
     label: "Role-change announcements channel",

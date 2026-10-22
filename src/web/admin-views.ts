@@ -311,6 +311,8 @@ export interface SettingRow {
    * the message and its channel are both known.
    */
   jumpUrl?: string;
+  /** For a `managed` row, the feature page where an admin re-posts the message (#1428). */
+  repostHref?: string;
   /**
    * Which channel picker a `channel` / `channel_list` control draws from:
    * `"voice"` uses the voice (+ stage) list, anything else (the default) uses
@@ -450,6 +452,52 @@ export function messageJumpUrl(
     return undefined;
   }
   return `https://discord.com/channels/${guildId}/${channelId.trim()}/${messageId.trim()}`;
+}
+
+export interface RepostCardOptions {
+  /** Anchor id; All settings links here (see `managed-messages.ts`). */
+  id: string;
+  heading: string;
+  /** What the message is and when re-posting it helps. Plain text. */
+  intro: string;
+  /** POST target, e.g. "/admin/quotes/header/repost". */
+  action: string;
+  csrfInput: string;
+  /** The id the page shows now, sent back so a double submit re-posts once. */
+  messageId: string;
+  buttonLabel: string;
+  /** The confirm dialog's question. */
+  confirmText: string;
+  /** The confirm dialog's consequence list. */
+  consequences: readonly string[];
+  /** Why the button is off, or null when it can be used. */
+  blockedReason: string | null;
+}
+
+/**
+ * The Re-post card of a bot-managed message (#1428). The action deletes the old
+ * message and posts a new one in Discord, so it goes through the confirm dialog
+ * with its consequences listed (the confirm tone stays the red default: it
+ * deletes a message). It sits on the feature's own page; All settings only
+ * links here.
+ */
+export function renderRepostCard(o: RepostCardOptions): string {
+  const state = o.messageId
+    ? `Current message ID <code>${escapeHtml(o.messageId)}</code>.`
+    : "Not posted yet.";
+  const blocked = o.blockedReason
+    ? `<p class="muted" role="status">${escapeHtml(o.blockedReason)}</p>`
+    : "";
+  return `<div class="card" id="${escapeHtml(o.id)}">
+  <h2>${escapeHtml(o.heading)}</h2>
+  <p class="muted">${escapeHtml(o.intro)} ${state}</p>
+  <form method="POST" action="${escapeHtml(o.action)}" class="inline-form" data-confirm="${escapeHtml(o.confirmText)}"${confirmListAttr(o.consequences)}>
+    ${o.csrfInput}
+    <input type="hidden" name="expectedId" value="${escapeHtml(o.messageId)}">
+    <button type="submit" class="btn"${o.blockedReason ? " disabled" : ""}>${escapeHtml(o.buttonLabel)}</button>
+  </form>
+  ${blocked}
+</div>`;
 }
 
 function coerceToDisplayValue(value: unknown): string | number | boolean {
@@ -935,7 +983,7 @@ function renderControlInput(
 
   // Bot-managed state is text with a link, never a field (#1304).
   if (r.managed) {
-    return renderManagedValue(String(primitive), r.jumpUrl);
+    return renderManagedValue(String(primitive), r.jumpUrl, r.repostHref);
   }
   // A boolean is always a switch, even if a key ever carried options (#1318).
   if (r.type === "boolean") {
@@ -1250,7 +1298,11 @@ function renderSettingRows(
         ? `<p class="kb-setting__name" id="${labelId}">${label}${mark}</p>`
         : `<p class="kb-setting__name"><label id="${labelId}" for="${escapeHtml(controlId)}">${label}</label>${mark}</p>`;
     const control = managed
-      ? renderManagedValue(String(coerceToDisplayValue(r.current)), r.jumpUrl)
+      ? renderManagedValue(
+          String(coerceToDisplayValue(r.current)),
+          r.jumpUrl,
+          r.repostHref,
+        )
       : offForm
         ? renderValueRoundTrip(r)
         : renderSettingControl(
@@ -3955,6 +4007,10 @@ export interface NoticesProps extends CommonProps {
   enabled: boolean;
   channel: { name: string; id: string; type: ChannelType | null } | null;
   total: number;
+  /** The auto-managed `notices.header_message_id`, sent back by Re-post. */
+  headerMessageId?: string;
+  /** `notices.header_enabled`; the Re-post button is off when it is false. */
+  headerEnabled?: boolean;
   /**
    * The editable `notices.*` settings rendered in place on the page (#972),
    * built from the config schema the same way the Settings page builds its
@@ -4057,6 +4113,29 @@ ${renderStatusLine({
   </form>
 </div>
 ${groupSections}
+${renderRepostCard({
+  id: "repost-header",
+  heading: "Header post",
+  intro:
+    "KoolBot keeps one header post in the notices channel and edits it in place when its wording changes. Re-post it to get a fresh message, for example if the post looks broken.",
+  action: "/admin/notices/header/repost",
+  csrfInput,
+  messageId: props.headerMessageId ?? "",
+  buttonLabel: "Re-post the header",
+  confirmText: "Re-post the notices channel header?",
+  consequences: [
+    "A new header is posted at the bottom of the notices channel, below the notices, and pinned if pinning is on. Resync notices to channel puts the notices back below it.",
+    "The old header is deleted if KoolBot can find it in this channel. If it was already deleted, nothing else happens.",
+    "The notices themselves are not touched.",
+  ],
+  blockedReason: !props.enabled
+    ? "Turn on Notices first."
+    : props.headerEnabled === false
+      ? "The header post is switched off in the settings below."
+      : !props.channel
+        ? "Set the notices channel first."
+        : null,
+})}
 <div class="card">
   <h2>Resync to the channel</h2>
   <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
@@ -4115,6 +4194,8 @@ export interface QuotesProps extends CommonProps {
   channel: { name: string; id: string; type: ChannelType | null } | null;
   /** The auto-managed `quotes.header_message_id`, shown read-only. */
   headerMessageId: string;
+  /** `quotes.header_enabled`; the Re-post button is off when it is false. */
+  headerEnabled?: boolean;
   /**
    * The editable `quotes.*` settings rendered in place on the page (#984).
    * Excludes the auto-managed `quotes.header_message_id`.
@@ -4230,6 +4311,29 @@ ${renderStatusLine({
   ${tableHtml}
   <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
 </div>
+${renderRepostCard({
+  id: "repost-header",
+  heading: "Header post",
+  intro:
+    "KoolBot keeps one header post at the top of the quote channel and edits it in place when its wording changes. Re-post it to get a fresh message, for example if the post looks broken.",
+  action: "/admin/quotes/header/repost",
+  csrfInput,
+  messageId: props.headerMessageId,
+  buttonLabel: "Re-post the header",
+  confirmText: "Re-post the quote channel header?",
+  consequences: [
+    "A new header is posted at the bottom of the quote channel, and pinned if pinning is on.",
+    "The old header is deleted if KoolBot can find it in this channel. If it was already deleted, nothing else happens.",
+    "Quotes are not touched.",
+  ],
+  blockedReason: !props.enabled
+    ? "Turn on Quotes first."
+    : props.headerEnabled === false
+      ? "The header post is switched off in the settings below."
+      : !props.channel
+        ? "Set the quote channel first."
+        : null,
+})}
 <div class="card">
   <h2>Quote channel</h2>
   <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
