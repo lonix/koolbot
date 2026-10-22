@@ -69,9 +69,9 @@ export function settingHref(key: string): string {
  * Remembers, per page, that the folded settings were left open, and opens them
  * when a link points at a control inside.
  *
- * - The server decides the first state (`open` when the feature is off or needs
- *   setup, and after a save). Those cases carry `data-fold-forced`: the script
- *   never closes them and never stores them as the admin's choice.
+ * - The server decides the first state (`open`, with `data-fold-forced`, when the
+ *   feature is off or needs setup, and after a save). The script only ever opens
+ *   a fold, so a remembered "closed" never closes one of those.
  * - Only a click on the summary counts as a choice, so opening the fold from
  *   script (a remembered state, a link to a control) is not remembered.
  * - Storage can be unavailable (private window, blocked site data): every
@@ -83,8 +83,7 @@ export const SETTINGS_FOLD_SCRIPT =
   "var PREFIX='kb-settings-open:';" +
   "Array.prototype.forEach.call(document.querySelectorAll('details[data-settings-fold]'),function(d){" +
   "var key=PREFIX+(d.getAttribute('data-fold-key')||'');" +
-  "if(!d.hasAttribute('data-fold-forced')){" +
-  "try{if(window.localStorage.getItem(key)==='1')d.open=true}catch(e){}}" +
+  "try{if(window.localStorage.getItem(key)==='1')d.open=true}catch(e){}" +
   "var chosen=false;var s=d.querySelector('summary');" +
   "if(s)s.addEventListener('click',function(){chosen=true});" +
   "d.addEventListener('toggle',function(){if(!chosen)return;chosen=false;" +

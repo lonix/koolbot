@@ -1658,6 +1658,24 @@ describe("a feature page's folded settings reopen after a save or reset (#1301)"
     expect(settingsOf(res)).toBe("open");
   });
 
+  it("asks for them to open when only some of the keys were saved", async () => {
+    mockConfigSet
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("write failed"));
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.cooldown_days", "polls.default_duration_hours"],
+      "value_polls.cooldown_days": "7",
+      "value_polls.default_duration_hours": "48",
+      no_cascade: "1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Failed",
+    );
+    expect(settingsOf(res)).toBe("open");
+  });
+
   it("asks for them to open when nothing was submitted", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "polls",
