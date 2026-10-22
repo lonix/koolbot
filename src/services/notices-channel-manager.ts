@@ -299,6 +299,15 @@ export class NoticesChannelManager {
    * Follows the bot-controlled channel header pattern from QuoteChannelManager
    */
   private async ensureHeaderPost(channel: TextChannel): Promise<void> {
+    // Every header creation runs under the channel lock, so an automatic
+    // recreation can't interleave with a Re-post or a resync and leave two
+    // headers (#1428).
+    return this.channelLock.run("channel", () =>
+      this.ensureHeaderPostUnlocked(channel),
+    );
+  }
+
+  private async ensureHeaderPostUnlocked(channel: TextChannel): Promise<void> {
     try {
       // Check if header is enabled
       const headerEnabled = await this.configService.getBoolean(

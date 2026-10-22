@@ -200,7 +200,7 @@ describe("QuoteChannelManager.repostHeader", () => {
     channel.messages.fetchPinned = jest.fn(async () => []);
     const m: any = await manager();
     // A rebuild that is busy clearing the channel.
-    jest.spyOn(m, "syncExistingQuotes").mockImplementation(async () => {
+    jest.spyOn(m, "syncExistingQuotesUnlocked").mockImplementation(async () => {
       calls.push("rebuild-start");
       await gate;
       calls.push("rebuild-end");
@@ -213,5 +213,77 @@ describe("QuoteChannelManager.repostHeader", () => {
     release();
     await Promise.all([rebuild, repost]);
     expect(calls.slice(0, 3)).toEqual(["rebuild-start", "rebuild-end", "send"]);
+  });
+});
+
+describe("automatic header recreation vs Re-post (#1428)", () => {
+  /** A channel whose stored header was deleted: only messages in `live` exist. */
+  function deletedHeaderChannel(): Map<string, unknown> {
+    const live = new Map<string, unknown>();
+    channel.messages.fetch = jest.fn(async (arg: unknown) => {
+      if (typeof arg === "string") {
+        const m = live.get(arg);
+        if (!m) throw discordError(10008);
+        return m;
+      }
+      return { find: () => undefined, values: () => [] };
+    });
+    channel.messages.fetchPinned = jest.fn(async () => ({
+      find: () => undefined,
+    }));
+    let n = 0;
+    channel.send = jest.fn(async () => {
+      n += 1;
+      const msg = {
+        id: `created${n}`,
+        author: { id: "bot" },
+        embeds: [],
+        pin: jest.fn(async () => undefined),
+        delete: jest.fn(async () => undefined),
+        edit: jest.fn(async () => undefined),
+      };
+      live.set(msg.id, msg);
+      return msg;
+    });
+    return live;
+  }
+
+  it("creates exactly one header when the cleanup check and Re-post overlap", async () => {
+    deletedHeaderChannel();
+    const m: any = await manager();
+    // The stored header (old1) no longer exists. The periodic check and an
+    // admin's Re-post of the page's header (old1) start together.
+    await Promise.all([m.ensureHeaderPost(channel), m.repostHeader("old1")]);
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(store.get("quotes.header_message_id")).toBe("created1");
+  });
+
+  it("creates exactly one header when Re-post goes first and the check follows", async () => {
+    deletedHeaderChannel();
+    const m: any = await manager();
+    await Promise.all([m.repostHeader("old1"), m.ensureHeaderPost(channel)]);
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(store.get("quotes.header_message_id")).toBe("created1");
+  });
+
+  it("does not deadlock: a rebuild that holds the lock recreates the header without waiting on it", async () => {
+    deletedHeaderChannel();
+    const m: any = await manager();
+    jest.spyOn(m, "ensureHeaderPost");
+    jest.spyOn(m, "syncExistingQuotes");
+    channel.messages.fetch = jest.fn(async () => ({
+      size: 0,
+      values: () => [],
+      filter: () => ({ size: 0, values: () => [] }),
+      find: () => undefined,
+    }));
+    jest.spyOn(m, "clearChannel").mockResolvedValue(undefined);
+    const { quoteService } =
+      await import("../../src/services/quote-service.js");
+    (quoteService as any).getAllQuotes = async () => [];
+    await m.resetChannel();
+    expect(m.ensureHeaderPost).not.toHaveBeenCalled();
+    expect(m.syncExistingQuotes).not.toHaveBeenCalled();
+    expect(channel.send).toHaveBeenCalledTimes(1);
   });
 });

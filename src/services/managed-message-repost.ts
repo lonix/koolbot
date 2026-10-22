@@ -22,6 +22,7 @@
 import type { Message } from "discord.js";
 import logger from "../utils/logger.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
+import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 /** What happened to the message that was live before the re-post. */
 export type OldMessageOutcome =
@@ -106,7 +107,11 @@ export function isPermissionError(error: unknown): boolean {
 
 /** The message for a failed send, in words an admin can act on. */
 export function sendFailureText(error: unknown, channelName?: string): string {
-  const where = channelName ? `#${channelName}` : "the channel";
+  // A channel name is admin-controlled text that can carry `@everyone`, a
+  // `<@id>` mention or Markdown; neutralise it before it goes into a message.
+  const where = channelName
+    ? `#${escapeDisplayText(channelName)}`
+    : "the channel";
   if (isPermissionError(error)) {
     return `KoolBot isn't allowed to post in ${where}. Give it View Channel, Send Messages and Embed Links there, then try again. Nothing was changed.`;
   }
@@ -141,16 +146,26 @@ export async function repostManagedMessage(
     logger.error(
       `Re-posting the ${p.label}: the new id couldn't be saved: ${describeDiscordError(error)}`,
     );
-    await sent.delete().catch((deleteError: unknown) => {
-      logger.warn(
-        `Couldn't remove the unlinked ${p.label} ${sent.id}: ${describeDiscordError(deleteError)}`,
-      );
-    });
+    // Only say the new message is gone when it is: a failed rollback leaves a
+    // visible, untracked copy that a blind retry would add to.
+    let removed = true;
+    try {
+      await sent.delete();
+    } catch (deleteError) {
+      // Unknown Message: it is already gone, which is what we wanted.
+      if (codeOf(deleteError) !== UNKNOWN_MESSAGE) {
+        removed = false;
+        logger.warn(
+          `Couldn't remove the unlinked ${p.label} ${sent.id}: ${describeDiscordError(deleteError)}`,
+        );
+      }
+    }
     return {
       ok: false,
       reason: "not-saved",
-      error:
-        "The new message was posted but couldn't be saved, so it was taken down again and the old one is still live. Check the database and try again.",
+      error: removed
+        ? "The new message was posted but couldn't be saved, so it was taken down again and the old one is still live. Check the database and try again."
+        : `The new message was posted but couldn't be saved, and it couldn't be taken down again. Delete message ${sent.id} in ${p.channel.name ? `#${escapeDisplayText(p.channel.name)}` : "the channel"} by hand (the old one is still the live one), fix the database, and only then try again.`,
     };
   }
 

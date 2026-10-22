@@ -24,6 +24,7 @@ function setup(
     storeImpl?: () => Promise<void>;
     oldDeleteImpl?: () => Promise<unknown>;
     oldAuthor?: string;
+    newDeleteImpl?: () => Promise<unknown>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -39,6 +40,7 @@ function setup(
     id: "new1",
     delete: jest.fn(async () => {
       calls.push("delete-new");
+      if (opts.newDeleteImpl) await opts.newDeleteImpl();
     }),
   };
   const params = {
@@ -150,6 +152,39 @@ describe("repostManagedMessage", () => {
     expect(oldMessage.delete).not.toHaveBeenCalled();
   });
 
+  it("treats a new message that is already gone as taken down", async () => {
+    const { params } = setup({
+      storeImpl: async () => {
+        throw new Error("mongo down");
+      },
+      newDeleteImpl: async () => {
+        throw discordError(10008);
+      },
+    });
+    const result = await repostManagedMessage(params);
+    expect(result).toMatchObject({ ok: false, reason: "not-saved" });
+    expect((result as { error: string }).error).toContain("taken down again");
+  });
+
+  it("names the new message for manual cleanup, and does not invite a blind retry, when it can't be taken down", async () => {
+    const { params } = setup({
+      storeImpl: async () => {
+        throw new Error("mongo down");
+      },
+      newDeleteImpl: async () => {
+        throw discordError(50013);
+      },
+    });
+    const result = await repostManagedMessage(params);
+    expect(result).toMatchObject({ ok: false, reason: "not-saved" });
+    const text = (result as { error: string }).error;
+    expect(text).not.toContain("was taken down again");
+    expect(text).toContain("new1");
+    expect(text).toContain("#quotes");
+    expect(text).toContain("by hand");
+    expect(text).toContain("only then try again");
+  });
+
   it("never deletes a message the bot did not write", async () => {
     const { params, oldMessage } = setup({ oldAuthor: "someone-else" });
     expect(await repostManagedMessage(params)).toMatchObject({
@@ -206,6 +241,18 @@ describe("describeRepost and sendFailureText", () => {
       "The header",
     );
     expect(flash.text).toContain("channel it was posted in before");
+  });
+
+  it("neutralises a channel name that carries mentions or Markdown", () => {
+    const text = sendFailureText(
+      discordError(50013),
+      "@everyone <@123> **bold** [x](http://e)",
+    );
+    expect(text).not.toContain("@everyone");
+    expect(text).not.toContain("<@123>");
+    expect(text).not.toContain("**bold**");
+    expect(text).toContain("@\u200beveryone");
+    expect(text).toContain("\\<@123\\>");
   });
 
   it("falls back to a generic channel name", () => {

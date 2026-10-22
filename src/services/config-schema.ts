@@ -1534,6 +1534,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where quote messages are posted.",
     category: "quotes",
     type: "channel",
+    // The Quotes page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "quotes.delete_roles": {
     label: "Roles allowed to delete quotes",
@@ -1564,6 +1566,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Post and maintain a pinned informational header in the quote channel.",
     category: "quotes",
     type: "boolean",
+    // The Quotes page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "quotes.header_message_id": {
     label: "Header message ID (auto-managed)",
@@ -2221,6 +2225,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where notice messages are posted.",
     category: "notices",
     type: "channel",
+    // The Notices page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "notices.header_enabled": {
     label: "Pinned header post enabled",
@@ -2228,6 +2234,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Post and maintain a pinned informational header in the notices channel.",
     category: "notices",
     type: "boolean",
+    // The Notices page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "notices.header_message_id": {
     label: "Header message ID (auto-managed)",

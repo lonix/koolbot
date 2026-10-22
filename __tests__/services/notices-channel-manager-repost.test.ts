@@ -206,3 +206,44 @@ describe("NoticesChannelManager.repostHeader", () => {
     expect(newMessage.delete).not.toHaveBeenCalled();
   });
 });
+
+describe("automatic header recreation vs Re-post (#1428)", () => {
+  function deletedHeaderChannel(): void {
+    const live = new Map<string, unknown>();
+    channel.messages.fetch = jest.fn(async (arg: unknown) => {
+      const m = typeof arg === "string" ? live.get(arg) : undefined;
+      if (!m) throw discordError(10008);
+      return m;
+    });
+    let n = 0;
+    channel.send = jest.fn(async () => {
+      n += 1;
+      const msg = {
+        id: `created${n}`,
+        author: { id: "bot" },
+        embeds: [],
+        pin: jest.fn(async () => undefined),
+        delete: jest.fn(async () => undefined),
+        edit: jest.fn(async () => undefined),
+      };
+      live.set(msg.id, msg);
+      return msg;
+    });
+  }
+
+  it("creates exactly one header when the cleanup check and Re-post overlap", async () => {
+    deletedHeaderChannel();
+    const m: any = await manager();
+    await Promise.all([m.ensureHeaderPost(channel), m.repostHeader("old1")]);
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(store.get("notices.header_message_id")).toBe("created1");
+  });
+
+  it("creates exactly one header when Re-post goes first and the check follows", async () => {
+    deletedHeaderChannel();
+    const m: any = await manager();
+    await Promise.all([m.repostHeader("old1"), m.ensureHeaderPost(channel)]);
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(store.get("notices.header_message_id")).toBe("created1");
+  });
+});

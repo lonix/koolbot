@@ -299,6 +299,16 @@ export class QuoteChannelManager {
    * await this.ensureHeaderPost(channel);
    */
   private async ensureHeaderPost(channel: TextChannel): Promise<void> {
+    // Every header creation runs under the channel lock, so an automatic
+    // recreation can't interleave with a Re-post or a rebuild and leave two
+    // headers (#1428). A caller that already holds the lock uses the
+    // Unlocked variant.
+    return this.channelLock.run("channel", () =>
+      this.ensureHeaderPostUnlocked(channel),
+    );
+  }
+
+  private async ensureHeaderPostUnlocked(channel: TextChannel): Promise<void> {
     try {
       // Check if header is enabled
       const headerEnabled = await this.configService.getBoolean(
@@ -1217,6 +1227,15 @@ export class QuoteChannelManager {
    * every quote in the channel.
    */
   private async syncExistingQuotes(clearFirst = false): Promise<number> {
+    return this.channelLock.run("channel", () =>
+      this.syncExistingQuotesUnlocked(clearFirst),
+    );
+  }
+
+  /** `syncExistingQuotes` for a caller that already holds the channel lock. */
+  private async syncExistingQuotesUnlocked(
+    clearFirst = false,
+  ): Promise<number> {
     try {
       const channel = await this.getQuoteChannel();
       if (!channel) {
@@ -1244,7 +1263,7 @@ export class QuoteChannelManager {
         "Message ID of the quote channel header post",
         "quotes",
       );
-      await this.ensureHeaderPost(channel);
+      await this.ensureHeaderPostUnlocked(channel);
 
       // Get every stored quote (unbounded): a rebuild must include all quotes,
       // not just the first page.
@@ -1362,7 +1381,7 @@ export class QuoteChannelManager {
       if (!channel) {
         throw new Error("Quote channel not configured or not found");
       }
-      const reposted = await this.syncExistingQuotes(true);
+      const reposted = await this.syncExistingQuotesUnlocked(true);
       return { reposted };
     });
   }
