@@ -215,14 +215,53 @@ describe("Server scan tabs (#1323)", () => {
   it("shows the ownership hints as a switch in the header, on the current tab", () => {
     const off = mainOf(page("roles"));
     expect(off).toContain(
-      '<input type="checkbox" role="switch" name="sample" value="1"><span class="kb-switch__track"></span><span class="kb-switch__state">Off</span>',
+      '<input type="checkbox" role="switch" name="sample" value="1"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>',
     );
     expect(off).toContain('<input type="hidden" name="tab" value="roles">');
     const on = mainOf(page("overview", { sampled: true }));
     expect(on).toContain('name="sample" value="1" checked>');
-    expect(on).toContain('<span class="kb-switch__state">On</span>');
+    // kb.css prints On/Off itself from :checked; literal text would double it.
+    for (const html of [off, on]) {
+      expect(html).toContain(
+        '<span class="kb-switch__state" aria-hidden="true"></span>',
+      );
+      expect(html).not.toMatch(/kb-switch__state[^>]*>(On|Off)</);
+    }
     expect(on).not.toContain('name="tab"');
     expect(on).toContain('href="/admin/adopt?sample=1&amp;refresh=1"');
+  });
+
+  it("keeps the ownership hints in every Overview link while they are on", () => {
+    const withBots = {
+      ...scan,
+      bots: [
+        {
+          userId: DYNO,
+          tag: "Dyno#1",
+          roleIds: [],
+          overwriteChannelIds: [],
+          verified: true,
+          isKoolBot: false,
+        },
+      ],
+    };
+    const on = mainOf(page("overview", { sampled: true, scan: withBots }));
+    for (const t of ["roles", "channels", "bots"]) {
+      expect(on).toContain(
+        `<a class="kb-tile" href="/admin/adopt?tab=${t}&amp;sample=1">`,
+      );
+    }
+    expect(on).toContain(
+      'href="/admin/adopt?tab=bots&amp;sample=1">1 in detail</a>',
+    );
+    expect(on).toContain(
+      'href="/admin/adopt?tab=discord&amp;sample=1">See the Discord tab</a>',
+    );
+    const off = mainOf(page("overview", { scan: withBots }));
+    expect(off).not.toContain("sample=1");
+    expect(off).toContain(
+      'href="/admin/adopt?tab=discord">See the Discord tab</a>',
+    );
   });
 
   it("is read-only: the only form is the GET switch, with no CSRF field and no other button", () => {
@@ -288,7 +327,9 @@ describe("Server scan tabs (#1323)", () => {
     const html = mainOf(page("overview"));
     expect(html).toContain('href="/admin/adopt/claims">Open Channel claims');
     expect(html).toContain('href="/admin/voice-channels">Open Voice channels');
-    expect(html).toContain('href="/admin/analytics">Open Voice analytics');
+    expect(html).toContain(
+      'href="/admin/settings#section-voicetracking">Open voice tracking settings',
+    );
     const addAfk = html.slice(
       html.indexOf("Add AFK"),
       html.indexOf("</li>", html.indexOf("Add AFK")),
@@ -301,7 +342,9 @@ describe("Server scan tabs (#1323)", () => {
     expect(suggestionAction("naming-prefix")?.href).toBe(
       "/admin/voice-channels",
     );
-    expect(suggestionAction("afk-not-excluded")?.href).toBe("/admin/analytics");
+    expect(suggestionAction("afk-not-excluded")?.href).toBe(
+      "/admin/settings#section-voicetracking",
+    );
     expect(suggestionAction("something-else")).toBeNull();
   });
 

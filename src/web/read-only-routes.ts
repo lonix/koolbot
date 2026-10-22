@@ -70,7 +70,7 @@ import {
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
 import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
-import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
+import { cachedScan, hasFreshScan, scanCacheKey } from "./server-scan-cache.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -1058,13 +1058,28 @@ export function createReadOnlyRouter(
 
   // ---------- Server scan (#1019) ----------
   // Read-only: GET only, no forms, no Discord writes.
+  // The limiter guards what is expensive: starting a scan. A tab click served
+  // from the shared scan costs nothing, so it is not counted (#1323).
+  const scanLimiter = createAdoptionScanLimiter();
   router.get(
     ADOPTION_SCAN_PAGE,
-    createAdoptionScanLimiter(),
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
       const sampled = req.query.sample === "1";
       const tab = parseScanTab(req.query.tab);
+      const refresh = req.query.refresh === "1";
+      const key = scanCacheKey(
+        req.webSession?.guildId ?? "",
+        req.webSession?.discordUserId,
+        sampled,
+      );
+      if (refresh || !hasFreshScan(key)) {
+        let allowed = false;
+        scanLimiter(req, res, () => {
+          allowed = true;
+        });
+        if (!allowed) return; // the limiter has answered 429
+      }
+      const common = await commonFromReq(req);
       let scan = null;
       let error: string | undefined;
       try {
@@ -1072,13 +1087,13 @@ export function createReadOnlyRouter(
         // One scan is shared across the tabs for a minute: each tab is its own
         // GET, and a scan costs a REST round of its own (#1323).
         scan = await cachedScan(
-          scanCacheKey(common.guildId, adminUserId, sampled),
+          key,
           () =>
             ServerScanService.getInstance(client).scan(common.guildId, {
               adminUserId,
               sampleMessages: sampled,
             }),
-          { refresh: req.query.refresh === "1" },
+          { refresh },
         );
       } catch (err) {
         logger.warn("server scan failed", err);

@@ -28,6 +28,12 @@ export function scanCacheKey(
   return `${guildId}:${adminUserId ?? ""}:${sampled ? "sampled" : "plain"}`;
 }
 
+/** Whether a fresh scan for `key` is held (or still loading), so a request needs no new one. */
+export function hasFreshScan(key: string, now: number = Date.now()): boolean {
+  const e = entries.get(key);
+  return e !== undefined && now - e.at < SCAN_CACHE_TTL_MS;
+}
+
 /**
  * The scan for `key`: the cached one while it is fresh, otherwise `load()`.
  * A failed load is never kept, so the next request tries again.

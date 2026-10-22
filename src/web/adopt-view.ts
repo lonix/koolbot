@@ -88,7 +88,10 @@ export function suggestionAction(
     return { href: "/admin/voice-channels", label: "Open Voice channels" };
   }
   if (code === "afk-not-excluded") {
-    return { href: "/admin/analytics", label: "Open Voice analytics" };
+    return {
+      href: "/admin/settings#section-voicetracking",
+      label: "Open voice tracking settings",
+    };
   }
   return null;
 }
@@ -202,7 +205,7 @@ function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
       : `<input type="hidden" name="tab" value="${escapeHtml(props.tab)}">`;
   const hints = scan
     ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end">${tabField}
-      <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1"${props.sampled ? " checked" : ""}><span class="kb-switch__track"></span><span class="kb-switch__state">${props.sampled ? "On" : "Off"}</span>Channel ownership hints</label>
+      <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1"${props.sampled ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Channel ownership hints</label>
       <button type="submit" class="kb-btn kb-btn--sm">Apply</button>
     </form>
     <a class="kb-btn kb-btn--sm" href="${escapeHtml(scanHref(props.tab, props.sampled, { refresh: "1" }))}">Scan again</a>`
@@ -268,7 +271,7 @@ function renderVerdict(scan: ServerScan): string {
   );
 }
 
-function renderTiles(scan: ServerScan): string {
+function renderTiles(scan: ServerScan, sampled: boolean): string {
   const r = scan.readiness;
   const n = blockers(scan).length;
   const unmanageable = scan.roles.filter(
@@ -285,17 +288,17 @@ function renderTiles(scan: ServerScan): string {
     <div class="kb-tile__value">${r.ready ? "Ready" : plural(n, "blocker", "blockers")}</div>
     <div class="kb-tile__detail">${escapeHtml(r.highestRoleName ?? "No KoolBot role")} is at position ${r.highestRolePosition} of ${r.roleCount}${r.administrator ? ", with Administrator" : ""}.</div>
   </a>
-  <a class="kb-tile" href="${scanHref("roles", false)}">
+  <a class="kb-tile" href="${escapeHtml(scanHref("roles", sampled))}">
     <div class="kb-tile__top"><span class="kb-overline">Roles</span></div>
     <div class="kb-tile__value">${scan.roles.length}</div>
     <div class="kb-tile__detail">${unmanageable === 0 ? "KoolBot can manage all of them." : `${unmanageable} KoolBot cannot manage.`}</div>
   </a>
-  <a class="kb-tile" href="${scanHref("channels", false)}">
+  <a class="kb-tile" href="${escapeHtml(scanHref("channels", sampled))}">
     <div class="kb-tile__top"><span class="kb-overline">Channels</span></div>
     <div class="kb-tile__value">${scan.channels.length}</div>
     <div class="kb-tile__detail">${used} used by KoolBot, ${custom} with custom permissions.</div>
   </a>
-  <a class="kb-tile" href="${scanHref("bots", false)}">
+  <a class="kb-tile" href="${escapeHtml(scanHref("bots", sampled))}">
     <div class="kb-tile__top"><span class="kb-overline">Other bots</span></div>
     <div class="kb-tile__value">${others.length}</div>
     <div class="kb-tile__detail">${others.length === 0 ? "None found." : `${known} in the catalogue.`}</div>
@@ -391,7 +394,7 @@ function renderBotSummaryCard(card: BotCard): string {
   return `<div class="kb-panel__body"><p><strong>${escapeHtml(card.name)}</strong></p><p class="kb-muted">${escapeHtml(card.summary)}</p>${renderCoverageBar(card)}</div>`;
 }
 
-function renderDiscordFacts(scan: ServerScan): string {
+function renderDiscordFacts(scan: ServerScan, sampled: boolean): string {
   const c = scan.community;
   const onboarding =
     c.onboardingEnabled === null
@@ -399,20 +402,20 @@ function renderDiscordFacts(scan: ServerScan): string {
       : c.onboardingEnabled
         ? "on"
         : "off";
-  return `<section class="kb-panel" aria-labelledby="p-native"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-native">Handled by Discord</h2></header><div class="kb-panel__body"><dl class="kb-kv"><dt>Community</dt><dd>${c.community ? "On" : "Off"}</dd><dt>Onboarding</dt><dd>${escapeHtml(onboarding)}</dd><dt>Scheduled events</dt><dd>${scan.scheduledEvents.length}</dd></dl><p><a href="${scanHref("discord", false)}">See the Discord tab</a></p></div></section>`;
+  return `<section class="kb-panel" aria-labelledby="p-native"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-native">Handled by Discord</h2></header><div class="kb-panel__body"><dl class="kb-kv"><dt>Community</dt><dd>${c.community ? "On" : "Off"}</dd><dt>Onboarding</dt><dd>${escapeHtml(onboarding)}</dd><dt>Scheduled events</dt><dd>${scan.scheduledEvents.length}</dd></dl><p><a href="${escapeHtml(scanHref("discord", sampled))}">See the Discord tab</a></p></div></section>`;
 }
 
-function renderOverview(scan: ServerScan): string {
+function renderOverview(scan: ServerScan, sampled: boolean): string {
   const report = buildBotReplacementReport(scan, scan.scanned?.config ?? {});
   const bots = report.cards.length
-    ? `<section class="kb-panel" aria-labelledby="p-bots"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-bots">Other bots</h2><span class="kb-panel__meta"><a href="${scanHref("bots", false)}">${report.cards.length} in detail</a></span></header>${report.cards.map(renderBotSummaryCard).join("")}</section>`
+    ? `<section class="kb-panel" aria-labelledby="p-bots"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-bots">Other bots</h2><span class="kb-panel__meta"><a href="${escapeHtml(scanHref("bots", sampled))}">${report.cards.length} in detail</a></span></header>${report.cards.map(renderBotSummaryCard).join("")}</section>`
     : "";
   return `${renderVerdict(scan)}
-${renderTiles(scan)}
+${renderTiles(scan, sampled)}
 <div class="kb-cols">
   <div class="kb-stack">${renderAttention(scan)}</div>
   <div class="kb-stack">${bots}
-${renderDiscordFacts(scan)}</div>
+${renderDiscordFacts(scan, sampled)}</div>
 </div>`;
 }
 
@@ -688,7 +691,7 @@ ${panel("Scheduled events", String(scan.scheduledEvents.length), events, { id: "
 
 // ---- Page -------------------------------------------------------------------
 
-function renderTab(scan: ServerScan, tab: ScanTab): string {
+function renderTab(scan: ServerScan, tab: ScanTab, sampled: boolean): string {
   switch (tab) {
     case "roles":
       return renderRoles(scan);
@@ -699,7 +702,7 @@ function renderTab(scan: ServerScan, tab: ScanTab): string {
     case "discord":
       return renderDiscord(scan);
     default:
-      return renderOverview(scan);
+      return renderOverview(scan, sampled);
   }
 }
 
@@ -708,7 +711,7 @@ export function renderAdoptPage(props: AdoptPageProps): string {
   const content = scan
     ? `${renderTabs(scan, props)}
 <div class="kb-stack" id="scan-${props.tab}">
-${renderTab(scan, props.tab)}
+${renderTab(scan, props.tab, props.sampled)}
 </div>`
     : callout(
         "err",

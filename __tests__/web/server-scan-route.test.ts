@@ -120,4 +120,44 @@ describe("GET /adopt tabs", () => {
     expect(await text("/adopt")).toContain("Needs fixing");
     expect(scan).toHaveBeenCalledTimes(2);
   });
+
+  it("does not count tab clicks served from the shared scan against the rate limit", async () => {
+    const tabs = [
+      "",
+      "?tab=roles",
+      "?tab=channels",
+      "?tab=bots",
+      "?tab=discord",
+    ];
+    const statuses: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      statuses.push(
+        (await harness.get(`/adopt${tabs[i % tabs.length]}`)).status,
+      );
+    }
+    expect(statuses.every((c) => c === 200)).toBe(true);
+    expect(scan).toHaveBeenCalledTimes(1);
+  });
+
+  it("still limits scans that start: refreshes are counted, and answer 429 after 15 a minute", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 17; i++) {
+      statuses.push((await harness.get("/adopt?refresh=1")).status);
+    }
+    expect(statuses.slice(0, 15).every((c) => c === 200)).toBe(true);
+    expect(statuses.slice(15)).toEqual([429, 429]);
+    expect(scan).toHaveBeenCalledTimes(15);
+    // A cached tab click is still served while refreshes are throttled.
+    expect((await harness.get("/adopt?tab=roles")).status).toBe(200);
+  });
+
+  it("counts a failed scan against the limit, since nothing was cached", async () => {
+    scan.mockRejectedValue(new Error("down"));
+    const statuses: number[] = [];
+    for (let i = 0; i < 16; i++) {
+      statuses.push((await harness.get("/adopt")).status);
+    }
+    expect(statuses.slice(0, 15).every((c) => c === 200)).toBe(true);
+    expect(statuses[15]).toBe(429);
+  });
 });

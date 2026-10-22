@@ -2754,11 +2754,11 @@ naming the status it found.
 **Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no write routes, and never
 writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), tiles for
 Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions that each link to the page that acts
-(Channel claims, Voice channels, Voice analytics). Readiness and permission detail link to **Bot permissions** instead of
+(Channel claims, Voice channels, and the voice tracking settings). Readiness and permission detail link to **Bot permissions** instead of
 repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the
 Overview), plain links that work without JavaScript. The **Channel ownership hints** switch in the header is a GET form
 and the only form on the page. The tabs share one scan for a minute per admin and hints setting, so clicking through them
-does not rescan Discord or use up the page's rate limit; the header says when Discord was read and **Scan again** bypasses
+does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which only counts scans that start; the header says when Discord was read and **Scan again** bypasses
 the cache. What follows describes the data each tab shows. It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
 whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
