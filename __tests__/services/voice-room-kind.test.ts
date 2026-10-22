@@ -19,6 +19,16 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: { exists: mockEventExists },
 }));
 
+const mockGetBoolean =
+  jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: { getInstance: () => ({ getBoolean: mockGetBoolean }) },
+}));
+const mockIsLobbyByIdentity = jest.fn<() => Promise<boolean>>();
+jest.unstable_mockModule("../../src/services/voice-channel-manager.js", () => ({
+  isLobbyByIdentity: mockIsLobbyByIdentity,
+}));
+
 const { classifyVoiceRoom } =
   await import("../../src/services/voice-room-kind.js");
 
@@ -79,6 +89,47 @@ describe("classifyVoiceRoom (#1420)", () => {
     managedReturns(null);
     mockEventExists.mockResolvedValue(null as never);
     expect(await classifyVoiceRoom(room, notLobby)).toBe("permanent");
+  });
+
+  describe("default lobby check on a tracking-only server", () => {
+    const named = { ...room, channelName: "Lobby" };
+
+    beforeEach(() => {
+      mockGetBoolean.mockReset();
+      mockIsLobbyByIdentity.mockReset();
+      // By its name alone, the manager's identity helper says "lobby".
+      mockIsLobbyByIdentity.mockResolvedValue(true);
+      managedReturns(null);
+    });
+
+    it("calls an unregistered room named Lobby permanent when voice-channel management is off", async () => {
+      mockGetBoolean.mockResolvedValue(false);
+      mockEventExists.mockResolvedValue(null as never);
+      expect(await classifyVoiceRoom(named)).toBe("permanent");
+      expect(mockGetBoolean).toHaveBeenCalledWith(
+        "voicechannels.enabled",
+        false,
+      );
+      expect(mockIsLobbyByIdentity).not.toHaveBeenCalled();
+    });
+
+    it("still finds the event that owns a room named Lobby when management is off", async () => {
+      mockGetBoolean.mockResolvedValue(false);
+      mockEventExists.mockResolvedValue({ _id: "e1" } as never);
+      expect(await classifyVoiceRoom(named)).toBe("event");
+    });
+
+    it("calls the same room a lobby when voice-channel management is on", async () => {
+      mockGetBoolean.mockResolvedValue(true);
+      expect(await classifyVoiceRoom(named)).toBe("lobby");
+      expect(mockIsLobbyByIdentity).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps classifying recorded rooms with management off", async () => {
+      mockGetBoolean.mockResolvedValue(false);
+      managedReturns({ kind: "channel" });
+      expect(await classifyVoiceRoom(named)).toBe("dynamic");
+    });
   });
 
   it("returns undefined, not a guess, without a guild or when the lookup fails", async () => {

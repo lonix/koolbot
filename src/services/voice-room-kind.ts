@@ -1,5 +1,6 @@
 import type { Guild } from "discord.js";
 import logger from "../utils/logger.js";
+import { ConfigService } from "./config-service.js";
 import { ManagedVoiceChannel } from "../models/managed-voice-channel.js";
 import { Event } from "../models/event.js";
 import type { VoiceRoomKind } from "../utils/voice-room-kinds.js";
@@ -17,8 +18,17 @@ export interface RoomToClassify {
  * identity (configured ID, else name), loaded lazily because the manager
  * imports the tracker. A lobby that was configured or name-matched and reused
  * has no registry row, so the registry alone cannot tell.
+ *
+ * Only when voice-channel management is on, the same gate the manager's own
+ * voice-state handler applies: without it there is no lobby, and the name
+ * fallback would call any room named "Lobby" one on a tracking-only server.
  */
 async function isLobbyRoom(room: RoomToClassify): Promise<boolean> {
+  const managed = await ConfigService.getInstance().getBoolean(
+    "voicechannels.enabled",
+    false,
+  );
+  if (!managed) return false;
   const { isLobbyByIdentity } = await import("./voice-channel-manager.js");
   return isLobbyByIdentity({
     id: room.channelId,
