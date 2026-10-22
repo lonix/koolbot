@@ -14,6 +14,8 @@ jest.mock("../../src/utils/logger.js", () => ({
   },
 }));
 
+const mockClassify = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+
 jest.mock("../../src/services/achievements-service.js", () => ({
   AchievementsService: {
     getInstance: jest.fn(() => ({
@@ -44,6 +46,9 @@ function createTracker(mockClient: Partial<Client>) {
   // Inject mock config service and stub the Mongo connection guard
   (tracker as never)["configService"] = mockConfigService;
   stubMongoGuard(tracker);
+  // The real classifier reads Mongo; default to "unknown" (#1420).
+  (tracker as never)["classifyRoom"] = (...args: unknown[]) =>
+    mockClassify(...args);
 
   return { tracker, mockConfigService };
 }
@@ -804,6 +809,18 @@ describe("VoiceChannelTracker", () => {
       return (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
         .calls[0][1].$push.sessions;
     }
+
+    it("stamps the room kind read at join, and omits it when unknown (#1420)", async () => {
+      mockClassify.mockResolvedValueOnce("event");
+      const room = roomWith(true);
+      const saved = await recordSession(room, room);
+      expect(mockClassify).toHaveBeenCalledWith("guild-1", "room-1");
+      expect(saved.roomKind).toBe("event");
+
+      mockClassify.mockResolvedValueOnce(undefined);
+      const unknown = await recordSession(room, room);
+      expect("roomKind" in unknown).toBe(false);
+    });
 
     it("marks a room public at join and still public at close", async () => {
       const room = roomWith(true);

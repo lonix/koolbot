@@ -635,8 +635,11 @@ DMs a member who has not opted in.
 ## ✨ Rewind (Year-in-Review)
 
 Per-user year-in-review page at **`/me/rewind`** (also `/me/rewind/:year`
-for past years). Renders total voice time, top voice companions, peak day,
-longest session, longest streak, badges earned, annual rank, a
+for past years). Renders total voice time, voice time by kind of room
+(dynamic, event, permanent, lobby; rooms are never listed by name, and
+sessions recorded before the kind was stamped count as "other voice
+channels"), top voice companions, peak day, longest session (date and kind
+of room, not its name), longest streak, badges earned, annual rank, a
 first/best/last weekly-rank journey, text activity, and reaction activity
 (given / received). Year picker bottom-anchored to years with data.
 

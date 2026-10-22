@@ -598,15 +598,17 @@ export interface RewindBodyOptions {
   // Replaces the old Top channels card, which was noise under dynamic VCs.
   topCompanions: RewindCompanionView[];
   peakDay: { date: string; duration: string } | null;
+  // Voice time by kind of room (#1420), pre-formatted. Rooms are not named on
+  // this user-facing page; empty hides the card.
+  voiceByKind: Array<{ kind: string; duration: string }>;
   // Longest single voice session of the year (#568): pre-formatted duration,
-  // the ISO date it started, and the (often ephemeral) channel name. Null
-  // when the user had no qualifying session that year.
+  // the ISO date it started, and the kind of room (#1420) — never its name,
+  // which is only a label and often belongs to a deleted room. Null when the
+  // user had no qualifying session that year.
   longestSession: {
     duration: string;
     date: string;
-    channelName: string | null;
-    /** Discord type of the session's channel (voice or stage); null when it no longer resolves. */
-    channelType: number | null;
+    roomKind: string;
   } | null;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
@@ -875,6 +877,22 @@ function renderPollActivity(opts: RewindBodyOptions): string {
   ].join("");
 }
 
+/** Room-kind labels for the Rewind page (#1420); `other` is the neutral fallback. */
+const ROOM_KIND_PLURAL: Record<string, string> = {
+  dynamic: "In dynamic voice channels",
+  event: "In event channels",
+  permanent: "In permanent voice channels",
+  lobby: "In the lobby",
+  other: "In other voice channels",
+};
+const ROOM_KIND_SINGULAR: Record<string, string> = {
+  dynamic: "a dynamic voice channel",
+  event: "an event channel",
+  permanent: "a permanent voice channel",
+  lobby: "the lobby",
+  other: "a voice channel",
+};
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -911,12 +929,28 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
   // channel when known) as the supporting detail.
   const longestSession = opts.longestSession
     ? `<div class="value">${escapeHtml(opts.longestSession.duration)}</div>` +
-      `<div class="detail">on ${escapeHtml(opts.longestSession.date)}` +
-      (opts.longestSession.channelName
-        ? ` in ${channelMention({ name: opts.longestSession.channelName, type: opts.longestSession.channelType })}`
-        : "") +
-      "</div>"
+      `<div class="detail">on ${escapeHtml(opts.longestSession.date)} in ${escapeHtml(
+        ROOM_KIND_SINGULAR[opts.longestSession.roomKind] ??
+          ROOM_KIND_SINGULAR.other,
+      )}</div>`
     : '<div class="value">—</div>';
+
+  // Voice time by kind of room (#1420), in place of per-room names.
+  const voiceKinds =
+    opts.voiceByKind.length === 0
+      ? ""
+      : '<div class="card"><h2>Where you spent your voice time</h2>' +
+        '<ul class="rw-channels">' +
+        opts.voiceByKind
+          .map(
+            (k) =>
+              "<li>" +
+              `<span class="name">${escapeHtml(ROOM_KIND_PLURAL[k.kind] ?? ROOM_KIND_PLURAL.other)}</span>` +
+              `<span class="dur">${escapeHtml(k.duration)}</span>` +
+              "</li>",
+          )
+          .join("") +
+        "</ul></div>";
 
   const streak = opts.longestStreakDays
     ? `<div class="value">${opts.longestStreakDays} day${opts.longestStreakDays === 1 ? "" : "s"}</div>` +
@@ -974,6 +1008,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       medianStat +
       "</div>",
     "</div>",
+    voiceKinds,
     '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
     renderTextActivity(opts),
     renderReactionActivity(opts),

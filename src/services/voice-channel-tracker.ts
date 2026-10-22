@@ -16,6 +16,8 @@ import { ConfigService } from "./config-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { AchievementsService } from "./achievements-service.js";
 import { isPublicToEveryone } from "../utils/channel-visibility.js";
+import { classifyVoiceRoom } from "./voice-room-kind.js";
+import type { VoiceRoomKind } from "../utils/voice-room-kinds.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -53,6 +55,8 @@ interface VoiceSession {
   channelName: string;
   /** `@everyone` could view the channel when the session began (#1162). */
   publicAtStart: boolean;
+  /** Kind of room at join, for the Rewind summary (#1420); undefined = unknown. */
+  roomKind?: VoiceRoomKind;
   /**
    * The guild the session is in, for the tracking opt-out checks at persist
    * time (#918). The tracking row itself is not guild-scoped.
@@ -166,6 +170,8 @@ export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
   private activeSessions: Map<string, VoiceSession> = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
+  /** Room-kind lookup (#1420); a field so tests can substitute it. */
+  private classifyRoom: typeof classifyVoiceRoom = classifyVoiceRoom;
   private encounteredUsers: Map<string, Set<string>> = new Map(); // Track all users encountered during each session
   // Precise per-companion co-presence accounting (#570). For each tracked
   // session: `companionSince` holds the epoch-ms start of the *current* open
@@ -773,11 +779,20 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Read while the room still exists; its records go with it (#1420).
+      const roomKind = await this.classifyRoom(guildId, channelId);
+      // That await yields, so repeat the purge-generation check just before
+      // the session is installed (#916).
+      if (this.purgeGeneration(member.id) !== generation) {
+        return;
+      }
+
       this.activeSessions.set(member.id, {
         startTime: new Date(),
         channelId,
         channelName,
         publicAtStart: isPublic,
+        roomKind,
         guildId,
       });
 
@@ -980,6 +995,7 @@ export class VoiceChannelTracker {
         // cannot be re-checked, so the join-time state stands (the stored
         // name is the join-time name, which was public then). (#1162)
         everyoneCanView: this.publicThroughout(session),
+        ...(session.roomKind ? { roomKind: session.roomKind } : {}),
       };
       if (companionsEnabled) {
         // Close any still-open companion intervals so the final session

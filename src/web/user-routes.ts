@@ -1172,17 +1172,17 @@ export function createUserRouter(
                 duration: formatHoursMinutes(summary.peakDay.totalSeconds),
               }
             : null,
+          voiceByKind: (summary.voiceByKind ?? []).map((k) => ({
+            kind: k.kind,
+            duration: formatHoursMinutes(k.totalSeconds),
+          })),
           longestSession: summary.longestSession
             ? {
                 duration: formatHoursMinutes(
                   summary.longestSession.totalSeconds,
                 ),
                 date: summary.longestSession.date,
-                channelName: summary.longestSession.channelName,
-                channelType: rewindChannelType(
-                  client,
-                  summary.longestSession.channelId,
-                ),
+                roomKind: summary.longestSession.roomKind ?? "other",
               }
             : null,
           longestStreakDays: summary.longestStreakDays,
