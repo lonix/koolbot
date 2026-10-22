@@ -31,6 +31,7 @@ const mockRecordAudit = jest.fn<(s: unknown, e: unknown) => Promise<void>>(
 );
 const mockGetSession = jest.fn<() => unknown>();
 const mockSetAccess = jest.fn();
+const mockAddConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
 const mockGetBoolean = jest.fn<
@@ -56,7 +57,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
     getInstance: (): unknown => ({
       getSession: mockGetSession,
       createSession: jest.fn(),
-      addConfiguration: jest.fn(),
+      addConfiguration: mockAddConfiguration,
       applyConfiguration: mockApplyConfiguration,
       endSession: mockEndSession,
       setAccess: mockSetAccess,
@@ -213,6 +214,7 @@ beforeEach(async () => {
   ]);
   stored = [];
   mockGetSession.mockReturnValue(null);
+  jest.spyOn(svc, "groupBackedRoles").mockResolvedValue([]);
   listSpy = jest.spyOn(svc, "list").mockImplementation(async () => [...stored]);
   createSpy = jest
     .spyOn(svc, "create")
@@ -742,6 +744,47 @@ describe("POST /wizard/apply with a role mapping", () => {
       "admin role you sign in with",
     );
     expect(updateSpy).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("a role used by a feature setting in the same run", () => {
+  const picks = { admin: [], staff: [MOD], host: [] };
+
+  it("is refused on the Access step when a pending setting already uses it", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(undefined, ["birthdays"], { "birthdays.role_id": MOD }),
+    );
+    const res = await harness.post("/wizard/access", { roles_staff: MOD });
+    expect(res.headers.get("location")).toContain("step=access");
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "birthdays.role_id",
+    );
+    expect(mockSetAccess).not.toHaveBeenCalled();
+  });
+
+  it("is dropped from the birthday step when the Access step maps it", async () => {
+    mockGetSession.mockReturnValue(wizardState(picks, ["birthdays"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_birthdays.enabled": "true",
+      "value_birthdays.role_id": MOD,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Access step",
+    );
+    expect(mockAddConfiguration.mock.calls.map((c) => c[2])).not.toContain(
+      "birthdays.role_id",
+    );
+  });
+
+  it("blocks Apply before any group is written", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(picks, ["birthdays"], { "birthdays.role_id": MOD }),
+    );
+    const res = await harness.post("/wizard/apply");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(createSpy).not.toHaveBeenCalled();
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
   });
 });

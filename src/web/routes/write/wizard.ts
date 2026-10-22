@@ -14,6 +14,7 @@ import { WizardService } from "../../../services/wizard-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
   accessGaps,
+  accessRoleOverlap,
   applyAccessChanges,
   currentMapping,
   diffAccess,
@@ -67,6 +68,7 @@ import {
   wizardApplyFailureMessage,
   coerceConfigValue,
   findGroupRoleReuseForSetting,
+  guardedRoleIds,
   findPowerfulRoleForSetting,
   truncateFlash,
 } from "./helpers.js";
@@ -77,6 +79,18 @@ const SNOWFLAKE = /^\d{1,25}$/;
 function pickedRoles(raw: unknown): string[] {
   const list = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
   return [...new Set(list.map(String).filter((id) => SNOWFLAKE.test(id)))];
+}
+
+/** The first pending role setting that names a role the Access step maps. */
+function pendingConfigOverlap(
+  configuration: Record<string, unknown>,
+  selection: AccessSelection,
+): string | null {
+  for (const [key, value] of Object.entries(configuration)) {
+    const hit = accessRoleOverlap(selection, guardedRoleIds(key, value), key);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** Features whose scope the Access step can leave without anybody to run it. */
@@ -443,7 +457,9 @@ export function createWizardRouter(client: Client): Router {
       let problem: string | null;
       try {
         const ctx = await readAccess(session);
-        problem = validateSelection(ctx, selection);
+        problem =
+          validateSelection(ctx, selection) ??
+          pendingConfigOverlap(state.configuration, selection);
       } catch (err) {
         logger.warn("wizard: access picks could not be checked", err);
         await recordAudit(session, {
@@ -544,7 +560,14 @@ export function createWizardRouter(client: Client): Router {
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse = coerced.ok
-          ? ((await findGroupRoleReuseForSetting(
+          ? ((state.access
+              ? accessRoleOverlap(
+                  state.access,
+                  guardedRoleIds(k, coerced.value),
+                  k,
+                )
+              : null) ??
+            (await findGroupRoleReuseForSetting(
               session.guildId,
               k,
               coerced.value,
@@ -641,6 +664,13 @@ export function createWizardRouter(client: Client): Router {
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse =
+          (state.access
+            ? accessRoleOverlap(
+                state.access,
+                guardedRoleIds(key, state.configuration[key]),
+                key,
+              )
+            : null) ??
           (await findGroupRoleReuseForSetting(
             session.guildId,
             key,

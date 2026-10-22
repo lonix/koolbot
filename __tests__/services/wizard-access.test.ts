@@ -7,6 +7,7 @@
 import { describe, it, expect, jest } from "@jest/globals";
 import {
   accessGaps,
+  accessRoleOverlap,
   applyAccessChanges,
   capabilitiesFor,
   currentMapping,
@@ -186,6 +187,39 @@ describe("diffAccess", () => {
     });
     expect(changes).toHaveLength(1);
     expect(changes[0].capabilitiesAfter).toEqual(["host"]);
+  });
+});
+
+describe("group names", () => {
+  const two = [role("a", "Mods", 5), role("b", "mods", 4)];
+
+  it("gives each new group a free name when roles share one", () => {
+    const changes = diffAccess([], two, {
+      admin: [],
+      staff: ["a", "b"],
+      host: [],
+    });
+    expect(changes.map((c) => c.groupName)).toEqual(["Mods", "mods (2)"]);
+  });
+
+  it("avoids the name of an unrelated existing group", () => {
+    const [change] = diffAccess(
+      [group({ id: "1", name: "MODS", roleId: "other" })],
+      two,
+      { admin: [], staff: ["a"], host: [] },
+    );
+    expect(change.groupName).toBe("Mods (2)");
+  });
+});
+
+describe("accessRoleOverlap", () => {
+  const sel = { admin: [], staff: ["m"], host: [] };
+  it("refuses a mapped role and allows others", () => {
+    expect(accessRoleOverlap(sel, ["m"], "birthdays.role_id")).toContain(
+      "birthdays.role_id",
+    );
+    expect(accessRoleOverlap(sel, ["x"], "birthdays.role_id")).toBeNull();
+    expect(accessRoleOverlap(sel, [], "k")).toBeNull();
   });
 });
 

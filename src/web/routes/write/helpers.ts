@@ -758,7 +758,7 @@ export async function findGroupRoleReuse(
 const GROUP_GUARDED_ROLE_KEYS = new Set(["birthdays.role_id", TIERS_KEY]);
 
 /** Role ids a guarded setting value names (empty for any other key). */
-function guardedRoleIds(key: string, value: unknown): string[] {
+export function guardedRoleIds(key: string, value: unknown): string[] {
   if (!GROUP_GUARDED_ROLE_KEYS.has(key) || typeof value !== "string") {
     return [];
   }

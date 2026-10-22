@@ -4,7 +4,7 @@ import {
   capabilityLabel,
   type RoleGroupCapability,
 } from "../models/role-group.js";
-import { roleLockReason } from "./role-group-plan.js";
+import { MAX_NAME_LENGTH, roleLockReason } from "./role-group-plan.js";
 import { RoleGroupService, type RoleGroupView } from "./role-group-service.js";
 
 /**
@@ -146,6 +146,18 @@ export function diffAccess(
       touched.add(g.roleId);
     }
   }
+  // Discord lets roles share a name, but group names are unique per server
+  // (case-insensitive), so a new group gets a free name: "Mods", "Mods (2)".
+  const taken = new Set(groups.map((g) => g.name.trim().toLowerCase()));
+  const freeName = (base: string): string => {
+    const stem = base.trim().slice(0, MAX_NAME_LENGTH - 6) || "Role";
+    let name = stem;
+    for (let n = 2; taken.has(name.toLowerCase()); n += 1) {
+      name = `${stem} (${n})`;
+    }
+    taken.add(name.toLowerCase());
+    return name;
+  };
   const changes: AccessChange[] = [];
   for (const roleId of touched) {
     const group = byRole.get(roleId) ?? null;
@@ -161,7 +173,7 @@ export function diffAccess(
       roleId,
       roleName: roleNames.get(roleId) ?? group?.roleName ?? roleId,
       groupId: group?.id ?? null,
-      groupName: group?.name ?? roleNames.get(roleId) ?? roleId,
+      groupName: group?.name ?? freeName(roleNames.get(roleId) ?? roleId),
       scopesBefore: before,
       scopesAfter: after,
       capabilitiesBefore: group ? [...group.capabilities] : [],
@@ -309,6 +321,22 @@ export function orderWithNewGroups(
     out.splice(at < 0 ? out.length : at, 0, c.id);
   }
   return out;
+}
+
+/**
+ * A role cannot both carry a scope and be handed out by a feature setting in
+ * the same run (the birthday role, leaderboard tiers): the feature would give
+ * members Moderator or Event host automatically. Returns the refusal, or null.
+ */
+export function accessRoleOverlap(
+  selection: AccessSelection,
+  roleIds: readonly string[],
+  key: string,
+): string | null {
+  const sel = normaliseSelection(selection);
+  const mapped = new Set(ACCESS_SCOPES.flatMap((s) => sel[s]));
+  if (!roleIds.some((id) => mapped.has(id))) return null;
+  return `That role is mapped to Admins, Moderators or Event hosts on the Access step, so ${key} can't use it. Pick a different role in one of the two places.`;
 }
 
 // ---- gaps ---------------------------------------------------------------
