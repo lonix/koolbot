@@ -737,7 +737,7 @@ Capturing native actions requires the bot to have the **View Audit Log**
 permission. See [SETTINGS.md](SETTINGS.md#moderation).
 
 Turn on `core.moderation.enabled` (plus a channel id) and KoolBot also posts
-each recorded action to a mod channel with the member's prior history
+each recorded action to a mod channel with the member's earlier actions
 attached — so the next person handling them has the context without anyone
 having to run `/modlog` first.
 
@@ -825,7 +825,7 @@ Reasons longer than 300 characters are shortened in this view so a full page alw
 Discord's embed; the full reason is kept and shown in the Web UI moderation log.
 
 When the case lifecycle is on (`moderation.cases.enabled`), a kick or ban that has a case shows one more
-line with its state, for example `Case #14 — under review, due 12 Mar 2026` or
+line with its state, for example `Case #14 — needs a decision, review date 12 Mar 2026` or
 `Case #9 — let back in 4 Feb 2026 by @staff`. Cases are opened and decided on the Web UI moderation page,
 not from Discord.
 

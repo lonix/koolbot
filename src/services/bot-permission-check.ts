@@ -81,6 +81,27 @@ export interface QuietNote {
   missing: string[];
 }
 
+/**
+ * How one registry entry turned out, for the permission matrix. `ok`: the
+ * bot has what it needs there; `missing`: `missing` names what it lacks;
+ * `unknown`: it could not be checked; `unchecked`: nothing to check (no
+ * category or channel configured, or a role-position entry whose feature is off).
+ */
+export type CheckOutcome = "ok" | "missing" | "unknown" | "unchecked";
+
+export interface FeatureCheck {
+  feature: FeatureRef;
+  /** `permission` rows come from `FEATURE_REQUIREMENTS`, `role-position` from `ROLE_HIERARCHY_REQUIREMENTS`. */
+  kind: "permission" | "role-position";
+  /** Whether the feature is switched on. */
+  enabled: boolean;
+  outcome: CheckOutcome;
+  /** Where it was checked; null when nothing was (an `unchecked` entry). */
+  target: PermissionTarget | null;
+  /** The permission names (or `ROLE_ABOVE_BOT`) that are missing there. */
+  missing: string[];
+}
+
 export interface BotPermissionReport {
   /** False when the server or the bot's membership cannot be read at all. */
   available: boolean;
@@ -97,6 +118,12 @@ export interface BotPermissionReport {
   okFeatures: FeatureRef[];
   /** Things worth saying that are not a finding (a feature is on but has no channel set). */
   notes: string[];
+  /**
+   * Every registry entry and what the check found, switched on or not. The
+   * permission matrix is built from this; `problems`, `unknown`, `quiet` and
+   * `okFeatures` stay as they were (the navigation badge counts `problems`).
+   */
+  checks: FeatureCheck[];
 }
 
 type ApiCall = <T>(fn: () => Promise<T>, name: string) => Promise<T>;
@@ -365,6 +392,7 @@ export async function checkBotPermissions(
     quiet: [],
     okFeatures: [],
     notes: [],
+    checks: [],
   });
   const snapshot = await getSnapshot(client, guildId, deps);
   if (!snapshot) {
@@ -390,6 +418,7 @@ export async function checkBotPermissions(
   const quiet: QuietNote[] = [];
   const okFeatures: FeatureRef[] = [];
   const notes: string[] = [];
+  const checks: FeatureCheck[] = [];
   if (!snapshot.fresh) {
     notes.push(
       "Discord could not be reached, so this is read from the bot's cached view of the server and may be out of date.",
@@ -413,6 +442,14 @@ export async function checkBotPermissions(
         targetId = (await config.getStringStrict(r.targetKey, "")).trim();
       }
       if (lobbyMissing) {
+        checks.push({
+          feature: ref(r),
+          kind: "permission",
+          enabled: inUse,
+          outcome: "unknown",
+          target: { kind: "channel", id: null, name: "the lobby" },
+          missing: [],
+        });
         if (inUse) {
           unknown.push({
             feature: ref(r),
@@ -423,6 +460,14 @@ export async function checkBotPermissions(
         continue;
       }
       if (r.scope !== "guild" && !targetId) {
+        checks.push({
+          feature: ref(r),
+          kind: "permission",
+          enabled: inUse,
+          outcome: "unchecked",
+          target: null,
+          missing: [],
+        });
         const note = `${r.area}: ${setting} is not set, so ${r.feature.toLowerCase()} is not checked.`;
         if (inUse && !notes.includes(note)) notes.push(note);
         continue;
@@ -463,6 +508,19 @@ export async function checkBotPermissions(
           why = "The bot's permissions could not be read.";
         }
       }
+      checks.push({
+        feature,
+        kind: "permission",
+        enabled: inUse,
+        outcome:
+          missing === null
+            ? "unknown"
+            : missing.length === 0
+              ? "ok"
+              : "missing",
+        target,
+        missing: missing ?? [],
+      });
       if (missing === null) {
         if (inUse) unknown.push({ feature, target, note: why });
         continue;
@@ -485,7 +543,18 @@ export async function checkBotPermissions(
 
     // Roles the bot must be able to hand out sit below its highest role.
     for (const r of ROLE_HIERARCHY_REQUIREMENTS) {
-      if (!(await config.getBooleanStrict(r.enabledKey, false))) continue;
+      const on = await config.getBooleanStrict(r.enabledKey, false);
+      if (!on) {
+        checks.push({
+          feature: ref(r),
+          kind: "role-position",
+          enabled: false,
+          outcome: "unchecked",
+          target: null,
+          missing: [],
+        });
+        continue;
+      }
       const ids = configuredRoleIds(
         r.roleSource,
         await config.getStringStrict(r.roleSource.key, ""),
@@ -499,6 +568,16 @@ export async function checkBotPermissions(
           name: role?.name ?? id,
         };
         const botHighest = me?.roles?.highest?.position;
+        const unreadable = !role || botHighest === undefined;
+        const above = !unreadable && role.position >= botHighest;
+        checks.push({
+          feature,
+          kind: "role-position",
+          enabled: true,
+          outcome: unreadable ? "unknown" : above ? "missing" : "ok",
+          target,
+          missing: above ? [ROLE_ABOVE_BOT] : [],
+        });
         if (!role || botHighest === undefined || role.position >= botHighest) {
           // Not fine, so not "in place" either, whatever Manage Roles says.
           dropOk(r.forFeature);
@@ -542,5 +621,6 @@ export async function checkBotPermissions(
     quiet,
     okFeatures,
     notes,
+    checks,
   };
 }

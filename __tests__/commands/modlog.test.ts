@@ -224,7 +224,7 @@ describe("Modlog Command", () => {
       [
         "an open case with a review date",
         { status: "open", reviewAt: at, events: [] },
-        `Case #14 — open, review <t:${ts}:D>`,
+        `Case #14 — open, review date <t:${ts}:D>`,
       ],
       [
         "an open case without one",
@@ -232,9 +232,9 @@ describe("Modlog Command", () => {
         "Case #14 — open, no review date",
       ],
       [
-        "a case under review",
+        "a case that needs a decision",
         { status: "under_review", reviewAt: at, events: [] },
-        `Case #14 — under review, due <t:${ts}:D>`,
+        `Case #14 — needs a decision, review date <t:${ts}:D>`,
       ],
       [
         "a case that let the member back in, naming who decided",
@@ -246,13 +246,13 @@ describe("Modlog Command", () => {
         `Case #14 — let back in <t:${ts}:D> by <@staff-9>`,
       ],
       [
-        "a permanent case",
+        "a case kept out for good",
         {
           status: "upheld",
           reviewAt: null,
           events: [{ at, byUserId: "staff-9" }],
         },
-        `Case #14 — made permanent <t:${ts}:D> by <@staff-9>`,
+        `Case #14 — kept out for good <t:${ts}:D> by <@staff-9>`,
       ],
       [
         "an expired case",

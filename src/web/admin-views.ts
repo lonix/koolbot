@@ -5,6 +5,15 @@
  */
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
+import {
+  ACTION_WORDS,
+  CASE_OUTCOME_WORDS,
+  CASE_STATUS_WORDS,
+  DECISION_CONFIRM_TEXT,
+  DECISION_LABELS,
+  PERMANENT_CONFIRM_ITEMS,
+  REVIEW_JOB_NOTE,
+} from "../utils/moderation-labels.js";
 import { renderSaveBar } from "./savebar.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
@@ -5417,17 +5426,8 @@ export interface ModerationProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
-export const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
-  warn: "warn",
-  kick: "kick",
-  ban: "ban",
-  unban: "unban",
-  timeout: "timeout",
-  untimeout: "untimeout",
-  quarantine: "quarantine",
-  raid_lockdown: "raid lockdown",
-  raid_clear: "raid cleared",
-};
+/** Display words for log actions; shared with Discord (`utils/moderation-labels.ts`). */
+export const MODERATION_ACTION_LABELS: Record<string, string> = ACTION_WORDS;
 
 function moderationActionTag(action: ModerationAction): string {
   const label = MODERATION_ACTION_LABELS[action] ?? action;
@@ -5454,21 +5454,11 @@ function buildModerationQueryString(
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
-export const CASE_STATUS_LABELS: Record<string, string> = {
-  open: "open",
-  under_review: "under review",
-  upheld: "upheld",
-  lifted: "let back in",
-  expired: "expired",
-};
+/** Display words for case states (stored values are unchanged). */
+export const CASE_STATUS_LABELS: Record<string, string> = CASE_STATUS_WORDS;
 
-/**
- * Display words for the outcome stored on a case event. The stored value
- * `readmitted` stays as it is (existing data); only the shown word changes.
- */
-export const CASE_OUTCOME_LABELS: Record<string, string> = {
-  readmitted: "let back in",
-};
+/** Display words for the decision recorded on a case event. */
+export const CASE_OUTCOME_LABELS: Record<string, string> = CASE_OUTCOME_WORDS;
 
 function caseStatusTag(status: string): string {
   const cls =
@@ -5504,7 +5494,7 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
 
 function renderCaseHistory(c: CaseView): string {
   if (c.history.length === 0) {
-    return '<p class="muted">No other history on file.</p>';
+    return '<p class="muted">No earlier actions on file.</p>';
   }
   const items = c.history
     .map(
@@ -5525,10 +5515,10 @@ function renderCaseEvents(c: CaseView): string {
       const what = e.outcome
         ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
-          ? "came due"
+          ? "marked as needing a decision"
           : "opened";
       return `<li><span class="mono">${escapeHtml(e.at.slice(0, 10))}</span> ${what} by ${escapeHtml(e.byLabel)}${
-        e.note ? ` — ${escapeHtml(e.note)}` : ""
+        e.note && e.note !== REVIEW_JOB_NOTE ? ` — ${escapeHtml(e.note)}` : ""
       }</li>`;
     })
     .join("")}</ul>`;
@@ -5542,17 +5532,14 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
       <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${days}"></label>
       <label>Note<input type="text" name="note" maxlength="500"></label>
       <div class="inline-form">
-        <button type="submit" class="btn btn-sm">Uphold</button>
-        <button type="submit" class="btn btn-sm" formaction="${base}/extend">Extend</button>
-        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="Make this removal permanent? The case closes with no further review."${confirmListAttr(
-          [
-            "The case is marked upheld and its review date is cleared.",
-            "It is not reviewed again.",
-          ],
-        )}>Make permanent</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="Let this member back in? KoolBot does not unban in Discord; do that there."${CONFIRM_NEUTRAL_ATTR}>Let back in</button>
+        <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
+        <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>
+        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
+          PERMANENT_CONFIRM_ITEMS,
+        )}>${DECISION_LABELS.permanent}</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
       </div>
-      <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Let back in records the decision only; lift the ban in Discord yourself.</p>
+      <p class="muted">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
 }
 
@@ -5568,7 +5555,7 @@ function renderCaseCard(c: CaseView, props: ModerationProps): string {
       : ""
   }</p>
   <p>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="muted">No reason recorded.</span>'}</p>
-  <details class="helper" ${c.live ? "open" : ""}><summary>Prior history</summary>${renderCaseHistory(c)}</details>
+  <details class="helper" ${c.live ? "open" : ""}><summary>Earlier actions</summary>${renderCaseHistory(c)}</details>
   <details class="helper"><summary>Decisions</summary>${renderCaseEvents(c)}</details>
   ${c.live ? renderCaseActions(c, props) : ""}
 </div>`;
@@ -5592,18 +5579,18 @@ function renderCasesSection(props: ModerationProps): string {
   if (!props.casesEnabled) return "";
   const groups = props.caseGroups;
   const body = groups
-    ? `${renderCaseGroup("Overdue", "Nothing is waiting for review.", groups.overdue, props)}
-${renderCaseGroup("Due soon", "Nothing falls due in the next 7 days.", groups.dueSoon, props)}
-${renderCaseGroup("Scheduled", "No open case has a review date more than 7 days away.", groups.scheduled, props)}
+    ? `${renderCaseGroup("Needs a decision", "No case is waiting for a decision.", groups.overdue, props)}
+${renderCaseGroup("Review in the next 7 days", "No review date falls in the next 7 days.", groups.dueSoon, props)}
+${renderCaseGroup("Review later", "No open case has a review date more than 7 days away.", groups.scheduled, props)}
 ${renderCaseGroup("No review date", "No open case is without a review date.", groups.indefinite, props)}
-${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days.", groups.recentlyResolved, props)}`
+${renderCaseGroup("Closed in the last 30 days", "No case was closed in the last 30 days.", groups.recentlyResolved, props)}`
     : '<div class="notice">The case queue could not be read. Check the bot\'s logs and reload the page.</div>';
   return `<div class="card">
   <h2>Cases</h2>
-  <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided when it came due. Escalation stays a human decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Move every case whose review date has passed into review now?"${CONFIRM_NEUTRAL_ATTR}>
+  <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided once the review date passed. Staff always make the decision. Open a case from the <strong>Case</strong> column of the log below.</p>
+  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Mark every case whose review date has passed as needing a decision now?"${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-    <button type="submit" class="btn btn-sm">Run review pass now</button>
+    <button type="submit" class="btn btn-sm">Check review dates now</button>
   </form>
   ${body}
 </div>`;
@@ -5666,7 +5653,7 @@ ${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
 
   const body = `
 <h1>Moderation log</h1>
-<p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus native kick/ban/timeout actions mirrored from the guild audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+<p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
 
@@ -5676,7 +5663,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", fea
     <dt>Moderation log</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
     <dt>Actions matched</dt><dd>${props.total}</dd>
   </dl>
-  <p class="muted">Native actions require the bot to have the <strong>View Audit Log</strong> permission.</p>
+  <p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
 </div>
 ${renderFeatureSettingsCard({
   intro:

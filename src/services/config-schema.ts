@@ -1162,7 +1162,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   moderation: {
     title: "Moderation",
     description:
-      "Lightweight moderation log: record actions via /warn, /timeout and /ban, mirror native kick/ban/timeout actions from the guild audit log, and query per-member history with /modlog or the admin page.",
+      "Lightweight moderation log: record actions via /warn, /timeout and /ban, copy in kicks, bans and timeouts made in Discord itself (from the server's audit log), and query per-member history with /modlog or the admin page.",
   },
   other: {
     title: "Other",
@@ -1664,14 +1664,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "rewind.enabled": {
     label: "Rewind enabled",
     description:
-      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page returns a disabled state and isn't linked. The end-of-year DM nudge has its own toggle below.",
+      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page answers 404 and isn't linked. The end-of-year DM nudge has its own toggle below.",
     category: "rewind",
     type: "boolean",
   },
   "rewind.nudge.enabled": {
     label: "Rewind end-of-year nudge enabled",
     description:
-      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. Independent of the Rewind feature toggle above. Existing installs that set the old `rewind.enabled` key keep their nudge behaviour via a backward-compat fallback.",
+      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. Only runs while the Rewind feature toggle above is on, because the page it links to is not available otherwise. Existing installs that set the old `rewind.enabled` key keep their nudge behaviour via a backward-compat fallback.",
     category: "rewind",
     type: "boolean",
   },
@@ -2339,7 +2339,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.moderation.enabled": {
     label: "Moderation log to Discord",
     description:
-      "Post a summary embed to the moderation log channel whenever a moderation action is recorded (a /warn, or a native kick/ban/unban/timeout mirrored from the audit log), including the member's prior history. Requires moderation.enabled.",
+      "Post a summary embed to the moderation log channel whenever a moderation action is recorded (a /warn, or a kick, ban, lifted ban or timeout made in Discord and copied in from the audit log), including the member's earlier actions. Requires moderation.enabled.",
     category: "core",
     type: "boolean",
   },
@@ -2353,7 +2353,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.moderation_review.enabled": {
     label: "Case review notices to Discord",
     description:
-      "Post one summary embed to the review channel whenever moderation cases come due for review. Requires moderation.cases.enabled.",
+      "Post one summary embed to the review channel whenever moderation cases need a decision. Requires moderation.cases.enabled.",
     category: "core",
     type: "boolean",
   },
@@ -2433,7 +2433,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.enabled": {
     label: "Moderation log enabled",
     description:
-      "Enable the moderation log: the /warn and /modlog commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the /admin/moderation page. Requires the bot to have the View Audit Log permission for native actions to be captured.",
+      "Enable the moderation log: the /warn and /modlog commands, copying in kicks, bans and timeouts made in Discord itself (from the server's audit log), and the /admin/moderation page. Requires the bot to have the View Audit Log permission for actions made in Discord to be captured.",
     category: "moderation",
     type: "boolean",
   },
@@ -2448,14 +2448,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.cases.enabled": {
     label: "Moderation cases enabled",
     description:
-      "Let staff open a case against a kick or ban with an optional review date, then record the outcome (uphold, extend, make permanent, let back in) from the Moderation page. Requires moderation.enabled. Cases and the log history behind them are exempt from retention pruning.",
+      "Let staff open a case against a kick or ban with an optional review date, then record the decision (keep out for now, decide later, keep out for good, let back in) from the Moderation page. Requires moderation.enabled. Cases and the log history behind them are exempt from retention pruning.",
     category: "moderation",
     type: "boolean",
   },
   "moderation.cases.review_cron": {
     label: "Case review schedule (cron)",
     description:
-      "When the job runs that moves cases whose review date has passed into the review queue and posts the due-for-review notice.",
+      "When the job runs that marks cases whose review date has passed as needing a decision and posts the notice for them.",
     category: "moderation",
     type: "cron",
   },

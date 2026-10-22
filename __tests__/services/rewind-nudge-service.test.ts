@@ -173,13 +173,12 @@ describe("RewindNudgeService", () => {
     });
 
     it("runs off the dedicated rewind.nudge.enabled toggle (#608)", async () => {
-      // Nudge on, feature gate off — the nudge is independent of the page
-      // feature, so it must still run.
+      // Nudge on and the page on: the nudge's own toggle decides.
       mockConfigGetBoolean.mockImplementation(
         async (key: unknown, def: unknown) => {
           const k = key as string;
           if (k === "rewind.nudge.enabled") return true;
-          if (k === "rewind.enabled") return false;
+          if (k === "rewind.enabled") return true;
           return (def as boolean) ?? false;
         },
       );
@@ -190,6 +189,21 @@ describe("RewindNudgeService", () => {
       const result = await svc.runNow();
       expect(result).not.toBeNull();
       expect(result!.sent).toBe(1);
+    });
+
+    it("does not run while the Rewind page is off, even with the nudge on (#1292)", async () => {
+      // The DM links to /me/rewind, which answers 404 while the page is off.
+      mockConfigGetBoolean.mockImplementation(
+        async (key: unknown, def: unknown) => {
+          const k = key as string;
+          if (k === "rewind.nudge.enabled") return true;
+          if (k === "rewind.enabled") return false;
+          return (def as boolean) ?? false;
+        },
+      );
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      expect(await svc.runNow()).toBeNull();
+      expect(mockTrackingAggregate).not.toHaveBeenCalled();
     });
 
     it("falls back to the legacy rewind.enabled value when rewind.nudge.enabled is unset (#608)", async () => {

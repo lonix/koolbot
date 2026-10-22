@@ -123,7 +123,7 @@ export function createModerationRouter(client: Client): Router {
         flashRedirect(res, MODERATION_PAGE, {
           type: "ok",
           text: summary
-            ? `Review pass done: ${summary.flipped} case${summary.flipped === 1 ? "" : "s"} moved into review.`
+            ? `Check done: ${summary.flipped} ${summary.flipped === 1 ? "case now needs" : "cases now need"} a decision.`
             : "Moderation cases are turned off.",
         });
       } catch (err) {

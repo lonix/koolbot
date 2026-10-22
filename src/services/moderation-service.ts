@@ -421,7 +421,7 @@ export class ModerationService {
               : "No reason given",
           },
           {
-            name: "Prior history",
+            name: "Earlier actions",
             value: truncateText(
               formatHistorySummary(summary),
               DISCORD_EMBED_FIELD_VALUE_LIMIT,
