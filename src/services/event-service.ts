@@ -146,6 +146,24 @@ export interface CreateEventInput {
    * `validateGroupSetup`; omitted for a plain event. */
   groups?: EventGroupSetup;
   createdBy: string;
+  /** "When: Now" (#1305): announced as happening now; no reminder. */
+  impromptu?: boolean;
+}
+
+/**
+ * How far ahead an impromptu event's start is set (#1305). Discord refuses a
+ * native event that starts in the past, and the mirror skips one that already
+ * has, so "now" is a few seconds ahead: far enough for the native create to
+ * land, short enough to read as now.
+ */
+export const IMPROMPTU_START_BUFFER_MS = 30 * 1000;
+
+/** Raised by `createImpromptuEvent` when a start now cannot work; nothing is created. */
+export class ImpromptuNotReadyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImpromptuNotReadyError";
+  }
 }
 
 /** What the announcement shows of an event, as one comparable string. */
@@ -1988,7 +2006,9 @@ export class EventService extends ScheduledService {
       durationMinutes: input.durationMinutes,
       categoryId: input.categoryId ?? "",
       state: "scheduled",
-      reminderSent: false,
+      // An impromptu event has no lead-up to remind anyone of.
+      reminderSent: input.impromptu === true,
+      ...(input.impromptu === true ? { impromptu: true } : {}),
       recurrence,
       // Only set when the form switched groups on; a plain event leaves every
       // group field at its schema default.
@@ -2015,6 +2035,50 @@ export class EventService extends ScheduledService {
     );
     logger.info(`Created event ${sanitizeForLog(String(event._id))}`);
     return event;
+  }
+
+  /**
+   * An impromptu event, "we are doing this now" (#1305): creates the event a few
+   * seconds ahead (so the native Discord event can be created), then runs the
+   * same Start now as the host panel, so the event voice channel and the group
+   * channels exist at once, ignoring the lead time. One-off only: it never
+   * repeats. Nothing is created when no channel category is configured, since
+   * Start now could not make a channel (`ImpromptuNotReadyError`).
+   *
+   * `started` is false when the event was created but Start now could not run
+   * (channel creation failed); the row stays, and the scan retries the channel
+   * on its next tick. Called by the Web UI create routes; #1319's list can call
+   * it too.
+   */
+  public async createImpromptuEvent(
+    input: Omit<CreateEventInput, "startTime" | "recurrence" | "impromptu">,
+    now: Date = new Date(),
+  ): Promise<{ event: IEvent; started: boolean }> {
+    const categoryId = await this.configService.getString(
+      "events.category_id",
+      "",
+    );
+    if (!categoryId) {
+      throw new ImpromptuNotReadyError(
+        "No channel category is set (events.category_id), so the event channels cannot be created.",
+      );
+    }
+    const event = await this.createEvent({
+      ...input,
+      startTime: new Date(now.getTime() + IMPROMPTU_START_BUFFER_MS),
+      recurrence: "none",
+      impromptu: true,
+    });
+    let started: IEvent | null = null;
+    try {
+      started = await this.startEventNow(String(event._id), input.guildId);
+    } catch (error) {
+      logger.error(
+        `Impromptu event ${sanitizeForLog(String(event._id))}: start now failed:`,
+        error,
+      );
+    }
+    return { event: started ?? event, started: started !== null };
   }
 
   /**
@@ -2766,7 +2830,11 @@ export class EventService extends ScheduledService {
         : event.state === "ended"
           ? `📅 **${event.title}** (ended)`
           : `📅 **${event.title}**`,
-      `🕒 ${formatEventWhenDiscord(event)}`,
+      // An impromptu event says so while it is open (#1305); once finished it
+      // reads like any other.
+      event.impromptu === true && !finished
+        ? "🔴 **Happening now**"
+        : `🕒 ${formatEventWhenDiscord(event)}`,
     ];
     if (event.description) lines.push(event.description);
     if (isRecurring(event)) {

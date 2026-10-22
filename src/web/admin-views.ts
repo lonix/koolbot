@@ -6,6 +6,11 @@
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import {
+  EVENT_WHEN_CHOICES,
+  EVENT_WHEN_LABELS,
+  EVENT_WHEN_SCRIPT,
+} from "./event-when.js";
+import {
   channelGroupLabel,
   channelMention,
   channelText,
@@ -2759,13 +2764,17 @@ function groupSwitch(
 /** Names offered for the group wording; any text is still accepted. */
 const GROUP_LABEL_SUGGESTIONS = ["Team", "Squad", "Room", "Party"];
 
-function renderGroupsSection(
+// Exported for the host's New event page (#1305); `presetsHref` is where the
+// preset library is managed for the viewer.
+export function renderGroupsSection(
   limits: {
     defaultCount: number;
     maxCount: number;
   },
   presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
   presetsNotice: string | null = null,
+  // Where the preset library is managed; an event host's own page for them (#1305).
+  presetsHref = "/admin/events/presets",
 ): string {
   const presetCards = presets.map((p) => renderPresetCard(p, limits)).join("");
   const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
@@ -2801,7 +2810,7 @@ function renderGroupsSection(
           ${CHECK_ICON}</label>
         </div>
         ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
-        <p class="kb-help">Choose a setup to fill in the groups, or Custom to write your own. Without scripts, a preset with all rows left empty uses the preset's groups. Presets are managed on the <a href="/admin/events/presets">group presets page</a>.</p>
+        <p class="kb-help">Choose a setup to fill in the groups, or Custom to write your own. Without scripts, a preset with all rows left empty uses the preset's groups. Presets are managed on the <a href="${escapeHtml(presetsHref)}">group presets page</a>.</p>
       </div>
       <p class="kb-help" data-preset-summary aria-live="polite" hidden></p>
       <button type="button" class="kb-btn kb-btn--sm" data-customise aria-expanded="true" hidden>Customise</button>
@@ -3073,7 +3082,7 @@ function eventGroupsScript(): string {
   );
 }
 
-const EVENT_GROUPS_SCRIPT = eventGroupsScript();
+export const EVENT_GROUPS_SCRIPT = eventGroupsScript();
 
 /** Which optional columns an events table shows (#1301). */
 interface EventCols {
@@ -3251,11 +3260,16 @@ ${permissionNote}
     <label>Description
       <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
     </label>
-    <label>Date
-      <input type="date" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
+    <label>When
+      <select name="when" data-when>
+        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === "pick" ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
+      </select>
     </label>
-    <label>Time
-      <input type="time" name="time" required pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
+    <label data-when-pick>Date
+      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
+    </label>
+    <label data-when-pick>Time
+      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
     </label>
     <label>Duration (minutes, optional)
       <input type="number" name="duration" min="1" max="1440" placeholder="120">
@@ -3293,6 +3307,7 @@ ${renderFeatureSettingsCard({
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
 ${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
+${EVENT_WHEN_SCRIPT}
 `;
 
   return renderAdminPage({

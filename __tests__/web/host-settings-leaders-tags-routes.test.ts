@@ -33,6 +33,7 @@ import {
 
 jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: LEventMock,
+  EVENT_RECURRENCES: ["none", "weekly", "biweekly", "monthly"],
 }));
 
 const { signValue } = await import("../../src/web/cookies.js");

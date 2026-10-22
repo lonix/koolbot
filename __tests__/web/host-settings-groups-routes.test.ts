@@ -37,6 +37,7 @@ import {
 
 jest.unstable_mockModule("../../src/models/event.js", () => ({
   Event: EventMock,
+  EVENT_RECURRENCES: ["none", "weekly", "biweekly", "monthly"],
 }));
 
 type Catalog =
