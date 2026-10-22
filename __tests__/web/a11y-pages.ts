@@ -3537,6 +3537,27 @@ export function userPages(): A11yPage[] {
       html: shell("Rewind", "/me/rewind", renderUserRewindBody(REWIND)),
     },
     {
+      name: "/me rewind (by room kind)",
+      html: shell(
+        "Rewind",
+        "/me/rewind",
+        renderUserRewindBody({
+          ...REWIND,
+          voiceByKind: [
+            { kind: "dynamic", duration: "30 hr" },
+            { kind: "event", duration: "8 hr 10 min" },
+            { kind: "permanent", duration: "2 hr" },
+            { kind: "other", duration: "2 hr" },
+          ],
+          longestSession: {
+            duration: "3 hr 5 min",
+            date: "2026-01-03",
+            roomKind: "dynamic",
+          },
+        }),
+      ),
+    },
+    {
       name: "/me privacy",
       html: shell(
         "Privacy",
@@ -3597,11 +3618,11 @@ const REWIND = {
   daysActive: 51,
   topCompanions: [{ userId: "u2", displayName: "bob", duration: "9 hr" }],
   peakDay: { date: "2026-01-03", duration: "4 hr 20 min" },
+  // No `voiceByKind` and no kind on the longest session: an older snapshot (#1420).
   longestSession: {
     duration: "3 hr 5 min",
     date: "2026-01-03",
-    channelName: "Lounge",
-    channelType: ChannelType.GuildStageVoice,
+    roomKind: "other",
   },
   longestStreakDays: 6,
   longestStreakRange: { startDate: "2026-01-01", endDate: "2026-01-06" },

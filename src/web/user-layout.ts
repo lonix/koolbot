@@ -600,7 +600,7 @@ export interface RewindBodyOptions {
   peakDay: { date: string; duration: string } | null;
   // Voice time by kind of room (#1420), pre-formatted. Rooms are not named on
   // this user-facing page; empty hides the card.
-  voiceByKind: Array<{ kind: string; duration: string }>;
+  voiceByKind?: Array<{ kind: string; duration: string }>;
   // Longest single voice session of the year (#568): pre-formatted duration,
   // the ISO date it started, and the kind of room (#1420) — never its name,
   // which is only a label and often belongs to a deleted room. Null when the
@@ -936,12 +936,14 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     : '<div class="value">—</div>';
 
   // Voice time by kind of room (#1420), in place of per-room names.
+  // A summary that never went through snapshot normalisation may omit it.
+  const kindRows = opts.voiceByKind ?? [];
   const voiceKinds =
-    opts.voiceByKind.length === 0
+    kindRows.length === 0
       ? ""
       : '<div class="card"><h2>Where you spent your voice time</h2>' +
         '<ul class="rw-channels">' +
-        opts.voiceByKind
+        kindRows
           .map(
             (k) =>
               "<li>" +
