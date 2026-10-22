@@ -62,6 +62,12 @@ export function planIsApplicable(p: GroupPlan): boolean {
 export async function planRoleGroups(
   guild: Guild,
   adminUserId: string,
+  /**
+   * Plan a groups list that differs from what is saved (the wizard previews a
+   * group it has not written yet). Applied after name tracking, so nothing
+   * here is ever written to the database.
+   */
+  transform?: (saved: RoleGroupView[]) => RoleGroupView[],
 ): Promise<GroupPlan> {
   const service = RoleGroupService.getInstance();
   let groups = await service.list(guild.id);
@@ -76,6 +82,7 @@ export async function planRoleGroups(
     needMembers,
   );
   groups = await trackNames(guild.id, groups, scan.scanned.roles);
+  if (transform) groups = transform(groups);
   const { desired, issues } = buildDesiredState(groups, scan.scanned);
   const plan = planAdoption(scan.scanned, desired, {
     approverId: adminUserId,
