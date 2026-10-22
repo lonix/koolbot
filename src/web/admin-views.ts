@@ -3064,6 +3064,12 @@ function eventGroupsScript(): string {
     "lobby();" +
     "function setEditor(open){editor.hidden=!open;customise.setAttribute('aria-expanded',open?'true':'false');customise.textContent=open?'Hide group rows':'Customise'}" +
     "customise.addEventListener('click',function(){setEditor(editor.hidden)});" +
+    // The browser checks min, max and maxlength before the submit listener runs and cannot
+    // focus a hidden field, so a control that fails is shown first: its rows, its Advanced
+    // section or any other folded container around it.
+    "form.addEventListener('invalid',function(e){var el=e.target;if(!el||!el.closest||!body.contains(el))return;" +
+    "for(var a=el.parentElement;a&&a!==form;a=a.parentElement){if(a===editor){if(editor.hidden)setEditor(true)}" +
+    "else{if(a.hidden)a.hidden=false;if(a.tagName==='DETAILS')a.open=true}}},true);" +
     "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
     "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
     "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
@@ -3105,7 +3111,7 @@ function eventGroupsScript(): string {
     "if(tagsOn())s+=' · clan tags on';var c=form.elements['groups_captains'];if(c&&c.checked)s+=' · leaders on';" +
     "summary.textContent=s;syncQuick(sizes)}" +
     "Array.prototype.forEach.call(form.querySelectorAll('[data-size-quick] input'),function(r){r.addEventListener('change',function(){" +
-    "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-auto')}});summarise()})});" +
+    "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-manual');if(r.value)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}});summarise()})});" +
     // A preset card fills the rows, then folds them behind the summary.
     "function compact(on){summary.hidden=!on;customise.hidden=!on;setEditor(!on)}" +
     "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;compact(false)}" +
@@ -3137,7 +3143,7 @@ function eventGroupsScript(): string {
     "var total=Math.max(rows().length,n);" +
     "for(var i=0;i<total&&i<max;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
     "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
-    "if(i>0&&size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
+    "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
     "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
     "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +

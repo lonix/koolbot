@@ -951,3 +951,94 @@ describe("what the group form hides is hidden by the stylesheet too (#1299)", ()
     expect(display(dom, q(dom, "[data-marker-btn]"))).not.toBe("none");
   });
 });
+
+describe("a folded field that fails the browser's check is shown first (#1299)", () => {
+  const validate = (dom: JSDOM): boolean =>
+    q<HTMLFormElement>(dom, "form[data-event-form]").reportValidity();
+
+  it("opens the rows for a size outside 1 to 99", () => {
+    const dom = boot();
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    typeInto(dom, "group_0_size", "100");
+    click(dom, q(dom, "[data-customise]")); // open
+    click(dom, q(dom, "[data-customise]")); // hide again
+    expect(q(dom, "[data-group-editor]").hidden).toBe(true);
+    expect(validate(dom)).toBe(false);
+    expect(q(dom, "[data-group-editor]").hidden).toBe(false);
+    expect(q(dom, "[data-customise]").getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+  });
+
+  it("opens Advanced for a lead time out of range", () => {
+    const dom = boot();
+    switchOn(dom);
+    const advanced = q<HTMLDetailsElement>(dom, "[data-groups-advanced]");
+    typeInto(dom, "groups_lead_minutes", "99999");
+    expect(advanced.open).toBe(false);
+    expect(validate(dom)).toBe(false);
+    expect(advanced.open).toBe(true);
+  });
+
+  it("opens the kind panel of a row it finds invalid, and leaves the rest folded", () => {
+    const dom = boot();
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    const panel = q(dom, "[data-kind-panel]");
+    expect(panel.hidden).toBe(true);
+    // Anything invalid inside a folded container is shown, whichever container.
+    const probe = field(dom, "group_0_kind");
+    probe.setCustomValidity("pretend this fails");
+    expect(validate(dom)).toBe(false);
+    expect(panel.hidden).toBe(false);
+    expect(q(dom, "[data-group-editor]").hidden).toBe(false);
+    expect(q(dom, "[data-groups-advanced]").hasAttribute("open")).toBe(false);
+  });
+
+  it("does not show the section for a form that is valid", () => {
+    const dom = boot();
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    quickSize(dom, "5");
+    validate(dom); // other fields of the page (title...) may fail; the groups do not
+    expect(q(dom, "[data-group-editor]").hidden).toBe(true);
+  });
+});
+
+describe("a generated first row clears like the others (#1299)", () => {
+  const build = (dom: JSDOM): void => {
+    q<HTMLInputElement>(dom, "[data-build-count]").value = "3";
+    q<HTMLInputElement>(dom, "[data-build-size]").value = "5";
+    click(dom, q(dom, "[data-build]"));
+  };
+
+  it("clearing the first group's name leaves a blank row, not a size with no name", () => {
+    const dom = boot();
+    build(dom);
+    expect(field(dom, "group_0_size").hasAttribute("data-auto")).toBe(true);
+    typeInto(dom, "group_0_name", "");
+    expect(field(dom, "group_0_size").value).toBe("");
+    expect(field(dom, "group_0_marker").value).toBe("");
+    expect(validate(dom).ok).toBe(true);
+  });
+
+  it("a size typed by hand stays, and is then reported as a missing name", () => {
+    const dom = boot();
+    build(dom);
+    typeInto(dom, "group_0_size", "7");
+    typeInto(dom, "group_0_name", "");
+    expect(field(dom, "group_0_size").value).toBe("7");
+    expect(validate(dom).ok).toBe(false);
+  });
+
+  it("a size chosen with Max per group clears with the name too", () => {
+    const dom = boot();
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    quickSize(dom, "10");
+    expect(field(dom, "group_1_size").value).toBe("10");
+    typeInto(dom, "group_1_name", "");
+    expect(field(dom, "group_1_size").value).toBe("");
+  });
+});
