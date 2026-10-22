@@ -241,8 +241,8 @@ describe("POST /moderation/cases/:id/<decision>", () => {
     harness.post(`/moderation/cases/${CASE}/${decision}`, body);
 
   it.each([
-    ["uphold", "kept out for now. The next review is set."],
-    ["extend", "put off. The next review is set."],
+    ["uphold", "kept out for now."],
+    ["extend", "put off to the new review date."],
     ["permanent", "kept out for good. It is not reviewed again."],
     ["readmit", "closed: the member was let back in."],
   ])(

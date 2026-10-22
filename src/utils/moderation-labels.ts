@@ -71,8 +71,8 @@ export const DECISION_LABELS: Record<CaseDecisionKey, string> = {
 
 /** The flash shown after a decision, after `Case #N`. */
 export const DECISION_DONE: Record<CaseDecisionKey, string> = {
-  uphold: "kept out for now. The next review is set.",
-  extend: "put off. The next review is set.",
+  uphold: "kept out for now.",
+  extend: "put off to the new review date.",
   permanent: "kept out for good. It is not reviewed again.",
   readmit: "closed: the member was let back in.",
 };

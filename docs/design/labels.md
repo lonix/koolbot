@@ -26,7 +26,7 @@ The confirmation dialogs follow the buttons. *Keep out for good*: "Keep this mem
 consequences "The case closes as "kept out for good" and its review date is cleared." and "It is not reviewed again." *Let back in*: "Let this member
 back in? KoolBot does not lift the ban in Discord; do that there."
 
-After a decision the flash reads `Case #14 kept out for now. The next review is set.`, `Case #14 put off. The next review is set.`,
+After a decision the flash reads `Case #14 kept out for now.`, `Case #14 put off to the new review date.`,
 `Case #14 kept out for good. It is not reviewed again.` or `Case #14 closed: the member was let back in.`
 
 ## Case states and the history of decisions
