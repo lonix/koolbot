@@ -12,6 +12,7 @@ import {
 } from "./admin-views.js";
 import { ConfigService } from "../services/config-service.js";
 import { EventService } from "../services/event-service.js";
+import { groupRowsScript } from "./event-group-form.js";
 import {
   catalogNotice,
   eventSetupToFormValues,
@@ -264,7 +265,7 @@ export const EVENT_PRESETS_SCRIPT =
   "function addRow(force){var n=rows().length;if(used()>=max&&!force)return false;" +
   "var d=document.createElement('div');" +
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);recompute();return true}" +
+  "var nr=d.firstElementChild;box.appendChild(nr);if(window.koolGroupRows)window.koolGroupRows.enhance(nr);recompute();return true}" +
   "recompute();if(add)add.addEventListener('click',function(){addRow()});" +
   // One recompute for every change inside the form (the lobby box, a row's kind
   // such as a restored leads row). Code that sets a control by hand fires no
@@ -291,7 +292,7 @@ export const EVENT_PRESETS_SCRIPT =
   "if(lobby&&typeof d['groups_captains_lobby']!=='boolean')lobby.checked=true}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]});" +
   // Setting `checked` fires no change event: the button follows the restored box.
-  "recompute()}}catch(x){}" +
+  "if(window.koolGroupRows)window.koolGroupRows.syncAll();recompute()}}catch(x){}" +
   "})();";
 
 export interface PresetEditorFormProps {
@@ -497,6 +498,7 @@ ${renderHostPresetsCard(props.hostPresets, csrfInput)}
   ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
   ${editorHtml}
 </div>
+${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_PRESETS_SCRIPT)}
 `;
 

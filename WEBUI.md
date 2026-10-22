@@ -1583,20 +1583,26 @@ actions. Every row has a **Host panel** link (see below). A
 **Schedule a new event** form (native date and time inputs) creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
 
-The **Groups** section of the schedule form (#1188) is optional and off unless
-"Use groups for this event" is ticked; a plain event is created exactly as before.
+The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
+folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.
 It sets up a list of groups for the event, such as quiz teams, clan-match squads,
-breakout rooms or raid parties: a **preset** (2, 3 or 4 teams, each listed with its team
-names and markers, or Custom), what a group and a leader are called (Team, Squad, Room, Party;
-Leader, Captain), a **channel creation time** in minutes before the start (empty
-uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: members
-belong to it; **open**: anyone can join, such as spectators), an optional size (1 to 99, the voice user limit), an
-optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
-an optional colour marker such as a coloured circle. A separate tick box, **Group
+breakout rooms or raid parties. The setups come first, as cards: the built-in 2, 3 and 4 teams, the
+server's and the host's own presets, and Custom. Choosing a card fills the rows and shows a one-line
+summary ("2 groups · Red 🔴, Blue 🔵 · 5 each") with **Customise** to open them; **Max per group**
+sets the size of every group in one click. For Custom, **Build groups** makes N groups of S
+(named Red, Blue, Green… or Team 1…N, with a colour marker each). Each group is one row: marker (an emoji
+picker of coloured circles and squares and common team icons, Unicode only and never longer than the
+marker limit), name, size (1 to 99, the voice user limit, copied down from the first row), tag (up to 8
+characters, so a nickname keeps room within Discord's 32; it starts as the name in capitals while clan tags
+are on) and, behind **More**, the kind (**team**: members belong to it; **open**: anyone can join, such as
+spectators). **Advanced** holds what a group is called (Team, Squad, Room, Party), and a **channel
+creation time** in minutes before the start (empty uses `events.create_lead_minutes`). Without
+JavaScript everything is shown open, the marker is a text box and the kind a select, and the same fields
+are posted. A separate switch, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
-**Leaders** below), **Leaders can customise** (#1196, off by default, only used while
-Group leaders is ticked; see **Team names and tags** below), **Captains lobby** (#1251, off by
-default, only used while Group leaders is ticked; see **Captains lobby** below) is a
+**Leaders** below); **What a leader is called**, **Leaders can customise** (#1196, off by default; see
+**Team names and tags** below) and **Captains lobby** (#1251, off by
+default; see **Captains lobby** below) appear under it only while it is on. The captains lobby is a
 separate voice channel that only the host and the current leaders can join, and **Clan tags** (#1194) puts each team's tag on its members'
 server nicknames while the event runs (off by default; see **Clan tags** below).
 The leaders-only channel is no longer a kind of group in the list: a preset (or a
