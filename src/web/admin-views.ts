@@ -6,6 +6,11 @@
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import {
+  EVENT_WHEN_CHOICES,
+  EVENT_WHEN_LABELS,
+  EVENT_WHEN_SCRIPT,
+} from "./event-when.js";
+import {
   ACTION_WORDS,
   CASE_OUTCOME_WORDS,
   CASE_STATUS_WORDS,
@@ -2797,13 +2802,15 @@ export function renderGroupRow(
       </fieldset>`;
 }
 
-function renderGroupsSection(
+export function renderGroupsSection(
   limits: {
     defaultCount: number;
     maxCount: number;
   },
   presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
   presetsNotice: string | null = null,
+  // Where the preset library is managed; an event host's own page for them (#1305).
+  presetsHref = "/admin/events/presets",
 ): string {
   const presetOptions = presets
     .map((preset) => {
@@ -2857,7 +2864,7 @@ function renderGroupsSection(
         </select>
       </label>
       ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
-      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups. Which presets are offered is managed on the <a href="/admin/events/presets">group presets page</a>.</p>
+      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups. Which presets are offered is managed on the <a href="${escapeHtml(presetsHref)}">group presets page</a>.</p>
       <label>What a group is called (e.g. Team, Squad, Room, Party)
         <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}">
       </label>
@@ -2889,7 +2896,7 @@ function renderGroupsSection(
 // still refuses, the entered values are kept in sessionStorage (this browser
 // tab only) and put back when the page comes back with the error. Everything
 // storage-related is wrapped in try/catch: it is a convenience only.
-const EVENT_GROUPS_SCRIPT =
+export const EVENT_GROUPS_SCRIPT =
   "(function(){" +
   "var form=document.querySelector('form[data-event-form]');" +
   "var box=form&&form.querySelector('[data-group-rows]');" +
@@ -3168,11 +3175,16 @@ ${permissionNote}
     <label>Description
       <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
     </label>
-    <label>Date
-      <input type="date" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
+    <label>When
+      <select name="when" data-when>
+        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === "pick" ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
+      </select>
     </label>
-    <label>Time
-      <input type="time" name="time" required pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
+    <label data-when-pick>Date
+      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
+    </label>
+    <label data-when-pick>Time
+      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
     </label>
     <label>Duration (minutes, optional)
       <input type="number" name="duration" min="1" max="1440" placeholder="120">
@@ -3209,6 +3221,7 @@ ${renderFeatureSettingsCard({
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
+${EVENT_WHEN_SCRIPT}
 `;
 
   return renderAdminPage({

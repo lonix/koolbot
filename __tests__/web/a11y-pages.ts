@@ -99,6 +99,7 @@ import {
   renderEventEditBody,
   type EventEditView,
 } from "../../src/web/event-edit-view.js";
+import { renderNewEventBody } from "../../src/web/event-new-view.js";
 import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
 import {
   renderConfirmBody,
@@ -3170,6 +3171,39 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({ event: hostEvent({ state: "ended" }) }),
+      ),
+    },
+    {
+      name: "/me new event",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+        }),
+      ),
+    },
+    {
+      name: "/me new event (setup missing, presets unreadable)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "UTC",
+          defaultDurationMinutes: 75,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: [],
+          groupPresetsNotice:
+            "The preset library could not be read, so no presets are offered right now. Custom still works.",
+          setupNotice:
+            "No channel category is set, so event channels cannot be created yet.",
+        }),
       ),
     },
     {

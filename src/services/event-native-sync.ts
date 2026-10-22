@@ -61,6 +61,9 @@ const DISCORD_UNKNOWN_SCHEDULED_EVENT = 10070;
 export const MAX_CREATES_PER_SCAN = 5;
 export const CREATE_GRACE_MS = 5 * MS_PER_MINUTE;
 
+/** Leads the native description of an impromptu ("Now") event (#1305). */
+export const HAPPENING_NOW_NOTE = "Happening now.";
+
 export const DEFAULT_NATIVE_LOCATION =
   "Voice channel in this server (see the event announcement)";
 
@@ -78,14 +81,17 @@ export function buildNativeFields(
   event: Pick<
     IEvent,
     "title" | "description" | "startTime" | "durationMinutes"
-  >,
+  > & { impromptu?: boolean },
   location: string,
 ): NativeEventFields {
   // Discord rejects an end that is not after the start.
   const minutes = Math.max(1, event.durationMinutes || 0);
   return {
     name: event.title.slice(0, NAME_MAX),
-    description: (event.description ?? "").slice(0, DESCRIPTION_MAX),
+    description: (event.impromptu === true
+      ? `${HAPPENING_NOW_NOTE}${event.description ? `\n\n${event.description}` : ""}`
+      : (event.description ?? "")
+    ).slice(0, DESCRIPTION_MAX),
     start: event.startTime,
     end: new Date(event.startTime.getTime() + minutes * MS_PER_MINUTE),
     location: (location.trim() || DEFAULT_NATIVE_LOCATION).slice(

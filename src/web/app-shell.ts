@@ -258,7 +258,7 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
     icon: "user",
     available: true,
   },
-  // Hosting. Your events and New event are #1319.
+  // Hosting. Your events is #1319; New event is #1305.
   {
     scope: "host",
     label: "Your events",
@@ -271,7 +271,8 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
     label: "New event",
     href: "/me/events/new",
     icon: "calendar-plus",
-    available: false,
+    featureKey: "events.enabled",
+    available: true,
   },
   {
     scope: "host",

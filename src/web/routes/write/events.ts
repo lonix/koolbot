@@ -8,26 +8,12 @@
 
 import express, { Router } from "express";
 import { Client } from "discord.js";
-import logger from "../../../utils/logger.js";
+import { EventService, isRecurring } from "../../../services/event-service.js";
 import {
-  EventService,
-  isRecurring,
-  RecurrenceDisabledError,
-} from "../../../services/event-service.js";
-import {
-  EVENT_RECURRENCES,
-  type EventRecurrence,
-} from "../../../models/event.js";
-import { validateEventForm } from "../../event-form.js";
-import { ConfigService } from "../../../services/config-service.js";
-import { loadPresetResolver } from "../../../services/event-group-preset-service.js";
-import {
-  hasCaptainsLobby,
-  parseGroupForm,
-  resolveGroupCountLimits,
-  validateGroupSetup,
-  type EventGroupSetup,
-} from "../../../services/event-groups.js";
+  createdFlash,
+  createEventFromForm,
+  redirectToHostPanel,
+} from "../../event-create.js";
 import {
   COVER_MAX_BYTES,
   removeEventCover,
@@ -58,134 +44,26 @@ export function createEventsRouter(client: Client): Router {
     "/events/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const recurrenceRaw = getString(req, "recurrence") || "none";
-      if (!(EVENT_RECURRENCES as readonly string[]).includes(recurrenceRaw)) {
+      // One pipeline with the host's form (`/me/events/new`, #1305): same
+      // validation, Groups handling and audit. Admins may also repeat events.
+      const result = await createEventFromForm(client, session, req.body, {
+        allowRecurrence: true,
+        via: "admin",
+      });
+      if (!result.ok) {
         flashRedirect(res, "/admin/events", {
           type: "err",
-          text: `Invalid recurrence: ${recurrenceRaw}`,
+          text: result.error,
         });
         return;
       }
-      const recurrence = recurrenceRaw as EventRecurrence;
-      // Shared with the edit form (#1298): one validator, one set of messages.
-      const parsed = await validateEventForm(
-        {
-          title: getString(req, "title"),
-          description: getString(req, "description"),
-          date: getString(req, "date"),
-          time: getString(req, "time"),
-          duration: getString(req, "duration"),
-          timezone: getString(req, "timezone"),
-        },
-        { requireFuture: true },
-      );
-      if (!parsed.ok) {
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: parsed.error,
-        });
+      const flash = createdFlash(result);
+      // "Now" lands on the host panel, where the event is run from.
+      if (result.impromptu) {
+        redirectToHostPanel(res, String(result.event._id), flash);
         return;
       }
-      const { title, description, startTime, timezone, durationMinutes } =
-        parsed.value;
-      const config = ConfigService.getInstance();
-
-      // Optional Groups section (#1188). Read the cap only when groups are on,
-      // so a plain event takes exactly the path it always did.
-      const groupInput = parseGroupForm(req.body);
-      let groups: EventGroupSetup | undefined;
-      if (groupInput.enabled) {
-        const [defaultCount, configuredMax] = await Promise.all([
-          config.getNumber("events.groups.default_count", 2),
-          config.getNumber("events.groups.max_count", 15),
-        ]);
-        const { maxCount } = resolveGroupCountLimits(
-          defaultCount,
-          configuredMax,
-        );
-        // The enabled presets are read once, here, and used for the whole
-        // request. Custom needs no read, so it works even when the library is
-        // unreadable; a named preset that cannot be confirmed is refused.
-        const presetId = groupInput.presetId;
-        const resolvePreset =
-          presetId && presetId !== "custom"
-            ? (
-                await loadPresetResolver(session.guildId, {
-                  ownerId: session.discordUserId,
-                })
-              ).resolve
-            : undefined;
-        const result = validateGroupSetup(groupInput, {
-          maxCount,
-          ...(resolvePreset ? { resolvePreset } : {}),
-        });
-        if (!result.ok) {
-          flashRedirect(res, "/admin/events", {
-            type: "err",
-            text: `Groups: ${result.errors.join(" ")}`,
-          });
-          return;
-        }
-        groups = result.setup;
-      }
-
-      const service = EventService.getInstance(client);
-      try {
-        const event = await service.createEvent({
-          guildId: session.guildId,
-          title,
-          description,
-          startTime,
-          timezone,
-          durationMinutes,
-          recurrence,
-          ...(groups ? { groups } : {}),
-          createdBy: session.discordUserId,
-        });
-        await recordAudit(session, {
-          action: "event.create",
-          targetId: String(event._id),
-          details: {
-            title,
-            startTime: startTime.toISOString(),
-            durationMinutes,
-            recurrence,
-            ...(groups
-              ? {
-                  groups: groups.groups.length,
-                  groupPreset: groups.presetId,
-                  channelLeadMinutes: groups.channelLeadMinutes,
-                  captainsEnabled: groups.captainsEnabled,
-                  captainsLobby: hasCaptainsLobby(groups.groups),
-                  captainCustomisationEnabled:
-                    groups.captainCustomisationEnabled,
-                  tagsEnabled: groups.tagsEnabled,
-                  tagsSuffix: groups.tagsSuffix,
-                }
-              : {}),
-          },
-          result: "success",
-        });
-        flashRedirect(res, "/admin/events", {
-          type: "ok",
-          text: `Scheduled event "${title}".`,
-        });
-      } catch (err) {
-        const text = err instanceof Error ? err.message : "Unknown error";
-        if (!(err instanceof RecurrenceDisabledError)) {
-          logger.error("Create event failed", err);
-        }
-        await recordAudit(session, {
-          action: "event.create",
-          details: { title },
-          result: "failure",
-          errorMessage: text,
-        });
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: `Failed to create event: ${text}`,
-        });
-      }
+      flashRedirect(res, "/admin/events", flash);
     }),
   );
 

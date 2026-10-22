@@ -182,6 +182,12 @@ export interface IEvent extends Document {
   endedAt: Date | null;
   reminderSent: boolean;
   /**
+   * Created with "When: Now" (#1305): announced as happening now, with its
+   * channels made at once. Constant for the row's life; a finished impromptu
+   * event is announced as ended like any other.
+   */
+  impromptu?: boolean;
+  /**
    * @deprecated Legacy KoolBot RSVPs (#1175). New events leave this empty:
    * members mark Interested on the native Discord event instead. Kept so
    * announcements and RSVPs from 2.0.x keep working and stay in member
@@ -410,6 +416,7 @@ const EventSchema = new Schema<IEvent>(
     },
     endedAt: { type: Date, default: null },
     reminderSent: { type: Boolean, default: false },
+    impromptu: { type: Boolean, default: false },
     rsvps: { type: [EventRsvpSchema], default: [] },
     recurrence: {
       type: String,
