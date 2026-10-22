@@ -263,7 +263,8 @@ The card pairs today's messages with the rewritten ones. The rules are in the *M
 badge, `span.kb-message__time` with "(edited)" for a post the bot keeps up to date), an optional `p.kb-message__text` (the mention line, as
 Mentions), then the `kb-embed`.
 
-- A password members need is `span.kb-spoiler` with an `aria-label` ("Password, hidden behind a spoiler"); the sketch never prints it.
+- A password members need is `span.kb-spoiler[role=img]` with an `aria-label` ("Password, hidden behind a spoiler"): a plain `span` cannot
+  carry a name, and the sketch never prints the password.
 - Review alerts with the message line: a role mention inside the embed would not notify anyone (*Alerts that mention a role* in `discord.md`).
 
 ### EmbedColours
