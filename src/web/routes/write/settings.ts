@@ -196,6 +196,8 @@ export function createSettingsRouter(client: Client): Router {
       // #705) pass their own page so a per-key Reset lands back where it was
       // clicked; allowlisted the same way as /settings/set and save-section.
       const redirectTo = safeAdminRedirect(getString(req, "redirect"));
+      // Resetting a row of a feature page's folded settings reopens them.
+      const reopen = redirectTo !== "/admin/settings";
       if (!(key in defaultConfig)) {
         await recordAudit(session, {
           action: "setting.reset",
@@ -203,10 +205,16 @@ export function createSettingsRouter(client: Client): Router {
           result: "failure",
           errorMessage: "unknown key",
         });
-        flashRedirect(res, redirectTo, {
-          type: "err",
-          text: `Unknown setting: ${key || "(empty)"}.`,
-        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: "err",
+            text: `Unknown setting: ${key || "(empty)"}.`,
+          },
+          [],
+          reopen,
+        );
         return;
       }
 
@@ -233,10 +241,16 @@ export function createSettingsRouter(client: Client): Router {
           before === undefined || effectiveValueChanged(key, before, null)
             ? await rearmScheduledServices(client, [key])
             : [];
-        flashRedirect(res, redirectTo, {
-          type: rearmFailed.length > 0 ? "warn" : "ok",
-          text: `Reset ${key} to default.${rearmFailureNote(rearmFailed)}`,
-        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: rearmFailed.length > 0 ? "warn" : "ok",
+            text: `Reset ${key} to default.${rearmFailureNote(rearmFailed)}`,
+          },
+          [],
+          reopen,
+        );
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Reset setting failed", err);
@@ -246,10 +260,16 @@ export function createSettingsRouter(client: Client): Router {
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, redirectTo, {
-          type: "err",
-          text: `Failed to reset ${key}: ${text}`,
-        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: "err",
+            text: `Failed to reset ${key}: ${text}`,
+          },
+          [],
+          reopen,
+        );
       }
     }),
   );
@@ -402,6 +422,9 @@ export function createSettingsRouter(client: Client): Router {
       // own `*.` keys in place passes its own page so the operator returns
       // there (#705), allowlisted the same way as /settings/set.
       const redirectTo = safeAdminRedirect(getString(req, "redirect"));
+      // A feature page's folded settings reopen on the result of a save, so a
+      // save does not make the section snap shut (#1301).
+      const reopen = redirectTo !== "/admin/settings";
       // Section forms carry an implicit master toggle (the section's shortest
       // `.enabled` key) whose cascade skips dependents when off. A feature page
       // reusing this route has no such master — its master lives elsewhere
@@ -434,6 +457,9 @@ export function createSettingsRouter(client: Client): Router {
             text: `No settings submitted for section ${category || "(unknown)"}.`,
           },
           redirectTo,
+          [],
+          false,
+          reopen,
         );
         return;
       }
@@ -543,6 +569,8 @@ export function createSettingsRouter(client: Client): Router {
           },
           redirectTo,
           rejected.map((r) => r.key),
+          false,
+          reopen,
         );
         return;
       }
@@ -660,6 +688,7 @@ export function createSettingsRouter(client: Client): Router {
           redirectTo,
           [],
           reload,
+          reopen,
         );
         return;
       }
@@ -674,6 +703,7 @@ export function createSettingsRouter(client: Client): Router {
         redirectTo,
         failed.map((f) => f.key),
         reload,
+        reopen,
       );
     }),
   );

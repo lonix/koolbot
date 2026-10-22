@@ -127,6 +127,7 @@ export const INVALID_KEYS_MAX = 25;
 export function flashRedirectQuery(
   flash: Flash,
   invalidKeys: string[] = [],
+  openSettings = false,
 ): string {
   // Mirror the renderer's 500-char cap on the way out so the redirect
   // URL itself can't balloon to header/URI limits on a noisy failure.
@@ -138,6 +139,10 @@ export function flashRedirectQuery(
   if (invalidKeys.length > 0) {
     params.invalid = invalidKeys.slice(0, INVALID_KEYS_MAX).join(",");
   }
+  // The result of a save or reset in a feature page's folded settings (#1301):
+  // the page opens them and shows the flash there. Not part of the signature,
+  // it only opens a fold.
+  if (openSettings) params.settings = "open";
   return new globalThis.URLSearchParams(params).toString();
 }
 
@@ -146,8 +151,12 @@ export function flashRedirect(
   path: string,
   flash: Flash,
   invalidKeys: string[] = [],
+  openSettings = false,
 ): void {
-  res.redirect(303, `${path}?${flashRedirectQuery(flash, invalidKeys)}`);
+  res.redirect(
+    303,
+    `${path}?${flashRedirectQuery(flash, invalidKeys, openSettings)}`,
+  );
 }
 
 /**
@@ -170,6 +179,8 @@ export function respondSectionFlash(
   // path redirects to, and the page script navigates there instead of
   // showing the flash in place over a now-stale page.
   reload = false,
+  // The save came from a feature page's folded settings (#1301).
+  openSettings = false,
 ): void {
   if (wantsJson(req)) {
     res.status(200).json({
@@ -177,12 +188,14 @@ export function respondSectionFlash(
       text: truncateFlash(flash.text),
       invalidKeys: invalidKeys.slice(0, INVALID_KEYS_MAX),
       ...(reload
-        ? { reload: `${redirectTo}?${flashRedirectQuery(flash, invalidKeys)}` }
+        ? {
+            reload: `${redirectTo}?${flashRedirectQuery(flash, invalidKeys, openSettings)}`,
+          }
         : {}),
     });
     return;
   }
-  flashRedirect(res, redirectTo, flash, invalidKeys);
+  flashRedirect(res, redirectTo, flash, invalidKeys, openSettings);
 }
 
 export function getString(req: AuthenticatedRequest, name: string): string {

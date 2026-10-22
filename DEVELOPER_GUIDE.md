@@ -225,6 +225,14 @@ Settings page's control renderer, labels, warnings and dependency locks,
 and posts to `/admin/settings/save-section` with `redirect` back to the page
 (the page must be in the nav, or the redirect falls back to Settings).
 
+The card is a folded `details` at the **bottom** of the page (#1301): open the page with
+`renderStatusLine` (`feature-page.ts`), then the usable part, then `renderFeatureSettingsCard`. Pass it
+`enabled` (the page's own flag, for pages whose master key is not `<feature>.enabled`), `needsSetup` (a
+value the feature cannot work without is missing, so the settings open) and `flash: props.flash`. Show the
+page's own flash with `renderPageFlash(props.flash)` instead of `renderFlash`: a flash that comes from a
+settings save or reset (`?settings=open`, added by the settings routes) belongs inside the open settings
+and is left out at the top. A status chip that warns links to the setting with `settingHref(key)`.
+
 Put the feature's `<feature>.enabled` key in `KEYS` to let operators turn the
 feature off from the page. It then acts as the section's cascade master:
 unchecking it greys the other controls, and the save writes only the master,
