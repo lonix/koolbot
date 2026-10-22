@@ -689,7 +689,7 @@ const CRON_PICKER_SCRIPT =
 // when the section master is on, and its row keeps the static `.dep-off`
 // greying. So `apply()` only ever *adds* disabling to such controls — it never
 // re-enables them.
-const CASCADE_DISABLE_SCRIPT =
+export const CASCADE_DISABLE_SCRIPT =
   "(function(){" +
   "function wire(master){" +
   "var scope=master.closest('[data-cascade-scope]');if(!scope)return;" +

@@ -168,10 +168,14 @@ export const COLOUR_INPUT_SCRIPT =
   "(function(){" +
   "function parts(el){var box=el.closest('[data-colour]');if(!box)return null;" +
   "return{box:box,color:box.querySelector('[data-colour-input]'),def:box.querySelector('[data-colour-default]'),mirror:box.querySelector('[data-colour-mirror]')}}" +
-  "function sync(p){if(!p.color||!p.def||p.def.hasAttribute('data-dep-locked'))return;p.color.disabled=p.def.checked}" +
-  // The mirror holds the stored non-colour until a colour is picked. A pick
-  // that lands back on the swatch's first colour is "no pick", so the stored
-  // text returns: the save bar cannot see a hidden field change.
+  // The swatch is off while Use default is ticked, and while the box itself is
+  // off: the section's cascade (its feature switch is off) disables every
+  // control, and the dependency lock marks its own.
+  "function sync(p){if(!p.color||!p.def||p.def.hasAttribute('data-dep-locked'))return;p.color.disabled=p.def.checked||p.def.disabled}" +
+  // A hidden input's value IS its default attribute, so the mirror keeps the
+  // stored text in `data-stored`. A pick that lands back on the swatch's first
+  // colour is "no pick", so the stored text returns: the save bar cannot see a
+  // hidden field change.
   "function mirrorFor(p){if(p.mirror)p.mirror.value=p.color.value===p.color.defaultValue?p.mirror.getAttribute('data-stored'):p.color.value}" +
   // Capture phase: the save bar listens on the form while bubbling, so it must
   // find the swatch and the box already in step. Discard's restoring events
@@ -183,9 +187,25 @@ export const COLOUR_INPUT_SCRIPT =
   "mirrorFor(p)},true);" +
   "document.addEventListener('change',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-default]'))return;var p=parts(el);" +
   "if(!p)return;if(e.kbRestore&&p.mirror)p.mirror.value=p.mirror.getAttribute('data-stored');sync(p)},true);" +
-  // After a save the stored value is whatever was posted.
-  "document.addEventListener('kb-saved',function(e){Array.prototype.forEach.call(e.target.querySelectorAll('[data-colour-mirror]'),function(m){m.setAttribute('data-stored',m.value)})},true);" +
-  "Array.prototype.forEach.call(document.querySelectorAll('[data-colour]'),function(box){sync(parts(box))})" +
+  // What a save sends is taken at submit, as the save bar takes its own
+  // baseline: the effective value (Use default means empty) and the mirror it
+  // came from. Edits made while the request is out are not part of it.
+  "document.addEventListener('submit',function(e){var f=e.target;if(!f||!f.querySelectorAll)return;" +
+  "Array.prototype.forEach.call(f.querySelectorAll('[data-colour-mirror]'),function(m){var p=parts(m);if(!p)return;" +
+  "m.setAttribute('data-sent',p.def&&p.def.checked?'':m.value);m.setAttribute('data-sent-raw',m.value)})},true);" +
+  // An accepted save makes the sent value the stored one. The field follows
+  // unless it was edited since submit, in which case that edit is still unsaved.
+  "document.addEventListener('kb-saved',function(e){var f=e.target;if(!f||!f.querySelectorAll)return;" +
+  "Array.prototype.forEach.call(f.querySelectorAll('[data-colour-mirror]'),function(m){if(!m.hasAttribute('data-sent'))return;" +
+  "var sent=m.getAttribute('data-sent');m.setAttribute('data-stored',sent);" +
+  "if(m.value===m.getAttribute('data-sent-raw'))m.value=sent;" +
+  "m.removeAttribute('data-sent');m.removeAttribute('data-sent-raw')})},true);" +
+  // The cascade script re-enables or disables every control when its master
+  // changes; this listener was added after it, so it runs after it on the
+  // master and before the save bar, and puts the swatch back in step.
+  "function all(){Array.prototype.forEach.call(document.querySelectorAll('[data-colour]'),function(box){var p=parts(box);if(p)sync(p)})}" +
+  "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',all)});" +
+  "all()" +
   "})();";
 
 // ---------- Emoji ----------

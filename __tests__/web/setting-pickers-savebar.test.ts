@@ -9,7 +9,10 @@ import { JSDOM } from "jsdom";
 import {
   COLOUR_INPUT_SCRIPT,
   renderColourInput,
+  renderEmojiField,
 } from "../../src/web/setting-pickers.js";
+import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
+import { groupRowsScript } from "../../src/web/event-group-form.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
 
 const NAME = "value_reactionroles.group_role_colour";
@@ -98,9 +101,7 @@ describe("Discard with a stored value that is not a colour", () => {
     const dom = mount("red");
     const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
     pick(dom, "#123456");
-    q<HTMLFormElement>(dom, "form").dispatchEvent(
-      new dom.window.Event("kb-saved"),
-    );
+    submitAndSave(dom);
     expect(mirror.getAttribute("data-stored")).toBe("#123456");
     pick(dom, "#654321");
     discard(dom);
@@ -144,5 +145,137 @@ describe("the save bar sees the final state of a colour change", () => {
     expect(barText(dom)).toBe("1 unsaved change");
     tick(dom, false);
     expect(bar(dom).hidden).toBe(true);
+  });
+});
+
+function submitAndSave(dom: JSDOM, during?: () => void): void {
+  const form = q<HTMLFormElement>(dom, "form");
+  form.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  during?.();
+  form.dispatchEvent(new dom.window.Event("kb-saved"));
+}
+
+describe("a save of a colour that held a stored non-colour", () => {
+  it("keeps an edit made while the request was out as one unsaved change", () => {
+    const dom = mount("red");
+    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
+    pick(dom, "#123456");
+    submitAndSave(dom, () => pick(dom, "#654321"));
+    // The bar committed what was sent; the later pick is still unsaved.
+    expect(mirror.getAttribute("data-stored")).toBe("#123456");
+    expect(mirror.value).toBe("#654321");
+    expect(bar(dom).hidden).toBe(false);
+    expect(barText(dom)).toBe("1 unsaved change");
+    // Discard returns to what was saved, in the swatch and in the field.
+    discard(dom);
+    expect(q<HTMLInputElement>(dom, "[data-colour-input]").value).toBe(
+      "#123456",
+    );
+    expect(mirror.value).toBe("#123456");
+    expect(posted(dom)[NAME]).toBe("#123456");
+    expect(bar(dom).hidden).toBe(true);
+  });
+
+  it("a plain save makes the sent colour the one Discard returns to", () => {
+    const dom = mount("red");
+    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
+    pick(dom, "#123456");
+    submitAndSave(dom);
+    expect(mirror.getAttribute("data-stored")).toBe("#123456");
+    expect(bar(dom).hidden).toBe(true);
+  });
+
+  it("saving Use default turns the stored text into the default, so unticking posts no invalid value", () => {
+    const dom = mount("red");
+    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
+    tick(dom, true);
+    expect(posted(dom)[DEFAULT]).toBe("true");
+    submitAndSave(dom);
+    expect(mirror.getAttribute("data-stored")).toBe("");
+    expect(mirror.value).toBe("");
+    tick(dom, false);
+    expect(posted(dom)[NAME]).toBe("");
+    expect(posted(dom)[NAME]).not.toBe("red");
+  });
+});
+
+describe("the section cascade", () => {
+  function cascade(current: string, masterOn: boolean): JSDOM {
+    const dom = new JSDOM(
+      `<!doctype html><body><form><div data-cascade-scope>` +
+        `<input type="checkbox" name="master" data-cascade-master${masterOn ? " checked" : ""}>` +
+        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, current)}</div>` +
+        `<div class="kb-setting">${renderEmojiField("value_p", "🎮", { label: "Prefix" })}</div>` +
+        `</div>${renderSaveBar("Save")}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    // The order the admin layout loads them in.
+    dom.window.eval(CASCADE_DISABLE_SCRIPT);
+    dom.window.eval(COLOUR_INPUT_SCRIPT);
+    dom.window.eval(groupRowsScript());
+    dom.window.eval(SAVEBAR_SCRIPT);
+    return dom;
+  }
+  const flip = (dom: JSDOM, on: boolean): void => {
+    const m = q<HTMLInputElement>(dom, "[data-cascade-master]");
+    m.checked = on;
+    m.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  };
+
+  it("keeps the swatch off while the feature is off, whatever Use default says", () => {
+    const dom = cascade("#a95f55", false);
+    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
+    const box = q<HTMLInputElement>(dom, "[data-colour-default]");
+    expect(box.disabled).toBe(true);
+    expect(swatch.disabled).toBe(true);
+    box.checked = true;
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    box.checked = false;
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(swatch.disabled).toBe(true);
+    expect(bar(dom).hidden).toBe(true);
+  });
+
+  it("follows the master: on enables the swatch, off disables it, Use default still greys it", () => {
+    const dom = cascade("#a95f55", false);
+    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
+    flip(dom, true);
+    expect(swatch.disabled).toBe(false);
+    tick(dom, true);
+    expect(swatch.disabled).toBe(true);
+    flip(dom, false);
+    expect(swatch.disabled).toBe(true);
+    flip(dom, true);
+    // Use default is still ticked, so the swatch stays off.
+    expect(swatch.disabled).toBe(true);
+    tick(dom, false);
+    expect(swatch.disabled).toBe(false);
+  });
+
+  it("master on from the start behaves as before", () => {
+    const dom = cascade("", true);
+    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
+    expect(swatch.disabled).toBe(true);
+    pick(dom, "#112233");
+    expect(swatch.disabled).toBe(false);
+    expect(q<HTMLInputElement>(dom, "[data-colour-default]").checked).toBe(
+      false,
+    );
+  });
+
+  it("the emoji button does nothing while its box is off", () => {
+    const dom = cascade("#a95f55", false);
+    const input = q<HTMLInputElement>(dom, "[data-marker-input]");
+    expect(input.disabled).toBe(true);
+    q(dom, "[data-marker-btn]").click();
+    expect(dom.window.document.querySelector(".kb-emoji-pop")).toBeNull();
+    flip(dom, true);
+    q(dom, "[data-marker-btn]").click();
+    expect(
+      (dom.window.document.querySelector(".kb-emoji-pop") as HTMLElement)
+        .hidden,
+    ).toBe(false);
   });
 });
