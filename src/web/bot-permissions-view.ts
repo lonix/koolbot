@@ -10,12 +10,18 @@
  * no second list of permissions here. `report.problems` is untouched, so the
  * navigation badge count is unchanged.
  *
+ * Folded at the bottom, "All Discord permissions" (#1366) lists every flag with
+ * whether the bot role holds it and what KoolBot does with it
+ * (`bot-permission-flags.ts`). It reads the role's own bits, so Administrator
+ * does not make every row read "Has".
+ *
  * Not built here: a "Re-authorise" invite link (whether Discord applies new
- * permission bits to the bot's existing role is not verified) and the
- * "Show all Discord permissions" toggle. Places use plain names; the
- * Discord-style channel-type labels are #1303.
+ * permission bits to the bot's existing role is not verified, and the posting
+ * permissions are #1254). Places use plain names; the Discord-style
+ * channel-type labels are #1303.
  */
 
+import { PermissionFlagsBits } from "discord.js";
 import { icon as sharedIcon, toneIcon } from "./icons.js";
 import {
   escapeHtml,
@@ -29,6 +35,7 @@ import {
   type FeatureRef,
   type PermissionTarget,
 } from "../services/bot-permission-check.js";
+import { allFlagRows, type FlagRow } from "../services/bot-permission-flags.js";
 import {
   FEATURE_REQUIREMENTS,
   PERM,
@@ -334,6 +341,90 @@ export function fixSteps(report: BotPermissionReport): string[] {
   return steps;
 }
 
+const ADMINISTRATOR_BIT = PermissionFlagsBits.Administrator;
+
+/**
+ * What the switched-on features need that the bot role itself lacks
+ * server-wide (names, "A or B" for an either-is-enough need). Meaningful when
+ * the role holds Administrator: that is what would stop working without it,
+ * unless a channel overwrite grants it.
+ */
+export function neededButNotInRole(
+  report: BotPermissionReport,
+  bits: bigint,
+): string[] {
+  const names: string[] = [];
+  for (const check of report.checks) {
+    // A feature that is on but has no category or channel set is `unchecked`
+    // with no target: what it would need is not known, so it is not listed.
+    if (check.kind !== "permission" || !check.enabled || check.target === null)
+      continue;
+    const req = FEATURE_REQUIREMENTS.find((r) => r.id === check.feature.id);
+    if (!req) continue;
+    const lacking = req.needs.filter((n) => (bits & n.bit) === 0n);
+    if (req.anyOf) {
+      if (lacking.length === req.needs.length) {
+        names.push(req.needs.map((n) => n.name).join(" or "));
+      }
+    } else names.push(...lacking.map((n) => n.name));
+  }
+  return [...new Set(names)];
+}
+
+function flagRowHtml(
+  row: FlagRow,
+  bits: bigint,
+  hasAdmin: boolean,
+  lackingWithoutAdmin: string[],
+  hasUnchecked: boolean,
+): string {
+  const held = (bits & row.bit) !== 0n;
+  const role = held
+    ? `<span class="kb-perm kb-perm--has">${icon("ok")}Has</span>`
+    : `<span class="kb-perm kb-perm--quiet">${icon("off")}Not in the role</span>${hasAdmin ? ' <span class="kb-muted">(Administrator covers it)</span>' : ""}`;
+  let use: string;
+  if (row.use.kind === "checked") {
+    use = "Checked in the table above.";
+  } else if (row.use.kind === "used") {
+    use = `Used, not checked on this page. ${escapeHtml(row.use.for)}`;
+  } else if (row.use.kind === "unclassified") {
+    use = "Not classified yet. Do not remove it on this page’s account.";
+  } else if (row.bit === ADMINISTRATOR_BIT) {
+    use =
+      "Not required for the bot's own features, but the bot can only hand out permissions it holds: without Administrator, a Role group cannot grant it (the Admin preset does), and every other permission a Role group grants must be held by the bot's role." +
+      (held
+        ? ` If you ever remove it, check three things. ${
+            lackingWithoutAdmin.length > 0
+              ? `The role itself lacks ${boldList(lackingWithoutAdmin)}, which the switched-on features need server-wide: give them first. `
+              : "The role itself holds the checked server-wide permissions the switched-on features need. "
+          }${hasUnchecked ? "Switched-on features with no category or channel set were not checked, so what they would need is not listed. " : ""}The permissions marked “Used, not checked on this page” are not verified here, so make sure the role holds the ones you rely on. And channel overwrites that deny something start to apply once Administrator is gone.`
+        : "");
+  } else {
+    use =
+      "Only needed if a Role group grants it. KoolBot itself does not use it, but the bot can only hand out a permission it holds.";
+  }
+  return `<tr><th scope="row">${escapeHtml(row.name)}</th><td>${role}</td><td>${use}</td></tr>`;
+}
+
+/** The folded "All Discord permissions" list; empty when the bot role's bits are unknown. */
+function allFlagsPanel(report: BotPermissionReport): string {
+  const bits = report.serverPermissions;
+  if (typeof bits !== "bigint") return "";
+  const rows = allFlagRows();
+  const hasAdmin = (bits & ADMINISTRATOR_BIT) !== 0n;
+  const lacking = hasAdmin ? neededButNotInRole(report, bits) : [];
+  const hasUnchecked = report.checks.some(
+    (c) => c.kind === "permission" && c.enabled && c.target === null,
+  );
+  const body = rows
+    .map((r) => flagRowHtml(r, bits, hasAdmin, lacking, hasUnchecked))
+    .join("");
+  return `<section class="kb-panel" aria-labelledby="flags-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="flags-h">All Discord permissions</h2></header>
+  <details class="kb-disclosure"><summary>${icon("chev", " kb-chev")}Show every permission <span class="kb-badge kb-badge--count">${rows.length}</span><span class="kb-disclosure__hint">what the bot’s role holds and what KoolBot uses</span></summary><div class="kb-disclosure__body"><p class="kb-muted">This is the bot role’s own server-wide list. Channel overwrites are not included, and Administrator would give the bot all of them.</p><div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">Permission</th><th scope="col">Bot role</th><th scope="col">KoolBot</th></tr></thead><tbody>${body}</tbody></table></div></div></details>
+</section>`;
+}
+
 export interface BotPermissionsPageProps {
   csrfToken: string;
   remainingMs: number;
@@ -403,7 +494,7 @@ export function renderBotPermissionsPage(
             )
           : "";
     const footer = `<p class="kb-muted">${report.fresh ? "Read from Discord when this page was opened (and reused for up to 30 seconds)." : "Discord could not be reached; this is the bot's cached view."} Channel overwrites are taken into account, not only the bot role's server-wide permissions. Nothing here changes anything in Discord.</p>`;
-    body = `${notes}${lead}${matrixPanels(rows)}${footer}`;
+    body = `${notes}${lead}${matrixPanels(rows)}${allFlagsPanel(report)}${footer}`;
   }
   return renderAdminPage({
     title: "Bot permissions",

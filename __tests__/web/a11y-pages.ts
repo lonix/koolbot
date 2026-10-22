@@ -10,7 +10,7 @@
  * add a page renderer, add a fixture for it in the matching group below.
  */
 
-import { ChannelType } from "discord.js";
+import { ChannelType, PermissionFlagsBits } from "discord.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -2468,6 +2468,19 @@ export function adminPages(): A11yPage[] {
       html: renderBotPermissionsPage({
         ...COMMON,
         report: botPermissionReport("ok"),
+      }),
+    },
+    {
+      name: "Bot permissions (all permissions listed, Administrator held)",
+      html: renderBotPermissionsPage({
+        ...COMMON,
+        report: {
+          ...botPermissionReport("ok"),
+          serverPermissions:
+            PermissionFlagsBits.Administrator |
+            PermissionFlagsBits.ManageChannels |
+            PermissionFlagsBits.SendMessages,
+        },
       }),
     },
     {

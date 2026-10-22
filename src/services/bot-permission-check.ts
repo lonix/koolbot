@@ -124,6 +124,12 @@ export interface BotPermissionReport {
    * `okFeatures` stay as they were (the navigation badge counts `problems`).
    */
   checks: FeatureCheck[];
+  /**
+   * The bot's managed role's own server-wide permission bits (not @everyone's
+   * or another role's, no channel overwrites, not widened by Administrator), for the "All Discord permissions" list. Null
+   * when they could not be read.
+   */
+  serverPermissions?: bigint | null;
 }
 
 type ApiCall = <T>(fn: () => Promise<T>, name: string) => Promise<T>;
@@ -393,6 +399,7 @@ export async function checkBotPermissions(
     okFeatures: [],
     notes: [],
     checks: [],
+    serverPermissions: null,
   });
   const snapshot = await getSnapshot(client, guildId, deps);
   if (!snapshot) {
@@ -622,5 +629,11 @@ export async function checkBotPermissions(
     okFeatures,
     notes,
     checks,
+    // The managed role's own bits: `me.permissions` also folds in @everyone
+    // and any other role the bot was given.
+    serverPermissions:
+      typeof me?.roles?.botRole?.permissions?.bitfield === "bigint"
+        ? me.roles.botRole.permissions.bitfield
+        : null,
   };
 }

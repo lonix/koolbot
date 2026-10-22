@@ -88,6 +88,8 @@ function makeClient(opts: {
   fetchedRoles?: Array<{ id: string; name: string; position: number }>;
   botPosition?: number;
   noMe?: boolean;
+  /** The managed bot role's own bits; absent = the bot has no managed role in the cache. */
+  botRoleBits?: bigint;
 }): {
   client: never;
   me: { permissionsIn: jest.Mock };
@@ -105,7 +107,13 @@ function makeClient(opts: {
   const me = {
     permissions: new PermissionsBitField(opts.serverBits ?? ALL),
     permissionsIn: jest.fn((c: FakeChannel) => new PermissionsBitField(c.bits)),
-    roles: { highest: { position: opts.botPosition ?? 10 } },
+    roles: {
+      highest: { position: opts.botPosition ?? 10 },
+      botRole:
+        opts.botRoleBits === undefined
+          ? null
+          : { permissions: new PermissionsBitField(opts.botRoleBits) },
+    },
   };
   const guild = {
     id: "guild-1",
@@ -612,6 +620,17 @@ describe("failing clearly", () => {
     const report = await run({ channels: [] });
     expect(report.unknown.map((u) => u.feature.id)).toContain("event-channels");
     expect(report.okFeatures.map((f) => f.id)).not.toContain("event-channels");
+  });
+
+  it("reports the managed bot role's own bits, not the member's (@everyone and other roles included)", async () => {
+    // The member holds everything (e.g. SendMessages from @everyone); the bot role only ViewChannel.
+    const report = await run({ botRoleBits: P.ViewChannel });
+    expect(report.serverPermissions).toBe(P.ViewChannel);
+  });
+
+  it("has no server permission list when the bot's managed role is not known", async () => {
+    expect((await run({})).serverPermissions).toBeNull();
+    expect((await run({ noMe: true })).serverPermissions).toBeNull();
   });
 
   it("is unknown when the bot's own membership is not available", async () => {
