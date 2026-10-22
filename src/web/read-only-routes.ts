@@ -69,7 +69,8 @@ import {
   type ConfigSchema,
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
-import { renderAdoptPage } from "./adopt-view.js";
+import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
+import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -1063,15 +1064,21 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const sampled = req.query.sample === "1";
+      const tab = parseScanTab(req.query.tab);
       let scan = null;
       let error: string | undefined;
       try {
-        scan = await ServerScanService.getInstance(client).scan(
-          common.guildId,
-          {
-            adminUserId: req.webSession?.discordUserId,
-            sampleMessages: sampled,
-          },
+        const adminUserId = req.webSession?.discordUserId;
+        // One scan is shared across the tabs for a minute: each tab is its own
+        // GET, and a scan costs a REST round of its own (#1323).
+        scan = await cachedScan(
+          scanCacheKey(common.guildId, adminUserId, sampled),
+          () =>
+            ServerScanService.getInstance(client).scan(common.guildId, {
+              adminUserId,
+              sampleMessages: sampled,
+            }),
+          { refresh: req.query.refresh === "1" },
         );
       } catch (err) {
         logger.warn("server scan failed", err);
@@ -1085,6 +1092,7 @@ export function createReadOnlyRouter(
           scan,
           error,
           sampled,
+          tab,
         }),
       );
     }),

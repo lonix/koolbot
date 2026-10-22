@@ -50,6 +50,7 @@ import {
 import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
+import { busyScan } from "./server-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
 import { renderRulesPage } from "../../src/web/rules-page.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
@@ -666,11 +667,12 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Server scan",
+      name: "Server scan (ready, overview)",
       html: renderAdoptPage({
         ...COMMON,
         navFeatureStatus: {},
         sampled: false,
+        tab: "overview",
         scan: {
           guildId: "g1",
           guildName: "Guild",
@@ -741,6 +743,67 @@ export function adminPages(): A11yPage[] {
           webhooks: { known: true, list: [], unavailable: null },
           partial: [],
         },
+      }),
+    },
+    {
+      name: "Server scan (overview, with problems)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: true,
+        tab: "overview",
+        scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (roles, with problems)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "roles",
+        scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (channels, with problems)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "channels",
+        scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (other bots, with problems)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "bots",
+        scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (Discord, with problems)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "discord",
+        scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (failed)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "overview",
+        scan: null,
+        error: "Discord couldn't be reached.",
       }),
     },
     ...channelManagerPages(),
