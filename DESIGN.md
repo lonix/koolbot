@@ -181,6 +181,11 @@ Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, 
 `shield-half` (staff scope), `grip-vertical` (drag handle), `ellipsis` (a row's menu), `refresh-cw` (check again), `zap` (test a connection),
 `wrench` (maintenance), `server` (servers).
 
+**As built (#1369):** every icon above is in `src/web/icons.ts` (licence notices in `THIRD_PARTY_NOTICES.md`), which exports `icon(name, opts?)` and
+`toneIcon(tone)` (info, ok, warn, err: a callout's or issue row's icon). Views import it rather than inlining an SVG. Icons are `aria-hidden` unless one stands
+alone and passes `label`; the words beside an icon always say the same thing, so colour and shape never carry the meaning alone. A test fails when this section
+lists a name the module lacks.
+
 KoolBot has no logo; the name is set in type in the TopBar.
 
 ### Brand icons

@@ -22,6 +22,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
+import { icon } from "./icons.js";
 import { renderSaveBar } from "./savebar.js";
 import {
   CHEVRON_ICON,
@@ -1111,7 +1112,7 @@ function renderMoreDisclosure(key: string, rest: string): string {
   const restHtml = rest ? `<p>${escapeHtml(rest)}</p>` : "";
   return (
     `<details class="kb-disclosure kb-disclosure--inline">` +
-    `<summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>More</summary>` +
+    `<summary>${icon("chevron-right", { className: "kb-chev" })}More</summary>` +
     `<div class="kb-disclosure__body">${restHtml}<p>Setting key: <code class="kb-mono">${escapeHtml(key)}</code></p></div>` +
     `</details>`
   );
@@ -2686,8 +2687,7 @@ export function renderGroupRow(
 const GROUP_ROWS_HEAD =
   '<div class="kb-grouprows__head" aria-hidden="true"><span>Marker</span><span>Name</span><span>Max size</span><span>Tag</span><span></span></div>';
 
-const CHECK_ICON =
-  '<svg class="kb-icon kb-choice__check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="20 6 9 17 4 12"/></svg>';
+const CHECK_ICON = icon("check", { className: "kb-choice__check" });
 
 /** Where a preset comes from, in the words a host would use. */
 function presetSource(id: string): string {
@@ -2845,7 +2845,7 @@ function renderGroupsSection(
         ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix")}
       </div>
       <details class="kb-disclosure" data-groups-advanced open>
-        <summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>Advanced</summary>
+        <summary>${icon("chevron-right", { className: "kb-chev" })}Advanced</summary>
         <div class="kb-disclosure__body kb-stack">
           <div class="kb-field">
             <label class="kb-label" for="groups-label">What a group is called</label>
