@@ -353,7 +353,10 @@ export function neededButNotInRole(
 ): string[] {
   const names: string[] = [];
   for (const check of report.checks) {
-    if (check.kind !== "permission" || !check.enabled) continue;
+    // A feature that is on but has no category or channel set is `unchecked`
+    // with no target: what it would need is not known, so it is not listed.
+    if (check.kind !== "permission" || !check.enabled || check.target === null)
+      continue;
     const req = FEATURE_REQUIREMENTS.find((r) => r.id === check.feature.id);
     if (!req) continue;
     const lacking = req.needs.filter((n) => (bits & n.bit) === 0n);
@@ -371,6 +374,7 @@ function flagRowHtml(
   bits: bigint,
   hasAdmin: boolean,
   lackingWithoutAdmin: string[],
+  hasUnchecked: boolean,
 ): string {
   const held = (bits & row.bit) !== 0n;
   const role = held
@@ -391,7 +395,7 @@ function flagRowHtml(
             lackingWithoutAdmin.length > 0
               ? `The role itself lacks ${boldList(lackingWithoutAdmin)}, which the switched-on features need server-wide: give them first. `
               : "The role itself holds the checked server-wide permissions the switched-on features need. "
-          }The permissions marked “Used, not checked on this page” are not verified here, so make sure the role holds the ones you rely on. And channel overwrites that deny something start to apply once Administrator is gone.`
+          }${hasUnchecked ? "Switched-on features with no category or channel set were not checked, so what they would need is not listed. " : ""}The permissions marked “Used, not checked on this page” are not verified here, so make sure the role holds the ones you rely on. And channel overwrites that deny something start to apply once Administrator is gone.`
         : "");
   } else {
     use =
@@ -407,8 +411,11 @@ function allFlagsPanel(report: BotPermissionReport): string {
   const rows = allFlagRows();
   const hasAdmin = (bits & ADMINISTRATOR_BIT) !== 0n;
   const lacking = hasAdmin ? neededButNotInRole(report, bits) : [];
+  const hasUnchecked = report.checks.some(
+    (c) => c.kind === "permission" && c.enabled && c.target === null,
+  );
   const body = rows
-    .map((r) => flagRowHtml(r, bits, hasAdmin, lacking))
+    .map((r) => flagRowHtml(r, bits, hasAdmin, lacking, hasUnchecked))
     .join("");
   return `<section class="kb-panel" aria-labelledby="flags-h">
   <header class="kb-panel__head"><h2 class="kb-panel__title" id="flags-h">All Discord permissions</h2></header>

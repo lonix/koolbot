@@ -147,6 +147,36 @@ describe("what the page says about flags KoolBot does not use itself", () => {
   });
 });
 
+describe("an enabled feature with nothing configured", () => {
+  const unconfigured: FeatureCheck = {
+    ...check("event-channels"),
+    outcome: "unchecked",
+    target: null,
+  };
+
+  it("is not demanded from the role, but the Administrator row says it was not checked", () => {
+    const r = report({
+      serverPermissions: ADMIN,
+      checks: [unconfigured],
+    });
+    expect(neededButNotInRole(r, ADMIN)).toEqual([]);
+    const admin = rowOf(page(r), "Administrator");
+    expect(admin).not.toContain("Manage Channels");
+    expect(admin).toContain("no category or channel set were not checked");
+    expect(admin).not.toContain("safe to remove");
+  });
+
+  it("does not add the unchecked note when every enabled feature was checked", () => {
+    const r = report({
+      serverPermissions: ADMIN,
+      checks: [check("event-tags")],
+    });
+    expect(rowOf(page(r), "Administrator")).not.toContain(
+      "no category or channel set",
+    );
+  });
+});
+
 describe("neededButNotInRole", () => {
   it("names what switched-on features need and the role does not hold itself", () => {
     const r = report({
