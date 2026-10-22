@@ -576,6 +576,8 @@ export interface RewindBadgeView {
 export interface RewindTextChannelView {
   channelId: string;
   channelName: string;
+  /** Discord channel type; null when the channel no longer resolves. */
+  channelType: number | null;
   count: number;
 }
 
@@ -724,7 +726,7 @@ function renderTextActivity(opts: RewindBodyOptions): string {
           .map(
             (c) =>
               "<li>" +
-              `<span class="name">${channelMention({ name: c.channelName, type: ChannelType.GuildText })}</span>` +
+              `<span class="name">${channelMention({ name: c.channelName, type: c.channelType })}</span>` +
               `<span class="dur">${c.count} msg${c.count === 1 ? "" : "s"}</span>` +
               "</li>",
           )

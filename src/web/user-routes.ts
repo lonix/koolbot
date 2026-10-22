@@ -1182,6 +1182,7 @@ export function createUserRouter(
           topTextChannels: summary.topTextChannels.map((c) => ({
             channelId: c.channelId,
             channelName: c.channelName,
+            channelType: c.channelType,
             count: c.count,
           })),
           peakMessageDay: summary.peakMessageDay,

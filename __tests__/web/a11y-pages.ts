@@ -3385,7 +3385,14 @@ const REWIND = {
     best: { isoYear: 2026, isoWeek: 5, rank: 2 },
   },
   messagesSent: 430,
-  topTextChannels: [{ channelId: "c1", channelName: "general", count: 300 }],
+  topTextChannels: [
+    {
+      channelId: "c1",
+      channelName: "general",
+      channelType: ChannelType.GuildText,
+      count: 300,
+    },
+  ],
   peakMessageDay: { date: "2026-01-04", count: 60 },
   reactionsGiven: 90,
   reactionsReceived: 120,

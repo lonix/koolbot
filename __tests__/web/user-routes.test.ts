@@ -9,6 +9,7 @@
  *  - The CSRF-protected `/me/finish` revokes the session and clears the cookie.
  */
 
+import { ChannelType } from "discord.js";
 import {
   describe,
   it,
@@ -902,7 +903,24 @@ describe("/me/rewind", () => {
       summary: makeSummary({
         messagesSent: 42,
         topTextChannels: [
-          { channelId: "t1", channelName: "general-chat", count: 30 },
+          {
+            channelId: "t1",
+            channelName: "general-chat",
+            channelType: ChannelType.GuildText,
+            count: 30,
+          },
+          {
+            channelId: "t2",
+            channelName: "news",
+            channelType: ChannelType.GuildAnnouncement,
+            count: 9,
+          },
+          {
+            channelId: "t3",
+            channelName: "Unknown channel",
+            channelType: null,
+            count: 2,
+          },
         ],
         peakMessageDay: { date: "2026-02-01", count: 12 },
       }),
@@ -914,6 +932,10 @@ describe("/me/rewind", () => {
     // Labelled as a text channel, the way Discord labels one (#1303).
     expect(out.body).toContain('aria-label="Text channel"');
     expect(out.body).not.toContain("#general-chat");
+    // Not every tracked channel is a text channel: an announcement channel
+    // gets its own icon, and one that no longer resolves reads unavailable.
+    expect(out.body).toContain('aria-label="Announcement channel"');
+    expect(out.body).toContain("Unknown channel (unavailable)");
     expect(out.body).toContain("42"); // messages sent
   });
 
