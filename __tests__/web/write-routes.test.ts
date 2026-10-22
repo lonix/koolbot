@@ -984,6 +984,7 @@ describe("createWriteRouter (#850)", () => {
         "POST /tickets/:id/reopen",
         "POST /version/check",
         "POST /voice-channels/force-reload",
+        "POST /wizard/access",
         "POST /wizard/apply",
         "POST /wizard/cancel",
         "POST /wizard/start",

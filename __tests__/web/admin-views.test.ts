@@ -4500,7 +4500,7 @@ describe("renderWizardStepPage", () => {
     expect(html).not.toContain("Next →");
   });
 
-  it("omits the Previous button on the first step (#485)", () => {
+  it("links the first step back to the Access step (#485, #1321)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
       ...EMPTY_PICKERS,
@@ -4512,7 +4512,9 @@ describe("renderWizardStepPage", () => {
       defaultValues: {},
       metadata: {},
     });
-    expect(html).not.toContain("← Previous");
+    expect(html).toContain(
+      'href="/admin/wizard?step=access" class="btn">← Previous',
+    );
   });
 
   it("shows a Previous button linking to the prior step on later steps (#485)", () => {
