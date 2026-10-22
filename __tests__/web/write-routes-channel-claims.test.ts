@@ -214,10 +214,8 @@ describe("GET /adopt/claims", () => {
       );
       const html = await res.text();
       expect(html).toContain(`<tr id="claim-${TEXT}">`);
-      expect(html).toMatch(
-        new RegExp(
-          `name="bind_${TEXT}"><option value="">\\(none\\)</option><option value="quotes\\.channel_id" selected>`,
-        ),
+      expect(html).toContain(
+        `name="bind_${TEXT}"><option value="">(none)</option><option value="quotes.channel_id" selected>`,
       );
       expect(html).toContain("Prefilled from the Server scan");
       expect(html).toContain("quote &lt;b&gt;board");

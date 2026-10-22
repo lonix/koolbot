@@ -73,10 +73,9 @@ describe("Claim link and Channel claims form agree (#1364)", () => {
       expect(html).toContain(
         `name="bind_${c.id}"><option value="">(none)</option>`,
       );
-      expect(html).toMatch(
-        new RegExp(
-          `name="bind_${c.id}">(?:(?!</select>).)*<option value="${key.replace(/\./g, "\\.")}" selected>`,
-        ),
+      const select = html.slice(html.indexOf(`name="bind_${c.id}">`));
+      expect(select.slice(0, select.indexOf("</select>"))).toContain(
+        `<option value="${key}" selected>`,
       );
     });
 
