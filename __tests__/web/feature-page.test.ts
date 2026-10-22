@@ -420,7 +420,7 @@ describe("the fold script", () => {
     expect(summaryText()).toContain("1 changed from the default");
     document
       .querySelector("form[action$='save-section']")
-      ?.dispatchEvent(new Event("kb-saved", { bubbles: true }));
+      ?.dispatchEvent(new Event("kb-saved"));
     expect(summaryText()).not.toContain("changed from the default");
     expect(summaryText()).toContain("Settings");
   });

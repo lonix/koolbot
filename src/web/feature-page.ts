@@ -90,7 +90,7 @@ export const SETTINGS_FOLD_SCRIPT =
   // makes it stale, so it goes until the next load rather than saying a wrong
   // number.
   "var h=d.querySelector('[data-fold-hint]');" +
-  "if(h)d.addEventListener('kb-saved',function(){if(h.parentNode)h.parentNode.removeChild(h)});" +
+  "if(h)d.addEventListener('kb-saved',function(){if(h.parentNode)h.parentNode.removeChild(h)},true);" +
   "var chosen=false;var s=d.querySelector('summary');" +
   "if(s)s.addEventListener('click',function(){chosen=true});" +
   "d.addEventListener('toggle',function(){if(!chosen)return;chosen=false;" +
