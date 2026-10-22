@@ -432,6 +432,11 @@ describe("the edit page", () => {
     expect(r.status).toBe(200);
     expect(r.text).toContain(`action="${COVER}"`);
     expect(r.text).toContain("Upload cover");
+    // The page script rides in a nonce-carrying tag (the security-headers
+    // middleware fills the nonce in; this harness has none).
+    expect(r.text).toMatch(
+      /<script nonce="[^"]+">\(function\(\)\{var forms=document\.querySelectorAll\('form\[data-cover-upload\]'\)/,
+    );
     expect(r.text).not.toContain("/cover/remove");
     expect(r.text).not.toContain('href="/admin/events"');
   });
