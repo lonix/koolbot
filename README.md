@@ -492,7 +492,13 @@ To upgrade a pinned install:
 1. Read the [changelog](CHANGELOG.md) for every release between yours and the new one.
 2. [Back up your data](#configuration--data-backup). A newer version may migrate the database, and an older one is not guaranteed
    to read it afterwards.
-3. Change the tag, then run `docker compose pull` and `docker compose up -d`.
+3. Change the `bot.image` tag in `docker-compose.yml`.
+4. Pull the new image and restart:
+
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
 
 Pinned to an older release? Read the docs for that version, from
 [Documentation for older versions](#documentation-for-older-versions), and take `docker-compose.yml` and `.env.example` from the
