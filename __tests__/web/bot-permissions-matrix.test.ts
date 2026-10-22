@@ -189,6 +189,29 @@ describe("buildMatrix", () => {
     expect(rows[0]).toMatchObject({ status: "unknown", places: [null] });
   });
 
+  it("skips a check whose id the registry does not know instead of failing", () => {
+    const stray: FeatureCheck = {
+      ...permCheck("event-tags", "ok", SERVER),
+      feature: { ...feature("event-tags"), id: "removed-from-registry" },
+    };
+    expect(buildMatrix(report([stray]))).toEqual([]);
+  });
+
+  it("escapes the reason a check could not run", () => {
+    const t = cat("C");
+    const html = renderBotPermissionsPage({
+      csrfToken: "t",
+      remainingMs: 1000,
+      report: report([permCheck("event-channels", "unknown", t)], {
+        unknown: [
+          { feature: feature("event-channels"), target: t, note: "<b>why</b>" },
+        ],
+      }),
+    });
+    expect(html).toContain("&lt;b&gt;why&lt;/b&gt;");
+    expect(html).not.toContain("<b>why</b>");
+  });
+
   it("carries the reason a check could not run onto the row", () => {
     const t = cat("Gone");
     const rows = buildMatrix(
@@ -242,6 +265,7 @@ describe("fixSteps", () => {
           problem("Manage Channels", cat("Events")),
           problem("Move Members", cat("Events")),
           problem("Manage Nicknames", SERVER),
+          problem("Manage Roles", SERVER),
           problem("Manage Roles", SERVER),
         ],
       }),

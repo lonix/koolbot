@@ -497,6 +497,9 @@ describe("what is missing and where", () => {
     });
     expect(report.unknown.map((u) => u.feature.id)).toEqual(["voice-lobby"]);
     expect(report.okFeatures.map((f) => f.id)).not.toContain("voice-lobby");
+    expect(
+      report.checks.find((c) => c.feature.id === "voice-lobby"),
+    ).toMatchObject({ enabled: true, outcome: "unknown" });
   });
 
   it("treats the room-status grant as on when its setting is absent, like the voice service", async () => {
