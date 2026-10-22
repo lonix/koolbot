@@ -99,6 +99,7 @@ import { renderSignedOut } from "./views.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createHostEventsRouter } from "./routes/host-events.js";
+import { createMeNewEventRouter } from "./routes/me-new-event.js";
 import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
@@ -627,6 +628,9 @@ export function createUserRouter(
   // below, so it covers the panel and the presets. A host still only reaches
   // events they created (`isEventHost`), an admin session every event.
   router.use("/events", requireScopeMiddleware("host"));
+  // A host creates events of their own (#1305): `/me/events/new`. Sits behind
+  // the guard above, so a member without the scope never reaches it.
+  router.use("/events/new", createMeNewEventRouter(client));
   router.use("/events/:id/host", createHostEventsRouter(client));
   // A host's own group presets (#1216): `/me/events/presets`.
   router.use("/events/presets", createMeEventPresetsRouter(client));

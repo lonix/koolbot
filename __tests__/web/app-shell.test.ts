@@ -94,7 +94,12 @@ const links = (doc: Document): string[] =>
 
 describe("nav registry rules", () => {
   it("never renders an item whose page is not built", () => {
-    const sections = sectionsFor(admin);
+    // Every feature on, so a feature-gated page that is built (New event, #1305)
+    // is not hidden for another reason.
+    const features = Object.fromEntries(
+      SHELL_NAV.flatMap((i) => (i.featureKey ? [[i.featureKey, true]] : [])),
+    );
+    const sections = sectionsFor(admin, SHELL_NAV, features);
     const shown = sections.flatMap((s) => s.items.map((i) => i.href));
     for (const item of SHELL_NAV) {
       expect(shown.includes(item.href)).toBe(item.available);
@@ -199,6 +204,20 @@ describe("sidebar per scope (non-admin /me)", () => {
     const doc = userPage(both, { navRegistry: BUILT });
     expect(headings(doc)).toEqual(["You", "Hosting", "Moderation"]);
     expect(badges(doc)).toEqual(["Event host", "Moderator"]);
+  });
+
+  it("offers New event to a host only while Events is on (#1305)", () => {
+    const on = { ...host, features: { "events.enabled": true } as const };
+    expect(links(userPage(on))).toEqual([
+      "My preferences",
+      "New event",
+      "Event presets",
+    ]);
+    const off = { ...host, features: { "events.enabled": false } as const };
+    expect(links(userPage(off))).not.toContain("New event");
+    // A moderator who does not host is never offered it.
+    const mod = { ...moderator, features: { "events.enabled": true } as const };
+    expect(links(userPage(mod))).not.toContain("New event");
   });
 
   it("uses the real registry: host, moderator, both and member", () => {
@@ -642,11 +661,18 @@ describe("resolveShellFeatures", () => {
     available,
   });
 
-  it("reads nothing while no gated page is built", async () => {
+  it("reads nothing for a gated page that is not built", async () => {
     const read = jest.fn(async () => true);
-    expect(await resolveShellFeatures(read)).toEqual({});
     expect(await resolveShellFeatures(read, [gated(false)])).toEqual({});
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("reads only the gated features of the built pages (New event needs Events)", async () => {
+    const read = jest.fn(async () => true);
+    expect(await resolveShellFeatures(read)).toEqual({
+      "events.enabled": true,
+    });
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("reads each built gated feature once", async () => {

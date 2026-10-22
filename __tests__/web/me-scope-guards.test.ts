@@ -36,6 +36,16 @@ jest.unstable_mockModule("../../src/web/routes/me-event-presets.js", () => ({
   },
 }));
 
+jest.unstable_mockModule("../../src/web/routes/me-new-event.js", () => ({
+  createMeNewEventRouter: (): Router => {
+    const r = Router();
+    r.use((_req, res) => {
+      res.status(200).type("text/plain").send("new-event-reached");
+    });
+    return r;
+  },
+}));
+
 jest.unstable_mockModule("../../src/web/routes/me-moderation.js", () => ({
   createMeModerationRouter: (): Router => {
     const r = Router();
@@ -82,6 +92,7 @@ afterAll(async () => {
 const EVENT_PATHS = [
   "/events/presets",
   "/events/presets/save",
+  "/events/new",
   "/events/abc123/host",
   "/events/abc123/host/end",
 ];
@@ -121,6 +132,16 @@ describe("/me/events needs the host scope (#1316)", () => {
       expect(await panel.text()).toBe("host-panel-reached");
     },
   );
+
+  it("opens the New event page (#1305) only for a host", async () => {
+    as("user", ["member", "host"]);
+    const page = await harness.get("/events/new");
+    expect(await page.text()).toBe("new-event-reached");
+    expect((await harness.post("/events/new", {})).status).toBe(200);
+    as("user", ["member", "moderator"]);
+    expect((await harness.get("/events/new")).status).toBe(403);
+    expect((await harness.post("/events/new", {})).status).toBe(403);
+  });
 
   it("refuses the same session on the next request once the scope is gone", async () => {
     as("user", ["member", "host"]);

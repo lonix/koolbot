@@ -8,6 +8,7 @@
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { designStylesheetLinks } from "./design-assets.js";
+import { icon } from "./icons.js";
 import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { getInactivityWindowMs } from "./session.js";
 import {
@@ -888,8 +889,7 @@ const NAV_OFF_SCRIPT =
   "});" +
   "})();";
 
-const NAV_CHEVRON =
-  '<svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>';
+const NAV_CHEVRON = icon("chevron-right", { className: "kb-chev" });
 
 /** Group name as an element id: "Server setup" -> "admin-nav-server-setup". */
 function navGroupId(group: NavGroup): string {
