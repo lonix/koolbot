@@ -2720,8 +2720,9 @@ change its description and duration. Finished, cancelled and adopted events cann
 event's form first asks how far the change reaches, with no option pre-chosen: **This occurrence** leaves the next occurrences as they were (the
 series' title, description, duration and timezone are kept in a stored template that the next occurrence is built from), and **This and following**
 changes this one and every later one (only the fields the edit changed are written to the template, and a moved start moves the series' schedule so
-this occurrence stays on the new time). A save without a scope is refused. "This occurrence" cannot move the start to or past the next occurrence's
-slot, "This and following" is refused when no schedule reproduces the new start (a monthly date that some months lack), and an occurrence whose
+this occurrence stays on the new time). A save without a scope is refused. A change of start or duration is refused when the event
+would still be running when the next occurrence is due (that occurrence would be skipped). "This and following" is refused when no schedule
+reproduces the new start (a monthly date that some months lack; a change of time alone keeps the series' day), and an occurrence whose
 successor has already been created is refused. The scope is recorded in the audit entry. A save made on an out-of-date form (the event started, ended,
 was cancelled or edited meanwhile) changes nothing and asks you to reload. That includes a form opened before the start with the title and start
 editable and saved after it: the whole save is refused ("This event has started since you opened the form"), never saved without the title and start.

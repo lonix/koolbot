@@ -150,6 +150,33 @@ describe("anchorForOccurrence", () => {
     }
   });
 
+  it("keeps the existing anchor's day when it still reproduces the start (a monthly 31st)", () => {
+    // 28 Feb is occurrence 1 of a series anchored on 31 Jan. Several anchors
+    // reproduce it; the one on the 31st is the series, and 31 Mar must follow.
+    const start = new Date("2030-02-28T21:00:00Z");
+    const prefer = new Date("2030-01-31T20:00:00Z");
+    const anchor = anchorForOccurrence(start, "monthly", 1, "UTC", prefer);
+    expect(anchor).toEqual(new Date("2030-01-31T21:00:00Z"));
+    expect(computeOccurrenceStart(anchor!, "monthly", 2, "UTC")).toEqual(
+      new Date("2030-03-31T21:00:00Z"),
+    );
+    // Without it, the first anchor that works is the 28th.
+    expect(anchorForOccurrence(start, "monthly", 1, "UTC")).toEqual(
+      new Date("2030-01-28T21:00:00Z"),
+    );
+  });
+
+  it("falls back to the inverse when the preferred day no longer reproduces the start", () => {
+    const anchor = anchorForOccurrence(
+      new Date("2030-03-15T20:00:00Z"),
+      "monthly",
+      2,
+      "UTC",
+      new Date("2030-01-31T20:00:00Z"),
+    );
+    expect(anchor).toEqual(new Date("2030-01-15T20:00:00Z"));
+  });
+
   it("is null when no anchor reproduces the start", () => {
     // Occurrence 1 of a monthly series on 28 Feb: the anchor would be 28 Jan,
     // which does reproduce it. Occurrence 1 on 31 Mar needs an anchor day of
@@ -230,7 +257,15 @@ describe("EventService.editEvent on a recurring event", () => {
   };
 
   it("refuses a missing or unknown scope and writes nothing", async () => {
-    for (const scope of [undefined, null]) {
+    for (const scope of [
+      undefined,
+      null,
+      "",
+      "series",
+      "all",
+      "OCCURRENCE",
+      " following",
+    ]) {
       expect(
         await service.editEvent(input({ title: "New" }, scope) as never),
       ).toMatchObject({
@@ -353,6 +388,72 @@ describe("EventService.editEvent on a recurring event", () => {
     expect(computeOccurrenceStart(anchor, "weekly", 2, "UTC")).toEqual(
       startTime,
     );
+  });
+
+  it("'following' with a time-only change keeps a monthly series on its 31st", async () => {
+    stored = series({
+      recurrence: "monthly",
+      occurrenceIndex: 1,
+      startTime: new Date("2030-02-28T20:00:00Z"),
+      seriesStart: new Date("2030-01-31T20:00:00Z"),
+    });
+    await service.editEvent(
+      input(
+        { startTime: new Date("2030-02-28T21:00:00Z") },
+        "following",
+      ) as never,
+    );
+    const anchor = written().set.seriesStart as unknown as Date;
+    expect(anchor).toEqual(new Date("2030-01-31T21:00:00Z"));
+    expect(computeOccurrenceStart(anchor, "monthly", 2, "UTC")).toEqual(
+      new Date("2030-03-31T21:00:00Z"),
+    );
+  });
+
+  it("'occurrence' refuses a start or duration that would run into the next slot", async () => {
+    // The next weekly slot is 11 Jan 20:00. 19:30 is before it, but a two-hour
+    // event from 19:30 ends at 21:30, and the 20:00 slot would be skipped.
+    expect(
+      await service.editEvent(
+        input(
+          { startTime: new Date("2030-01-11T19:30:00Z") },
+          "occurrence",
+        ) as never,
+      ),
+    ).toMatchObject({ ok: false, code: "past-next-slot" });
+    // A duration-only edit of an occurrence moved earlier is checked too.
+    stored = series({ startTime: new Date("2030-01-11T18:00:00Z") });
+    expect(
+      await service.editEvent(
+        input({ durationMinutes: 180 }, "occurrence") as never,
+      ),
+    ).toMatchObject({ ok: false, code: "past-next-slot" });
+    expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(
+      (
+        await service.editEvent(
+          input({ durationMinutes: 90 }, "occurrence") as never,
+        )
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("'following' refuses a duration that would run into the next slot, and leaves a description-only edit alone", async () => {
+    expect(
+      await service.editEvent(
+        input({ durationMinutes: 1440 * 8 }, "following") as never,
+      ),
+    ).toMatchObject({ ok: false, code: "past-next-slot" });
+    // An occurrence that already overlaps its next slot can still get a new
+    // description: the end did not change.
+    stored = series({ durationMinutes: 1440 * 8 });
+    expect(
+      (
+        await service.editEvent(
+          input({ description: "New" }, "following") as never,
+        )
+      ).ok,
+    ).toBe(true);
   });
 
   it("'following' refuses a start no anchor can reproduce, writing nothing", async () => {

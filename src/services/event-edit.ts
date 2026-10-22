@@ -104,7 +104,18 @@ export function nextSeriesTemplate(
   row: EventEditFields & { seriesTemplate?: SeriesTemplate | null },
   want: EventEditFields,
 ): SeriesTemplate {
-  const base = row.seriesTemplate ?? templateFromRow(row);
+  // The four fields are copied one by one: the stored template of a row read
+  // through Mongoose is a subdocument, and spreading or returning it would
+  // carry its internals instead of the values.
+  const stored = row.seriesTemplate;
+  const base: SeriesTemplate = stored
+    ? {
+        title: stored.title,
+        description: stored.description,
+        durationMinutes: stored.durationMinutes,
+        timezone: stored.timezone,
+      }
+    : templateFromRow(row);
   if (scope === "occurrence") return base;
   const out = { ...base };
   if (want.title !== row.title) out.title = want.title;
@@ -133,7 +144,7 @@ export const EDIT_MESSAGES = {
   seriesAdvanced:
     "The next occurrence of this series has already been created, so this one can no longer be edited. Edit the next occurrence instead.",
   pastNextSlot:
-    'For this occurrence only, the new start must be before the next occurrence of the series. Choose "This and following occurrences" to move the whole series.',
+    "With this start and duration the event would still be running when the next occurrence is due, and that occurrence would then be skipped. Move it earlier or shorten it.",
   anchor:
     "That start cannot be applied to the whole series (a monthly date that some months do not have, or a time that does not exist on some days). Pick another day or time, or change this occurrence only.",
   adopted:

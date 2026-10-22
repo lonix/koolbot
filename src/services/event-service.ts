@@ -31,7 +31,7 @@ import {
   hasEdit,
   isSeriesRow,
   nextSeriesTemplate,
-  templateFromRow,
+  parseEditScope,
   type EditScope,
   type EventEditDiff,
   type EventEditFields,
@@ -438,6 +438,7 @@ export function anchorForOccurrence(
   recurrence: EventRecurrence,
   index: number,
   timezone: string,
+  prefer?: Date,
 ): Date | null {
   if (recurrence === "none" || index <= 0) return new Date(start);
   const zone = resolveTimezone(timezone);
@@ -445,12 +446,29 @@ export function anchorForOccurrence(
     .split("-")
     .map(Number);
   const time = formatInTimeZone(start, zone, "HH:mm:ss");
+  const reproduces = (anchor: Date): boolean =>
+    computeOccurrenceStart(anchor, recurrence, index, timezone).getTime() ===
+    start.getTime();
   let target: Date;
   if (recurrence === "monthly") {
     const monthIndex = m - 1 - index;
     const year = y + Math.floor(monthIndex / 12);
     const month = ((monthIndex % 12) + 12) % 12;
     const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    // Several anchors can reproduce a clamped month (28 Feb from the 28th, 29th,
+    // 30th or 31st), and they differ in the months after. The existing anchor's
+    // day is kept when it still reproduces `start`, so a change of time alone
+    // leaves a series on the 31st on the 31st.
+    if (prefer) {
+      const day = Number(formatInTimeZone(prefer, zone, "d"));
+      if (day <= lastDay) {
+        const preferred = fromZonedTime(
+          `${new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10)}T${time}`,
+          zone,
+        );
+        if (reproduces(preferred)) return preferred;
+      }
+    }
     target = new Date(Date.UTC(year, month, Math.min(d, lastDay)));
   } else {
     const stepDays = recurrence === "weekly" ? 7 : 14;
@@ -460,14 +478,7 @@ export function anchorForOccurrence(
     `${target.toISOString().slice(0, 10)}T${time}`,
     zone,
   );
-  return computeOccurrenceStart(
-    anchor,
-    recurrence,
-    index,
-    timezone,
-  ).getTime() === start.getTime()
-    ? anchor
-    : null;
+  return reproduces(anchor) ? anchor : null;
 }
 
 function accentColor(state: IEvent["state"]): number {
@@ -2067,7 +2078,10 @@ export class EventService extends ScheduledService {
 
     // A recurring event needs to be told how far the edit reaches (#1298).
     const series = isSeriesRow(row);
-    const scope = series ? (input.scope ?? null) : null;
+    // Exactly the two known values: anything else is refused, never read as one.
+    const scope = series
+      ? parseEditScope(typeof input.scope === "string" ? input.scope : "")
+      : null;
     if (series && scope === null) {
       return { ok: false, code: "scope", message: EDIT_MESSAGES.scope };
     }
@@ -2129,37 +2143,51 @@ export class EventService extends ScheduledService {
       const anchor = row.seriesStart ?? row.startTime;
       if (!row.seriesStart) seriesWrite.seriesStart = row.startTime;
       const recurs = !!row.recurrence && row.recurrence !== "none";
-      if (scope === "occurrence" && moved && recurs) {
-        // Only this occurrence moves, so it must stay before the next slot:
-        // at or past it, the series would silently lose an occurrence.
-        const nextSlot = computeOccurrenceStart(
-          anchor,
-          row.recurrence,
-          (row.occurrenceIndex ?? 0) + 1,
-          (row.seriesTemplate ?? templateFromRow(row)).timezone,
-        );
-        if (want.startTime.getTime() >= nextSlot.getTime()) {
-          return {
-            ok: false,
-            code: "past-next-slot",
-            message: EDIT_MESSAGES.pastNextSlot,
-          };
-        }
-      }
       const zoneChanged = (want.timezone ?? "") !== (row.timezone ?? "");
+      let scheduleAnchor = anchor;
       if (scope === "following" && (moved || zoneChanged)) {
+        // The existing anchor is passed as the preferred one, so a time-only
+        // change keeps a monthly series' day (31st) instead of the clamped one.
         const newAnchor = recurs
           ? anchorForOccurrence(
               want.startTime,
               row.recurrence,
               row.occurrenceIndex ?? 0,
               template.timezone,
+              row.seriesStart ?? undefined,
             )
           : new Date(want.startTime);
         if (!newAnchor) {
           return { ok: false, code: "anchor", message: EDIT_MESSAGES.anchor };
         }
         seriesWrite.seriesStart = newAnchor;
+        scheduleAnchor = newAnchor;
+      }
+      // The next occurrence is created once this one has ended, and a slot that
+      // is already past by then is skipped. So the edited event must end before
+      // the next slot, or the series silently loses an occurrence. Checked when
+      // the edit changes the start or the duration (the end), against the slot
+      // of the schedule the edit leaves behind.
+      if (
+        recurs &&
+        (moved || zoneChanged || want.durationMinutes !== row.durationMinutes)
+      ) {
+        const nextSlot = computeOccurrenceStart(
+          scheduleAnchor,
+          row.recurrence,
+          (row.occurrenceIndex ?? 0) + 1,
+          template.timezone,
+        );
+        if (
+          computeEndTime(want.startTime, want.durationMinutes).getTime() >=
+          nextSlot.getTime()
+        ) {
+          return {
+            ok: false,
+            code: "past-next-slot",
+            message: EDIT_MESSAGES.pastNextSlot,
+          };
+        }
       }
     }
 
