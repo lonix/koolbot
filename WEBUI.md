@@ -935,7 +935,19 @@ The folded list opens on a switched-off feature's own page, and is otherwise rem
 open or closed per browser. The routes did not change with the names (Command permissions
 is still `/admin/permissions`, Presence `/admin/bot-status`, Environment `/admin/bootstrap`).
 
-The **Dashboard** has a **Version** card (#1029) that shows the running version
+The **Dashboard** (#1322) opens with four tiles, each linking to the page where you act:
+Version, Discord (connected, members, in voice now), Database (connected, a few counts) and
+Permissions (the number of missing bot permissions, warned when above zero). **Needs you**
+lists the problems from Bot permissions and the last Server scan, one row each with a button
+to the page that fixes it, and is left out when there is nothing. **This week in voice** is
+the last 7 days by weekday (only when voice tracking is on) and links to Voice analytics.
+**Features** lists every feature with On or Off and its config key, each linking to its own
+page: nothing is switched on the Dashboard. Every source is read on its own with a time
+limit, so one that fails or is slow says "unavailable" in its own card and never takes the
+page down or reads as zero. The Dashboard never starts a Server scan: it lists what a scan
+read in the last minute found, and the Server scan page is where you run one.
+
+The Dashboard's **Version** panel (#1029) shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
 available_ (with the kind: major, minor or patch), or _couldn't check_. It also
 links to the release notes and has a **Check now** button. When an update is
@@ -1179,6 +1191,17 @@ locked this way because Rewind is a graceful aggregator that declares no
 `dependsOn`. The Setup Wizard keeps its own row layout and gets the same
 switch and segmented controls.
 
+**Channels, categories and roles are labelled the way Discord labels them** (#1303), on every admin page that shows
+one. A text channel reads `# general`, an announcement channel `📢 news`, a voice channel `🔊 Lobby`, a stage
+`🎙️ Town hall`, a forum `💬 ideas`, a thread `🧵 name`, a category `📁 Events` (shown in capitals in tables) and a role
+`@Moderators`. Nothing but a text channel gets a `#`, so a category or voice channel is no longer taken for a text
+channel. A stored id that no longer resolves to a channel (deleted, or the bot cannot see it) reads
+`⚠ 1234 (unavailable)`, and stays selected in its picker so a save does not clear it. Pickers are native selects, grouped by kind
+(`Text channels`, `Voice channels`, `Categories`), with the category after the name (`🔊 Lobby · SCRATCH`);
+tables and sentences use an icon with the kind as its accessible name. One module, `src/web/discord-labels.ts`,
+decides all of this, and `__tests__/web/discord-labels.test.ts` fails when a page writes its own `#` in front of a name.
+The Rewind page (`/me/rewind`) uses the same labels. Voice stats and the searchable, typeahead picker of the design manual are not done yet (#1394).
+
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction
 roles, announcements, notices, polls, LFG, name history, moderation, events,
@@ -1198,14 +1221,33 @@ step comes right after you pick features and maps Discord roles to who can do wh
 (`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a multi-select of roles, and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
-capabilities, and only links existing roles: it does not create or change a role in Discord. Nothing is written when
+capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the
+Event host (below). Nothing is written when
 you save the step. The picks wait in the wizard session and are applied from **Review**, which lists the role
 groups it will create or change. Apply checks the roles against Discord again, refuses if the role groups changed since Review,
 writes the groups one at a time with an audit entry each, and undoes them if a write fails or the settings that follow fail to apply, so a mapping is
 never reported as saved while half of it is. It refuses a managed role, a role at or above the bot's, a role behind
 a bot group, a role a feature hands out to members (rules, birthday, leaderboard tiers, raid quarantine, reaction roles),
 and removing `admin` from a group (that goes through Role groups, where it is reviewed). A callout says when Events or
-Moderation is on and no role is mapped to run it. To create an Event host role, use the Event host preset on Role groups first.
+Moderation is on and no role is mapped to run it.
+
+When no Event host role exists (no role of that name in Discord, no group carrying `host`), the Event hosts card offers
+**Create @Event host**: a role with no Discord permissions and nobody in it, mapped to the `host` capability. Ticking it
+only saves the choice in the wizard session. **Review** lists what the adoption engine would do (a single role create) and
+carries the plan id. Roles are only ever created through the engine, never with a direct Discord call: Apply recomputes
+the plan from the live server and refuses, before writing anything, if the plan id no longer matches, if the plan holds
+anything besides that one role (drift or reorders on other groups belong on Role groups), or if the bot lacks Manage
+Roles (the card and the Access step refuse it up front as well). The role is created last: after the role mapping and the
+settings have applied, Apply saves the Event host group (with no role yet), plans again from the saved groups, starts the
+engine's background job only if that plan is the one Review showed, and goes to `/admin/role-groups?job=…`, which shows
+the job's outcome and links the group to the new role when it finishes. Apply waits until the job is committed (past
+the busy-server lock and the live checks, before the first Discord write). If the group can't be saved or the job can't
+start, the group is removed again; once the job is committed it is never removed. The new group ranks strictly below
+every other group, so it is never inside another group's "group and above"; if a group already has rank 0 the card
+refuses until the order is re-saved on Role groups. A new group is only ever linked to a role created after it was
+saved. When the role was not created, the message says the settings and mapping are live.
+A job that fails in Discord leaves the group without a role, which does not count as mapped; finish it on Role groups.
+The group write and the role creation each get an audit entry.
 
 The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
@@ -1473,8 +1515,11 @@ groups are defined:
   @everyone as the birthday role or a tier is refused, naming the permissions (on the Settings page,
   section saves, imports and the Setup Wizard too). A role already saved is kept, not changed, and not granted: the
   birthday run still announces but skips the role, and a tier skips new grants, each logging one
-  warning per role. The `admin` group's role is refused at grant time as well. If the guild's roles
-  can't be read, the save is refused.
+  warning per role. A role that backs any role group (Admins, Moderators or Event hosts) is refused at
+  grant time as well, by the birthday role, leaderboard tiers, the Rules acceptance role and the raid
+  quarantine role (#1375), so a combination saved earlier or created some other way can't hand a group's
+  access to everyone the feature reaches. The log names the group; if the groups can't be read nothing is
+  granted. If the guild's roles can't be read, the save is refused.
 - **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
   chosen for another feature (a leaderboard tier would take it back from members, a birthday role
   would hand it out). The save is refused with a message naming the group. Choices made earlier are
@@ -1589,20 +1634,26 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
-The **Groups** section of the schedule form (#1188) is optional and off unless
-"Use groups for this event" is ticked; a plain event is created exactly as before.
+The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
+folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.
 It sets up a list of groups for the event, such as quiz teams, clan-match squads,
-breakout rooms or raid parties: a **preset** (2, 3 or 4 teams, each listed with its team
-names and markers, or Custom), what a group and a leader are called (Team, Squad, Room, Party;
-Leader, Captain), a **channel creation time** in minutes before the start (empty
-uses `events.create_lead_minutes`) and, per group, a name, a kind (**team**: members
-belong to it; **open**: anyone can join, such as spectators), an optional size (1 to 99, the voice user limit), an
-optional tag (up to 8 characters, so a nickname keeps room within Discord's 32) and
-an optional colour marker such as a coloured circle. A separate tick box, **Group
+breakout rooms or raid parties. The setups come first, as cards: the built-in 2, 3 and 4 teams, the
+server's and the host's own presets, and Custom. Choosing a card fills the rows and shows a one-line
+summary ("2 groups · Red 🔴, Blue 🔵 · 5 each") with **Customise** to open them; **Max per group**
+sets the size of every group in one click. For Custom, **Build groups** makes N groups of S
+(named Red, Blue, Green… or Team 1…N, with a colour marker each). Each group is one row: marker (an emoji
+picker of coloured circles and squares and common team icons, Unicode only and never longer than the
+marker limit), name, size (1 to 99, the voice user limit, copied down from the first row), tag (up to 8
+characters, so a nickname keeps room within Discord's 32; it starts as the name in capitals while clan tags
+are on) and, behind **More**, the kind (**team**: members belong to it; **open**: anyone can join, such as
+spectators). **Advanced** holds what a group is called (Team, Squad, Room, Party), and a **channel
+creation time** in minutes before the start (empty uses `events.create_lead_minutes`). Without
+JavaScript everything is shown open, the marker is a text box and the kind a select, and the same fields
+are posted. A separate switch, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
-**Leaders** below), **Leaders can customise** (#1196, off by default, only used while
-Group leaders is ticked; see **Team names and tags** below), **Captains lobby** (#1251, off by
-default, only used while Group leaders is ticked; see **Captains lobby** below) is a
+**Leaders** below); **What a leader is called**, **Leaders can customise** (#1196, off by default; see
+**Team names and tags** below) and **Captains lobby** (#1251, off by
+default; see **Captains lobby** below) appear under it only while it is on. The captains lobby is a
 separate voice channel that only the host and the current leaders can join, and **Clan tags** (#1194) puts each team's tag on its members'
 server nicknames while the event runs (off by default; see **Clan tags** below).
 The leaders-only channel is no longer a kind of group in the list: a preset (or a
@@ -2728,17 +2779,24 @@ ended, or is being ended, answers "could not be cancelled: it is ended" (admin p
 spawns no successor. A recurring event's next occurrence is created by the next scan,
 as after a scheduled end.
 
-**Edit** (#1298) opens the create form pre-filled, on the host panel's own address (`/me/events/<id>/host/edit`), for an upcoming or running one-off
-event. An administrator can edit any event; a host with the Event host role only the events they created. A scheduled event with no channel yet takes a
-new title, description, date, time, timezone and duration, with the same checks as the create form. The Discord event is patched in place (so the people
-who marked Interested are kept), the announcement is edited in place, and a moved start moves the lead-time channel creation and sends the reminder
-again. An event that has started (running, its channel already created, or past its start) can only change its description and duration. Finished,
-cancelled, recurring and adopted events cannot be edited: changing one occurrence of a series would change every later one. A save made on an
-out-of-date form (the event started, ended, was cancelled or edited meanwhile) changes nothing and asks you to reload. That includes a form opened
-before the start with the title and start editable and saved after it: the whole save is refused ("This event has started since you opened the form"),
-never saved without the title and start. The same holds for events turned off, a Discord event still being created (a new title or start is refused,
-and nothing else from that save is applied) and a running Discord event that holds the start. Every save is audited as `event.edit` with the changed
-fields before and after; a refusal is audited as a failure.
+**Edit** (#1298) opens the create form pre-filled, on the host panel's own address (`/me/events/<id>/host/edit`), for an upcoming or running event,
+one-off or an occurrence of a recurring series. An administrator can edit any event; a host with the Event host role only the events they created. A
+scheduled event with no channel yet takes a new title, description, date, time, timezone and duration, with the same checks as the create form. The
+Discord event is patched in place (so the people who marked Interested are kept), the announcement is edited in place, and a moved start moves the
+lead-time channel creation and sends the reminder again. An event that has started (running, its channel already created, or past its start) can only
+change its description and duration. Finished, cancelled and adopted events cannot be edited (an adopted one is edited in Discord). A recurring
+event's form first asks how far the change reaches, with no option pre-chosen: **This occurrence** leaves the next occurrences as they were (the
+series' title, description, duration and timezone are kept in a stored template that the next occurrence is built from), and **This and following**
+changes this one and every later one (only the fields the edit changed are written to the template, and a moved start moves the series' schedule so
+this occurrence stays on the new time). A save without a scope is refused. A change of start or duration is refused when the event
+would still be running when the next occurrence is due (that occurrence would be skipped). "This and following" is refused when no schedule
+reproduces the new start (a monthly date that some months lack; a change of time alone keeps the series' day), and an occurrence whose
+successor has already been created is refused. The scope is recorded in the audit entry. A save made on an out-of-date form (the event started, ended,
+was cancelled or edited meanwhile) changes nothing and asks you to reload. That includes a form opened before the start with the title and start
+editable and saved after it: the whole save is refused ("This event has started since you opened the form"), never saved without the title and start.
+The same holds for events turned off, a Discord event still being created (a new title or start is refused, and nothing else from that save is
+applied) and a running Discord event that holds the start. Every save is audited as `event.edit` with the changed fields before and after; a refusal
+is audited as a failure.
 
 The **Cover image** column (#1181) sets, replaces and removes an optional cover
 for a scheduled or active event. The image is mirrored to the native Discord event

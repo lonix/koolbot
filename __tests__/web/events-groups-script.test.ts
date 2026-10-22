@@ -1,4 +1,4 @@
-/* global HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLElement */
+/* global HTMLInputElement, HTMLOptionElement, HTMLElement */
 /**
  * The Groups section's page script, run for real in jsdom (#1188). The markup
  * and script come from `renderEventsPage`, so what is tested is what ships.
@@ -59,6 +59,10 @@ function boot(
     code.includes("koolbot-event-form-draft"),
   );
   if (!groups) throw new Error("groups script not found");
+  const rowsScript = scripts.find((code) => code.includes("koolGroupRows="));
+  if (!rowsScript) throw new Error("group rows script not found");
+  // The same order as the page: the shared rows script, then the form's.
+  dom.window.eval(rowsScript);
   dom.window.eval(groups);
   return dom;
 }
@@ -87,46 +91,62 @@ function tick(dom: JSDOM): void {
   box.dispatchEvent(new (dom.window as Win).Event("change", { bubbles: true }));
 }
 
+/** Click a preset card: check its radio and fire the change event. */
+function choosePreset(dom: JSDOM, id: string): void {
+  const radio = dom.window.document.querySelector(
+    `input[type=radio][name="groups_preset"][value="${id}"]`,
+  ) as HTMLInputElement;
+  radio.checked = true;
+  radio.dispatchEvent(
+    new (dom.window as Win).Event("change", { bubbles: true }),
+  );
+}
+
+/** The value of the chosen preset card ("" = Custom). */
+function chosenPreset(dom: JSDOM): string {
+  const radio = dom.window.document.querySelector(
+    'input[type=radio][name="groups_preset"]:checked',
+  ) as HTMLInputElement | null;
+  return radio ? radio.value : "<none>";
+}
+
 describe("oversized presets (#1188)", () => {
   it("renders presets bigger than the cap disabled, with the reason", () => {
     const doc = new JSDOM(page(2)).window.document;
-    const option = (id: string): HTMLOptionElement =>
-      doc.querySelector(`option[value="${id}"]`) as HTMLOptionElement;
-    expect(option("builtin:red-vs-blue").disabled).toBe(false);
-    expect(option("builtin:wardogs").disabled).toBe(true);
-    expect(option("builtin:wardogs").textContent).toContain(
-      "needs 3 groups, limit is 2",
-    );
-    expect(option("builtin:eve-factions").disabled).toBe(true);
-    expect(option("builtin:eve-factions").textContent).toContain(
+    const card = (id: string): HTMLInputElement =>
+      doc.querySelector(`input[value="${id}"]`) as HTMLInputElement;
+    const text = (id: string): string =>
+      card(id).parentElement?.textContent ?? "";
+    expect(card("builtin:red-vs-blue").disabled).toBe(false);
+    expect(card("builtin:wardogs").disabled).toBe(true);
+    expect(text("builtin:wardogs")).toContain("needs 3 groups, limit is 2");
+    expect(card("builtin:eve-factions").disabled).toBe(true);
+    expect(text("builtin:eve-factions")).toContain(
       "needs 4 groups, limit is 2",
     );
   });
 
   it("offers every preset when the cap is large enough", () => {
     const doc = new JSDOM(page(15)).window.document;
-    expect(doc.querySelectorAll("option[disabled]")).toHaveLength(0);
+    expect(doc.querySelectorAll("input[type=radio][disabled]")).toHaveLength(0);
   });
 
   it("does not replace rows or truncate when an oversized preset is selected anyway", () => {
     const dom = boot(2);
     field(dom, "group_0_name").value = "Mine";
-    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
-    select.value = "builtin:wardogs";
-    select.dispatchEvent(
-      new (dom.window as Win).Event("change", { bubbles: true }),
-    );
+    // A disabled card cannot be clicked; forcing it must still change nothing.
+    const wardogs = dom.window.document.querySelector(
+      'input[value="builtin:wardogs"]',
+    ) as HTMLInputElement;
+    wardogs.disabled = false;
+    choosePreset(dom, "builtin:wardogs");
     expect(field(dom, "group_0_name").value).toBe("Mine");
-    expect(select.value).toBe("");
+    expect(chosenPreset(dom)).toBe("");
   });
 
   it("fills a preset that fits", () => {
     const dom = boot(2);
-    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
-    select.value = "builtin:red-vs-blue";
-    select.dispatchEvent(
-      new (dom.window as Win).Event("change", { bubbles: true }),
-    );
+    choosePreset(dom, "builtin:red-vs-blue");
     expect(field(dom, "group_0_name").value).toBe("Red");
     expect(field(dom, "group_1_name").value).toBe("Blue");
     expect(field(dom, "groups_enabled").checked).toBe(true);
@@ -344,16 +364,13 @@ describe("restoring a draft after a refused submit (#1188)", () => {
       groups_enabled: true,
       groups_preset: "builtin:wardogs",
     });
-    expect(
-      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
-    ).toBe("");
+    // The card is disabled (over the cap), so Custom stays chosen.
+    expect(chosenPreset(dom)).toBe("");
   });
 
   it("puts back a preset that is offered", () => {
     const dom = boot(15, 2, { groups_preset: "builtin:wardogs" });
-    expect(
-      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
-    ).toBe("builtin:wardogs");
+    expect(chosenPreset(dom)).toBe("builtin:wardogs");
   });
 
   it("restores nothing without an error flash", () => {
@@ -399,11 +416,7 @@ describe("the Captains lobby switch of the event form (#1251)", () => {
     ],
   };
   const choose = (dom: JSDOM, id: string): void => {
-    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
-    select.value = id;
-    select.dispatchEvent(
-      new (dom.window as Win).Event("change", { bubbles: true }),
-    );
+    choosePreset(dom, id);
   };
   const captains = (dom: JSDOM, on: boolean): void => {
     const box = field(dom, "groups_captains");
@@ -582,11 +595,7 @@ describe("choosing a preset recomputes the lobby, the cap and the button (#1263)
     preset("lib:lobby", ["team", "team", "leads"]),
   ];
   const pick = (dom: JSDOM, id: string): void => {
-    const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
-    select.value = id;
-    select.dispatchEvent(
-      new (dom.window as Win).Event("change", { bubbles: true }),
-    );
+    choosePreset(dom, id);
   };
   const tickBox = (dom: JSDOM, name: string, checked: boolean): void => {
     const el = field(dom, name);

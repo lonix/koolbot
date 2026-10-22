@@ -12,6 +12,7 @@
 
 import { escapeHtml, scriptTag } from "./html.js";
 import { renderSegmented } from "./setting-controls.js";
+import { groupRowsScript } from "./event-group-form.js";
 import { EVENT_GROUPS_SCRIPT, renderGroupsSection } from "./admin-views.js";
 import {
   EVENT_WHEN_CHOICES,
@@ -69,12 +70,6 @@ function timezoneOptions(serverZone: string): string {
   ].join("");
 }
 
-// The shared Groups block still uses plain label/field markup, which the member
-// layout does not style (as the preset editor, `me-event-presets-page.ts`).
-// Scoped to that block so the kb- controls around it are untouched.
-const GROUPS_STYLE =
-  "<style>[data-groups-section] label{display:block;margin:0 0 .75rem}[data-groups-section] label.checkbox{display:flex;gap:.5rem;align-items:flex-start}[data-groups-section] input[type=text],[data-groups-section] input[type=number],[data-groups-section] select{display:block;max-width:100%}[data-groups-section] fieldset{margin:0 0 .75rem}</style>";
-
 export function renderNewEventBody(props: NewEventViewProps): string {
   const when = renderSegmented(
     "when",
@@ -95,7 +90,6 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   </div>
 </header>
 ${notice}
-${GROUPS_STYLE}
 <form method="POST" action="/me/events/new" class="kb-stack" data-event-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
   <section class="kb-panel" aria-labelledby="new-event-when-h">
@@ -147,6 +141,7 @@ ${GROUPS_STYLE}
   </section>
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>
 </form>
+${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
 ${EVENT_WHEN_SCRIPT}`;
 }

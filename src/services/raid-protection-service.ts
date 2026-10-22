@@ -2,6 +2,8 @@ import { Client, Guild, GuildMember, type Role } from "discord.js";
 import { Types } from "mongoose";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 import { ConfigService } from "./config-service.js";
+import { RoleGroupService } from "./role-group-service.js";
+import { groupBackedBlockReason } from "../utils/role-safety.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -1228,6 +1230,22 @@ export class RaidProtectionService {
         problem = "the quarantine role must be an ordinary role";
       else if (!role.editable)
         problem = "the quarantine role is not below the bot's highest role";
+      else {
+        // A role that backs a role group (admin, Moderators or Event hosts)
+        // would hand that access to everyone quarantined (#1375). If the
+        // groups can't be read the role can't be cleared, so it isn't used.
+        try {
+          const block = groupBackedBlockReason(
+            await RoleGroupService.getInstance().groupBackedRoles(guild.id, [
+              role.id,
+            ]),
+          );
+          if (block) problem = `the quarantine role ${block}`;
+        } catch {
+          problem =
+            "the quarantine role could not be checked against the role groups";
+        }
+      }
     }
     if (problem) {
       if (!this.warned.has(problem)) {

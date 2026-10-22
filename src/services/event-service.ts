@@ -29,6 +29,11 @@ import {
   editModeOf,
   eventEditVersion,
   hasEdit,
+  isSeriesRow,
+  nextSeriesTemplate,
+  parseEditScope,
+  seriesWriteFilter,
+  type EditScope,
   type EventEditDiff,
   type EventEditFields,
   type RenderedMode,
@@ -181,12 +186,16 @@ export function announcementContentKey(event: {
 
 /** The outcome of {@link EventService.editEvent} (#1298). */
 export type EditEventResult =
-  | { ok: true; event: IEvent; diff: EventEditDiff }
+  | { ok: true; event: IEvent; diff: EventEditDiff; scope: EditScope | null }
   | {
       ok: false;
       code:
         | "not-found"
         | "refused"
+        | "scope"
+        | "series-advanced"
+        | "past-next-slot"
+        | "anchor"
         | "conflict"
         | "locked"
         | "bad-end"
@@ -434,6 +443,61 @@ export function computeOccurrenceStart(
   if (drift > 43200) drift -= 86400;
   else if (drift < -43200) drift += 86400;
   return drift > 0 ? new Date(resolved.getTime() + drift * 1000) : resolved;
+}
+
+/**
+ * The series anchor that puts occurrence `index` at `start` (the inverse of
+ * {@link computeOccurrenceStart}), or null when no anchor does: a monthly day
+ * the anchor month lacks, or a wall-clock time inside a DST gap. The result is
+ * checked by running the forward computation, so a non-null anchor always
+ * reproduces `start` exactly (#1298).
+ */
+export function anchorForOccurrence(
+  start: Date,
+  recurrence: EventRecurrence,
+  index: number,
+  timezone: string,
+  prefer?: Date,
+): Date | null {
+  if (recurrence === "none" || index <= 0) return new Date(start);
+  const zone = resolveTimezone(timezone);
+  const [y, m, d] = formatInTimeZone(start, zone, "yyyy-MM-dd")
+    .split("-")
+    .map(Number);
+  const time = formatInTimeZone(start, zone, "HH:mm:ss");
+  const reproduces = (anchor: Date): boolean =>
+    computeOccurrenceStart(anchor, recurrence, index, timezone).getTime() ===
+    start.getTime();
+  let target: Date;
+  if (recurrence === "monthly") {
+    const monthIndex = m - 1 - index;
+    const year = y + Math.floor(monthIndex / 12);
+    const month = ((monthIndex % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    // Several anchors can reproduce a clamped month (28 Feb from the 28th, 29th,
+    // 30th or 31st), and they differ in the months after. The existing anchor's
+    // day is kept when it still reproduces `start`, so a change of time alone
+    // leaves a series on the 31st on the 31st.
+    if (prefer) {
+      const day = Number(formatInTimeZone(prefer, zone, "d"));
+      if (day <= lastDay) {
+        const preferred = fromZonedTime(
+          `${new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10)}T${time}`,
+          zone,
+        );
+        if (reproduces(preferred)) return preferred;
+      }
+    }
+    target = new Date(Date.UTC(year, month, Math.min(d, lastDay)));
+  } else {
+    const stepDays = recurrence === "weekly" ? 7 : 14;
+    target = new Date(Date.UTC(y, m - 1, d - stepDays * index));
+  }
+  const anchor = fromZonedTime(
+    `${target.toISOString().slice(0, 10)}T${time}`,
+    zone,
+  );
+  return reproduces(anchor) ? anchor : null;
 }
 
 function accentColor(state: IEvent["state"]): number {
@@ -1738,13 +1802,19 @@ export class EventService extends ScheduledService {
         return later;
       }
 
-      const anchor = previous.seriesStart ?? previous.startTime;
+      // What an edit left for the series (#1298), read from the fresh row: the
+      // occurrence has left `scheduled`/`active` by now, so no edit can still
+      // change it. Without a template the occurrence's own values carry on.
+      const template = fresh.seriesTemplate ?? null;
+      const zone = template ? template.timezone : previous.timezone;
+      const anchor =
+        fresh.seriesStart ?? previous.seriesStart ?? previous.startTime;
       let index = previous.occurrenceIndex + 1;
       let start = computeOccurrenceStart(
         anchor,
         previous.recurrence,
         index,
-        previous.timezone,
+        zone,
       );
       for (
         let skipped = 0;
@@ -1756,7 +1826,7 @@ export class EventService extends ScheduledService {
           anchor,
           previous.recurrence,
           index,
-          previous.timezone,
+          zone,
         );
       }
       if (start.getTime() <= now.getTime()) {
@@ -1798,11 +1868,13 @@ export class EventService extends ScheduledService {
           );
           const doc = new Event({
             guildId: previous.guildId,
-            title: previous.title,
-            description: previous.description,
+            title: template ? template.title : previous.title,
+            description: template ? template.description : previous.description,
             startTime: start,
-            timezone: previous.timezone,
-            durationMinutes: previous.durationMinutes,
+            timezone: zone,
+            durationMinutes: template
+              ? template.durationMinutes
+              : previous.durationMinutes,
             categoryId: previous.categoryId,
             state: "scheduled",
             reminderSent: false,
@@ -2037,6 +2109,11 @@ export class EventService extends ScheduledService {
     /** The mode the form was rendered in; part of the token (`eventEditVersion`). */
     renderedMode: RenderedMode;
     changes: EventEditFields;
+    /**
+     * How far the edit reaches on a recurring event; required there (a missing
+     * one is refused, never defaulted) and ignored on a one-off event.
+     */
+    scope?: EditScope | null;
     now?: Date;
   }): Promise<EditEventResult> {
     const now = input.now ?? new Date();
@@ -2062,6 +2139,23 @@ export class EventService extends ScheduledService {
     });
     if (eventEditVersion(row, input.renderedMode) !== input.expectedVersion) {
       return conflict();
+    }
+
+    // A recurring event needs to be told how far the edit reaches (#1298).
+    const series = isSeriesRow(row);
+    // Exactly the two known values: anything else is refused, never read as one.
+    const scope = series
+      ? parseEditScope(typeof input.scope === "string" ? input.scope : "")
+      : null;
+    if (series && scope === null) {
+      return { ok: false, code: "scope", message: EDIT_MESSAGES.scope };
+    }
+    if (series && row.nextSpawned === true) {
+      return {
+        ok: false,
+        code: "series-advanced",
+        message: EDIT_MESSAGES.seriesAdvanced,
+      };
     }
 
     const want = input.changes;
@@ -2102,6 +2196,66 @@ export class EventService extends ScheduledService {
     if (!hasEdit(diff)) {
       return { ok: false, code: "unchanged", message: EDIT_MESSAGES.unchanged };
     }
+    // What a recurring edit writes besides the row's own fields: the template
+    // the next occurrence is built from, and the series anchor.
+    const seriesWrite: Record<string, unknown> = {};
+    if (series && scope !== null) {
+      const template = nextSeriesTemplate(scope, row, want);
+      seriesWrite.seriesTemplate = template;
+      // The anchor the schedule is computed from. A row without one (made
+      // before it was stored) is pinned to its start as it is NOW, so a move of
+      // this occurrence cannot drag the series along.
+      const anchor = row.seriesStart ?? row.startTime;
+      if (!row.seriesStart) seriesWrite.seriesStart = row.startTime;
+      const recurs = !!row.recurrence && row.recurrence !== "none";
+      const zoneChanged = (want.timezone ?? "") !== (row.timezone ?? "");
+      let scheduleAnchor = anchor;
+      if (scope === "following" && (moved || zoneChanged)) {
+        // The existing anchor is passed as the preferred one, so a time-only
+        // change keeps a monthly series' day (31st) instead of the clamped one.
+        const newAnchor = recurs
+          ? anchorForOccurrence(
+              want.startTime,
+              row.recurrence,
+              row.occurrenceIndex ?? 0,
+              template.timezone,
+              row.seriesStart ?? undefined,
+            )
+          : new Date(want.startTime);
+        if (!newAnchor) {
+          return { ok: false, code: "anchor", message: EDIT_MESSAGES.anchor };
+        }
+        seriesWrite.seriesStart = newAnchor;
+        scheduleAnchor = newAnchor;
+      }
+      // The next occurrence is created once this one has ended, and a slot that
+      // is already past by then is skipped. So the edited event must end before
+      // the next slot, or the series silently loses an occurrence. Checked when
+      // the edit changes the start or the duration (the end), against the slot
+      // of the schedule the edit leaves behind.
+      if (
+        recurs &&
+        (moved || zoneChanged || want.durationMinutes !== row.durationMinutes)
+      ) {
+        const nextSlot = computeOccurrenceStart(
+          scheduleAnchor,
+          row.recurrence,
+          (row.occurrenceIndex ?? 0) + 1,
+          template.timezone,
+        );
+        if (
+          computeEndTime(want.startTime, want.durationMinutes).getTime() >=
+          nextSlot.getTime()
+        ) {
+          return {
+            ok: false,
+            code: "past-next-slot",
+            message: EDIT_MESSAGES.pastNextSlot,
+          };
+        }
+      }
+    }
+
     // A native create that timed out may still land in Discord, and the sync
     // recognises it by the row's name and start. Renaming or moving the row now
     // would make it unrecognisable and a second Discord event would be created,
@@ -2131,6 +2285,7 @@ export class EventService extends ScheduledService {
     if (want.durationMinutes !== row.durationMinutes) {
       changes.durationMinutes = want.durationMinutes;
     }
+    Object.assign(changes, seriesWrite);
 
     const updated = await Event.findOneAndUpdate(
       {
@@ -2161,6 +2316,9 @@ export class EventService extends ScheduledService {
               nativeCreateStartedAt: row.nativeCreateStartedAt ?? null,
             }
           : {}),
+        // A successor that appeared since (or a moved anchor) means the series
+        // has moved on from what the scope was judged against.
+        ...(series ? seriesWriteFilter(row) : {}),
         nativeAdopted: { $ne: true },
         seriesCancelled: { $ne: true },
       },
@@ -2197,7 +2355,7 @@ export class EventService extends ScheduledService {
       this.linkVerified.delete(id);
     }
     logger.info(`Edited event ${sanitizeForLog(id)}`);
-    return { ok: true, event: updated, diff };
+    return { ok: true, event: updated, diff, scope };
   }
 
   /** Whether events are on; false when off or when the setting cannot be read. */

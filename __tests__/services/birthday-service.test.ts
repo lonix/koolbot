@@ -45,10 +45,10 @@ jest.unstable_mockModule(
   }),
 );
 
-const mockGetRoleIdsWith = jest.fn();
+const mockGroupBackedRoles = jest.fn();
 jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: {
-    getInstance: jest.fn(() => ({ getRoleIdsWith: mockGetRoleIdsWith })),
+    getInstance: jest.fn(() => ({ groupBackedRoles: mockGroupBackedRoles })),
   },
 }));
 
@@ -349,7 +349,7 @@ describe("BirthdayService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
-    mockGetRoleIdsWith.mockResolvedValue([]);
+    mockGroupBackedRoles.mockResolvedValue([]);
     mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
       const k = key as string;
       if (k === "birthdays.enabled") return true;
@@ -797,13 +797,25 @@ describe("BirthdayService", () => {
       expect(blockedWarnings()).toHaveLength(0);
     });
 
-    it("refuses the admin role group's role", async () => {
-      mockGetRoleIdsWith.mockResolvedValue(["role-1"]);
-      const { rolesAdd } = await runWithRole(0n);
+    it.each(["Admins", "Moderators", "Event hosts"])(
+      "refuses a role that backs the %s group and says why (#1375)",
+      async (groupName) => {
+        mockGroupBackedRoles.mockResolvedValue([
+          { roleId: "role-1", groupName },
+        ]);
+        const { summary, rolesAdd } = await runWithRole(0n);
 
-      expect(mockGetRoleIdsWith).toHaveBeenCalledWith("guild-1", "admin");
-      expect(rolesAdd).not.toHaveBeenCalled();
-    });
+        expect(mockGroupBackedRoles).toHaveBeenCalledWith("guild-1", [
+          "role-1",
+        ]);
+        expect(summary?.announced).toBe(2);
+        expect(rolesAdd).not.toHaveBeenCalled();
+        expect(blockedWarnings()).toHaveLength(1);
+        expect(String(blockedWarnings()[0][0])).toContain(
+          `backs the role group "${groupName}"`,
+        );
+      },
+    );
 
     it("reads the live role: a cached safe role that is privileged on a fresh fetch is not granted", async () => {
       const { rolesAdd } = await runWithRole(
@@ -831,8 +843,8 @@ describe("BirthdayService", () => {
       expect(unverified()).toHaveLength(1);
     });
 
-    it("refuses the grant, but still announces, when the admin group cannot be read", async () => {
-      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+    it("refuses the grant, but still announces, when the role groups cannot be read", async () => {
+      mockGroupBackedRoles.mockRejectedValue(new Error("db down"));
       const { summary, rolesAdd } = await runWithRole(0n);
 
       expect(summary?.announced).toBe(2);
@@ -901,7 +913,7 @@ describe("BirthdayService", () => {
       await BirthdayService.getInstance(client).runNow();
 
       expect(rolesFetch).not.toHaveBeenCalled();
-      expect(mockGetRoleIdsWith).not.toHaveBeenCalled();
+      expect(mockGroupBackedRoles).not.toHaveBeenCalled();
     });
 
     it("leaves a deleted role to the existing grant failure path", async () => {

@@ -85,3 +85,33 @@ describe("code that adds a role to a member", () => {
     expect(adders).toEqual(Object.keys(ROLE_GRANT_CODE).sort());
   });
 });
+
+describe("grant-time guard (#1375)", () => {
+  // Configuration-time guards only run when a setting is saved. A combination
+  // stored earlier, or created some other way, is stopped when the grant
+  // happens, so every file behind a role-granting setting must ask the role
+  // groups (any scope) before it adds the role.
+  const featureFiles = Object.entries(ROLE_GRANT_CODE)
+    .filter(([, key]) => granting.has(key))
+    .map(([file]) => file);
+
+  it("finds the features that grant through a setting", () => {
+    expect([...featureFiles].sort()).toEqual([
+      "services/birthday-service.ts",
+      "services/leaderboard-role-service.ts",
+      "services/raid-protection-service.ts",
+      "services/rules-service.ts",
+    ]);
+  });
+
+  it.each(featureFiles)(
+    "%s refuses a group-backed role before granting it",
+    (file) => {
+      const text = fs.readFileSync(path.join(SRC, file), "utf8");
+      expect(text).toMatch(/\.groupBackedRoles\(/);
+      expect(text).toMatch(
+        /(automaticGrantBlockReason|groupBackedBlockReason)\(/,
+      );
+    },
+  );
+});

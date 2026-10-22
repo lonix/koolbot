@@ -62,6 +62,12 @@ export function planIsApplicable(p: GroupPlan): boolean {
 export async function planRoleGroups(
   guild: Guild,
   adminUserId: string,
+  /**
+   * Plan a groups list that differs from what is saved (the wizard previews a
+   * group it has not written yet). The preview is read-only: tracked role
+   * names are resolved in memory and nothing is written to the database.
+   */
+  transform?: (saved: RoleGroupView[]) => RoleGroupView[],
 ): Promise<GroupPlan> {
   const service = RoleGroupService.getInstance();
   let groups = await service.list(guild.id);
@@ -75,7 +81,13 @@ export async function planRoleGroups(
     needBots,
     needMembers,
   );
-  groups = await trackNames(guild.id, groups, scan.scanned.roles);
+  groups = await trackNames(
+    guild.id,
+    groups,
+    scan.scanned.roles,
+    transform === undefined,
+  );
+  if (transform) groups = transform(groups);
   const { desired, issues } = buildDesiredState(groups, scan.scanned);
   const plan = planAdoption(scan.scanned, desired, {
     approverId: adminUserId,
@@ -110,14 +122,18 @@ export async function trackNames(
   guildId: string,
   groups: RoleGroupView[],
   roles: readonly RoleState[],
+  /** `false` resolves the names in memory only (a read-only preview). */
+  persist = true,
 ): Promise<RoleGroupView[]> {
   const track = roleNamesToTrack(groups, roles, guildId);
   if (track.length === 0) return groups;
-  try {
-    await RoleGroupService.getInstance().trackRoleNames(guildId, track);
-  } catch (error) {
-    logger.warn("role groups: could not start tracking role names", error);
-    return groups;
+  if (persist) {
+    try {
+      await RoleGroupService.getInstance().trackRoleNames(guildId, track);
+    } catch (error) {
+      logger.warn("role groups: could not start tracking role names", error);
+      return groups;
+    }
   }
   const names = new Map(track.map((t) => [t.groupId, t.roleName]));
   return groups.map((g) =>
@@ -329,6 +345,16 @@ export async function linkCreatedRoles(guildId: string): Promise<number> {
     for (const group of pending) {
       const key = group.name.trim().toLowerCase();
       for (const snap of snapshots) {
+        // A role an earlier apply created, before this group existed, can't be
+        // the one asked for: the role may be long gone, and linking it would
+        // keep the group from the role its own apply is creating.
+        if (
+          group.createdAt &&
+          snap.createdAt &&
+          new Date(snap.createdAt as Date) < new Date(group.createdAt)
+        ) {
+          continue;
+        }
         // A role created before a recreate was requested can't be the one
         // that was asked for (it is the one that was deleted, #1021).
         if (

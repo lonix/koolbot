@@ -147,6 +147,14 @@ export interface ISeriesGroupSetup {
   groups: ISeriesGroup[];
 }
 
+/** The series' own values for the fields an edit can change (#1298). */
+export interface ISeriesTemplate {
+  title: string;
+  description: string;
+  durationMinutes: number;
+  timezone: string;
+}
+
 export interface IEventRsvp {
   userId: string;
   status: RsvpStatus;
@@ -325,6 +333,13 @@ export interface IEvent extends Document {
    * one-off event) has none and its successor is made from the row itself.
    */
   seriesGroupSetup?: ISeriesGroupSetup | null;
+  /**
+   * What the next occurrence's title, description, duration and timezone are
+   * taken from, when they differ from this row's (#1298: "this occurrence
+   * only" edit). Optional and without a schema default: a row without it hands
+   * its own values on. Not carried to the successor.
+   */
+  seriesTemplate?: ISeriesTemplate | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -393,6 +408,17 @@ const SeriesGroupSetupSchema = new Schema<ISeriesGroupSetup>(
   { _id: false },
 );
 
+// No defaults (#1298): stored whole or not at all.
+const SeriesTemplateSchema = new Schema<ISeriesTemplate>(
+  {
+    title: { type: String, maxlength: 100 },
+    description: { type: String, maxlength: 1000 },
+    durationMinutes: { type: Number },
+    timezone: { type: String },
+  },
+  { _id: false },
+);
+
 const EventSchema = new Schema<IEvent>(
   {
     guildId: { type: String, required: true, index: true },
@@ -451,6 +477,7 @@ const EventSchema = new Schema<IEvent>(
     tagsSuffix: { type: Boolean, default: false },
     liveEditRevision: { type: Number },
     seriesGroupSetup: { type: SeriesGroupSetupSchema },
+    seriesTemplate: { type: SeriesTemplateSchema },
     createdBy: { type: String, required: true },
   },
   {

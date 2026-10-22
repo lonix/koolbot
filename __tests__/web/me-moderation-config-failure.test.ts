@@ -74,7 +74,7 @@ jest.unstable_mockModule(
   }),
 );
 jest.unstable_mockModule("../../src/web/read-only-routes.js", () => ({
-  fetchChannelData: async () => ({ names: new Map() }),
+  fetchChannelData: async () => ({ names: new Map(), types: new Map() }),
 }));
 
 const { createMeModerationRouter } =

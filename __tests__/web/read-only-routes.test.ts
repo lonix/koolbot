@@ -34,7 +34,12 @@ import {
  * through the `guild.channels.cache` collection that fetchChannelData iterates.
  */
 function mockClientWithChannels(
-  channels: Array<{ id: string; name: string; type: number }>,
+  channels: Array<{
+    id: string;
+    name: string;
+    type: number;
+    parent?: { name: string };
+  }>,
 ): any {
   const cache = createMockCollection(channels.map((c) => [c.id, c]));
   const guild = {
@@ -73,6 +78,38 @@ describe("fetchChannelData (#611)", () => {
     expect(data.categoryChannels.map((c) => c.id)).toEqual(["cat"]);
     // Every channel contributes to the id→name map.
     expect(data.names.get("v1")).toBe("Lounge");
+  });
+
+  it("records each channel's type and category for labelling it by kind (#1303)", async () => {
+    const client = mockClientWithChannels([
+      { id: "t1", name: "general", type: ChannelType.GuildText },
+      { id: "t2", name: "news", type: ChannelType.GuildAnnouncement },
+      {
+        id: "v1",
+        name: "Lobby",
+        type: ChannelType.GuildVoice,
+        parent: { name: "Scratch" },
+      },
+      { id: "cat", name: "Scratch", type: ChannelType.GuildCategory },
+    ]);
+
+    const data = await fetchChannelData(client, "guild-1");
+
+    expect(data.types.get("t1")).toBe(ChannelType.GuildText);
+    expect(data.types.get("t2")).toBe(ChannelType.GuildAnnouncement);
+    expect(data.types.get("cat")).toBe(ChannelType.GuildCategory);
+    expect(data.types.has("gone")).toBe(false);
+    expect(data.voiceChannels).toEqual([
+      {
+        id: "v1",
+        name: "Lobby",
+        type: ChannelType.GuildVoice,
+        parentName: "Scratch",
+      },
+    ]);
+    expect(data.textChannels.find((c) => c.id === "t2")?.type).toBe(
+      ChannelType.GuildAnnouncement,
+    );
   });
 
   it("sorts voiceChannels by name", async () => {
@@ -393,7 +430,14 @@ describe("loadFeatureSettings (#971)", () => {
     // The anti-raid quarantine role (#1045) needs the role picker.
     expect(byKey.get("moderation.raid.quarantine_role_id")?.type).toBe("role");
     expect(calls).toEqual({ channels: 1, roles: 1 });
-    expect(data.pickers.textChannels).toEqual([{ id: "t1", name: "general" }]);
+    expect(data.pickers.textChannels).toEqual([
+      {
+        id: "t1",
+        name: "general",
+        type: ChannelType.GuildText,
+        parentName: null,
+      },
+    ]);
   });
 
   it("loads the Announcements card as the lone master toggle, no guild fetch (#977)", async () => {
@@ -437,9 +481,21 @@ describe("loadFeatureSettings (#971)", () => {
     );
     expect(calls).toEqual({ channels: 1, roles: 0 });
     expect(data.pickers.categoryChannels).toEqual([
-      { id: "c1", name: "Voice" },
+      {
+        id: "c1",
+        name: "Voice",
+        type: ChannelType.GuildCategory,
+        parentName: null,
+      },
     ]);
-    expect(data.pickers.textChannels).toEqual([{ id: "t1", name: "general" }]);
+    expect(data.pickers.textChannels).toEqual([
+      {
+        id: "t1",
+        name: "general",
+        type: ChannelType.GuildText,
+        parentName: null,
+      },
+    ]);
     expect(data.pickers.roles).toBeUndefined();
   });
 
