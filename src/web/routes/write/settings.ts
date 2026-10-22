@@ -15,6 +15,7 @@ import { BotStatusService } from "../../../services/bot-status-service.js";
 import { CommandManager } from "../../../services/command-manager.js";
 import {
   defaultConfig,
+  isManagedSetting,
   settingsMetadata,
 } from "../../../services/config-schema.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
@@ -211,6 +212,26 @@ export function createSettingsRouter(client: Client): Router {
           {
             type: "err",
             text: `Unknown setting: ${key || "(empty)"}.`,
+          },
+          [],
+          reopen,
+        );
+        return;
+      }
+
+      if (isManagedSetting(key)) {
+        await recordAudit(session, {
+          action: "setting.reset",
+          targetId: key,
+          result: "failure",
+          errorMessage: "managed key",
+        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: "err",
+            text: `Cannot reset ${key}: it is managed by KoolBot.`,
           },
           [],
           reopen,
@@ -760,12 +781,14 @@ export function createSettingsRouter(client: Client): Router {
         const all = await config.getAll();
         const exportObj: Record<string, unknown> = {};
         // Start from defaults so every public key has a value.
+        // Bot-managed message ids are state, not settings: importing one
+        // would point the bot at a message that may no longer exist (#1304).
         for (const [k, v] of Object.entries(defaultConfig)) {
-          if (!PROTECTED_KEYS.has(k)) exportObj[k] = v;
+          if (!PROTECTED_KEYS.has(k) && !isManagedSetting(k)) exportObj[k] = v;
         }
         // Overlay with DB values.
         for (const entry of all) {
-          if (!PROTECTED_KEYS.has(entry.key))
+          if (!PROTECTED_KEYS.has(entry.key) && !isManagedSetting(entry.key))
             exportObj[entry.key] = entry.value;
         }
         const yamlContent = yaml.dump(exportObj, { sortKeys: true });
@@ -844,6 +867,15 @@ export function createSettingsRouter(client: Client): Router {
         }
         if (!(key in defaultConfig)) {
           rows.push({ key, status: "rejected", reason: "unknown key" });
+          continue;
+        }
+        // An export made before #1304 still carries the bot's own message ids.
+        if (isManagedSetting(key)) {
+          rows.push({
+            key,
+            status: "rejected",
+            reason: "managed by KoolBot, not imported",
+          });
           continue;
         }
         // Surface type-mismatch in the preview so a silent drop at apply
@@ -933,6 +965,10 @@ export function createSettingsRouter(client: Client): Router {
         }
         if (!(key in defaultConfig)) {
           failed.push({ key, reason: "unknown" });
+          continue;
+        }
+        if (isManagedSetting(key)) {
+          failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
         const coerced = coerceConfigValue(key, value);
