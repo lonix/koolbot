@@ -378,6 +378,31 @@ describe("decide", () => {
     expect(caseFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it("asks for a date to decide later in plain words (#1353)", async () => {
+    mockCurrent("under_review");
+    const err = await service()
+      .decide({ ...base, decision: "extend", nextReviewAt: null })
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toBe(
+      "Deciding later needs a new review date.",
+    );
+  });
+
+  it("names a closed case by its display words, never the stored value (#1353)", async () => {
+    for (const [status, words] of [
+      ["upheld", "kept out for good"],
+      ["lifted", "let back in"],
+    ] as const) {
+      mockCurrent(status);
+      const err = await service()
+        .decide({ ...base, decision: "uphold", nextReviewAt: future() })
+        .catch((e: unknown) => e);
+      expect((err as Error).message).toBe(
+        `Case #14 is already closed: ${words}.`,
+      );
+    }
+  });
+
   it.each(["uphold", "extend"] as const)(
     "refuses a past date on %s",
     async (decision) => {
@@ -465,7 +490,7 @@ describe("decide", () => {
     expect(loser.reason).toBeInstanceOf(ModerationCaseError);
     expect(loser.reason.code).toBe("status-changed");
     expect(loser.reason.foundStatus).toBe("lifted");
-    expect(loser.reason.message).toContain("lifted");
+    expect(loser.reason.message).toContain("let back in");
   });
 });
 

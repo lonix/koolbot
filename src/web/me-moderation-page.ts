@@ -18,9 +18,14 @@ import {
   type CommandAuditRow,
   type ModerationRow,
 } from "./admin-views.js";
+import {
+  DECISION_CONFIRM_TEXT,
+  DECISION_LABELS,
+  PERMANENT_CONFIRM_ITEMS,
+  REVIEW_JOB_NOTE,
+} from "../utils/moderation-labels.js";
 import type { CaseView } from "./moderation-case-groups.js";
 import { CASE_DECISIONS } from "./moderation-case-actions.js";
-import type { ModerationCaseDecision } from "../services/moderation-case-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
 export const MOD_BASE = "/me/moderation";
@@ -229,10 +234,10 @@ function renderTiles(p: ModLogBodyProps): string {
           open === null
             ? "Could not be read."
             : t.overdueCases === null
-              ? "Due for review could not be read."
+              ? "How many need a decision could not be read."
               : t.overdueCases > 0
-                ? `${t.overdueCases} due for review`
-                : "None due for review",
+                ? `${t.overdueCases} ${plural(t.overdueCases, "needs", "need")} a decision`
+                : "None need a decision",
         href: "#open-cases",
         warn: (open ?? 0) > 0,
       });
@@ -273,7 +278,7 @@ function renderOpenCases(p: ModLogBodyProps): string {
       .map((c) => {
         const href = `${MOD_BASE}/cases/${encodeURIComponent(c.id)}`;
         const review = c.reviewAt
-          ? `${escapeHtml(stamp(c.reviewAt))}${c.due ? ' <span class="kb-badge kb-badge--warn">Due</span>' : ""}`
+          ? `${escapeHtml(stamp(c.reviewAt))}${c.due ? ' <span class="kb-badge kb-badge--warn">Needs a decision</span>' : ""}`
           : '<span class="kb-muted">No date</span>';
         return `<tr>
 <th scope="row"><a href="${href}">#${c.caseNumber}</a></th>
@@ -392,26 +397,6 @@ export interface ModCaseBodyProps {
   defaultReviewDays: number;
 }
 
-const DECISION_LABELS: Record<ModerationCaseDecision, string> = {
-  uphold: "Uphold",
-  extend: "Extend",
-  permanent: "Make permanent",
-  readmit: "Let back in",
-};
-
-/** Confirmation before a decision that closes the case; same text as the admin page. */
-const DECISION_CONFIRM: Partial<Record<ModerationCaseDecision, string>> = {
-  permanent:
-    "Make this removal permanent? The case closes with no further review.",
-  readmit:
-    "Let this member back in? KoolBot does not unban in Discord; do that there.",
-};
-
-const PERMANENT_CONFIRM_ITEMS = [
-  "The case is marked upheld and its review date is cleared.",
-  "It is not reviewed again.",
-];
-
 function caseEvents(c: CaseView): string {
   if (c.events.length === 0) {
     return '<p class="kb-muted">No decisions yet.</p>';
@@ -421,10 +406,10 @@ function caseEvents(c: CaseView): string {
       const what = e.outcome
         ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
-          ? "came due"
+          ? "marked as needing a decision"
           : "opened";
       return `<li><span class="kb-mono">${escapeHtml(stamp(e.at))}</span> ${what} by ${escapeHtml(e.byLabel)}${
-        e.note ? `: ${escapeHtml(e.note)}` : ""
+        e.note && e.note !== REVIEW_JOB_NOTE ? `: ${escapeHtml(e.note)}` : ""
       }</li>`;
     })
     .join("")}</ul>`;
@@ -432,10 +417,10 @@ function caseEvents(c: CaseView): string {
 
 function caseHistory(c: CaseView): string {
   if (c.historyUnavailable) {
-    return '<p class="kb-muted">The prior history could not be read. Reload the page in a moment.</p>';
+    return '<p class="kb-muted">The earlier actions could not be read. Reload the page in a moment.</p>';
   }
   if (c.history.length === 0) {
-    return '<p class="kb-muted">No other history on file.</p>';
+    return '<p class="kb-muted">No earlier actions on file.</p>';
   }
   return `<ul>${c.history
     .map(
@@ -466,8 +451,8 @@ function reviewForm(p: ModCaseBodyProps): string {
         : d === "readmit"
           ? CONFIRM_NEUTRAL_ATTR
           : "";
-    const confirm = DECISION_CONFIRM[d]
-      ? ` data-confirm="${escapeHtml(DECISION_CONFIRM[d])}"${tone}`
+    const confirm = DECISION_CONFIRM_TEXT[d]
+      ? ` data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT[d])}"${tone}`
       : "";
     return `<button type="submit" class="${cls}" formaction="${base}/${d}"${confirm}>${DECISION_LABELS[d]}</button>`;
   }).join("\n    ");
@@ -476,7 +461,7 @@ function reviewForm(p: ModCaseBodyProps): string {
   <div class="kb-field">
     <label class="kb-label" for="next-review">Next review in (days)</label>
     <input class="kb-input" type="number" id="next-review" name="next_review_in_days" min="1" max="3650" value="${p.defaultReviewDays}">
-    <p class="kb-help">Uphold keeps the removal and schedules the next review; clear the days for none. Extend needs a date.</p>
+    <p class="kb-help">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date.</p>
   </div>
   <div class="kb-field">
     <label class="kb-label" for="review-note">Note</label>
@@ -485,7 +470,7 @@ function reviewForm(p: ModCaseBodyProps): string {
   <div class="kb-toolbar">
     ${buttons}
   </div>
-  <p class="kb-help">Make permanent closes the case with no further review. Let back in records the decision only; KoolBot does not lift the ban in Discord, do that there.</p>
+  <p class="kb-help">${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; KoolBot does not lift the ban in Discord, do that there.</p>
 </form>`;
 }
 
@@ -520,7 +505,7 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
   </div>
 </section>
 <section class="kb-panel" aria-labelledby="case-history-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title" id="case-history-h">Prior history</h2></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="case-history-h">Earlier actions</h2></header>
   <div class="kb-panel__body">${caseHistory(c)}</div>
 </section>
 <section class="kb-panel" aria-labelledby="case-events-h">
