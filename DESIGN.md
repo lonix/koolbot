@@ -123,8 +123,9 @@ should not send its admins' browsers to a font CDN, and the native face is the f
 
 ## Iconography
 
-Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loaded from a CDN. 24×24 viewBox, 2px stroke, round caps and joins,
-`currentColor`, drawn at 16px (`kb-icon`) or 20px (`kb-icon--lg`). The files are in the **Icons** asset group.
+Interface and page icons are Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loaded from a CDN. 24×24 viewBox, 2px stroke,
+round caps and joins, `currentColor`, drawn at 16px (`kb-icon`) or 20px (`kb-icon--lg`). The files are in the **Icons** asset group. Marks of games
+and services follow *Brand icons*, and every icon enters the repo as *Pulling icons into the repo* says (both below).
 
 | Page | Icon | Page | Icon |
 | --- | --- | --- | --- |
@@ -151,6 +152,47 @@ Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, 
 `wrench` (maintenance), `server` (servers).
 
 KoolBot has no logo; the name is set in type in the TopBar.
+
+### Brand icons
+
+A game, platform, social network or voice app is shown with its own mark, next to its name and never instead of it. Marks come from one source per
+need, in this order, so a mark added in two years looks like one added today:
+
+1. **Tabler Icons, the outline `brand-*` set** (MIT, `@tabler/icons`). Drawn on Lucide's grid and stroke (24×24, 2px, round caps and joins), so a
+   mark sits beside an interface icon without looking pasted in. Among its 376 brands: Discord, Steam, Twitch, YouTube, X, Reddit, Facebook,
+   Instagram, TikTok, Bluesky, Mastodon, Kick, Minecraft and Xbox.
+2. **Simple Icons** (CC0, `simple-icons`), only for a brand Tabler does not have, such as Counter-Strike, PlayStation, Mumble or TeamSpeak. These
+   are solid marks: draw them with `kb-icon--filled` at the same size, and switch to Tabler's once Tabler adds the brand.
+3. **Neither has it:** the Lucide icon for the kind of thing: `gamepad-2` for a game, `headphones` for a voice app, `globe` for a website.
+
+- Never draw, trace or edit a mark, and never take one from a brand's own site, a font or another icon set.
+- Marks are `currentColor` like every other icon, never in brand colours: colour would be the only thing telling two marks apart, and the palette
+  stays ours.
+- The name is always written next to the mark, and the mark is `aria-hidden`.
+- A mark is a trademark: the licence covers the SVG, not the mark. Use it only to say which game or service something is, unaltered, never as
+  decoration or as if it were KoolBot's own.
+- **Names:** Lucide icons keep Lucide's name (`gamepad-2`). Every mark is `brand-<name>` whichever source it comes from (`brand-discord` from Tabler,
+  `brand-mumble` from Simple Icons), so code asks for a brand the same way and moving it to another source changes no caller.
+
+Game servers: `brand-minecraft` (Tabler), `brand-counter-strike` (Simple Icons), and `gamepad-2` for Factorio, Other game and LinuxGSM games
+without a mark of their own.
+
+### Pulling icons into the repo
+
+Icons are code and are kept like code: pinned, listed and reproducible (#1390).
+
+- **From the published package only**, at a pinned version: `lucide-static`, `@tabler/icons`, `simple-icons`. Never from a website, a CDN, a design
+  file or another project, and never edited by hand.
+- **One module renders every icon** (`icon(name)`, #1369). No view keeps its own copy of path data.
+- **One manifest lists every icon in use** (`src/web/icons/manifest.json`): our name, the source and the source's name. `npm run icons:pull`
+  copies each listed icon from the pinned packages, so updating a source is a version bump and a re-pull, and every changed drawing shows in review.
+- **The pull keeps only the drawing.** The outer `svg` attributes, `<title>` and Tabler's invisible bounding-box path are dropped; the module adds
+  `kb-icon` and `aria-hidden`.
+- **Licences ship with the icons:** the ISC (Lucide) and MIT (Tabler) notices sit next to the module. Simple Icons is CC0 and needs none, but the
+  manifest still names it.
+- **Only what is used.** An icon is pulled with the first page or message that shows it, and removed with the last.
+- **A new source** needs this section changed first. It must have an open licence that allows copying into the repo, a versioned package that is
+  still maintained, and a style that matches one of the sources above.
 
 ## Accessibility
 
