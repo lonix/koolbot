@@ -422,34 +422,39 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("the leaders section", () => {
-  it("shows the picker, the rename and the pull with CSRF, the event's label, escaped names and keys, never channel ids", async () => {
+describe("leaders on the board", () => {
+  it("shows the leader's badge, a Make leader button, the pull form and the label rename, with CSRF, the event's label, escaped names and keys, never channel ids", async () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
-    expect(r.text).toContain('id="host-leaders"');
-    expect(r.text).toContain('<h2 id="host-leaders-h">Leaders</h2>');
+    expect(r.text).toContain('id="host-board"');
     for (const action of ["set-leader", "leader-label", "pull-leaders"]) {
       expect(r.text).toContain(`action="${PANEL}/${action}"`);
     }
-    const section = r.text.slice(r.text.indexOf('id="host-leaders"'));
-    const forms = section.match(/<form[\s\S]*?<\/form>/g) ?? [];
-    expect(forms.length).toBeGreaterThanOrEqual(4);
-    for (const f of forms) expect(f).toContain('name="_csrf"');
+    const forms = r.text.match(/<form[\s\S]*?<\/form>/g) ?? [];
+    const leaderForms = forms.filter((f) =>
+      /\/(set-leader|leader-label|pull-leaders)"/.test(f),
+    );
+    expect(leaderForms.length).toBeGreaterThanOrEqual(3);
+    for (const f of leaderForms) expect(f).toContain('name="_csrf"');
     // The event's own label is used; names are escaped.
-    expect(section).toContain("Pull captains only");
-    expect(section).toContain("Heli &lt;i&gt;");
-    expect(section).not.toContain("Heli <i>");
+    expect(r.text).toContain("Pull captains only");
+    expect(r.text).toContain("Heli &lt;i&gt;");
+    expect(r.text).not.toContain("Heli <i>");
+    // The leader carries a badge; a member who is not the leader can be made one.
+    expect(r.text).toMatch(
+      /<span class="kb-badge kb-badge--info">[\s\S]*?Captain<\/span>/,
+    );
+    expect(r.text).toMatch(/Make captain/);
+    expect(r.text).toMatch(/Remove as captain/);
     // Destinations are default, main, here and keys; a leads group exists.
-    expect(section).toContain('<option value="default">');
-    expect(section).toContain('<option value="g_leads">');
-    expect(section).toContain("the Command channel");
-    expect(section).not.toMatch(/<option value="c-(main|heli|logi|leads)"/);
-    // The Groups card has a leader column and the assignment list a badge.
+    expect(r.text).toContain('<option value="default">');
+    expect(r.text).toContain('<option value="g_leads">');
+    expect(r.text).toContain("the Command channel");
+    expect(r.text).not.toMatch(/<option value="c-(main|heli|logi|leads)"/);
+    // The Groups card has a leader column.
     expect(r.text).toContain('<th scope="col">Captain</th>');
-    expect(r.text).toMatch(/<span class="tag tag-info">Captain<\/span>/);
-    // The open and leads groups take no leader.
-    expect(section).not.toContain('id="leader-g_open"');
-    expect(section).not.toContain('id="leader-g_leads"');
+    // The open and leads groups are no column and take no leader.
+    expect(r.text).not.toContain('aria-label="People in Command"');
   });
 
   it("falls back to the main channel in the default text when there is no leads group", async () => {
@@ -459,39 +464,43 @@ describe("the leaders section", () => {
     expect(r.text).toContain("the main channel");
   });
 
-  it("is not on the page, and no leader column or badge shows, while leaders are off", async () => {
+  it("shows no leader badge, button, pull or column while leaders are off", async () => {
     doc().captainsEnabled = false;
     const r = await call(PANEL);
     expect(r.status).toBe(200);
-    expect(r.text).not.toContain('id="host-leaders"');
     expect(r.text).not.toContain("Pull captains");
+    expect(r.text).not.toContain(`${PANEL}/pull-leaders`);
+    expect(r.text).not.toContain(`${PANEL}/set-leader`);
+    expect(r.text).not.toContain("Make captain");
     expect(r.text).not.toContain('<th scope="col">Captain</th>');
-    expect(r.text).not.toMatch(/<span class="tag tag-info">Captain<\/span>/);
+    expect(r.text).not.toContain("kb-crown");
   });
 
   it("is not on the page for an event without groups or an ended one", async () => {
     store.set(EVENT_ID, makeEvent({ groupsEnabled: false, groups: [] }));
-    expect((await call(PANEL)).text).not.toContain('id="host-leaders"');
+    expect((await call(PANEL)).text).not.toContain(`${PANEL}/set-leader`);
     store.set(EVENT_ID, makeEvent({ state: "ended" }));
-    expect((await call(PANEL)).text).not.toContain('id="host-leaders"');
+    expect((await call(PANEL)).text).not.toContain(`${PANEL}/set-leader`);
   });
 
-  it("disables the pull with an explanation when the bot cannot move members", async () => {
+  it("switches the pull off with an explanation when the bot cannot move members", async () => {
     botMayMove = false;
     const r = await call(PANEL);
-    const section = r.text.slice(r.text.indexOf('id="host-leaders"'));
-    expect(section).toContain("Move Members");
-    expect(section).toMatch(
-      /<button class="btn" type="submit" disabled aria-disabled="true" aria-describedby="leaders-blocker">Pull captains<\/button>/,
-    );
+    expect(r.text).toContain("Move Members");
+    // Move people… is replaced by a disabled button, so the pull form is not reachable either.
+    expect(r.text).not.toContain(`action="${PANEL}/pull-leaders"`);
+    expect(r.text).toContain('id="host-board-notes"');
   });
 
   it("does not show a stored captain who is no longer a member as a leader", async () => {
     groupOf("g_heli").memberIds = [BEN];
     const r = await call(PANEL);
-    const row = r.text.match(/<tr><td>Heli &lt;i&gt;<\/td><td>[\s\S]*?<\/tr>/);
-    expect(row?.[0]).toContain("None");
-    expect(row?.[0]).not.toContain(ANA);
+    // Heli's stored captain is not in its member list now: nobody in Heli's column leads.
+    const col = r.text.slice(r.text.indexOf('data-group="g_heli"'));
+    const heli = col.slice(0, col.indexOf("</section>"));
+    expect(heli).not.toContain("kb-crown");
+    expect(heli).not.toContain("Remove as captain");
+    expect(heli).toContain("Make captain");
   });
 });
 

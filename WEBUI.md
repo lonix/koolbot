@@ -1953,15 +1953,40 @@ existing Discord event records the adopting admin as its creator but is not list
 under Events you host, and the panel never changes the Discord event itself.
 
 The page shows a summary (state, start, duration, repeat, main voice channel) and the
-event's groups. Scheduled and active events also show a section for each control:
-**Assign people**, **Move people**, **End the event**, **Team names and tags** (below) and, when
-the event has leaders switched on, **Leaders** (below) and **Live settings** (below) work today.
-**Live settings** (settings, leaders, tags and changes to the groups) is one folded section, **Event settings and groups**, at the bottom
-of the page (#1319); its summary states the channel lead time and the number of groups, and it opens by itself after a save, so the
-result is in view. The page is part of the Hosting section: its breadcrumb returns to **Your events**.
-Ended and cancelled events show the read-only summary only. Each action a host takes is recorded in the audit
-log with the event id. The Web UI must be on and the member must be able to get a
-sign-in link (`/me`) to reach the page.
+event's groups. Scheduled and active events also show the team board and its toolbar (#1424, below), **End the event**, and two
+folded sections at the bottom of the page (#1319, #1424): **Event settings** and **Change the groups**. Each summary states the current
+values (the channel lead time, whether leaders and clan tags are on, and the number and names of the groups), and both open by themselves
+after a settings save, so the result is in view (a board action such as an assignment does not open them). The page is part of the Hosting
+section: its breadcrumb returns to **Your events**. Ended and cancelled events show the read-only summary only. Each action a host takes is
+recorded in the audit log with the event id. The Web UI must be on and the member must be able to get a sign-in link (`/me`) to reach the page.
+
+**The team board and toolbar** (#1424) replace the cards **Assign people**, **Move people**, **Leaders** and **Team names and tags** of the
+host panel. No route, gate or audit row changed: every control is a plain form that posts to the action it always posted to, so the board works
+with JavaScript off, and the same CSRF, creator-or-admin check and one audit row (`event.host.<action>`) apply. An event host with no other
+rights can assign, randomise, move and send people from it, and gets a 403 on another host's event.
+
+- **Toolbar**, in this order: the lock state (**Unlocked** or **Locked**, with **Lock groups** or **Unlock groups**, `lock`), **Randomise…**
+  (`randomise`) and **Move people…** (`return-to-main` and `move-one`, and `pull-leaders` while leaders are on), then **Send to teams**
+  (`send-to-groups`). **Randomise…** and **Move people…** are disclosures that work without script; with script each opens in a dialog (focus
+  starts on _Go back_, Escape closes and focus returns to the button). A switched-off control stays visible, disabled, and the line under the
+  toolbar says why (the bot cannot move members, the voice state cannot be read, no team has a channel yet). The same line says what the lock does.
+- **Board**: one column per team group, then **Not in a team** for people connected to the event's voice channels who are in no team. Open and
+  leaders-only groups are not columns. Each person shows where they are connected now (the main channel, or a team's channel) or _Not connected_
+  (an assigned member who left voice stays in their team's column so they can still be taken out), and a leader carries a visible label.
+- **Moving a person**: every person has a **Move** menu with a labelled team select (a full team is disabled, except for its own members) and two
+  buttons, **Add to / Move to team** (`assign`) and **Not in a team** (`unassign`, posted with `formaction`). This is the keyboard and no-JavaScript
+  path and the baseline. With JavaScript a person can also be dragged to another column: a drop fills in that person's own select and submits the same
+  form, so a drop is exactly one `assign` or `unassign` and a refused drop (a full team) is announced in a live region. Moving a person between teams
+  never moves them in voice; **Send to teams** is the explicit, separate action for that.
+- **Leaders** (only while leaders are on): **Make leader** or **Remove as leader** in a person's menu (`set-leader`). The leader label rename
+  (`leader-label`) and the last edits leaders made are under **Event settings**. A team a leader renamed shows **Reset name and tag**
+  (`reset-team`) in its column.
+- **Event settings** (fold) holds the channel lead time, **Group leaders** and **Clan tags** (children nested) and the leader label; **Change the
+  groups** (fold) holds names and sizes, **Switch preset**, add and remove groups, and switching groups on or off. They are separate forms that
+  post to `settings`, so saving one never touches the other's rows. The lock row of the settings form moved to the toolbar.
+
+The sections below describe what each action does. Since #1424 the cards **Assign people**, **Move people**, **Leaders** and **Team names and tags**
+are the board and toolbar above (same actions, same rules), and **Live settings** is the two folds **Event settings** and **Change the groups**.
 
 **Assign people** (#1191) puts members into the `team` groups of an event. Open and
 leaders-only groups never take members. The section lists everyone connected to the

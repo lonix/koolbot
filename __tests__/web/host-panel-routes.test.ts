@@ -351,7 +351,7 @@ describe("host panel page", () => {
     expect(r.status).toBe(200);
     expect(r.text).toContain("Reds &lt;b&gt;");
     expect(r.text).not.toContain("Reds <b>");
-    for (const id of ["assignment", "moves", "end", "settings"]) {
+    for (const id of ["board", "end", "settings", "groupchanges"]) {
       expect(r.text).toContain(`id="host-${id}"`);
     }
     expect(r.text).toContain("30 minutes before the start");
@@ -451,7 +451,9 @@ describe("host panel page", () => {
     const r = await call(url(PANEL));
     expect(r.text).toContain("This event has no groups.");
     expect(r.text).toContain('id="host-end"');
-    expect(r.text).not.toContain('id="host-assignment"');
+    expect(r.text).not.toContain('id="host-board"');
+    // Switching groups on is still offered, from the second fold.
+    expect(r.text).toContain('id="host-groupchanges"');
   });
 
   it("is a read-only summary for ended and cancelled events", async () => {

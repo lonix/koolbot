@@ -3,7 +3,7 @@ import {
   leadersTagsViewOf,
   renderLeadersTagsFields,
 } from "../../src/web/host-settings-leaders-tags-view.js";
-import { renderSettingsSection } from "../../src/web/host-settings-view.js";
+import { renderEventSettings } from "../../src/web/host-settings-view.js";
 
 /**
  * The leaders and tags fields of the Live settings form (#1240): what each field
@@ -181,14 +181,13 @@ describe("renderLeadersTagsFields", () => {
     expect(html).not.toContain("s_groupTags_g_00000002");
   });
 
-  it("is part of the Live settings form, inside the one form that posts to settings", () => {
-    const page = renderSettingsSection({
+  it("is part of the Event settings form, inside the one form that posts to settings", () => {
+    const page = renderEventSettings({
       csrfToken: "tok",
       actionPath: (n) => `/me/events/e/host/${n}`,
       blocker: null,
       leadMinutes: null,
       leadReadOnly: null,
-      locked: null,
       groupLabel: "Team",
       groups: [],
       leadersTags: view,
@@ -200,13 +199,12 @@ describe("renderLeadersTagsFields", () => {
   });
 
   it("is absent from the form when the section has no leaders and tags view", () => {
-    const page = renderSettingsSection({
+    const page = renderEventSettings({
       csrfToken: "tok",
       actionPath: (n) => `/x/${n}`,
       blocker: null,
       leadMinutes: null,
       leadReadOnly: null,
-      locked: null,
       groupLabel: "Team",
       groups: [],
     });

@@ -266,15 +266,14 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("the panel section (#1196)", () => {
-  it("shows each team, what the host set and a reset only where a leader changed it", async () => {
+describe("the board's reset (#1196, #1424)", () => {
+  it("shows each team and a reset only where a leader changed it", async () => {
     groupOf(RED).name = "Crimson <b>";
     groupOf(RED).tag = "CRM";
     groupOf(RED).originalName = "Red";
     groupOf(RED).originalTag = "RED";
     const res = await call(`${PANEL}`);
     expect(res.status).toBe(200);
-    expect(res.text).toContain("Team names and tags");
     expect(res.text).toContain("Crimson &lt;b&gt;");
     expect(res.text).not.toContain("Crimson <b>");
     expect(res.text).toContain(`${PANEL}/reset-team`);
@@ -282,7 +281,15 @@ describe("the panel section (#1196)", () => {
     expect(res.text.match(/action="[^"]*\/reset-team"/g)).toHaveLength(1);
     expect(res.text).toContain(`value="${RED}"`);
     expect(res.text).toContain('name="_csrf"');
-    expect(res.text).toContain("Not changed");
+    // The reset button sits in the changed team's column only.
+    const col = res.text.slice(res.text.indexOf(`data-group="${RED}"`));
+    expect(col.slice(0, col.indexOf("</section>"))).toContain(
+      "Reset name and tag",
+    );
+    const blue = res.text.slice(res.text.indexOf(`data-group="${BLUE}"`));
+    expect(blue.slice(0, blue.indexOf("</section>"))).not.toContain(
+      "Reset name and tag",
+    );
   });
 
   it("lists the recent leader edits with who and what, escaped", async () => {
@@ -305,15 +312,23 @@ describe("the panel section (#1196)", () => {
     expect(res.text).toContain("tag &quot;RED&quot; to &quot;CRM&quot;");
   });
 
-  it("is there, saying leaders cannot customise, when the switches are off", async () => {
-    seed({ captainCustomisationEnabled: false });
+  it("offers the reset whatever the leaders' switches say", async () => {
+    seed({
+      captainsEnabled: false,
+      captainCustomisationEnabled: false,
+      groups: [
+        group(RED, {
+          name: "Crimson",
+          tag: "CRM",
+          originalName: "Red",
+          originalTag: "RED",
+        }),
+        group(BLUE),
+      ],
+    });
     const res = await call(`${PANEL}`);
-    expect(res.text).toContain("Team names and tags");
-    expect(res.text).toContain("cannot customise");
-    // The Leaders section may be hidden with leaders off; this one never is.
-    seed({ captainsEnabled: false, captainCustomisationEnabled: false });
-    const res2 = await call(`${PANEL}`);
-    expect(res2.text).toContain("Team names and tags");
+    expect(res.text).toContain(`${PANEL}/reset-team`);
+    expect(res.text).toContain("Reset name and tag");
   });
 });
 

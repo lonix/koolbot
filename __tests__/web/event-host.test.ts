@@ -178,25 +178,65 @@ describe("renderHostPanelBody", () => {
   it("lets a later issue replace a section body without touching the page", () => {
     const html = renderHostPanelBody({
       event: base,
-      controls: { moves: "<p>MOVE CONTROLS</p>" },
+      controls: { board: "<p>BOARD CONTROLS</p>" },
     });
-    expect(html).toContain("MOVE CONTROLS");
-    expect(html).toContain('id="host-assignment"');
+    expect(html).toContain("BOARD CONTROLS");
+    expect(html).toContain('id="host-end"');
     expect(html).toContain("Not available yet");
   });
 
-  it("offers one section per definition when groups are on (leaders only while switched on)", () => {
-    const html = renderHostPanelBody({ event: base });
-    for (const s of HOST_SECTIONS.filter((d) => !d.needsLeaders)) {
-      expect(html).toContain(`id="host-${s.id}"`);
-    }
-    expect(html).not.toContain('id="host-leaders"');
-    const withLeaders = renderHostPanelBody({
-      event: { ...base, captainsEnabled: true },
+  it("offers one section per definition when groups are on; the board renders itself", () => {
+    const html = renderHostPanelBody({
+      event: base,
+      controls: { board: '<section id="host-board"></section>' },
     });
     for (const s of HOST_SECTIONS) {
-      expect(withLeaders).toContain(`id="host-${s.id}"`);
+      expect(html).toContain(`id="host-${s.id}"`);
     }
+  });
+
+  it("folds Event settings and Change the groups at the bottom, each summary stating its values (#1424)", () => {
+    const group = {
+      name: "Reds",
+      marker: "",
+      kind: "team" as const,
+      size: null,
+      tag: "",
+      hasChannel: false,
+      memberCount: 0,
+      fill: "0",
+    };
+    const html = renderHostPanelBody({
+      event: {
+        ...base,
+        channelLeadMinutes: 20,
+        captainsEnabled: true,
+        leaderLabel: "Captain",
+        tagsEnabled: true,
+        groups: [group, { ...group, name: "Blues" }],
+      },
+    });
+    const settings = html.slice(html.indexOf('id="host-settings"'));
+    expect(settings).toContain("Event settings");
+    expect(settings).toContain(
+      "Channels 20 min before the start · Captains on · Clan tags on",
+    );
+    expect(html).toContain('id="host-groupchanges"');
+    expect(html).toContain("Change the groups");
+    expect(html).toContain("2 groups: Reds, Blues");
+    expect(html.indexOf('id="host-settings"')).toBeLessThan(
+      html.indexOf('id="host-groupchanges"'),
+    );
+    expect(html).not.toMatch(/<details[^>]*id="host-settings"[^>]* open/);
+    const open = renderHostPanelBody({ event: base, settingsOpen: true });
+    expect(open).toMatch(/<details[^>]*id="host-settings" open/);
+    expect(open).toMatch(/<details[^>]*id="host-groupchanges" open/);
+    // Groups off: the second fold still offers to switch them on.
+    const off = renderHostPanelBody({
+      event: { ...base, groupsEnabled: false },
+    });
+    expect(off).toContain("Groups are off");
+    expect(off).not.toContain('id="host-board"');
   });
 
   it("lists group channel problems as a warning, escaped, and nothing when there are none", () => {
@@ -237,7 +277,7 @@ describe("renderHostPanelBody", () => {
       fill: "0",
     };
     const html = renderHostPanelBody({ event: { ...base, groups: [group] } });
-    expect(html).not.toContain("Clan tags");
+    expect(html).not.toContain("<h3>Clan tags</h3>");
   });
 
   it("lists who could not be tagged and why, and warnings, escaped (#1194)", () => {

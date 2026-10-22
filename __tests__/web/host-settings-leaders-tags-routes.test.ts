@@ -304,12 +304,20 @@ describe("the leaders and tags fields in the Live settings section", () => {
     expect(r.text).not.toContain("s_groupTags_");
   });
 
-  it("the Leaders section appears with leaders on and is gone with leaders off", async () => {
-    expect((await call(panel())).text).not.toContain('id="host-leaders"');
+  it("the leader controls appear with leaders on and are gone with leaders off", async () => {
+    const marker = `${panel()}/pull-leaders`;
+    expect((await call(panel())).text).not.toContain(marker);
+    expect((await call(panel())).text).not.toContain(
+      'id="host-leaders-extras"',
+    );
     await save({ s_captainsEnabled: "1", b_captainsEnabled: "0" });
-    expect((await call(panel())).text).toContain('id="host-leaders"');
+    const on = (await call(panel())).text;
+    expect(on).toContain('id="host-leaders-extras"');
+    expect(on).toContain(`${panel()}/leader-label`);
     await save({ s_captainsEnabled: "0", b_captainsEnabled: "1" });
-    expect((await call(panel())).text).not.toContain('id="host-leaders"');
+    expect((await call(panel())).text).not.toContain(
+      'id="host-leaders-extras"',
+    );
   });
 });
 

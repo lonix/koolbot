@@ -59,6 +59,7 @@ import {
 import { renderEventEditBody } from "../event-edit-view.js";
 import { validateEventForm } from "../event-form.js";
 import { renderErrorPage } from "../views.js";
+import { scriptTag } from "../html.js";
 import { isEventHost } from "../event-host.js";
 import {
   hostControlsAvailable,
@@ -90,10 +91,7 @@ import {
   cachedMemberName,
   readEventPresence,
 } from "../../services/event-group-presence.js";
-import {
-  groupKeyOf,
-  type RandomiseMode,
-} from "../../services/event-group-plan.js";
+import { type RandomiseMode } from "../../services/event-group-plan.js";
 import {
   describeMoveReport,
   moveEventMembers,
@@ -105,22 +103,20 @@ import {
   type MoveSkipReason,
 } from "../../services/event-member-moves.js";
 import {
-  renderMovesSection,
-  type MoveDestinationView,
-  type MovePersonView,
-} from "../host-moves-view.js";
+  renderHostBoard,
+  HOST_BOARD_SCRIPT,
+  type BoardDestinationView,
+  type BoardLeadersView,
+  type BoardMovePersonView,
+  type BoardPersonView,
+  type BoardTeamView,
+} from "../host-board-view.js";
 import {
   END_CONFIRM_FIELD,
   END_PULL_BACK_FIELD,
   renderEndSection,
 } from "../event-end-view.js";
 import { summariseEnd } from "../../services/event-teardown.js";
-import {
-  groupFill,
-  renderAssignmentSection,
-  type AssignmentGroupView,
-  type AssignmentPersonView,
-} from "../host-assignment-view.js";
 import {
   effectiveLeaders,
   planPullLeaders,
@@ -135,7 +131,6 @@ import {
   hasCaptainsLobby,
   validateLeaderLabel,
 } from "../../services/event-groups.js";
-import { customisationOn } from "../../services/event-customise-rules.js";
 import {
   LEADER_AUDIT_ACTION,
   createCustomiseDeps,
@@ -148,7 +143,6 @@ import {
   describeRowValue,
   isGroupOverSize,
   leadTimeRow,
-  lockGroupsRow,
   parseSubmission,
   REFUSAL_MESSAGE,
   runLiveEdit,
@@ -160,8 +154,11 @@ import {
 import { seriesSetupRow } from "../../services/event-live-edit-series.js";
 import {
   renderConfirmBody,
+  renderEventSettings,
+  renderGroupChanges,
   renderResultBody,
-  renderSettingsSection,
+  type LeaderEditView,
+  type SettingsViewData,
 } from "../host-settings-view.js";
 import {
   CONFIRM_ONLY_HEADER,
@@ -179,15 +176,6 @@ import {
   buildGroupEditView,
   prepareGroupEditBody,
 } from "../host-settings-groups.js";
-import {
-  renderCustomiseSection,
-  type CustomiseEditView,
-} from "../host-customise-view.js";
-import {
-  renderLeadersSection,
-  type LeaderDestinationView,
-  type LeaderGroupView,
-} from "../host-leaders-view.js";
 
 /** A request that has passed the host gate. */
 export type HostRequest = AuthenticatedRequest & {
@@ -262,12 +250,14 @@ function redirectWithFlash(
   res: Response,
   path: string,
   flash: UserFlashMessage,
+  extra?: Record<string, string>,
 ): void {
   const text = truncateFlash(flash.text);
   const qs = new globalThis.URLSearchParams({
     flash: flash.type,
     msg: text,
     sig: signFlash(flash.type, text),
+    ...extra,
   }).toString();
   res.redirect(303, `${path}?${qs}`);
 }
@@ -277,8 +267,9 @@ export function hostPanelRedirect(
   res: Response,
   eventId: string,
   flash: UserFlashMessage,
+  extra?: Record<string, string>,
 ): void {
-  redirectWithFlash(res, hostPanelPath(eventId), flash);
+  redirectWithFlash(res, hostPanelPath(eventId), flash, extra);
 }
 
 export interface HostActionResult {
@@ -309,6 +300,12 @@ export interface HostActionResult {
 }
 
 export interface HostActionOptions {
+  /**
+   * Come back to the panel with its two folds at the bottom open (`open=folds`),
+   * so a settings save shows its result (#1424). Off for the board's actions: a
+   * move or an assignment must not open the settings.
+   */
+  reopenFolds?: boolean;
   /**
    * Run the handler for an ended or cancelled event too. Off by default: only
    * scheduled and active events have host controls, so a write against a
@@ -394,7 +391,12 @@ export function hostAction(
         redirectWithFlash(res, result.redirectTo, flash);
         return;
       }
-      hostPanelRedirect(res, eventId, flash);
+      hostPanelRedirect(
+        res,
+        eventId,
+        flash,
+        options.reopenFolds ? { open: "folds" } : undefined,
+      );
     })().catch(next);
   });
 }
@@ -415,69 +417,6 @@ function bodyString(req: Request, name: string): string {
 function nameList(names: string[], limit = 10): string {
   if (names.length <= limit) return names.join(", ");
   return `${names.slice(0, limit).join(", ")} and ${names.length - limit} more`;
-}
-
-function groupViews(event: IEvent): AssignmentGroupView[] {
-  return (event.groups ?? []).map((g) => ({
-    key: g.key,
-    name: g.name,
-    marker: g.marker ?? "",
-    size: g.size ?? null,
-    memberCount: (g.memberIds ?? []).length,
-    isTeam: g.kind === "team",
-  }));
-}
-
-/** The "Assign people" section (#1191). */
-function createAssignmentSection(client: Client): HostSectionRenderer {
-  return (ctx) => {
-    const { event } = ctx;
-    if (event.groupsEnabled !== true) return undefined;
-    const presence = readEventPresence(client, event);
-    const people: AssignmentPersonView[] = [];
-    const listed = new Set<string>();
-    // Leaders are marked only while the event has them switched on (#1195).
-    const leaderIds = new Set(
-      event.captainsEnabled === true
-        ? effectiveLeaders(event.groups).map((l) => l.userId)
-        : [],
-    );
-    const leaderLabelOf = (id: string): string | null =>
-      leaderIds.has(id) ? event.leaderLabel || "Leader" : null;
-    for (const m of presence.members) {
-      listed.add(m.id);
-      people.push({
-        id: m.id,
-        name: m.name,
-        connected: true,
-        groupKey: groupKeyOf(event.groups ?? [], m.id),
-        leaderLabel: leaderLabelOf(m.id),
-      });
-    }
-    // Assigned but not connected: still listed so they can be unassigned.
-    for (const g of event.groups ?? []) {
-      for (const id of g.memberIds ?? []) {
-        if (listed.has(id)) continue;
-        listed.add(id);
-        people.push({
-          id,
-          name: cachedMemberName(client, event.guildId, id),
-          connected: false,
-          groupKey: groupKeyOf(event.groups ?? [], id),
-          leaderLabel: leaderLabelOf(id),
-        });
-      }
-    }
-    return renderAssignmentSection({
-      csrfToken: ctx.csrfToken,
-      actionPath: ctx.actionPath,
-      groups: groupViews(event),
-      people,
-      presenceOk: presence.ok,
-      locked: event.groupsLocked === true,
-      groupLabel: event.groupLabel || "Group",
-    });
-  };
 }
 
 const EVENTS_OFF =
@@ -669,8 +608,12 @@ function channelFacts(
   };
 }
 
-/** The "Move people" section (#1192). */
-function createMovesSection(client: Client): HostSectionRenderer {
+/**
+ * The toolbar and the team board (#1424): one section that replaced the cards
+ * "Assign people", "Move people", "Leaders" and "Team names and tags". It only
+ * reads; every control posts to the action routes below, unchanged.
+ */
+function createBoardSection(client: Client): HostSectionRenderer {
   return (ctx) => {
     const { event } = ctx;
     if (event.groupsEnabled !== true) return undefined;
@@ -682,10 +625,13 @@ function createMovesSection(client: Client): HostSectionRenderer {
         "The bot could not read who is in the voice channels, so moving people is switched off.";
     }
     const groups = event.groups ?? [];
-    const labelOf = new Map<string, string>();
-    const destinations: MoveDestinationView[] = [];
+    const labelOf = (g: { marker?: string; name: string }): string =>
+      `${g.marker ? `${g.marker} ` : ""}${g.name}`;
+    // Where each channel is, in words: the one map the board and Move people share.
+    const channelLabel = new Map<string, string>();
+    const destinations: BoardDestinationView[] = [];
     if (event.channelId) {
-      labelOf.set(event.channelId, "Main channel");
+      channelLabel.set(event.channelId, "Main channel");
       destinations.push({
         value: "main",
         label: "Main channel",
@@ -694,33 +640,104 @@ function createMovesSection(client: Client): HostSectionRenderer {
     }
     for (const g of groups) {
       if (!g.channelId) continue;
-      const label = `${g.marker ? `${g.marker} ` : ""}${g.name}`;
-      labelOf.set(g.channelId, label);
+      channelLabel.set(g.channelId, labelOf(g));
       destinations.push({
         value: g.key,
-        label,
+        label: labelOf(g),
         ...channelFacts(client, event.guildId, g.channelId),
       });
     }
-    const people: MovePersonView[] = presence.members.map((m) => ({
+    // Leaders are marked only while the event has them switched on (#1195).
+    const leaderIds = new Set(
+      event.captainsEnabled === true
+        ? effectiveLeaders(event.groups).map((l) => l.userId)
+        : [],
+    );
+    const leaderLabel = event.leaderLabel || "Leader";
+    const connected = new Map(presence.members.map((m) => [m.id, m]));
+    const personOf = (id: string, name: string): BoardPersonView => {
+      const m = connected.get(id);
+      return {
+        id,
+        name,
+        connected: m !== undefined,
+        where: m ? (channelLabel.get(m.channelId) ?? "an event channel") : null,
+        leaderLabel: leaderIds.has(id) ? leaderLabel : null,
+      };
+    };
+    const teamGroups = groups.filter((g) => g.kind === "team");
+    const inTeam = new Set<string>();
+    const teams: BoardTeamView[] = teamGroups.map((g) => {
+      const people = (g.memberIds ?? []).map((id) => {
+        inTeam.add(id);
+        return personOf(
+          id,
+          connected.get(id)?.name ??
+            cachedMemberName(client, event.guildId, id),
+        );
+      });
+      return {
+        key: g.key,
+        name: g.name,
+        marker: g.marker ?? "",
+        tag: (g.tag ?? "").trim(),
+        size: g.size ?? null,
+        hasChannel: !!g.channelId,
+        customised: !!g.originalName,
+        people,
+      };
+    });
+    // Connected people who are in no team (the leaders-only lobby is not a team).
+    const loose = presence.members
+      .filter((m) => !inTeam.has(m.id))
+      .map((m) => personOf(m.id, m.name));
+    const movePeople: BoardMovePersonView[] = presence.members.map((m) => ({
       id: m.id,
       name: m.name,
-      where: labelOf.get(m.channelId) ?? "an event channel",
+      where: channelLabel.get(m.channelId) ?? "an event channel",
     }));
-    const teams = groups.filter((g) => g.kind === "team");
-    return renderMovesSection({
-      csrfToken: ctx.csrfToken,
-      actionPath: ctx.actionPath,
-      blocker,
-      sendableGroups: teams.filter((g) => !!g.channelId).length,
-      waitingForChannel: teams
-        .filter((g) => !g.channelId)
-        .reduce((n, g) => n + (g.memberIds ?? []).length, 0),
-      hasMain: !!event.channelId,
-      destinations,
-      people,
-      groupLabel: event.groupLabel || "Group",
-    });
+    let leaders: BoardLeadersView | undefined;
+    if (event.captainsEnabled === true) {
+      const leads = groups.find(
+        (g) => g.channelId && g.channelId === resolveLeadsChannel(event),
+      );
+      const defaultWhere = leads
+        ? `the ${labelOf(leads)} channel.`
+        : event.channelId
+          ? "the main channel (the event has no leaders-only channel yet)."
+          : "the channel you are in (the event has no main channel yet).";
+      const dests = [{ value: PULL_DEFAULT, label: "Default" }];
+      if (event.channelId) {
+        dests.push({ value: PULL_MAIN, label: "Main channel" });
+      }
+      dests.push({ value: PULL_HERE, label: "The channel I am in" });
+      for (const g of groups) {
+        if (g.channelId) dests.push({ value: g.key, label: labelOf(g) });
+      }
+      leaders = { defaultWhere, destinations: dests };
+    }
+    return (
+      renderHostBoard({
+        csrfToken: ctx.csrfToken,
+        actionPath: ctx.actionPath,
+        groupLabel: event.groupLabel || "Group",
+        leaderLabel,
+        locked: event.groupsLocked === true,
+        presenceOk: presence.ok,
+        teams,
+        loose,
+        connectedCount: presence.members.length,
+        moveBlocker: blocker,
+        sendableTeams: teamGroups.filter((g) => !!g.channelId).length,
+        waitingForChannel: teamGroups
+          .filter((g) => !g.channelId)
+          .reduce((n, g) => n + (g.memberIds ?? []).length, 0),
+        hasMain: !!event.channelId,
+        destinations,
+        movePeople,
+        leaders,
+      }) + scriptTag(HOST_BOARD_SCRIPT)
+    );
   };
 }
 
@@ -916,70 +933,6 @@ function registerEndAction(router: Router, client: Client): void {
   );
 }
 
-/** The "Leaders" section (#1195); only rendered while leaders are on. */
-function createLeadersSection(client: Client): HostSectionRenderer {
-  return (ctx) => {
-    const { event } = ctx;
-    if (event.groupsEnabled !== true || event.captainsEnabled !== true) {
-      return undefined;
-    }
-    const guild = client.guilds?.cache?.get(event.guildId);
-    const presence = readEventPresence(client, event);
-    let blocker = moveMembersBlocker(guild);
-    if (!blocker && !presence.ok) {
-      blocker =
-        "The bot could not read who is in the voice channels, so pulling people is switched off.";
-    }
-    const leaderOf = new Map(
-      effectiveLeaders(event.groups).map((l) => [l.groupKey, l.userId]),
-    );
-    const groups: LeaderGroupView[] = (event.groups ?? [])
-      .filter((g) => g.kind === "team")
-      .map((g) => ({
-        key: g.key,
-        name: g.name,
-        marker: g.marker ?? "",
-        leaderId: leaderOf.get(g.key) ?? null,
-        members: (g.memberIds ?? []).map((id) => ({
-          id,
-          name: cachedMemberName(client, event.guildId, id),
-        })),
-      }));
-    const labelOf = (g: { marker?: string; name: string }): string =>
-      `${g.marker ? `${g.marker} ` : ""}${g.name}`;
-    const leads = (event.groups ?? []).find(
-      (g) => g.channelId && g.channelId === resolveLeadsChannel(event),
-    );
-    const defaultWhere = leads
-      ? `the ${labelOf(leads)} channel.`
-      : event.channelId
-        ? "the main channel (the event has no leaders-only channel yet)."
-        : "the channel you are in (the event has no main channel yet).";
-    const destinations: LeaderDestinationView[] = [
-      { value: PULL_DEFAULT, label: "Default" },
-    ];
-    if (event.channelId) {
-      destinations.push({ value: PULL_MAIN, label: "Main channel" });
-    }
-    destinations.push({ value: PULL_HERE, label: "The channel I am in" });
-    for (const g of event.groups ?? []) {
-      if (g.channelId) {
-        destinations.push({ value: g.key, label: labelOf(g) });
-      }
-    }
-    return renderLeadersSection({
-      csrfToken: ctx.csrfToken,
-      actionPath: ctx.actionPath,
-      leaderLabel: event.leaderLabel || "Leader",
-      groupLabel: event.groupLabel || "Group",
-      groups,
-      defaultWhere,
-      destinations,
-      blocker,
-    });
-  };
-}
-
 /** How many recent leader edits the panel lists. */
 const RECENT_EDITS = 10;
 
@@ -999,53 +952,33 @@ function describeEdit(details: Record<string, unknown>): string {
   return parts.length > 0 ? parts.join(", ") : "no change";
 }
 
-/** The "Team names and tags" section (#1196). */
-function createCustomiseSectionRenderer(client: Client): HostSectionRenderer {
-  return async (ctx) => {
-    const { event } = ctx;
-    if (event.groupsEnabled !== true) return undefined;
-    const teams = (event.groups ?? [])
-      .filter((g) => g.kind === "team")
-      .map((g) => ({
-        key: g.key,
-        name: g.name,
-        marker: g.marker ?? "",
-        tag: g.tag ?? "",
-        originalName: g.originalName ? g.originalName : null,
-        originalTag: g.originalTag ?? "",
-        renamePending: g.nameSyncPending === true,
-      }));
-    const edits: CustomiseEditView[] = [];
-    try {
-      const rows = await WebAuditLog.find({
-        guildId: event.guildId,
-        targetId: String(event._id),
-        action: LEADER_AUDIT_ACTION,
-        result: "success",
-      })
-        .sort({ createdAt: -1 })
-        .limit(RECENT_EDITS)
-        .lean();
-      for (const r of rows) {
-        edits.push({
-          at: new Date(r.createdAt).toISOString(),
-          who: cachedMemberName(client, event.guildId, r.discordUserId),
-          text: describeEdit((r.details ?? {}) as Record<string, unknown>),
-        });
-      }
-    } catch (err) {
-      logger.warn("Could not read the leader edits for the host panel:", err);
+/** The last edits leaders made from Discord, for "Event settings" (#1196). */
+async function recentLeaderEdits(
+  client: Client,
+  event: IEvent,
+): Promise<LeaderEditView[]> {
+  const edits: LeaderEditView[] = [];
+  try {
+    const rows = await WebAuditLog.find({
+      guildId: event.guildId,
+      targetId: String(event._id),
+      action: LEADER_AUDIT_ACTION,
+      result: "success",
+    })
+      .sort({ createdAt: -1 })
+      .limit(RECENT_EDITS)
+      .lean();
+    for (const r of rows) {
+      edits.push({
+        at: new Date(r.createdAt).toISOString(),
+        who: cachedMemberName(client, event.guildId, r.discordUserId),
+        text: describeEdit((r.details ?? {}) as Record<string, unknown>),
+      });
     }
-    return renderCustomiseSection({
-      csrfToken: ctx.csrfToken,
-      actionPath: ctx.actionPath,
-      on: customisationOn(event),
-      groupLabel: event.groupLabel || "Group",
-      leaderLabel: event.leaderLabel || "Leader",
-      teams,
-      edits,
-    });
-  };
+  } catch (err) {
+    logger.warn("Could not read the leader edits for the host panel:", err);
+  }
+  return edits;
 }
 
 /** The host puts a team's name and tag back (#1196). */
@@ -1211,91 +1144,115 @@ function createLiveEditDeps(client: Client): LiveEditDeps {
 }
 
 /**
- * The "Live settings" section (#1239). It reads the event FRESH (the form's
- * base values must be what is stored now, not the gate's copy) and fails
- * closed: an unreadable event or a switched-off Events feature shows a notice
- * and no form.
+ * What the two folds at the bottom of the panel (#1239, split in two by #1424)
+ * render from. It reads the event FRESH (the form's base values must be what is
+ * stored now, not the gate's copy) and fails closed: an unreadable event or a
+ * switched-off Events feature shows a notice and no form. One read per request
+ * serves both folds (cached on the request's section context).
  */
-function createSettingsSection(client: Client): HostSectionRenderer {
-  return async (ctx) => {
-    const empty = {
-      csrfToken: ctx.csrfToken,
-      actionPath: ctx.actionPath,
-      leadMinutes: null,
-      leadReadOnly: null,
-      locked: null,
-      groupLabel: ctx.event.groupLabel || "Group",
-      groups: [],
-    };
-    let fresh: IEvent | null = null;
-    try {
-      fresh = await EventService.getInstance(client).getEvent(
-        String(ctx.event._id),
-      );
-    } catch (err) {
-      logger.warn("Could not read the event for the settings section:", err);
-    }
-    if (!fresh || fresh.guildId !== ctx.event.guildId) {
-      return renderSettingsSection({
-        ...empty,
-        blocker: "The event could not be read, so it cannot be edited now.",
-      });
-    }
-    if (!hostControlsAvailable(fresh)) {
-      return renderSettingsSection({
-        ...empty,
-        blocker: REFUSAL_MESSAGE["not-open"],
-      });
-    }
-    // Every save is refused while an end or cancel holds the event, so no form.
-    if (EventService.getInstance(client).isEventBeingEnded(String(fresh._id))) {
-      return renderSettingsSection({
-        ...empty,
-        blocker: REFUSAL_MESSAGE.ending,
-      });
-    }
-    if ((await createLiveEditDeps(client).isEventsEnabled()) !== true) {
-      return renderSettingsSection({
-        ...empty,
-        blocker: REFUSAL_MESSAGE["events-off"],
-      });
-    }
-    const hasGroups =
-      fresh.groupsEnabled === true && (fresh.groups ?? []).length > 0;
-    return renderSettingsSection({
-      ...empty,
-      blocker: null,
-      leadMinutes: leadTimeRow.read(fresh) as number | null,
-      leadReadOnly: channelsExist(fresh)
-        ? (leadTimeRow.applicable(fresh) ?? null)
-        : null,
-      locked: hasGroups ? (lockGroupsRow.read(fresh) as boolean) : null,
-      groupLabel: fresh.groupLabel || "Group",
-      // The tick "also for the next occurrences" (#1266) is for a series only.
-      seriesTick: seriesSetupRow.applicable(fresh) === null,
-      leadersTags: leadersTagsViewOf(fresh),
-      groups: hasGroups
-        ? (fresh.groups ?? [])
-            .filter((g) => g.kind !== "leads")
-            .map((g) => ({
-              name: g.name,
-              marker: g.marker ?? "",
-              size: g.size ?? null,
-              memberCount: (g.memberIds ?? []).length,
-              overSize: isGroupOverSize(g),
-            }))
-        : [],
-      // Names, sizes and the preset switch (#1241).
-      groupEdit: hasGroups
-        ? await buildGroupEditView(fresh, ctx.session.discordUserId)
-        : undefined,
-      // Groups on or off (#1243): shown whether or not the event has groups.
-      groupsSwitch: await buildGroupsSwitchView(
-        fresh,
-        ctx.session.discordUserId,
-      ),
-    });
+const settingsViews = new WeakMap<
+  HostSectionContext,
+  Promise<SettingsViewData>
+>();
+
+function loadSettingsView(
+  client: Client,
+  ctx: HostSectionContext,
+): Promise<SettingsViewData> {
+  const cached = settingsViews.get(ctx);
+  if (cached) return cached;
+  const built = buildSettingsView(client, ctx);
+  settingsViews.set(ctx, built);
+  return built;
+}
+
+async function buildSettingsView(
+  client: Client,
+  ctx: HostSectionContext,
+): Promise<SettingsViewData> {
+  const empty = {
+    csrfToken: ctx.csrfToken,
+    actionPath: ctx.actionPath,
+    leadMinutes: null,
+    leadReadOnly: null,
+    groupLabel: ctx.event.groupLabel || "Group",
+    groups: [],
   };
+  let fresh: IEvent | null = null;
+  try {
+    fresh = await EventService.getInstance(client).getEvent(
+      String(ctx.event._id),
+    );
+  } catch (err) {
+    logger.warn("Could not read the event for the settings section:", err);
+  }
+  if (!fresh || fresh.guildId !== ctx.event.guildId) {
+    return {
+      ...empty,
+      blocker: "The event could not be read, so it cannot be edited now.",
+    };
+  }
+  if (!hostControlsAvailable(fresh)) {
+    return { ...empty, blocker: REFUSAL_MESSAGE["not-open"] };
+  }
+  // Every save is refused while an end or cancel holds the event, so no form.
+  if (EventService.getInstance(client).isEventBeingEnded(String(fresh._id))) {
+    return { ...empty, blocker: REFUSAL_MESSAGE.ending };
+  }
+  if ((await createLiveEditDeps(client).isEventsEnabled()) !== true) {
+    return { ...empty, blocker: REFUSAL_MESSAGE["events-off"] };
+  }
+  const hasGroups =
+    fresh.groupsEnabled === true && (fresh.groups ?? []).length > 0;
+  return {
+    ...empty,
+    blocker: null,
+    leadMinutes: leadTimeRow.read(fresh) as number | null,
+    leadReadOnly: channelsExist(fresh)
+      ? (leadTimeRow.applicable(fresh) ?? null)
+      : null,
+    groupLabel: fresh.groupLabel || "Group",
+    // The tick "also for the next occurrences" (#1266) is for a series only.
+    seriesTick: seriesSetupRow.applicable(fresh) === null,
+    leadersTags: leadersTagsViewOf(fresh),
+    // The leader label and what leaders changed (#1195, #1196): only while
+    // leaders are on for this event.
+    leaderExtras:
+      hasGroups && fresh.captainsEnabled === true
+        ? {
+            leaderLabel: fresh.leaderLabel || "Leader",
+            edits: await recentLeaderEdits(client, fresh),
+          }
+        : undefined,
+    groups: hasGroups
+      ? (fresh.groups ?? [])
+          .filter((g) => g.kind !== "leads")
+          .map((g) => ({
+            name: g.name,
+            marker: g.marker ?? "",
+            size: g.size ?? null,
+            memberCount: (g.memberIds ?? []).length,
+            overSize: isGroupOverSize(g),
+          }))
+      : [],
+    // Names, sizes and the preset switch (#1241).
+    groupEdit: hasGroups
+      ? await buildGroupEditView(fresh, ctx.session.discordUserId)
+      : undefined,
+    // Groups on or off (#1243): shown whether or not the event has groups.
+    groupsSwitch: await buildGroupsSwitchView(fresh, ctx.session.discordUserId),
+  };
+}
+
+/** The "Event settings" fold (#1239, #1424). */
+function createSettingsSection(client: Client): HostSectionRenderer {
+  return async (ctx) =>
+    renderEventSettings(await loadSettingsView(client, ctx));
+}
+
+/** The "Change the groups" fold (#1424). */
+function createGroupChangesSection(client: Client): HostSectionRenderer {
+  return async (ctx) => renderGroupChanges(await loadSettingsView(client, ctx));
 }
 
 const CONFIRM_FAILURE: Record<
@@ -1465,6 +1422,7 @@ function registerSettingsActions(router: Router, client: Client): void {
         }),
       };
     }),
+    { reopenFolds: true },
   );
 
   hostAction(
@@ -1497,6 +1455,7 @@ function registerSettingsActions(router: Router, client: Client): void {
       });
       return describeLiveEditOutcome(outcome);
     }),
+    { reopenFolds: true },
   );
 }
 
@@ -1555,10 +1514,11 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
             tag: g.tag ?? "",
             hasChannel: !!g.channelId,
             memberCount: (g.memberIds ?? []).length,
-            fill: groupFill({
-              size: g.size ?? null,
-              memberCount: (g.memberIds ?? []).length,
-            }),
+            // "2/2" for a sized group, "5" for an unsized one (#1191).
+            fill:
+              g.size == null
+                ? String((g.memberIds ?? []).length)
+                : `${(g.memberIds ?? []).length}/${g.size}`,
           }))
       : [],
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
@@ -1950,22 +1910,20 @@ export function createHostEventsRouter(client: Client): Router {
       });
   });
 
-  // The "Assign people" section and its actions (#1191).
-  HOST_SECTION_RENDERERS.assignment = createAssignmentSection(client);
+  // The toolbar and the team board (#1424) read; the actions below are the
+  // routes of #1191 (assign, unassign, randomise, lock), #1192 (moves),
+  // #1195 (leaders) and #1196 (reset a team), unchanged.
+  HOST_SECTION_RENDERERS.board = createBoardSection(client);
   registerAssignmentActions(router, client);
-  // The "Move people" section and its actions (#1192).
-  HOST_SECTION_RENDERERS.moves = createMovesSection(client);
   registerMoveActions(router, client);
-  // The "Leaders" section and its actions (#1195).
-  HOST_SECTION_RENDERERS.leaders = createLeadersSection(client);
   registerLeaderActions(router, client);
-  // The "Team names and tags" section and the host's reset (#1196).
-  HOST_SECTION_RENDERERS.customise = createCustomiseSectionRenderer(client);
   registerCustomiseActions(router, client);
   // The "End the event" section and its action (#1193).
   HOST_SECTION_RENDERERS.end = createEndSection();
   registerEndAction(router, client);
-  // The "Live settings" section and its save and confirm actions (#1239).
+  // The folded "Change the groups" section (#1424), built from the settings read.
+  HOST_SECTION_RENDERERS.groupchanges = createGroupChangesSection(client);
+  // The "Event settings" section and its save and confirm actions (#1239).
   HOST_SECTION_RENDERERS.settings = createSettingsSection(client);
   registerSettingsActions(router, client);
   // Editing the event itself (#1298): `GET` and `POST` `/edit`.
@@ -2001,7 +1959,10 @@ export function createHostEventsRouter(client: Client): Router {
           body: renderHostPanelBody({
             event: toPanelEvent(client, event),
             controls,
-            settingsOpen: flash !== null && flash !== undefined,
+            settingsOpen:
+              flash !== null &&
+              flash !== undefined &&
+              req.query.open === "folds",
           }),
           csrfToken,
           remainingMs: getDisplayedRemainingMs(session),
