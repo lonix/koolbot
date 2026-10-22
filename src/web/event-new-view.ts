@@ -18,6 +18,7 @@ import {
   EVENT_WHEN_CHOICES,
   EVENT_WHEN_LABELS,
   EVENT_WHEN_SCRIPT,
+  type EventWhen,
 } from "./event-when.js";
 import {
   EVENT_DESCRIPTION_MAX,
@@ -36,6 +37,8 @@ export interface NewEventViewProps {
   groupPresetsNotice: string | null;
   /** The channel category or the announcement channel is not set. */
   setupNotice?: string | null;
+  /** The When choice that starts selected (Start now on Your events passes `now`). */
+  initialWhen?: EventWhen;
 }
 
 /** Preset lengths, in minutes (docs/design NumberField: durations are chosen). */
@@ -77,7 +80,7 @@ export function renderNewEventBody(props: NewEventViewProps): string {
       value,
       label: EVENT_WHEN_LABELS[value],
     })),
-    "pick",
+    props.initialWhen ?? "pick",
     { id: "new-event-when", labelledBy: "new-event-when-label" },
   );
   const notice = props.setupNotice

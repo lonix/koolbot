@@ -40,6 +40,10 @@ import {
   type SettingRow,
 } from "../../src/web/admin-views.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
+import {
+  renderHostEventsPage,
+  type HostEventListRow,
+} from "../../src/web/me-events-page.js";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import {
   renderModAuditBody,
@@ -2840,6 +2844,19 @@ function editEventView(over: Partial<EventEditView>): EventEditView {
   };
 }
 
+function yourEventRow(over: Partial<HostEventListRow>): HostEventListRow {
+  return {
+    id: "65a000000000000000000001",
+    title: "Quiz night",
+    when: "2030-01-01 19:00 (UTC)",
+    state: "scheduled",
+    durationMinutes: 90,
+    editable: true,
+    recurring: false,
+    ...over,
+  };
+}
+
 /** Every `/me` member-facing page, rendered through the user layout. */
 export function userPages(): A11yPage[] {
   const shell = (title: string, active: string, body: string): string =>
@@ -2964,11 +2981,106 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me/events Your events (live, upcoming, past)",
+      html: shell(
+        "Your events",
+        "/me/events",
+        renderHostEventsPage({
+          csrfToken: COMMON.csrfToken,
+          eventsEnabled: true,
+          events: {
+            live: [
+              yourEventRow({
+                id: "65a000000000000000000002",
+                state: "active",
+                title: "Live quiz",
+              }),
+            ],
+            upcoming: [
+              yourEventRow({}),
+              yourEventRow({
+                id: "65a000000000000000000003",
+                title: "Weekly game",
+                recurring: true,
+              }),
+            ],
+            past: [
+              yourEventRow({
+                id: "65a000000000000000000004",
+                state: "ended",
+                title: "Old quiz",
+                editable: false,
+              }),
+              yourEventRow({
+                id: "65a000000000000000000005",
+                state: "cancelled",
+                title: "Called off",
+                editable: false,
+              }),
+            ],
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me/events Your events (nothing yet)",
+      html: shell(
+        "Your events",
+        "/me/events",
+        renderHostEventsPage({
+          csrfToken: COMMON.csrfToken,
+          eventsEnabled: true,
+          events: { live: [], upcoming: [], past: [] },
+        }),
+      ),
+    },
+    {
+      name: "/me/events Your events (Events off, unreadable)",
+      html: shell(
+        "Your events",
+        "/me/events",
+        renderHostEventsPage({
+          csrfToken: COMMON.csrfToken,
+          eventsEnabled: false,
+          events: null,
+        }),
+      ),
+    },
+    {
+      name: "/me/events Your events (Events off, past only)",
+      html: shell(
+        "Your events",
+        "/me/events",
+        renderHostEventsPage({
+          csrfToken: COMMON.csrfToken,
+          eventsEnabled: false,
+          events: {
+            live: [],
+            upcoming: [],
+            past: [yourEventRow({ state: "ended", editable: false })],
+          },
+        }),
+      ),
+    },
+    {
       name: "/me host panel (scheduled, groups)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+      ),
+    },
+    {
+      // The settings fold open (after a save): summary, hint and body.
+      name: "/me host panel (settings fold open)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/events",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          controls: { settings: "<p>Settings body.</p>" },
+          settingsOpen: true,
+        }),
       ),
     },
     {

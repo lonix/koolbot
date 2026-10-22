@@ -138,3 +138,80 @@ export async function listHostedEvents(
     return [];
   }
 }
+
+/** One row of the host's "Your events" page. */
+export interface HostEventRow {
+  id: string;
+  title: string;
+  startTime: Date;
+  timezone: string;
+  state: string;
+  durationMinutes: number;
+  /** The row can still be edited (open, not adopted). */
+  editable: boolean;
+  /** Part of a recurring series: Cancel then only reaches this occurrence. */
+  recurring: boolean;
+}
+
+/** Most finished events the page lists. */
+export const HOST_PAST_EVENTS_LIMIT = 25;
+/** Most open events the page lists. */
+export const HOST_OPEN_EVENTS_LIMIT = 50;
+
+/**
+ * The events `userId` created in `guildId`, for the host's own page (#1319):
+ * running (`live`), planned (`upcoming`, soonest first) and finished (`past`,
+ * newest first). The filter is on `createdBy` and `guildId`, both from the
+ * session, so nobody else's event can appear. Adopted events are left out, as
+ * on the overview: the adopting admin did not create them. Unlike the overview
+ * card, a failed read throws, so the page can say so instead of showing "no
+ * events".
+ */
+export async function listHostEvents(
+  guildId: string,
+  userId: string,
+): Promise<{
+  live: HostEventRow[];
+  upcoming: HostEventRow[];
+  past: HostEventRow[];
+}> {
+  const empty = { live: [], upcoming: [], past: [] };
+  if (!guildId || !userId) return empty;
+  const base = {
+    guildId,
+    createdBy: userId,
+    nativeCleanupOnly: { $ne: true },
+    nativeAdopted: { $ne: true },
+  };
+  const toRows = (rows: unknown): HostEventRow[] =>
+    Array.isArray(rows)
+      ? rows.map((r) => ({
+          id: String(r._id),
+          title: String(r.title ?? ""),
+          startTime: r.startTime as Date,
+          timezone: String(r.timezone ?? ""),
+          state: String(r.state ?? ""),
+          durationMinutes: Number(r.durationMinutes ?? 0),
+          editable: r.state === "scheduled" || r.state === "active",
+          recurring: Boolean(
+            r.recurrence && r.recurrence !== "none" && r.seriesId,
+          ),
+        }))
+      : [];
+  const [open, past] = await Promise.all([
+    Event.find({ ...base, state: { $in: ["scheduled", "active"] } })
+      .sort({ startTime: 1 })
+      .limit(HOST_OPEN_EVENTS_LIMIT)
+      .lean() as unknown,
+    Event.find({ ...base, state: { $in: ["ended", "cancelled"] } })
+      .sort({ startTime: -1 })
+      .limit(HOST_PAST_EVENTS_LIMIT)
+      .lean() as unknown,
+  ]);
+  const openRows = toRows(open);
+  return {
+    live: openRows.filter((r) => r.state === "active"),
+    upcoming: openRows.filter((r) => r.state === "scheduled"),
+    past: toRows(past),
+  };
+}

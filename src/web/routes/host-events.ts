@@ -248,15 +248,15 @@ function forbidden(res: Response): void {
         product: "Koolbot",
         bodyHtml:
           `<p>This event is not yours to host, or it does not exist. ` +
-          `Back to <a href="/me/">your overview</a>.</p>`,
+          `Back to <a href="/me/events">your events</a>.</p>`,
       }),
     );
 }
 
-/** Redirect to the panel with a signed flash (not a bare query-string flash, #1149). */
-export function hostPanelRedirect(
+/** Redirect to `path` with a signed flash (not a bare query-string flash, #1149). */
+function redirectWithFlash(
   res: Response,
-  eventId: string,
+  path: string,
   flash: UserFlashMessage,
 ): void {
   const text = truncateFlash(flash.text);
@@ -265,7 +265,16 @@ export function hostPanelRedirect(
     msg: text,
     sig: signFlash(flash.type, text),
   }).toString();
-  res.redirect(303, `${hostPanelPath(eventId)}?${qs}`);
+  res.redirect(303, `${path}?${qs}`);
+}
+
+/** Redirect to the panel with a signed flash. */
+export function hostPanelRedirect(
+  res: Response,
+  eventId: string,
+  flash: UserFlashMessage,
+): void {
+  redirectWithFlash(res, hostPanelPath(eventId), flash);
 }
 
 export interface HostActionResult {
@@ -288,6 +297,11 @@ export interface HostActionResult {
    * dialog from a fetched answer. Set by nothing else.
    */
   confirmPage?: boolean;
+  /**
+   * Redirect (with the same signed flash) to this fixed `/me/events` path
+   * instead of the panel; used by Cancel, whose panel is then only a summary.
+   */
+  redirectTo?: string;
 }
 
 export interface HostActionOptions {
@@ -368,10 +382,15 @@ export function hostAction(
           .send(result.page);
         return;
       }
-      hostPanelRedirect(res, eventId, {
+      const flash: UserFlashMessage = {
         type: result.ok ? "ok" : "err",
         text: result.message,
-      });
+      };
+      if (result.redirectTo !== undefined) {
+        redirectWithFlash(res, result.redirectTo, flash);
+        return;
+      }
+      hostPanelRedirect(res, eventId, flash);
     })().catch(next);
   });
 }
@@ -1627,7 +1646,7 @@ function registerEditRoutes(router: Router, client: Client): void {
         .send(
           renderUserPage({
             title: `Edit event: ${event.title}`,
-            active: "/me/",
+            active: "/me/events",
             body: renderEventEditBody({
               event: {
                 id: eventId,
@@ -1836,6 +1855,40 @@ function registerEditRoutes(router: Router, client: Client): void {
   });
 }
 
+/**
+ * `POST /cancel` (#1319): cancel a planned event from "Your events". Only this
+ * event, never a series (a host's events do not repeat; an admin's series is
+ * stopped from the admin Events page). A running event is ended from its
+ * panel instead, so it is refused here. The outcome is what the service
+ * reports: `cancelled` only when this call really cancelled it.
+ */
+function registerCancelAction(router: Router, client: Client): void {
+  hostAction(router, "cancel", "/cancel", async ({ event, session }) => {
+    if (event.state !== "scheduled") {
+      return {
+        ok: false,
+        message:
+          "This event is running. End it from its host panel instead of cancelling it.",
+        errorMessage: `event is ${event.state}`,
+        redirectTo: "/me/events",
+      };
+    }
+    const after = await EventService.getInstance(client).cancelEvent(
+      String(event._id),
+      session.guildId,
+    );
+    const ok = after !== null && after.state === "cancelled";
+    return {
+      ok,
+      message: ok
+        ? `Cancelled '${event.title}'.`
+        : `'${event.title}' could not be cancelled: it is ${after?.state ?? "gone"}.`,
+      errorMessage: ok ? null : `event is ${after?.state ?? "missing"}`,
+      redirectTo: "/me/events",
+    };
+  });
+}
+
 export function createHostEventsRouter(client: Client): Router {
   const router = Router({ mergeParams: true });
 
@@ -1909,6 +1962,8 @@ export function createHostEventsRouter(client: Client): Router {
   registerSettingsActions(router, client);
   // Editing the event itself (#1298): `GET` and `POST` `/edit`.
   registerEditRoutes(router, client);
+  // Cancelling a planned event from "Your events" (#1319).
+  registerCancelAction(router, client);
 
   router.get("/", (req, res, next: NextFunction) => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
@@ -1938,6 +1993,7 @@ export function createHostEventsRouter(client: Client): Router {
           body: renderHostPanelBody({
             event: toPanelEvent(client, event),
             controls,
+            settingsOpen: flash !== null && flash !== undefined,
           }),
           csrfToken,
           remainingMs: getDisplayedRemainingMs(session),

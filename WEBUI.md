@@ -106,7 +106,7 @@ the console links back to **My preferences**. The display name comes from the me
 (the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
 
 On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
-(New event and Event presets today; Your events with #1319) and **Moderation** (Mod log and Command audit; Tickets once
+(Your events, New event and Event presets) and **Moderation** (Mod log and Command audit; Tickets once
 it has a page and is on). A section appears when the person holds the scope and it has at least one page that exists. A
 person with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So a Moderator sees You
 and Moderation with a sidebar, a host and moderator sees You, Hosting and Moderation, and a plain member sees no sidebar.
@@ -1652,6 +1652,15 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
+**Your events** (#1319) is the home of the Hosting section, at `/me/events`. It lists the events the signed-in person created, never anyone
+else's (the query is filtered on the session's server and user, an admin session included): **Live now**, **Upcoming** with **Edit** and
+**Cancel** per row, and **Past events** folded. The header has **Start now**, which opens the New event form with **When: Now** already chosen
+(`/me/events/new?when=now`; any other value of `when` is ignored), and **New event**; both are left out while Events is switched off, and the page then
+says so and still lists earlier events. The scope line under the title says why the person can host ("You can host because you are in @Event
+hosts"). **Cancel** asks for confirmation and posts to `/me/events/<id>/host/cancel`, behind the same gate as every host action (CSRF, then
+creator-or-admin, 403 otherwise, a refused write audited as `event.host.denied`); it cancels this event only, is audited as `event.host.cancel`, and
+is refused for a running event, which is ended from its host panel instead. Nothing on the page links to `/admin` or shows a server-wide setting.
+
 The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
 folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.
 It sets up a list of groups for the event, such as quiz teams, clan-match squads,
@@ -1923,8 +1932,8 @@ matters when events share the voice channels' category and managed-only cleanup 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
 under `/admin`, because the host is the event's creator, who may have signed in with `/me`
-rather than `/config`. The creator signs in with `/me` like any member and finds their open events
-under **Events you host** on the overview; admins open it from the **Host panel**
+rather than `/config`. The creator signs in with `/me` like any member and finds their events
+under **Your events** (Hosting), and their open ones under **Events you host** on the overview; admins open it from the **Host panel**
 link on each row of the Events page. Who may open it:
 
 - the member who created the event (through the schedule form), and
@@ -1942,6 +1951,9 @@ The page shows a summary (state, start, duration, repeat, main voice channel) an
 event's groups. Scheduled and active events also show a section for each control:
 **Assign people**, **Move people**, **End the event**, **Team names and tags** (below) and, when
 the event has leaders switched on, **Leaders** (below) and **Live settings** (below) work today.
+**Live settings** (settings, leaders, tags and changes to the groups) is one folded section, **Event settings and groups**, at the bottom
+of the page (#1319); its summary states the channel lead time and the number of groups, and it opens by itself after a save, so the
+result is in view. The page is part of the Hosting section: its breadcrumb returns to **Your events**.
 Ended and cancelled events show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.

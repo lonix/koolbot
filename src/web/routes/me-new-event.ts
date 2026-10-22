@@ -21,6 +21,7 @@ import {
   loadPresetCatalog,
 } from "../../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../../services/event-groups.js";
+import { parseEventWhen } from "../event-when.js";
 import { resolveTimezone } from "../../utils/timezone.js";
 import {
   createdFlash,
@@ -140,6 +141,11 @@ export function createMeNewEventRouter(client: Client): Router {
               catalog.personalUnreadable,
             ),
             setupNotice,
+            // `?when=now` is Start now on Your events; anything else is the default.
+            initialWhen:
+              parseEventWhen(
+                typeof req.query.when === "string" ? req.query.when : "",
+              ) ?? "pick",
           }),
           csrfToken: csrfOf(req),
           remainingMs: getDisplayedRemainingMs(session),

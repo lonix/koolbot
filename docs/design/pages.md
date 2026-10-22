@@ -146,6 +146,14 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
 - *Live now* (or one line saying how Start now works), *Upcoming* with Edit and Cancel, *Past events* folded.
 - Only events the person created; server-wide event settings stay with admins.
 
+**As built (#1319).** `/me/events` (`me-events-page.ts`, `routes/me-events.ts`). The scope line is the shell's own (`renderScopeWhy`), so the page header
+carries only the title and one sentence about *Start now* and *New event*. *Start now* is a link to the New event form with *Now* preselected
+(`?when=now`), not a one-click action: a title is still needed. Both buttons are left out while Events is off, and a callout says so. *Live now* has
+one line saying how Start now works when empty; a live row links to its host panel and has no Cancel (a running event is ended from its panel).
+*Upcoming* rows have Edit and a confirmed Cancel (`POST /me/events/:id/host/cancel`, this occurrence only); the empty state links to *New event*.
+*Past events* is a folded `kb-disclosure` with a count. The list is filtered on the session's server and user, an admin session included, and
+leaves adopted events out as the overview card does. A failed read says so instead of showing an empty list.
+
 ### NewEventPage
 
 Creating an event, here as an event host. Admins get the same form from the Events page.
@@ -168,6 +176,11 @@ The host panel for a live event, as an event host who is neither admin nor moder
   shows where they are connected now.
 - At the bottom, folded: *Event settings* (Group leaders and Clan tags, children nested) and *Change the groups* (add, remove, preset, switch off).
   Each summary states the current values.
+
+**As built (#1319).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). *Event settings and groups* is one
+`kb-disclosure` at the bottom holding the former *Live settings* section (lead time, lock, leaders and tags, and the changes to the groups); its summary
+states the lead time and group count, and it is open after a save. The board with drag-and-drop columns, the toolbar dialogs, and the split into two
+folds are not built: the sections *Assign people*, *Move people*, *Leaders*, *Team names and tags* and *End the event* are still the cards of #1189.
 
 ## Moderator
 
