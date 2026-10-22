@@ -683,6 +683,60 @@ describe("Server scan tabs (#1323)", () => {
     }
   });
 
+  it("says on the Overview when the bot list may be incomplete, even with no bots found", () => {
+    const noBots = { ...scan, bots: [] as typeof scan.bots };
+    const off = mainOf(page("overview", { scan: noBots }));
+    expect(off).toContain(
+      "so a bot without an integration role may be missing",
+    );
+    expect(off).toContain("GUILD_MEMBERS_INTENT=true");
+    expect(off).toContain("None found, but the list may be incomplete.");
+    expect(off).not.toContain("None found.<");
+    // Cards present: the warning is still on the Overview, once.
+    const withCards = mainOf(page("overview"));
+    expect(withCards.match(/may be missing from this list/g)).toHaveLength(1);
+    // Intent on: nothing to warn about.
+    const on = mainOf(
+      page("overview", {
+        scan: {
+          ...noBots,
+          readiness: { ...scan.readiness, membersIntent: true },
+        },
+      }),
+    );
+    expect(on).not.toContain("may be missing from this list");
+    expect(on).toContain("None found.");
+  });
+
+  it("does not say the suggestions look fine when webhooks could not be read", () => {
+    const base = { ...scan, suggestions: [] as typeof scan.suggestions };
+    const known = mainOf(page("overview", { scan: base }));
+    expect(known).toContain("look fine");
+    expect(known).not.toContain("were not checked");
+    const unknown = mainOf(
+      page("overview", {
+        scan: {
+          ...base,
+          webhooks: { known: false, list: [], unavailable: "error" },
+        },
+      }),
+    );
+    expect(unknown).not.toContain("look fine");
+    expect(unknown).toContain("Nothing to suggest from what could be read.");
+    expect(unknown).toContain(
+      "were not checked, because webhooks could not be read",
+    );
+    const withSuggestions = mainOf(
+      page("overview", {
+        scan: {
+          ...scan,
+          webhooks: { known: false, list: [], unavailable: "error" },
+        },
+      }),
+    );
+    expect(withSuggestions).toContain("were not checked");
+  });
+
   it("renders a failure notice, with no tabs, when the scan failed", () => {
     const html = renderAdoptPage({
       ...common,

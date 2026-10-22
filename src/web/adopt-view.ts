@@ -301,7 +301,7 @@ function renderTiles(scan: ServerScan, sampled: boolean): string {
   <a class="kb-tile" href="${escapeHtml(scanHref("bots", sampled))}">
     <div class="kb-tile__top"><span class="kb-overline">Other bots</span></div>
     <div class="kb-tile__value">${others.length}</div>
-    <div class="kb-tile__detail">${others.length === 0 ? "None found." : `${known} in the catalogue.`}</div>
+    <div class="kb-tile__detail">${others.length === 0 ? (report.warnings.length ? "None found, but the list may be incomplete." : "None found.") : `${known} in the catalogue.`}</div>
   </a>
 </div>`;
 }
@@ -344,12 +344,15 @@ function renderAttention(scan: ServerScan): string {
       return `<li><span class="kb-list__main">${escapeHtml(s.message)}</span>${act ? `<a class="kb-btn kb-btn--sm" href="${act.href}">${escapeHtml(act.label)}</a>` : ""}</li>`;
     })
     .join("");
+  const unchecked = scan.webhooks.known
+    ? ""
+    : `<footer class="kb-panel__foot">Channels fed by webhooks or followed announcement channels were not checked, because webhooks could not be read.</footer>`;
   parts.push(
     `<section class="kb-panel" aria-labelledby="p-suggest"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-suggest">Suggestions</h2><span class="kb-panel__meta">${scan.suggestions.length}</span></header>${
       suggestions
         ? `<div class="kb-panel__body kb-panel__body--flush"><ul class="kb-list">${suggestions}</ul></div>`
-        : `<div class="kb-panel__body"><p class="kb-muted">Nothing to suggest. The channels and settings the scan checks look fine.</p></div>`
-    }</section>`,
+        : `<div class="kb-panel__body"><p class="kb-muted">${scan.webhooks.known ? "Nothing to suggest. The channels and settings the scan checks look fine." : "Nothing to suggest from what could be read."}</p></div>`
+    }${unchecked}</section>`,
   );
   return parts.join("\n");
 }
@@ -401,7 +404,9 @@ function renderOverview(scan: ServerScan, sampled: boolean): string {
   const bots = report.cards.length
     ? `<section class="kb-panel" aria-labelledby="p-bots"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-bots">Other bots</h2><span class="kb-panel__meta"><a href="${escapeHtml(scanHref("bots", sampled))}">${report.cards.length} in detail</a></span></header>${report.cards.map(renderBotSummaryCard).join("")}</section>`
     : "";
+  const botWarnings = report.warnings.map((w) => callout("warn", w)).join("");
   return `${renderVerdict(scan)}
+${botWarnings}
 ${renderTiles(scan, sampled)}
 <div class="kb-cols">
   <div class="kb-stack">${renderAttention(scan)}</div>
