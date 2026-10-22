@@ -308,10 +308,13 @@ describe("POST /moderation/cases/:id/<decision>", () => {
 
   it("tells the loser of a race which status the case was found in", async () => {
     mockDecide.mockRejectedValue(
-      new MockCaseError("status-changed", "Case #14 changed while you were looking: it is now \"let back in\"."),
+      new MockCaseError(
+        "status-changed",
+        'Case #14 changed while you were looking: it is now "let back in".',
+      ),
     );
     expect(flashOf(await decide("permanent")).msg).toBe(
-      "Case #14 changed while you were looking: it is now \"let back in\".",
+      'Case #14 changed while you were looking: it is now "let back in".',
     );
   });
 });
@@ -322,11 +325,18 @@ describe("POST /moderation/cases/run-review", () => {
       await harness.post("/moderation/cases/run-review", {}),
     );
     expect(flash).toMatchObject({ type: "ok" });
-    expect(flash.msg).toContain("2 cases");
+    expect(flash.msg).toBe("Check done: 2 cases now need a decision.");
     expect(lastAudit()).toMatchObject({
       action: "moderation.case.run_review",
       result: "success",
     });
+  });
+
+  it("says one case needs a decision in the singular", async () => {
+    mockRunNow.mockResolvedValue({ due: 1, flipped: 1, notified: false });
+    expect(
+      flashOf(await harness.post("/moderation/cases/run-review", {})).msg,
+    ).toBe("Check done: 1 case now needs a decision.");
   });
 
   it("says so when the feature is off and nothing ran", async () => {
