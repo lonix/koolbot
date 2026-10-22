@@ -3067,13 +3067,13 @@ function eventGroupsScript(): string {
     "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
     "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
     "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
-    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto')})}" +
+    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto');f(i,k).removeAttribute('data-manual')})}" +
     // The tag follows the name (Red -> RED) while clan tags are on, until it is edited.
     "function derive(name){var w=name.replace(/[^\\p{L}\\p{N}\\s]/gu,' ').trim().split(/\\s+/).filter(Boolean);" +
     "var s=w.length>1?w.map(function(x){return Array.from(x)[0]}).join(''):Array.from(w[0]||'').slice(0,4).join('');" +
     "return s.toUpperCase().slice(0,MAXTAG)}" +
     "function deriveTags(){if(!tagsOn())return;Array.prototype.forEach.call(rows(),function(r,i){" +
-    "var t=f(i,'tag'),n=val('group_'+i+'_name');if(t.value&&!t.hasAttribute('data-auto'))return;" +
+    "var t=f(i,'tag'),n=val('group_'+i+'_name');if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
     "if(n){t.value=derive(n);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
     "function firstFree(){var taken={};Array.prototype.forEach.call(rows(),function(r,i){var m=val('group_'+i+'_marker');if(m)taken[m]=1});" +
     "for(var k=0;k<COLOURS.length;k++)if(!taken[COLOURS[k][0]])return COLOURS[k][0];return ''}" +
@@ -3082,14 +3082,14 @@ function eventGroupsScript(): string {
     // other rows have markers; a row whose name is cleared gives those back, so a row
     // is never left holding only automatic values (it would count as filled in).
     "function autoFill(i,n){var s=f(i,'size'),m=f(i,'marker'),t=f(i,'tag');" +
-    "if(n){var s0=val('group_0_size');if(i>0&&s0&&!s.value){s.value=s0;s.setAttribute('data-auto','1')}" +
-    "if(i>0&&!m.value&&anyMarker()){m.value=firstFree();m.setAttribute('data-auto','1');if(kr())kr().syncAll()}}" +
+    "if(n){var s0=val('group_0_size');if(i>0&&s0&&!s.value&&!s.hasAttribute('data-manual')){s.value=s0;s.setAttribute('data-auto','1')}" +
+    "if(i>0&&!m.value&&!m.hasAttribute('data-manual')&&anyMarker()){m.value=firstFree();m.setAttribute('data-auto','1');if(kr())kr().syncAll()}}" +
     "else{[s,m,t].forEach(function(el){if(el.hasAttribute('data-auto')){el.value='';el.removeAttribute('data-auto')}});if(kr())kr().syncAll()}}" +
     "function copySize(){var s0=val('group_0_size');Array.prototype.forEach.call(rows(),function(r,i){if(i===0||!val('group_'+i+'_name'))return;" +
-    "var s=f(i,'size');if(!s.value||s.hasAttribute('data-auto')){s.value=s0;if(s0)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}})}" +
+    "var s=f(i,'size');if(s.hasAttribute('data-manual'))return;if(!s.value||s.hasAttribute('data-auto')){s.value=s0;if(s0)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}})}" +
     // Typing in a group row switches groups on, so rows are never silently dropped.
     "box.addEventListener('input',function(e){enabled.checked=true;show();var t=e.target,m=/^group_(\\d+)_(\\w+)$/.exec(t.name||'');" +
-    "if(m){var i=+m[1];if(m[2]==='size'||m[2]==='tag'||m[2]==='marker')t.removeAttribute('data-auto');" +
+    "if(m){var i=+m[1];if(m[2]==='size'||m[2]==='tag'||m[2]==='marker'){t.removeAttribute('data-auto');t.setAttribute('data-manual','1')}" +
     "if(m[2]==='size'&&i===0)copySize();" +
     "if(m[2]==='name'){autoFill(i,t.value.trim());deriveTags()}}validity()});" +
     "form.elements['groups_tags']&&form.elements['groups_tags'].addEventListener('change',deriveTags);" +
@@ -3164,6 +3164,7 @@ function eventGroupsScript(): string {
     // Only the chosen radio is saved, or the last card would win.
     "if(el.type==='radio'){if(el.checked)d[el.name]=el.value;return}" +
     "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
+    "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
     "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
     "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
     "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
@@ -3179,6 +3180,7 @@ function eventGroupsScript(): string {
     "var el=form.elements[k];if(!el||el.type==='file'||el.type==='radio')return;" +
     "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
     // The person gets the rows back, open, so they can fix what the server refused.
+    "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
     "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
     "if(adv&&(val('groups_label')||val('groups_lead_minutes')))adv.open=true;" +
     // Setting `checked` fires no change event, so reapply the dependent state by hand.

@@ -1,11 +1,14 @@
-/* global HTMLInputElement, HTMLElement, HTMLButtonElement, HTMLDetailsElement, HTMLFormElement */
+/* global HTMLInputElement, HTMLElement, HTMLButtonElement, HTMLDetailsElement, HTMLFormElement, Element */
 /**
  * The group setup form's collapse, preset cards, quick builder, derived values
  * and emoji picker (#1299), run for real in jsdom. The markup and scripts come
  * from `renderEventsPage`, so what is tested is what ships.
  */
 import { describe, it, expect } from "@jest/globals";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
+import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
 import { renderEventsPage } from "../../src/web/admin-views.js";
 import {
   MARKER_CHOICES,
@@ -655,5 +658,296 @@ describe("a refused submit puts the form back (#1299)", () => {
       dom.window.sessionStorage.getItem("koolbot-event-form-draft") ?? "{}",
     );
     expect(saved.groups_preset).toBe("builtin:wardogs");
+  });
+});
+
+describe("edits by hand are remembered, even to empty (#1299)", () => {
+  const manualSetup = (): JSDOM => {
+    const dom = boot(15, 3);
+    switchOn(dom);
+    typeInto(dom, "group_0_name", "A");
+    typeInto(dom, "group_0_size", "5");
+    typeInto(dom, "group_1_name", "B");
+    return dom;
+  };
+
+  it("a size cleared on purpose stays empty when the first row changes", () => {
+    const dom = manualSetup();
+    expect(field(dom, "group_1_size").value).toBe("5");
+    typeInto(dom, "group_1_size", "");
+    typeInto(dom, "group_0_size", "6");
+    expect(field(dom, "group_1_size").value).toBe("");
+  });
+
+  it("a tag cleared on purpose is not made again from the name", () => {
+    const dom = boot();
+    switchOn(dom);
+    click(dom, field(dom, "groups_tags"));
+    typeInto(dom, "group_0_name", "Red");
+    expect(field(dom, "group_0_tag").value).toBe("RED");
+    typeInto(dom, "group_0_tag", "");
+    typeInto(dom, "group_0_name", "Reds");
+    expect(field(dom, "group_0_tag").value).toBe("");
+    click(dom, field(dom, "groups_tags"));
+    click(dom, field(dom, "groups_tags"));
+    expect(field(dom, "group_0_tag").value).toBe("");
+  });
+
+  it("a marker removed on purpose is not given the next colour when the row is named", () => {
+    const dom = boot(15, 3);
+    switchOn(dom);
+    typeInto(dom, "group_0_name", "A");
+    field(dom, "group_0_marker").value = "🔴";
+    typeInto(dom, "group_1_marker", "");
+    typeInto(dom, "group_1_name", "B");
+    expect(field(dom, "group_1_marker").value).toBe("");
+  });
+
+  it("a preset or generated rows start over, so derived values work again", () => {
+    const dom = manualSetup();
+    typeInto(dom, "group_1_size", "");
+    chooseCard(dom, "builtin:red-vs-blue");
+    typeInto(dom, "group_0_size", "8");
+    typeInto(dom, "group_1_name", "Navy");
+    expect(field(dom, "group_1_size").value).toBe("8");
+  });
+
+  it("is kept when the draft is restored after a refused submit", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 3, maxCount: 15 },
+    } as never);
+    const run = (restore: Record<string, unknown>): JSDOM => {
+      const page = html.replace(
+        "<h1>Events</h1>",
+        '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+      );
+      const dom = new JSDOM(page, {
+        url: "http://localhost/admin/events",
+        runScripts: "outside-only",
+      });
+      dom.window.sessionStorage.setItem(
+        "koolbot-event-form-draft",
+        JSON.stringify(restore),
+      );
+      const scripts = [
+        ...page.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+      ].map((m) => m[1]);
+      dom.window.eval(scripts.find((c) => c.includes("koolGroupRows="))!);
+      dom.window.eval(
+        scripts.find((c) => c.includes("koolbot-event-form-draft"))!,
+      );
+      return dom;
+    };
+    // Submit once to see what the script saves.
+    const first = manualSetup();
+    typeInto(first, "group_1_size", "");
+    q(first, "form[data-event-form]").dispatchEvent(
+      new (first.window as Win).Event("submit", {
+        cancelable: true,
+        bubbles: true,
+      }),
+    );
+    const saved = JSON.parse(
+      first.window.sessionStorage.getItem("koolbot-event-form-draft") ?? "{}",
+    );
+    expect(saved.__manual).toContain("group_1_size");
+    expect(saved.__auto).not.toContain("group_1_size");
+    const back = run(saved);
+    expect(field(back, "group_1_size").value).toBe("");
+    typeInto(back, "group_0_size", "9");
+    expect(field(back, "group_1_size").value).toBe("");
+    expect(field(back, "group_0_size").value).toBe("9");
+  });
+});
+
+describe("the emoji picker, the summary and the form (#1299)", () => {
+  it("picking a marker is a change of the form, so the summary follows", () => {
+    const dom = boot();
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    expect(q(dom, "[data-preset-summary]").textContent).toContain("Red 🔴");
+    click(dom, q(dom, "[data-customise]"));
+    q(dom, "[data-marker-btn]").dispatchEvent(
+      new (dom.window as Win).Event("click", { bubbles: true }),
+    );
+    click(dom, q(dom, ".kb-emoji-pop button[data-emoji='🟣']"));
+    expect(q(dom, "[data-preset-summary]").textContent).toContain("Red 🟣");
+    q(dom, "[data-marker-btn]").dispatchEvent(
+      new (dom.window as Win).Event("click", { bubbles: true }),
+    );
+    click(dom, q(dom, ".kb-emoji-pop button[data-emoji='']"));
+    expect(q(dom, "[data-preset-summary]").textContent).toMatch(
+      /^2 groups · Red, Blue 🔵/,
+    );
+  });
+
+  it("the search box belongs to no form and Enter in it submits nothing", () => {
+    const dom = boot();
+    q(dom, "[data-marker-btn]").dispatchEvent(
+      new (dom.window as Win).Event("click", { bubbles: true }),
+    );
+    const search = q<HTMLInputElement>(dom, "[data-emoji-search]");
+    expect(search.form).toBeNull();
+    expect(
+      [...q<HTMLFormElement>(dom, "form[data-event-form]").elements].includes(
+        search,
+      ),
+    ).toBe(false);
+    const enter = new (dom.window as Win).KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    search.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+  });
+});
+
+describe("what the group form hides is hidden by the stylesheet too (#1299)", () => {
+  const css = readFileSync(
+    resolve(process.cwd(), "docs/design/kb.css"),
+    "utf8",
+  );
+
+  /** The page with kb.css in force, as a browser loads it. */
+  const styled = (html: string): JSDOM =>
+    new JSDOM(html.replace("</head>", `<style>${css}</style></head>`), {
+      url: "http://localhost/admin/events",
+      runScripts: "outside-only",
+    });
+  /** [ids, classes and attributes, elements] of one selector. */
+  const specificity = (sel: string): [number, number, number] => {
+    const s = sel.replace(/"[^"]*"|'[^']*'/g, "");
+    const ids = (s.match(/#[\w-]+/g) ?? []).length;
+    const classes =
+      (s.match(/\.[\w-]+/g) ?? []).length +
+      (s.match(/\[[^\]]*\]/g) ?? []).length +
+      (s.match(/(?<!:):(?!:)[\w-]+/g) ?? []).filter(
+        (p) => !/^:(not|is|where|has)$/.test(p),
+      ).length;
+    const stripped = s
+      .replace(/\[[^\]]*\]|[.#:][\w-]+|[>+~*]/g, " ")
+      .replace(/[()]/g, " ");
+    const elements = stripped.split(/\s+/).filter(Boolean).length;
+    return [ids, classes, elements];
+  };
+  const outranks = (
+    a: { spec: number[]; order: number },
+    b: { spec: number[]; order: number },
+  ): boolean => {
+    for (let i = 0; i < 3; i++) {
+      if (a.spec[i] !== b.spec[i]) return a.spec[i] > b.spec[i];
+    }
+    return a.order > b.order;
+  };
+  /**
+   * What a browser would use for `display`: the author rule with the highest
+   * specificity (then the latest), else the user agent's `[hidden]` rule. jsdom
+   * only orders rules, it does not rank them, so this does the ranking.
+   */
+  const display = (dom: JSDOM, el: Element): string => {
+    let best: { spec: number[]; order: number; value: string } | null = null;
+    let order = 0;
+    for (const style of dom.window.document.querySelectorAll("style")) {
+      const text = (style.textContent ?? "").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const value = /(?:^|;)\s*display\s*:\s*([^;!]+)/.exec(m[2])?.[1].trim();
+        if (!value) continue;
+        for (const sel of m[1].split(/,(?![^(]*\))/)) {
+          const selector = sel.trim();
+          let hit: boolean;
+          try {
+            hit = el.matches(selector);
+          } catch {
+            hit = false;
+          }
+          order++;
+          if (!hit) continue;
+          const candidate = { spec: specificity(selector), order, value };
+          if (!best || outranks(candidate, best)) best = candidate;
+        }
+      }
+    }
+    if (best) return best.value;
+    return (el as HTMLElement).hidden ? "none" : "inline";
+  };
+  const hiddenEls = (dom: JSDOM): Element[] =>
+    [...dom.window.document.querySelectorAll("[hidden]")].filter((el) =>
+      el.closest("[data-groups-section], [data-preset-form]"),
+    );
+  /** Every element marked hidden really is display none. */
+  const expectAllNone = (dom: JSDOM): void => {
+    for (const el of hiddenEls(dom)) {
+      const where = el.outerHTML.slice(0, 80);
+      expect([display(dom, el), where]).toEqual(["none", where]);
+    }
+  };
+  const bootStyled = (): JSDOM => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 15 },
+    } as never);
+    const dom = styled(html);
+    const scripts = [
+      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ].map((m) => m[1]);
+    dom.window.eval(scripts.find((c) => c.includes("koolGroupRows="))!);
+    dom.window.eval(
+      scripts.find((c) => c.includes("koolbot-event-form-draft"))!,
+    );
+    return dom;
+  };
+
+  it("every element the server renders hidden is display none", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 15 },
+    } as never);
+    const dom = styled(html);
+    expect(hiddenEls(dom).length).toBeGreaterThan(5);
+    expectAllNone(dom);
+  });
+
+  it("everything the script folds is display none: the body, the rows, the nested options", () => {
+    const dom = bootStyled();
+    // Groups off: the body, the nested options and the replaced marker box.
+    expect(display(dom, q(dom, "[data-groups-body]"))).toBe("none");
+    expect(display(dom, q(dom, "[data-nested-for='groups_captains']"))).toBe(
+      "none",
+    );
+    expectAllNone(dom);
+    // A preset chosen: the rows fold behind the summary.
+    switchOn(dom);
+    chooseCard(dom, "builtin:red-vs-blue");
+    expect(display(dom, q(dom, "[data-groups-body]"))).not.toBe("none");
+    expect(display(dom, q(dom, "[data-group-editor]"))).toBe("none");
+    expect(display(dom, q(dom, "[data-preset-summary]"))).not.toBe("none");
+    expect(display(dom, q(dom, "[data-nested-for='groups_tags']"))).toBe(
+      "none",
+    );
+    expectAllNone(dom);
+  });
+
+  it("the replaced marker box stays hidden in the member preset editor, whose own style sets display on inputs", () => {
+    const body = renderMyEventPresetsBody({
+      csrfToken: "t",
+      presets: [],
+      editing: null,
+      editUnavailable: false,
+      values: {},
+      prefillNote: null,
+      maxCount: 15,
+      defaultCount: 2,
+    });
+    const dom = styled(`<html><head></head><body>${body}</body></html>`);
+    const scripts = [
+      ...body.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+    ].map((m) => m[1]);
+    dom.window.eval(scripts.find((c) => c.includes("koolGroupRows="))!);
+    const input = q(dom, "[data-marker-input]");
+    expect(input.hidden).toBe(true);
+    expect(display(dom, input)).toBe("none");
+    expect(display(dom, q(dom, "[data-marker-btn]"))).not.toBe("none");
   });
 });

@@ -98,15 +98,16 @@ export function groupRowsScript(): string {
     "function closePop(focus){if(!pop||!popFor)return;var b=btn(popFor);pop.hidden=true;if(b){b.setAttribute('aria-expanded','false');if(focus)b.focus()}popFor=null}" +
     "function mark(i){var cur=i.value.trim();Array.prototype.forEach.call(pop.querySelectorAll('.kb-emoji-grid button'),function(x){x.setAttribute('aria-pressed',x.getAttribute('data-emoji')===cur?'true':'false')})}" +
     "function choose(v){if(!popFor)return;var i=input(popFor);i.value=v;label(popFor);" +
-    "i.dispatchEvent(new Event('input',{bubbles:true}));closePop(true)}" +
+    "i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));closePop(true)}" +
     "function build(){pop=document.createElement('div');pop.className='kb-emoji-pop';pop.hidden=true;pop.setAttribute('role','group');pop.setAttribute('aria-label','Choose a marker');" +
-    "var s=document.createElement('input');s.type='search';s.className='kb-input kb-input--sm';s.setAttribute('aria-label','Search markers');s.placeholder='Search';s.setAttribute('data-emoji-search','');" +
+    "var s=document.createElement('input');s.type='search';s.className='kb-input kb-input--sm';s.setAttribute('aria-label','Search markers');s.setAttribute('form','none');s.placeholder='Search';s.setAttribute('data-emoji-search','');" +
     "var h=document.createElement('p');h.className='kb-picker__group';h.textContent='Markers';" +
     "var g=document.createElement('div');g.className='kb-emoji-grid';" +
     "CHOICES.forEach(function(c){var b=document.createElement('button');b.type='button';b.textContent=c[0];b.title=c[1];b.setAttribute('aria-label',c[1]);b.setAttribute('data-emoji',c[0]);b.setAttribute('data-name',c[1]);b.setAttribute('aria-pressed','false');g.appendChild(b)});" +
     "var n=document.createElement('button');n.type='button';n.className='kb-btn kb-btn--ghost kb-btn--sm';n.textContent='No marker';n.setAttribute('data-emoji','');" +
     "var e=document.createElement('p');e.className='kb-help';e.textContent='No markers match.';e.hidden=true;e.setAttribute('data-emoji-empty','');" +
     "pop.appendChild(s);pop.appendChild(h);pop.appendChild(g);pop.appendChild(e);pop.appendChild(n);" +
+    "s.addEventListener('keydown',function(ev){if(ev.key==='Enter')ev.preventDefault()});" +
     "s.addEventListener('input',function(){var q=s.value.trim().toLowerCase(),any=false;" +
     "Array.prototype.forEach.call(g.children,function(b){var ok=!q||b.getAttribute('data-name').indexOf(q)!==-1;b.hidden=!ok;if(ok)any=true});e.hidden=any});" +
     "pop.addEventListener('click',function(ev){var b=ev.target.closest('button[data-emoji]');if(b&&pop.contains(b))choose(b.getAttribute('data-emoji'))});" +
