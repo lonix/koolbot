@@ -1179,6 +1179,17 @@ locked this way because Rewind is a graceful aggregator that declares no
 `dependsOn`. The Setup Wizard keeps its own row layout and gets the same
 switch and segmented controls.
 
+**Channels, categories and roles are labelled the way Discord labels them** (#1303), on every admin page that shows
+one. A text channel reads `# general`, an announcement channel `📢 news`, a voice channel `🔊 Lobby`, a stage
+`🎙️ Town hall`, a forum `💬 ideas`, a thread `🧵 name`, a category `📁 Events` (shown in capitals in tables) and a role
+`@Moderators`. Nothing but a text channel gets a `#`, so a category or voice channel is no longer taken for a text
+channel. A stored id that no longer resolves to a channel (deleted, or the bot cannot see it) reads
+`⚠ 1234 (unavailable)`, and stays selected in its picker so a save does not clear it. Pickers are native selects, grouped by kind
+(`Text channels`, `Voice channels`, `Categories`), with the category after the name (`🔊 Lobby · SCRATCH`);
+tables and sentences use an icon with the kind as its accessible name. One module, `src/web/discord-labels.ts`,
+decides all of this, and `__tests__/web/discord-labels.test.ts` fails when a page writes its own `#` in front of a name.
+The Rewind page (`/me/rewind`) uses the same labels. Voice stats and the searchable, typeahead picker of the design manual are not done yet (#1394).
+
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction
 roles, announcements, notices, polls, LFG, name history, moderation, events,

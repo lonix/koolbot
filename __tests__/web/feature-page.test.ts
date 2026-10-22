@@ -11,6 +11,7 @@
  * Markup is checked through a DOM, never with regular expressions over HTML.
  */
 
+import { ChannelType } from "discord.js";
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import {
@@ -624,8 +625,10 @@ function eventsPage(
     rows,
     settingRows: FEATURE_ROWS,
     settingsPickers: {
-      textChannels: [{ id: "c1", name: "events" }],
-      categoryChannels: [{ id: "cat1", name: "Events" }],
+      textChannels: [{ id: "c1", name: "events", type: ChannelType.GuildText }],
+      categoryChannels: [
+        { id: "cat1", name: "Events", type: ChannelType.GuildCategory },
+      ],
     },
     ...over,
   });

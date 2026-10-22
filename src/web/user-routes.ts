@@ -481,6 +481,23 @@ function toPresetViews(
   }));
 }
 
+/**
+ * The Discord type of a channel shown on Rewind, for labelling it by kind
+ * (#1303). A stored value (including an explicit null, a failed resolution)
+ * is kept; a snapshot frozen before the field existed has none, so it is
+ * read from the client cache. A channel that is no longer cached is null and
+ * reads as unavailable.
+ */
+function rewindChannelType(
+  client: Client,
+  channelId: string,
+  stored?: number | null,
+): number | null {
+  if (stored !== undefined) return stored;
+  const channel = client.channels.cache.get(channelId);
+  return channel && typeof channel.type === "number" ? channel.type : null;
+}
+
 function parseYearParam(raw: unknown, fallback: number): number {
   if (typeof raw !== "string" || raw.length === 0) return fallback;
   const n = Number.parseInt(raw, 10);
@@ -1158,6 +1175,10 @@ export function createUserRouter(
                 ),
                 date: summary.longestSession.date,
                 channelName: summary.longestSession.channelName,
+                channelType: rewindChannelType(
+                  client,
+                  summary.longestSession.channelId,
+                ),
               }
             : null,
           longestStreakDays: summary.longestStreakDays,
@@ -1182,6 +1203,7 @@ export function createUserRouter(
           topTextChannels: summary.topTextChannels.map((c) => ({
             channelId: c.channelId,
             channelName: c.channelName,
+            channelType: rewindChannelType(client, c.channelId, c.channelType),
             count: c.count,
           })),
           peakMessageDay: summary.peakMessageDay,

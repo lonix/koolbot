@@ -7,7 +7,7 @@ import {
 /**
  * `quotes.delete_roles` takes role groups (#1023). The Settings page and the
  * wizard step must offer them and render a stored group token by name, not as
- * "(missing) group:...". Other role lists must not offer groups.
+ * "⚠ group:... (unavailable)". Other role lists must not offer groups.
  */
 const ROLES = [{ id: "111111111111111111", name: "Mods" }];
 const GROUP_ROLES = [
@@ -56,13 +56,13 @@ describe("role group pickers on Settings and the wizard (#1023)", () => {
       '<option value="group:g1+" selected>@Staff and above (group)</option>',
     );
     expect(html).toContain('<option value="group:g1">@Staff (group)</option>');
-    expect(html).not.toContain("(missing) group:g1+");
+    expect(html).not.toContain("⚠ group:g1+");
     // A role list that doesn't resolve groups never offers them; a stored
     // token there stays visible as unknown instead of silently vanishing.
     const other = html.slice(
       html.indexOf('name="value_birthdays.allowed_roles"'),
     );
-    expect(other).toContain("(missing) group:g1");
+    expect(other).toContain("⚠ group:g1 (unavailable)");
     expect(other).not.toContain("Staff (group)");
   });
 
@@ -107,6 +107,6 @@ describe("role group pickers on Settings and the wizard (#1023)", () => {
     expect(html).toContain(
       '<option value="group:g1" selected>@Staff (group)</option>',
     );
-    expect(html).not.toContain("(missing) group:g1");
+    expect(html).not.toContain("⚠ group:g1 (unavailable)");
   });
 });

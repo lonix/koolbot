@@ -7,7 +7,7 @@
  * row is the member, the moderator, the action and the stated reason.
  */
 
-import type { Client } from "discord.js";
+import type { ChannelType, Client } from "discord.js";
 import type mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
@@ -206,8 +206,11 @@ export async function loadCommandAuditPage(args: {
   page: number;
   pageSize: number;
   channelNames: ReadonlyMap<string, string>;
+  /** Discord type per channel id, so a row can show the channel by kind (#1303). */
+  channelTypes: ReadonlyMap<string, ChannelType>;
 }): Promise<CommandAuditPageData> {
-  const { client, guildId, filters, pageSize, channelNames } = args;
+  const { client, guildId, filters, pageSize, channelNames, channelTypes } =
+    args;
   const query = buildCommandAuditQuery(guildId, filters);
   let unavailable = false;
   const total = await DiscordCommandAuditLog.countDocuments(query).catch(() => {
@@ -262,6 +265,7 @@ export async function loadCommandAuditPage(args: {
       channelLabel: channelId
         ? (channelNames.get(channelId) ?? channelId)
         : null,
+      channelType: channelId ? (channelTypes.get(channelId) ?? null) : null,
       result: (d.result as "success" | "error" | "denied") ?? "success",
       errorMessage: typeof d.errorMessage === "string" ? d.errorMessage : null,
       durationMs: typeof d.durationMs === "number" ? d.durationMs : 0,

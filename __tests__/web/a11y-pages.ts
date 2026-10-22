@@ -10,6 +10,7 @@
  * add a page renderer, add a fixture for it in the matching group below.
  */
 
+import { ChannelType } from "discord.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -341,11 +342,20 @@ const ADOPTION_SNAPSHOT = {
 };
 
 const CHANNELS = [
-  { id: "c1", name: "general" },
-  { id: "c2", name: "announcements" },
+  { id: "c1", name: "general", type: ChannelType.GuildText },
+  { id: "c2", name: "announcements", type: ChannelType.GuildAnnouncement },
 ];
-const VOICE_CHANNELS = [{ id: "v1", name: "Lounge" }];
-const CATEGORIES = [{ id: "cat1", name: "Voice Channels" }];
+const VOICE_CHANNELS = [
+  {
+    id: "v1",
+    name: "Lounge",
+    type: ChannelType.GuildVoice,
+    parentName: "Voice Channels",
+  },
+];
+const CATEGORIES = [
+  { id: "cat1", name: "Voice Channels", type: ChannelType.GuildCategory },
+];
 const ROLES = [
   { id: "r1", name: "Admin" },
   { id: "r2", name: "Member" },
@@ -1276,6 +1286,7 @@ export function adminPages(): A11yPage[] {
           {
             id: "a1",
             channelName: "general",
+            channelType: ChannelType.GuildText,
             cron: "0 9 * * 1",
             enabled: true,
             messagePreview: "Good morning!",
@@ -1632,6 +1643,7 @@ export function adminPages(): A11yPage[] {
             id: "s1",
             channelId: "c1",
             channelName: "general",
+            channelType: ChannelType.GuildText,
             cron: "0 12 * * 3",
             durationHours: 24,
             pingRoleId: "r2",
@@ -1661,7 +1673,7 @@ export function adminPages(): A11yPage[] {
       html: renderReactionRolesPage({
         ...COMMON,
         enabled: true,
-        configChannel: { name: "roles", id: "c1" },
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
         active: [
           {
             mappingId: "m1",
@@ -1669,7 +1681,9 @@ export function adminPages(): A11yPage[] {
             roleName: "Gamer",
             roleId: "r2",
             categoryName: "Games",
+            categoryType: ChannelType.GuildCategory,
             channelName: "roles",
+            channelType: ChannelType.GuildText,
             messageId: "msg1",
             autoCreated: true,
             mode: "toggle",
@@ -1685,7 +1699,9 @@ export function adminPages(): A11yPage[] {
             roleName: "Retro",
             roleId: "r2",
             categoryName: "Games",
+            categoryType: ChannelType.GuildCategory,
             channelName: "roles",
+            channelType: ChannelType.GuildText,
             messageId: "msg2",
             autoCreated: false,
             mode: "toggle",
@@ -1736,9 +1752,11 @@ export function adminPages(): A11yPage[] {
       html: renderNoticesPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "rules", id: "c1" },
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
         total: 1,
-        textChannels: [{ id: "c1", name: "rules" }],
+        textChannels: [
+          { id: "c1", name: "rules", type: ChannelType.GuildText },
+        ],
         settingRows: [
           {
             key: "notices.enabled",
@@ -1785,10 +1803,12 @@ export function adminPages(): A11yPage[] {
       html: renderQuotesPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "quotes", id: "c1" },
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
         headerMessageId: "900000000000000001",
         settingsPickers: {
-          textChannels: [{ id: "c1", name: "quotes" }],
+          textChannels: [
+            { id: "c1", name: "quotes", type: ChannelType.GuildText },
+          ],
           roles: [{ id: "r1", name: "Mods" }],
         },
         settingRows: [
@@ -1846,11 +1866,13 @@ export function adminPages(): A11yPage[] {
       html: renderBirthdaysPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "general", id: "c1" },
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
         role: { name: "Birthday", id: "r1" },
         cron: "0 * * * *",
         settingsPickers: {
-          textChannels: [{ id: "c1", name: "general" }],
+          textChannels: [
+            { id: "c1", name: "general", type: ChannelType.GuildText },
+          ],
           roles: [{ id: "r1", name: "Birthday" }],
         },
         settingRows: [
@@ -2171,6 +2193,7 @@ export function adminPages(): A11yPage[] {
             subcommand: "add",
             channelId: "c1",
             channelLabel: "general",
+            channelType: ChannelType.GuildText,
             result: "success",
             errorMessage: null,
             durationMs: 42,
@@ -2183,6 +2206,7 @@ export function adminPages(): A11yPage[] {
             subcommand: null,
             channelId: null,
             channelLabel: null,
+            channelType: null,
             result: "denied",
             errorMessage: "missing role",
             durationMs: 3,
@@ -2454,7 +2478,13 @@ export function adminPages(): A11yPage[] {
         native: { screening: false, community: true },
         intentMissing: true,
         plan: null,
-        channels: [{ id: "100000000000000010", name: "rules" }],
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+        ],
         roleName: "Accepted",
         unavailable: null,
         options: {
@@ -2480,7 +2510,13 @@ export function adminPages(): A11yPage[] {
         native: { screening: false, community: true },
         intentMissing: false,
         plan: null,
-        channels: [{ id: "100000000000000010", name: "rules" }],
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+        ],
         roleName: null,
         unavailable: null,
         options: {
@@ -3332,6 +3368,7 @@ const REWIND = {
     duration: "3 hr 5 min",
     date: "2026-01-03",
     channelName: "Lounge",
+    channelType: ChannelType.GuildStageVoice,
   },
   longestStreakDays: 6,
   longestStreakRange: { startDate: "2026-01-01", endDate: "2026-01-06" },
@@ -3360,7 +3397,14 @@ const REWIND = {
     best: { isoYear: 2026, isoWeek: 5, rank: 2 },
   },
   messagesSent: 430,
-  topTextChannels: [{ channelId: "c1", channelName: "general", count: 300 }],
+  topTextChannels: [
+    {
+      channelId: "c1",
+      channelName: "general",
+      channelType: ChannelType.GuildText,
+      count: 300,
+    },
+  ],
   peakMessageDay: { date: "2026-01-04", count: 60 },
   reactionsGiven: 90,
   reactionsReceived: 120,
@@ -3597,6 +3641,7 @@ function moderatorPages(
         subcommand: null,
         channelId: "c-1",
         channelLabel: "general",
+        channelType: ChannelType.GuildText,
         result: "denied" as const,
         errorMessage: "Missing permission",
         durationMs: 12,
