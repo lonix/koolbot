@@ -660,6 +660,29 @@ describe("Server scan tabs (#1323)", () => {
     );
   });
 
+  it("warns on every tab when a part could not be read, so an empty list is not read as an absence", () => {
+    const partial = {
+      ...scan,
+      scheduledEvents: [],
+      partial: ["scheduled events"],
+    };
+    for (const t of SCAN_TABS) {
+      const html = mainOf(page(t, { scan: partial }));
+      expect(html).toContain("Some parts could not be read.");
+      expect(html).toContain("Not read: scheduled events.");
+      expect(html.match(/Some parts could not be read/g)).toHaveLength(1);
+    }
+    const discord = mainOf(page("discord", { scan: partial }));
+    expect(discord.indexOf("Some parts could not be read")).toBeLessThan(
+      discord.indexOf("No native scheduled events."),
+    );
+    for (const t of SCAN_TABS) {
+      expect(mainOf(page(t, { scan: { ...scan, partial: [] } }))).not.toContain(
+        "Some parts could not be read",
+      );
+    }
+  });
+
   it("renders a failure notice, with no tabs, when the scan failed", () => {
     const html = renderAdoptPage({
       ...common,

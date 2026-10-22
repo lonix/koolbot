@@ -30,10 +30,18 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   isDebugMode: jest.fn(() => false),
 }));
 
+let configDelayMs = 0;
+const slow = async (): Promise<void> => {
+  if (configDelayMs) await new Promise((r) => setTimeout(r, configDelayMs));
+};
+
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
-      getBoolean: jest.fn(async (_k: string, d: boolean) => d),
+      getBoolean: jest.fn(async (_k: string, d: boolean) => {
+        await slow();
+        return d;
+      }),
       getString: jest.fn(async (_k: string, d: string) => d),
       getNumber: jest.fn(async () => 0),
       getAll: jest.fn(async () => []),
@@ -53,6 +61,7 @@ let harness: AdminHarness;
 let scan: jest.Mock<(guildId: string, opts: unknown) => Promise<unknown>>;
 
 beforeEach(async () => {
+  configDelayMs = 0;
   resetScanCache();
   scan = jest.fn(async () => busyScan());
   jest
@@ -159,5 +168,23 @@ describe("GET /adopt tabs", () => {
     }
     expect(statuses.slice(0, 15).every((c) => c === 200)).toBe(true);
     expect(statuses[15]).toBe(429);
+  });
+
+  it("shares one scan, and one unit of limiter quota, between concurrent cold requests", async () => {
+    configDelayMs = 40;
+    const tabs = [
+      "",
+      "?tab=roles",
+      "?tab=channels",
+      "?tab=bots",
+      "?tab=discord",
+    ];
+    const responses = await Promise.all(
+      Array.from({ length: 24 }, (_, i) =>
+        harness.get(`/adopt${tabs[i % tabs.length]}`),
+      ),
+    );
+    expect(responses.map((r) => r.status)).toEqual(Array(24).fill(200));
+    expect(scan).toHaveBeenCalledTimes(1);
   });
 });

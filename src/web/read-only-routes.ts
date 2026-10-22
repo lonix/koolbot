@@ -1072,6 +1072,10 @@ export function createReadOnlyRouter(
         req.webSession?.discordUserId,
         sampled,
       );
+      // Resolve the common data first: from the freshness check to the cache
+      // insertion below there must be no await, or concurrent cold requests all
+      // pass the check, each spend limiter quota, then share one scan (#1323).
+      const common = await commonFromReq(req);
       if (refresh || !hasFreshScan(key)) {
         let allowed = false;
         scanLimiter(req, res, () => {
@@ -1079,7 +1083,6 @@ export function createReadOnlyRouter(
         });
         if (!allowed) return; // the limiter has answered 429
       }
-      const common = await commonFromReq(req);
       let scan = null;
       let error: string | undefined;
       try {

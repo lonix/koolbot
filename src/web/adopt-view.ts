@@ -323,15 +323,6 @@ function renderIssue(i: ReadinessIssue): string {
 function renderAttention(scan: ServerScan): string {
   const problems = [...blockers(scan), ...warnings(scan)];
   const parts: string[] = [];
-  if (scan.partial.length) {
-    parts.push(
-      callout(
-        "warn",
-        "Some parts could not be read.",
-        `Missing: ${escapeHtml(scan.partial.join(", "))}.`,
-      ),
-    );
-  }
   if (problems.length) {
     parts.push(
       `<section class="kb-panel" aria-labelledby="p-fix"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-fix">Needs fixing</h2>${badge(String(problems.length), "warn")}</header><div class="kb-panel__body kb-panel__body--flush">${problems.map(renderIssue).join("")}</div></section>`,
@@ -691,6 +682,17 @@ ${panel("Scheduled events", String(scan.scheduledEvents.length), events, { id: "
 
 // ---- Page -------------------------------------------------------------------
 
+/** On every tab: an empty list there may be a failed read, not an absence. */
+function renderPartial(scan: ServerScan): string {
+  return scan.partial.length
+    ? callout(
+        "warn",
+        "Some parts could not be read.",
+        `Not read: ${escapeHtml(scan.partial.join(", "))}. Lists that depend on them may be incomplete, and an empty list here does not mean there is nothing.`,
+      )
+    : "";
+}
+
 function renderTab(scan: ServerScan, tab: ScanTab, sampled: boolean): string {
   switch (tab) {
     case "roles":
@@ -711,6 +713,7 @@ export function renderAdoptPage(props: AdoptPageProps): string {
   const content = scan
     ? `${renderTabs(scan, props)}
 <div class="kb-stack" id="scan-${props.tab}">
+${renderPartial(scan)}
 ${renderTab(scan, props.tab, props.sampled)}
 </div>`
     : callout(
