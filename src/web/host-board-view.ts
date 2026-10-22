@@ -447,7 +447,7 @@ export function renderHostBoard(d: HostBoardData): string {
     }),
     ' class="kb-toolbar__end"',
   );
-  const toolbar = `<div class="kb-toolbar" role="toolbar" aria-label="${escapeHtml(d.groupLabel)} actions">
+  const toolbar = `<div class="kb-toolbar" role="group" aria-label="${escapeHtml(d.groupLabel)} actions">
 ${renderLock(d)}
 <span class="kb-toolbar__sep" aria-hidden="true"></span>
 ${randomise}

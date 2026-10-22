@@ -381,7 +381,7 @@ describe("the toolbar's moves (Send to teams, Move people)", () => {
     expect(moveForms).toHaveLength(3);
     for (const f of moveForms) expect(f).toContain('name="_csrf"');
     // Send to teams sits in the toolbar; the other two in the Move people set.
-    const toolbar = r.text.slice(r.text.indexOf('role="toolbar"'));
+    const toolbar = r.text.slice(r.text.indexOf('role="group"'));
     expect(toolbar.indexOf("Move people…")).toBeLessThan(
       toolbar.indexOf(`${PANEL}/send-to-groups`),
     );
@@ -404,7 +404,7 @@ describe("the toolbar's moves (Send to teams, Move people)", () => {
     botMayMove = false;
     const r = await call(PANEL);
     expect(r.text).toContain("Move Members");
-    const toolbar = r.text.slice(r.text.indexOf('role="toolbar"'));
+    const toolbar = r.text.slice(r.text.indexOf('role="group"'));
     const bar = toolbar.slice(0, toolbar.indexOf("</div>\n<p"));
     // Move people… and Send to teams are disabled and point at the reason.
     expect(bar.match(/ disabled aria-disabled="true"/g)?.length).toBe(2);
@@ -685,6 +685,12 @@ describe("move one person", () => {
 
 describe("an event host with no other rights moves people from the toolbar (#1424)", () => {
   it("posts the forms the page carries (send, return, move one) and each is one audited run; another host gets 403", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
     const page = await call(PANEL);
     const forms = (page.text.match(/<form[\s\S]*?<\/form>/g) ?? []).map(
       (f) => ({

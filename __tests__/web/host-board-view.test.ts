@@ -87,7 +87,7 @@ function data(over: Partial<HostBoardData> = {}): HostBoardData {
 describe("the toolbar", () => {
   it("is Lock, then Randomise… and Move people…, then Send to teams, each a form or a disclosure that works without script", () => {
     const html = renderHostBoard(data());
-    const bar = html.slice(html.indexOf('role="toolbar"'));
+    const bar = html.slice(html.indexOf('role="group"'));
     const order = [
       "Unlocked",
       "Lock groups",

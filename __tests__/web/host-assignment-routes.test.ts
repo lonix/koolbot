@@ -704,6 +704,12 @@ function formsOf(
 
 describe("an event host with no other rights runs the team board (#1424)", () => {
   it("assigns, unassigns, randomises and locks with the forms the page itself carries, one audit row each", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
     const page = await call(PANEL);
     const forms = formsOf(page.text);
     const bens = forms.find(
@@ -743,6 +749,12 @@ describe("an event host with no other rights runs the team board (#1424)", () =>
   });
 
   it("cannot reach another host's event: the page and every board action answer 403 and the denial is audited", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
     const forms = formsOf((await call(PANEL)).text);
     const actions = [
       ...new Set(forms.map((f) => f.action.slice(PANEL.length + 1))),

@@ -182,7 +182,7 @@ The host panel for a live event, as an event host who is neither admin nor moder
 **As built (#1319, #1424).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the Summary and
 Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event*, then the two folds.
 
-- *Toolbar* (`kb-toolbar`, `role=toolbar`): the lock state as a `kb-badge` with *Lock groups* / *Unlock groups*, a separator, *Randomise…* and
+- *Toolbar* (`kb-toolbar`, `role=group` with a label): the lock state as a `kb-badge` with *Lock groups* / *Unlock groups*, a separator, *Randomise…* and
   *Move people…*, then *Send to teams* at the end. *Randomise…* and *Move people…* are `details.kb-toolbar__action` (a disclosure, so they work
   without script); the page script moves the panel into a `dialog.kb-dialog` with *Go back*, and puts it back on close. A control that cannot work
   is disabled and `aria-describedby` points at the line under the toolbar that says why. *Send to teams* is a plain form, with no confirm dialog.
