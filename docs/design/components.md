@@ -258,6 +258,15 @@ A sketch of how a KoolBot message reads in Discord, to design and review embeds 
 
 The card pairs today's messages with the rewritten ones. The rules are in the *Messages in Discord* section of the brand book.
 
+**Message line.** Where it matters who posted, when, and what sits outside the embed (an alert's role mention, an edited post), wrap the embed in
+`article.kb-message` → `span.kb-avatar` (the bot's initial), `div.kb-message__body` → `p.kb-message__head` (the name, a `kb-badge--info` *App*
+badge, `span.kb-message__time` with "(edited)" for a post the bot keeps up to date), an optional `p.kb-message__text` (the mention line, as
+Mentions), then the `kb-embed`.
+
+- A password members need is `span.kb-spoiler[role=img]` with an `aria-label` ("Password, hidden behind a spoiler"): a plain `span` cannot
+  carry a name, and the sketch never prints the password.
+- Review alerts with the message line: a role mention inside the embed would not notify anyone (*Alerts that mention a role* in `discord.md`).
+
 ### EmbedColours
 
 The six embed accents and when to use each. They are tokens (`embed-brand`, `embed-ok`, `embed-warn`, `embed-danger`, `embed-neutral`, `embed-lore`)
@@ -393,6 +402,19 @@ weekday a `span.kb-heatmap__row` and 24 `span.kb-heatmap__cell[data-l=0..4]`; th
 
 - Intensity is `lore-fill` at four opacities; the peak is `lore-peak` and is named in text beside the chart.
 - Always pair the grid with the bar list or a table: the grid alone is not readable as numbers.
+
+### UptimeStrip
+
+Whether something was up, hour by hour, for the last 24 hours: game servers on their list and edit pages (#1376). A status, not activity, so it
+uses the status colours, never the lore colours.
+
+**Markup.** `div.kb-uptime` → `div.kb-uptime__bar[role=img][aria-label]` with 24 `span` cells, oldest first, then the figure in text
+(`98.6 % up, last 24 h`). A cell is up by default; `is-part` when some checks failed or maintenance ran that hour, `is-down` when every check
+failed, `is-none` before the first check. `kb-uptime--lg` draws a taller bar for a page about one thing.
+
+- Up is `ok-text`, part is `warn-text`, down is `err-text`, no data is `heat-empty`.
+- The figure is always next to the bar, and the `aria-label` names each outage ("Down 20 minutes, 03:12 to 03:32 UTC"): never colour alone.
+- Maintenance does not count as down in the figure; the help line under a large strip says so.
 
 ## Disclosure and overlays
 

@@ -517,6 +517,23 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-embed--lore { --accent: var(--embed-lore); }
 .kb-embed-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); align-items: start; }
 .kb-embed-pair > div { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+/* The message line around an embed: who posted, when, and the mention line an alert carries outside the embed. */
+.kb-message { display: flex; gap: var(--space-3); align-items: flex-start; min-width: 0; }
+.kb-message > .kb-avatar { width: 2.5rem; height: 2.5rem; font-size: var(--type-ui-size); }
+.kb-message__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.kb-message__head { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--type-ui-size); font-weight: 600; color: var(--text); }
+.kb-message__time { font-size: var(--type-help-size); font-weight: 400; color: var(--muted); }
+.kb-message__text { margin: 0; font-size: var(--type-ui-size); color: var(--text); }
+.kb-spoiler { display: inline-block; min-width: 4.5rem; border-radius: var(--radius-xs); background: var(--fill); color: transparent; user-select: none; }
+
+/* ---------- Uptime strip: 24 hourly cells, always next to its figure in text ---------- */
+.kb-uptime { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--type-help-size); color: var(--muted); }
+.kb-uptime__bar { display: flex; gap: 1px; height: 0.75rem; }
+.kb-uptime__bar > span { flex: 1; border-radius: var(--radius-xs); background: var(--ok-text); }
+.kb-uptime__bar > span.is-part { background: var(--warn-text); }
+.kb-uptime__bar > span.is-down { background: var(--err-text); }
+.kb-uptime__bar > span.is-none { background: var(--heat-empty); }
+.kb-uptime--lg .kb-uptime__bar { height: 1rem; }
 
 /* Group rows on narrow screens (reflow, #855): marker, name and remove on the first line; size and tag under the name.
    The column headings hide; every control keeps its own aria-label. */
