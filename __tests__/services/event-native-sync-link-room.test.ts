@@ -464,3 +464,54 @@ describe("link-room review fixes (#1421, Copilot round 1)", () => {
     );
   });
 });
+
+describe("impromptu window (#1421, Copilot round 2)", () => {
+  it("links right after the room exists (start +30s), and the scan after the start has nothing left to link", async () => {
+    const start = new Date(Date.now() + 30 * 1000);
+    const { guild, rest, scheduledEvents } = makeGuild([
+      makeNative({
+        scheduledStartTimestamp: start.getTime(),
+        scheduledEndTimestamp: start.getTime() + 120 * 60 * 1000,
+      }),
+    ]);
+    const sync = makeSync();
+
+    // Immediate sync, called by startEventNow as soon as the room is claimed.
+    await sync.syncEvent(
+      makeEvent({ channelId: ROOM, startTime: start, state: "active" }),
+      guild,
+    );
+    expect(rest.patch).toHaveBeenCalledTimes(1);
+
+    // The native event is now the voice event Discord would return; the next
+    // scan runs after the start time and does not need to link again.
+    const linked = voiceNative(ROOM, {
+      status: GuildScheduledEventStatus.Active,
+      scheduledStartTimestamp: PAST.getTime(),
+      scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
+    });
+    const later = makeGuild([linked]);
+    await sync.syncEvent(
+      makeEvent({ channelId: ROOM, startTime: PAST, state: "active" }),
+      later.guild,
+    );
+    expect(later.rest.patch).not.toHaveBeenCalled();
+    expect(later.scheduledEvents.edit).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("without the immediate sync the scan after the start never links (why it exists)", async () => {
+    const { guild, rest } = makeGuild([
+      makeNative({
+        status: GuildScheduledEventStatus.Active,
+        scheduledStartTimestamp: PAST.getTime(),
+        scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
+      }),
+    ]);
+    await makeSync().syncEvent(
+      makeEvent({ channelId: ROOM, startTime: PAST, state: "active" }),
+      guild,
+    );
+    expect(rest.patch).not.toHaveBeenCalled();
+  });
+});

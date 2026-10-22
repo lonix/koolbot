@@ -2583,6 +2583,32 @@ export class EventService extends ScheduledService {
     return true;
   }
 
+  /** Event ids whose immediate post-room native sync already logged a failure. */
+  private readonly nativeAfterRoomWarned = new Set<string>();
+
+  /**
+   * Best-effort native sync right after the main room was claimed outside the
+   * scan (#1421). Never throws; a failure is logged once per event and the
+   * next scan retries the sync as usual.
+   */
+  private async syncNativeAfterRoom(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<void> {
+    const id = String(event._id);
+    try {
+      await this.nativeSync.syncEvent(event, guild);
+      this.nativeAfterRoomWarned.delete(id);
+    } catch (error) {
+      if (this.nativeAfterRoomWarned.has(id)) return;
+      this.nativeAfterRoomWarned.add(id);
+      logger.warn(
+        `Event ${sanitizeForLog(id)}: native sync after room creation failed (the scan retries):`,
+        error,
+      );
+    }
+  }
+
   /** Force the temp channel to spin up now, ahead of its scheduled lead. */
   public async startEventNow(
     eventId: string,
@@ -2610,6 +2636,10 @@ export class EventService extends ScheduledService {
         ) {
           return null;
         }
+        // Link the native event to the new room now (#1421). An impromptu
+        // event starts 30 s ahead, so waiting for the minute scan could pass
+        // the start and miss the only window in which linking is allowed.
+        await this.syncNativeAfterRoom(event, guild);
         if (event.groupsEnabled === true && !event.nativeAdopted) {
           // Not awaited: up to 25 paced creates must not hold the web request
           // open. The per-event lock keeps it from overlapping the scan, which
