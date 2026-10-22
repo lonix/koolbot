@@ -12,6 +12,14 @@ management, activity tracking, automated announcements, and a browser-based admi
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
+> [!NOTE]
+> These docs follow `main`, which can describe features that are not released yet. Running a release? Read the
+> [docs for the latest release][docs-latest], or pick your version under [Documentation for older versions](#documentation-for-older-versions).
+
+<!-- x-release-please-start-version -->
+[docs-latest]: https://github.com/lonix/koolbot/tree/v2.0.1
+<!-- x-release-please-end -->
+
 ---
 
 ## The Name
@@ -686,6 +694,19 @@ docker compose restart mongodb
 - **[CHANGELOG.md](CHANGELOG.md)** — Version history (managed by release-please)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines for developers
 - **[SECURITY.md](SECURITY.md)** — Security policy and vulnerability reporting
+
+### Documentation for older versions
+
+Every release tag is a snapshot of the code and its docs together, so the docs at a tag describe exactly what that release
+shipped. Older release lines get no further patches, so each one links to its last release.
+
+| Version | Docs |
+| --- | --- |
+| Latest release | [v2.0.1][docs-latest] <!-- x-release-please-version --> |
+| 1.2 | [v1.2.2](https://github.com/lonix/koolbot/tree/v1.2.2) |
+| 1.1 | [v1.1.0](https://github.com/lonix/koolbot/tree/v1.1.0) |
+| 1.0 | [v1.0.0](https://github.com/lonix/koolbot/tree/v1.0.0) |
+| 0.x and every patch release | [All release tags](https://github.com/lonix/koolbot/tags) |
 
 ---
 

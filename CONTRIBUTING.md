@@ -558,6 +558,18 @@ from the release entirely; `fix: prevent memory leak in CooldownManager` is
 not. The `PR Title Lint` workflow enforces this on every PR, and re-runs when the title is edited or new
 commits are pushed.
 
+### Docs and released versions
+
+The docs on `main` describe `main`, so they can run ahead of the newest release. The README sends readers who run a release to
+the docs at their tag instead. release-please bumps the `[docs-latest]` link and the "Latest release" row in every release PR
+(`extra-files` in `release-please-config.json`, plus the `x-release-please-*` markers in `README.md`), so do not edit those
+versions by hand.
+
+When a release starts a new minor or major line (say 2.0.1 → 2.1.0), add the line it replaces to the "Documentation for older
+versions" table in `README.md` in a `docs:` PR right after the release, linked to that line's last tag:
+`| 2.0 | [v2.0.1](https://github.com/lonix/koolbot/tree/v2.0.1) |`. release-please can only rewrite version numbers, not add
+rows, so this is the one manual step. Patch releases need nothing.
+
 ## Pull Request Process
 
 ### Before Submitting
