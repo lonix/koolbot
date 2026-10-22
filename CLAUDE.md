@@ -266,7 +266,8 @@ Allowed types (kept in sync with `release-please-config.json` changelog sections
   in test files but keeps `no-unused-vars` an error.
 - ESLint flags `@typescript-eslint/no-explicit-any` and missing return types as **warnings** but
   `no-unused-vars`, `no-duplicate-imports`, and `prefer-const` as **errors**.
-- Update `SETTINGS.md` when adding/changing config keys and `COMMANDS.md` for user-facing commands.
+- Update `SETTINGS.md` when adding/changing config keys and `COMMANDS.md` for user-facing commands. Markdown docs follow
+  `DESIGN.md` → _Writing docs_ (sentence-case headings without emoji, GitHub alerts, UI names as the UI shows them now).
   `__tests__/config/settings-doc-drift.test.ts` enforces the first half in both directions: every
   key in `defaultConfig` must appear in `SETTINGS.md`, and every key `SETTINGS.md` names must exist
   in the schema (#846).
