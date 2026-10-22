@@ -38,6 +38,7 @@ const mockConfigGet = jest.fn(async () => null);
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
+  recordAuditOrThrow: mockRecordAudit,
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
