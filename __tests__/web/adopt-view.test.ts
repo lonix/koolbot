@@ -737,6 +737,31 @@ describe("Server scan tabs (#1323)", () => {
     expect(withSuggestions).toContain("were not checked");
   });
 
+  it("links a blocker for a bound role above the bot to Bot permissions", () => {
+    const html = mainOf(
+      page("overview", {
+        scan: {
+          ...scan,
+          readiness: {
+            ...scan.readiness,
+            issues: [
+              {
+                code: "bound-role-unmanageable-r9",
+                severity: "error",
+                message: "The role Staff sits above KoolBot",
+                help: "h",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const fix = html.slice(html.indexOf('class="kb-issue__fix"'));
+    expect(fix.slice(0, fix.indexOf("</article>"))).toContain(
+      'href="/admin/bot-permissions"',
+    );
+  });
+
   it("renders a failure notice, with no tabs, when the scan failed", () => {
     const html = renderAdoptPage({
       ...common,
