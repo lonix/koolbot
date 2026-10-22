@@ -32,7 +32,7 @@ const channelsPage = (extra: Props = {}): string => {
 const rowNames = (html: string): string[] =>
   [
     ...html.matchAll(
-      /<th scope="row"[^>]*><span class="kb-mention[^"]*"><span class="kb-visually-hidden">[^<]*<\/span>#?([^<]+)<\/span>/g,
+      /<th scope="row"[^>]*><span class="kb-mention[^"]*"><svg[^>]*>[\s\S]*?<\/svg>([^<]+)<\/span>/g,
     ),
   ].map((m) => m[1]);
 
@@ -80,15 +80,17 @@ describe("Channels tab as the Discord tree (#1364)", () => {
 
   it("shows categories in capitals, indents their channels, and says each kind", () => {
     const html = channelsPage();
-    expect(html).toContain(
-      '<span class="kb-mention kb-mention--category"><span class="kb-visually-hidden">Category </span>Community</span>',
+    const community = rowOf(html, "Community");
+    expect(community).toContain(
+      '<span class="kb-mention kb-mention--category">',
     );
+    expect(community).toContain('aria-label="Category"');
     expect(rowOf(html, "quotes")).toContain(
       '<th scope="row" class="kb-tree__child">',
     );
     expect(rowOf(html, "general")).not.toContain("kb-tree__child");
-    expect(rowOf(html, "lobby")).toContain("Voice channel");
-    expect(rowOf(html, "general")).toContain("Text channel");
+    expect(rowOf(html, "lobby")).toContain('aria-label="Voice channel"');
+    expect(rowOf(html, "general")).toContain('aria-label="Text channel"');
   });
 
   it("shows what uses a channel as a green chip, and what it looks like it could be", () => {

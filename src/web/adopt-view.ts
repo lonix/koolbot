@@ -1,4 +1,5 @@
 import { URLSearchParams } from "node:url";
+import { ChannelType } from "discord.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -12,6 +13,7 @@ import type {
   ServerScan,
 } from "../services/server-scan-service.js";
 import { claimKeyFor, featureTarget } from "../services/channel-claims.js";
+import { channelMention } from "./discord-labels.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import {
   buildBotReplacementReport,
@@ -510,34 +512,6 @@ function renderOverwrites(c: ScanChannel): string {
     .join("");
 }
 
-/** What Discord calls a channel of this shape, for the word next to its name. */
-function kindWord(c: ScanChannel): string {
-  if (c.kind === "category") return "Category";
-  if (c.flags.stage) return "Stage";
-  if (c.kind === "voice") return "Voice";
-  if (c.flags.forum) return "Forum";
-  if (c.flags.announcement) return "Announcement";
-  return "Text";
-}
-
-/**
- * A category or channel the way Discord labels it: categories in capitals,
- * text channels with a `#`. The kind icons and the shared Mention helper are
- * #1303, which replaces this one function; until then a visually hidden word
- * says the kind to a screen reader and a muted word to everyone else.
- */
-function scanChannelLabel(c: ScanChannel): string {
-  const name = escapeHtml(c.name);
-  const word = kindWord(c);
-  if (c.kind === "category") {
-    return `<span class="kb-mention kb-mention--category"><span class="kb-visually-hidden">${word} </span>${name}</span>`;
-  }
-  if (word === "Text") {
-    return `<span class="kb-mention"><span class="kb-visually-hidden">${word} channel </span>#${name}</span>`;
-  }
-  return `<span class="kb-mention"><span class="kb-visually-hidden">${word} channel </span>${name}</span> <span class="kb-muted">${word}</span>`;
-}
-
 /** What a "looks like" guess is called in the row, e.g. `voicetracking` is Voice stats. */
 const GUESS_LABELS: Record<string, string> = {
   quotes: "Quotes",
@@ -664,7 +638,7 @@ function renderChannelRow(row: TreeRow, roleName: Map<string, string>): string {
     : `<span class="kb-muted">none</span>`;
   const rowClass = c.kind === "category" ? ' class="kb-tree__cat"' : "";
   const headClass = row.child ? ' class="kb-tree__child"' : "";
-  return `<tr${rowClass}><th scope="row"${headClass}>${scanChannelLabel(c)}</th><td>${bits.join(" ")}${notes.length ? `<div class="kb-muted">${escapeHtml(notes.join("; "))}</div>` : ""}</td><td>${overwrites}</td></tr>`;
+  return `<tr${rowClass}><th scope="row"${headClass}>${channelMention({ name: c.name, type: ChannelType[c.typeName as keyof typeof ChannelType] })}</th><td>${bits.join(" ")}${notes.length ? `<div class="kb-muted">${escapeHtml(notes.join("; "))}</div>` : ""}</td><td>${overwrites}</td></tr>`;
 }
 
 function renderChannels(

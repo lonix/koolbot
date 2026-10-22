@@ -82,8 +82,8 @@ permissions. A row's overwrites open on demand.
 The filters are `?filter=` links in a `kb-tabs` strip with a count each (`aria-current="true"` marks the filter, `"page"` stays on the section tabs); they
 keep `tab` and `sample`, and a filter keeps a category as the heading of any channel that matches. A row's overwrites are an inline `kb-disclosure`
 whose summary counts them. *Claim* is a link to `/admin/adopt/claims?channel=&feature=#claim-<id>`, shown only where the claims form offers that
-feature for that kind of channel and never on a channel Discord uses (rules, system, public updates). Labels are plain `kb-mention` markup with a hidden
-kind word, standing in until the Mention helper and kind icons of #1303 replace `scanChannelLabel()`.
+feature for that kind of channel and never on a channel Discord uses (rules, system, public updates). Rows are labelled with `channelMention()` from
+`discord-labels.ts`, so each carries its kind icon.
 
 ### GameServersPage
 
