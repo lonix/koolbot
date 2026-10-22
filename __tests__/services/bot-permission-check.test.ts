@@ -184,6 +184,12 @@ describe("registry", () => {
     }
   });
 
+  it("lists the permissions in Discord's role-editor order, each once", () => {
+    const keys = Object.keys(registry.PERM).sort();
+    expect([...registry.PERMISSION_ORDER].sort()).toEqual(keys);
+    expect(new Set(registry.PERMISSION_ORDER).size).toBe(keys.length);
+  });
+
   it("lists the leaders-only channel's permissions as the service needs them", () => {
     expect(registry.LEADS_NEEDS.map((n) => n.name)).toEqual([
       "View Channel",
@@ -491,6 +497,9 @@ describe("what is missing and where", () => {
     });
     expect(report.unknown.map((u) => u.feature.id)).toEqual(["voice-lobby"]);
     expect(report.okFeatures.map((f) => f.id)).not.toContain("voice-lobby");
+    expect(
+      report.checks.find((c) => c.feature.id === "voice-lobby"),
+    ).toMatchObject({ enabled: true, outcome: "unknown" });
   });
 
   it("treats the room-status grant as on when its setting is absent, like the voice service", async () => {
@@ -876,5 +885,95 @@ describe("configuredRoleIds", () => {
     expect(
       check.configuredRoleIds({ kind: "id", key: "rules.role_id" }, ""),
     ).toEqual([]);
+  });
+});
+
+describe("the per-entry checks the permission matrix is built from (#1306)", () => {
+  it("records every registry entry, switched on or not, with its outcome and place", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat" };
+    const report = await run({
+      serverBits: without(ALL, P.ManageNicknames),
+      channels: [
+        {
+          id: "cat",
+          name: "Events",
+          type: ChannelType.GuildCategory,
+          bits: without(ALL, P.ManageChannels),
+        },
+      ],
+    });
+    const byId = new Map(report.checks.map((c) => [c.feature.id, c] as const));
+    for (const r of registry.FEATURE_REQUIREMENTS) {
+      expect(byId.has(r.id)).toBe(true);
+    }
+    expect(byId.get("event-channels")).toMatchObject({
+      enabled: true,
+      outcome: "missing",
+      missing: ["Manage Channels"],
+      target: { kind: "category", name: "Events" },
+    });
+    expect(byId.get("event-tags")).toMatchObject({
+      enabled: true,
+      outcome: "missing",
+      missing: ["Manage Nicknames"],
+      target: { kind: "server" },
+    });
+    expect(byId.get("event-moves")).toMatchObject({
+      enabled: true,
+      outcome: "ok",
+      missing: [],
+    });
+    // Switched off: still checked, so the matrix can show what it would need.
+    expect(byId.get("reaction-roles")).toMatchObject({
+      enabled: false,
+      outcome: "ok",
+    });
+  });
+
+  it("records an enabled feature with no channel set as unchecked, and a feature that cannot be read as unknown", async () => {
+    settings = { "events.enabled": true, "events.category_id": "" };
+    const unset = await run({ serverBits: ALL });
+    expect(
+      unset.checks.find((c) => c.feature.id === "event-channels"),
+    ).toMatchObject({ enabled: true, outcome: "unchecked", target: null });
+    settings = { "events.enabled": true, "events.category_id": "gone" };
+    const gone = await run({ serverBits: ALL, channels: [] });
+    expect(
+      gone.checks.find((c) => c.feature.id === "event-channels"),
+    ).toMatchObject({ enabled: true, outcome: "unknown" });
+  });
+
+  it("records role-position checks per role, and one unchecked entry for a switched-off feature", async () => {
+    settings = { "rules.enabled": true, "rules.role_id": "r-high" };
+    const report = await run({
+      botPosition: 5,
+      roles: [{ id: "r-high", name: "Admins", position: 9 }],
+    });
+    const rolePos = report.checks.filter((c) => c.kind === "role-position");
+    expect(
+      rolePos.find((c) => c.feature.id === "rules-role-hierarchy"),
+    ).toMatchObject({
+      enabled: true,
+      outcome: "missing",
+      missing: [check.ROLE_ABOVE_BOT],
+      target: { kind: "role", name: "Admins" },
+    });
+    expect(
+      rolePos.find((c) => c.feature.id === "leaderboard-roles-hierarchy"),
+    ).toMatchObject({ enabled: false, outcome: "unchecked", target: null });
+  });
+
+  it("leaves the navigation badge count as it was: two features sharing one gap count once", async () => {
+    settings = {
+      "reactionroles.enabled": true,
+      "leaderboard_roles.enabled": true,
+    };
+    const report = await run({ serverBits: without(ALL, P.ManageRoles) });
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0].features).toHaveLength(2);
+    expect(
+      report.checks.filter((c) => c.enabled && c.outcome === "missing"),
+    ).toHaveLength(2);
+    expect(status.getPermissionIssueCount()).toBe(1);
   });
 });

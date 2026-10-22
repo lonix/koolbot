@@ -130,9 +130,9 @@ when no role name is available.
   (the Moderator role groups they are in; an administrator session says so instead). It shows three tiles (open cases, actions in the last
   7 days, timeouts running now), the **Open cases** with a **Review** link, and the **Actions** list, filterable by kind (All, Warnings,
   Timeouts, Bans; a kick shows under All), 50 per page. Each row links to its case at `/me/moderation/cases/:id`, where the four decisions
-  (Uphold, Extend, Make permanent, Let back in) are the same ones the admin Moderation page offers: the same service call, and an audit row
+  (Keep out for now, Decide later, Keep out for good, Let back in) are the same ones the admin Moderation page offers: the same service call, and an audit row
   (`moderation.case.<decision>`) for every attempt. `/me/moderation/audit` is the Command audit, read only (no settings card, no write
-  route). A moderator cannot open a case, run the review pass, change a moderation setting or reach any `/admin` page. The log shows what
+  route). A moderator cannot open a case, run the review-date check, change a moderation setting or reach any `/admin` page. The log shows what
   the admin log shows (member, moderator, action, reason); message content and attachments are never stored there. "Timeouts running now"
   counts members whose Discord timeout has not ended, from the member cache, so it needs the Server Members intent and shows a dash
   without it (the log does not record how long a timeout lasts). Mod-log rows carry no channel; channels appear in the Command audit.
@@ -1190,9 +1190,17 @@ in lockstep and can't drift apart.
 The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
 not have to guess why a feature does nothing. It is read-only and writes nothing
-to Discord. For each missing permission it shows where it is missing (server-wide,
-or in the configured category or channel), which enabled features it affects, what
-stops working and how to fix it. What each feature needs is listed in one place in
+to Discord. When something is missing, the first card is **How to fix**: a numbered
+list with one step per place (one step for everything missing server-wide, one per
+category or channel, one for roles above the bot's role). When nothing is missing it
+is one green line instead. Below it, **Permissions** is a matrix with one row per
+Discord permission, in the order of Discord's role editor: its status (an icon and a
+word: Missing, Not checked, Has), where it applies (server-wide, or the configured
+category or channel) and the features that need it, with switched-off features
+greyed and marked _(off)_. Rows are sorted Missing, Not checked, Has; a permission
+with different results in different places gets one row per result. **Role position**
+is a row of its own for roles the bot must be able to hand out. Permissions only
+switched-off features would use are folded under _Not needed_. What each feature needs is listed in one place in
 the code (`src/services/bot-permission-registry.ts`), and the services that act
 (event group channels, clan tags, Events list sync, member moves, voice rooms) take
 their permission bits and warning texts from the same list. It covers voice
@@ -1208,8 +1216,8 @@ Links) are not covered yet.
   Roles, Manage Nicknames, Create Events) are checked server-wide and shown as such.
 - **Only features in use count.** A feature is listed as affected only while its
   `*.enabled` setting is on and its category or channel is set. A permission that
-  only a switched-off feature would need is shown under _Not needed right now_,
-  not as a problem. An enabled feature with no category set is skipped with a note.
+  only a switched-off feature would need is folded under _Not needed_, not a
+  problem. An enabled feature with no category set is shown as _Not checked_, with a note.
   Role groups have no switch of their own, so they count as in use when the server
   has at least one role group. If a setting cannot be read, the page says the check
   is unavailable instead of treating features as off.
@@ -1217,11 +1225,15 @@ Links) are not covered yet.
   from Discord when the page opens (through the same timeout and rate-limit helpers
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
   be reached the page says it is using the bot's cached view; a feature that cannot
-  be checked is listed as _could not be checked_, never as fine.
+  be checked is shown as _Not checked_, never as fine.
 - **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
+- **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
+  applies new permission bits to the bot's existing role) and a "Show all Discord
+  permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
+  #1303.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
@@ -2755,17 +2767,25 @@ opened on it like any kick, which is the place to record a review or letting the
 With `moderation.cases.enabled` on, the page also gains a **Cases** section and a **Case** column (#908).
 In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from
 `moderation.cases.default_review_days`; clear it for a case with no review date), and a row with one shows its
-number and status. The section groups cases into **Overdue** (review date passed), **Due soon** (next 7 days),
-**Scheduled** (review date further out), **No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
-who acted, the member's **prior log history** (newest 10 entries) and the case's decision trail. A live card
-offers **Uphold** (keep it, schedule the next review), **Extend** (new review date, required), **Make permanent**
-and **Let back in**; staff may decide a case before it is due. Let back in records the decision only, it does not unban in
-Discord. A **Run review pass now** button runs the due-review job on demand. Every decision is written to the
+number and status. The section groups cases into **Needs a decision** (review date passed), **Review in the next 7 days**,
+**Review later** (review date further out), **No review date** and **Closed in the last 30 days**. Each card shows the member, the original reason,
+who acted, the member's **earlier actions** (newest 10 entries) and the case's decision trail. A live card
+offers **Keep out for now** (the member stays out, schedule the next review), **Decide later** (new review date, required),
+**Keep out for good** and **Let back in**; staff may decide a case before its review date. Let back in records the decision only, it does not
+lift the ban in Discord. A **Check review dates now** button runs the review-date job on demand. Every decision is written to the
 Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
 naming the status it found.
 
-**Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no forms and no write
-routes, and never writes to Discord. It lists **roles** (position, colour, cached member count, `managed` flag,
+**Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no write routes, and never
+writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), tiles for
+Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions that each link to the page that acts
+(Channel claims, Voice channels, and the voice tracking settings). Readiness and permission detail link to **Bot permissions** instead of
+repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the
+Overview), plain links that work without JavaScript. The **Channel ownership hints** switch in the header is a GET form
+and the only form on the page. The tabs share one scan for a minute per admin and hints setting, so clicking through them
+does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which
+only counts scans that start. The header says when Discord was read and **Scan again** bypasses the cache. What follows describes the data each tab shows.
+It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
 whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
 channel by a `*.channel_id` / `*.category_id` / `*_channels` setting), **other bots** (integration role and the
@@ -2776,7 +2796,7 @@ handles (Community, rules/system/public-updates channels, Onboarding prompts and
 AFK channel, webhook-fed and followed channels (reading webhooks needs the Manage Webhooks permission; without
 it the scan warns that these marks are missing instead of showing none, and never edits a webhook), role-gated
 categories, the server's channel naming convention and native scheduled events. The scan never pages through the member list: role member counts come from the
-cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Include channel ownership
+cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Channel ownership
 hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
 REST call per channel, so it is off by default. The same data is available to code as
 `ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
@@ -3047,23 +3067,18 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
 
-**Disabled-feature handling is uniform across `/me/*` (#709).** A
-feature-gated page whose feature an admin has turned off is never hidden
-behind a 404 or silently dropped: the nav link stays visible (greyed with
-an "off" badge, mirroring the admin nav), the Overview lists its card with
-an "off" tag, and opening the page shows one consistent banner — _"Your
-server admin hasn't enabled X yet."_ Settings pages (Voice, Birthday) keep
-their editable form so members can pre-set a choice that applies the moment
-the feature is enabled; the read-only Rewind page simply shows the banner in
-place of the recap. This makes "not enabled yet, but my choice is
-remembered" clearly distinguishable from "broken".
-
-**Privacy is the exception (#1066).** None of its choices (tracking opt-in/out, export,
-deletion) can be pre-set while the feature is off, so while `privacy.enabled` is off the Privacy nav entry and the
-Overview card are not rendered at all, and `GET /me/privacy` and
-`GET /me/privacy/export` return `404`. Enabling the key brings everything
-back on the next request (the settings save reloads the config cache; no
-restart).
+**A switched-off feature is not shown on `/me/*` (#1292, extending #1066).**
+Voice, Birthday, Rewind and Privacy each follow their feature switch
+(`voicechannels.presets.enabled`, `birthdays.enabled`, `rewind.enabled`,
+`privacy.enabled`). While one is off it has no tab, no Overview card and no
+mention in other pages' text, and its page answers `404` for every `GET` and
+`POST` (Rewind and Privacy's export are refused before their rate limiters, so
+a bookmark spends no allowance). Nothing a member saved is deleted: turn the
+feature back on and the tab, the page and the saved name pattern, presets,
+birthday and notification choices are back on the next request. If the switch
+cannot be read (a database error) the page answers an error rather than a
+`404`, so a hiccup never takes away a page that is on. The one list of what
+gates `/me` is `GATED_ME_SURFACES` in `src/web/me-surfaces.ts`.
 
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
@@ -3075,27 +3090,29 @@ votes. The weekly figure comes from per-ISO-week buckets kept for
 whose only votes predate the weekly capture.
 
 Notification preferences are scoped per `(userId, guildId)`. The page
-lists every notification type with the current state and a checkbox;
+lists the notification types whose DM can actually be sent, each with the
+current state and a checkbox: **Achievement DMs** need `achievements.enabled`
+and `achievements.dm_notifications.enabled`, **Weekly digest** needs
+`digest.enabled`, and **Year-in-review** needs `rewind.enabled` and the
+nudge (`rewind.nudge.enabled`). A row that is not offered keeps its stored
+value and is skipped when the form is saved. With none on, the page says so
+and shows no form;
 toggling one row is a single POST that records the diff in the audit
 log and PRG-redirects back to the page.
 
 The **Birthday** page (`#657`) stores a month/day and an optional year
 per `(userId, guildId)`. The year is optional by design — many people
 share the date but not the age — and when omitted no age is computed or
-shown. The page stays reachable even when `birthdays.enabled` is off so a
-member can pre-set their date (it shows an informational notice that
-nothing will be posted until an admin enables the feature), mirroring how
-the Notifications page exposes toggles for not-yet-active paths. A
-"Remove my birthday" button clears the stored date. The daily birthday
+shown. The page is gated by `birthdays.enabled` and answers `404` while it
+is off. A "Remove my birthday" button clears the stored date. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
 The whole feature is gated by `rewind.enabled` (`#608`). When it is off
-the route renders the shared "off" banner (HTTP 200) instead of the recap
-and skips the data work — Rewind is read-only, so there is nothing to
-pre-set — while the nav link stays visible, greyed with an "off" badge
-(`#709`); the end-of-year DM nudge is a separate toggle
-(`rewind.nudge.enabled`).
+the page (and `/me/rewind/:year`) answers `404` and skips the data work
+(`#1292`); the end-of-year DM nudge is a separate toggle
+(`rewind.nudge.enabled`), offered on Notifications only while Rewind is on
+too.
 
 The **Voice** page (`/me/voice`, `#656`) lets a member manage the
 per-user voice preferences that back the Discord control panel's
@@ -3111,12 +3128,8 @@ your next lobby spawn), and **delete**. Every write goes through the same
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
 (`user.voice.namepattern.set`, `user.voice.preset.edit|default|delete`).
-The whole page is gated by `voicechannels.presets.enabled`, but stays
-reachable when off: the editable form still renders (so a member can
-pre-set their name pattern and manage presets before an admin enables the
-feature) above the shared "off" banner, and its nav link stays visible,
-greyed with an "off" badge (`#709`) — mirroring how the Birthday page has
-always let members pre-set their date.
+The whole page is gated by `voicechannels.presets.enabled` and answers
+`404` (its writes too) while it is off; saved presets stay stored.
 
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows

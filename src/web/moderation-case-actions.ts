@@ -17,6 +17,7 @@ import {
   MAX_REVIEW_DAYS,
   type ModerationCaseDecision,
 } from "../services/moderation-case-service.js";
+import { DECISION_DONE } from "../utils/moderation-labels.js";
 import type { AuditEntry } from "./audit.js";
 import type { WebSessionContext } from "./session.js";
 import {
@@ -34,12 +35,9 @@ export const CASE_DECISIONS: ModerationCaseDecision[] = [
   "readmit",
 ];
 
-const DECISION_PAST_TENSE: Record<ModerationCaseDecision, string> = {
-  uphold: "upheld",
-  extend: "extended",
-  permanent: "made permanent",
-  readmit: "was let back in",
-};
+/** Checked against the service's decision names, so a new one needs a word. */
+const DECISION_DONE_WORDS: Record<ModerationCaseDecision, string> =
+  DECISION_DONE;
 
 export type ReviewDate =
   { ok: true; date: Date | null } | { ok: false; reason: string };
@@ -189,7 +187,7 @@ export async function decideCase(args: {
     });
     return {
       type: "ok",
-      text: `Case #${updated.caseNumber} ${DECISION_PAST_TENSE[decision]}.`,
+      text: `Case #${updated.caseNumber} ${DECISION_DONE_WORDS[decision]}`,
     };
   } catch (err) {
     return auditCaseFailure(audit, session, action, caseId, err);

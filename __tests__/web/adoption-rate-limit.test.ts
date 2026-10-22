@@ -143,7 +143,7 @@ describe("adoption scan limiter", () => {
     }
   });
 
-  it("is mounted in front of GET /admin/adopt on the read-only router", async () => {
+  it("mounts GET /admin/adopt as one handler: its limiter runs inside it, only when a scan starts (#1323)", async () => {
     const router = createReadOnlyRouter(
       {} as never,
       ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
@@ -156,8 +156,8 @@ describe("adoption scan limiter", () => {
       (l) => l.route?.path === "/adopt" && "get" in l.route.methods,
     );
     expect(layer).toBeDefined();
-    // The limiter runs ahead of the handler that scans Discord.
-    expect(layer!.route!.stack).toHaveLength(2);
+    expect(layer!.route!.stack).toHaveLength(1);
+    // The 429 itself is covered over HTTP in server-scan-route.test.ts.
   });
 
   it("the scan limiter answers 429 once its bucket is spent", async () => {

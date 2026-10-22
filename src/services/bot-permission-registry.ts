@@ -94,6 +94,24 @@ export const PERM = {
   },
 } as const satisfies Record<string, PermissionNeed>;
 
+/**
+ * The order Discord's role editor lists these permissions in (General, then
+ * Membership, then Voice, then Events), as keys of `PERM`. The permission
+ * matrix sorts by it; a test keeps it covering every `PERM` entry exactly once.
+ */
+export const PERMISSION_ORDER: readonly (keyof typeof PERM)[] = [
+  "viewChannel",
+  "manageChannels",
+  "manageRoles",
+  "manageNicknames",
+  "connect",
+  "speak",
+  "moveMembers",
+  "setVoiceStatus",
+  "createEvents",
+  "manageEvents",
+];
+
 /** The leaders-only channel needs View, Connect, Speak, Move Members and Manage Roles in the category. */
 export const LEADS_NEEDS: readonly PermissionNeed[] = [
   PERM.viewChannel,

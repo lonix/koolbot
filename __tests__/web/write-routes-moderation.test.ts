@@ -241,10 +241,10 @@ describe("POST /moderation/cases/:id/<decision>", () => {
     harness.post(`/moderation/cases/${CASE}/${decision}`, body);
 
   it.each([
-    ["uphold", "upheld"],
-    ["extend", "extended"],
-    ["permanent", "made permanent"],
-    ["readmit", "was let back in"],
+    ["uphold", "kept out for now."],
+    ["extend", "put off to the new review date."],
+    ["permanent", "kept out for good. It is not reviewed again."],
+    ["readmit", "closed: the member was let back in."],
   ])(
     "%s calls the service as the session and audits it",
     async (decision, word) => {
@@ -252,7 +252,7 @@ describe("POST /moderation/cases/:id/<decision>", () => {
         await decide(decision, { next_review_in_days: "60", note: "reviewed" }),
       );
       expect(flash).toMatchObject({ path: "/admin/moderation", type: "ok" });
-      expect(flash.msg).toBe(`Case #14 ${word}.`);
+      expect(flash.msg).toBe(`Case #14 ${word}`);
 
       expect(mockDecide.mock.calls[0][0]).toMatchObject({
         guildId: "guild-1",
@@ -292,13 +292,13 @@ describe("POST /moderation/cases/:id/<decision>", () => {
 
   it("flashes an illegal transition instead of returning a 500", async () => {
     mockDecide.mockRejectedValue(
-      new MockCaseError("terminal", "Case #14 is already lifted."),
+      new MockCaseError("terminal", "Case #14 is already closed: let back in."),
     );
     const res = await decide("readmit");
     expect(res.status).toBe(303);
     expect(flashOf(res)).toMatchObject({
       type: "err",
-      msg: "Case #14 is already lifted.",
+      msg: "Case #14 is already closed: let back in.",
     });
     expect(lastAudit()).toMatchObject({
       action: "moderation.case.readmit",
@@ -308,10 +308,13 @@ describe("POST /moderation/cases/:id/<decision>", () => {
 
   it("tells the loser of a race which status the case was found in", async () => {
     mockDecide.mockRejectedValue(
-      new MockCaseError("status-changed", "Case #14 was already lifted."),
+      new MockCaseError(
+        "status-changed",
+        'Case #14 changed while you were looking: it is now "let back in".',
+      ),
     );
     expect(flashOf(await decide("permanent")).msg).toBe(
-      "Case #14 was already lifted.",
+      'Case #14 changed while you were looking: it is now "let back in".',
     );
   });
 });
@@ -322,11 +325,18 @@ describe("POST /moderation/cases/run-review", () => {
       await harness.post("/moderation/cases/run-review", {}),
     );
     expect(flash).toMatchObject({ type: "ok" });
-    expect(flash.msg).toContain("2 cases");
+    expect(flash.msg).toBe("Check done: 2 cases now need a decision.");
     expect(lastAudit()).toMatchObject({
       action: "moderation.case.run_review",
       result: "success",
     });
+  });
+
+  it("says one case needs a decision in the singular", async () => {
+    mockRunNow.mockResolvedValue({ due: 1, flipped: 1, notified: false });
+    expect(
+      flashOf(await harness.post("/moderation/cases/run-review", {})).msg,
+    ).toBe("Check done: 1 case now needs a decision.");
   });
 
   it("says so when the feature is off and nothing ran", async () => {
