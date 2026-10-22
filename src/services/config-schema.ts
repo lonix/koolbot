@@ -1,4 +1,5 @@
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
+import type { SettingFormat } from "../utils/setting-formats.js";
 
 export interface ConfigSchema {
   // Voice Channel Management
@@ -733,6 +734,14 @@ export interface SettingMetadata {
    */
   options?: SettingOption[];
   /**
+   * The value set of a free-text `string` key, so the Web UI can offer a picker
+   * and the write boundary can refuse a value the picker could not have
+   * produced (#1426): `timezone` (IANA zone select), `colour` (`#RRGGBB`
+   * colour input) or `emoji` (emoji picker, at most 4 characters). A stored
+   * value that fails the rule still displays and saves unchanged.
+   */
+  format?: SettingFormat;
+  /**
    * Optional "minimum recommended value" hint for `number`-typed keys. The
    * WebUI shows the warning when the current value drops below the threshold.
    * Reusable across settings; today it guards the Rewind-relevant retention
@@ -1265,6 +1274,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Prefix prepended to dynamically created voice channel names. Emoji shortcodes like :video_game: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
+    format: "emoji",
   },
   "voicechannels.channel.suffix": {
     label: "Per-user channel name suffix",
@@ -1272,6 +1282,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Suffix appended to dynamically created voice channel names. Emoji shortcodes like :sparkles: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
+    format: "emoji",
   },
   "voicechannels.cleanup.managed_only": {
     label: "Only clean up channels KoolBot created",
@@ -1921,6 +1932,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "IANA timezone (e.g. Europe/London) used to interpret the wall-clock start time entered for an event. Empty falls back to the host/server timezone.",
     category: "events",
     type: "string",
+    format: "timezone",
   },
   "events.channel_prefix": {
     label: "Event channel name prefix",
@@ -1928,6 +1940,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Prefix prepended to the event title when naming the temporary voice channel.",
     category: "events",
     type: "string",
+    format: "emoji",
   },
   "events.reminder_minutes": {
     label: "Reminder lead time (minutes)",
@@ -2181,6 +2194,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Colour (#RRGGBB) given to roles the grouped-role generator creates on the Reaction Roles page. Leave empty for Discord's default. Generated roles never get any permissions, and existing roles of the same name are reused untouched.",
     category: "reactionroles",
     type: "string",
+    format: "colour",
   },
   "reactionroles.max_toggles": {
     label: "Role flips per member per window",

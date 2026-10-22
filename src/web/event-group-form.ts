@@ -32,7 +32,11 @@ export const MARKER_COLOURS: readonly (MarkerChoice & { colour: string })[] = [
   { emoji: "⚪", name: "white circle", colour: "White" },
 ];
 
-/** Squares, then common team icons. */
+/**
+ * Squares, then common team icons, then the emoji people put in front of a
+ * channel name. The last group is why the default voice channel prefix and the
+ * default event channel prefix are in the picker (#1426).
+ */
 const MARKER_OTHERS: readonly MarkerChoice[] = [
   { emoji: "🟥", name: "red square" },
   { emoji: "🟧", name: "orange square" },
@@ -51,6 +55,16 @@ const MARKER_OTHERS: readonly MarkerChoice[] = [
   { emoji: "🐺", name: "wolf" },
   { emoji: "🦅", name: "eagle" },
   { emoji: "🐉", name: "dragon" },
+  { emoji: "🎮", name: "video game controller" },
+  { emoji: "🎧", name: "headphone" },
+  { emoji: "🎤", name: "microphone" },
+  { emoji: "🔊", name: "speaker loud" },
+  { emoji: "🎲", name: "game die" },
+  { emoji: "🎵", name: "musical note" },
+  { emoji: "📅", name: "calendar" },
+  { emoji: "✨", name: "sparkles" },
+  { emoji: "🏆", name: "trophy" },
+  { emoji: "💬", name: "speech balloon chat" },
 ];
 
 /** Everything the picker offers, in order. Unicode emoji only, each within the marker limit. */
@@ -88,13 +102,20 @@ export function groupRowsScript(): string {
   );
   return (
     "(function(){" +
+    // Loaded by the page and again by the admin layout for an emoji setting:
+    // the second copy only re-syncs the first.
+    "if(window.koolGroupRows){window.koolGroupRows.syncAll();return}" +
     `var CHOICES=${choices};` +
     "var pop=null,popFor=null;" +
     "function wrapOf(row){return row.querySelector('[data-marker-wrap]')}" +
     "function input(row){return row.querySelector('[data-marker-input]')}" +
     "function btn(row){return row.querySelector('[data-marker-btn]')}" +
+    // A settings emoji field keeps its text box and the button's own glyph.
+    "function field(row){return row.hasAttribute('data-emoji-field')}" +
     "function label(row){var b=btn(row),i=input(row);if(!b||!i)return;var v=i.value.trim();" +
-    "var g=row.getAttribute('aria-label')||'Group';b.textContent=v||'+';b.setAttribute('aria-label',g+' marker: '+(v||'none')+'. '+(v?'Change it':'Choose one'))}" +
+    "var g=row.getAttribute('aria-label')||'Group';" +
+    "if(field(row)){b.setAttribute('aria-label','Choose an emoji for '+g+(v?' (now '+v+')':''));return}" +
+    "b.textContent=v||'+';b.setAttribute('aria-label',g+' marker: '+(v||'none')+'. '+(v?'Change it':'Choose one'))}" +
     "function closePop(focus){if(!pop||!popFor)return;var b=btn(popFor);pop.hidden=true;if(b){b.setAttribute('aria-expanded','false');if(focus)b.focus()}popFor=null}" +
     "function mark(i){var cur=i.value.trim();Array.prototype.forEach.call(pop.querySelectorAll('.kb-emoji-grid button'),function(x){x.setAttribute('aria-pressed',x.getAttribute('data-emoji')===cur?'true':'false')})}" +
     "function choose(v){if(!popFor)return;var i=input(popFor);i.value=v;label(popFor);" +
@@ -112,12 +133,19 @@ export function groupRowsScript(): string {
     "Array.prototype.forEach.call(g.children,function(b){var ok=!q||b.getAttribute('data-name').indexOf(q)!==-1;b.hidden=!ok;if(ok)any=true});e.hidden=any});" +
     "pop.addEventListener('click',function(ev){var b=ev.target.closest('button[data-emoji]');if(b&&pop.contains(b))choose(b.getAttribute('data-emoji'))});" +
     "pop.addEventListener('keydown',function(ev){if(ev.key==='Escape'){ev.stopPropagation();closePop(true)}})}" +
-    "function openPop(row){if(!pop)build();if(popFor===row){closePop(true);return}closePop(false);" +
+    // The same grid serves both; only the words differ.
+    "function words(row){var f=field(row);" +
+    "pop.setAttribute('aria-label',f?'Choose an emoji':'Choose a marker');" +
+    "pop.querySelector('[data-emoji-search]').setAttribute('aria-label',f?'Search emoji':'Search markers');" +
+    "pop.querySelector('.kb-picker__group').textContent=f?'Emoji':'Markers';" +
+    "pop.querySelector('[data-emoji=\"\"]').textContent=f?'No emoji':'No marker';" +
+    "pop.querySelector('[data-emoji-empty]').textContent=f?'No emoji match.':'No markers match.'}" +
+    "function openPop(row){if(!pop)build();if(popFor===row){closePop(true);return}closePop(false);words(row);" +
     "popFor=row;var w=wrapOf(row);w.appendChild(pop);pop.hidden=false;btn(row).setAttribute('aria-expanded','true');" +
     "var s=pop.querySelector('[data-emoji-search]');s.value='';s.dispatchEvent(new Event('input'));mark(input(row));s.focus()}" +
     "function enhance(row){if(!row||row.hasAttribute('data-enhanced'))return;row.setAttribute('data-enhanced','');" +
     "var w=wrapOf(row),i=input(row),b=btn(row);" +
-    "if(w&&i&&b){i.hidden=true;b.hidden=false;label(row);" +
+    "if(w&&i&&b){if(!field(row))i.hidden=true;b.hidden=false;label(row);" +
     "b.addEventListener('click',function(){openPop(row)});" +
     // A value typed or restored by hand keeps the button in step.
     "i.addEventListener('input',function(){label(row)})}" +
@@ -125,7 +153,7 @@ export function groupRowsScript(): string {
     "if(more&&panel){var sel=panel.querySelector('select');var open=!!sel&&sel.value!=='team';" +
     "more.hidden=false;panel.hidden=!open;more.setAttribute('aria-expanded',open?'true':'false');" +
     "more.addEventListener('click',function(){var o=panel.hidden;panel.hidden=!o;more.setAttribute('aria-expanded',o?'true':'false')})}}" +
-    "function syncAll(){Array.prototype.forEach.call(document.querySelectorAll('[data-group-row]'),function(r){enhance(r);label(r);" +
+    "function syncAll(){Array.prototype.forEach.call(document.querySelectorAll('[data-group-row],[data-emoji-field]'),function(r){enhance(r);label(r);" +
     "var more=r.querySelector('[data-kind-toggle]'),panel=r.querySelector('[data-kind-panel]');" +
     "if(more&&panel&&panel.hidden){var sel=panel.querySelector('select');if(sel&&sel.value!=='team'){panel.hidden=false;more.setAttribute('aria-expanded','true')}}})}" +
     "document.addEventListener('click',function(ev){if(pop&&!pop.hidden&&!pop.contains(ev.target)&&!ev.target.closest('[data-marker-btn]'))closePop(false)});" +

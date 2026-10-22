@@ -1110,6 +1110,191 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The pickers of #1426 in their normal states: a listed zone, a colour
+      // and emoji prefixes, one of them empty.
+      name: "Settings (timezone select, colour input, emoji fields)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "events",
+            rows: [
+              {
+                key: "events.timezone",
+                label: "Event timezone (IANA)",
+                current: "Europe/Oslo",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "IANA timezone used to interpret the start time of an event. Empty falls back to the server timezone.",
+                category: "events",
+                format: "timezone",
+              },
+              {
+                key: "events.channel_prefix",
+                label: "Event channel name prefix",
+                current: "📅",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Prefix prepended to the event title when naming the temporary voice channel.",
+                category: "events",
+                format: "emoji",
+              },
+            ],
+          },
+          {
+            category: "reactionroles",
+            rows: [
+              {
+                key: "reactionroles.group_role_colour",
+                label: "Generated group role colour",
+                current: "#a95f55",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Colour given to roles the grouped-role generator creates.",
+                category: "reactionroles",
+                format: "colour",
+              },
+            ],
+          },
+          {
+            category: "voicechannels",
+            rows: [
+              {
+                key: "voicechannels.channel.prefix",
+                label: "Per-user channel name prefix",
+                current: "🎮",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Prefix prepended to dynamically created voice channel names.",
+                category: "voicechannels",
+                format: "emoji",
+              },
+              {
+                key: "voicechannels.channel.suffix",
+                label: "Per-user channel name suffix",
+                current: "",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Suffix appended to dynamically created voice channel names.",
+                category: "voicechannels",
+                format: "emoji",
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
+      // Values a picker cannot produce keep showing and saving as they are:
+      // an old custom zone, a colour that is not #RRGGBB, a prefix that is not
+      // an emoji, and the colour default (#1426).
+      name: "Settings (pickers holding values they cannot produce, rejected)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "events",
+            rows: [
+              {
+                key: "events.timezone",
+                label: "Event timezone (IANA)",
+                current: "Mars/Olympus",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "IANA timezone used to interpret the start time of an event. Empty falls back to the server timezone.",
+                category: "events",
+                format: "timezone",
+              },
+              {
+                key: "events.channel_prefix",
+                label: "Event channel name prefix",
+                current: "[Events]",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Prefix prepended to the event title when naming the temporary voice channel.",
+                category: "events",
+                format: "emoji",
+              },
+            ],
+          },
+          {
+            category: "reactionroles",
+            rows: [
+              {
+                key: "reactionroles.group_role_colour",
+                label: "Generated group role colour",
+                current: "red",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Colour given to roles the grouped-role generator creates.",
+                category: "reactionroles",
+                format: "colour",
+              },
+            ],
+          },
+          {
+            category: "voicechannels",
+            rows: [
+              {
+                key: "voicechannels.channel.suffix",
+                label: "Per-user channel name suffix",
+                current: "🎮 | ",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Suffix appended to dynamically created voice channel names.",
+                category: "voicechannels",
+                format: "emoji",
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+        flash: { type: "err", text: "One value was rejected." },
+        invalidKeys: ["events.timezone", "reactionroles.group_role_colour"],
+      }),
+    },
+    {
+      name: "Setup wizard step (timezone and emoji settings)",
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 0,
+        totalSteps: 1,
+        featureKey: "events",
+        settingKeys: [
+          "events.enabled",
+          "events.timezone",
+          "events.channel_prefix",
+        ],
+        currentValues: {
+          "events.enabled": true,
+          "events.timezone": "",
+          "events.channel_prefix": "📅",
+        },
+        metadata: {},
+        defaultValues: {
+          "events.enabled": false,
+          "events.timezone": "",
+          "events.channel_prefix": "📅",
+        },
+        enabledByKey: { "events.enabled": true },
+      }),
+    },
+    {
       // The state the save bar script leaves behind after two edits: the bar
       // shown with its count and Discard (#1330). The scripts do not run under
       // axe, so the markup is put in that state here.

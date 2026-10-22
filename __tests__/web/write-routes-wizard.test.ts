@@ -284,6 +284,50 @@ describe("POST /wizard/step/:n", () => {
     });
   });
 
+  it("refuses a timezone and a prefix a picker could not produce (#1426)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["events"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_events.enabled": "true",
+      "value_events.timezone": "Mars/Olympus",
+      "value_events.channel_prefix": "abcde",
+    });
+    const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
+    expect(recorded).toContain("events.enabled");
+    expect(recorded).not.toContain("events.timezone");
+    expect(recorded).not.toContain("events.channel_prefix");
+    expect(parseFlashRedirect(res.headers.get("location") ?? "").type).not.toBe(
+      "ok",
+    );
+  });
+
+  it("keeps a stored value a picker could not produce, and turns Use default into empty (#1426)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["events", "reactionroles"]));
+    mockConfigGet.mockImplementation((async (key: string) =>
+      key === "events.timezone" ? "Mars/Olympus" : null) as never);
+    await harness.post("/wizard/step/0", {
+      "value_events.enabled": "true",
+      "value_events.timezone": "Mars/Olympus",
+    });
+    expect(
+      Object.fromEntries(
+        mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+      ),
+    ).toMatchObject({ "events.timezone": "Mars/Olympus" });
+    mockAddConfiguration.mockClear();
+    mockGetSession.mockReturnValue(wizardState(["reactionroles"]));
+    await harness.post("/wizard/step/0", {
+      "value_reactionroles.enabled": "true",
+      "value_reactionroles.group_role_colour": "#99aab5",
+      "use_default_reactionroles.group_role_colour": "true",
+    });
+    expect(
+      Object.fromEntries(
+        mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+      ),
+    ).toMatchObject({ "reactionroles.group_role_colour": "" });
+    mockConfigGet.mockImplementation((async () => null) as never);
+  });
+
   it("advances to the next step when more features remain", async () => {
     mockGetSession.mockReturnValue(wizardState(["quotes", "polls"]));
     const res = await harness.post("/wizard/step/0", {

@@ -23,10 +23,13 @@ function supportedZones(): Set<string> {
     const values = (
       Intl as unknown as { supportedValuesOf?: (key: string) => string[] }
     ).supportedValuesOf?.("timeZone");
-    cachedZones = new Set(values ?? []);
+    // `supportedValuesOf` omits "UTC" although it is the zone most servers run
+    // in, so it is added here: the picker then offers it and a Set keeps it
+    // from appearing twice when a future runtime does list it (#1426).
+    cachedZones = new Set([...(values ?? []), "UTC"]);
   } catch (err) {
     logger.warn("Intl.supportedValuesOf('timeZone') unavailable", err);
-    cachedZones = new Set();
+    cachedZones = new Set(["UTC"]);
   }
   return cachedZones;
 }

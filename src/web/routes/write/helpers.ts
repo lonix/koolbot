@@ -17,6 +17,7 @@ import {
   sanitizeCronExpression,
 } from "../../../utils/cron.js";
 import logger from "../../../utils/logger.js";
+import { validateSettingFormat } from "../../../utils/setting-formats.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import { grantedRoleIds } from "../../../services/role-grants.js";
@@ -513,10 +514,17 @@ export const EMOJI_NAME_KEYS: ReadonlySet<string> = new Set([
  * Coerce a raw form value to match the expected type of `key` in
  * `defaultConfig`. Returns the coerced value on success, or a typed
  * failure describing why coercion was refused.
+ *
+ * `current` is the stored value, when the caller has it (the Settings page and
+ * the wizard do; an import or an adoption plan does not and stays strict). A
+ * picker-format key (#1426) accepts its stored value unchanged even when the
+ * picker could not produce it, so an old custom timezone or a prefix that is
+ * not an emoji never blocks saving the rest of its section.
  */
 export function coerceConfigValue(
   key: string,
   raw: unknown,
+  current?: unknown,
 ):
   | { ok: true; value: string | number | boolean }
   | { ok: false; reason: string } {
@@ -619,6 +627,22 @@ export function coerceConfigValue(
       ok: false,
       reason: `too long (max ${TEXT_LIMITS.configValue} characters)`,
     };
+  }
+  // Picker formats (#1426): the timezone select, colour input and emoji picker
+  // are conveniences, so the value is checked again here. The stored value is
+  // exempt, whatever it is: refusing it would block the whole section save.
+  const format = settingsMetadata[key as keyof typeof settingsMetadata]?.format;
+  if (format) {
+    const checked = validateSettingFormat(format, value);
+    if (checked.ok) {
+      value = checked.value;
+    } else if (!(
+      current !== undefined &&
+      current !== null &&
+      value === String(current)
+    )) {
+      return { ok: false, reason: checked.reason };
+    }
   }
   // Cron keys are re-armed on save (#976), so a value the scheduler can't
   // parse would stop a running job. Refuse it at the write boundary instead,

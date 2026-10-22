@@ -11,6 +11,11 @@ import { designStylesheetLinks } from "./design-assets.js";
 import { icon } from "./icons.js";
 import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
+import {
+  COLOUR_INPUT_SCRIPT,
+  TIMEZONE_SELECT_SCRIPT,
+} from "./setting-pickers.js";
+import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
 import {
   CONFIRM_SCRIPT,
@@ -1010,6 +1015,16 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,
     `${scriptTag(NUMBER_INPUT_SCRIPT)}`,
+    // Pickers (#1426): each script is only sent on a page that has its control.
+    ...(opts.body.includes("data-tz")
+      ? [`${scriptTag(TIMEZONE_SELECT_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-colour")
+      ? [`${scriptTag(COLOUR_INPUT_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-emoji-field")
+      ? [`${scriptTag(groupRowsScript())}`]
+      : []),
     `${scriptTag(SETTINGS_SAVE_SCRIPT)}`,
     `${scriptTag(SAVEBAR_SCRIPT)}`,
     `${scriptTag(INVALID_FOCUS_SCRIPT)}`,
