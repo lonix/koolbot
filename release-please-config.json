@@ -6,6 +6,7 @@
   "packages": {
     ".": {
       "package-name": "koolbot",
+      "extra-files": ["README.md"],
       "changelog-sections": [
         { "type": "feat", "section": "🚀 Features" },
         { "type": "fix", "section": "🐛 Bug Fixes" },

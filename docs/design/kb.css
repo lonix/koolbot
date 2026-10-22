@@ -440,8 +440,18 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 
 /* ---------- Group rows (compact, one line per group) ---------- */
 .kb-grouprows { display: flex; flex-direction: column; gap: var(--space-2); }
-.kb-grouprow { display: grid; grid-template-columns: auto minmax(8rem, 1fr) auto 6rem auto; gap: var(--space-2); align-items: center; }
-.kb-grouprows__head { display: grid; grid-template-columns: 1.9rem minmax(8rem, 1fr) 6.6rem 6rem 1.9rem; gap: var(--space-2); font-size: var(--type-overline-size); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.kb-grouprow { display: grid; grid-template-columns: 3.5rem minmax(8rem, 1fr) 5rem 7rem 4.5rem; gap: var(--space-2); align-items: center; }
+.kb-grouprow > * { min-width: 0; }
+.kb-grouprows__item { display: flex; flex-direction: column; gap: var(--space-2); }
+.kb-grouprows__more { padding-left: 3.5rem; }
+.kb-grouprows__head { display: grid; grid-template-columns: 3.5rem minmax(8rem, 1fr) 5rem 7rem 4.5rem; gap: var(--space-2); font-size: var(--type-overline-size); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.kb-emoji-wrap { position: relative; display: flex; }
+.kb-emoji-wrap .kb-emoji-pop { position: absolute; top: 100%; left: 0; z-index: 5; margin-top: var(--space-1); }
+.kb-input--num { width: 5.5ch; min-width: 4rem; }
+/* Anything the group form folds or only shows with scripts: `display` on a container or a button would otherwise beat the browser's [hidden]. */
+[data-groups-section] [hidden], .kb-grouprows__item [hidden], .kb-grouprows__item [data-marker-input][hidden], .kb-grouprows__head[hidden], .kb-emoji-pop[hidden] { display: none; }
+.kb-groupopt { display: flex; flex-direction: column; gap: 0.2rem; }
+.kb-groupopt > .kb-help { padding-left: 2.25rem; }
 
 /* ---------- Nested options: children sit under their parent ---------- */
 .kb-nested { margin: var(--space-2) 0 0 1.1rem; padding-left: var(--space-4); border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: var(--space-3); }

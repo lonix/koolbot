@@ -85,6 +85,9 @@ function boot(html: string, restore?: Record<string, unknown>): JSDOM {
     code.includes("koolbot-event-form-draft"),
   );
   if (!groups) throw new Error("groups script not found");
+  const rowsScript = scripts.find((code) => code.includes("koolGroupRows="));
+  if (!rowsScript) throw new Error("group rows script not found");
+  dom.window.eval(rowsScript);
   dom.window.eval(groups);
   return dom;
 }
@@ -97,29 +100,49 @@ function field(dom: JSDOM, name: string): HTMLInputElement {
   return el as HTMLInputElement;
 }
 
-function choose(dom: JSDOM, id: string): HTMLSelectElement {
-  const select = field(dom, "groups_preset") as unknown as HTMLSelectElement;
-  select.value = id;
-  select.dispatchEvent(
+/** Click a preset card: check its radio and fire the change event. Returns the chosen value. */
+function choose(dom: JSDOM, id: string): string {
+  const radio = dom.window.document.querySelector(
+    `input[type=radio][name="groups_preset"][value="${id}"]`,
+  ) as HTMLInputElement;
+  radio.checked = true;
+  radio.dispatchEvent(
     new (dom.window as Win).Event("change", { bubbles: true }),
   );
-  return select;
+  return chosen(dom);
 }
 
+/** The value of the chosen card ("" = Custom). */
+function chosen(dom: JSDOM): string {
+  const radio = dom.window.document.querySelector(
+    'input[type=radio][name="groups_preset"]:checked',
+  ) as HTMLInputElement | null;
+  return radio ? radio.value : "<none>";
+}
+
+/** The cards offered, in order: presets first, Custom ("") last. */
 function optionValues(html: string): string[] {
   const doc = new JSDOM(html).window.document;
   return Array.from(
-    doc.querySelectorAll<HTMLOptionElement>(
-      'select[name="groups_preset"] option',
+    doc.querySelectorAll<HTMLInputElement>(
+      'input[type=radio][name="groups_preset"]',
     ),
   ).map((o) => o.value);
+}
+
+/** The text of the card with this value. */
+function cardText(doc: Document, id: string): string {
+  return (
+    doc.querySelector(`input[type=radio][value="${id}"]`)?.parentElement
+      ?.textContent ?? ""
+  );
 }
 
 describe("the event form's preset picker (#1200)", () => {
   it("offers every built-in when no list is passed, as before the library", () => {
     expect(optionValues(page(undefined))).toEqual([
-      "",
       ...EVENT_GROUP_PRESETS.map((p) => p.id),
+      "",
     ]);
   });
 
@@ -129,9 +152,9 @@ describe("the event form's preset picker (#1200)", () => {
       libraryPreset,
     ] as EventGroupPreset[];
     expect(optionValues(page(enabled))).toEqual([
-      "",
       "builtin:red-vs-blue",
       LIB_ID,
+      "",
     ]);
   });
 
@@ -141,10 +164,9 @@ describe("the event form's preset picker (#1200)", () => {
       id: "my:0123456789abcdef01234599",
     } as EventGroupPreset;
     const doc = new JSDOM(page([libraryPreset, mine])).window.document;
-    const text = (id: string): string =>
-      doc.querySelector(`option[value="${id}"]`)?.textContent ?? "";
-    expect(text(mine.id)).toContain("(yours)");
-    expect(text(LIB_ID)).not.toContain("(yours)");
+    expect(cardText(doc, mine.id)).toContain("Yours");
+    expect(cardText(doc, LIB_ID)).not.toContain("Yours");
+    expect(cardText(doc, LIB_ID)).toContain("Server preset");
   });
 
   it("offers only Custom when nothing is enabled", () => {
@@ -208,15 +230,18 @@ describe("the event form's preset picker (#1200)", () => {
 
   it("a library preset bigger than the cap is disabled and never applied", () => {
     const dom = boot(page([libraryPreset], 2));
-    const option = dom.window.document.querySelector(
-      `option[value="${LIB_ID}"]`,
-    ) as HTMLOptionElement;
-    expect(option.disabled).toBe(true);
-    expect(option.textContent).toContain("needs 3 groups, limit is 2");
+    const card = dom.window.document.querySelector(
+      `input[type=radio][value="${LIB_ID}"]`,
+    ) as HTMLInputElement;
+    expect(card.disabled).toBe(true);
+    expect(cardText(dom.window.document, LIB_ID)).toContain(
+      "needs 3 groups, limit is 2",
+    );
     field(dom, "group_0_name").value = "Mine";
-    const select = choose(dom, LIB_ID);
+    // A disabled card cannot be clicked; forcing it must still change nothing.
+    card.disabled = false;
+    expect(choose(dom, LIB_ID)).toBe("");
     expect(field(dom, "group_0_name").value).toBe("Mine");
-    expect(select.value).toBe("");
   });
 
   it("a draft that names a preset no longer offered is not put back", () => {
@@ -225,9 +250,7 @@ describe("the event form's preset picker (#1200)", () => {
       groups_preset: "builtin:wardogs",
       group_0_name: "Kept",
     });
-    expect(
-      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
-    ).toBe("");
+    expect(chosen(dom)).toBe("");
     expect(field(dom, "group_0_name").value).toBe("Kept");
   });
 
@@ -236,9 +259,7 @@ describe("the event form's preset picker (#1200)", () => {
       groups_enabled: true,
       groups_preset: LIB_ID,
     });
-    expect(
-      (field(dom, "groups_preset") as unknown as HTMLSelectElement).value,
-    ).toBe(LIB_ID);
+    expect(chosen(dom)).toBe(LIB_ID);
   });
 });
 

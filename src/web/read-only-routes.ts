@@ -74,7 +74,12 @@ import {
   parseScanTab,
   renderAdoptPage,
 } from "./adopt-view.js";
-import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
+import {
+  cachedScan,
+  peekNewestScan,
+  scanCacheKey,
+} from "./server-scan-cache.js";
+import { loadDashboardData } from "./dashboard-data.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -148,7 +153,10 @@ import {
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
-import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
+import {
+  getGuildVoiceHeatmap,
+  queryGuildVoiceHeatmap,
+} from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
@@ -674,6 +682,8 @@ async function commonFromReq(req: AuthenticatedRequest): Promise<{
 
 interface ChannelData {
   names: Map<string, string>;
+  /** Discord type per channel id, for labelling a stored id by kind (#1303). */
+  types: Map<string, ChannelType>;
   textChannels: ChannelOption[];
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
@@ -699,6 +709,7 @@ export async function fetchChannelData(
   guildId: string,
 ): Promise<ChannelData> {
   const names = new Map<string, string>();
+  const types = new Map<string, ChannelType>();
   const textChannels: ChannelOption[] = [];
   const voiceChannels: ChannelOption[] = [];
   const categoryChannels: ChannelOption[] = [];
@@ -709,18 +720,25 @@ export async function fetchChannelData(
       if (!ch?.id) continue;
       const name = ch.name ?? ch.id;
       names.set(ch.id, name);
+      types.set(ch.id, ch.type);
+      const option: ChannelOption = {
+        id: ch.id,
+        name,
+        type: ch.type,
+        parentName: ch.parent?.name ?? null,
+      };
       if (
         ch.type === ChannelType.GuildText ||
         ch.type === ChannelType.GuildAnnouncement
       ) {
-        textChannels.push({ id: ch.id, name });
+        textChannels.push(option);
       } else if (
         ch.type === ChannelType.GuildVoice ||
         ch.type === ChannelType.GuildStageVoice
       ) {
-        voiceChannels.push({ id: ch.id, name });
+        voiceChannels.push(option);
       } else if (ch.type === ChannelType.GuildCategory) {
-        categoryChannels.push({ id: ch.id, name });
+        categoryChannels.push(option);
       }
     }
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
@@ -729,7 +747,7 @@ export async function fetchChannelData(
   } catch (err) {
     logger.debug("fetchChannelData failed", err);
   }
-  return { names, textChannels, voiceChannels, categoryChannels };
+  return { names, types, textChannels, voiceChannels, categoryChannels };
 }
 
 /**
@@ -951,62 +969,81 @@ export function createReadOnlyRouter(
     "/",
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
+      const guildId = common.guildId;
+      const adminUserId = req.webSession?.discordUserId;
 
-      let guildName: string | null = null;
-      let memberCount: number | null = null;
-      let voiceUsers: number | null = null;
-      try {
-        const guild = await client.guilds.fetch(common.guildId);
-        guildName = guild.name;
-        memberCount = guild.memberCount;
-        voiceUsers = guild.voiceStates.cache.filter(
-          (s) => s.channelId !== null,
-        ).size;
-      } catch (err) {
-        logger.debug("dashboard guild fetch failed", err);
-      }
-
-      const featureKeys: Array<{ key: string; label: string }> = [
-        { key: "voicechannels.enabled", label: "Voice Channels" },
-        { key: "voicetracking.enabled", label: "Voice Tracking" },
-        { key: "quotes.enabled", label: "Quotes" },
-        { key: "achievements.enabled", label: "Achievements" },
-        { key: "announcements.enabled", label: "Announcements" },
-        { key: "polls.enabled", label: "Polls" },
-        { key: "reactionroles.enabled", label: "Reaction Roles" },
-        { key: "notices.enabled", label: "Notices" },
-      ];
-      const features = await Promise.all(
-        featureKeys.map(async (f) => ({
-          ...f,
-          on: await config.getBoolean(f.key, false),
-        })),
-      );
-
-      const [announcements, pollSchedules, pollItems, reactionRoles, notices] =
-        await Promise.all([
-          ScheduledAnnouncement.countDocuments({
-            guildId: common.guildId,
-          }).catch(() => 0),
-          PollSchedule.countDocuments({ guildId: common.guildId }).catch(
-            () => 0,
-          ),
-          PollItem.countDocuments({ guildId: common.guildId }).catch(() => 0),
-          ReactionRoleConfig.countDocuments({
-            guildId: common.guildId,
-            isArchived: false,
-          }).catch(() => 0),
-          Notice.countDocuments({}).catch(() => 0),
-        ]);
-
-      const mongoState =
-        ["disconnected", "connected", "connecting", "disconnecting"][
-          mongoose.connection.readyState
-        ] ?? "unknown";
+      // Every source is read on its own and bounded (`loadDashboardData`): one
+      // that fails or is slow is "unavailable" in its own card, never the page.
+      const data = await loadDashboardData({
+        navFeatureStatus: common.navFeatureStatus,
+        guild: async () => {
+          const guild = await client.guilds.fetch(guildId);
+          return {
+            id: guildId,
+            name: guild.name,
+            memberCount: guild.memberCount,
+            voiceUsers: guild.voiceStates.cache.filter(
+              (s) => s.channelId !== null,
+            ).size,
+            botTag: client.user?.tag ?? null,
+            connected: client.isReady(),
+          };
+        },
+        mongoState: () =>
+          ["disconnected", "connected", "connecting", "disconnecting"][
+            mongoose.connection.readyState
+          ] ?? "unknown",
+        counts: async () => {
+          const count = (work: PromiseLike<number>): Promise<number | null> =>
+            Promise.resolve(work).catch(() => null);
+          const [
+            announcements,
+            pollSchedules,
+            pollItems,
+            reactionRoles,
+            notices,
+          ] = await Promise.all([
+            count(ScheduledAnnouncement.countDocuments({ guildId })),
+            count(PollSchedule.countDocuments({ guildId })),
+            count(PollItem.countDocuments({ guildId })),
+            count(
+              ReactionRoleConfig.countDocuments({ guildId, isArchived: false }),
+            ),
+            count(Notice.countDocuments({})),
+          ]);
+          return {
+            announcements,
+            pollSchedules,
+            pollItems,
+            reactionRoles,
+            notices,
+          };
+        },
+        // Cached for 30 s and never throws; a page is not held up for it.
+        permissions: () => checkBotPermissions(client, guildId),
+        // Only a scan that has already finished: the Dashboard never starts one
+        // (a scan is a round of Discord reads and spends the scan limiter).
+        recentScan: () =>
+          // Newest of the plain and the ownership-hints scan, not the plain one first.
+          peekNewestScan([
+            scanCacheKey(guildId, adminUserId, false),
+            scanCacheKey(guildId, adminUserId, true),
+          ]),
+        voiceTrackingEnabled: () =>
+          common.navFeatureStatus["voicetracking.enabled"] === true,
+        voiceWeek: () => {
+          const end = new Date();
+          // The strict read: a failed query is "unavailable", not an empty week.
+          return queryGuildVoiceHeatmap(
+            new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000),
+            end,
+            getServerTimezone(),
+          );
+        },
+      });
 
       // Update check (#1029): re-read the enable flag so a Settings save shows
-      // up at once, then use the cached result — the dashboard never waits on
+      // up at once, then use the cached result: the dashboard never waits on
       // GitHub.
       const versionService = VersionCheckService.getInstance(client);
       await versionService.refreshEnabled();
@@ -1015,22 +1052,7 @@ export function createReadOnlyRouter(
       res.type("text/html").send(
         renderDashboardPage({
           ...common,
-          guild: {
-            id: common.guildId,
-            name: guildName,
-            memberCount,
-            voiceUsers,
-            botTag: client.user?.tag ?? null,
-          },
-          mongoState,
-          counts: {
-            announcements,
-            pollSchedules,
-            pollItems,
-            reactionRoles,
-            notices,
-          },
-          features,
+          data,
           version,
           flash: readFlash(req),
         }),
@@ -1342,6 +1364,7 @@ export function createReadOnlyRouter(
       const rows = announcements.map((a) => ({
         id: String(a._id),
         channelName: channelData.names.get(a.channelId) ?? a.channelId,
+        channelType: channelData.types.get(a.channelId) ?? null,
         cron: a.cronSchedule,
         enabled: a.enabled,
         messagePreview:
@@ -1582,6 +1605,7 @@ export function createReadOnlyRouter(
             id: String(s._id),
             channelId: s.channelId,
             channelName: channelData.names.get(s.channelId) ?? s.channelId,
+            channelType: channelData.types.get(s.channelId) ?? null,
             cron: s.cronSchedule,
             durationHours: s.pollDuration,
             pingRoleId: s.roleIdToPing ?? null,
@@ -1648,6 +1672,8 @@ export function createReadOnlyRouter(
       // be absent — fall back to an em dash so the table renders cleanly.
       const resolveChannel = (id?: string | null): string =>
         id ? (channelNames.get(id) ?? id) : "—";
+      const typeOf = (id?: string | null): ChannelType | null =>
+        id ? (channelData.types.get(id) ?? null) : null;
       const shape = (rr: {
         _id?: unknown;
         emoji: string;
@@ -1668,11 +1694,14 @@ export function createReadOnlyRouter(
         roleName: rr.roleName,
         roleId: rr.roleId,
         categoryName: resolveChannel(rr.categoryId),
+        categoryType: typeOf(rr.categoryId),
         channelName: resolveChannel(rr.channelId),
+        channelType: typeOf(rr.channelId),
         messageId: rr.messageId,
         pickerChannelName: rr.messageChannelId
           ? (channelNames.get(rr.messageChannelId) ?? rr.messageChannelId)
           : null,
+        pickerChannelType: typeOf(rr.messageChannelId),
         autoCreated: rr.autoCreated ?? true,
         mode: rr.mode ?? "toggle",
         groupId: rr.groupId ?? null,
@@ -1690,6 +1719,7 @@ export function createReadOnlyRouter(
             ? {
                 name: channelNames.get(configChannelId) ?? configChannelId,
                 id: configChannelId,
+                type: channelData.types.get(configChannelId) ?? null,
               }
             : null,
           active: active.map(shape),
@@ -1760,7 +1790,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelData.types.get(channelId) ?? null,
+              }
             : null,
           total: notices.length,
           settingRows,
@@ -1813,8 +1847,10 @@ export function createReadOnlyRouter(
           : await quoteService.listQuotes(page, pageSize, search);
 
       const channelNames = new Map<string, string>();
+      const channelTypes = new Map<string, ChannelType>();
       for (const c of quoteSettings.pickers.textChannels ?? []) {
         channelNames.set(c.id, c.name);
+        channelTypes.set(c.id, c.type);
       }
 
       // Show names rather than raw snowflakes: one batched member fetch per
@@ -1860,7 +1896,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelTypes.get(channelId) ?? null,
+              }
             : null,
           headerMessageId,
           settingRows: quoteSettings.settingRows,
@@ -1926,8 +1966,10 @@ export function createReadOnlyRouter(
       );
 
       const channelNames = new Map<string, string>();
+      const channelTypes = new Map<string, ChannelType>();
       for (const c of birthdaySettings.pickers.textChannels ?? []) {
         channelNames.set(c.id, c.name);
+        channelTypes.set(c.id, c.type);
       }
       const roleNames = new Map<string, string>();
       for (const r of birthdaySettings.pickers.roles ?? []) {
@@ -1974,7 +2016,11 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           channel: channelId
-            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            ? {
+                name: channelNames.get(channelId) ?? channelId,
+                id: channelId,
+                type: channelTypes.get(channelId) ?? null,
+              }
             : null,
           role: roleId
             ? { name: roleNames.get(roleId) ?? roleId, id: roleId }
@@ -2232,9 +2278,18 @@ export function createReadOnlyRouter(
         await guild.channels.fetch();
         for (const ch of guild.channels.cache.values()) {
           if (ch?.type === ChannelType.GuildCategory) {
-            categoryChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+            categoryChannels.push({
+              id: ch.id,
+              name: ch.name ?? ch.id,
+              type: ch.type,
+            });
           } else if (ch?.type === ChannelType.GuildVoice) {
-            voiceChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+            voiceChannels.push({
+              id: ch.id,
+              name: ch.name ?? ch.id,
+              type: ch.type,
+              parentName: ch.parent?.name ?? null,
+            });
           }
         }
         categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
@@ -2701,6 +2756,7 @@ export function createReadOnlyRouter(
           page,
           pageSize,
           channelNames: channelData.names,
+          channelTypes: channelData.types,
         }),
       ]);
       const { rows, total, userOptions } = audit;

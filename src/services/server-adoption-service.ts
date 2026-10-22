@@ -280,6 +280,13 @@ export interface ApplyOptions {
   memberPageSize?: number;
   onProgress?: (progress: ApplyProgress) => void;
   /**
+   * Called once, after the snapshot is saved (or claimed, on a resume) and
+   * before the first Discord write: from here the apply is committed and its
+   * outcome is the job's. A failure before this point (the busy-server lock,
+   * a stale baseline, a failed live check) means nothing was written.
+   */
+  onStarted?: () => void;
+  /**
    * Extra live-state safety check run before a resume claims its snapshot.
    * Receives the operations that are still pending; return reasons to refuse.
    * The scanner that knows feature bindings supplies this.
@@ -346,6 +353,14 @@ export interface AdoptionJob {
   progress: ApplyProgress;
   result: ApplyResult | null;
   error: string | null;
+  /**
+   * Settles once the apply is committed (resolves) or fails before any
+   * Discord write (rejects). `startApply` only throws for a plan that can
+   * never run; the checks that need the database or Discord, including the
+   * busy-server lock, happen inside the job and are reported here. A failure
+   * after the apply started does not reject it: read `status` for that.
+   */
+  started?: Promise<void>;
 }
 
 export interface RollbackJob {
@@ -466,23 +481,37 @@ export class ServerAdoptionService {
       error: null,
     };
     this.jobs.set(job.id, job);
+    let markStarted: () => void = () => undefined;
+    let markNotStarted: (error: unknown) => void = () => undefined;
+    job.started = new Promise<void>((resolve, reject) => {
+      markStarted = resolve;
+      markNotStarted = reject;
+    });
+    // Callers that don't wait for it must not trip an unhandled rejection.
+    job.started.catch(() => undefined);
     void this.apply(plan, {
       ...options,
       onProgress: (progress) => {
         job.progress = progress;
         options.onProgress?.(progress);
       },
+      onStarted: () => {
+        markStarted();
+        options.onStarted?.();
+      },
     })
       .then((result) => {
         job.result = result;
         job.status = "done";
         job.finishedAt = Date.now();
+        markStarted();
       })
       .catch((error) => {
         job.error = getErrorMessage(error);
         job.status = "failed";
         job.finishedAt = Date.now();
         logger.error("Server adoption apply failed:", error);
+        markNotStarted(error);
       });
     return job;
   }
@@ -624,6 +653,7 @@ export class ServerAdoptionService {
       });
     }
 
+    options.onStarted?.();
     const records = new Map(snapshot.operations.map((r) => [r.opId, r]));
     const progress: ApplyProgress = {
       total: plan.operations.length,

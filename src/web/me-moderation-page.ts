@@ -25,6 +25,7 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import type { CaseView } from "./moderation-case-groups.js";
+import { channelMention, roleMention } from "./discord-labels.js";
 import { CASE_DECISIONS } from "./moderation-case-actions.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
@@ -66,25 +67,6 @@ export function parseModLogKind(raw: unknown): ModLogKind {
 /** Why the viewer holds the Moderator scope. */
 export type ModeratorReason =
   { kind: "admin" } | { kind: "groups"; names: string[] };
-
-/**
- * A role, labelled the way Discord labels it. One helper, so the proper
- * mention helpers (#1303) replace a single function.
- */
-export function roleMention(name: string): string {
-  return `<span class="kb-mention">@${escapeHtml(name)}</span>`;
-}
-
-/**
- * A channel, labelled the way Discord labels it. Mod-log rows carry no
- * channel; the command audit does. `null` is a row with no channel (a direct
- * interaction); a name that could not be resolved falls back to the id.
- * Replaced by the #1303 helper.
- */
-export function channelMention(label: string | null): string {
-  if (!label) return '<span class="kb-muted">—</span>';
-  return `<span class="kb-mention">#${escapeHtml(label)}</span>`;
-}
 
 function reasonLine(reason: ModeratorReason): string {
   if (reason.kind === "admin") {
@@ -622,7 +604,7 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
 <td class="kb-mono">${escapeHtml(stamp(r.createdAt))}</td>
 <th scope="row" title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</th>
 <td class="kb-mono">${cmd}</td>
-<td>${channelMention(r.channelLabel ?? r.channelId)}</td>
+<td>${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType }) : '<span class="kb-muted">—</span>'}</td>
 <td>${resultBadge(r.result)}</td>
 <td>${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : '<span class="kb-muted">—</span>'}</td>
 </tr>`;

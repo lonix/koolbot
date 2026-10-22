@@ -1377,20 +1377,21 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           throw error;
         });
       if (!role) return null;
-      // No fallback: if the admin group can't be read, the role can't be
+      // No fallback: if the role groups can't be read, the role can't be
       // cleared, so the error reaches the catch below and the grant is
-      // refused (the announcement still goes out).
-      const adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+      // refused (the announcement still goes out). Any group counts, not only
+      // admin: a staff or host role would hand that scope to every celebrant.
+      const backing = await RoleGroupService.getInstance().groupBackedRoles(
         guild.id,
-        "admin",
+        [roleId],
       );
-      const reason = automaticGrantBlockReason(role, adminRoleIds);
+      const reason = automaticGrantBlockReason(role, backing);
       if (reason) {
         const key = `${roleId}:${reason}`;
         if (!this.warnedBlockedRoles.has(key)) {
           this.warnedBlockedRoles.add(key);
           logger.warn(
-            `Birthday role ${sanitizeForLog(roleId)} is not granted: it ${reason}. Choose a role without those permissions in the Web UI.`,
+            `Birthday role ${sanitizeForLog(roleId)} is not granted: it ${reason}. Choose another role in the Web UI.`,
           );
         }
       }

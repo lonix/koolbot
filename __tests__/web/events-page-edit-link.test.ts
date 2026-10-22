@@ -30,15 +30,15 @@ function page(extra: Record<string, unknown>): string {
 }
 
 describe("the Edit link on the admin Events page (#1298)", () => {
-  it("is offered for an upcoming one-off event, and for a running one", () => {
+  it("is offered for an upcoming event, a series occurrence and a running one", () => {
     expect(page({})).toContain(EDIT);
     expect(page({ state: "active" })).toContain(EDIT);
+    expect(page({ recurrence: "weekly" })).toContain(EDIT);
   });
 
   it.each([
     ["an ended event", { state: "ended" }],
     ["a cancelled event", { state: "cancelled" }],
-    ["a recurring event", { recurrence: "weekly" }],
     ["an adopted event", { nativeAdopted: true }],
   ])("is not offered for %s", (_n, extra) => {
     expect(page(extra)).not.toContain(EDIT);

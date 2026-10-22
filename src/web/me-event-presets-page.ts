@@ -1,4 +1,5 @@
 import { escapeHtml, scriptTag } from "./html.js";
+import { groupRowsScript } from "./event-group-form.js";
 import {
   EVENT_PRESETS_SCRIPT,
   groupSummary,
@@ -90,5 +91,6 @@ export function renderMyEventPresetsBody(
   ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
   ${editor}
 </div>
+${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_PRESETS_SCRIPT)}`;
 }

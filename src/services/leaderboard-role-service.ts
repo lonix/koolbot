@@ -13,7 +13,10 @@ import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
-import { automaticGrantBlockReason } from "../utils/role-safety.js";
+import {
+  automaticGrantBlockReason,
+  type BackingGroup,
+} from "../utils/role-safety.js";
 import { RoleGroupService } from "./role-group-service.js";
 import {
   parseLeaderboardTiers,
@@ -438,20 +441,22 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       };
     }
     if (!live) return null;
-    // No fallback: if the admin group can't be read the role can't be
-    // cleared, so no new grant is made this run (revocations continue).
-    let adminRoleIds: string[];
+    // No fallback: if the role groups can't be read the role can't be
+    // cleared, so no new grant is made this run (revocations continue). Any
+    // group counts, not only admin: a staff or host role would hand that scope
+    // to everyone who reaches the tier.
+    let backing: BackingGroup[];
     try {
-      adminRoleIds = await RoleGroupService.getInstance().getRoleIdsWith(
+      backing = await RoleGroupService.getInstance().groupBackedRoles(
         guild.id,
-        "admin",
+        [role.id],
       );
     } catch (error) {
       const key = `${role.id}:groups-unverified`;
       if (!this.warnedBlockedRoles.has(key)) {
         this.warnedBlockedRoles.add(key);
         logger.warn(
-          `Leaderboard role ${role.name} (${role.id}) could not be checked against the admin role group, so it is not granted until the groups can be read:`,
+          `Leaderboard role ${role.name} (${role.id}) could not be checked against the role groups, so it is not granted until the groups can be read:`,
           error,
         );
       }
@@ -460,13 +465,13 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         skippedReason: "role-unverified",
       };
     }
-    const reason = automaticGrantBlockReason(live, adminRoleIds);
+    const reason = automaticGrantBlockReason(live, backing);
     if (reason) {
       const key = `${role.id}:${reason}`;
       if (!this.warnedBlockedRoles.has(key)) {
         this.warnedBlockedRoles.add(key);
         logger.warn(
-          `Leaderboard role ${role.name} (${role.id}) is not granted: it ${reason}. Choose a role without those permissions on the Leaderboard Roles page.`,
+          `Leaderboard role ${role.name} (${role.id}) is not granted: it ${reason}. Choose another role on the Leaderboard Roles page.`,
         );
       }
     }

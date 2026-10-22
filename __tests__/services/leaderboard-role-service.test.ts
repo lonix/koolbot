@@ -34,10 +34,10 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
-const mockGetRoleIdsWith = jest.fn();
+const mockGroupBackedRoles = jest.fn();
 jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: {
-    getInstance: jest.fn(() => ({ getRoleIdsWith: mockGetRoleIdsWith })),
+    getInstance: jest.fn(() => ({ groupBackedRoles: mockGroupBackedRoles })),
   },
 }));
 
@@ -141,7 +141,7 @@ describe("LeaderboardRoleService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
-    mockGetRoleIdsWith.mockResolvedValue([]);
+    mockGroupBackedRoles.mockResolvedValue([]);
     mockConfigGetBoolean.mockResolvedValue(true);
     mockConfigGetString.mockImplementation(async (key: unknown) => {
       const k = key as string;
@@ -409,21 +409,29 @@ describe("LeaderboardRoleService", () => {
       expect(warnings).toHaveLength(1);
     });
 
-    it("does not grant the admin role group's role either", async () => {
-      setup(0n);
-      mockGetRoleIdsWith.mockResolvedValue(["111"]);
-      const svc: ServiceInstance =
-        LeaderboardRoleService.getInstance(makeClient());
-      const result = await svc.runNow();
+    it.each(["Admins", "Moderators", "Event hosts"])(
+      "does not grant a role that backs the %s group, and logs why (#1375)",
+      async (groupName) => {
+        setup(0n);
+        mockGroupBackedRoles.mockResolvedValue([{ roleId: "111", groupName }]);
+        const svc: ServiceInstance =
+          LeaderboardRoleService.getInstance(makeClient());
+        const result = await svc.runNow();
 
-      expect(mockGetRoleIdsWith).toHaveBeenCalledWith("guild-1", "admin");
-      expect(mockRolesAdd).not.toHaveBeenCalled();
-      expect(result!.tiers[0].skippedReason).toBe("role-privileged");
-    });
+        expect(mockGroupBackedRoles).toHaveBeenCalledWith("guild-1", ["111"]);
+        expect(mockRolesAdd).not.toHaveBeenCalled();
+        expect(result!.tiers[0].skippedReason).toBe("role-privileged");
+        expect(
+          mockLoggerWarn.mock.calls.some((c) =>
+            String(c[0]).includes(`backs the role group "${groupName}"`),
+          ),
+        ).toBe(true);
+      },
+    );
 
     it("grants nothing, and says it could not verify, when the role groups cannot be read", async () => {
       setup(0n);
-      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      mockGroupBackedRoles.mockRejectedValue(new Error("db down"));
       const svc: ServiceInstance =
         LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
@@ -434,7 +442,7 @@ describe("LeaderboardRoleService", () => {
 
     it("still revokes members who dropped out when the role groups cannot be read", async () => {
       setup(0n, ["u1", "u3"]);
-      mockGetRoleIdsWith.mockRejectedValue(new Error("db down"));
+      mockGroupBackedRoles.mockRejectedValue(new Error("db down"));
       const svc: ServiceInstance =
         LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
