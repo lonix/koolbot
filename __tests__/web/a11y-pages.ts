@@ -1470,6 +1470,40 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The group setup form (#1299): choice cards with some over the cap
+      // (disabled), the nested options, the compact rows and the Advanced section.
+      name: "Events (group setup cards, one over the cap)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        groupLimits: { defaultCount: 3, maxCount: 3 },
+        groupPresets: [
+          ...EVENT_GROUP_PRESETS,
+          {
+            id: "my:0123456789abcdef01234567",
+            label: "Clan match",
+            description: "Five roles",
+            groupLabel: "Squad",
+            groups: [
+              {
+                name: "Assault",
+                kind: "team",
+                size: 8,
+                tag: "AS",
+                marker: "🟢",
+              },
+              { name: "Logi", kind: "open", size: null, tag: "", marker: "" },
+            ],
+          },
+        ],
+      }),
+    },
+    {
       name: "Group presets",
       html: renderEventPresetsPage({
         ...COMMON,

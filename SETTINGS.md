@@ -854,7 +854,7 @@ channel.
   patterns, "2nd Tuesday", holiday exceptions) is not supported.
 - **Event groups** (#1188): an event can carry a set of groups (teams, squads, breakout rooms, raid parties), set up in
   the Groups section of the event form. There is no master switch: the section is off for every event unless the
-  organiser ticks "Use groups for this event", and a plain event stores and behaves exactly as before. The setup is
+  organiser ticks "Split into groups", and a plain event stores and behaves exactly as before. The setup is
   stored with the event (each group has a name, a kind of team, open or leads (the hidden Captains lobby), an optional size of 1 to 99, an optional
   tag of up to 8 characters and an optional colour marker) and a recurring series copies it to the next occurrence
   without members. An event can also set its own **channel creation time**; empty uses `events.create_lead_minutes`, and

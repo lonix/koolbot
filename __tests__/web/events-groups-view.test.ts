@@ -19,8 +19,10 @@ const render = (extra: Record<string, unknown> = {}): string =>
 describe("renderEventsPage Groups section (#1188)", () => {
   it("is part of the create form and off until ticked", () => {
     const html = render();
-    expect(html).toContain("Groups (optional)");
-    expect(html).toMatch(/<input type="checkbox" name="groups_enabled"[^>]*>/);
+    expect(html).toContain("Split into groups (teams, squads, rooms…)");
+    expect(html).toMatch(
+      /<input type="checkbox" role="switch" name="groups_enabled"[^>]*>/,
+    );
     expect(html).not.toMatch(/name="groups_enabled"[^>]*checked/);
     // Inside the create form, before its submit button.
     const form = html.slice(html.indexOf('action="/admin/events/create"'));
@@ -32,10 +34,22 @@ describe("renderEventsPage Groups section (#1188)", () => {
 
   it("offers every built-in preset and Custom, with the groups as data", () => {
     const html = render();
-    expect(html).toContain("Custom: any number of groups and names");
+    // Choice cards (radios), Custom last and chosen by default.
+    expect(html).toContain(
+      'role="radiogroup" aria-labelledby="groups-setup-label"',
+    );
     for (const preset of EVENT_GROUP_PRESETS) {
-      expect(html).toContain(`value="${preset.id}"`);
+      expect(html).toContain(
+        `<input type="radio" name="groups_preset" value="${preset.id}"`,
+      );
     }
+    expect(html).toContain(
+      '<input type="radio" name="groups_preset" value="" checked>',
+    );
+    expect(html.indexOf('value="" checked')).toBeGreaterThan(
+      html.indexOf(`value="${EVENT_GROUP_PRESETS.at(-1)?.id}"`),
+    );
+    expect(html).not.toContain('<select name="groups_preset"');
     expect(html).toContain("Manticore");
     expect(html).toMatch(/data-groups="\[\{&quot;name&quot;:&quot;Red&quot;/);
   });
@@ -66,7 +80,7 @@ describe("renderEventsPage Groups section (#1188)", () => {
   it("carries the input constraints of the server rules", () => {
     const html = render();
     expect(html).toMatch(/name="group_0_name"[^>]*maxlength="50"/);
-    expect(html).toMatch(/name="group_0_size" min="1" max="99"/);
+    expect(html).toMatch(/name="group_0_size"[^>]*min="1" max="99"/);
     expect(html).toMatch(/name="group_0_tag"[^>]*maxlength="8"/);
     expect(html).toMatch(/name="groups_lead_minutes" min="0" max="1440"/);
   });
@@ -80,8 +94,86 @@ describe("renderEventsPage Groups section (#1188)", () => {
     expect(html).toContain("koolbot-event-form-draft");
     // Typing in a row ticks "use groups", so rows are never silently dropped.
     expect(html).toContain(
-      "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()})",
+      "box.addEventListener('input',function(e){enabled.checked=true;",
     );
+  });
+
+  /** The section's markup, from its fieldset to the closing tag. */
+  const section = (): string => {
+    const html = render();
+    const start = html.indexOf("<fieldset data-groups-section>");
+    return html.slice(start, html.indexOf("</fieldset>", start));
+  };
+
+  it("renders everything open for a browser without scripts (#1299)", () => {
+    const s = section();
+    // The scripts fold the body, the nested options and the rows; the server
+    // renders none of them folded.
+    expect(s).toMatch(/<div data-groups-body[^>]*>/);
+    expect(s).not.toMatch(/<div data-groups-body[^>]*hidden/);
+    expect(s).not.toMatch(/<div class="kb-nested"[^>]*hidden/);
+    expect(s).not.toMatch(/<div data-group-editor[^>]*hidden/);
+    expect(s).toContain(
+      '<details class="kb-disclosure" data-groups-advanced open>',
+    );
+    // What only works with scripts is the only thing that starts hidden.
+    for (const marker of [
+      "data-preset-summary",
+      "data-customise",
+      "data-group-builder",
+      "data-size-quick",
+      "data-marker-btn",
+      "data-kind-toggle",
+    ]) {
+      expect(s).toMatch(new RegExp(`${marker}[^>]*hidden`));
+    }
+    // The kind select and the marker text box are there to be used.
+    expect(s).toContain('name="group_0_kind">');
+    expect(s).toMatch(/data-marker-input[^>]*name="group_0_marker"/);
+  });
+
+  it("nests the options that depend on another under their parent, never greyed out (#1299)", () => {
+    const s = section();
+    const captains = s.indexOf('data-nested-for="groups_captains"');
+    const tags = s.indexOf('data-nested-for="groups_tags"');
+    const advanced = s.indexOf("data-groups-advanced");
+    expect(s.indexOf('name="groups_captains"')).toBeLessThan(captains);
+    expect(captains).toBeLessThan(tags);
+    // Leader wording, customise and the captains lobby sit under Group leaders.
+    const leaders = s.slice(captains, tags);
+    for (const name of [
+      "groups_leader_label",
+      "groups_captain_custom",
+      "groups_captains_lobby",
+    ]) {
+      expect(leaders).toContain(`name="${name}"`);
+      expect(s).not.toMatch(new RegExp(`name="${name}"[^>]*disabled`));
+    }
+    // Only "tag after the name" sits under Clan tags.
+    expect(s.indexOf('name="groups_tags"')).toBeLessThan(tags);
+    const clan = s.slice(tags, advanced);
+    expect(clan).toContain('name="groups_tags_suffix"');
+    expect(clan).not.toContain('name="groups_captains');
+  });
+
+  it("keeps the rarely changed fields in an Advanced section, with short labels and help text (#1299)", () => {
+    const s = section();
+    const at = s.indexOf("data-groups-advanced");
+    const advanced = s.slice(at);
+    expect(advanced).toContain('name="groups_label"');
+    expect(advanced).toContain('name="groups_lead_minutes"');
+    // The leader wording sits under Group leaders, not here.
+    expect(advanced).not.toContain('name="groups_leader_label"');
+    expect(s).not.toContain("Group leaders: the host picks");
+    expect(s).toContain('id="groups-captains-help"');
+    expect(s).toContain("Tag after the name");
+  });
+
+  it("sizes the fields to their content, without inline styles (#1299)", () => {
+    const s = section();
+    expect(s).toContain("kb-input kb-input--sm kb-input--num");
+    expect(s).toContain('class="kb-grouprow"');
+    expect(s).not.toContain("style=");
   });
 
   it("tells the organiser that each group gets a voice channel", () => {
@@ -113,7 +205,7 @@ describe("renderEventsPage Groups section (#1188)", () => {
     expect(html).toContain("4 groups");
     expect(html).not.toContain("Quiz <b>night</b>");
     expect(html).toContain("Quiz &lt;b&gt;night&lt;/b&gt;");
-    expect(html.match(/ groups?<\/span>/g)).toHaveLength(1);
+    expect(html.match(/title="Groups set up for this event"/g)).toHaveLength(1);
   });
 
   it("the page script is valid JavaScript", () => {

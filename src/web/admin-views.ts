@@ -68,9 +68,11 @@ import {
 } from "../services/event-groups.js";
 import {
   EVENT_GROUP_PRESETS,
+  LIBRARY_PRESET_PREFIX,
   PERSONAL_PRESET_PREFIX,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
+import { MARKER_COLOURS, groupRowsScript } from "./event-group-form.js";
 import {
   MAX_GROUP_ENTRIES,
   reactionRoleGroupPresets,
@@ -2752,8 +2754,14 @@ const LEADS_KIND_OPTION: [string, string] = [
 ];
 
 /**
- * One group row. `index` and `position` are numbers for a rendered row and the
- * `__N__` / `__P__` placeholders for the template the script clones.
+ * One group row, on one line: marker, name, size, tag, and a "More" button for
+ * the kind (Team is right for almost everything). `index` and `position` are
+ * numbers for a rendered row and the `__N__` / `__P__` placeholders for the
+ * template the script clones.
+ *
+ * Without scripts the marker is a text box and the kind select is shown, as
+ * before; `event-group-form.ts` turns the marker into an emoji picker and folds
+ * the kind behind "More".
  */
 export function renderGroupRow(
   index: string,
@@ -2777,25 +2785,101 @@ export function renderGroupRow(
         `<option value="${value}"${group?.kind === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
     )
     .join("");
-  return `<fieldset data-group-row>
-        <legend>Group ${position}</legend>
-        <label>Group ${position} name
-          <input type="text" name="${field("name")}" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
-        </label>
-        <label>Group ${position} kind
-          <select name="${field("kind")}">${kinds}</select>
-        </label>
-        <label>Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)
-          <input type="number" name="${field("size")}" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
-        </label>
-        <label>Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)
-          <input type="text" name="${field("tag")}" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
-        </label>
-        <label>Group ${position} marker (optional, e.g. a coloured circle)
-          <input type="text" name="${field("marker")}" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
-        </label>
-      </fieldset>`;
+  return `<div data-group-row role="group" aria-label="Group ${position}" class="kb-grouprows__item">
+        <div class="kb-grouprow">
+          <div data-marker-wrap class="kb-emoji-wrap">
+            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
+            <button type="button" data-marker-btn class="kb-emoji-btn kb-emoji-btn--sm" aria-haspopup="true" aria-expanded="false" aria-label="Group ${position} marker: choose one" hidden>+</button>
+          </div>
+          <input type="text" class="kb-input kb-input--sm" name="${field("name")}" aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
+          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
+          <input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
+          <button type="button" data-kind-toggle class="kb-btn kb-btn--ghost kb-btn--sm" aria-expanded="true" aria-label="Group ${position}: more options" hidden>More</button>
+        </div>
+        <div data-kind-panel class="kb-grouprows__more">
+          <label class="kb-label">Group ${position} kind
+            <select class="kb-select kb-input--sm" name="${field("kind")}">${kinds}</select>
+          </label>
+        </div>
+      </div>`;
 }
+
+/** The labels over the group rows' columns, matching `.kb-grouprow`. */
+const GROUP_ROWS_HEAD =
+  '<div class="kb-grouprows__head" aria-hidden="true"><span>Marker</span><span>Name</span><span>Max size</span><span>Tag</span><span></span></div>';
+
+const CHECK_ICON =
+  '<svg class="kb-icon kb-choice__check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="20 6 9 17 4 12"/></svg>';
+
+/** Where a preset comes from, in the words a host would use. */
+function presetSource(id: string): string {
+  if (id.startsWith(PERSONAL_PRESET_PREFIX)) return "Yours";
+  if (id.startsWith(LIBRARY_PRESET_PREFIX)) return "Server preset";
+  return "Built in";
+}
+
+/** One preset as a choice card: a radio, so the posted field is the same as the old select's. */
+function renderPresetCard(
+  preset: EventGroupPreset,
+  limits: { maxCount: number },
+): string {
+  const groups = JSON.stringify(
+    preset.groups.map((g) => ({
+      name: g.name,
+      kind: g.kind,
+      size: g.size,
+      tag: g.tag,
+      marker: g.marker,
+    })),
+  );
+  // A preset bigger than the cap cannot be applied whole, so it is not offered
+  // (the server refuses it too).
+  const tooBig = preset.groups.length > limits.maxCount;
+  // Library presets may carry a leader label and a lead time; the script
+  // fills those fields only when the attribute is there. An explicit null
+  // (a library preset that uses the server default) is an empty attribute,
+  // which clears the field; a built-in has none and leaves it alone.
+  const extra =
+    (preset.leaderLabel
+      ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
+      : "") +
+    (typeof preset.channelLeadMinutes === "number"
+      ? ` data-lead="${preset.channelLeadMinutes}"`
+      : preset.channelLeadMinutes === null
+        ? ' data-lead=""'
+        : "") +
+    // The preset's default for the clan tags box (#1194); absent = off. The
+    // script sets the box from it when the preset is chosen.
+    ` data-tags="${preset.tagsEnabled === true ? "1" : "0"}"`;
+  const markers = preset.groups
+    .map((g) => g.marker)
+    .filter(Boolean)
+    .join(" ");
+  const shape = `${preset.groups.length} ${preset.groups.length === 1 ? "group" : "groups"}`;
+  const meta = tooBig
+    ? `needs ${preset.groups.length} groups, limit is ${limits.maxCount}`
+    : `${presetSource(preset.id)} · ${shape}`;
+  return `<label class="kb-choice"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>
+          <span class="kb-choice__title">${escapeHtml(preset.label)}</span>
+          <span class="kb-choice__meta">${escapeHtml(meta)}</span>${preset.description ? `\n          <span class="kb-choice__meta">${escapeHtml(preset.description)}</span>` : ""}${markers ? `\n          <span class="kb-choice__marks">${escapeHtml(markers)}</span>` : ""}
+          ${CHECK_ICON}</label>`;
+}
+
+/** A switch with its help line underneath, for the options of the group setup. */
+function groupSwitch(
+  name: string,
+  label: string,
+  help: string,
+  idSuffix: string,
+): string {
+  return `<div class="kb-groupopt">
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${name}" value="1" aria-describedby="groups-${idSuffix}-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>${escapeHtml(label)}</label>
+        <p class="kb-help" id="groups-${idSuffix}-help">${escapeHtml(help)}</p>
+      </div>`;
+}
+
+/** Names offered for the group wording; any text is still accepted. */
+const GROUP_LABEL_SUGGESTIONS = ["Team", "Squad", "Room", "Party"];
 
 function renderGroupsSection(
   limits: {
@@ -2805,193 +2889,305 @@ function renderGroupsSection(
   presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
   presetsNotice: string | null = null,
 ): string {
-  const presetOptions = presets
-    .map((preset) => {
-      const groups = JSON.stringify(
-        preset.groups.map((g) => ({
-          name: g.name,
-          kind: g.kind,
-          size: g.size,
-          tag: g.tag,
-          marker: g.marker,
-        })),
-      );
-      // A preset bigger than the cap cannot be applied whole, so it is not offered
-      // (the server refuses it too).
-      const tooBig = preset.groups.length > limits.maxCount;
-      const note =
-        (preset.id.startsWith(PERSONAL_PRESET_PREFIX) ? " (yours)" : "") +
-        (tooBig
-          ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
-          : "");
-      // Library presets may carry a leader label and a lead time; the script
-      // fills those fields only when the attribute is there. An explicit null
-      // (a library preset that uses the server default) is an empty attribute,
-      // which clears the field; a built-in has none and leaves it alone.
-      const extra =
-        (preset.leaderLabel
-          ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
-          : "") +
-        (typeof preset.channelLeadMinutes === "number"
-          ? ` data-lead="${preset.channelLeadMinutes}"`
-          : preset.channelLeadMinutes === null
-            ? ' data-lead=""'
-            : "") +
-        // The preset's default for the clan tags box (#1194); absent = off. The
-        // script sets the box from it when the preset is chosen.
-        ` data-tags="${preset.tagsEnabled === true ? "1" : "0"}"`;
-      return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
-    })
-    .join("");
+  const presetCards = presets.map((p) => renderPresetCard(p, limits)).join("");
   const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1)),
   ).join("\n      ");
+  // The quick builder's own fields belong to no form (`form="none"`): they
+  // are neither posted nor checked on submit, they only drive the script.
+  const detached = ' form="none"';
+  const sizeChoices = [
+    ["", "No limit"],
+    ["5", "5"],
+    ["10", "10"],
+    ["20", "20"],
+  ]
+    .map(
+      ([value, label], i) =>
+        `<label><input type="radio" name="groups_size_quick"${detached} value="${value}"${i === 0 ? " checked" : ""}><span>${label}</span></label>`,
+    )
+    .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups (optional)</legend>
-      <p class="muted">Split the event into groups, such as teams, squads or breakout rooms. Each group gets its own voice channel next to the event's channel, created at the channel creation time and removed when the event is over. Leave this off for a plain event.</p>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.enabled}" value="1"> Use groups for this event</label>
-      <label>Preset
-        <select name="${GROUP_FORM_FIELDS.preset}">
-          <option value="">Custom: any number of groups and names</option>
-          ${presetOptions}
-        </select>
-      </label>
-      ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
-      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups. Which presets are offered is managed on the <a href="/admin/events/presets">group presets page</a>.</p>
-      <label>What a group is called (e.g. Team, Squad, Room, Party)
-        <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}">
-      </label>
-      <label>What a leader is called (e.g. Leader, Captain)
-        <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
-      </label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainCustom}" value="1"> Leaders can customise: each leader may rename their own team and set its tag from a button in the team's channel chat. Only used when group leaders is ticked. The host can reset any team from the host panel.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"> Captains lobby: a separate voice channel that only you and the current leaders can join. Nobody is assigned to it. Only used when group leaders is ticked; leave it off and leaders talk in the main channel. You can switch it on or off from the host panel while the event runs.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"> Clan tags: while the event runs, put each team's tag on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tagsSuffix}" value="1"> Put the tag after the name (Alice [RED]) instead of before it</label>
-      <label>Create channels this many minutes before the start (empty = server default)
-        <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Server default">
-      </label>
-      <div data-group-rows data-max="${limits.maxCount}" class="stack">
+      <legend>Groups</legend>
+      <div class="kb-groupopt">
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1" aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
+        <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
+      </div>
+      <div data-groups-body class="kb-stack">
+      <div class="kb-field">
+        <p class="kb-label" id="groups-setup-label">Group setup</p>
+        <div class="kb-choices" role="radiogroup" aria-labelledby="groups-setup-label">${presetCards}
+          <label class="kb-choice kb-choice--custom"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="" checked>
+          <span class="kb-choice__title">Custom</span>
+          <span class="kb-choice__meta">Any number of groups and names</span>
+          ${CHECK_ICON}</label>
+        </div>
+        ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
+        <p class="kb-help">Choose a setup to fill in the groups, or Custom to write your own. Without scripts, a preset with all rows left empty uses the preset's groups. Presets are managed on the <a href="/admin/events/presets">group presets page</a>.</p>
+      </div>
+      <p class="kb-help" data-preset-summary aria-live="polite" hidden></p>
+      <button type="button" class="kb-btn kb-btn--sm" data-customise aria-expanded="true" hidden>Customise</button>
+      <div class="kb-field" data-size-quick hidden>
+        <p class="kb-label" id="groups-size-quick-label">Max per group</p>
+        <div class="kb-segmented" role="radiogroup" aria-labelledby="groups-size-quick-label">${sizeChoices}</div>
+      </div>
+      <div class="kb-field" data-group-builder hidden>
+        <p class="kb-label" id="groups-build-label">Build groups</p>
+        <div class="kb-row" role="group" aria-labelledby="groups-build-label">
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-count${detached} min="1" max="${limits.maxCount}" value="${Math.min(4, limits.maxCount)}" aria-label="Number of groups">
+          <span class="kb-unit">groups of</span>
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-size${detached} min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="5" aria-label="Members in each group (empty = no limit)">
+          <div class="kb-segmented" role="radiogroup" aria-label="Names for the groups"><label><input type="radio" name="groups_build_names"${detached} value="colours" checked><span>Colours</span></label><label><input type="radio" name="groups_build_names"${detached} value="numbers"><span>Numbered</span></label></div>
+          <button type="button" class="kb-btn kb-btn--sm" data-build>Generate</button>
+        </div>
+        <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
+      </div>
+      <div data-group-editor class="kb-stack">
+      ${GROUP_ROWS_HEAD}
+      <div data-group-rows data-max="${limits.maxCount}" class="kb-grouprows">
       ${rows}
       </div>
       <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
-      <button type="button" class="btn" data-add-group hidden>Add a group</button>
-      <p class="muted">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored.</p>
+      <button type="button" class="kb-btn kb-btn--sm" data-add-group hidden>Add a group</button>
+      <p class="kb-help">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored. Max size empty means no limit. The tag is shown on nicknames when clan tags are on; it starts as the name in capitals.</p>
       <div class="notice err" role="alert" data-group-errors hidden></div>
+      </div>
+      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains")}
+      <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.captains}">
+        <div class="kb-field">
+          <label class="kb-label" for="groups-leader-label">What a leader is called</label>
+          <input type="text" id="groups-leader-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}" aria-describedby="groups-leader-label-help">
+          <p class="kb-help" id="groups-leader-label-help">For example Leader or Captain. It names the captains lobby and is used in the leader messages.</p>
+        </div>
+        ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom")}
+        ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby")}
+      </div>
+      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags")}
+      <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.tags}">
+        ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix")}
+      </div>
+      <details class="kb-disclosure" data-groups-advanced open>
+        <summary><svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>Advanced</summary>
+        <div class="kb-disclosure__body kb-stack">
+          <div class="kb-field">
+            <label class="kb-label" for="groups-label">What a group is called</label>
+            <input type="text" id="groups-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}" list="groups-label-options" aria-describedby="groups-label-help">
+            <datalist id="groups-label-options">${GROUP_LABEL_SUGGESTIONS.map((s) => `<option value="${s}"></option>`).join("")}</datalist>
+            <p class="kb-help" id="groups-label-help">For example Team, Squad, Room or Party. Choosing a preset sets it.</p>
+          </div>
+          <div class="kb-field">
+            <label class="kb-label" for="groups-lead-minutes">Create channels this many minutes before the start</label>
+            <input type="number" id="groups-lead-minutes" class="kb-input kb-input--sm kb-input--num" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Default" aria-describedby="groups-lead-minutes-help">
+            <p class="kb-help" id="groups-lead-minutes-help">Empty uses the server default. ${CHANNEL_LEAD_MIN} to ${CHANNEL_LEAD_MAX} minutes.</p>
+          </div>
+        </div>
+      </details>
+      </div>
     </fieldset>`;
 }
 
-// Progressive enhancement for the Groups section. Presets fill the rows, "Add a
-// group" clones the template, and the submit is checked in the browser first so
-// a mistake is shown next to the fields without losing the filled-in form. The
-// server repeats every check and stays the source of truth. If the server
-// still refuses, the entered values are kept in sessionStorage (this browser
-// tab only) and put back when the page comes back with the error. Everything
-// storage-related is wrapped in try/catch: it is a convenience only.
-const EVENT_GROUPS_SCRIPT =
-  "(function(){" +
-  "var form=document.querySelector('form[data-event-form]');" +
-  "var box=form&&form.querySelector('[data-group-rows]');" +
-  "var tpl=form&&form.querySelector('template[data-group-row-template]');" +
-  "if(!box||!tpl)return;" +
-  "var add=form.querySelector('[data-add-group]');" +
-  "var errBox=form.querySelector('[data-group-errors]');" +
-  "var preset=form.elements['groups_preset'];" +
-  "var KEY='koolbot-event-form-draft';" +
-  `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
-  "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
-  "function rows(){return box.querySelectorAll('[data-group-row]')}" +
-  "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
-  // The captains lobby is a channel and counts toward the cap while it will be
-  // posted (ticked and not disabled), exactly as the server counts it.
-  "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
-  "function addRow(){var n=rows().length;if(used()>=max)return false;" +
-  "var d=document.createElement('div');" +
-  "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);sync();validity();return true}" +
-  "function sync(){if(add)add.hidden=used()>=max}" +
-  "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
-  "sync();" +
-  // While groups are off the section's number fields leave native validation
-  // (the server ignores them then); ticking the box restores min, max and step.
-  "function validity(){var on=form.elements['groups_enabled'].checked;" +
-  "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
-  "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
-  "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
-  "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
-  "form.elements['groups_enabled'].addEventListener('change',validity);" +
-  "validity();" +
-  // The captains lobby needs group leaders: the box is disabled (and so not
-  // posted) while leaders are unticked, the server ignores it then too.
-  "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked;sync()}" +
-  // One recompute (the lobby box's state, then the cap and the button) for every
-  // change in the form: the lobby and leaders boxes, and a preset choice, whose
-  // handler sets the lobby box by hand (that fires no change event of its own, and
-  // the preset's own event bubbles here after its handler has run).
-  "form.addEventListener('change',lobby);" +
-  "lobby();" +
-  "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
-  "form.elements['group_'+i+'_name'].value=g.name||'';" +
-  "form.elements['group_'+i+'_kind'].value=g.kind||'team';" +
-  "form.elements['group_'+i+'_size'].value=g.size==null?'':g.size;" +
-  "form.elements['group_'+i+'_tag'].value=g.tag||'';" +
-  "form.elements['group_'+i+'_marker'].value=g.marker||''}" +
-  // Typing in a group row switches groups on, so rows are never silently dropped.
-  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()});" +
-  "if(preset)preset.addEventListener('change',function(){" +
-  "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
-  "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
-  // A preset's leads row (an old preset) is the captains lobby: it ticks the
-  // switch instead of becoming a row of the list. It still counts toward the cap.
-  "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
-  "if(g.length+(hadLobby?1:0)>max){preset.value='';return}" +
-  "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
-  "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
-  "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
-  "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
-  // The preset's clan tags default (#1194); the host can still change the box.
-  "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
-  "var n=Math.max(rows().length,g.length);" +
-  "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
-  "form.elements['groups_enabled'].checked=true;validity()});" +
-  "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
-  "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
-  "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
-  "if(!name&&!size&&!tag&&!mk)return;filled++;" +
-  "if(!name)errs.push('Group '+p+' name: a name is required.');" +
-  "else if(name.length>MAXNAME)errs.push('Group '+p+' name: at most '+MAXNAME+' characters.');" +
-  "else{var f=name.toLowerCase();if(seen[f])errs.push('Group '+p+' name: \"'+name+'\" is already used by group '+seen[f]+'.');else seen[f]=p}" +
-  "if(size&&!(/^\\d{1,3}$/.test(size)&&+size>=MINSIZE&&+size<=MAXSIZE))errs.push('Group '+p+' size: a whole number from '+MINSIZE+' to '+MAXSIZE+', or empty.');" +
-  "if(tag.length>MAXTAG)errs.push('Group '+p+' tag: at most '+MAXTAG+' characters.');" +
-  "if(val('group_'+i+'_kind')==='leads'&&++leads>1)errs.push('Group '+p+' kind: only one leads group is allowed.')});" +
-  "if(!filled&&!val('groups_preset'))errs.push('Add at least one group, or switch groups off.');" +
-  "return errs}" +
-  "form.addEventListener('submit',function(e){" +
-  "if(form.elements['groups_enabled'].checked){var errs=check();" +
-  "if(errs.length){e.preventDefault();errBox.textContent='';" +
-  "errs.forEach(function(m){var p=document.createElement('p');p.textContent=m;errBox.appendChild(p)});" +
-  "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
-  "errBox.hidden=true;" +
-  "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
-  "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
-  "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
-  "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
-  "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
-  "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
-  // A draft from before the switch can hold a row of kind leads (the select no
-  // longer offers it): that row is the captains lobby now, so it ticks the box
-  // and is not restored as a team. The other rows are left as they are.
-  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
-  "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(f){delete d['group_'+m[1]+'_'+f]});d['groups_captains_lobby']=true}});" +
-  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
-  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||el.type==='file')return;" +
-  // A saved choice that is no longer offered (e.g. a preset now over the cap) is not put back.
-  "if(el.tagName==='SELECT'){var ok=false;Array.prototype.forEach.call(el.options,function(o){if(o.value===d[k]&&!o.disabled)ok=true});if(!ok)return}" +
-  "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
-  // Setting `checked` fires no change event, so reapply the number limits by hand.
-  "validity();lobby()}}catch(x){}" +
-  "})();";
+// Progressive enhancement for the Groups section. Without scripts everything
+// is shown and the form posts as it always has. With them: the switch folds the
+// section, a preset card fills the rows and folds them behind a one-line
+// summary (Customise opens them), the quick builder generates rows, a tag and a
+// size follow the name and the first row until they are edited, and the submit
+// is checked in the browser first so a mistake is shown next to the fields
+// without losing the filled-in form. The server repeats every check and stays
+// the source of truth. If the server still refuses, the entered values are kept
+// in sessionStorage (this browser tab only) and put back when the page comes
+// back with the error. Everything storage-related is wrapped in try/catch: it
+// is a convenience only.
+function eventGroupsScript(): string {
+  const colours = JSON.stringify(
+    MARKER_COLOURS.map((c) => [c.emoji, c.colour]),
+  );
+  return (
+    "(function(){" +
+    "var form=document.querySelector('form[data-event-form]');" +
+    "var box=form&&form.querySelector('[data-group-rows]');" +
+    "var tpl=form&&form.querySelector('template[data-group-row-template]');" +
+    "if(!box||!tpl)return;" +
+    "var add=form.querySelector('[data-add-group]');" +
+    "var errBox=form.querySelector('[data-group-errors]');" +
+    "var body=form.querySelector('[data-groups-body]');" +
+    "var editor=form.querySelector('[data-group-editor]');" +
+    "var summary=form.querySelector('[data-preset-summary]');" +
+    "var customise=form.querySelector('[data-customise]');" +
+    "var builder=form.querySelector('[data-group-builder]');" +
+    "var sizeQuick=form.querySelector('[data-size-quick]');" +
+    "var adv=form.querySelector('[data-groups-advanced]');" +
+    "var enabled=form.elements['groups_enabled'];" +
+    "var KEY='koolbot-event-form-draft';" +
+    `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
+    `var COLOURS=${colours};` +
+    "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
+    "function rows(){return box.querySelectorAll('[data-group-row]')}" +
+    "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
+    "function f(i,k){return form.elements['group_'+i+'_'+k]}" +
+    "function kr(){return window.koolGroupRows}" +
+    "function tagsOn(){var t=form.elements['groups_tags'];return !!(t&&t.checked)}" +
+    "function chosen(){return form.querySelector('input[type=radio][name=groups_preset]:checked')}" +
+    // The captains lobby is a channel and counts toward the cap while it will be
+    // posted (ticked and not disabled), exactly as the server counts it.
+    "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
+    "function addRow(){var n=rows().length;if(used()>=max)return false;" +
+    "var d=document.createElement('div');" +
+    "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
+    "var r=d.firstElementChild;box.appendChild(r);if(kr())kr().enhance(r);sync();validity();return true}" +
+    "function sync(){if(add)add.hidden=used()>=max}" +
+    "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
+    "sync();" +
+    // The pieces that need scripts are unhidden here; the Advanced section starts
+    // folded; the rows are one line each.
+    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv)adv.open=false;" +
+    // While groups are off the section's number fields leave native validation
+    // (the server ignores them then); ticking the box restores min, max and step.
+    "function validity(){var on=enabled.checked;" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
+    "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
+    "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
+    "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
+    // The switch folds the whole section; an option that depends on another is
+    // hidden (and not posted) until its parent is on, never shown greyed out.
+    "function show(){body.hidden=!enabled.checked}" +
+    "function nest(){Array.prototype.forEach.call(form.querySelectorAll('[data-nested-for]'),function(n){" +
+    "var p=form.elements[n.getAttribute('data-nested-for')];var on=!!(p&&p.checked);n.hidden=!on;" +
+    "Array.prototype.forEach.call(n.querySelectorAll('input,select'),function(el){el.disabled=!on})})}" +
+    "enabled.addEventListener('change',function(){show();validity()});" +
+    "show();validity();" +
+    // Cap and button follow the lobby box, which nest() disables with its parent.
+    "function lobby(){nest();sync()}" +
+    // One recompute for every change in the form: the lobby and leaders boxes, and a
+    // preset choice, whose handler sets boxes by hand (that fires no change event of
+    // its own, and the preset's own event bubbles here after its handler has run).
+    "form.addEventListener('change',function(){lobby();summarise()});" +
+    "lobby();" +
+    "function setEditor(open){editor.hidden=!open;customise.setAttribute('aria-expanded',open?'true':'false');customise.textContent=open?'Hide group rows':'Customise'}" +
+    "customise.addEventListener('click',function(){setEditor(editor.hidden)});" +
+    "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
+    "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
+    "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
+    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto')})}" +
+    // The tag follows the name (Red -> RED) while clan tags are on, until it is edited.
+    "function derive(name){var w=name.replace(/[^\\p{L}\\p{N}\\s]/gu,' ').trim().split(/\\s+/).filter(Boolean);" +
+    "var s=w.length>1?w.map(function(x){return Array.from(x)[0]}).join(''):Array.from(w[0]||'').slice(0,4).join('');" +
+    "return s.toUpperCase().slice(0,MAXTAG)}" +
+    "function deriveTags(){if(!tagsOn())return;Array.prototype.forEach.call(rows(),function(r,i){" +
+    "var t=f(i,'tag'),n=val('group_'+i+'_name');if(t.value&&!t.hasAttribute('data-auto'))return;" +
+    "if(n){t.value=derive(n);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
+    "function firstFree(){var taken={};Array.prototype.forEach.call(rows(),function(r,i){var m=val('group_'+i+'_marker');if(m)taken[m]=1});" +
+    "for(var k=0;k<COLOURS.length;k++)if(!taken[COLOURS[k][0]])return COLOURS[k][0];return ''}" +
+    "function anyMarker(){var any=false;Array.prototype.forEach.call(rows(),function(r,i){if(val('group_'+i+'_marker'))any=true});return any}" +
+    // A row that gets a name takes the first row's size, and the next colour when the
+    // other rows have markers; a row whose name is cleared gives those back, so a row
+    // is never left holding only automatic values (it would count as filled in).
+    "function autoFill(i,n){var s=f(i,'size'),m=f(i,'marker'),t=f(i,'tag');" +
+    "if(n){var s0=val('group_0_size');if(i>0&&s0&&!s.value){s.value=s0;s.setAttribute('data-auto','1')}" +
+    "if(i>0&&!m.value&&anyMarker()){m.value=firstFree();m.setAttribute('data-auto','1');if(kr())kr().syncAll()}}" +
+    "else{[s,m,t].forEach(function(el){if(el.hasAttribute('data-auto')){el.value='';el.removeAttribute('data-auto')}});if(kr())kr().syncAll()}}" +
+    "function copySize(){var s0=val('group_0_size');Array.prototype.forEach.call(rows(),function(r,i){if(i===0||!val('group_'+i+'_name'))return;" +
+    "var s=f(i,'size');if(!s.value||s.hasAttribute('data-auto')){s.value=s0;if(s0)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}})}" +
+    // Typing in a group row switches groups on, so rows are never silently dropped.
+    "box.addEventListener('input',function(e){enabled.checked=true;show();var t=e.target,m=/^group_(\\d+)_(\\w+)$/.exec(t.name||'');" +
+    "if(m){var i=+m[1];if(m[2]==='size'||m[2]==='tag'||m[2]==='marker')t.removeAttribute('data-auto');" +
+    "if(m[2]==='size'&&i===0)copySize();" +
+    "if(m[2]==='name'){autoFill(i,t.value.trim());deriveTags()}}validity()});" +
+    "form.elements['groups_tags']&&form.elements['groups_tags'].addEventListener('change',deriveTags);" +
+    // The one-line summary of what the rows will create.
+    "function sizeText(list){var u={};list.forEach(function(x){u[x]=1});var k=Object.keys(u);" +
+    "if(k.length===1)return k[0]?k[0]+' each':'no size limit';return 'sizes differ'}" +
+    "function syncQuick(list){var u={};list.forEach(function(x){u[x]=1});var k=Object.keys(u);var v=k.length===1?k[0]:null;" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-size-quick] input'),function(r){r.checked=v!==null&&r.value===v})}" +
+    "function summarise(){var names=[],sizes=[];Array.prototype.forEach.call(rows(),function(r,i){var n=val('group_'+i+'_name');if(!n)return;" +
+    "var t=val('group_'+i+'_tag'),m=val('group_'+i+'_marker');names.push(n+(t&&tagsOn()?' ['+t+']':'')+(m?' '+m:''));sizes.push(val('group_'+i+'_size'))});" +
+    "if(!names.length){summary.textContent='';syncQuick(['']);return}" +
+    "var s=names.length+(names.length===1?' group':' groups')+' · '+names.join(', ')+' · '+sizeText(sizes);" +
+    "if(tagsOn())s+=' · clan tags on';var c=form.elements['groups_captains'];if(c&&c.checked)s+=' · leaders on';" +
+    "summary.textContent=s;syncQuick(sizes)}" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-size-quick] input'),function(r){r.addEventListener('change',function(){" +
+    "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-auto')}});summarise()})});" +
+    // A preset card fills the rows, then folds them behind the summary.
+    "function compact(on){summary.hidden=!on;customise.hidden=!on;setEditor(!on)}" +
+    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;compact(false)}" +
+    "function onPreset(){var o=chosen();if(!o||!o.value){compact(false);return}" +
+    "var raw=o.getAttribute('data-groups');if(!raw)return;" +
+    "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
+    // A preset's leads row (an old preset) is the captains lobby: it ticks the
+    // switch instead of becoming a row of the list. It still counts toward the cap.
+    "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
+    "if(g.length+(hadLobby?1:0)>max){custom();return}" +
+    "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
+    "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
+    "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
+    "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
+    // The preset's clan tags default (#1194); the host can still change the box.
+    "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
+    "var n=Math.max(rows().length,g.length);" +
+    "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
+    "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();lobby();validity();summarise();compact(true)}" +
+    "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',onPreset)});" +
+    // The quick builder: N groups of S, named by colour or number, one marker each.
+    "var build=form.querySelector('[data-build]');" +
+    "if(build)build.addEventListener('click',function(){var cnt=form.querySelector('[data-build-count]'),sz=form.querySelector('[data-build-size]');" +
+    "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
+    "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
+    "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
+    "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
+    "var word=val('groups_label')||'Team';" +
+    "var total=Math.max(rows().length,n);" +
+    "for(var i=0;i<total&&i<max;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
+    "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
+    "if(i>0&&size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
+    "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
+    "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
+    "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
+    "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
+    "if(!name&&!size&&!tag&&!mk)return;filled++;" +
+    "if(!name)errs.push('Group '+p+' name: a name is required.');" +
+    "else if(name.length>MAXNAME)errs.push('Group '+p+' name: at most '+MAXNAME+' characters.');" +
+    "else{var f2=name.toLowerCase();if(seen[f2])errs.push('Group '+p+' name: \"'+name+'\" is already used by group '+seen[f2]+'.');else seen[f2]=p}" +
+    "if(size&&!(/^\\d{1,3}$/.test(size)&&+size>=MINSIZE&&+size<=MAXSIZE))errs.push('Group '+p+' size: a whole number from '+MINSIZE+' to '+MAXSIZE+', or empty.');" +
+    "if(tag.length>MAXTAG)errs.push('Group '+p+' tag: at most '+MAXTAG+' characters.');" +
+    "if(val('group_'+i+'_kind')==='leads'&&++leads>1)errs.push('Group '+p+' kind: only one leads group is allowed.')});" +
+    "if(!filled&&!val('groups_preset'))errs.push('Add at least one group, or switch groups off.');" +
+    "return errs}" +
+    "form.addEventListener('submit',function(e){" +
+    "if(enabled.checked){var errs=check();" +
+    "if(errs.length){e.preventDefault();errBox.textContent='';" +
+    "errs.forEach(function(m){var p=document.createElement('p');p.textContent=m;errBox.appendChild(p)});" +
+    // The rows are shown so the mistake is next to the field it names.
+    "setEditor(true);" +
+    "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
+    "errBox.hidden=true;" +
+    "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
+    "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
+    // Only the chosen radio is saved, or the last card would win.
+    "if(el.type==='radio'){if(el.checked)d[el.name]=el.value;return}" +
+    "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
+    "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
+    "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
+    "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+    // A draft from before the switch can hold a row of kind leads (the select no
+    // longer offers it): that row is the captains lobby now, so it ticks the box
+    // and is not restored as a team. The other rows are left as they are.
+    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
+    "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(x){delete d['group_'+m[1]+'_'+x]});d['groups_captains_lobby']=true}});" +
+    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
+    "Object.keys(d).forEach(function(k){" +
+    // A saved preset that is no longer offered (e.g. now over the cap, so its card is disabled) is not put back.
+    "if(k==='groups_preset'){Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){if(r.value===d[k]&&!r.disabled)r.checked=true});return}" +
+    "var el=form.elements[k];if(!el||el.type==='file'||el.type==='radio')return;" +
+    "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
+    // The person gets the rows back, open, so they can fix what the server refused.
+    "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
+    "if(adv&&(val('groups_label')||val('groups_lead_minutes')))adv.open=true;" +
+    // Setting `checked` fires no change event, so reapply the dependent state by hand.
+    "if(kr())kr().syncAll();show();validity();lobby();summarise();setEditor(true)}}catch(x){}" +
+    "})();"
+  );
+}
+
+const EVENT_GROUPS_SCRIPT = eventGroupsScript();
 
 /** Which optional columns an events table shows (#1301). */
 interface EventCols {
@@ -3208,6 +3404,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
+${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
 `;
 
