@@ -5,6 +5,7 @@ import { DiscordLogger } from "./discord-logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindService } from "./rewind-service.js";
+import { isRewindNudgeEnabled } from "./rewind-nudge-config.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { embedColor } from "../utils/embed-style.js";
@@ -92,8 +93,9 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
    * or run the nudge without other coupling.
    */
   protected async isEnabled(): Promise<boolean> {
-    const legacy = await this.configService.getBoolean("rewind.enabled", false);
-    return this.configService.getBoolean("rewind.nudge.enabled", legacy);
+    return isRewindNudgeEnabled((key, fallback) =>
+      this.configService.getBoolean(key, fallback),
+    );
   }
 
   protected async runOnce(): Promise<RewindNudgeRunSummary | null> {

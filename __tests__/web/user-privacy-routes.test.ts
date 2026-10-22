@@ -136,9 +136,11 @@ async function installCommonMocks(privacyEnabled: boolean): Promise<void> {
 
   const { ConfigService } =
     await import("../../src/services/config-service.js");
+  const readBoolean = async (key: string): Promise<boolean> =>
+    key === "privacy.enabled" ? privacyEnabled : false;
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async (key: string) =>
-      key === "privacy.enabled" ? privacyEnabled : false,
+    getBoolean: readBoolean,
+    getBooleanStrict: readBoolean,
     getNumber: async (_key: string, fallback: number) => fallback,
   } as never);
 

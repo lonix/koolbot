@@ -105,12 +105,14 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
 
   const { ConfigService } =
     await import("../../src/services/config-service.js");
+  const readBoolean = async (key: string): Promise<boolean> => {
+    if (key === "privacy.enabled") return opts.privacyEnabled ?? true;
+    if (key === "privacy.delete.enabled") return opts.resetEnabled ?? true;
+    return false;
+  };
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async (key: string) => {
-      if (key === "privacy.enabled") return opts.privacyEnabled ?? true;
-      if (key === "privacy.delete.enabled") return opts.resetEnabled ?? true;
-      return false;
-    },
+    getBoolean: readBoolean,
+    getBooleanStrict: readBoolean,
     getNumber: async (key: string, fallback: number) =>
       key === "privacy.delete.cooldown_hours"
         ? (opts.cooldownHours ?? fallback)

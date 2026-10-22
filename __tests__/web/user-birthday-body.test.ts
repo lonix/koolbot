@@ -2,7 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { renderUserBirthdayBody } from "../../src/web/user-layout.js";
 
 describe("renderUserBirthdayBody day dropdown (#704)", () => {
-  const base = { csrfToken: "tok", featureEnabled: true };
+  const base = { csrfToken: "tok" };
 
   it("renders the day as a select, not a free-text number input", () => {
     const html = renderUserBirthdayBody({ ...base, selected: null });

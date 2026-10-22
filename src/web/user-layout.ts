@@ -13,6 +13,7 @@ import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import type { MeSurfaceFlags } from "./me-surfaces.js";
 import {
   SESSION_LOW_MS,
   renderScopeWhy,
@@ -37,24 +38,13 @@ interface UserNavItem {
   href: string;
   label: string;
   /**
-   * When set, the item is feature-gated. A disabled feature is NOT hidden:
-   * the link stays visible but is greyed with an "off" badge (#709),
-   * mirroring the admin nav's `featureKey` treatment (#610). Its page stays
-   * reachable so members can pre-set their choice before an admin flips the
-   * feature on — the same "let users pre-set" intent the birthday page has
-   * always followed.
-   *
-   * Exception: `"privacy"` is hidden outright while disabled (#1066) — it
-   * has nothing to pre-set, and `/me/privacy` returns 404 in that state.
+   * When set, the item is feature-gated and is left out while the feature is
+   * off (#1292): a member sees only what their server has switched on, and the
+   * page itself answers 404 (#1066). Nothing a member saved is deleted, so
+   * turning the feature back on brings the tab and the saved choice back.
+   * Names the flag in `GATED_ME_SURFACES`, the one list of what gates `/me`.
    */
-  feature?: "rewind" | "voice" | "birthday" | "privacy";
-  /**
-   * Whether the gated page lets the member pre-set a choice (Voice, Birthday)
-   * versus being read-only (Rewind). Drives the disabled tooltip copy so a
-   * read-only page doesn't claim a "choice is saved" it never had (#709).
-   * Only meaningful alongside `feature`; defaults to read-only.
-   */
-  presettable?: boolean;
+  surface?: keyof MeSurfaceFlags;
 }
 
 /**
@@ -67,41 +57,30 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
-  { href: "/me/voice", label: "Voice", feature: "voice", presettable: true },
-  {
-    href: "/me/birthday",
-    label: "Birthday",
-    feature: "birthday",
-    presettable: true,
-  },
-  { href: "/me/rewind", label: "Rewind", feature: "rewind" },
-  { href: "/me/privacy", label: "Privacy", feature: "privacy" },
+  { href: "/me/voice", label: "Voice", surface: "presetsEnabled" },
+  { href: "/me/birthday", label: "Birthday", surface: "birthdayEnabled" },
+  { href: "/me/rewind", label: "Rewind", surface: "rewindEnabled" },
+  { href: "/me/privacy", label: "Privacy", surface: "privacyEnabled" },
 ];
 
 /**
  * Enabled-state of every feature-gated `/me/*` surface, threaded from the
- * routes into the layout so the nav and overview cards can render a
- * consistent "off" treatment (#709). Each flag defaults to enabled
- * (`undefined` → treated as on) so non-gating callers and tests that don't
- * care about gating render every item as a plain link.
+ * routes into the layout so the tabs and overview cards leave out whatever is
+ * switched off (#1292). Each flag defaults to enabled (`undefined` → treated
+ * as on) so non-gating callers and tests that don't care about gating render
+ * every item. The routes always pass the strict read of `me-surfaces.ts`.
  */
-export interface UserFeatureFlags {
-  rewindEnabled?: boolean;
-  presetsEnabled?: boolean;
-  birthdayEnabled?: boolean;
-  privacyEnabled?: boolean;
-}
+export type UserFeatureFlags = Partial<MeSurfaceFlags>;
 
-/** Whether a given nav item's feature is disabled per the supplied flags. */
-function isNavItemDisabled(
-  item: UserNavItem,
+/**
+ * Whether a gated `/me` surface is shown: the one predicate behind the tabs
+ * and the overview cards (the routes use the same flags for their 404s).
+ */
+function isSurfaceOn(
   flags: UserFeatureFlags,
+  surface: keyof MeSurfaceFlags | undefined,
 ): boolean {
-  if (item.feature === "rewind") return flags.rewindEnabled === false;
-  if (item.feature === "voice") return flags.presetsEnabled === false;
-  if (item.feature === "birthday") return flags.birthdayEnabled === false;
-  if (item.feature === "privacy") return flags.privacyEnabled === false;
-  return false;
+  return surface === undefined || flags[surface] !== false;
 }
 
 export interface UserFlashMessage {
@@ -129,30 +108,14 @@ export interface UserPageOptions {
    */
   flash?: UserFlashMessage | null;
   /**
-   * Enabled-state of the feature-gated Rewind page (#608). When `false`,
-   * the Rewind nav link is greyed with an "off" badge rather than hidden
-   * (#709). Omitted/`undefined` keeps the link plain, so direct callers and
-   * tests that don't care about gating work unchanged.
+   * Enabled-state of the feature-gated `/me` pages (Rewind #608, Voice #656,
+   * Birthday #657, Privacy #719). A tab whose flag is `false` is not rendered
+   * (#1292, #1066); omitted/`undefined` keeps it, so direct callers and tests
+   * that don't care about gating work unchanged.
    */
   rewindEnabled?: boolean;
-  /**
-   * Enabled-state of the feature-gated Voice-preferences page (#656). When
-   * `false`, the Voice nav link is greyed with an "off" badge, mirroring
-   * `rewindEnabled` (#709).
-   */
   presetsEnabled?: boolean;
-  /**
-   * Enabled-state of the feature-gated Birthday page (#657). When `false`,
-   * the Birthday nav link is greyed with an "off" badge, mirroring
-   * `rewindEnabled`/`presetsEnabled` (#709). The page itself stays reachable
-   * either way so members can pre-set their date.
-   */
   birthdayEnabled?: boolean;
-  /**
-   * Enabled-state of the feature-gated Privacy / data-export page (#719).
-   * When `false`, the Privacy nav link and overview card are not rendered
-   * and `/me/privacy` + `/me/privacy/export` return 404 (#1066).
-   */
   privacyEnabled?: boolean;
   /**
    * Who is looking (#1317). Normally omitted: the session middleware sets the
@@ -195,7 +158,6 @@ const STYLE = [
   ".tag-info{background:var(--info-bg);color:var(--info-text)}",
   // Disabled-feature "off" tag on the overview cards, mirroring the admin
   // Settings palette (#709).
-  ".tag-off{background:var(--err-bg);color:var(--err-text)}",
   ".notice{padding:.6rem .8rem;border-radius:6px;margin:0 0 1rem}",
   ".notice.info{background:var(--selected);color:var(--info-text)}",
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
@@ -236,15 +198,6 @@ const STYLE = [
   ".page-nav a{padding:.35rem .75rem;border-radius:4px;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);font-size:.85rem;font-weight:600}",
   ".page-nav a:hover{background:var(--chrome);text-decoration:none;color:var(--on-primary)}",
   ".page-nav a.active{background:var(--info-bg);border-color:var(--info-bg);color:var(--on-primary)}",
-  // Feature-gated pages whose feature is off are shown but greyed with an
-  // "off" badge so they stay discoverable and pre-settable (#709), mirroring
-  // the admin side nav (#610). The active page keeps its highlight even when
-  // disabled, so the greying only applies while inactive.
-  // Greyed, but still 6.8:1 (a darker grey was 3.6:1 — #855); the dashed border
-  // and "off" badge carry the state too, not the colour alone.
-  `.page-nav a.nav-disabled:not(.active){color:var(--muted);border-style:dashed}`,
-  ".page-nav a.nav-disabled:not(.active):hover{color:var(--text-secondary)}",
-  ".page-nav a .nav-badge{font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);background:var(--fill);border-radius:4px;padding:.05rem .3rem;margin-left:.35rem}",
   ".rw-hero{background:linear-gradient(135deg,var(--lore-deep) 0%,var(--lore) 100%);border:1px solid var(--lore-fill);border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
   ".rw-hero .total{font-size:2.5rem;font-weight:700;color:var(--on-primary);line-height:1.1}",
   ".rw-hero .compare{margin-top:.4rem;color:var(--lore-text);font-size:1rem}",
@@ -408,33 +361,20 @@ export function renderUserPage(opts: UserPageOptions): string {
 }
 
 function renderPageNav(active: string, flags: UserFeatureFlags): string {
-  // A feature-gated page whose feature is off is greyed with an "off" badge
-  // rather than hidden (#709), so it stays discoverable and its choice stays
-  // pre-settable. The one exception is Privacy (#1066): none of its choices
-  // (tracking opt-in/out, export, deletion) can be pre-set while the feature
-  // is off, so it is dropped entirely. `undefined` flags are treated as
-  // enabled so non-gating callers/tests render plain links.
-  const items = USER_NAV_ITEMS.filter(
-    (item) => !(item.feature === "privacy" && flags.privacyEnabled === false),
+  // A feature the server has switched off has no tab (#1292, extending the
+  // Privacy treatment of #1066): the member sees only what they can use, and
+  // the page answers 404. `undefined` flags are treated as enabled so
+  // non-gating callers/tests render every tab.
+  const items = USER_NAV_ITEMS.filter((item) =>
+    isSurfaceOn(flags, item.surface),
   )
     .map((item) => {
       const isActive =
         item.href === active ||
         (item.href === "/me/" && (active === "/me" || active === "/me/"));
-      const disabled = isNavItemDisabled(item, flags);
-      const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
-        .filter(Boolean)
-        .join(" ");
-      const cls = classes ? ` class="${classes}"` : "";
+      const cls = isActive ? ' class="active"' : "";
       const current = isActive ? ' aria-current="page"' : "";
-      // Read-only pages (Rewind) have no choice to save, so don't claim one.
-      const title = disabled
-        ? item.presettable
-          ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
-          : ' title="Your server admin hasn\'t enabled this yet"'
-        : "";
-      const badge = disabled ? '<span class="nav-badge">off</span>' : "";
-      return `<a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a>`;
+      return `<a href="${escapeHtml(item.href)}"${cls}${current}>${escapeHtml(item.label)}</a>`;
     })
     .join("");
   // Named so it stays distinguishable from a page body's own nav (the
@@ -453,30 +393,19 @@ function renderFlash(flash?: UserFlashMessage | null): string {
 }
 
 /**
- * The single, consistent "this feature is off" banner shown on every gated
- * `/me/*` page when its feature is disabled (#709). Replaces the old mix of
- * hard 404s, bespoke per-page notices, and silent omissions with one
- * predictable message. Members can't enable features (that's admin-only), so
- * the banner is purely informational — no action button.
- *
- * `label` names the feature (e.g. "Voice presets"). When `presettable` is
- * true the copy reassures the member their choice is saved and will apply
- * once an admin turns the feature on; when false (read-only surfaces like
- * Rewind, where there is nothing to pre-set) it simply says the content will
- * appear once the feature is enabled. Returns "" when `enabled` is true so
- * callers can drop it in unconditionally.
+ * The "this feature is off" banner. Only the Privacy body still renders it,
+ * and only as a safety net: the route answers 404 while `privacy.enabled` is
+ * off (#1066), so a member never sees it. Every other gated `/me/*` page is
+ * left out of the nav and answers 404 while its feature is off (#1292).
+ * Returns "" when `enabled` is true so a caller can drop it in unconditionally.
  */
 export function renderUserFeatureDisabledNotice(opts: {
   enabled: boolean;
   label: string;
-  presettable: boolean;
 }): string {
   if (opts.enabled) return "";
   const label = escapeHtml(opts.label);
-  const tail = opts.presettable
-    ? "Your choice is saved and will apply automatically once they turn it on."
-    : "Once they enable it, it'll show up here.";
-  return `<div class="notice info"><strong>Your server admin hasn't enabled ${label} yet.</strong> ${tail}</div>`;
+  return `<div class="notice info"><strong>Your server admin hasn't enabled ${label} yet.</strong> Once they enable it, it'll show up here.</div>`;
 }
 
 /**
@@ -488,18 +417,13 @@ export function renderUserIndexBody(opts: {
   discordUserId: string;
   guildId: string;
   isAdmin: boolean;
-  // Whether the feature-gated Rewind page is enabled (#608). When false, its
-  // card is still shown but tagged "off" (#709) so the overview lists every
-  // manageable surface consistently rather than making some vanish.
+  // Enabled-state of the feature-gated pages (Rewind #608, Voice #656,
+  // Birthday #657, Privacy #719). A switched-off feature gets no card at all
+  // (#1292, #1066): its page answers 404, so a link would be a dead end.
+  // `undefined` keeps the card.
   rewindEnabled?: boolean;
-  // Whether the feature-gated Voice page is enabled (#656). When false, its
-  // card is shown tagged "off" (#709), mirroring `rewindEnabled`.
   presetsEnabled?: boolean;
-  // Whether the feature-gated Birthday page is enabled (#657). When false,
-  // its card is shown tagged "off" (#709), mirroring `rewindEnabled`.
   birthdayEnabled?: boolean;
-  // Whether the feature-gated Privacy page is enabled (#719). When false, its
-  // card is not rendered at all (#1066).
   privacyEnabled?: boolean;
   // Open events the member created (#1189), each linking to its host panel.
   // Empty or absent hides the card.
@@ -526,47 +450,41 @@ export function renderUserIndexBody(opts: {
   const greeting = opts.isAdmin
     ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Admin console</em> link above to manage the server.</p>`
     : `<p class="subtitle">These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.</p>`;
-  // Each manageable surface is always listed (#709); a disabled feature is
-  // tagged "off" rather than dropped, so the overview reads the same whether
-  // or not an admin has flipped the feature on.
-  const offTag = ' <span class="tag tag-off">off</span>';
+  // A card per surface that is switched on; the rest are left out (#1292).
   const featureCard = (
+    surface: keyof MeSurfaceFlags,
     href: string,
     label: string,
     desc: string,
-    enabled: boolean,
   ): string =>
-    `<li><span class="feature-name"><a href="${href}">${label}</a>${enabled ? "" : offTag}</span>` +
-    `<span class="feature-desc">${desc}</span></li>`;
+    isSurfaceOn(opts, surface)
+      ? `<li><span class="feature-name"><a href="${href}">${label}</a></span>` +
+        `<span class="feature-desc">${desc}</span></li>`
+      : "";
   const voiceCard = featureCard(
+    "presetsEnabled",
     "/me/voice",
     "Voice",
     "Manage your channel name pattern and saved voice-channel presets.",
-    opts.presetsEnabled !== false,
   );
   const birthdayCard = featureCard(
+    "birthdayEnabled",
     "/me/birthday",
     "Birthday",
     "Set your birthday (the year is optional) so Koolbot can celebrate it on the day — in your own timezone.",
-    opts.birthdayEnabled !== false,
   );
   const rewindCard = featureCard(
+    "rewindEnabled",
     "/me/rewind",
     "Rewind",
     "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
-    opts.rewindEnabled !== false,
   );
-  // Unlike the cards above, Privacy is omitted while off (#1066): its page
-  // 404s, so a link would be a dead end.
-  const privacyCard =
-    opts.privacyEnabled === false
-      ? ""
-      : featureCard(
-          "/me/privacy",
-          "Privacy",
-          "See what Koolbot stores about you — and download all of it as a single JSON file.",
-          true,
-        );
+  const privacyCard = featureCard(
+    "privacyEnabled",
+    "/me/privacy",
+    "Privacy",
+    "See what Koolbot stores about you — and download all of it as a single JSON file.",
+  );
   // Events the member created (#1189): one link per event to its host panel.
   const hosted = opts.hostedEvents ?? [];
   const hostedCard =
@@ -591,8 +509,12 @@ export function renderUserIndexBody(opts: {
     ? [
         '<div class="card">',
         "<h2>Poll participation</h2>",
-        '<p class="muted">Your votes on server polls. Capture this and ' +
-          "you'll see your yearly tally on Rewind too.</p>",
+        '<p class="muted">Your votes on server polls.' +
+          // Names Rewind only while it is on (#1292).
+          (isSurfaceOn(opts, "rewindEnabled")
+            ? " Capture this and you'll see your yearly tally on Rewind too."
+            : "") +
+          "</p>",
         '<div class="rw-grid">',
         '<div class="rw-stat"><div class="label">Votes cast (all time)</div>' +
           `<div class="value">${poll.totalVotes}</div></div>`,
@@ -621,7 +543,7 @@ export function renderUserIndexBody(opts: {
     '<li><span class="feature-name"><a href="/me/notifications">Notifications</a></span>' +
       '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
-      '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
+      '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times, such as in <code>/voicestats</code>.</span></li>',
     voiceCard,
     birthdayCard,
     rewindCard,
@@ -1084,13 +1006,6 @@ export interface BirthdayPageBodyOptions {
   csrfToken: string;
   /** Currently stored birthday, or null when none is set. */
   selected: { month: number; day: number; year: number | null } | null;
-  /**
-   * Whether birthday announcements are enabled on the server. When off,
-   * the page still lets a member pre-set their date (mirroring how the
-   * notifications page exposes not-yet-active toggles) but shows a notice
-   * that nothing will be posted until an admin turns the feature on.
-   */
-  featureEnabled: boolean;
 }
 
 function renderMonthOptions(selected: number | null): string {
@@ -1141,16 +1056,10 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
   const month = opts.selected?.month ?? null;
   const day = opts.selected?.day ?? null;
   const year = opts.selected?.year ?? null;
-  const disabledNotice = renderUserFeatureDisabledNotice({
-    enabled: opts.featureEnabled,
-    label: "birthday announcements",
-    presettable: true,
-  });
   const hasBirthday = opts.selected !== null;
   return [
     "<h1>Birthday</h1>",
     `<p class="subtitle">Set your birthday so Koolbot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
-    disabledNotice,
     '<form method="POST" action="/me/birthday">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
@@ -1239,7 +1148,7 @@ const TZ_PREVIEW_SCRIPT =
 export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
   return [
     "<h1>Timezone</h1>",
-    `<p class="subtitle">Koolbot renders the times in your weekly digest, Rewind, and <code>/voicestats</code> in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
+    `<p class="subtitle">Koolbot renders the times it shows you, such as in <code>/voicestats</code>, in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
     '<form method="POST" action="/me/timezone">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
@@ -1283,6 +1192,17 @@ export interface NotificationsPageBodyOptions {
 export function renderUserNotificationsBody(
   opts: NotificationsPageBodyOptions,
 ): string {
+  // Only DMs the server can send are offered (#1292). With none on there is
+  // nothing to toggle, so no form and no Save button.
+  if (opts.rows.length === 0) {
+    return [
+      "<h1>Notifications</h1>",
+      // EmptyState (docs/design/components.md): what is missing, then how it
+      // fills up.
+      '<div class="kb-empty"><p class="kb-empty__title">No direct messages to offer</p>' +
+        '<p class="kb-empty__text">Koolbot has no direct messages to offer you on this server right now. Options appear here when the server turns a feature on.</p></div>',
+    ].join("");
+  }
   const rows = opts.rows
     .map((row) => {
       const soon = row.comingSoon
@@ -1356,13 +1276,6 @@ export interface VoicePageBodyOptions {
   presets: VoicePresetView[];
   /** Configured max presets per user (shown as guidance). */
   maxPerUser: number;
-  /**
-   * Whether the voice-presets feature is enabled on the server. When off the
-   * page still renders the editable form (so a member can pre-set their name
-   * pattern and manage presets) but shows the shared "off" banner (#709),
-   * mirroring the birthday page's pre-set affordance.
-   */
-  featureEnabled: boolean;
 }
 
 function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
@@ -1430,11 +1343,6 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
   return [
     "<h1>Voice preferences</h1>",
     '<p class="subtitle">Manage how your dynamic voice channels are named and the presets you can apply to them.</p>',
-    renderUserFeatureDisabledNotice({
-      enabled: opts.featureEnabled,
-      label: "voice presets",
-      presettable: true,
-    }),
     // ---- Name pattern ----
     '<form method="POST" action="/me/voice/name-pattern">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
@@ -1660,7 +1568,6 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
   const disabledNotice = renderUserFeatureDisabledNotice({
     enabled: opts.featureEnabled,
     label: "self-service data export",
-    presettable: false,
   });
   const download = opts.featureEnabled
     ? '<div class="form-actions">' +

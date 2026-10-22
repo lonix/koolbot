@@ -26,7 +26,12 @@ import {
   type NotificationPrefs,
 } from "../services/user-notification-prefs-service.js";
 import { ConfigService } from "../services/config-service.js";
-import { readMeSurfaceFlags } from "./me-surfaces.js";
+import {
+  readMeNotificationAvailability,
+  readMeSurfaceFlagsStrict,
+  type MeNotificationAvailability,
+  type MeSurfaceFlags,
+} from "./me-surfaces.js";
 import { requireCsrf } from "./csrf.js";
 import {
   AuthenticatedRequest,
@@ -42,7 +47,6 @@ import {
   renderUserIndexBody,
   renderUserNotificationsBody,
   renderUserPage,
-  renderUserFeatureDisabledNotice,
   renderUserPrivacyBody,
   renderUserRewindBody,
   renderUserTimezoneBody,
@@ -188,20 +192,29 @@ const NOTIFICATION_ROW_DEFS: readonly NotificationRowDef[] = [
   },
 ];
 
-function buildNotificationRows(prefs: NotificationPrefs): Array<{
+/**
+ * The rows to offer: only DMs the server can send (#1292). A hidden row keeps
+ * its stored value untouched and shows it again once the feature is back on.
+ */
+function buildNotificationRows(
+  prefs: NotificationPrefs,
+  available: MeNotificationAvailability,
+): Array<{
   key: string;
   label: string;
   description: string;
   enabled: boolean;
   comingSoon?: string;
 }> {
-  return NOTIFICATION_ROW_DEFS.map((def) => ({
-    key: def.key,
-    label: def.label,
-    description: def.description,
-    enabled: prefs[def.key],
-    comingSoon: def.comingSoon,
-  }));
+  return NOTIFICATION_ROW_DEFS.filter((def) => available[def.key]).map(
+    (def) => ({
+      key: def.key,
+      label: def.label,
+      description: def.description,
+      enabled: prefs[def.key],
+      comingSoon: def.comingSoon,
+    }),
+  );
 }
 
 /**
@@ -261,7 +274,7 @@ async function isPollParticipationEnabled(): Promise<boolean> {
  * shared "off" banner and the export route refuses.
  */
 async function isPrivacyExportEnabled(): Promise<boolean> {
-  return ConfigService.getInstance().getBoolean("privacy.enabled", false);
+  return (await readMeSurfaceFlagsStrict()).privacyEnabled;
 }
 
 /**
@@ -372,12 +385,36 @@ async function findActiveResetCooldown(
 
 /**
  * Resolve the enabled-state of every feature-gated `/me/*` surface in one
- * shot (#709). Threaded into `renderUserPage` (and the overview body) on
- * every page so the nav renders a consistent "off" badge for whichever
- * features are disabled — regardless of which page you're on.
+ * shot. Threaded into `renderUserPage` (and the overview body) on every page
+ * so the tabs and cards leave out whatever is switched off (#1292), and read
+ * by `requireSurfaceOn` for the 404s: one read, one answer, on every page.
+ * Strict: a failed read goes to the error handler instead of reading as off,
+ * so a database hiccup cannot 404 a page that is on.
  */
 async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
-  return readMeSurfaceFlags();
+  return readMeSurfaceFlagsStrict();
+}
+
+/**
+ * 404 for a whole `/me/<feature>` area (every GET and POST under it) while
+ * its feature is off (#1292, as `/me/privacy` since #1066), so a bookmark
+ * lands on "not found" rather than a dead settings page and nothing can be
+ * saved for a feature the member cannot see. Stored choices are left alone.
+ * Mounted ahead of the page's own rate limiter, so refused requests spend no
+ * allowance.
+ */
+function requireSurfaceOn(surface: keyof MeSurfaceFlags): RequestHandler {
+  return (_req, res, next): void => {
+    readUserFeatureFlags()
+      .then((flags) => {
+        if (!flags[surface]) {
+          res.status(404).type("text/plain").send("Not found");
+          return;
+        }
+        next();
+      })
+      .catch(next);
+  };
 }
 
 /**
@@ -583,6 +620,14 @@ export function createUserRouter(
   router.use("/moderation", requireScopeMiddleware("moderator"));
   router.use("/moderation", createMeModerationRouter(client));
 
+  // Feature-gated pages answer 404 while their feature is off (#1292, #1066),
+  // GETs and POSTs alike. Mounted ahead of every route below, so a route added
+  // under these prefixes is gated from its first commit. Privacy gates itself
+  // (its export is also gated ahead of its own limiter).
+  router.use("/voice", requireSurfaceOn("presetsEnabled"));
+  router.use("/birthday", requireSurfaceOn("birthdayEnabled"));
+  router.use("/rewind", requireSurfaceOn("rewindEnabled"));
+
   // ---------- Index ----------
   router.get(
     "/",
@@ -664,19 +709,21 @@ export function createUserRouter(
         guildId,
       );
       const flash = readFlashFromQuery(req);
+      const flags = await readUserFeatureFlags();
+      const available = await readMeNotificationAvailability(flags);
       res.type("text/html").send(
         renderUserPage({
           title: "Notifications",
           active: "/me/notifications",
           body: renderUserNotificationsBody({
             csrfToken: getCsrfToken(req),
-            rows: buildNotificationRows(prefs),
+            rows: buildNotificationRows(prefs, available),
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
-          ...(await readUserFeatureFlags()),
+          ...flags,
         }),
       );
     }),
@@ -707,8 +754,16 @@ export function createUserRouter(
       // hidden flag a single missing checkbox would silently default to
       // "false" on every save and quietly reset opt-ins on unrelated
       // rows that future sub-issues append.
+      //
+      // A row the page does not offer (its feature is off, #1292) is skipped
+      // even when a stale form still carries it: nothing is saved for a DM
+      // the member cannot see, and the stored value stays as it was.
+      const available = await readMeNotificationAvailability(
+        await readUserFeatureFlags(),
+      );
       const patch: Partial<NotificationPrefs> = {};
       for (const key of NOTIFICATION_PREF_KEYS) {
+        if (!available[key]) continue;
         const submitted = body[`submitted_${key}`];
         if (typeof submitted !== "string" || submitted.length === 0) continue;
         patch[key] = readCheckbox(body[key]);
@@ -905,7 +960,6 @@ export function createUserRouter(
           body: renderUserBirthdayBody({
             csrfToken: getCsrfToken(req),
             selected,
-            featureEnabled: flags.birthdayEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -1024,32 +1078,8 @@ export function createUserRouter(
     });
     const flags = await readUserFeatureFlags();
 
-    // Feature gate (#608/#709): when Rewind is disabled the recap can't be
-    // computed (there's nothing to pre-set here — it's a read-only view), so
-    // we render the consistent "off" banner instead of the recap and skip the
-    // data work. Unlike the old 404 this returns 200 and keeps the nav link
-    // visible (greyed), matching every other gated `/me/*` surface.
-    if (!flags.rewindEnabled) {
-      res.type("text/html").send(
-        renderUserPage({
-          title: "Rewind",
-          active: "/me/rewind",
-          body:
-            "<h1>Rewind</h1>" +
-            '<p class="subtitle">Your personal year-in-review.</p>' +
-            renderUserFeatureDisabledNotice({
-              enabled: false,
-              label: "the year-in-review (Rewind) feature",
-              presettable: false,
-            }),
-          csrfToken: getCsrfToken(req),
-          remainingMs: getDisplayedRemainingMs(session),
-          isAdmin: session.role === "admin",
-          ...flags,
-        }),
-      );
-      return;
-    }
+    // While Rewind is off the whole area answers 404 (`requireSurfaceOn`,
+    // #1292), ahead of the limiter, so everything below runs with it on.
 
     const currentYear = new Date().getUTCFullYear();
     // The explicit `/rewind/:year` deep-link must always honour the
@@ -1179,11 +1209,9 @@ export function createUserRouter(
   // Discord (snapshot of a live channel); the web surface edits, sets the
   // default, and deletes the ones you already have.
 
-  // The page and its POST routes stay reachable even when the feature is off
-  // (#709): a member can pre-set their name pattern and manage presets before
-  // an admin flips `voicechannels.presets.enabled` on, mirroring the birthday
-  // page. The GET renders the shared "off" banner via `featureEnabled`; the
-  // POSTs persist regardless, exactly like the birthday POST.
+  // While `voicechannels.presets.enabled` is off the page and its POSTs answer
+  // 404 (`requireSurfaceOn`, #1292); a member's saved name pattern and presets
+  // stay stored and are back when the feature is turned on.
 
   router.get(
     "/voice",
@@ -1222,7 +1250,6 @@ export function createUserRouter(
             displayName,
             presets: toPresetViews(prefs.presets),
             maxPerUser,
-            featureEnabled: flags.presetsEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),

@@ -665,12 +665,12 @@ gates the December DM independently. Following the repo's opt-in
 convention, both default to `false` — set `rewind.enabled = true` to
 expose the page.
 
-| Setting                | Default          | Description                                                                                                                                                                                                                                    |
-| ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page shows a consistent "off" banner (HTTP 200) in place of the recap and its nav link is greyed with an "off" badge (#709) |
-| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled`                                                                                                                                 |
-| `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                                                           |
-| `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                                                                 |
+| Setting                | Default          | Description                                                                                                                                                                                          |
+| ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, `/me/rewind` answers 404 and its tab, card and notification row are not shown (#1292) |
+| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled`                                                                                       |
+| `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                 |
+| `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                       |
 
 **Notes:**
 

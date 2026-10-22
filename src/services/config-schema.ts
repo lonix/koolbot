@@ -1664,7 +1664,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "rewind.enabled": {
     label: "Rewind enabled",
     description:
-      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page returns a disabled state and isn't linked. The end-of-year DM nudge has its own toggle below.",
+      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page answers 404 and isn't linked. The end-of-year DM nudge has its own toggle below.",
     category: "rewind",
     type: "boolean",
   },
