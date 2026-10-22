@@ -203,6 +203,7 @@ import {
   type LeaderboardTierView,
   type RoleOption,
   type SettingRow,
+  messageJumpUrl,
 } from "./admin-views.js";
 
 function deriveCategory(key: string): string {
@@ -511,6 +512,8 @@ export function buildSettingRows(
       options: meta?.options,
       warnBelow: meta?.warnBelow,
       min: meta?.min,
+      max: meta?.max,
+      managed: meta?.managed,
       channelKind: meta?.channelKind,
     };
   });
@@ -1197,10 +1200,23 @@ export function createReadOnlyRouter(
             options: meta?.options,
             warnBelow: meta?.warnBelow,
             min: meta?.min,
+            max: meta?.max,
+            managed: meta?.managed,
             channelKind: meta?.channelKind,
           };
         },
       );
+      // A bot-managed message id is shown read-only with a jump link to the
+      // message, built from the channel setting it was posted in (#1304).
+      const currentByKey = new Map(rows.map((r) => [r.key, r.current]));
+      for (const row of rows) {
+        if (!row.managed) continue;
+        row.jumpUrl = messageJumpUrl(
+          common.guildId,
+          currentByKey.get(row.managed.channelKey),
+          row.current,
+        );
+      }
       for (const entry of stored) {
         if (!(entry.key in defaultConfig)) {
           rows.push({

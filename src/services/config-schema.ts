@@ -751,6 +751,21 @@ export interface SettingMetadata {
    */
   min?: number;
   /**
+   * Inclusive upper bound for `number`-typed keys (#1304). Declared on every
+   * number key (a drift test enforces it) so the Settings input can refuse
+   * `99999` in the browser and `coerceConfigValue` can refuse it again on the
+   * server. A value above it is rejected with a message, never clamped.
+   */
+  max?: number;
+  /**
+   * Set on values the bot writes and reads itself (the id of a message it
+   * posted), which an admin must never type (#1304). The Settings page shows
+   * them read-only with a link to the message instead of an input, and the
+   * write boundary refuses them. `channelKey` names the setting holding the
+   * channel the message was posted in, which the jump link needs.
+   */
+  managed?: { channelKey: keyof ConfigSchema };
+  /**
    * Set when the rest of the feature page renders from this value (beyond the
    * `*.enabled` flags, which always reload): saving it from a feature page's
    * card reloads the page so nothing keeps describing the old value (#1090).
@@ -778,6 +793,18 @@ export interface SettingMetadata {
    * Sub-feature/parent gates may also be declared when it helps the UI.
    */
   dependsOn?: (keyof ConfigSchema)[];
+}
+
+/**
+ * Whether `key` holds bot-managed state (the id of a message the bot posted)
+ * that must never be typed or imported (#1304). Declared per key with
+ * `managed` in `settingsMetadata`.
+ */
+export function isManagedSetting(key: string): boolean {
+  return (
+    settingsMetadata[key as keyof typeof settingsMetadata]?.managed !==
+    undefined
+  );
 }
 
 /**
@@ -1019,6 +1046,13 @@ const rewindRetentionWarning: SettingWarnBelow = {
 const RETENTION_MIN = 0;
 
 /**
+ * Upper bound shared by the retention keys counted in days (#1304): one
+ * hundred years, far past any real policy, so only a mistyped value (an extra
+ * digit, a pasted ID) is refused.
+ */
+const RETENTION_MAX_DAYS = 36500;
+
+/**
  * Per-category metadata for the WebUI Settings page section headers and
  * future `/config` surfaces. Keyed by the `category` slug used in
  * `SettingMetadata`.
@@ -1216,6 +1250,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicechannels",
     type: "number",
     min: 0,
+    max: 100,
   },
   "voicechannels.lobby.room_window_seconds": {
     label: "Lobby room limit window (seconds)",
@@ -1224,6 +1259,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicechannels",
     type: "number",
     min: 1,
+    max: 86400,
   },
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
@@ -1274,6 +1310,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Maximum number of presets a user can save.",
     category: "voicechannels",
     type: "number",
+    min: 0,
+    max: 100,
   },
 
   // Voice Activity Tracking
@@ -1301,6 +1339,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Server-side cap on how many ranked users the /voicestats top leaderboard returns. Bounds the aggregation pipeline so a single request can never materialise the whole collection.",
     category: "voicetracking",
     type: "number",
+    min: 1,
+    max: 10000,
   },
   "voicetracking.seen.enabled": {
     label: "/seen command enabled",
@@ -1391,8 +1431,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep detailed session rows before the cleanup job prunes them. Rewind reads these detailed sessions, so keep this at or above a full year. Set to 0 to keep every session forever.",
     category: "voicetracking",
     type: "number",
-    warnBelow: rewindRetentionWarning,
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
+    warnBelow: rewindRetentionWarning,
   },
   "voicetracking.cleanup.retention.monthly_summaries_months": {
     label: "Monthly-summary retention (months)",
@@ -1401,6 +1442,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicetracking",
     type: "number",
     min: RETENTION_MIN,
+    max: 1200,
   },
   "voicetracking.cleanup.retention.yearly_summaries_years": {
     label: "Yearly-summary retention (years)",
@@ -1409,6 +1451,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicetracking",
     type: "number",
     min: RETENTION_MIN,
+    max: 100,
   },
 
   // Text-Message Activity Tracking (#495)
@@ -1445,8 +1488,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned. Rewind reads this detail, so keep it at or above a full year. Set to 0 to keep every message forever.",
     category: "messagetracking",
     type: "number",
-    warnBelow: rewindRetentionWarning,
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
+    warnBelow: rewindRetentionWarning,
   },
 
   // Reaction Activity Tracking (#570)
@@ -1498,12 +1542,16 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Maximum length of a single quote in characters.",
     category: "quotes",
     type: "number",
+    min: 1,
+    max: 4000,
   },
   "quotes.cooldown": {
     label: "Cooldown between quotes (seconds)",
     description: "Cooldown in seconds between quote additions per user.",
     category: "quotes",
     type: "number",
+    min: 0,
+    max: 86400,
   },
   "quotes.header_enabled": {
     label: "Pinned header post enabled",
@@ -1517,6 +1565,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Auto-managed message ID of the quote channel header post.",
     category: "quotes",
     type: "string",
+    managed: { channelKey: "quotes.channel_id" },
   },
   "quotes.header_pin_enabled": {
     label: "Pin header post",
@@ -1540,6 +1589,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Older vote records are pruned; the lifetime like tally is never affected.",
     category: "quotes",
     type: "number",
+    min: 0,
+    max: RETENTION_MAX_DAYS,
   },
 
   // Rate Limiting
@@ -1554,12 +1605,16 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Maximum number of commands a user can run per time window.",
     category: "ratelimit",
     type: "number",
+    min: 1,
+    max: 1000,
   },
   "ratelimit.window_seconds": {
     label: "Rate-limit window (seconds)",
     description: "Length of the rate-limit time window in seconds.",
     category: "ratelimit",
     type: "number",
+    min: 1,
+    max: 3600,
   },
   "ratelimit.bypass_admin": {
     label: "Admins bypass rate limit",
@@ -1574,6 +1629,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "ratelimit",
     type: "number",
     min: 1,
+    max: 1000,
   },
 
   // Scheduled Announcements
@@ -1645,6 +1701,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Users with less than this many minutes of voice activity in the past 7 days are skipped.",
     category: "digest",
     type: "number",
+    min: 0,
+    max: 10080,
   },
   "digest.streak_min_minutes": {
     label: "Streak threshold (minutes per week)",
@@ -1652,6 +1710,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Minutes of voice activity that count a week toward the consecutive-weeks streak.",
     category: "digest",
     type: "number",
+    min: 0,
+    max: 10080,
   },
   "digest.include_achievements": {
     label: "Include weekly achievements in digest",
@@ -1690,6 +1750,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Users with less than this many minutes of voice activity in the year are skipped by the end-of-year DM nudge. The /me/rewind page itself is unaffected.",
     category: "rewind",
     type: "number",
+    min: 0,
+    max: 525600,
   },
 
   // Reaction Roles
@@ -1740,6 +1802,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long the temporary birthday role is held before the daily sweep removes it.",
     category: "birthdays",
     type: "number",
+    min: 1,
+    max: 8760,
   },
   "birthdays.change_cooldown_seconds": {
     label: "Birthday change cooldown (seconds)",
@@ -1748,6 +1812,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "birthdays",
     type: "number",
     min: 0,
+    max: 2592000,
   },
   "welcome.enabled": {
     label: "Welcome messages enabled",
@@ -1826,9 +1891,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "rules.message_id": {
     label: "Rules message ID",
     description:
-      "Managed by KoolBot: the ID of the posted rules message. Clear it to have a fresh message posted.",
+      "Managed by KoolBot: the ID of the posted rules message. Shown here for reference. The Rules page's button edits the message, or posts a new one when it was deleted or the channel changed.",
     category: "rules",
     type: "string",
+    managed: { channelKey: "rules.channel_id" },
   },
   "events.enabled": {
     label: "Events enabled",
@@ -1871,6 +1937,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How many minutes before an event starts the reminder is posted in the announcement channel. Set to 0 to disable reminders.",
     category: "events",
     type: "number",
+    min: 0,
+    max: 10080,
   },
   "events.create_lead_minutes": {
     label: "Channel creation lead time (minutes)",
@@ -1878,6 +1946,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How many minutes before an event starts its temporary voice channel is created.",
     category: "events",
     type: "number",
+    min: 0,
+    max: 1440,
   },
   "events.default_duration_minutes": {
     label: "Default event duration (minutes)",
@@ -1885,6 +1955,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Duration applied to an event when the organiser doesn't specify one.",
     category: "events",
     type: "number",
+    min: 1,
+    max: 1440,
   },
   "events.channel_grace_minutes": {
     label: "Channel cleanup grace (minutes)",
@@ -1892,6 +1964,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long after an event ends (counted from when it actually ended, so ending it early with End now starts the clock then) the bot waits before deleting its (now empty) voice channel.",
     category: "events",
     type: "number",
+    min: 0,
+    max: 1440,
   },
   "events.recurrence_enabled": {
     label: "Recurring events enabled",
@@ -1921,15 +1995,17 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "events",
     type: "number",
     min: 1,
+    max: 25,
     reloadOnSave: true,
   },
   "events.groups.max_count": {
     label: "Most groups per event",
     description:
-      "The most groups one event may have (each becomes its own voice channel). Values above 25 are treated as 25, since a Discord category holds 50 channels.",
+      "The most groups one event may have (each becomes its own voice channel). At most 25, since a Discord category holds 50 channels. Anything over the maximum is refused.",
     category: "events",
     type: "number",
     min: 1,
+    max: 25,
     reloadOnSave: true,
   },
   "lfg.enabled": {
@@ -1953,6 +2029,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "lfg",
     type: "number",
     min: 1,
+    max: 10080,
   },
   "lfg.default_size": {
     label: "Default party size",
@@ -1961,6 +2038,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "lfg",
     type: "number",
     min: 2,
+    max: 25,
   },
   "lfg.max_active_per_user": {
     label: "Open posts per member",
@@ -1969,6 +2047,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "lfg",
     type: "number",
     min: 0,
+    max: 100,
   },
   "lfg.voice_channel.enabled": {
     label: "Attach a voice channel",
@@ -2019,6 +2098,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "tickets",
     type: "number",
     min: 0,
+    max: 100,
   },
   "tickets.open_cooldown_seconds": {
     label: "Ticket open cooldown (seconds)",
@@ -2027,6 +2107,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "tickets",
     type: "number",
     min: 0,
+    max: 86400,
   },
   "reminders.max_pending": {
     label: "Pending reminders per member",
@@ -2035,6 +2116,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "reminders",
     type: "number",
     min: 1,
+    max: 1000,
   },
   "privacy.enabled": {
     label: "Self-service data export enabled",
@@ -2050,6 +2132,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "privacy",
     type: "number",
     min: 1,
+    max: 1000000,
   },
   "privacy.delete.enabled": {
     label: "Self-service data reset enabled",
@@ -2065,6 +2148,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "privacy",
     type: "number",
     min: 0,
+    max: 8760,
   },
   "privacy.tracking_opt_out.enabled": {
     label: "Member tracking opt-out enabled",
@@ -2114,6 +2198,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "reactionroles",
     type: "number",
     min: 0,
+    max: 1000,
   },
   "reactionroles.toggle_window_seconds": {
     label: "Role flip window (seconds)",
@@ -2122,6 +2207,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "reactionroles",
     type: "number",
     min: 1,
+    max: 3600,
   },
 
   // Notices System
@@ -2150,6 +2236,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Auto-managed message ID of the notices channel header post.",
     category: "notices",
     type: "string",
+    managed: { channelKey: "notices.channel_id" },
   },
   "notices.header_pin_enabled": {
     label: "Pin header post",
@@ -2171,6 +2258,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Default poll duration in hours (1–768).",
     category: "polls",
     type: "number",
+    min: 1,
+    max: 768,
   },
   "polls.cooldown_days": {
     label: "Reuse cooldown (days)",
@@ -2178,6 +2267,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Minimum days before a question from the library can be reused.",
     category: "polls",
     type: "number",
+    min: 0,
+    max: 3650,
   },
   "polls.participation.enabled": {
     label: "Poll participation tracking enabled",
@@ -2193,6 +2284,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "polls",
     type: "number",
     min: RETENTION_MIN,
+    max: 5200,
   },
   "polls.turnout.retention_days": {
     label: "Poll turnout retention (days)",
@@ -2201,6 +2293,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "polls",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
 
   // Leaderboard Role Rewards
@@ -2274,6 +2367,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "core",
     type: "number",
     min: 0,
+    max: 3600,
   },
   "core.startup.enabled": {
     label: "Startup log to Discord",
@@ -2413,6 +2507,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "core",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "core.web_audit.retention_days": {
     label: "WebUI audit retention (days)",
@@ -2421,6 +2516,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "core",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "monitoring.metrics_persistence.enabled": {
     label: "Persist command metrics",
@@ -2436,6 +2532,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "core",
     type: "number",
     min: 1,
+    max: RETENTION_MAX_DAYS,
   },
 
   // Moderation log (#728)
@@ -2453,6 +2550,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "moderation.cases.enabled": {
     label: "Moderation cases enabled",
@@ -2475,6 +2573,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: 1,
+    max: 3650,
   },
   "moderation.cases.retention_days": {
     label: "Resolved case retention (days)",
@@ -2483,6 +2582,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "moderation.cases.history_grace_days": {
     label: "Case history protection (days)",
@@ -2491,6 +2591,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "moderation.raid.enabled": {
     label: "Anti-raid protection enabled",
@@ -2513,14 +2614,16 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: 2,
+    max: 1000,
   },
   "moderation.raid.window_seconds": {
     label: "Raid window (seconds)",
     description:
-      "The sliding window the join threshold is counted over. Values outside 5 to 3600 are clamped.",
+      "The sliding window the join threshold is counted over. Must be 5 to 3600.",
     category: "moderation",
     type: "number",
     min: 5,
+    max: 3600,
   },
   "moderation.raid.lockdown_action": {
     label: "Lockdown action",
@@ -2544,6 +2647,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: 0,
+    max: 8760,
   },
   "moderation.raid.new_account_action": {
     label: "New-account action",
@@ -2563,10 +2667,11 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "moderation.raid.timeout_minutes": {
     label: "Anti-raid timeout (minutes)",
     description:
-      "How long the timeout action lasts. Values outside 1 to 40320 (28 days, Discord's limit) are clamped. A moderator can lift a timeout early from Discord.",
+      "How long the timeout action lasts. Must be 1 to 40320 (28 days, Discord's limit). A moderator can lift a timeout early from Discord.",
     category: "moderation",
     type: "number",
     min: 1,
+    max: 40320,
   },
   "moderation.raid.quarantine_role_id": {
     label: "Quarantine role",
@@ -2582,6 +2687,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "moderation",
     type: "number",
     min: 0,
+    max: 43200,
   },
   "moderation.raid.alert_channel_id": {
     label: "Raid alert channel",
@@ -2611,6 +2717,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "adoption",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
   "adoption.role_groups.sync_policy": {
     label: "Role group sync policy",
@@ -2659,5 +2766,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "namehistory",
     type: "number",
     min: RETENTION_MIN,
+    max: RETENTION_MAX_DAYS,
   },
 };

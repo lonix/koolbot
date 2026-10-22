@@ -23,6 +23,7 @@ import { grantedRoleIds } from "../../../services/role-grants.js";
 import type { WizardApplyResult } from "../../../services/wizard-service.js";
 import {
   defaultConfig,
+  isManagedSetting,
   settingsMetadata,
 } from "../../../services/config-schema.js";
 import { signFlash, truncateFlash, wantsJson } from "../../http-flash.js";
@@ -524,6 +525,12 @@ export function coerceConfigValue(
     return { ok: false, reason: "unknown key" };
   }
 
+  // Bot-managed state (the id of a message the bot posted) is never written
+  // from a form, an import or an adoption plan (#1304).
+  if (isManagedSetting(key)) {
+    return { ok: false, reason: "managed by KoolBot and cannot be set here" };
+  }
+
   // Array payloads only make sense for the multi-select Discord-entity
   // types (channel_list / role_list). For every other key shape, an
   // array means something is wrong upstream — a misconfigured YAML
@@ -564,13 +571,32 @@ export function coerceConfigValue(
     if (typeof raw === "string" && raw.trim() === "") {
       return { ok: false, reason: "invalid number" };
     }
+    // Digits only: `Number("1e3")` is 1000 and `Number("0x10")` is 16, which
+    // the numeric input would never produce, and every number setting is a
+    // whole number (#1304).
+    if (typeof raw === "string" && !/^-?\d+$/.test(raw.trim())) {
+      return {
+        ok: false,
+        reason: Number.isFinite(Number(raw))
+          ? "must be a whole number"
+          : "invalid number",
+      };
+    }
     const n = typeof raw === "number" ? raw : Number(raw);
     if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
-    // Declared lower bound (#835): refuse — never clamp — so the operator sees
+    if (!Number.isInteger(n)) {
+      return { ok: false, reason: "must be a whole number" };
+    }
+    // Declared bounds (#835, #1304): refuse, never clamp, so the operator sees
     // a field-level error rather than a silently different value.
-    const min = settingsMetadata[key as keyof typeof settingsMetadata]?.min;
+    const numberMeta = settingsMetadata[key as keyof typeof settingsMetadata];
+    const min = numberMeta?.min;
+    const max = numberMeta?.max;
     if (min !== undefined && n < min) {
       return { ok: false, reason: `must be at least ${min}` };
+    }
+    if (max !== undefined && n > max) {
+      return { ok: false, reason: `must be at most ${max}` };
     }
     return { ok: true, value: n };
   }

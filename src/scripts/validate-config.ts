@@ -295,7 +295,15 @@ export function validateSetting(
     return {
       key,
       severity: "error",
-      message: `${key}: ${formatValue(value)} is below the minimum of ${meta.min} — the Web UI refuses this value; a negative retention window would prune everything`,
+      message: `${key}: ${formatValue(value)} is below the minimum of ${meta.min} — the Web UI refuses this value`,
+    };
+  }
+
+  if (meta.max !== undefined && Number(value) > meta.max) {
+    return {
+      key,
+      severity: "error",
+      message: `${key}: ${formatValue(value)} is above the maximum of ${meta.max} — the Web UI refuses this value`,
     };
   }
 
