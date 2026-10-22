@@ -1,7 +1,8 @@
 /**
  * Shared icon helper for the Web UI (#1369).
  *
- * Lucide icons (ISC licence, lucide-static 0.468), copied and inlined, never
+ * Lucide icons (ISC licence, lucide-static 0.468.0; the Lucide and Feather
+ * notices are in THIRD_PARTY_NOTICES.md), copied and inlined, never
  * loaded from a CDN. Each entry is the children of a 24x24 `svg`; the
  * `kb-icon` class draws it (16px, `kb-icon--lg` 20px, `currentColor`).
  * The names are those DESIGN.md > Iconography lists, plus the few the views
