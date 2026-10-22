@@ -79,6 +79,7 @@ down. The feature-page pattern, with the down servers first.
 3. Tiles: Servers, Online (warn when any is down), Players now, Last check.
 4. **Servers**, in the order they are posted: status word and dot, name, game and check method, the address in mono, two facts (players, then
    map or version), an UptimeStrip and *Edit*, *Jump to post* and a row menu. Rows drag to reorder; the menu has *Move up* / *Move down*.
+   Saving a new order re-posts those posts in Discord (`discord.md`, *Posts that track live state*), and the page says so before it saves.
 5. *Settings (n)*, folded, with the summary line.
 6. *Recent changes* (state changes, alerts sent or not, maintenance, edits; times in UTC) beside *In #notices*, the posts as DiscordEmbed sketches.
 

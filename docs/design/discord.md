@@ -29,6 +29,8 @@ A post that shows something live, such as a game server's status, is one message
 
 - **Edit, never delete and re-post**, so members keep their place and links to the message keep working. If someone deletes it, the bot posts
   it again and keeps the new id.
+- **The one exception is a reorder by an admin.** Discord cannot move a message, so the bot re-posts every post from the first one whose position
+  changed, in the new order, and stores the new ids. Links to those old messages stop working; the Web UI says so before the reorder is saved.
 - **The state is a word** in a *Status* field (*Online*, *Offline*, *Maintenance*) as well as the accent: `embed-ok`, `embed-danger`, `embed-warn`.
 - The embed `timestamp` is the time of the last check, so every reader sees how fresh it is in their own timezone.
 - A change of state edits the post at once; smaller changes (players, map) edit it at most once a minute.
