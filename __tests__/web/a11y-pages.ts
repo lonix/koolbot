@@ -3184,6 +3184,17 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me edit event (recurring: asks how far the change reaches)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ series: { cadence: "weekly" } }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
       name: "/me edit event (start held by a running Discord event)",
       html: shell(
         "Edit event: Quiz night",

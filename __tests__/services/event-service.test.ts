@@ -1179,6 +1179,45 @@ describe("recurring event lifecycle", () => {
     );
   });
 
+  it("builds the next occurrence from the series template and anchor (#1298), not from the edited row", async () => {
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+      // The fresh row: the anchor moved one hour later and the template holds
+      // the series' own values, while the occurrence itself was renamed.
+      seriesStart: new Date("2026-07-03T21:00:00Z"),
+      seriesTemplate: {
+        title: "Game Night",
+        description: "Bring snacks",
+        durationMinutes: 120,
+        timezone: "UTC",
+      },
+    }));
+    const { service } = buildService();
+    await (service as unknown as Spawner).spawnNextOccurrence(
+      ended({
+        title: "One-off rename",
+        description: "Only this week",
+        durationMinutes: 30,
+        timezone: "Europe/Oslo",
+      }),
+      NOW,
+    );
+    expect(created[0]).toMatchObject({
+      title: "Game Night",
+      description: "Bring snacks",
+      durationMinutes: 120,
+      timezone: "UTC",
+    });
+    expect((created[0].startTime as Date).toISOString()).toBe(
+      "2026-07-10T21:00:00.000Z",
+    );
+    expect((created[0].seriesStart as Date).toISOString()).toBe(
+      "2026-07-03T21:00:00.000Z",
+    );
+    expect(created[0]).not.toHaveProperty("seriesTemplate");
+  });
+
   it("gives the next occurrence the series' cover hash (#1181), null when none", async () => {
     EventMock.findById = jest.fn(async () => ({
       nextSpawned: false,

@@ -42,6 +42,26 @@ export interface EventEditView {
    * read), so the start cannot move: shown as text, title still editable.
    */
   startLocked?: boolean;
+  /**
+   * Set for an event of a recurring series: the form then asks how far the
+   * change reaches and has no default answer (`cadence` is the label, e.g.
+   * "weekly").
+   */
+  series?: { cadence: string };
+}
+
+/** The scope question of a recurring event (#1298): no option is pre-chosen. */
+function renderScopeField(cadence: string): string {
+  return `<div class="kb-fields">
+        <div class="kb-field">
+          <p class="kb-label" id="edit-scope-l">Apply this change to</p>
+          <div class="kb-segmented" role="radiogroup" aria-labelledby="edit-scope-l" aria-describedby="edit-scope-h">
+            <label><input type="radio" name="scope" value="occurrence" required><span>This occurrence</span></label>
+            <label><input type="radio" name="scope" value="following" required><span>This and following</span></label>
+          </div>
+          <p class="kb-help" id="edit-scope-h">This event repeats ${escapeHtml(cadence)}. "This occurrence" leaves the next ones as they were. "This and following" also changes every later occurrence.</p>
+        </div>
+      </div>`;
 }
 
 export function renderEventEditBody(opts: {
@@ -109,6 +129,7 @@ export function renderEventEditBody(opts: {
   <section class="kb-panel" aria-labelledby="edit-event-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="edit-event-h">Event details</h2></header>
     <div class="kb-panel__body kb-stack">
+      ${e.series ? renderScopeField(e.series.cadence) : ""}
       ${scheduleFields}
       <div class="kb-fields">
         <div class="kb-field">
