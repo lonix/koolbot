@@ -108,11 +108,11 @@ describe("Cases section", () => {
         ],
       }),
     });
-    expect(html).toContain("<h3>Overdue (1)</h3>");
-    expect(html).toContain("<h3>Due soon (1)</h3>");
-    expect(html).toContain("<h3>Scheduled (0)</h3>");
+    expect(html).toContain("<h3>Needs a decision (1)</h3>");
+    expect(html).toContain("<h3>Review in the next 7 days (1)</h3>");
+    expect(html).toContain("<h3>Review later (0)</h3>");
     expect(html).toContain("<h3>No review date (0)</h3>");
-    expect(html).toContain("<h3>Recently resolved (1)</h3>");
+    expect(html).toContain("<h3>Closed in the last 30 days (1)</h3>");
     expect(html).toContain("No open case is without a review date.");
   });
 
@@ -130,12 +130,12 @@ describe("Cases section", () => {
         ],
       }),
     });
-    expect(html).toContain("<h3>Scheduled (1)</h3>");
+    expect(html).toContain("<h3>Review later (1)</h3>");
     expect(html).toContain('action="/admin/moderation/cases/far/uphold"');
     expect(html).toContain('formaction="/admin/moderation/cases/far/readmit"');
   });
 
-  it("shows the member, the original reason, and their prior history", () => {
+  it("shows the member, the original reason, and their earlier actions", () => {
     const html = render({
       casesEnabled: true,
       caseGroups: groups({ overdue: [card()] }),
@@ -143,7 +143,7 @@ describe("Cases section", () => {
     expect(html).toContain("Case #14");
     expect(html).toContain("Member One");
     expect(html).toContain("Repeated spam");
-    expect(html).toContain("Prior history");
+    expect(html).toContain("Earlier actions");
     expect(html).toContain("2025-11-01");
     expect(html).toContain("caps");
   });
@@ -160,9 +160,9 @@ describe("Cases section", () => {
       );
     }
     expect(html).toContain('name="_csrf" value="tok-123"');
-    // The destructive ones ask first, and "Let back in" says it does not unban.
-    expect(html).toContain("Make this removal permanent?");
-    expect(html).toContain("KoolBot does not unban in Discord");
+    // The destructive ones ask first, and "Let back in" says it does not lift the ban.
+    expect(html).toContain("Keep this member out for good?");
+    expect(html).toContain("KoolBot does not lift the ban in Discord");
   });
 
   it('says "Let back in", never "Readmit", on the admin page', () => {
@@ -281,7 +281,7 @@ describe("Case column", () => {
       row({ caseNumber: 14, caseStatus: "under_review" }),
     ]);
     expect(html).toContain("#14");
-    expect(html).toContain("under review");
+    expect(html).toContain("needs a decision");
     expect(html).not.toContain("cases/open");
   });
 

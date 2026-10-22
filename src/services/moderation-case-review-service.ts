@@ -116,7 +116,7 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
     const notified = flipped.length > 0 && (await this.postNotice(flipped));
     if (flipped.length > 0) {
       logger.info(
-        `Moderation case review: ${flipped.length} case(s) now due for review`,
+        `Moderation case review: ${flipped.length} case(s) now need a decision`,
       );
     }
     return { due: due.length, flipped: flipped.length, notified };
@@ -132,12 +132,12 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
       }
       const lines = flipped.map(
         (c) =>
-          `**Case #${c.caseNumber}** · <@${c.userId}> · ${c.action} · due ${discordTimestamp(c.reviewAt ?? c.updatedAt, "D")}`,
+          `**Case #${c.caseNumber}** · <@${c.userId}> · ${c.action} · review date ${discordTimestamp(c.reviewAt ?? c.updatedAt, "D")}`,
       );
       return await discordLogger.logToChannel("moderation_review", {
         title: `🛡️ ${flipped.length} moderation case${
           flipped.length === 1 ? "" : "s"
-        } due for review`,
+        } need${flipped.length === 1 ? "s" : ""} a decision`,
         description: truncateText(
           lines.join("\n"),
           DISCORD_EMBED_DESCRIPTION_LIMIT,

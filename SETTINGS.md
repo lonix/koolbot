@@ -661,16 +661,16 @@ off) still renders cleanly with the remaining sections hidden.
 
 The feature and the end-of-year DM nudge have **separate** switches
 (#608). `rewind.enabled` gates the page itself; `rewind.nudge.enabled`
-gates the December DM independently. Following the repo's opt-in
+gates the December DM, which also needs the page on (#1292). Following the repo's opt-in
 convention, both default to `false` — set `rewind.enabled = true` to
 expose the page.
 
-| Setting                | Default          | Description                                                                                                                                                                                                                                    |
-| ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page shows a consistent "off" banner (HTTP 200) in place of the recap and its nav link is greyed with an "off" badge (#709) |
-| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled`                                                                                                                                 |
-| `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                                                           |
-| `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                                                                 |
+| Setting                | Default          | Description                                                                                                                                                                                          |
+| ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rewind.enabled`       | `false`          | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, `/me/rewind` answers 404 and its tab, card and notification row are not shown (#1292) |
+| `rewind.nudge.enabled` | `false`          | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Only runs while `rewind.enabled` is on too, since the page it links to answers 404 otherwise (#1292)                  |
+| `rewind.cron`          | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone)                                                                                                                                 |
+| `rewind.min_minutes`   | `60`             | Minimum annual voice minutes a user needs to receive the nudge                                                                                                                                       |
 
 **Notes:**
 
@@ -1146,14 +1146,14 @@ command override in **Server Settings → Integrations → KoolBot**. See
 | -------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `moderation.enabled`                   | `false`     | Master switch — enables the `/warn`, `/timeout`, `/ban` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page                            |
 | `moderation.retention_days`            | `365`       | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever                                                                                                          |
-| `core.moderation.enabled`              | `false`     | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached                                                                                              |
+| `core.moderation.enabled`              | `false`     | Post an embed to the moderation log channel each time an action is recorded, with the member's earlier actions attached                                                                                            |
 | `core.moderation.channel_id`           | `""`        | Text channel that receives those embeds. Nothing is posted while this is empty                                                                                                                                     |
 | `moderation.cases.enabled`             | `false`     | Case lifecycle: lets staff open a case against a kick or ban with an optional review date and record the outcome. Requires `moderation.enabled`                                                                    |
-| `moderation.cases.review_cron`         | `0 9 * * *` | When the job runs that moves cases whose review date has passed into the review queue                                                                                                                              |
+| `moderation.cases.review_cron`         | `0 9 * * *` | When the job runs that marks cases whose review date has passed as needing a decision                                                                                                                              |
 | `moderation.cases.default_review_days` | `90`        | Review date pre-filled (days from now) when staff open a case                                                                                                                                                      |
 | `moderation.cases.retention_days`      | `0`         | Days to keep a resolved case, counted from its last decision. `0` keeps resolved cases forever. Open cases are never pruned, and a resolved case is kept at least as long as `moderation.cases.history_grace_days` |
 | `moderation.cases.history_grace_days`  | `365`       | How long after a case resolves its member's log history stays exempt from pruning. `0` protects it for as long as the case exists                                                                                  |
-| `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases come due for review. Requires `moderation.cases.enabled`                                                                                                                  |
+| `core.moderation_review.enabled`       | `false`     | Post one summary to a channel when cases need a decision. Requires `moderation.cases.enabled`                                                                                                                      |
 | `core.moderation_review.channel_id`    | `""`        | Text channel that receives that summary. Nothing is posted while this is empty                                                                                                                                     |
 
 Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
@@ -1190,9 +1190,9 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
 - Actions the bot itself executed are **not** mirrored a second time from the
   audit log, so a `/ban` produces exactly one row.
 - **Context notices** (`core.moderation.*`): with these on, every recorded
-  action — a `/warn`, or a native kick / ban / unban / timeout mirrored from
-  the audit log — is announced in the configured channel together with the
-  member's prior history, e.g. _"Prior history: 2 warns, 1 timeout (most
+  action — a `/warn`, or a kick, ban, lifted ban or timeout made in Discord and copied in
+  from the audit log — is announced in the configured channel together with the
+  member's earlier actions, e.g. _"Earlier actions: 2 warns, 1 timeout (most
   recent 4 months ago)"_. That is the context Discord cannot give you: its
   audit log keeps ~45 days and filters by the moderator, not the target, so
   this surfaces KoolBot's own history at the moment someone is making a
@@ -1247,15 +1247,15 @@ status` shows the action the open lockdown is running. A lockdown restored after
   on.
 - **Cases** (`moderation.cases.*`): a kick or ban can carry a review date.
   Staff open a case against a log row from the **Case** column of the
-  `/admin/moderation` page; when the date passes, the daily review job moves
-  the case into the review queue (and posts to `core.moderation_review.*`, if
-  set). Staff then **uphold** it (keep the removal, schedule the next
-  review), **extend** it (new review date), **make it permanent**, or
-  **let the member back in**. Every decision is kept in the case's own trail, so
+  `/admin/moderation` page; when the date passes, the daily review job marks
+  the case as needing a decision (and posts to `core.moderation_review.*`, if
+  set). Staff then choose **Keep out for now** (the member stays out, schedule the next
+  review), **Decide later** (new review date), **Keep out for good**, or
+  **Let back in**. Every decision is kept in the case's own trail, so
   the next time the member appears the moderator sees _"two warnings →
   timeout → removed → reviewed → allowed back"_ instead of reconstructing it.
-  A case records the decision only: KoolBot never unbans for you, so lift a
-  ban in Discord yourself after letting them back in. `/modlog` shows each case's state
+  A case records the decision only: KoolBot never lifts a ban for you, so lift
+  the ban in Discord yourself after letting them back in. `/modlog` shows each case's state
   under its kick or ban. Cases only open by hand, and nothing closes one
   automatically.
 - **Cases and retention:** the daily prune skips every log entry a case
@@ -2124,8 +2124,8 @@ apply to the next log message — no restart is needed.
 | `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
 | `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Configuration reloads and their outcome                                                                   |
 | `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks)                                         |
-| `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`)                  |
-| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that came due for review (needs `moderation.cases.enabled`)             |
+| `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                |
+| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)                 |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 | `core.role_groups.enabled` / `core.role_groups.channel_id`             | bool / channel | `false` / `""` | Role group drift (a role edited or deleted in Discord) and what the sync did about it                     |
 

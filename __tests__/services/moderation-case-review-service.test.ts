@@ -161,6 +161,21 @@ describe("ModerationCaseReviewService", () => {
     expect(message.description).toContain("<@user-2>");
   });
 
+  it("words the notice the way the Web UI words the state (#1353)", async () => {
+    dueRows([row(1), row(2)]);
+    await service().runNow();
+    const many = logToChannel.mock.calls[0]?.[1] as Record<string, string>;
+    expect(many.title).toBe("🛡️ 2 moderation cases need a decision");
+    expect(many.description).toContain("review date <t:");
+    expect(many.description).not.toMatch(/\bdue\b/i);
+
+    logToChannel.mockClear();
+    dueRows([row(3)]);
+    await service().runNow();
+    const one = logToChannel.mock.calls[0]?.[1] as Record<string, string>;
+    expect(one.title).toBe("🛡️ 1 moderation case needs a decision");
+  });
+
   it("does not post when nothing is due", async () => {
     dueRows([]);
     expect(await service().runNow()).toEqual({

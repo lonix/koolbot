@@ -69,7 +69,8 @@ import {
   type ConfigSchema,
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
-import { renderAdoptPage } from "./adopt-view.js";
+import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
+import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -1057,22 +1058,50 @@ export function createReadOnlyRouter(
 
   // ---------- Server scan (#1019) ----------
   // Read-only: GET only, no forms, no Discord writes.
+  // The limiter guards what is expensive: starting a scan. A tab click served
+  // from the shared scan costs nothing, so it is not counted (#1323).
+  const scanLimiter = createAdoptionScanLimiter();
   router.get(
     ADOPTION_SCAN_PAGE,
-    createAdoptionScanLimiter(),
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
       const sampled = req.query.sample === "1";
+      const tab = parseScanTab(req.query.tab);
+      const refresh = req.query.refresh === "1";
+      const key = scanCacheKey(
+        req.webSession?.guildId ?? "",
+        req.webSession?.discordUserId,
+        sampled,
+      );
+      // Resolve the common data first, so that nothing is awaited between the
+      // cache lookup, the limiter and the insertion of a new scan (#1323).
+      const common = await commonFromReq(req);
       let scan = null;
       let error: string | undefined;
       try {
-        scan = await ServerScanService.getInstance(client).scan(
-          common.guildId,
+        const adminUserId = req.webSession?.discordUserId;
+        // One scan is shared across the tabs: each tab is its own GET, and a
+        // scan costs a REST round of its own. The limiter is spent only when
+        // a new scan starts, not for a tab served from the shared one.
+        const pending = cachedScan(
+          key,
+          () =>
+            ServerScanService.getInstance(client).scan(common.guildId, {
+              adminUserId,
+              sampleMessages: sampled,
+            }),
           {
-            adminUserId: req.webSession?.discordUserId,
-            sampleMessages: sampled,
+            refresh,
+            admit: () => {
+              let allowed = false;
+              scanLimiter(req, res, () => {
+                allowed = true;
+              });
+              return allowed;
+            },
           },
         );
+        if (!pending) return; // the limiter has answered 429
+        scan = await pending;
       } catch (err) {
         logger.warn("server scan failed", err);
         error = err instanceof Error ? err.message : String(err);
@@ -1085,6 +1114,7 @@ export function createReadOnlyRouter(
           scan,
           error,
           sampled,
+          tab,
         }),
       );
     }),

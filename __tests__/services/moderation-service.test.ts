@@ -533,7 +533,7 @@ describe("ModerationService context notice (#907)", () => {
     return logToChannelMock.mock.calls[0][1] as never;
   }
 
-  it("posts a summary with prior history when a native action is mirrored", async () => {
+  it("posts a summary with earlier actions when a native action is mirrored", async () => {
     getBooleanMock.mockResolvedValue(true);
     createMock.mockResolvedValueOnce({ _id: "row-9" });
     const mostRecent = new Date("2026-05-08T12:00:00.000Z");
@@ -564,7 +564,7 @@ describe("ModerationService context notice (#907)", () => {
       name: "Reason",
       value: "Repeated spam after warnings",
     });
-    expect(payload.fields[1].name).toBe("Prior history");
+    expect(payload.fields[1].name).toBe("Earlier actions");
     expect(payload.fields[1].value).toBe(
       `2 warns, 1 timeout (most recent <t:${Math.floor(
         mostRecent.getTime() / 1000,
@@ -597,7 +597,7 @@ describe("ModerationService context notice (#907)", () => {
     });
   });
 
-  it("says so when the member has no prior history, and when the executor is hidden", async () => {
+  it("says so when the member has no earlier actions, and when the executor is hidden", async () => {
     getBooleanMock.mockResolvedValue(true);
     createMock.mockResolvedValueOnce({ _id: "row-9" });
     aggregateExecMock.mockResolvedValueOnce([]);
@@ -618,7 +618,7 @@ describe("ModerationService context notice (#907)", () => {
     const payload = noticePayload();
     expect(payload.description).toBe("<@u1> · by Unknown");
     expect(payload.fields[0].value).toBe("No reason given");
-    expect(payload.fields[1].value).toBe("No prior entries");
+    expect(payload.fields[1].value).toBe("No earlier entries");
   });
 
   it("also posts for a bot-issued /warn", async () => {

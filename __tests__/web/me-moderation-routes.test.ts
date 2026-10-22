@@ -391,7 +391,7 @@ describe("tiles", () => {
     expect(page.includes(tile("Open cases", "3"))).toBe(true);
     expect(page.includes(tile("Actions, last 7 days", "4"))).toBe(true);
     expect(page.includes(tile("Timeouts running now", "2"))).toBe(true);
-    expect(page.includes("1 due for review")).toBe(true);
+    expect(page.includes("1 needs a decision")).toBe(true);
     // The seven-day count is bounded by `since`, the open count is uncapped.
     const sinceCall = moderation.countRecent.mock.calls.find(
       (c) => (c[1] as { since?: Date }).since,
@@ -442,8 +442,8 @@ describe("tiles", () => {
       recentlyResolved: [],
     });
     const page = await html("/");
-    expect(page.includes("125 due for review")).toBe(true);
-    expect(page.includes("100 due for review")).toBe(false);
+    expect(page.includes("125 need a decision")).toBe(true);
+    expect(page.includes("100 need a decision")).toBe(false);
     expect(cases.countOverdueCases).toHaveBeenCalledWith(GUILD);
   });
 
@@ -461,9 +461,12 @@ describe("tiles", () => {
   it("says the overdue count could not be read, never none, when its read fails", async () => {
     cases.countOverdueCases.mockRejectedValue(new Error("db down"));
     const page = await html("/");
-    expect(page.includes("Due for review could not be read.")).toBe(true);
-    expect(page.includes("None due for review")).toBe(false);
-    expect(page.includes("due for review</div>")).toBe(false);
+    expect(page.includes("How many need a decision could not be read.")).toBe(
+      true,
+    );
+    expect(page.includes("None need a decision")).toBe(false);
+    expect(page.includes("need a decision</div>")).toBe(false);
+    expect(page.includes("needs a decision</div>")).toBe(false);
     // The open count itself still shows.
     expect(
       page.includes(
@@ -474,7 +477,7 @@ describe("tiles", () => {
 
   it("says none due only when the count really is zero", async () => {
     cases.countOverdueCases.mockResolvedValue(0);
-    expect((await html("/")).includes("None due for review")).toBe(true);
+    expect((await html("/")).includes("None need a decision")).toBe(true);
   });
 
   it("marks the open cases tile as a warning only when there are some", async () => {
@@ -696,11 +699,11 @@ describe("a failed read is never shown as empty or zero", () => {
     expect((await harness.get("/cases/case-1")).status).toBe(500);
   });
 
-  it("says the prior history could not be read instead of 'No other history'", async () => {
+  it("says the earlier actions could not be read instead of 'No earlier actions'", async () => {
     moderation.getHistory.mockImplementation(rejected);
     const page = await html("/cases/case-1");
-    expect(page.includes("The prior history could not be read.")).toBe(true);
-    expect(page.includes("No other history on file.")).toBe(false);
+    expect(page.includes("The earlier actions could not be read.")).toBe(true);
+    expect(page.includes("No earlier actions on file.")).toBe(false);
   });
 
   it("says the command audit is unavailable instead of empty", async () => {
@@ -787,12 +790,12 @@ describe("case page and Review", () => {
     const page = await html("/cases/case-1");
     expect(
       page.includes(
-        'formaction="/me/moderation/cases/case-1/permanent" data-confirm="Make this removal permanent? The case closes with no further review."',
+        'formaction="/me/moderation/cases/case-1/permanent" data-confirm="Keep this member out for good? The case closes with no further review."',
       ),
     ).toBe(true);
     expect(
       page.includes(
-        'formaction="/me/moderation/cases/case-1/readmit" data-confirm="Let this member back in? KoolBot does not unban in Discord; do that there."',
+        'formaction="/me/moderation/cases/case-1/readmit" data-confirm="Let this member back in? KoolBot does not lift the ban in Discord; do that there."',
       ),
     ).toBe(true);
     expect(page.split(' data-confirm="').length - 1).toBe(2);

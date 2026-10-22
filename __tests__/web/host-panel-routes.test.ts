@@ -202,6 +202,7 @@ beforeEach(() => {
   } as never);
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async () => false,
+    getBooleanStrict: async () => false,
     getNumber: async (_k: string, f: number) => f,
     getString: async (_k: string, f: string) => f,
   } as never);
