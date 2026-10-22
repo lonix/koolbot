@@ -164,7 +164,7 @@ describe("POST /wizard/start", () => {
       session.guildId,
       ["quotes"],
     );
-    expect(res.headers.get("location")).toBe("/admin/wizard?step=0");
+    expect(res.headers.get("location")).toBe("/admin/wizard?step=access");
   });
 
   it("rejects a submission whose only feature is unrecognised", async () => {

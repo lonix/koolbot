@@ -72,6 +72,8 @@ import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
 import { formatVersion } from "../utils/semver.js";
 import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
+import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
+import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -1896,6 +1898,7 @@ export function renderWizardPage(props: WizardPageProps): string {
 
   const body = `
 <h1>Setup Wizard</h1>
+${renderWizardSteps("features")}
 <p class="subtitle">Pick the features you want to configure and click <strong>Next</strong>. The wizard walks you through each feature's key settings.</p>
 <div class="notice info">Changes are only applied at the final confirmation step. Cancel any time without affecting the current configuration.</div>
 <div class="card" id="wizard-adoption">
@@ -2091,12 +2094,12 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   // values, and the step renderer pre-fills from `wizard.getConfiguration`,
   // so navigating back preserves in-progress state without re-submitting
   // this step's form (issue #485).
-  const previousButton =
-    props.stepIndex >= 1
-      ? `<a href="/admin/wizard?step=${props.stepIndex - 1}" class="btn">← Previous</a>`
-      : "";
+  const previousButton = `<a href="/admin/wizard?step=${
+    props.stepIndex >= 1 ? props.stepIndex - 1 : "access"
+  }" class="btn">← Previous</a>`;
 
   const body = `
+${renderWizardSteps("channels")}
 <h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
 ${renderFlash(props.flash)}
@@ -2131,10 +2134,20 @@ ${
 export interface WizardConfirmPageProps extends CommonProps {
   pending: Array<[string, unknown]>;
   metadata: Record<string, { description: string; category: string }>;
+  /** Role mapping from the Access step, written to role groups on Apply (#1321). */
+  accessChanges?: AccessChange[];
+  /** Why the role mapping can't be applied; Apply is blocked while set. */
+  accessProblem?: string | null;
+  /** Switched-on features with nobody mapped to run them. */
+  accessGaps?: AccessGap[];
+  flash?: FlashMessage | null;
 }
 
 export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
+  const accessChanges = props.accessChanges ?? [];
+  const nothingToApply =
+    props.pending.length === 0 && accessChanges.length === 0;
   const rows =
     props.pending.length === 0
       ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
@@ -2150,8 +2163,11 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
           .join("");
 
   const body = `
+${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
+${renderFlash(props.flash)}
+${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [])}
 <div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
@@ -2161,7 +2177,7 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
 <div class="actions">
   <form method="POST" action="/admin/wizard/apply">
     <input type="hidden" name="_csrf" value="${csrf}">
-    <button type="submit" class="btn btn-primary"${props.pending.length === 0 ? " disabled" : ""}>Apply</button>
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">

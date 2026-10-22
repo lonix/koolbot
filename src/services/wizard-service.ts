@@ -3,6 +3,7 @@ import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { DependencyError, hasOwn, settingsMetadata } from "./config-schema.js";
 import type { IConfig } from "../models/config.js";
+import type { AccessSelection } from "./wizard-access.js";
 
 export interface WizardConfiguration {
   [key: string]: string | number | boolean;
@@ -53,6 +54,13 @@ export interface WizardState {
   messageId?: string;
   allowNavigation: boolean;
   channelPage?: number; // Track current page for channel selection
+  /**
+   * The roles picked on the Access step (#1321). Held here, not in
+   * `configuration`: it is not a config key, and nothing is written until the
+   * review step is applied. `undefined` = the step was not saved, so Apply
+   * leaves the role mapping alone.
+   */
+  access?: AccessSelection;
 }
 
 /**
@@ -208,6 +216,18 @@ export class WizardService {
     }
 
     state.configuration[key] = value;
+    return this.updateSession(userId, guildId, state);
+  }
+
+  /** Remember the Access step's picks until the review step applies them. */
+  setAccess(
+    userId: string,
+    guildId: string,
+    access: AccessSelection | undefined,
+  ): boolean {
+    const state = this.getSession(userId, guildId);
+    if (!state) return false;
+    state.access = access;
     return this.updateSession(userId, guildId, state);
   }
 
