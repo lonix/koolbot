@@ -514,14 +514,11 @@ export function createSettingsRouter(client: Client): Router {
         if (seen.has(key)) continue;
         seen.add(key);
         if (masterOff && key !== masterKey) continue;
-        const raw = readSettingField(body, key);
-        const r = coerceConfigValue(
-          key,
-          raw,
-          await ConfigService.getInstance()
-            .get(key)
-            .catch(() => undefined),
-        );
+        const stored = await ConfigService.getInstance()
+          .get(key)
+          .catch(() => undefined);
+        const raw = readSettingField(body, key, stored);
+        const r = coerceConfigValue(key, raw, stored);
         if (r.ok) {
           coerced.push({ key, value: r.value });
         } else {

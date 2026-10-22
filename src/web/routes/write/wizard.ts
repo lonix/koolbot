@@ -603,10 +603,10 @@ export function createWizardRouter(client: Client): Router {
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) continue;
-        const raw = readSettingField(body, k);
         const current = await ConfigService.getInstance()
           .get(k)
           .catch(() => undefined);
+        const raw = readSettingField(body, k, current);
         const coerced = coerceConfigValue(k, raw, current);
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.

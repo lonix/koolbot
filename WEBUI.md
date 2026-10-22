@@ -1197,8 +1197,12 @@ until it is fixed.
   JavaScript a search box filters the zones (`new york` finds `America/New_York`, Enter picks the first match). The
   event forms (the admin form, `/me/events/new` and the edit page) use the same select.
 - `reactionroles.group_role_colour` is a colour input with a _Use default_ checkbox. A colour input cannot hold an empty
-  value and `""` is how the key says "Discord's default", so the checkbox posts `use_default_<key>=true`, which the
-  save paths read through `readSettingField`; it wins over the swatch, with or without JavaScript.
+  value and `""` is how the key says "Discord's default", so the checkbox posts `use_default_<key>=true`. A stored value
+  that is not `#RRGGBB` gets a second, ticked checkbox, _Keep the stored value_ (`keep_<key>=true`). The save paths turn
+  the boxes into the value with `readSettingField` (Use default wins over Keep, which wins over the swatch), so a browser
+  without JavaScript posts what a script would. The colour field keeps no state of its own: the swatch and both boxes are
+  ordinary controls, so the save bar's baseline, commit on a saved response and Discard apply to them as to any control,
+  and the small script only keeps them exclusive and disables the swatch while the section's feature is off.
 - `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and `events.channel_prefix` keep their text box (so a prefix with a
   separator after the emoji, which the server scan suggests, can still be typed) and gain the event group marker's emoji grid beside it. A
   pick replaces the value.
@@ -1208,7 +1212,7 @@ The server checks every value again in `coerceConfigValue` (`src/utils/setting-f
 control characters and no custom Discord emoji markup. A value that is **already stored** is exempt: the Settings page and
 the wizard pass the stored value, so an old custom timezone, a colour that is not `#RRGGBB` or a prefix such as `[VC]`
 still shows, posts unchanged and never blocks saving the rest of its section (a stored custom zone is shown as a
-selected "(custom)" option, a stored non-colour is posted from a hidden field and noted under the control). Anything else
+selected "(custom)" option, a stored non-colour is kept by the ticked Keep box and noted under the control). Anything else
 that is not what a picker could produce is refused with a message. YAML import and adoption plans have no stored value
 to compare with and stay strict.
 

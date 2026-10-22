@@ -722,6 +722,11 @@ export function settingDefaultFieldName(key: string): string {
   return `use_default_${key}`;
 }
 
+/** Form-field name of a colour setting's "Keep the stored value" checkbox (#1426). */
+export function settingKeepFieldName(key: string): string {
+  return `keep_${key}`;
+}
+
 /**
  * The raw posted value of a setting: its `value_<key>` field, or `""` when the
  * key is a colour and "Use default" is ticked. Every save path reads values
@@ -731,13 +736,22 @@ export function settingDefaultFieldName(key: string): string {
 export function readSettingField(
   body: Record<string, unknown> | undefined,
   key: string,
+  current?: unknown,
 ): unknown {
   if (
-    settingsMetadata[key as keyof typeof settingsMetadata]?.format ===
-      "colour" &&
-    body?.[settingDefaultFieldName(key)] === "true"
+    settingsMetadata[key as keyof typeof settingsMetadata]?.format === "colour"
   ) {
-    return "";
+    // Use default wins over Keep, which wins over the swatch (see
+    // `renderColourInput`). Keep means the stored value, whatever it is, so a
+    // crafted post can only ask for what is already there.
+    if (body?.[settingDefaultFieldName(key)] === "true") return "";
+    if (
+      body?.[settingKeepFieldName(key)] === "true" &&
+      current !== undefined &&
+      current !== null
+    ) {
+      return String(current);
+    }
   }
   return body?.[settingValueFieldName(key)];
 }

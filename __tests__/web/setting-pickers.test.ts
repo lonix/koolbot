@@ -441,9 +441,7 @@ describe("renderColourInput", () => {
     return {
       color: d.querySelector("[data-colour-input]") as HTMLInputElement,
       def: d.querySelector("[data-colour-default]") as HTMLInputElement,
-      mirror: d.querySelector(
-        "[data-colour-mirror]",
-      ) as HTMLInputElement | null,
+      keep: d.querySelector("[data-colour-keep]") as HTMLInputElement | null,
       note: d.querySelector(".kb-help"),
     };
   }
@@ -456,7 +454,7 @@ describe("renderColourInput", () => {
     expect(p.def.checked).toBe(false);
     expect(p.def.name).toBe("use_default_c");
     expect(p.def.value).toBe("true");
-    expect(p.mirror).toBeNull();
+    expect(p.keep).toBeNull();
   });
 
   it("normalises a colour stored without the hash", () => {
@@ -470,11 +468,12 @@ describe("renderColourInput", () => {
     expect(p.color.value).toBe(DEFAULT_COLOUR_SWATCH);
   });
 
-  it("a stored value that is not a colour is posted unchanged, not as black", () => {
+  it("a stored value that is not a colour gets a ticked Keep box, so it is not posted as black", () => {
     const p = parts(renderColourInput("value_c", "use_default_c", "red"));
-    expect(p.mirror?.name).toBe("value_c");
-    expect(p.mirror?.value).toBe("red");
-    expect(p.color.hasAttribute("name")).toBe(false);
+    expect(p.keep?.name).toBe("keep_c");
+    expect(p.keep?.checked).toBe(true);
+    expect(p.keep?.value).toBe("true");
+    expect(p.color.name).toBe("value_c");
     expect(p.def.checked).toBe(false);
     expect(p.note?.textContent).toContain("not a #RRGGBB colour");
   });
@@ -489,13 +488,20 @@ describe("renderColourInput", () => {
     expect(p.def.disabled).toBe(true);
   });
 
-  it("a locked legacy colour posts one value: the round trip, not the mirror too", () => {
+  it("a locked legacy colour posts one value: the round trip, not the disabled swatch", () => {
     const dom = new JSDOM(
       `<!doctype html><body><form>${renderColourInput("value_c", "use_default_c", "red", { disabled: true })}` +
         `<input type="hidden" name="value_c" value="red"></form></body>`,
     );
     const form = dom.window.document.querySelector("form") as HTMLFormElement;
     expect(new dom.window.FormData(form).getAll("value_c")).toEqual(["red"]);
+    expect(
+      (
+        dom.window.document.querySelector(
+          "[data-colour-keep]",
+        ) as HTMLInputElement
+      ).disabled,
+    ).toBe(true);
   });
 
   it("is a labelled control", () => {
@@ -525,18 +531,15 @@ describe("COLOUR_INPUT_SCRIPT", () => {
     c.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   }
 
-  it("greys the swatch while Use default is on, and picking a colour unticks it", () => {
+  it("picking a colour unticks Use default, and the swatch stays pickable throughout", () => {
     const dom = mount("");
-    expect(el<HTMLInputElement>(dom, "[data-colour-input]").disabled).toBe(
-      true,
-    );
-    // Un-ticking enables the swatch again.
     const def = el<HTMLInputElement>(dom, "[data-colour-default]");
-    def.checked = false;
-    def.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(def.checked).toBe(true);
     expect(el<HTMLInputElement>(dom, "[data-colour-input]").disabled).toBe(
       false,
     );
+    pick(dom, "#00ff00");
+    expect(def.checked).toBe(false);
     pick(dom, "#ff0000");
     expect(def.checked).toBe(false);
   });
@@ -552,22 +555,37 @@ describe("COLOUR_INPUT_SCRIPT", () => {
     expect(c.disabled).toBe(false);
   });
 
-  it("ticking Use default disables the swatch so only the tick posts", () => {
+  it("ticking Use default leaves the swatch pickable: the tick wins at the server", () => {
     const dom = mount("#112233");
     const def = el<HTMLInputElement>(dom, "[data-colour-default]");
     def.checked = true;
     def.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(el<HTMLInputElement>(dom, "[data-colour-input]").disabled).toBe(
-      true,
+      false,
     );
   });
 
-  it("a stored non-colour is replaced by the first colour picked", () => {
+  it("a stored non-colour is kept until a colour is picked, which unticks Keep", () => {
     const dom = mount("red");
-    const mirror = el<HTMLInputElement>(dom, "[data-colour-mirror]");
-    expect(mirror.value).toBe("red");
+    const keep = el<HTMLInputElement>(dom, "[data-colour-keep]");
+    const swatch = el<HTMLInputElement>(dom, "[data-colour-input]");
+    expect(keep.checked).toBe(true);
+    expect(swatch.disabled).toBe(false);
     pick(dom, "#123456");
-    expect(mirror.value).toBe("#123456");
+    expect(keep.checked).toBe(false);
+    expect(swatch.disabled).toBe(false);
+  });
+
+  it("Use default and Keep exclude each other", () => {
+    const dom = mount("red");
+    const keep = el<HTMLInputElement>(dom, "[data-colour-keep]");
+    const def = el<HTMLInputElement>(dom, "[data-colour-default]");
+    def.checked = true;
+    def.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(keep.checked).toBe(false);
+    keep.checked = true;
+    keep.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(def.checked).toBe(false);
   });
 
   it("leaves a dependency-locked control disabled", () => {
@@ -639,6 +657,27 @@ describe("what the browser posts after the colour script ran", () => {
     expect(readSettingField(body, "reactionroles.group_role_colour")).toBe(
       "#123456",
     );
+  });
+
+  it("Keep posts the stored value, whatever it is; Use default wins over Keep", () => {
+    const key = "reactionroles.group_role_colour";
+    const body = {
+      [`value_${key}`]: "#99aab5",
+      [`keep_${key}`]: "true",
+    };
+    expect(readSettingField(body, key, "red")).toBe("red");
+    expect(readSettingField(body, key)).toBe("#99aab5");
+    expect(
+      readSettingField({ ...body, [`use_default_${key}`]: "true" }, key, "red"),
+    ).toBe("");
+    // Only a colour key reads the boxes.
+    expect(
+      readSettingField(
+        { "value_events.timezone": "UTC", "keep_events.timezone": "true" },
+        "events.timezone",
+        "Mars/Olympus",
+      ),
+    ).toBe("UTC");
   });
 
   it("an untouched stored colour posts as it was", () => {
@@ -897,7 +936,7 @@ describe("the accessibility fixtures (#1426)", () => {
       ],
       [
         "Settings (pickers holding values they cannot produce, rejected)",
-        ["(custom)", "data-colour-mirror", "data-emoji-field"],
+        ["(custom)", "data-colour-keep", "data-emoji-field"],
       ],
       [
         "Setup wizard step (timezone and emoji settings)",

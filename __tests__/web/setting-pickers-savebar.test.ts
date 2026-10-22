@@ -1,8 +1,10 @@
 /* global HTMLElement, HTMLButtonElement, HTMLInputElement, HTMLFormElement */
 /**
- * The colour input and the save bar, both scripts loaded together in jsdom
- * (#1426): Discard must put the swatch, the Use default box and the stored
- * non-colour back as one, and the bar must see the final state of a change.
+ * The colour input, the save bar and the section cascade, all their scripts
+ * loaded together in jsdom (#1426). The colour field keeps no state of its own:
+ * Use default and Keep are real checkboxes and the swatch is a real input, so
+ * the save bar's baseline, commit and Discard apply to them as to any control.
+ * A seeded random walk at the end checks that over every order of events.
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
@@ -11,20 +13,29 @@ import {
   renderColourInput,
   renderEmojiField,
 } from "../../src/web/setting-pickers.js";
+import { DEFAULT_COLOUR_SWATCH } from "../../src/utils/setting-formats.js";
 import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
 import { groupRowsScript } from "../../src/web/event-group-form.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
+import { readSettingField } from "../../src/web/admin-views.js";
+import { coerceConfigValue } from "../../src/web/routes/write/helpers.js";
 
-const NAME = "value_reactionroles.group_role_colour";
-const DEFAULT = "use_default_reactionroles.group_role_colour";
+const KEY = "reactionroles.group_role_colour";
+const NAME = `value_${KEY}`;
+const DEFAULT = `use_default_${KEY}`;
+const PLACEHOLDER = DEFAULT_COLOUR_SWATCH;
 
-function mount(current: string): JSDOM {
+/** A form as the Settings page builds it: a cascade scope with its master, the colour row, a sibling, the bar. */
+function mount(current: string, masterOn = true): JSDOM {
   const dom = new JSDOM(
-    `<!doctype html><body><form><div class="kb-setting">${renderColourInput(NAME, DEFAULT, current)}</div>` +
-      `<input type="text" name="sibling" value="a">${renderSaveBar("Save")}</form></body>`,
+    `<!doctype html><body><form><div data-cascade-scope>` +
+      `<input type="checkbox" name="master" data-cascade-master${masterOn ? " checked" : ""}>` +
+      `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, current)}</div>` +
+      `</div><input type="text" name="sibling" value="a">${renderSaveBar("Save")}</form></body>`,
     { runScripts: "outside-only" },
   );
   // The order the admin layout loads them in.
+  dom.window.eval(CASCADE_DISABLE_SCRIPT);
   dom.window.eval(COLOUR_INPUT_SCRIPT);
   dom.window.eval(SAVEBAR_SCRIPT);
   return dom;
@@ -44,86 +55,148 @@ function posted(dom: JSDOM): Record<string, string> {
   );
 }
 
-function pick(dom: JSDOM, value: string): void {
-  const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
-  swatch.value = value;
-  swatch.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  swatch.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+/** What the server would take from the form, given the stored value. */
+function effective(dom: JSDOM, stored: string): unknown {
+  return readSettingField(posted(dom), KEY, stored);
 }
 
-function tick(dom: JSDOM, on: boolean): void {
-  const box = q<HTMLInputElement>(dom, "[data-colour-default]");
-  box.checked = on;
-  box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+function swatch(dom: JSDOM): HTMLInputElement {
+  return q<HTMLInputElement>(dom, "[data-colour-input]");
+}
+function box(dom: JSDOM, which: "default" | "keep"): HTMLInputElement | null {
+  return dom.window.document.querySelector(
+    `[data-colour-${which}]`,
+  ) as HTMLInputElement | null;
+}
+
+function pick(dom: JSDOM, value: string): void {
+  const s = swatch(dom);
+  if (s.disabled || s.value === value) return; // a browser fires nothing then
+  s.value = value;
+  s.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  s.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+}
+
+function tick(dom: JSDOM, which: "default" | "keep", on: boolean): void {
+  const b = box(dom, which);
+  if (!b || b.disabled || b.checked === on) return;
+  b.checked = on;
+  b.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+}
+
+function flip(dom: JSDOM, on: boolean): void {
+  const m = q<HTMLInputElement>(dom, "[data-cascade-master]");
+  if (m.checked === on) return;
+  m.checked = on;
+  m.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 }
 
 function discard(dom: JSDOM): void {
   q(dom, "[data-savebar-discard]").click();
 }
 
+function submit(dom: JSDOM): void {
+  q<HTMLFormElement>(dom, "form").dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+}
+function saved(dom: JSDOM): void {
+  q<HTMLFormElement>(dom, "form").dispatchEvent(
+    new dom.window.Event("kb-saved"),
+  );
+}
+
 const bar = (dom: JSDOM): HTMLElement => q(dom, "[data-savebar]");
 const barText = (dom: JSDOM): string =>
   q(dom, "[data-savebar-text]").textContent ?? "";
 
-describe("Discard with a stored value that is not a colour", () => {
-  it("restores the stored text, so a later save of a sibling does not replace it", () => {
+describe("a stored value that is not a colour", () => {
+  it("is kept: Keep is ticked, and the server reads the stored text, not the swatch", () => {
     const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
-    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
-    pick(dom, "#123456");
-    expect(mirror.value).toBe("#123456");
-    expect(bar(dom).hidden).toBe(false);
-    discard(dom);
-    expect(mirror.value).toBe("red");
-    expect(posted(dom)[NAME]).toBe("red");
-    expect(swatch.hasAttribute("name")).toBe(false);
-    expect(swatch.disabled).toBe(false);
+    expect(box(dom, "keep")?.checked).toBe(true);
+    expect(posted(dom)[NAME]).toBe(PLACEHOLDER);
+    expect(effective(dom, "red")).toBe("red");
     expect(bar(dom).hidden).toBe(true);
-    // A sibling edit afterwards still posts the stored text.
+  });
+
+  it("a pick replaces it, and Discard brings back Keep and the text together", () => {
+    const dom = mount("red");
+    pick(dom, "#123456");
+    expect(box(dom, "keep")?.checked).toBe(false);
+    expect(effective(dom, "red")).toBe("#123456");
+    expect(barText(dom)).toBe("1 unsaved change");
+    discard(dom);
+    expect(box(dom, "keep")?.checked).toBe(true);
+    expect(effective(dom, "red")).toBe("red");
+    expect(bar(dom).hidden).toBe(true);
+  });
+
+  it("a sibling edit after Discard still posts Keep, so the stored text survives the save", () => {
+    const dom = mount("red");
+    pick(dom, "#123456");
+    discard(dom);
     const sibling = q<HTMLInputElement>(dom, "[name=sibling]");
     sibling.value = "b";
     sibling.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-    expect(posted(dom)[NAME]).toBe("red");
-    expect(posted(dom)[DEFAULT]).toBeUndefined();
+    expect(effective(dom, "red")).toBe("red");
   });
 
-  it("returning the swatch to its first colour brings the stored text back", () => {
+  it("in flight: pick, submit, return to the first colour before the response", () => {
     const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
-    const first = q<HTMLInputElement>(dom, "[data-colour-input]").defaultValue;
     pick(dom, "#123456");
-    pick(dom, first);
-    expect(mirror.value).toBe("red");
+    submit(dom);
+    pick(dom, PLACEHOLDER);
+    // The server stored the submitted colour.
+    saved(dom);
+    expect(effective(dom, "#123456")).toBe(PLACEHOLDER);
+    expect(coerceConfigValue(KEY, PLACEHOLDER, "#123456").ok).toBe(true);
+    // What is shown differs from what was saved, so it is one unsaved change.
+    expect(bar(dom).hidden).toBe(false);
+    expect(barText(dom)).toBe("1 unsaved change");
+    discard(dom);
+    expect(swatch(dom).value).toBe("#123456");
+    expect(effective(dom, "#123456")).toBe("#123456");
     expect(bar(dom).hidden).toBe(true);
   });
 
-  it("a saved pick becomes the value Discard returns to", () => {
+  it("an edit made while the request was out stays one unsaved change", () => {
     const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
     pick(dom, "#123456");
-    submitAndSave(dom);
-    expect(mirror.getAttribute("data-stored")).toBe("#123456");
+    submit(dom);
     pick(dom, "#654321");
+    saved(dom);
+    expect(barText(dom)).toBe("1 unsaved change");
     discard(dom);
-    expect(mirror.value).toBe("#123456");
+    expect(effective(dom, "#123456")).toBe("#123456");
+  });
+
+  it("saving Use default, then unticking it, posts a colour that validates", () => {
+    const dom = mount("red");
+    tick(dom, "default", true);
+    expect(box(dom, "keep")?.checked).toBe(false);
+    expect(effective(dom, "red")).toBe("");
+    submit(dom);
+    saved(dom);
+    tick(dom, "default", false);
+    const value = effective(dom, "");
+    expect(value).not.toBe("red");
+    expect(coerceConfigValue(KEY, value, "").ok).toBe(true);
   });
 });
 
-describe("Discard with Use default on", () => {
-  it("ticks the box again and greys the swatch, posting the default", () => {
+describe("Use default on a stored default", () => {
+  it("pick then Discard ticks the box again", () => {
     const dom = mount("");
-    const box = q<HTMLInputElement>(dom, "[data-colour-default]");
-    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
-    expect(box.checked).toBe(true);
+    expect(box(dom, "default")?.checked).toBe(true);
+    expect(box(dom, "keep")).toBeNull();
     pick(dom, "#123456");
-    expect(box.checked).toBe(false);
-    expect(swatch.disabled).toBe(false);
-    expect(bar(dom).hidden).toBe(false);
+    expect(box(dom, "default")?.checked).toBe(false);
+    expect(swatch(dom).disabled).toBe(false);
+    expect(effective(dom, "")).toBe("#123456");
     discard(dom);
-    expect(box.checked).toBe(true);
-    expect(swatch.disabled).toBe(true);
+    expect(box(dom, "default")?.checked).toBe(true);
     expect(posted(dom)[DEFAULT]).toBe("true");
-    expect(bar(dom).hidden).toBe(true);
+    expect(effective(dom, "")).toBe("");
   });
 });
 
@@ -132,155 +205,68 @@ describe("the save bar sees the final state of a colour change", () => {
     const dom = mount("#a95f55");
     pick(dom, "#123456");
     expect(barText(dom)).toBe("1 unsaved change");
-    tick(dom, true);
-    tick(dom, false);
+    tick(dom, "default", true);
+    tick(dom, "default", false);
     expect(bar(dom).hidden).toBe(false);
     expect(barText(dom)).toBe("1 unsaved change");
-    expect(posted(dom)[NAME]).toBe("#123456");
+    expect(effective(dom, "#a95f55")).toBe("#123456");
   });
 
-  it("ticking Use default on a stored colour counts one change and unticking clears it", () => {
+  it("ticking Use default counts one change and unticking clears it", () => {
     const dom = mount("#a95f55");
-    tick(dom, true);
+    tick(dom, "default", true);
     expect(barText(dom)).toBe("1 unsaved change");
-    tick(dom, false);
+    tick(dom, "default", false);
     expect(bar(dom).hidden).toBe(true);
-  });
-});
-
-function submitAndSave(dom: JSDOM, during?: () => void): void {
-  const form = q<HTMLFormElement>(dom, "form");
-  form.dispatchEvent(
-    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
-  );
-  during?.();
-  form.dispatchEvent(new dom.window.Event("kb-saved"));
-}
-
-describe("a save of a colour that held a stored non-colour", () => {
-  it("keeps an edit made while the request was out as one unsaved change", () => {
-    const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
-    pick(dom, "#123456");
-    submitAndSave(dom, () => pick(dom, "#654321"));
-    // The bar committed what was sent; the later pick is still unsaved.
-    expect(mirror.getAttribute("data-stored")).toBe("#123456");
-    expect(mirror.value).toBe("#654321");
-    expect(bar(dom).hidden).toBe(false);
-    expect(barText(dom)).toBe("1 unsaved change");
-    // Discard returns to what was saved, in the swatch and in the field.
-    discard(dom);
-    expect(q<HTMLInputElement>(dom, "[data-colour-input]").value).toBe(
-      "#123456",
-    );
-    expect(mirror.value).toBe("#123456");
-    expect(posted(dom)[NAME]).toBe("#123456");
-    expect(bar(dom).hidden).toBe(true);
-  });
-
-  it("a plain save makes the sent colour the one Discard returns to", () => {
-    const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
-    pick(dom, "#123456");
-    submitAndSave(dom);
-    expect(mirror.getAttribute("data-stored")).toBe("#123456");
-    expect(bar(dom).hidden).toBe(true);
-  });
-
-  it("saving Use default turns the stored text into the default, so unticking posts no invalid value", () => {
-    const dom = mount("red");
-    const mirror = q<HTMLInputElement>(dom, "[data-colour-mirror]");
-    tick(dom, true);
-    expect(posted(dom)[DEFAULT]).toBe("true");
-    submitAndSave(dom);
-    expect(mirror.getAttribute("data-stored")).toBe("");
-    expect(mirror.value).toBe("");
-    tick(dom, false);
-    expect(posted(dom)[NAME]).toBe("");
-    expect(posted(dom)[NAME]).not.toBe("red");
   });
 });
 
 describe("the section cascade", () => {
-  function cascade(current: string, masterOn: boolean): JSDOM {
-    const dom = new JSDOM(
-      `<!doctype html><body><form><div data-cascade-scope>` +
-        `<input type="checkbox" name="master" data-cascade-master${masterOn ? " checked" : ""}>` +
-        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, current)}</div>` +
-        `<div class="kb-setting">${renderEmojiField("value_p", "🎮", { label: "Prefix" })}</div>` +
-        `</div>${renderSaveBar("Save")}</form></body>`,
-      { runScripts: "outside-only" },
-    );
-    // The order the admin layout loads them in.
-    dom.window.eval(CASCADE_DISABLE_SCRIPT);
-    dom.window.eval(COLOUR_INPUT_SCRIPT);
-    dom.window.eval(groupRowsScript());
-    dom.window.eval(SAVEBAR_SCRIPT);
-    return dom;
-  }
-  const flip = (dom: JSDOM, on: boolean): void => {
-    const m = q<HTMLInputElement>(dom, "[data-cascade-master]");
-    m.checked = on;
-    m.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  };
-
-  it("keeps the swatch off while the feature is off, whatever Use default says", () => {
-    const dom = cascade("#a95f55", false);
-    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
-    const box = q<HTMLInputElement>(dom, "[data-colour-default]");
-    expect(box.disabled).toBe(true);
-    expect(swatch.disabled).toBe(true);
-    box.checked = true;
-    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    box.checked = false;
-    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    expect(swatch.disabled).toBe(true);
+  it("keeps the swatch off while the feature is off, whatever the boxes say", () => {
+    const dom = mount("#a95f55", false);
+    expect(box(dom, "default")?.disabled).toBe(true);
+    expect(swatch(dom).disabled).toBe(true);
+    const b = box(dom, "default") as HTMLInputElement;
+    b.checked = true;
+    b.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    b.checked = false;
+    b.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(swatch(dom).disabled).toBe(true);
     expect(bar(dom).hidden).toBe(true);
   });
 
-  it("follows the master: on enables the swatch, off disables it, Use default still greys it", () => {
-    const dom = cascade("#a95f55", false);
-    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
+  it("follows the master: on enables the swatch and the boxes, off disables them", () => {
+    const dom = mount("#a95f55", false);
     flip(dom, true);
-    expect(swatch.disabled).toBe(false);
-    tick(dom, true);
-    expect(swatch.disabled).toBe(true);
+    expect(swatch(dom).disabled).toBe(false);
+    expect(box(dom, "default")?.disabled).toBe(false);
+    tick(dom, "default", true);
+    expect(swatch(dom).disabled).toBe(false);
     flip(dom, false);
-    expect(swatch.disabled).toBe(true);
+    expect(swatch(dom).disabled).toBe(true);
     flip(dom, true);
-    // Use default is still ticked, so the swatch stays off.
-    expect(swatch.disabled).toBe(true);
-    tick(dom, false);
-    expect(swatch.disabled).toBe(false);
+    expect(swatch(dom).disabled).toBe(false);
   });
 
-  it("master on from the start behaves as before", () => {
-    const dom = cascade("", true);
-    const swatch = q<HTMLInputElement>(dom, "[data-colour-input]");
-    expect(swatch.disabled).toBe(true);
-    pick(dom, "#112233");
-    expect(swatch.disabled).toBe(false);
-    expect(q<HTMLInputElement>(dom, "[data-colour-default]").checked).toBe(
-      false,
-    );
-  });
-
-  it("the emoji button does nothing while its box is off", () => {
-    const dom = cascade("#a95f55", false);
-    const input = q<HTMLInputElement>(dom, "[data-marker-input]");
-    expect(input.disabled).toBe(true);
-    q(dom, "[data-marker-btn]").click();
-    expect(dom.window.document.querySelector(".kb-emoji-pop")).toBeNull();
+  it("a save made with the section off commits nothing for the colour", () => {
+    const dom = mount("red");
+    pick(dom, "#123456");
+    const sibling = q<HTMLInputElement>(dom, "[name=sibling]");
+    sibling.value = "b";
+    sibling.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    flip(dom, false);
+    submit(dom);
+    saved(dom);
     flip(dom, true);
-    q(dom, "[data-marker-btn]").click();
-    expect(
-      (dom.window.document.querySelector(".kb-emoji-pop") as HTMLElement)
-        .hidden,
-    ).toBe(false);
+    discard(dom);
+    // The save committed the master as off, so Discard restores that too.
+    flip(dom, true);
+    expect(box(dom, "keep")?.checked).toBe(true);
+    expect(effective(dom, "red")).toBe("red");
   });
 });
 
-describe("a save made while the section is off", () => {
+describe("the emoji field in a section that is off", () => {
   function twoScopes(): JSDOM {
     const scope = (n: number, field: string): string =>
       `<div data-cascade-scope id="s${n}">` +
@@ -305,90 +291,189 @@ describe("a save made while the section is off", () => {
     return dom;
   }
 
-  it("does not commit a pick the server will skip: Discard still returns to the stored text", () => {
-    const scoped = new JSDOM(
-      `<!doctype html><body><form><div data-cascade-scope>` +
-        `<input type="checkbox" name="master" data-cascade-master checked>` +
-        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, "red")}</div>` +
-        `</div><input type="text" name="sibling" value="a">${renderSaveBar("Save")}</form></body>`,
-      { runScripts: "outside-only" },
-    );
-    scoped.window.eval(CASCADE_DISABLE_SCRIPT);
-    scoped.window.eval(COLOUR_INPUT_SCRIPT);
-    scoped.window.eval(SAVEBAR_SCRIPT);
-    const mirror = q<HTMLInputElement>(scoped, "[data-colour-mirror]");
-    const master = q<HTMLInputElement>(scoped, "[data-cascade-master]");
-    const flip = (on: boolean): void => {
-      master.checked = on;
-      master.dispatchEvent(
-        new scoped.window.Event("change", { bubbles: true }),
-      );
-    };
-    pick(scoped, "#123456");
-    // The sibling changes, so the bar stays up and the form can be saved.
-    const sibling = q<HTMLInputElement>(scoped, "[name=sibling]");
-    sibling.value = "b";
-    sibling.dispatchEvent(new scoped.window.Event("input", { bubbles: true }));
-    flip(false);
-    submitAndSave(scoped);
-    // Nothing was sent for the colour, so nothing was committed for it.
-    expect(mirror.getAttribute("data-stored")).toBe("red");
-    flip(true);
-    expect(q<HTMLInputElement>(scoped, "[data-colour-input]").disabled).toBe(
-      false,
-    );
-    discard(scoped);
-    expect(mirror.value).toBe("red");
-    expect(posted(scoped)[NAME]).toBe("red");
+  it("the button does nothing while its box is off", () => {
+    const dom = twoScopes();
+    const m = q<HTMLInputElement>(dom, "#m1");
+    m.checked = false;
+    m.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    q<HTMLButtonElement>(dom, "#s1 [data-marker-btn]").click();
+    expect(dom.window.document.querySelector(".kb-emoji-pop")).toBeNull();
+    m.checked = true;
+    m.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    q<HTMLButtonElement>(dom, "#s1 [data-marker-btn]").click();
+    expect(
+      (dom.window.document.querySelector(".kb-emoji-pop") as HTMLElement)
+        .hidden,
+    ).toBe(false);
   });
 
-  it("an earlier submission's snapshot is dropped when the next one skips the colour", () => {
-    const scoped = new JSDOM(
-      `<!doctype html><body><form><div data-cascade-scope>` +
-        `<input type="checkbox" name="master" data-cascade-master checked>` +
-        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, "red")}</div>` +
-        `</div>${renderSaveBar("Save")}</form></body>`,
-      { runScripts: "outside-only" },
-    );
-    scoped.window.eval(CASCADE_DISABLE_SCRIPT);
-    scoped.window.eval(COLOUR_INPUT_SCRIPT);
-    scoped.window.eval(SAVEBAR_SCRIPT);
-    const mirror = q<HTMLInputElement>(scoped, "[data-colour-mirror]");
-    const master = q<HTMLInputElement>(scoped, "[data-cascade-master]");
-    pick(scoped, "#123456");
-    const form = q<HTMLFormElement>(scoped, "form");
-    // A save that failed leaves its snapshot behind.
-    form.dispatchEvent(
-      new scoped.window.Event("submit", { bubbles: true, cancelable: true }),
-    );
-    master.checked = false;
-    master.dispatchEvent(new scoped.window.Event("change", { bubbles: true }));
-    submitAndSave(scoped);
-    expect(mirror.getAttribute("data-stored")).toBe("red");
-  });
-
-  it("the shared emoji grid is usable in a section that is on after another section went off", () => {
+  it("the shared grid is usable in a section that is on after another went off", () => {
     const dom = twoScopes();
     const d = dom.window.document;
-    const clickBtn = (id: string): void =>
-      (
-        d
-          .querySelector(`#${id}`)
-          ?.closest("[data-emoji-field]")
-          ?.querySelector("[data-marker-btn]") as HTMLButtonElement
-      ).click();
-    clickBtn("a");
+    q<HTMLButtonElement>(dom, "#s1 [data-marker-btn]").click();
     const search = d.querySelector("[data-emoji-search]") as HTMLInputElement;
     expect(search.disabled).toBe(false);
     const m1 = q<HTMLInputElement>(dom, "#m1");
     m1.checked = false;
     m1.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(search.disabled).toBe(true);
-    clickBtn("b");
+    q<HTMLButtonElement>(dom, "#s2 [data-marker-btn]").click();
     expect(search.closest("#s2")).not.toBeNull();
     expect(search.disabled).toBe(false);
     expect((d.querySelector(".kb-emoji-pop") as HTMLElement).hidden).toBe(
       false,
     );
   });
+});
+
+/** Small seeded generator, so a failing walk can be replayed. */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe("every order of events (random walk)", () => {
+  const COLOURS = ["#123456", "#654321", PLACEHOLDER, "#a95f55"];
+  const ACTIONS = [
+    "pick",
+    "pick",
+    "tickDefault",
+    "untickDefault",
+    "tickKeep",
+    "untickKeep",
+    "submit",
+    "saved",
+    "failed",
+    "discard",
+    "cascadeOff",
+    "cascadeOn",
+  ] as const;
+
+  function walk(seed: number, stored0: string): void {
+    const rand = mulberry32(seed);
+    const dom = mount(stored0);
+    let server = stored0;
+    let pending: { sent: unknown } | null = null;
+    const log: string[] = [];
+    const fail = (why: string): never => {
+      throw new Error(
+        `seed ${seed}, stored ${JSON.stringify(stored0)}: ${why}\n  ${log.join("\n  ")}`,
+      );
+    };
+    const cascadeOn = (): boolean =>
+      q<HTMLInputElement>(dom, "[data-cascade-master]").checked;
+
+    for (let step = 0; step < 40; step++) {
+      const action = ACTIONS[Math.floor(rand() * ACTIONS.length)];
+      log.push(action);
+      switch (action) {
+        case "pick": {
+          const colour = COLOURS[Math.floor(rand() * COLOURS.length)];
+          const before = swatch(dom).value;
+          pick(dom, colour);
+          // What the user just picked is what a save sends.
+          if (
+            cascadeOn() &&
+            colour !== before &&
+            effective(dom, server) !== colour
+          ) {
+            fail(
+              `picked ${colour}, the form posts ${JSON.stringify(effective(dom, server))}`,
+            );
+          }
+          break;
+        }
+        case "tickDefault": {
+          const was = box(dom, "default")?.checked;
+          tick(dom, "default", true);
+          if (cascadeOn() && !was && effective(dom, server) !== "") {
+            fail("Use default ticked, the form does not post the default");
+          }
+          break;
+        }
+        case "untickDefault":
+          tick(dom, "default", false);
+          break;
+        case "tickKeep": {
+          const was = box(dom, "keep")?.checked;
+          tick(dom, "keep", true);
+          if (
+            cascadeOn() &&
+            was === false &&
+            effective(dom, server) !== server
+          ) {
+            fail("Keep ticked, the form does not post the stored value");
+          }
+          break;
+        }
+        case "untickKeep":
+          tick(dom, "keep", false);
+          break;
+        case "cascadeOff":
+          flip(dom, false);
+          break;
+        case "cascadeOn":
+          flip(dom, true);
+          break;
+        case "submit":
+          if (pending) break;
+          pending = { sent: cascadeOn() ? effective(dom, server) : null };
+          submit(dom);
+          break;
+        case "failed":
+          pending = null;
+          break;
+        case "saved":
+          if (!pending) break;
+          if (pending.sent !== null) {
+            const r = coerceConfigValue(KEY, pending.sent, server);
+            if (!r.ok)
+              fail(`the server would refuse what was sent: ${r.reason}`);
+            else server = String(r.value);
+          }
+          pending = null;
+          saved(dom);
+          break;
+        case "discard":
+          if (pending || bar(dom).hidden) break;
+          discard(dom);
+          if (cascadeOn()) {
+            if (String(effective(dom, server)) !== server) {
+              fail(
+                `Discard left ${JSON.stringify(effective(dom, server))}, saved is ${JSON.stringify(server)}`,
+              );
+            }
+            if (!bar(dom).hidden) fail("the bar stayed after Discard");
+          }
+          break;
+      }
+      if (!cascadeOn()) continue;
+      // The two boxes are exclusive.
+      if (box(dom, "default")?.checked && box(dom, "keep")?.checked) {
+        fail("Use default and Keep are both ticked");
+      }
+      // Whatever is shown, a save of it must be accepted, never rejecting the section.
+      const sent = effective(dom, server);
+      const r = coerceConfigValue(KEY, sent, server);
+      if (!r.ok)
+        fail(`the displayed state posts ${JSON.stringify(sent)}: ${r.reason}`);
+      // A clean bar means nothing differs from what was saved.
+      if (!pending && bar(dom).hidden && String(sent) !== server) {
+        fail(
+          `the bar is hidden but the form posts ${JSON.stringify(sent)}, saved is ${JSON.stringify(server)}`,
+        );
+      }
+    }
+  }
+
+  for (const stored of ["red", "#a95f55", ""]) {
+    it(`never posts a refused value or hides an unsaved change (stored ${JSON.stringify(stored)})`, () => {
+      for (let seed = 1; seed <= 60; seed++) walk(seed, stored);
+    });
+  }
 });

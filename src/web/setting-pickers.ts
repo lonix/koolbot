@@ -119,15 +119,23 @@ export const TIMEZONE_SELECT_SCRIPT =
 // ---------- Colour ----------
 
 /**
- * A colour input with a "Use default" checkbox. `<input type="color">` always
- * holds a colour, but `""` is how the setting says "Discord's default", so the
- * checkbox posts `<defaultName>=true` and the save handlers read it through
- * `readSettingField`; it wins over the swatch, with or without JavaScript.
+ * A colour input with its two non-colour states as real checkboxes.
  *
- * A stored value that is not `#RRGGBB` (the service ignores it with a warning)
- * is posted unchanged from a hidden field and noted under the control, until a
- * colour is picked (script) or the default is ticked. The swatch has no name in
- * that case, because it would otherwise post black over the stored value.
+ * `<input type="color">` always holds a colour, but `""` is how the setting
+ * says "Discord's default", so a *Use default* checkbox stands for it. A stored
+ * value that is not `#RRGGBB` (the service ignores it with a warning) gets a
+ * second one, *Keep the stored value*, ticked. The three states are exclusive:
+ *
+ * - Use default ticked: the value is `""`;
+ * - Keep ticked: the value is the stored one, whatever it is;
+ * - neither: the value is the swatch.
+ *
+ * Every piece of state is a form control the save bar already compares, commits
+ * on a saved response and restores on Discard, so this control has no state of
+ * its own to keep in step. The save handlers turn the boxes into the value
+ * (`readSettingField`, with the stored value for Keep); Use default wins over
+ * Keep, which wins over the swatch, so a browser without JavaScript posts the
+ * same thing a script would have.
  */
 export function renderColourInput(
   name: string,
@@ -141,72 +149,53 @@ export function renderColourInput(
   const shown =
     checked.ok && checked.value ? checked.value : DEFAULT_COLOUR_SWATCH;
   const lock = a.disabled ? LOCK : "";
+  const keepName = defaultName.replace(/^use_default_/, "keep_");
   return (
     `<span class="kb-colour" data-colour>` +
-    (legacy
-      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(current)}" data-colour-mirror data-stored="${escapeHtml(current)}"${lock}>`
-      : "") +
     `<input type="color" class="kb-colour__swatch" data-colour-input${attr("id", a.id)}` +
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
-    `${legacy ? "" : ` name="${escapeHtml(name)}"`} value="${escapeHtml(shown)}"${lock}>` +
+    ` name="${escapeHtml(name)}" value="${escapeHtml(shown)}"${lock}>` +
     `<label class="kb-colour__default"><input type="checkbox" data-colour-default ` +
     `name="${escapeHtml(defaultName)}" value="true"${empty ? " checked" : ""}${lock}> Use default</label>` +
     (legacy
-      ? `<span class="kb-help">Stored value <span class="kb-mono">${escapeHtml(current)}</span> is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default.</span>`
+      ? `<label class="kb-colour__default"><input type="checkbox" data-colour-keep ` +
+        `name="${escapeHtml(keepName)}" value="true" checked${lock}> Keep the stored value</label>` +
+        `<span class="kb-help">The stored value <span class="kb-mono">${escapeHtml(current)}</span> is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default.</span>`
       : "") +
     `</span>`
   );
 }
 
 /**
- * Keeps a colour input and its "Use default" box in step: picking a colour
- * unticks the box, ticking it greys the swatch out, and a stored value that is
- * not a colour is replaced by the first colour picked. Delegated, and it leaves
- * a control the dependency lock disabled alone.
+ * Keeps a colour input in step with its boxes. The swatch stays pickable in
+ * every state (picking is how you leave Use default or Keep) and is off only
+ * while its boxes are disabled (the section's cascade has its feature off, or
+ * the dependency lock). Picking a colour unticks both boxes; ticking one
+ * unticks the other. Nothing
+ * else is stored: baselines, commits and Discard belong to the save bar, whose
+ * restoring events (`kbRestore`) only need the swatch re-synchronised.
+ *
+ * The handlers run in the capture phase, so the save bar's bubbling listener on
+ * the form finds the final state. Delegated; a dependency-locked control stays
+ * as rendered.
  */
 export const COLOUR_INPUT_SCRIPT =
   "(function(){" +
   "function parts(el){var box=el.closest('[data-colour]');if(!box)return null;" +
-  "return{box:box,color:box.querySelector('[data-colour-input]'),def:box.querySelector('[data-colour-default]'),mirror:box.querySelector('[data-colour-mirror]')}}" +
-  // The swatch is off while Use default is ticked, and while the box itself is
-  // off: the section's cascade (its feature switch is off) disables every
-  // control, and the dependency lock marks its own.
-  "function sync(p){if(!p.color||!p.def||p.def.hasAttribute('data-dep-locked'))return;p.color.disabled=p.def.checked||p.def.disabled}" +
-  // A hidden input's value IS its default attribute, so the mirror keeps the
-  // stored text in `data-stored`. A pick that lands back on the swatch's first
-  // colour is "no pick", so the stored text returns: the save bar cannot see a
-  // hidden field change.
-  "function mirrorFor(p){if(p.mirror)p.mirror.value=p.color.value===p.color.defaultValue?p.mirror.getAttribute('data-stored'):p.color.value}" +
-  // Capture phase: the save bar listens on the form while bubbling, so it must
-  // find the swatch and the box already in step. Discard's restoring events
-  // (`kbRestore`) are not picks: the box and the mirror go back together.
+  "return{color:box.querySelector('[data-colour-input]'),def:box.querySelector('[data-colour-default]'),keep:box.querySelector('[data-colour-keep]')}}" +
+  "function sync(p){if(!p.color||!p.def||p.def.hasAttribute('data-dep-locked'))return;" +
+  "p.color.disabled=p.def.disabled}" +
   "document.addEventListener('input',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-input]'))return;" +
   "var p=parts(el);if(!p)return;" +
-  "if(e.kbRestore){if(p.mirror)p.mirror.value=p.mirror.getAttribute('data-stored');sync(p);return}" +
-  "if(p.def&&p.def.checked){p.def.checked=false;sync(p);p.def.dispatchEvent(new Event('change',{bubbles:true}))}" +
-  "mirrorFor(p)},true);" +
-  "document.addEventListener('change',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-default]'))return;var p=parts(el);" +
-  "if(!p)return;if(e.kbRestore&&p.mirror)p.mirror.value=p.mirror.getAttribute('data-stored');sync(p)},true);" +
-  // What a save sends is taken at submit, as the save bar takes its own
-  // baseline: the effective value (Use default means empty) and the mirror it
-  // came from. Edits made while the request is out are not part of it.
-  "document.addEventListener('submit',function(e){var f=e.target;if(!f||!f.querySelectorAll)return;" +
-  "Array.prototype.forEach.call(f.querySelectorAll('[data-colour-mirror]'),function(m){var p=parts(m);if(!p)return;" +
-  "m.removeAttribute('data-sent');m.removeAttribute('data-sent-raw');" +
-  // A disabled box means the section is off (or locked): the server skips
-  // the key, so what was sent is not the new baseline.
-  "if(p.def&&p.def.disabled)return;" +
-  "m.setAttribute('data-sent',p.def&&p.def.checked?'':m.value);m.setAttribute('data-sent-raw',m.value)})},true);" +
-  // An accepted save makes the sent value the stored one. The field follows
-  // unless it was edited since submit, in which case that edit is still unsaved.
-  "document.addEventListener('kb-saved',function(e){var f=e.target;if(!f||!f.querySelectorAll)return;" +
-  "Array.prototype.forEach.call(f.querySelectorAll('[data-colour-mirror]'),function(m){if(!m.hasAttribute('data-sent'))return;" +
-  "var sent=m.getAttribute('data-sent');m.setAttribute('data-stored',sent);" +
-  "if(m.value===m.getAttribute('data-sent-raw'))m.value=sent;" +
-  "m.removeAttribute('data-sent');m.removeAttribute('data-sent-raw')})},true);" +
+  "if(!e.kbRestore){if(p.def)p.def.checked=false;if(p.keep)p.keep.checked=false}" +
+  "sync(p)},true);" +
+  "document.addEventListener('change',function(e){var el=e.target;if(!el||!el.matches||!el.matches('[data-colour-default],[data-colour-keep]'))return;" +
+  "var p=parts(el);if(!p)return;" +
+  "if(!e.kbRestore&&el.checked){var other=el===p.def?p.keep:p.def;if(other)other.checked=false}" +
+  "sync(p)},true);" +
   // The cascade script re-enables or disables every control when its master
   // changes; this listener was added after it, so it runs after it on the
-  // master and before the save bar, and puts the swatch back in step.
+  // master and before the save bar.
   "function all(){Array.prototype.forEach.call(document.querySelectorAll('[data-colour]'),function(box){var p=parts(box);if(p)sync(p)})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',all)});" +
   "all()" +

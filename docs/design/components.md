@@ -227,13 +227,16 @@ An IANA zone for a setting or an event (#1426).
 
 A role colour for a setting (#1426).
 
-**Markup.** `span.kb-colour[data-colour]` → `input[type=color].kb-colour__swatch` and `label.kb-colour__default` with a checkbox (*Use default*).
+**Markup.** `span.kb-colour[data-colour]` → `input[type=color].kb-colour__swatch` and `label.kb-colour__default` with a checkbox (*Use default*),
+plus a second one (*Keep the stored value*) when the stored value is not `#RRGGBB`.
 
 - A colour input cannot be empty, so the checkbox is the empty state. It posts `use_default_<key>=true` and wins over the swatch, with or without
-  JavaScript; with the script, picking a colour unticks it and ticking it greys the swatch.
+  JavaScript; with the script, picking a colour unticks it and the two boxes exclude each other.
 - The swatch of the default shows Discord's default grey (`#99aab5`).
-- A stored value that is not `#RRGGBB` is posted unchanged from a hidden field and noted under the control ("is not a #RRGGBB colour. It stays as it is
-  until you pick a colour or use the default"); the swatch has no name then, so it cannot post black over it.
+- A stored value that is not `#RRGGBB` is kept by the ticked *Keep the stored value* box (`keep_<key>=true`, read by the server as the stored value) and
+  noted under the control ("is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default").
+- Every state is a real control (swatch, two checkboxes), so the save bar compares, commits and restores them without help; the swatch is only
+  disabled while the section's feature is off.
 
 ### PresetCards
 
