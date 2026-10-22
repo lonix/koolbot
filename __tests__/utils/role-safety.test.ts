@@ -4,6 +4,7 @@ import {
   SELF_ASSIGN_FORBIDDEN_PERMISSIONS,
   forbiddenSelfAssignPermissions,
   automaticGrantBlockReason,
+  groupBackedBlockReason,
 } from "../../src/utils/role-safety.js";
 
 const role = (...bits: bigint[]) => ({
@@ -90,13 +91,41 @@ describe("automaticGrantBlockReason (#1145)", () => {
     ).toBe("carries powerful permissions (BanMembers, Administrator)");
   });
 
-  it("refuses the admin role group's role even without permissions", () => {
-    expect(automaticGrantBlockReason({ id: "2", ...role() }, ["2"])).toBe(
-      "is the role of the admin role group",
-    );
+  it.each(["Admins", "Moderators", "Event hosts"])(
+    "refuses a role that backs the %s group even without permissions (#1375)",
+    (groupName) => {
+      expect(
+        automaticGrantBlockReason({ id: "2", ...role() }, [
+          { roleId: "2", groupName },
+        ]),
+      ).toContain(`backs the role group "${groupName}"`);
+    },
+  );
+
+  it("ignores groups backed by other roles", () => {
+    expect(
+      automaticGrantBlockReason({ id: "2", ...role() }, [
+        { roleId: "3", groupName: "Moderators" },
+      ]),
+    ).toBeNull();
   });
 
   it("treats a role with unreadable permissions as safe", () => {
     expect(automaticGrantBlockReason({ id: "1" })).toBeNull();
+  });
+});
+
+describe("groupBackedBlockReason (#1375)", () => {
+  it("is null when no group uses the role", () => {
+    expect(groupBackedBlockReason([])).toBeNull();
+  });
+
+  it("names every group and strips line breaks from the name", () => {
+    const reason = groupBackedBlockReason([
+      { roleId: "1", groupName: "Mods\nforged line" },
+      { roleId: "1", groupName: "Hosts" },
+    ]);
+    expect(reason).toContain('"Mods forged line", "Hosts"');
+    expect(reason).not.toContain("\n");
   });
 });

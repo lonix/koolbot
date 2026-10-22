@@ -24,6 +24,18 @@ const mockLogger = {
 const mockCreate =
   jest.fn<(row: Record<string, unknown>) => Promise<unknown>>();
 const mockFindOne = jest.fn();
+const mockGroupBackedRoles =
+  jest.fn<
+    (
+      guildId: string,
+      roleIds: string[],
+    ) => Promise<Array<{ roleId: string; groupName: string }>>
+  >();
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: jest.fn(() => ({ groupBackedRoles: mockGroupBackedRoles })),
+  },
+}));
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -210,6 +222,7 @@ describe("RaidProtectionService", () => {
     roles.clear();
     mockEnv.guildId = "guild-1";
     mockEnv.guildMembersIntent = true;
+    mockGroupBackedRoles.mockResolvedValue([]);
     mockCreate.mockResolvedValue({});
     send.mockResolvedValue({});
     liveConfig();
@@ -1458,6 +1471,43 @@ describe("RaidProtectionService", () => {
         expect.any(String),
       );
       expect(rowsWith("quarantine")).toHaveLength(1);
+    });
+
+    it.each(["Admins", "Moderators", "Event hosts"])(
+      "never quarantines with a role that backs the %s group, and logs why (#1375)",
+      async (groupName) => {
+        roles.set("q-1", { id: "q-1", managed: false, editable: true });
+        mockGroupBackedRoles.mockResolvedValue([{ roleId: "q-1", groupName }]);
+        liveConfig({
+          "moderation.raid.lockdown_action": "quarantine",
+          "moderation.raid.quarantine_role_id": "q-1",
+        });
+        const members = await joinMany(5);
+        expect(mockGroupBackedRoles).toHaveBeenCalledWith("guild-1", ["q-1"]);
+        expect(members.every((m) => m.rolesAdd.mock.calls.length === 0)).toBe(
+          true,
+        );
+        expect(rowsWith("quarantine")).toHaveLength(0);
+        expect(
+          mockLogger.warn.mock.calls.some((c) =>
+            String(c[0]).includes(`backs the role group "${groupName}"`),
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it("never quarantines when the role groups cannot be read", async () => {
+      roles.set("q-1", { id: "q-1", managed: false, editable: true });
+      mockGroupBackedRoles.mockRejectedValue(new Error("db down"));
+      liveConfig({
+        "moderation.raid.lockdown_action": "quarantine",
+        "moderation.raid.quarantine_role_id": "q-1",
+      });
+      const members = await joinMany(5);
+      expect(members.every((m) => m.rolesAdd.mock.calls.length === 0)).toBe(
+        true,
+      );
+      expect(rowsWith("quarantine")).toHaveLength(0);
     });
 
     it.each([

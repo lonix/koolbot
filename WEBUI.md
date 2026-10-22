@@ -1473,8 +1473,11 @@ groups are defined:
   @everyone as the birthday role or a tier is refused, naming the permissions (on the Settings page,
   section saves, imports and the Setup Wizard too). A role already saved is kept, not changed, and not granted: the
   birthday run still announces but skips the role, and a tier skips new grants, each logging one
-  warning per role. The `admin` group's role is refused at grant time as well. If the guild's roles
-  can't be read, the save is refused.
+  warning per role. A role that backs any role group (Admins, Moderators or Event hosts) is refused at
+  grant time as well, by the birthday role, leaderboard tiers, the Rules acceptance role and the raid
+  quarantine role (#1375), so a combination saved earlier or created some other way can't hand a group's
+  access to everyone the feature reaches. The log names the group; if the groups can't be read nothing is
+  granted. If the guild's roles can't be read, the save is refused.
 - **Leaderboard Roles, Reaction Roles, birthday role**: a role that already backs a group can't be
   chosen for another feature (a leaderboard tier would take it back from members, a birthday role
   would hand it out). The save is refused with a message naming the group. Choices made earlier are
