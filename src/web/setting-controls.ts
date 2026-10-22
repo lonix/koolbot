@@ -124,22 +124,15 @@ export function renderSegmented(
 
 // ---------- Numbers ----------
 
-/** How many characters a whole number up to `max` (and its sign) can take. */
-function numberMaxLength(
-  min: number | undefined,
-  max: number | undefined,
-): number {
-  const digits = max === undefined ? 9 : String(Math.abs(max)).length;
-  return digits + (min !== undefined && min < 0 ? 1 : 0);
-}
-
 /**
  * A bounded whole number (#1304). A `type="number"` input lets letters in on
  * Safari and Firefox and ignores `pattern`, so this is a text input with
  * `inputmode="numeric"` (the digit keypad on phones) and `pattern`, plus
  * `data-min` / `data-max` that `NUMBER_INPUT_SCRIPT` (number-input.ts) turns into a range
- * check and a digit filter. Without the script the pattern and `maxlength`
- * still hold, and the server refuses anything out of range either way.
+ * check and a digit filter. There is deliberately no `maxlength`: it would cut
+ * an oversized paste down to a different, valid number before the range check
+ * saw it. Without the script the pattern still holds, and the server refuses
+ * anything out of range either way.
  */
 export function renderNumberInput(
   name: string,
@@ -158,7 +151,7 @@ export function renderNumberInput(
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
     ` name="${escapeHtml(name)}" value="${escapeHtml(value)}"` +
     ` inputmode="numeric" autocomplete="off" pattern="${signed ? "-?[0-9]*" : "[0-9]*"}"` +
-    ` maxlength="${numberMaxLength(min, max)}" title="${escapeHtml(range)}" data-number` +
+    ` title="${escapeHtml(range)}" data-number` +
     `${min !== undefined ? ` data-min="${min}"` : ""}${max !== undefined ? ` data-max="${max}"` : ""}` +
     ` required style="width:8rem"${a.disabled ? " disabled data-dep-locked" : ""}>`
   );

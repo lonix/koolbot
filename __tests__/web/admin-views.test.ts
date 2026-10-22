@@ -567,11 +567,16 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(html).toMatch(
-      /<input type="text"[^>]*name="value_voicetracking\.cleanup\.retention\.detailed_sessions_days" value="400" inputmode="numeric"[^>]*pattern="\[0-9\]\*" maxlength="5"[^>]*data-number data-min="0" data-max="36500" required/,
+      /<input type="text"[^>]*name="value_voicetracking\.cleanup\.retention\.detailed_sessions_days" value="400" inputmode="numeric"[^>]*pattern="\[0-9\]\*"[^>]*data-number data-min="0" data-max="36500" required/,
     );
     // `type="number"` lets letters in on Safari and Firefox and ignores
     // `pattern`, so no number setting may render as one (#1304).
     expect(html).not.toMatch(/<input type="number"[^>]*name="value_/);
+    // maxlength would truncate an oversized paste into a different valid number.
+    expect(html).not.toMatch(
+      /<input[^>]*name="value_[^>]*data-number[^>]*maxlength/,
+    );
+    expect(html).not.toMatch(/<input[^>]*maxlength[^>]*data-number/);
     // A key without declared bounds is still required but carries none.
     const quotesInput = html.match(
       /<input type="text"[^>]*name="value_quotes\.max_length"[^>]*>/,

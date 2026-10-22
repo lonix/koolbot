@@ -340,6 +340,18 @@ describe("coerceConfigValue", () => {
       });
     });
 
+    it("rejects an oversized number outright rather than a truncated one", () => {
+      const r = coerceConfigValue("events.default_duration_minutes", "14400");
+      expect(r).toEqual({ ok: false, reason: "must be at most 1440" });
+    });
+
+    it("rejects signs, decimals and exponents on a retention key instead of reading another number", () => {
+      const key = "voicetracking.cleanup.retention.detailed_sessions_days";
+      for (const raw of ["-1", "1.5", "1e3"]) {
+        expect(coerceConfigValue(key, raw).ok).toBe(false);
+      }
+    });
+
     it("rejects words, however they are sent", () => {
       for (const raw of ["TEN", "ten", "NaN", "Infinity", "12abc"]) {
         const r = coerceConfigValue("quotes.max_length", raw);

@@ -793,7 +793,7 @@ channels).
 | `rules.role_id`      | `""`                                 | Acceptance role granted on Accept; pick an existing role (its holders count as accepted) or create one on the Rules page |
 | `rules.message`      | `"Please read the server rules ..."` | Text posted with the button                                                                                              |
 | `rules.button_label` | `"I accept the rules"`               | Button text (up to 80 characters)                                                                                        |
-| `rules.message_id`   | `""`                                 | Managed by KoolBot: the posted message's ID, shown read-only. The Rules page's button edits that message, or posts a new one when it was deleted or the channel changed                                            |
+| `rules.message_id`   | `""`                                 | Managed by KoolBot: the posted message's ID, read-only. The Rules page button edits it or posts anew if it was deleted   |
 
 When a member accepts, KoolBot stores _accepted at_ (and whether it was by
 button or because they already held the role). It is part of the member's

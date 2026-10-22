@@ -66,7 +66,8 @@ describe("renderNumberInput", () => {
     expect(input.getAttribute("pattern")).toBe("[0-9]*");
     expect(input.getAttribute("data-min")).toBe("1");
     expect(input.getAttribute("data-max")).toBe("25");
-    expect(input.getAttribute("maxlength")).toBe("2");
+    // No maxlength: it would cut an oversized paste to a different valid number.
+    expect(input.hasAttribute("maxlength")).toBe(false);
     expect(input.required).toBe(true);
     expect(input.title).toBe("Whole number from 1 to 25");
   });
@@ -109,15 +110,44 @@ describe("NUMBER_INPUT_SCRIPT", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  it("strips letters as they are typed or pasted", () => {
-    type("TEN");
-    expect(input.value).toBe("");
-    type("1a2");
-    expect(input.value).toBe("12");
-    type("1e3");
-    expect(input.value).toBe("13");
-    type("-4");
-    expect(input.value).toBe("4");
+  /** A keystroke or paste as `beforeinput`; returns true when it was blocked. */
+  function attempt(text: string, paste = false): boolean {
+    const ev = new Event("beforeinput", { bubbles: true, cancelable: true });
+    Object.assign(ev, {
+      inputType: paste ? "insertFromPaste" : "insertText",
+      data: paste ? null : text,
+      dataTransfer: paste ? { getData: () => text } : null,
+    });
+    input.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }
+
+  it("blocks a keystroke or paste that would leave a non-digit, keeping the value", () => {
+    input.value = "5";
+    input.setSelectionRange(1, 1);
+    for (const text of ["-", ".", "e", "T", "1e3", "-1", "1.5", "a1"]) {
+      expect(attempt(text)).toBe(true);
+      expect(attempt(text, true)).toBe(true);
+    }
+    expect(input.value).toBe("5");
+    expect(attempt("2")).toBe(false);
+    expect(attempt("12", true)).toBe(false);
+  });
+
+  it("never rewrites what got in: it keeps it and flags it, so the server still sees it", () => {
+    for (const raw of ["TEN", "1a2", "1e3", "-4", "-1", "1.5", "0x10"]) {
+      type(raw);
+      expect(input.value).toBe(raw);
+      expect(input.validity.valid).toBe(false);
+      expect(input.validationMessage).toContain("Digits only");
+    }
+  });
+
+  it("flags an oversized paste instead of truncating it into a valid number", () => {
+    type("14400");
+    expect(input.value).toBe("14400");
+    expect(input.validity.valid).toBe(false);
+    expect(input.validationMessage).toBe("Enter a whole number from 1 to 25.");
   });
 
   it("holds the form back outside the range, with a message", () => {
