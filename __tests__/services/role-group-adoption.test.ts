@@ -397,6 +397,60 @@ describe("linkCreatedRoles", () => {
   });
 });
 
+describe("link safety for a repeated create", () => {
+  it("never links a role an earlier apply created before the group existed", async () => {
+    // "Event host" was created, then deleted with its group. A new group of the
+    // same name must wait for its own apply, not take the old, gone role.
+    mockList.mockResolvedValue([
+      grp({
+        roleId: null,
+        name: "Event host",
+        createdAt: new Date("2026-02-01"),
+      }),
+    ]);
+    mockSnapshots.mockResolvedValue([
+      {
+        createdAt: new Date("2026-02-01T00:00:05Z"),
+        createdRoles: [],
+      },
+      {
+        createdAt: new Date("2026-01-01"),
+        createdRoles: [{ roleId: "r-gone", name: "Event host" }],
+      },
+    ]);
+    expect(await linkCreatedRoles("g")).toBe(0);
+    expect(mockLink).not.toHaveBeenCalled();
+  });
+
+  it("links the role its own apply created", async () => {
+    mockList.mockResolvedValue([
+      grp({
+        roleId: null,
+        name: "Event host",
+        createdAt: new Date("2026-02-01"),
+      }),
+    ]);
+    mockSnapshots.mockResolvedValue([
+      {
+        createdAt: new Date("2026-02-01T00:00:05Z"),
+        createdRoles: [{ roleId: "r-new", name: "Event host" }],
+      },
+      {
+        createdAt: new Date("2026-01-01"),
+        createdRoles: [{ roleId: "r-gone", name: "Event host" }],
+      },
+    ]);
+    expect(await linkCreatedRoles("g")).toBe(1);
+    expect(mockLink).toHaveBeenCalledWith(
+      "g",
+      "g1",
+      "r-new",
+      true,
+      "Event host",
+    );
+  });
+});
+
 describe("link safety for recreated groups (#1021)", () => {
   it("never links an unlinked group", async () => {
     mockList.mockResolvedValue([
@@ -412,6 +466,7 @@ describe("link safety for recreated groups (#1021)", () => {
         roleId: null,
         name: "Admin",
         lostRoleId: "r-old",
+        createdAt: new Date("2025-12-01"),
         recreateRequestedAt: new Date("2026-01-02"),
       }),
     ]);
@@ -507,6 +562,20 @@ describe("admin group sync (#1021)", () => {
     expect(mockTrack).toHaveBeenCalledWith("g", [
       { groupId: "g1", roleName: "role-r1" },
     ]);
+    expect(built.groups[0].roleName).toBe("role-r1");
+    expect(built.drift).toEqual([]);
+  });
+
+  it("resolves tracked names in memory and writes nothing for a transformed preview", async () => {
+    mockList.mockResolvedValue([grp({ roleName: null })]);
+    mockScan.mockResolvedValue({
+      scanned: scanned(),
+      memberCounts: new Map(),
+      botIds: null,
+      members: null,
+    });
+    const built = await planRoleGroups(guild, "admin", (saved) => [...saved]);
+    expect(mockTrack).not.toHaveBeenCalled();
     expect(built.groups[0].roleName).toBe("role-r1");
     expect(built.drift).toEqual([]);
   });

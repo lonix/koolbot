@@ -32,11 +32,23 @@ export type HostCreateState =
       available: false;
       /**
        * `exists`: a role or group for hosts is already there, so the card just
-       * offers the picker. `pending` and `permission` are said out loud.
+       * offers the picker. The others are said out loud.
        */
-      reason: "exists" | "pending" | "permission";
+      reason: "exists" | "pending" | "permission" | "rank";
       message: string;
     };
+
+/**
+ * The new group must rank strictly below every other group. A tie would put
+ * it inside another group's "group and above" (everyone handed the host role
+ * would gain what those settings give that group) and let the planner place
+ * the role by name. Ranks start at 0, so a group at 0 leaves no room.
+ */
+export function hostRankProblem(groups: readonly GroupSpec[]): string | null {
+  if (groups.length === 0) return null;
+  if (Math.min(...groups.map((g) => g.rank)) > 0) return null;
+  return "A role group already has the lowest rank (0), so the new Event host group can't be ranked below it. Open Role groups and re-save the order, then come back.";
+}
 
 const sameName = (a: string, b: string): boolean =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -72,6 +84,8 @@ export function hostCreateState(ctx: AccessContext): HostCreateState {
       message: `A role group called "${named.name}" is already waiting for its role. Create or link the role on Role groups, then pick it here.`,
     };
   }
+  const rank = hostRankProblem(ctx.groups);
+  if (rank) return { available: false, reason: "rank", message: rank };
   if (!ctx.botManageRoles) {
     return {
       available: false,
@@ -91,7 +105,7 @@ export function hostGroupSpec(groups: readonly GroupSpec[]): RoleGroupView {
     id: SYNTHETIC_GROUP_ID,
     name: EVENT_HOST_ROLE_NAME,
     roleId: null,
-    rank: Math.max(0, lowest - 1),
+    rank: lowest - 1,
     permissions: preset?.permissions ?? "0",
     capabilities: [...(preset?.capabilities ?? ["host"])],
     colour: null,
@@ -242,7 +256,9 @@ export interface HostRoleDeps {
   /** Plan from the saved groups only. */
   plan: () => ReturnType<typeof planRoleGroups>;
   /** Start the engine's background job; throws when it can't start. */
-  start: (plan: AdoptionPlan) => Promise<{ id: string }>;
+  start: (
+    plan: AdoptionPlan,
+  ) => Promise<{ id: string; started?: Promise<void> }>;
 }
 
 export type HostRoleResult =
@@ -301,6 +317,8 @@ export async function startHostRole(
   };
 
   const saved = await deps.groups.list(guildId);
+  const rankProblem = hostRankProblem(saved);
+  if (rankProblem) return { ok: false, error: rankProblem, groupStuck: false };
   const spec = hostGroupSpec(saved);
   const details = { name: spec.name, capabilities: spec.capabilities };
   let groupId: string;
@@ -360,6 +378,11 @@ export async function startHostRole(
 
   try {
     const job = await deps.start(plan);
+    // startApply returns at once; the busy-server lock and the live checks run
+    // inside the job. Wait until it is committed (past them, before the first
+    // Discord write) so a refusal there removes the group instead of leaving
+    // it behind for a role that was never started.
+    await job.started;
     await deps.audit({
       action: "wizard.access.host-role",
       targetId: plan.id,

@@ -11,11 +11,16 @@
 import { describe, it, expect, jest } from "@jest/globals";
 import { PermissionFlagsBits } from "discord.js";
 import {
+  makeGroupRef,
+  resolveGroupRefs,
+} from "../../src/services/role-group-access.js";
+import {
   EVENT_HOST_ROLE_NAME,
   groupsAfterAccess,
   hostCreateState,
   hostGroupSpec,
   hostPlanProblems,
+  hostRankProblem,
   startHostRole,
   type HostRoleDeps,
 } from "../../src/services/wizard-host-role.js";
@@ -188,11 +193,47 @@ describe("hostGroupSpec", () => {
     });
   });
 
-  it("ranks below every other group, never below zero", () => {
-    expect(hostGroupSpec([group({ rank: 4 }), group({ rank: 2 })]).rank).toBe(
-      1,
+  it("ranks strictly below every other group", () => {
+    const others = [group({ rank: 4 }), group({ rank: 2 })];
+    const spec = hostGroupSpec(others);
+    expect(spec.rank).toBe(1);
+    expect(others.every((g) => spec.rank < g.rank)).toBe(true);
+  });
+
+  it("is never inside another group's 'group and above' set", () => {
+    // `quotes.delete_roles` can name "this group and above": every group at or
+    // above the base rank. The new group must not be at or above any of them.
+    const others = [
+      group({ id: "admin", roleId: "ra", rank: 3 }),
+      group({ id: "mod", roleId: "rm", rank: 1 }),
+    ];
+    const host = { ...hostGroupSpec(others), roleId: "role-host" };
+    const all = [...others, host];
+    for (const base of others) {
+      const roles = resolveGroupRefs(all, [makeGroupRef(base.id, true)]);
+      expect(roles).not.toContain("role-host");
+      expect(host.rank).toBeLessThan(base.rank);
+    }
+  });
+});
+
+describe("hostRankProblem", () => {
+  it("is clean when every group ranks above zero, or there are none", () => {
+    expect(hostRankProblem([])).toBeNull();
+    expect(
+      hostRankProblem([group({ rank: 1 }), group({ rank: 5 })]),
+    ).toBeNull();
+  });
+
+  it("refuses when a group already has rank 0, which would leave a tie", () => {
+    expect(hostRankProblem([group({ rank: 0 }), group({ rank: 5 })])).toContain(
+      "lowest rank",
     );
-    expect(hostGroupSpec([group({ rank: 0 })]).rank).toBe(0);
+  });
+
+  it("makes the card refuse the create, saying why", () => {
+    const state = hostCreateState(ctx([group({ rank: 0 })]));
+    expect(state).toMatchObject({ available: false, reason: "rank" });
   });
 });
 
@@ -440,6 +481,53 @@ describe("startHostRole", () => {
     expect(res).toMatchObject({ ok: false });
     expect(groups.remove).toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("saves nothing and starts nothing when a group already has rank 0", async () => {
+    const { deps, groups, start, reviewedId } = setup();
+    (
+      groups.list as jest.Mock<() => Promise<RoleGroupView[]>>
+    ).mockResolvedValue([group({ id: "a", roleId: "admin", rank: 0 })]);
+    const res = await startHostRole(deps, GUILD, reviewedId);
+    expect(res).toMatchObject({ ok: false, groupStuck: false });
+    expect((res as { error: string }).error).toContain("lowest rank");
+    expect(groups.create).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("removes the group when the job is refused after it was returned (busy server)", async () => {
+    // startApply returns a job at once; the busy-server lock is taken inside
+    // it, so the refusal arrives on `started`, not as a throw.
+    const { deps, groups, audit, reviewedId, saved } = setup({
+      start: jest.fn(async () => ({
+        id: "job-busy",
+        started: Promise.reject(new Error("Another apply is already running")),
+      })),
+    } as Partial<HostRoleDeps>);
+    const res = await startHostRole(deps, GUILD, reviewedId);
+    expect(res).toMatchObject({ ok: false, groupStuck: false });
+    expect((res as { error: string }).error).toContain("already running");
+    expect(groups.remove).toHaveBeenCalledWith(GUILD, "new-host");
+    expect(saved().map((g) => g.id)).toEqual(["a"]);
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "wizard.access.host-role",
+        result: "failure",
+      }),
+    );
+  });
+
+  it("keeps the group once the job is committed, whatever happens to it later", async () => {
+    const { deps, groups, reviewedId, saved } = setup({
+      start: jest.fn(async () => ({
+        id: "job-1",
+        started: Promise.resolve(),
+      })),
+    } as Partial<HostRoleDeps>);
+    const res = await startHostRole(deps, GUILD, reviewedId);
+    expect(res).toMatchObject({ ok: true, jobId: "job-1" });
+    expect(groups.remove).not.toHaveBeenCalled();
+    expect(saved().map((g) => g.id)).toContain("new-host");
   });
 
   it("starts nothing when the group can't be saved", async () => {

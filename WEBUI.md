@@ -1217,8 +1217,12 @@ anything besides that one role (drift or reorders on other groups belong on Role
 Roles (the card and the Access step refuse it up front as well). The role is created last: after the role mapping and the
 settings have applied, Apply saves the Event host group (with no role yet), plans again from the saved groups, starts the
 engine's background job only if that plan is the one Review showed, and goes to `/admin/role-groups?job=…`, which shows
-the job's outcome and links the group to the new role when it finishes. If the group can't be saved or the job can't
-start, the group is removed again and the message says the settings and mapping are live but the role was not created.
+the job's outcome and links the group to the new role when it finishes. Apply waits until the job is committed (past
+the busy-server lock and the live checks, before the first Discord write). If the group can't be saved or the job can't
+start, the group is removed again; once the job is committed it is never removed. The new group ranks strictly below
+every other group, so it is never inside another group's "group and above"; if a group already has rank 0 the card
+refuses until the order is re-saved on Role groups. A new group is only ever linked to a role created after it was
+saved. When the role was not created, the message says the settings and mapping are live.
 A job that fails in Discord leaves the group without a role, which does not count as mapped; finish it on Role groups.
 The group write and the role creation each get an audit entry.
 
