@@ -217,6 +217,36 @@ describe("renderChannelClaimsPage (#1022)", () => {
     expect(html).not.toContain("Apply plan");
   });
 
+  it("shows a prefilled feature as chosen on its row, and says where it came from", () => {
+    const html = renderChannelClaimsPage({
+      ...empty,
+      claims: [
+        { channelId: "14", action: "leave", bindKey: "quotes.channel_id" },
+      ],
+      prefill: {
+        channelId: "14",
+        channelName: "loose <b>",
+        featureLabel: "Quotes",
+      },
+    });
+    expect(html).toMatch(
+      /name="bind_14"><option value="">\(none\)<\/option><option value="quotes\.channel_id" selected>/,
+    );
+    expect(html).toContain('<tr id="claim-14">');
+    expect(html).toContain(
+      "Prefilled from the Server scan: <strong>loose &lt;b&gt;</strong> is set to be bound to <strong>Quotes</strong>.",
+    );
+    expect(html).toContain(
+      "Nothing changes until you preview the plan and apply it.",
+    );
+    // Still only a form: nothing is applied and no plan exists yet.
+    expect(html).not.toContain("Apply plan");
+  });
+
+  it("says nothing about a prefill when there is none", () => {
+    expect(renderChannelClaimsPage(empty)).not.toContain("Prefilled from");
+  });
+
   it("reports a failed scan", () => {
     const html = renderChannelClaimsPage({
       ...empty,

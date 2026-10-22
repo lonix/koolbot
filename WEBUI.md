@@ -2897,7 +2897,16 @@ repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`,
 Overview), plain links that work without JavaScript. The **Channel ownership hints** switch in the header is a GET form
 and the only form on the page. The tabs share one scan for a minute per admin and hints setting, so clicking through them
 does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which
-only counts scans that start. The header says when Discord was read and **Scan again** bypasses the cache. What follows describes the data each tab shows.
+only counts scans that start. The header says when Discord was read and **Scan again** bypasses the cache.
+The **Channels** tab lists the channels as Discord does: those outside a category first, then each category in
+capitals with its channels under it (text before voice). Each row shows what uses the channel (green chips), what it
+looks like it could be (for example _looks like Quotes_), Discord's own flags and **Custom permissions** when it is
+not synced to its category; its overwrites open on demand. **Claim** appears on a _looks like_ row where KoolBot has
+one feature that fits that kind of channel (Quotes, Voice stats, Birthdays, Tickets category, Looking for group,
+Moderation log, Notices, Reaction roles, Voice lobby), never on a channel Discord uses for rules, system messages
+or public updates, and opens **Channel claims** with the channel and feature filled in. The filters (`?filter=used`,
+`claimable` or `custom`; anything else is _All_) are plain links that keep the tab and the ownership hints. All of
+it is links: the tab still has no write route. What follows describes the data each tab shows.
 It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
 whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
@@ -3039,6 +3048,10 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
 - **Bulk select**: a category row has a "for every channel here left alone" choice that applies one action to
   all of its channels (each row's own choice wins). A sync approval is never carried over by a bulk choice: each
   channel needs its own tick.
+- **Prefill from the Server scan** (#1364): `/admin/adopt/claims?channel=<id>&feature=<config key>` opens the form with
+  that feature already chosen on that channel's row, scrolls to the row and says where it came from. It is only a
+  starting point: it is ignored unless the channel is in the scan and the feature is one the form offers for that
+  kind of channel, it changes no other row, and nothing is written until you preview the plan and apply it.
 
 **Suggestions** at the top of the Channel Claims form (nothing is selected for you):
 

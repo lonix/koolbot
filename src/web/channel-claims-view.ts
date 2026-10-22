@@ -12,6 +12,7 @@ import {
 import {
   CLAIM_ACTIONS,
   FEATURE_TARGETS,
+  featureFitsChannel,
   type ChannelClaim,
   type ClaimAction,
 } from "../services/channel-claims.js";
@@ -61,18 +62,23 @@ export interface ClaimsPageProps {
   previewToken: string | null;
   jobId?: string | null;
   flash?: FlashMessage | null;
+  /**
+   * A channel and feature arriving from the Server scan's *Claim* link: the
+   * form shows the feature already chosen for that channel and says so. Only
+   * a choice the form offers is ever set, and nothing is written until the
+   * plan is previewed and applied.
+   */
+  prefill?: {
+    channelId: string;
+    channelName: string;
+    featureLabel: string;
+  } | null;
 }
 
 const checked = (v: boolean | undefined): string => (v ? " checked" : "");
 
 function featureOptions(channel: ScanChannel, selected: string): string {
-  const fits = FEATURE_TARGETS.filter((f) =>
-    f.kind === "category"
-      ? channel.kind === "category"
-      : f.kind === "voice"
-        ? channel.kind === "voice" && !channel.flags.stage
-        : channel.kind === "text" && !channel.flags.forum,
-  );
+  const fits = FEATURE_TARGETS.filter((f) => featureFitsChannel(f, channel));
   if (fits.length === 0) return "";
   return `<label>Bind to a feature <select name="bind_${escapeHtml(channel.id)}"><option value="">(none)</option>${fits
     .map(
@@ -179,7 +185,7 @@ ${forumLock}
 <label class="check"><input type="checkbox" name="replace_${id}" value="1"${checked(claim?.approveReplace)}> Sync: I approve replacing the permission overwrites this channel has of its own. The previous ones are saved in the snapshot.</label>
 ${voiceBind}
 </div></details>`;
-  return `<tr>
+  return `<tr id="claim-${id}">
 <td>${c.kind === "category" ? `<strong>${escapeHtml(c.name)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${escapeHtml(c.name)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</td>
 <td>${actionSelect}${bulkSelect}</td>
 <td>${featureOptions(c, claim?.bindKey ?? "")}</td>
@@ -255,8 +261,16 @@ function renderForm(props: ClaimsPageProps, csrf: string): string {
   const categories = sortChannels(
     scan.channels.filter((c) => c.kind === "category"),
   );
+  // A channel whose category is not in the scan is listed with the
+  // uncategorised ones, as the Server scan tree does, so every channel the scan
+  // offers *Claim* on has a row here.
+  const categoryIds = new Set(categories.map((c) => c.id));
   const loose = sortChannels(
-    (byParent.get(null) ?? []).filter((c) => c.kind !== "category"),
+    scan.channels.filter(
+      (c) =>
+        c.kind !== "category" &&
+        (c.parentId === null || !categoryIds.has(c.parentId)),
+    ),
   );
   const rows: string[] = [];
   for (const cat of categories) {
@@ -349,6 +363,9 @@ export function renderChannelClaimsPage(props: ClaimsPageProps): string {
   const job = props.jobId
     ? `<div class="notice" id="cc-job" role="status">Applying…</div>`
     : "";
+  const prefill = props.prefill
+    ? `<div class="notice" role="status">Prefilled from the Server scan: <strong>${escapeHtml(props.prefill.channelName)}</strong> is set to be bound to <strong>${escapeHtml(props.prefill.featureLabel)}</strong>. Nothing changes until you preview the plan and apply it.</div>`
+    : "";
   const problems = props.problems.length
     ? `<div class="notice warn" role="status">${props.problems.map((p) => escapeHtml(p)).join(" ")}</div>`
     : "";
@@ -369,6 +386,7 @@ export function renderChannelClaimsPage(props: ClaimsPageProps): string {
 <p class="subtitle">Take over existing categories and channels: make them read-only, gate them to groups, sync them with their category, or bind them to a KoolBot feature. See <a href="/admin/adopt">Server Scan</a> for what is there now.</p>
 ${renderFlash(props.flash)}
 ${job}
+${prefill}
 ${problems}
 ${content}
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}

@@ -97,6 +97,19 @@ describe("GET /adopt tabs", () => {
     }
   });
 
+  it("lists only what ?filter= names on the Channels tab, and everything for anything else (#1364)", async () => {
+    const used = await text("/adopt?tab=channels&filter=used");
+    expect(used).toContain('aria-current="true">Used by KoolBot');
+    expect(used).toContain('<input type="hidden" name="filter" value="used">');
+    for (const q of ["", "&filter=all", "&filter=nope", "&filter=%3Cb%3E"]) {
+      const html = await text(`/adopt?tab=channels${q}`);
+      expect(html).toContain('aria-current="true">All');
+      expect(html).not.toContain('name="filter"');
+    }
+    // One scan is shared across every filter.
+    expect(scan).toHaveBeenCalledTimes(1);
+  });
+
   it("passes the ownership hints to the scan only when ?sample=1", async () => {
     await text("/adopt");
     await text("/adopt?sample=1");

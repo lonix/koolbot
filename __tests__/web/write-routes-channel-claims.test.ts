@@ -173,6 +173,101 @@ describe("GET /adopt/claims", () => {
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 
+  describe("prefill from the Server scan's Claim link (#1364)", () => {
+    const TEXT = "300000000000000010";
+    const VOICE = "300000000000000011";
+    const withChannels = {
+      ...scan,
+      channels: [
+        ...scan.channels,
+        {
+          ...scan.channels[0],
+          id: TEXT,
+          name: "quote <b>board",
+          kind: "text",
+          typeName: "GuildText",
+          parentId: null,
+          flags: { forum: false, stage: false },
+        },
+        {
+          ...scan.channels[0],
+          id: VOICE,
+          name: "lobby",
+          kind: "voice",
+          typeName: "GuildVoice",
+          parentId: null,
+          flags: { forum: false, stage: false },
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      mockPlan.mockImplementation(async (_g, _a, claims) =>
+        planned({ scan: withChannels, claims }),
+      );
+    });
+
+    it("preselects the feature on that channel's row and says so, without planning any change", async () => {
+      await mount();
+      const res = await harness.get(
+        `/adopt/claims?channel=${TEXT}&feature=quotes.channel_id`,
+      );
+      const html = await res.text();
+      expect(html).toContain(`<tr id="claim-${TEXT}">`);
+      expect(html).toContain(
+        `name="bind_${TEXT}"><option value="">(none)</option><option value="quotes.channel_id" selected>`,
+      );
+      expect(html).toContain("Prefilled from the Server scan");
+      expect(html).toContain("quote &lt;b&gt;board");
+      expect(html).toContain("<strong>Quotes</strong>");
+      // The plan is still made from no claims: nothing is previewed or applied.
+      expect(mockPlan.mock.calls[0]?.[2]).toEqual([]);
+      expect(mockStartApply).not.toHaveBeenCalled();
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    });
+
+    it("also fills a voice lobby", async () => {
+      await mount();
+      const html = await (
+        await harness.get(
+          `/adopt/claims?channel=${VOICE}&feature=voicechannels.lobby.channel_id`,
+        )
+      ).text();
+      expect(html).toContain("Prefilled from the Server scan");
+      expect(html).toMatch(
+        /<option value="voicechannels\.lobby\.channel_id" selected>/,
+      );
+    });
+
+    it.each([
+      [
+        "a feature that is not a bindable one",
+        `channel=${TEXT}&feature=core.admin_role`,
+      ],
+      [
+        "a feature that does not fit the channel",
+        `channel=${TEXT}&feature=tickets.category_id`,
+      ],
+      [
+        "a channel that is not in the scan",
+        "channel=999999999999999999&feature=quotes.channel_id",
+      ],
+      ["no feature", `channel=${TEXT}`],
+      ["no channel", "feature=quotes.channel_id"],
+      [
+        "list values",
+        `channel=${TEXT}&channel=${VOICE}&feature=quotes.channel_id`,
+      ],
+    ])("ignores %s", async (_what, query) => {
+      await mount();
+      const res = await harness.get(`/adopt/claims?${query}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).not.toContain("Prefilled from");
+      expect(html).not.toMatch(/<option value="[a-z._]+_id" selected>/);
+    });
+  });
+
   it("explains when Discord can't be reached", async () => {
     await mount(makeClient({ fetchFails: true }));
     const res = await harness.get("/adopt/claims");

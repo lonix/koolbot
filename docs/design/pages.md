@@ -69,8 +69,7 @@ The full role, channel and bot tables live in their tabs. The ownership-hints sw
 
 **As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the ownership-hints switch is a GET form, so
 the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
-no icon yet: the shared icon helper in `app-shell.ts` has none of the alert icons. The Channels tab is still a flat table; the tree, filters and
-*Claim* are tracked in #1364.
+no icon yet: the shared icon helper in `app-shell.ts` has none of the alert icons. The Channels tab is the tree described below (#1364).
 
 ### ServerScanChannelsPage
 
@@ -78,6 +77,13 @@ Server scan, Channels tab. The channels as Discord shows them, categories with t
 chips), what it looks like it could be (*looks like Quotes* plus *Claim*, which opens Channel claims with the channel filled in), Discord's own flags,
 and *Custom permissions* when it is not synced to its category. Filters on top narrow it to what is used, what could be claimed, or what has custom
 permissions. A row's overwrites open on demand.
+
+**As built (#1364).** Channels outside a category come first, then each category with its channels under it, text before voice, as Discord lists them.
+The filters are `?filter=` links in a `kb-tabs` strip with a count each (`aria-current="true"` marks the filter, `"page"` stays on the section tabs); they
+keep `tab` and `sample`, and a filter keeps a category as the heading of any channel that matches. A row's overwrites are an inline `kb-disclosure`
+whose summary counts them. *Claim* is a link to `/admin/adopt/claims?channel=&feature=#claim-<id>`, shown only where the claims form offers that
+feature for that kind of channel and never on a channel Discord uses (rules, system, public updates). Rows are labelled with `channelMention()` from
+`discord-labels.ts`, so each carries its kind icon.
 
 ### GameServersPage
 

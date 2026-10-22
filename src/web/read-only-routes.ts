@@ -69,7 +69,11 @@ import {
   type ConfigSchema,
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
-import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
+import {
+  parseChannelFilter,
+  parseScanTab,
+  renderAdoptPage,
+} from "./adopt-view.js";
 import {
   cachedScan,
   peekNewestScan,
@@ -1096,6 +1100,7 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const sampled = req.query.sample === "1";
       const tab = parseScanTab(req.query.tab);
+      const filter = parseChannelFilter(req.query.filter);
       const refresh = req.query.refresh === "1";
       const key = scanCacheKey(
         req.webSession?.guildId ?? "",
@@ -1145,6 +1150,7 @@ export function createReadOnlyRouter(
           error,
           sampled,
           tab,
+          filter,
         }),
       );
     }),

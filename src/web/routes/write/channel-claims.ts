@@ -15,6 +15,11 @@ import { ChannelType, Client, type Guild } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
+  featureFitsChannel,
+  featureTarget,
+  type ChannelClaim,
+} from "../../../services/channel-claims.js";
+import {
   claimsPlanIsApplicable,
   claimsRevalidator,
   planChannelClaims,
@@ -49,6 +54,41 @@ function readFlash(req: {
   if (!text || (type !== "ok" && type !== "warn" && type !== "err"))
     return null;
   return { type, text: text.slice(0, 500) };
+}
+
+/**
+ * The claim a `?channel=&feature=` pair stands for, or null when the channel is
+ * not in the scan, the feature is not a bindable one, or it does not fit that
+ * channel. Exported for tests.
+ */
+export function prefillFromQuery(
+  query: Record<string, unknown>,
+  scan: {
+    channels: ReadonlyArray<{
+      id: string;
+      name: string;
+      kind: "category" | "text" | "voice" | "other";
+      flags: { forum: boolean; stage: boolean };
+    }>;
+  } | null,
+): {
+  claims: ChannelClaim[];
+  notice: { channelId: string; channelName: string; featureLabel: string };
+} | null {
+  const channelId = typeof query.channel === "string" ? query.channel : "";
+  const feature = typeof query.feature === "string" ? query.feature : "";
+  if (!scan) return null;
+  const channel = scan.channels.find((c) => c.id === channelId);
+  const target = featureTarget(feature);
+  if (!channel || !target || !featureFitsChannel(target, channel)) return null;
+  return {
+    claims: [{ channelId, action: "leave", bindKey: target.key }],
+    notice: {
+      channelId,
+      channelName: channel.name,
+      featureLabel: target.label,
+    },
+  };
 }
 
 export function createChannelClaimsRouter(client: Client): Router {
@@ -121,6 +161,10 @@ export function createChannelClaimsRouter(client: Client): Router {
           error = err instanceof Error ? err.message : String(err);
         }
       }
+      // A *Claim* link from the Server scan names a channel and a feature. Both
+      // must exist and fit, or the link is ignored: the form never shows a
+      // choice it would not offer itself.
+      const prefill = prefillFromQuery(req.query, scan);
       const jobParam = req.query.job;
       res.type("text/html").send(
         renderChannelClaimsPage({
@@ -128,7 +172,8 @@ export function createChannelClaimsRouter(client: Client): Router {
           scan,
           error,
           groups,
-          claims: [],
+          claims: prefill?.claims ?? [],
+          prefill: prefill?.notice ?? null,
           plan: null,
           problems: [],
           previewToken: null,

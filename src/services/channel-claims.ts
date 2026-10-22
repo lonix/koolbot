@@ -263,6 +263,77 @@ export function featureTarget(key: string): FeatureTarget | undefined {
   return FEATURE_TARGETS.find((f) => f.key === key);
 }
 
+/** The parts of a scanned channel that decide which features can be bound to it. */
+export interface ClaimableChannel {
+  kind: "category" | "text" | "voice" | "other";
+  flags: { forum: boolean; stage: boolean };
+}
+
+/**
+ * Whether a feature can be bound to a channel of this shape: a category for a
+ * category feature, a plain voice channel for the lobby, a plain text channel
+ * (not a forum) for the rest. The claims form offers a feature only where this
+ * holds, and the Server scan offers *Claim* only where it holds, so a link
+ * never lands on a form that has no such option.
+ */
+export function featureFitsChannel(
+  target: FeatureTarget,
+  channel: ClaimableChannel,
+): boolean {
+  switch (target.kind) {
+    case "category":
+      return channel.kind === "category";
+    case "voice":
+      return channel.kind === "voice" && !channel.flags.stage;
+    default:
+      return channel.kind === "text" && !channel.flags.forum;
+  }
+}
+
+/**
+ * The feature a Server scan "looks like" guess (`ScanChannel.featureGuess`)
+ * would be bound to. A guess missing here has no single honest target:
+ * `announcements` could be events, celebrations or welcome messages, and
+ * `polls` has no channel setting.
+ */
+export const GUESS_BIND_KEYS: Readonly<Record<string, string>> = {
+  quotes: "quotes.channel_id",
+  voicetracking: "voicetracking.announcements.channel_id",
+  birthdays: "birthdays.channel_id",
+  tickets: "tickets.category_id",
+  lfg: "lfg.channel_id",
+  moderation: "core.moderation.channel_id",
+  notices: "notices.channel_id",
+  reactionroles: "reactionroles.message_channel_id",
+  voicechannels: "voicechannels.lobby.channel_id",
+};
+
+/**
+ * The feature key *Claim* would prefill for a channel, or null when there is
+ * none: no guess, no single target for it, a target that does not fit this
+ * kind of channel, or a channel Discord itself uses (rules, system messages,
+ * public updates), which a notices or log feature must not take over.
+ */
+export function claimKeyFor(
+  channel: ClaimableChannel & {
+    featureGuess: string | null;
+    usedBy: readonly string[];
+    flags: { rules: boolean; system: boolean; publicUpdates: boolean };
+  },
+): string | null {
+  if (!channel.featureGuess || channel.usedBy.length > 0) return null;
+  if (
+    channel.flags.rules ||
+    channel.flags.system ||
+    channel.flags.publicUpdates
+  ) {
+    return null;
+  }
+  const key = GUESS_BIND_KEYS[channel.featureGuess];
+  const target = key ? featureTarget(key) : undefined;
+  return target && featureFitsChannel(target, channel) ? target.key : null;
+}
+
 const VOICE_MANAGED_ONLY = "voicechannels.cleanup.managed_only";
 const VOICE_CATEGORY = "voicechannels.category_id";
 const VOICE_LOBBY = "voicechannels.lobby.channel_id";
