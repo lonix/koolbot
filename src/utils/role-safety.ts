@@ -1,4 +1,5 @@
 import { PermissionFlagsBits } from "discord.js";
+import { sanitizeForLog } from "./log-sanitize.js";
 
 /**
  * Permissions no member may self-grant through a reaction, button or select
@@ -56,25 +57,46 @@ export function forbiddenSelfAssignNames(bits: bigint): string[] {
     .map(([name]) => name);
 }
 
+/** A role group and the role that backs it (see `groupBackedRoles`). */
+export interface BackingGroup {
+  roleId: string;
+  groupName: string;
+}
+
+/**
+ * Why a role that backs a role group must not be handed out by a feature, or
+ * null when no group uses it. Any group counts, whatever its scope (admin,
+ * Moderators, Event hosts or none): the same rule the Web UI applies when a
+ * role is chosen, so grant time never refuses less than configuration time
+ * (#1375).
+ */
+export function groupBackedBlockReason(
+  backing: readonly BackingGroup[],
+): string | null {
+  if (backing.length === 0) return null;
+  const names = backing
+    .map((b) => `"${sanitizeForLog(b.groupName, 64)}"`)
+    .join(", ");
+  return `backs the role group ${names}, whose access would go to everyone it is granted to`;
+}
+
 /**
  * Why a feature that hands a role to members on its own (a leaderboard tier,
  * the birthday role) must not grant `role`, or null when it may. Covers the
- * forbidden permissions above and a role of the configured `admin` role group,
- * which the Web UI accepts as admin by bare membership, so handing it out is a
- * Web UI admin grant (#1145). `adminRoleIds` are the admin group's role ids.
- * Reaction roles already refuse every group-backed role, so they keep using
+ * forbidden permissions above and a role that backs any role group (admin,
+ * Moderators or Event hosts), which the Web UI accepts by bare membership, so
+ * handing it out would be a Web UI grant (#1145, #1375). `backing` is what
+ * `RoleGroupService.groupBackedRoles` returned for this role. Reaction roles
+ * already refuse every group-backed role, so they keep using
  * {@link forbiddenSelfAssignPermissions} alone.
  */
 export function automaticGrantBlockReason(
   role: { id: string; permissions?: { bitfield: bigint } | null },
-  adminRoleIds: readonly string[] = [],
+  backing: readonly BackingGroup[] = [],
 ): string | null {
   const dangerous = forbiddenSelfAssignPermissions(role);
   if (dangerous.length > 0) {
     return `carries powerful permissions (${dangerous.join(", ")})`;
   }
-  if (adminRoleIds.includes(role.id)) {
-    return "is the role of the admin role group";
-  }
-  return null;
+  return groupBackedBlockReason(backing.filter((b) => b.roleId === role.id));
 }

@@ -17,6 +17,18 @@ const mockLogger = {
   debug: jest.fn(),
 };
 const mockUpdateOne = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockGroupBackedRoles =
+  jest.fn<
+    (
+      guildId: string,
+      roleIds: string[],
+    ) => Promise<Array<{ roleId: string; groupName: string }>>
+  >();
+jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
+  RoleGroupService: {
+    getInstance: jest.fn(() => ({ groupBackedRoles: mockGroupBackedRoles })),
+  },
+}));
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -164,6 +176,7 @@ describe("handleAcceptButton", () => {
     add.mockResolvedValue(undefined);
     remove.mockResolvedValue(undefined);
     mockUpdateOne.mockResolvedValue({});
+    mockGroupBackedRoles.mockResolvedValue([]);
   });
 
   const service = (): InstanceType<typeof RulesService> => {
@@ -202,6 +215,37 @@ describe("handleAcceptButton", () => {
 
   it("never grants a role that carries Administrator", async () => {
     rolePerms = P.Administrator;
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(add).not.toHaveBeenCalled();
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("can't grant"),
+    });
+  });
+
+  it.each(["Admins", "Moderators", "Event hosts"])(
+    "never grants a role that backs the %s group, and logs why (#1375)",
+    async (groupName) => {
+      mockGroupBackedRoles.mockResolvedValue([{ roleId: "r1", groupName }]);
+      const i = interaction();
+      await service().handleAcceptButton(i);
+      expect(mockGroupBackedRoles).toHaveBeenCalledWith("g1", ["r1"]);
+      expect(add).not.toHaveBeenCalled();
+      expect(mockUpdateOne).not.toHaveBeenCalled();
+      expect(i.editReply).toHaveBeenCalledWith({
+        content: expect.stringContaining("can't grant"),
+      });
+      expect(
+        mockLogger.warn.mock.calls.some((c) =>
+          String(c[0]).includes(`backs the role group "${groupName}"`),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("grants nothing when the role groups cannot be read", async () => {
+    mockGroupBackedRoles.mockRejectedValue(new Error("db down"));
     const i = interaction();
     await service().handleAcceptButton(i);
     expect(add).not.toHaveBeenCalled();

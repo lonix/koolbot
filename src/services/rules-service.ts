@@ -10,6 +10,8 @@ import {
   type Role,
 } from "discord.js";
 import { ConfigService } from "./config-service.js";
+import { RoleGroupService } from "./role-group-service.js";
+import { groupBackedBlockReason } from "../utils/role-safety.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
 import { env } from "../config/env.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
@@ -303,6 +305,35 @@ export class RulesService {
       if (problem || !role) {
         logger.warn(
           `Rules acceptance can't grant role ${roleId}: ${problem ?? "unknown"}`,
+        );
+        await reply(
+          "I can't grant the acceptance role right now. Please tell a server admin.",
+        );
+        return;
+      }
+      // Everyone can press Accept, so a role that backs a role group (admin,
+      // Moderators or Event hosts) would hand that access to every member
+      // (#1375). If the groups can't be read the role can't be cleared, so
+      // nothing is granted.
+      let groupBlock: string | null;
+      try {
+        groupBlock = groupBackedBlockReason(
+          await RoleGroupService.getInstance().groupBackedRoles(guild.id, [
+            role.id,
+          ]),
+        );
+      } catch (error) {
+        logger.warn(
+          `Rules acceptance can't grant role ${sanitizeForLog(roleId)}: the role groups could not be read, so it can't be checked: ${sanitizeForLog(getErrorMessage(error))}`,
+        );
+        await reply(
+          "I can't grant the acceptance role right now. Please tell a server admin.",
+        );
+        return;
+      }
+      if (groupBlock) {
+        logger.warn(
+          `Rules acceptance can't grant role ${sanitizeForLog(roleId)}: it ${groupBlock}. Choose another role in the Web UI.`,
         );
         await reply(
           "I can't grant the acceptance role right now. Please tell a server admin.",
