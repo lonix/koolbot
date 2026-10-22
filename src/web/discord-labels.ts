@@ -80,7 +80,7 @@ interface KindInfo {
 const KINDS: Record<ChannelKind, KindInfo> = {
   text: {
     label: "Text channel",
-    group: "Text Channels",
+    group: "Text channels",
     glyph: "#",
     icon:
       `<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/>` +
@@ -88,7 +88,7 @@ const KINDS: Record<ChannelKind, KindInfo> = {
   },
   announcement: {
     label: "Announcement channel",
-    group: "Text Channels",
+    group: "Text channels",
     glyph: "📢",
     icon:
       `<path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>` +
@@ -96,7 +96,7 @@ const KINDS: Record<ChannelKind, KindInfo> = {
   },
   voice: {
     label: "Voice channel",
-    group: "Voice Channels",
+    group: "Voice channels",
     glyph: "🔊",
     icon:
       `<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>` +
@@ -104,7 +104,7 @@ const KINDS: Record<ChannelKind, KindInfo> = {
   },
   stage: {
     label: "Stage channel",
-    group: "Voice Channels",
+    group: "Voice channels",
     glyph: "🎙️",
     icon:
       `<path d="m11 7.601-5.994 8.19a1 1 0 0 0 .1 1.298l.817.818a1 1 0 0 0 1.314.087L15.09 12"/>` +
@@ -113,7 +113,7 @@ const KINDS: Record<ChannelKind, KindInfo> = {
   },
   forum: {
     label: "Forum channel",
-    group: "Forum Channels",
+    group: "Forum channels",
     glyph: "💬",
     icon:
       `<path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>` +
@@ -178,14 +178,17 @@ export function missingMention(id: string): string {
 
 /**
  * A channel as plain text (not escaped): `# general`, `🔊 Lobby`, `📁 Events`.
- * `parentName` adds the category the way Discord's autocomplete shows it
- * (`🔊 Lobby · Scratch`). Unknown type: `⚠ <name> (unavailable)`.
+ * `parentName` adds the category the way Discord's autocomplete shows it, in
+ * capitals as the design manual's no-JavaScript fallback does
+ * (`🔊 Lobby · SCRATCH`). Unknown type: `⚠ <name> (unavailable)`.
  */
 export function channelText(ref: ChannelRef, parentName?: string): string {
   const kind = channelKindOf(ref.type);
   if (!kind) return missingText(ref.name);
   const head = `${KINDS[kind].glyph} ${ref.name}`;
-  return parentName && kind !== "category" ? `${head} · ${parentName}` : head;
+  return parentName && kind !== "category"
+    ? `${head} · ${parentName.toUpperCase()}`
+    : head;
 }
 
 /** A role as plain text (not escaped): `@Moderators`. */

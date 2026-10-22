@@ -1185,10 +1185,10 @@ one. A text channel reads `# general`, an announcement channel `📢 news`, a vo
 `@Moderators`. Nothing but a text channel gets a `#`, so a category or voice channel is no longer taken for a text
 channel. A stored id that no longer resolves to a channel (deleted, or the bot cannot see it) reads
 `⚠ 1234 (unavailable)`, and stays selected in its picker so a save does not clear it. Pickers are native selects, grouped by kind
-(`Text Channels`, `Voice Channels`, `Categories`), with the category after the name (`🔊 Lobby · Scratch`);
+(`Text channels`, `Voice channels`, `Categories`), with the category after the name (`🔊 Lobby · SCRATCH`);
 tables and sentences use an icon with the kind as its accessible name. One module, `src/web/discord-labels.ts`,
 decides all of this, and `__tests__/web/discord-labels.test.ts` fails when a page writes its own `#` in front of a name.
-The member pages (`/me/...`) and the searchable, typeahead picker of the design manual are not done yet.
+The Rewind page (`/me/rewind`) uses the same labels. Voice stats and the searchable, typeahead picker of the design manual are not done yet (#1394).
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction

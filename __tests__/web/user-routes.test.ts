@@ -846,7 +846,9 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Companion One");
     expect(out.body).not.toContain("Top channels"); // removed from Rewind
     expect(out.body).toContain("Longest session"); // #568 card
-    expect(out.body).toContain("on 2026-03-14 in General"); // date + channel
+    expect(out.body).toContain("on 2026-03-14 in "); // date + channel
+    expect(out.body).toContain('aria-label="Voice channel"'); // #1303
+    expect(out.body).toContain("General</span>");
   });
 
   it("renders a specific past year when the route param is present", async () => {
@@ -909,6 +911,9 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Text activity");
     expect(out.body).toContain("Top text channels");
     expect(out.body).toContain("general-chat");
+    // Labelled as a text channel, the way Discord labels one (#1303).
+    expect(out.body).toContain('aria-label="Text channel"');
+    expect(out.body).not.toContain("#general-chat");
     expect(out.body).toContain("42"); // messages sent
   });
 

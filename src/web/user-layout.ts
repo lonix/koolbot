@@ -10,6 +10,8 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
+import { ChannelType } from "discord.js";
+import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
 import { hostPanelPath } from "./host-panel-shared.js";
@@ -722,7 +724,7 @@ function renderTextActivity(opts: RewindBodyOptions): string {
           .map(
             (c) =>
               "<li>" +
-              `<span class="name">${escapeHtml(c.channelName)}</span>` +
+              `<span class="name">${channelMention({ name: c.channelName, type: ChannelType.GuildText })}</span>` +
               `<span class="dur">${c.count} msg${c.count === 1 ? "" : "s"}</span>` +
               "</li>",
           )
@@ -908,7 +910,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     ? `<div class="value">${escapeHtml(opts.longestSession.duration)}</div>` +
       `<div class="detail">on ${escapeHtml(opts.longestSession.date)}` +
       (opts.longestSession.channelName
-        ? ` in ${escapeHtml(opts.longestSession.channelName)}`
+        ? ` in ${channelMention({ name: opts.longestSession.channelName, type: ChannelType.GuildVoice })}`
         : "") +
       "</div>"
     : '<div class="value">—</div>';

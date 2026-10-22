@@ -64,7 +64,7 @@ describe("channelText (plain text, for options and chips)", () => {
   it("adds the category after the name, as Discord's autocomplete does", () => {
     expect(
       channelText({ name: "Lobby", type: ChannelType.GuildVoice }, "Scratch"),
-    ).toBe("🔊 Lobby · Scratch");
+    ).toBe("🔊 Lobby · SCRATCH");
   });
 
   it("does not add a parent to a category", () => {
@@ -149,13 +149,13 @@ describe("channelMention (HTML, for tables and sentences)", () => {
 
 describe("kinds", () => {
   it("groups text and announcement together, voice and stage together", () => {
-    expect(channelGroupLabel(ChannelType.GuildText)).toBe("Text Channels");
+    expect(channelGroupLabel(ChannelType.GuildText)).toBe("Text channels");
     expect(channelGroupLabel(ChannelType.GuildAnnouncement)).toBe(
-      "Text Channels",
+      "Text channels",
     );
-    expect(channelGroupLabel(ChannelType.GuildVoice)).toBe("Voice Channels");
+    expect(channelGroupLabel(ChannelType.GuildVoice)).toBe("Voice channels");
     expect(channelGroupLabel(ChannelType.GuildStageVoice)).toBe(
-      "Voice Channels",
+      "Voice channels",
     );
     expect(channelGroupLabel(ChannelType.GuildCategory)).toBe("Categories");
   });
@@ -240,18 +240,18 @@ describe("settings pickers", () => {
 
   it("shows voice channels with the speaker and their category, never #", () => {
     const html = control("channel", "3", { channelKind: "voice" });
-    expect(html).toContain('<optgroup label="Voice Channels">');
+    expect(html).toContain('<optgroup label="Voice channels">');
     expect(html).toContain(
-      '<option value="3" selected>🔊 Lobby · Scratch</option>',
+      '<option value="3" selected>🔊 Lobby · SCRATCH</option>',
     );
     expect(html).not.toContain("#Lobby");
   });
 
-  it("lists text and announcement channels in one Text Channels group", () => {
+  it("lists text and announcement channels in one Text channels group", () => {
     const html = control("channel", "1");
     expect(html.match(/<optgroup /g)).toHaveLength(1);
     expect(html).toContain(
-      '<option value="1" selected># general · Chat</option>',
+      '<option value="1" selected># general · CHAT</option>',
     );
     expect(html).toContain('<option value="2">📢 news</option>');
   });
@@ -273,7 +273,7 @@ describe("settings pickers", () => {
   it("labels a multi-select's summary by kind too", () => {
     const html = control("channel_list", "3,gone", { channelKind: "voice" });
     expect(html).toContain(
-      "Selected: 🔊 Lobby · Scratch, ⚠ gone (unavailable)",
+      "Selected: 🔊 Lobby · SCRATCH, ⚠ gone (unavailable)",
     );
   });
 
