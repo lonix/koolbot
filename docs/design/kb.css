@@ -176,7 +176,7 @@ a.kb-tile:hover, a.kb-tile:focus-visible { background: var(--surface-alt); borde
 .kb-help { margin: 0; font-size: var(--type-help-size); color: var(--muted); }
 .kb-input, .kb-select, .kb-textarea { width: 100%; height: var(--control-height); padding: 0 0.65rem; background: var(--bg); color: var(--text); border: 1px solid var(--control); border-radius: var(--radius-md); font: inherit; font-size: var(--type-ui-size); }
 .kb-input::placeholder, .kb-textarea::placeholder { color: var(--muted); }
-.kb-select[multiple] { height: auto; padding: 0.35rem 0.5rem; }
+.kb-select[multiple] { height: auto; padding: var(--space-1) var(--space-2); }
 .kb-input--sm { height: 1.9rem; font-size: var(--type-description-size); }
 .kb-textarea { height: auto; min-height: 5rem; padding: 0.5rem 0.65rem; font-family: var(--font-mono); font-size: var(--type-description-size); resize: vertical; }
 .kb-input[aria-invalid="true"], .kb-select[aria-invalid="true"], .kb-textarea[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 1px; }
