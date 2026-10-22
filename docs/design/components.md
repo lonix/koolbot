@@ -435,6 +435,10 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
   consequence list can never be neutral, and the drift test fails when a site's tone and that list disagree.
 - Confirming submits the same form (`requestSubmit`), so the CSRF token, typed-name guards and other submit handlers are unchanged.
 - Without `showModal()` it falls back to `window.confirm()`; without JavaScript the form posts at once, as before.
+- A question built in script (the host panel's fetch-and-upgrade, `src/web/confirm-fetch.ts`, #1344) uses the same dialog through the
+  `kb-confirm-request` event (title, items and verb as plain strings, and a `go` callback that runs only from the confirm button). It is for two-step
+  routes whose consequences only the server knows: the form carries `data-confirm-fetch`, the script posts it with `fetch`, and the dialog lists the
+  server's reasons and changes. The page stays as the no-JavaScript route.
 
 ### SaveBar
 

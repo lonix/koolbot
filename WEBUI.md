@@ -2113,7 +2113,16 @@ groups under **Adding and removing groups** (#1242), and switching groups on or 
   in between: every save through Live settings counts on a revision number stored on the event,
   and a token only works at the revision it was issued at), and one for an event that changed
   since the page was shown all apply nothing. Without a session secret a change that needs
-  confirmation is refused. There is no browser-only confirm dialog.
+  confirmation is refused. There is no browser-only confirm dialog: with JavaScript, the two forms
+  that the server always confirms ("Switch groups off" and "Remove selected") show that same
+  confirmation in a dialog instead of a page. The script posts the form with `fetch` and the
+  header `X-Kb-Confirm-Only`, and the server then either answers with the confirmation page or
+  changes nothing (it refuses a plan that needs no confirmation before it claims the revision or
+  writes). The script opens the dialog only for the expected page (status 200, HTML, the
+  server-only response header `X-Kb-Confirm-Page` and the page marker), reads the reasons and
+  changes from it as text, and the dialog's confirm button posts the page's own `_csrf` and
+  `token` to `settings-confirm`. Any other answer shows a message and posts nothing. Without
+  JavaScript (or `<dialog>`) the form posts as before and you get the confirmation page.
 - **Groups over their size** (more people than the size, after a size is lowered) are
   shown with an "over size" mark in the section's table. That state is worked out each time from
   the member count and the size; it is never stored.

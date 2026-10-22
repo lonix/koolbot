@@ -798,6 +798,56 @@ describe("concurrency with host moves (shared locks)", () => {
     expect(await run([lead(45)])).toMatchObject({ status: "done" });
   });
 });
+describe("requireConfirmation (#1344): confirm or change nothing", () => {
+  const only = (
+    submission: Array<{ rowId: string; to: unknown; base: unknown }>,
+    d: LiveEditDeps = deps(),
+    rows: readonly LiveEditRow[] = LIVE_EDIT_ROWS,
+  ) =>
+    runLiveEdit({
+      guildId: GUILD,
+      eventId: EV,
+      deps: d,
+      rows,
+      submission: submission as never,
+      requireConfirmation: true,
+    });
+
+  it("refuses a plan that needs no confirmation before anything is claimed or written", async () => {
+    seed();
+    const before = JSON.stringify([...store.values()]);
+    expect(await only([lead(45)])).toMatchObject({
+      status: "refused",
+      code: "not-confirmable",
+    });
+    expect(writes).toEqual([]);
+    expect(JSON.stringify([...store.values()])).toBe(before);
+  });
+
+  it("refuses an empty plan too", async () => {
+    seed();
+    expect(await only([lead(30)])).toMatchObject({ code: "not-confirmable" });
+    expect(writes).toEqual([]);
+  });
+
+  it("without the option the same plan is applied", async () => {
+    seed();
+    expect(await run([lead(45)])).toMatchObject({ status: "done" });
+    expect(writes).not.toEqual([]);
+  });
+
+  it("a plan that needs confirmation is still answered with it, and writes nothing", async () => {
+    seed();
+    const out = await only(
+      [{ rowId: "testName", to: "danger", base: "a" }],
+      deps(),
+      ROWS,
+    );
+    expect(out.status).toBe("needs-confirmation");
+    expect(writes).toEqual([]);
+  });
+});
+
 describe("the confirmation round trip (rule 6) with a row that needs it", () => {
   const dangerous = { rowId: "testName", to: "danger", base: "a" };
 

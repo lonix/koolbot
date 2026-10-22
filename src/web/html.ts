@@ -91,6 +91,16 @@ export const CONFIRM_SCRIPT = [
   "foot.appendChild(back);foot.appendChild(ok);",
   "d.appendChild(head);d.appendChild(body);d.appendChild(foot);",
   "document.body.appendChild(d);d.showModal();back.focus()}",
+  // The same dialog for a question built in script (the host panel's
+  // fetch-and-upgrade, `confirm-fetch.ts`, #1344): title, items and verb are
+  // plain strings that reach the page through `textContent`, and `go` runs only
+  // from the confirm button. `handled` tells the sender the dialog exists.
+  "document.addEventListener('kb-confirm-request',function(e){var o=e.detail;",
+  "if(!o||typeof o.go!=='function'||!canDialog())return;",
+  "var s=el('div');s.setAttribute('data-confirm',String(o.title||'Confirm'));",
+  "s.setAttribute('data-confirm-list',JSON.stringify(Array.isArray(o.items)?o.items:[]));",
+  "if(o.verb)s.setAttribute('data-confirm-verb',String(o.verb));",
+  "o.handled=true;ask(s,null,o.trigger||document.activeElement,o.go)});",
   "document.addEventListener('submit',function(e){var f=e.target;",
   "if(!f||!f.getAttribute)return;var m=f.getAttribute('data-confirm');if(!m)return;",
   "if(bypass===f)return;",

@@ -16,6 +16,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
 import {
   type SwitchSetup,
   GROUPS_PICK_FIELD,
@@ -138,11 +139,13 @@ function form(
   noValidate = false,
   /** The "also for the next occurrences" tick (#1266), or "". */
   tick = "",
+  /** The server always confirms this form's action: it may be confirmed in a dialog (#1344). */
+  alwaysConfirmed = false,
 ): string {
-  return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
+  return `<form method="POST" action="${escapeHtml(actionPath)}"${alwaysConfirmed ? CONFIRM_FETCH_ATTR : ""}>${hidden("_csrf", csrfToken)}
 ${body}
 ${tick}
-<button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>
+<button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>${alwaysConfirmed ? `\n${confirmFetchError()}` : ""}
 </form>`;
 }
 
@@ -167,6 +170,7 @@ ${hidden(id, OFF)}${hidden(base, ON)}
       "Switch groups off",
       false,
       tick,
+      true,
     );
     const owed = v.channelOwed
       ? form(

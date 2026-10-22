@@ -242,7 +242,8 @@ export type RefusalCode =
   | "not-open"
   | "ending"
   | "busy"
-  | "no-secret";
+  | "no-secret"
+  | "not-confirmable";
 
 /** Host-facing wording of each refusal. */
 export const REFUSAL_MESSAGE: Record<RefusalCode, string> = {
@@ -256,6 +257,8 @@ export const REFUSAL_MESSAGE: Record<RefusalCode, string> = {
   busy: "A move or another change is already in progress for this event. Wait for it to finish, then try again.",
   "no-secret":
     "The Web UI has no session secret configured, so a change that needs confirmation cannot be made. Nothing was changed.",
+  "not-confirmable":
+    "There was nothing to confirm, so nothing was changed. This happens when the event changed since the page was shown: reload the page and look again.",
 };
 
 /**
@@ -1208,6 +1211,14 @@ export async function runLiveEdit(opts: {
   confirmedRevision?: number;
   /** The token's `voiceInUse`; with `confirmed`. */
   confirmedVoiceInUse?: boolean;
+  /**
+   * The caller will show the answer in a confirm dialog and nothing else (the
+   * panel's fetch-and-upgrade, #1344): a posted `submission` that would not
+   * end in `needs-confirmation` is refused (`not-confirmable`) BEFORE the
+   * revision is claimed or any row is written, instead of being applied. Has
+   * no effect with `confirmed`.
+   */
+  requireConfirmation?: boolean;
 }): Promise<LiveEditOutcome> {
   const rows = opts.rows ?? LIVE_EDIT_ROWS;
   const { guildId, deps } = opts;
@@ -1331,6 +1342,10 @@ export async function runLiveEdit(opts: {
           voiceInUse,
         };
       }
+      // Asked to confirm or do nothing: a plan that needs no confirmation
+      // (the event changed since the page was shown, so what the form asks for
+      // is no longer a switch-off or a removal) is never applied here.
+      if (opts.requireConfirmation === true) return refuse("not-confirmable");
     }
 
     // Claim the save (rule 6): the revision moves on BEFORE any row is written,
