@@ -73,7 +73,15 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
       if (!row) return null;
       for (const [k, want] of Object.entries(filter)) {
         if (k === "_id") continue;
-        if (!same(row[k], want)) return null;
+        const actual = k.includes(".")
+          ? k
+              .split(".")
+              .reduce<unknown>(
+                (o, p) => (o as Json | null | undefined)?.[p],
+                row,
+              )
+          : row[k];
+        if (!same(actual, want)) return null;
       }
       Object.assign(row, update.$set);
       return clone(row);
@@ -1040,11 +1048,6 @@ describe("what is refused", () => {
   it.each([
     ["an ended event", { state: "ended" }, "finished or was cancelled"],
     ["a cancelled event", { state: "cancelled" }, "finished or was cancelled"],
-    [
-      "a recurring event",
-      { recurrence: "weekly", seriesId: EVENT_ID },
-      "recurring series",
-    ],
     ["an adopted event", { nativeAdopted: true }, "adopted"],
   ])(
     "refuses %s, with a message, on both GET and POST",
@@ -1148,11 +1151,118 @@ describe("escaping", () => {
 });
 
 describe("the links", () => {
-  it("shows Edit on the host panel of an editable event, and not on a series", async () => {
+  it("shows Edit on the host panel of an editable event, a series occurrence included, and not on an adopted one", async () => {
     const own = await call(PANEL);
     expect(own.text).toContain(`href="${EDIT}"`);
     events[EVENT_ID] = makeEvent({ recurrence: "weekly", seriesId: EVENT_ID });
     const series = await call(PANEL);
-    expect(series.text).not.toContain(`href="${EDIT}"`);
+    expect(series.text).toContain(`href="${EDIT}"`);
+    events[EVENT_ID] = makeEvent({ nativeAdopted: true });
+    const adopted = await call(PANEL);
+    expect(adopted.text).not.toContain(`href="${EDIT}"`);
+  });
+});
+
+describe("a recurring event", () => {
+  beforeEach(() => {
+    events[EVENT_ID] = makeEvent({
+      recurrence: "weekly",
+      seriesId: EVENT_ID,
+      occurrenceIndex: 0,
+      seriesStart: new Date(START.getTime()),
+      nextSpawned: false,
+    });
+  });
+
+  it("asks how far the change reaches, with neither option pre-chosen", async () => {
+    const r = await call(EDIT);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('name="scope" value="occurrence"');
+    expect(r.text).toContain('name="scope" value="following"');
+    expect(r.text).not.toMatch(/name="scope"[^>]*checked/);
+    expect(r.text).toContain("This event repeats weekly");
+  });
+
+  it("refuses a save without a scope or with an unknown one, changing nothing", async () => {
+    for (const body of [{}, { scope: "" }, { scope: "series" }]) {
+      const r = await save({ title: "Changed", ...body });
+      expect(flashOf(r.location).type).toBe("err");
+      expect(flashOf(r.location).msg).toContain("this occurrence only");
+    }
+    expect(row().title).toBe("Quiz night");
+    expect(syncEvent).not.toHaveBeenCalled();
+    const failures = auditRows.filter(
+      (a) => (a as { action?: string }).action === "event.edit",
+    );
+    expect(failures).toHaveLength(3);
+    expect(failures.every((a) => (a as Json).result === "failure")).toBe(true);
+  });
+
+  it("'This occurrence' saves the row, keeps the series' values for the next one and audits the scope", async () => {
+    const r = await save({ title: "Special night", scope: "occurrence" });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().title).toBe("Special night");
+    expect(row().seriesTemplate).toEqual({
+      title: "Quiz night",
+      description: "Bring a friend",
+      durationMinutes: 90,
+      timezone: "UTC",
+    });
+    const entry = auditRows.find(
+      (a) => (a as { action?: string }).action === "event.edit",
+    ) as { details: Json };
+    expect(entry.details).toMatchObject({ scope: "occurrence" });
+  });
+
+  it("'This and following' writes the changed field to the series and moves the anchor with the start", async () => {
+    const r = await save({
+      time: "19:30",
+      description: "New text",
+      scope: "following",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(row().seriesTemplate).toEqual({
+      title: "Quiz night",
+      description: "New text",
+      durationMinutes: 90,
+      timezone: "UTC",
+    });
+    expect(row().seriesStart).toEqual(new Date("2099-06-01T19:30:00.000Z"));
+    expect(row().startTime).toEqual(new Date("2099-06-01T19:30:00.000Z"));
+  });
+
+  it("refuses a stale save when only the stored template changed meanwhile (a series rename, then the row restored)", async () => {
+    // Another host renames the series ("This and following"), then restores
+    // this row's title ("This occurrence"): every row field is back to what
+    // the stale form saw, but the template now holds the series-wide rename.
+    const renamed = {
+      title: "Series renamed",
+      description: "Bring a friend",
+      durationMinutes: 90,
+      timezone: "UTC",
+    };
+    const form = await formState();
+    beforeWrite = () => {
+      row().seriesTemplate = renamed;
+    };
+    const r = await save(
+      { time: "19:30", scope: "occurrence" },
+      { ...form, mode: form.mode },
+    );
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("changed since you opened");
+    expect(row().seriesTemplate).toEqual(renamed);
+    expect(row().startTime).toEqual(START);
+  });
+
+  it("refuses an occurrence whose successor already exists", async () => {
+    events[EVENT_ID] = makeEvent({
+      recurrence: "weekly",
+      seriesId: EVENT_ID,
+      nextSpawned: true,
+    });
+    const r = await save({ title: "Changed", scope: "following" });
+    expect(flashOf(r.location).msg).toContain("already been created");
+    expect(row().title).toBe("Quiz night");
   });
 });

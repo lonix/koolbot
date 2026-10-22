@@ -1,4 +1,4 @@
-import type { Guild } from "discord.js";
+import { PermissionFlagsBits, type Guild } from "discord.js";
 import { createHash } from "node:crypto";
 import logger from "../utils/logger.js";
 import {
@@ -202,6 +202,8 @@ export interface AccessContext {
   featureUses: Map<string, string[]>;
   /** Position of the bot's highest role: a role at or above it can't be linked. */
   botHighest: number;
+  /** The bot may manage roles (Administrator counts); needed to create one. */
+  botManageRoles: boolean;
 }
 
 /**
@@ -234,6 +236,7 @@ export async function readAccessContext(
       position: r.position,
     })),
     botHighest: me.roles.highest.position,
+    botManageRoles: me.permissions.has(PermissionFlagsBits.ManageRoles),
   };
 }
 
@@ -379,10 +382,12 @@ export interface AccessGap {
 export function accessGaps(
   enabled: ReadonlySet<string>,
   selection: AccessSelection,
+  /** Scopes a role is about to be created for (the Event host create). */
+  creating: ReadonlySet<AccessScope> = new Set(),
 ): AccessGap[] {
   const sel = normaliseSelection(selection);
   const covered = (scope: AccessScope): boolean =>
-    sel[scope].length > 0 || sel.admin.length > 0;
+    sel[scope].length > 0 || sel.admin.length > 0 || creating.has(scope);
   const gaps: AccessGap[] = [];
   if (enabled.has("events") && !covered("host")) {
     gaps.push({

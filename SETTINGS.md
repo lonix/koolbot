@@ -717,7 +717,7 @@ page (`/admin/birthdays`), which also edits these settings.
 | `birthdays.channel_id`              | `""`                              | Channel where birthday messages are posted (required)                                                                                                                                |
 | `birthdays.message`                 | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file)                                              |
 | `birthdays.mention`                 | `true`                            | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification                                                                                  |
-| `birthdays.role_id`                 | `""`                              | Optional role granted on the birthday, auto-removed later. Roles with Administrator or other powerful permissions are refused                                                        |
+| `birthdays.role_id`                 | `""`                              | Optional role granted on the birthday, auto-removed later. Roles with Administrator or other powerful permissions, or that back a role group, are refused                            |
 | `birthdays.role_duration_hours`     | `24`                              | How long the temporary birthday role is held before the sweep removes it                                                                                                             |
 | `birthdays.change_cooldown_seconds` | `300`                             | Minimum seconds between a member changing the month/day of their own birthday (`0` = no cooldown). Saving the same date, or only the year, is never limited                          |
 
@@ -854,7 +854,7 @@ channel.
   patterns, "2nd Tuesday", holiday exceptions) is not supported.
 - **Event groups** (#1188): an event can carry a set of groups (teams, squads, breakout rooms, raid parties), set up in
   the Groups section of the event form. There is no master switch: the section is off for every event unless the
-  organiser ticks "Use groups for this event", and a plain event stores and behaves exactly as before. The setup is
+  organiser ticks "Split into groups", and a plain event stores and behaves exactly as before. The setup is
   stored with the event (each group has a name, a kind of team, open or leads (the hidden Captains lobby), an optional size of 1 to 99, an optional
   tag of up to 8 characters and an optional colour marker) and a recurring series copies it to the next occurrence
   without members. An event can also set its own **channel creation time**; empty uses `events.create_lead_minutes`, and
@@ -1168,7 +1168,7 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
 | `moderation.raid.min_account_age_hours` | `0`       | New-account gate, independent of lockdown: accounts younger than this get the new-account action. `0` turns the gate off                                |
 | `moderation.raid.new_account_action`    | `timeout` | `timeout`, `quarantine` or `kick`, applied to a too-young account                                                                                       |
 | `moderation.raid.timeout_minutes`       | `60`      | Length of the timeout action (clamped to 1 minute to 28 days)                                                                                           |
-| `moderation.raid.quarantine_role_id`    | `""`      | Role the quarantine action assigns. It should have no channel access and sit below the bot's role                                                       |
+| `moderation.raid.quarantine_role_id`    | `""`      | Role the quarantine action assigns. It should have no channel access and sit below the bot's role. A role that backs a role group is never assigned     |
 | `moderation.raid.lockdown_max_minutes`  | `0`       | End a lockdown automatically after this long. `0` keeps it on until a moderator runs `/raidmode off`                                                    |
 | `moderation.raid.alert_channel_id`      | `""`      | Text channel that gets a message when lockdown starts or ends. Nothing is posted while this is empty                                                    |
 
@@ -1936,7 +1936,7 @@ leave the graph in a broken state.
 
 - `rules.enabled` (bool, default: false)
 - `rules.channel_id` (string, default: "")
-- `rules.role_id` (string, default: "")
+- `rules.role_id` (string, default: "") — a role that backs a role group is never granted (#1375)
 - `rules.message` (string, default: the "Please read the server rules above ..." text)
 - `rules.button_label` (string, default: "I accept the rules")
 - `rules.message_id` (string, default: "")

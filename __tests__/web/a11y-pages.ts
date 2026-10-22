@@ -10,6 +10,7 @@
  * add a page renderer, add a fixture for it in the matching group below.
  */
 
+import { ChannelType } from "discord.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -49,6 +50,11 @@ import {
 } from "../../src/web/me-moderation-page.js";
 import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
+import {
+  UPDATE_AVAILABLE,
+  busyDashboard,
+  calmDashboard,
+} from "./dashboard-fixtures.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
@@ -341,11 +347,20 @@ const ADOPTION_SNAPSHOT = {
 };
 
 const CHANNELS = [
-  { id: "c1", name: "general" },
-  { id: "c2", name: "announcements" },
+  { id: "c1", name: "general", type: ChannelType.GuildText },
+  { id: "c2", name: "announcements", type: ChannelType.GuildAnnouncement },
 ];
-const VOICE_CHANNELS = [{ id: "v1", name: "Lounge" }];
-const CATEGORIES = [{ id: "cat1", name: "Voice Channels" }];
+const VOICE_CHANNELS = [
+  {
+    id: "v1",
+    name: "Lounge",
+    type: ChannelType.GuildVoice,
+    parentName: "Voice Channels",
+  },
+];
+const CATEGORIES = [
+  { id: "cat1", name: "Voice Channels", type: ChannelType.GuildCategory },
+];
 const ROLES = [
   { id: "r1", name: "Admin" },
   { id: "r2", name: "Member" },
@@ -675,44 +690,21 @@ const CLAIMS_DESTRUCTIVE_PLAN = {
 export function adminPages(): A11yPage[] {
   return [
     {
+      // Everything read, nothing to fix, and the update-available Version panel (#1029).
       name: "Dashboard",
       html: renderDashboardPage({
         ...COMMON,
-        guild: {
-          id: "g1",
-          name: "Test Guild",
-          memberCount: 42,
-          voiceUsers: 3,
-          botTag: "Koolbot#0001",
-        },
-        mongoState: "connected",
-        counts: {
-          announcements: 1,
-          pollSchedules: 2,
-          pollItems: 3,
-          reactionRoles: 4,
-          notices: 5,
-        },
-        features: [
-          { key: "voicechannels.enabled", label: "Voice Channels", on: true },
-          { key: "polls.enabled", label: "Polls", on: false },
-        ],
-        // Update-available state (#1029): the fullest card — kind tag, major
-        // warning, release links, update instructions and "Check now".
-        version: {
-          enabled: true,
-          running: "1.2.2",
-          latest: {
-            version: "v2.0.0",
-            url: "https://github.com/lonix/koolbot/releases/tag/v2.0.0",
-            publishedAt: new Date("2026-09-01T12:00:00Z"),
-            fetchedAt: new Date("2026-09-24T08:00:00Z"),
-          },
-          status: "update-available",
-          updateKind: "major",
-          lastAttemptAt: new Date("2026-09-24T08:00:00Z"),
-          lastError: null,
-        },
+        data: calmDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
+      // Problems, a recent scan and sources that could not be read (#1322).
+      name: "Dashboard with problems",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: busyDashboard(),
+        version: { ...UPDATE_AVAILABLE, status: "error", lastError: "offline" },
       }),
     },
     {
@@ -1204,6 +1196,36 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard access, create Event host offered",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: [
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+        ],
+        gaps: [],
+        hostCreate: { available: true },
+        createHost: true,
+      }),
+    },
+    {
+      name: "Setup wizard access, create Event host refused",
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: [
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+        ],
+        gaps: [],
+        hostCreate: {
+          available: false,
+          reason: "permission",
+          message:
+            "The bot needs the Manage Roles permission to create a role. Give it that in Discord, or pick an existing role instead.",
+        },
+      }),
+    },
+    {
       name: "Setup wizard access, roles unavailable",
       html: renderWizardAccessPage({
         ...COMMON,
@@ -1246,6 +1268,36 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard confirm, Event host role",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        hostRole: {
+          planId: "0123456789abcdef01234567",
+          operations: ['Create role "Event host"'],
+          problems: [],
+        },
+      }),
+    },
+    {
+      name: "Setup wizard confirm, Event host role blocked",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        hostRole: {
+          planId: null,
+          operations: [],
+          problems: [
+            "The bot needs the Manage Roles permission for these changes.",
+          ],
+        },
+      }),
+    },
+    {
       name: "Setup wizard confirm, role mapping blocked",
       html: renderWizardConfirmPage({
         ...COMMON,
@@ -1276,6 +1328,7 @@ export function adminPages(): A11yPage[] {
           {
             id: "a1",
             channelName: "general",
+            channelType: ChannelType.GuildText,
             cron: "0 9 * * 1",
             enabled: true,
             messagePreview: "Good morning!",
@@ -1470,6 +1523,40 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The group setup form (#1299): choice cards with some over the cap
+      // (disabled), the nested options, the compact rows and the Advanced section.
+      name: "Events (group setup cards, one over the cap)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        groupLimits: { defaultCount: 3, maxCount: 3 },
+        groupPresets: [
+          ...EVENT_GROUP_PRESETS,
+          {
+            id: "my:0123456789abcdef01234567",
+            label: "Clan match",
+            description: "Five roles",
+            groupLabel: "Squad",
+            groups: [
+              {
+                name: "Assault",
+                kind: "team",
+                size: 8,
+                tag: "AS",
+                marker: "🟢",
+              },
+              { name: "Logi", kind: "open", size: null, tag: "", marker: "" },
+            ],
+          },
+        ],
+      }),
+    },
+    {
       name: "Group presets",
       html: renderEventPresetsPage({
         ...COMMON,
@@ -1632,6 +1719,7 @@ export function adminPages(): A11yPage[] {
             id: "s1",
             channelId: "c1",
             channelName: "general",
+            channelType: ChannelType.GuildText,
             cron: "0 12 * * 3",
             durationHours: 24,
             pingRoleId: "r2",
@@ -1661,7 +1749,7 @@ export function adminPages(): A11yPage[] {
       html: renderReactionRolesPage({
         ...COMMON,
         enabled: true,
-        configChannel: { name: "roles", id: "c1" },
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
         active: [
           {
             mappingId: "m1",
@@ -1669,7 +1757,9 @@ export function adminPages(): A11yPage[] {
             roleName: "Gamer",
             roleId: "r2",
             categoryName: "Games",
+            categoryType: ChannelType.GuildCategory,
             channelName: "roles",
+            channelType: ChannelType.GuildText,
             messageId: "msg1",
             autoCreated: true,
             mode: "toggle",
@@ -1685,7 +1775,9 @@ export function adminPages(): A11yPage[] {
             roleName: "Retro",
             roleId: "r2",
             categoryName: "Games",
+            categoryType: ChannelType.GuildCategory,
             channelName: "roles",
+            channelType: ChannelType.GuildText,
             messageId: "msg2",
             autoCreated: false,
             mode: "toggle",
@@ -1736,9 +1828,11 @@ export function adminPages(): A11yPage[] {
       html: renderNoticesPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "rules", id: "c1" },
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
         total: 1,
-        textChannels: [{ id: "c1", name: "rules" }],
+        textChannels: [
+          { id: "c1", name: "rules", type: ChannelType.GuildText },
+        ],
         settingRows: [
           {
             key: "notices.enabled",
@@ -1785,10 +1879,12 @@ export function adminPages(): A11yPage[] {
       html: renderQuotesPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "quotes", id: "c1" },
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
         headerMessageId: "900000000000000001",
         settingsPickers: {
-          textChannels: [{ id: "c1", name: "quotes" }],
+          textChannels: [
+            { id: "c1", name: "quotes", type: ChannelType.GuildText },
+          ],
           roles: [{ id: "r1", name: "Mods" }],
         },
         settingRows: [
@@ -1846,11 +1942,13 @@ export function adminPages(): A11yPage[] {
       html: renderBirthdaysPage({
         ...COMMON,
         enabled: true,
-        channel: { name: "general", id: "c1" },
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
         role: { name: "Birthday", id: "r1" },
         cron: "0 * * * *",
         settingsPickers: {
-          textChannels: [{ id: "c1", name: "general" }],
+          textChannels: [
+            { id: "c1", name: "general", type: ChannelType.GuildText },
+          ],
           roles: [{ id: "r1", name: "Birthday" }],
         },
         settingRows: [
@@ -2171,6 +2269,7 @@ export function adminPages(): A11yPage[] {
             subcommand: "add",
             channelId: "c1",
             channelLabel: "general",
+            channelType: ChannelType.GuildText,
             result: "success",
             errorMessage: null,
             durationMs: 42,
@@ -2183,6 +2282,7 @@ export function adminPages(): A11yPage[] {
             subcommand: null,
             channelId: null,
             channelLabel: null,
+            channelType: null,
             result: "denied",
             errorMessage: "missing role",
             durationMs: 3,
@@ -2454,7 +2554,13 @@ export function adminPages(): A11yPage[] {
         native: { screening: false, community: true },
         intentMissing: true,
         plan: null,
-        channels: [{ id: "100000000000000010", name: "rules" }],
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+        ],
         roleName: "Accepted",
         unavailable: null,
         options: {
@@ -2480,7 +2586,13 @@ export function adminPages(): A11yPage[] {
         native: { screening: false, community: true },
         intentMissing: false,
         plan: null,
-        channels: [{ id: "100000000000000010", name: "rules" }],
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+        ],
         roleName: null,
         unavailable: null,
         options: {
@@ -3184,6 +3296,17 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me edit event (recurring: asks how far the change reaches)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({ series: { cadence: "weekly" } }),
+          csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
       name: "/me edit event (start held by a running Discord event)",
       html: shell(
         "Edit event: Quiz night",
@@ -3321,6 +3444,7 @@ const REWIND = {
     duration: "3 hr 5 min",
     date: "2026-01-03",
     channelName: "Lounge",
+    channelType: ChannelType.GuildStageVoice,
   },
   longestStreakDays: 6,
   longestStreakRange: { startDate: "2026-01-01", endDate: "2026-01-06" },
@@ -3349,7 +3473,14 @@ const REWIND = {
     best: { isoYear: 2026, isoWeek: 5, rank: 2 },
   },
   messagesSent: 430,
-  topTextChannels: [{ channelId: "c1", channelName: "general", count: 300 }],
+  topTextChannels: [
+    {
+      channelId: "c1",
+      channelName: "general",
+      channelType: ChannelType.GuildText,
+      count: 300,
+    },
+  ],
   peakMessageDay: { date: "2026-01-04", count: 60 },
   reactionsGiven: 90,
   reactionsReceived: 120,
@@ -3586,6 +3717,7 @@ function moderatorPages(
         subcommand: null,
         channelId: "c-1",
         channelLabel: "general",
+        channelType: ChannelType.GuildText,
         result: "denied" as const,
         errorMessage: "Missing permission",
         durationMs: 12,

@@ -1,4 +1,6 @@
+import { ChannelType } from "discord.js";
 import { describe, it, expect } from "@jest/globals";
+import { calmDashboard } from "./dashboard-fixtures.js";
 import {
   findCascadeMasterKey,
   findFeatureMasterKey,
@@ -109,7 +111,7 @@ describe("renderVersionCard (#1029)", () => {
       },
       "tok",
     );
-    expect(html).toContain("couldn't check");
+    expect(html).toContain("couldn&#39;t check");
     expect(html).toContain("Rate-limited by GitHub &lt;soon&gt;.");
     expect(html).toContain("last successful result");
     expect(html).toContain("v2.1.0");
@@ -137,25 +139,7 @@ describe("renderVersionCard (#1029)", () => {
   });
 
   it("is rendered on the dashboard only when a snapshot is passed", () => {
-    const props = {
-      ...COMMON,
-      guild: {
-        id: "g1",
-        name: "G",
-        memberCount: 1,
-        voiceUsers: 0,
-        botTag: null,
-      },
-      mongoState: "connected",
-      counts: {
-        announcements: 0,
-        pollSchedules: 0,
-        pollItems: 0,
-        reactionRoles: 0,
-        notices: 0,
-      },
-      features: [],
-    };
+    const props = { ...COMMON, data: calmDashboard() };
     expect(renderDashboardPage(props)).not.toContain('id="version"');
     expect(renderDashboardPage({ ...props, version: base })).toContain(
       'id="version"',
@@ -164,34 +148,17 @@ describe("renderVersionCard (#1029)", () => {
 });
 
 describe("renderDashboardPage", () => {
-  it("renders feature toggles with status tags", () => {
-    const html = renderDashboardPage({
-      ...COMMON,
-      guild: {
-        id: "g1",
-        name: "Test Guild",
-        memberCount: 42,
-        voiceUsers: 3,
-        botTag: "Bot#0001",
-      },
-      mongoState: "connected",
-      counts: {
-        announcements: 1,
-        pollSchedules: 2,
-        pollItems: 3,
-        reactionRoles: 4,
-        notices: 5,
-      },
-      features: [
-        { key: "voicechannels.enabled", label: "Voice Channels", on: true },
-        { key: "polls.enabled", label: "Polls", on: false },
-      ],
-    });
+  it("lists every feature with its state, key and page, and has no switch", () => {
+    const html = renderDashboardPage({ ...COMMON, data: calmDashboard() });
     expect(html).toContain("Test Guild");
-    expect(html).toContain("Bot#0001");
+    expect(html).toContain("Koolbot#0001");
     expect(html).toContain("voicechannels.enabled");
-    expect(html).toContain('class="tag tag-on">ON');
-    expect(html).toContain('class="tag tag-off">OFF');
+    expect(html).toContain('<a class="kb-list__link" href="/admin/polls">');
+    expect(html).toContain('class="kb-badge kb-badge--on">On');
+    expect(html).toContain('class="kb-badge kb-badge--off">Off');
+    // Features are switched on their own page, never here (design principle 8).
+    expect(html).not.toContain("kb-switch");
+    expect(html).not.toContain('role="switch"');
   });
 });
 
@@ -679,8 +646,8 @@ describe("renderSettingsPage", () => {
     const html = renderSettingsPage({
       ...COMMON,
       textChannels: [
-        { id: "111", name: "general" },
-        { id: "222", name: "voice-stats" },
+        { id: "111", name: "general", type: ChannelType.GuildText },
+        { id: "222", name: "voice-stats", type: ChannelType.GuildText },
       ],
       categoryChannels: [],
       roles: [],
@@ -704,9 +671,9 @@ describe("renderSettingsPage", () => {
     expect(html).toMatch(
       /<select[^>]*name="value_voicetracking\.announcements\.channel_id"[^>]*>/,
     );
-    expect(html).toContain('<option value="111">#general</option>');
+    expect(html).toContain('<option value="111"># general</option>');
     expect(html).toContain(
-      '<option value="222" selected>#voice-stats</option>',
+      '<option value="222" selected># voice-stats</option>',
     );
   });
 
@@ -714,7 +681,13 @@ describe("renderSettingsPage", () => {
     const html = renderSettingsPage({
       ...COMMON,
       textChannels: [],
-      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      categoryChannels: [
+        {
+          id: "cat-1",
+          name: "Voice Channels",
+          type: ChannelType.GuildCategory,
+        },
+      ],
       roles: [],
       groups: [
         {
@@ -734,7 +707,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(html).toContain(
-      '<option value="cat-1" selected>#Voice Channels</option>',
+      '<option value="cat-1" selected>📁 Voice Channels</option>',
     );
   });
 
@@ -772,9 +745,9 @@ describe("renderSettingsPage", () => {
     const html = renderSettingsPage({
       ...COMMON,
       textChannels: [
-        { id: "111", name: "general" },
-        { id: "222", name: "afk" },
-        { id: "333", name: "other" },
+        { id: "111", name: "general", type: ChannelType.GuildText },
+        { id: "222", name: "afk", type: ChannelType.GuildText },
+        { id: "333", name: "other", type: ChannelType.GuildText },
       ],
       voiceChannels: [],
       categoryChannels: [],
@@ -799,19 +772,21 @@ describe("renderSettingsPage", () => {
     expect(html).toMatch(
       /<select[^>]*name="value_messagetracking\.excluded_channels" multiple/,
     );
-    expect(html).toContain('<option value="111" selected>#general</option>');
-    expect(html).toContain('<option value="222">#afk</option>');
-    expect(html).toContain('<option value="333" selected>#other</option>');
+    expect(html).toContain('<option value="111" selected># general</option>');
+    expect(html).toContain('<option value="222"># afk</option>');
+    expect(html).toContain('<option value="333" selected># other</option>');
   });
 
   it("renders a voice channel_list (channelKind: voice) from voiceChannels, not textChannels (#611)", () => {
     const html = renderSettingsPage({
       ...COMMON,
-      textChannels: [{ id: "t1", name: "general-text" }],
+      textChannels: [
+        { id: "t1", name: "general-text", type: ChannelType.GuildText },
+      ],
       voiceChannels: [
-        { id: "v1", name: "Lounge" },
-        { id: "v2", name: "Gaming" },
-        { id: "v3", name: "AFK" },
+        { id: "v1", name: "Lounge", type: ChannelType.GuildVoice },
+        { id: "v2", name: "Gaming", type: ChannelType.GuildVoice },
+        { id: "v3", name: "AFK", type: ChannelType.GuildVoice },
       ],
       categoryChannels: [],
       roles: [],
@@ -834,13 +809,13 @@ describe("renderSettingsPage", () => {
       ],
     });
     // Voice channels are offered…
-    expect(html).toContain('<option value="v1" selected>#Lounge</option>');
-    expect(html).toContain('<option value="v2">#Gaming</option>');
-    expect(html).toContain('<option value="v3" selected>#AFK</option>');
+    expect(html).toContain('<option value="v1" selected>🔊 Lounge</option>');
+    expect(html).toContain('<option value="v2">🔊 Gaming</option>');
+    expect(html).toContain('<option value="v3" selected>🔊 AFK</option>');
     // …and the text channel is NOT present in this control.
     expect(html).not.toContain("general-text");
     // Selected channels render as a readable, separated summary (no blob).
-    expect(html).toContain("Selected: #Lounge, #AFK");
+    expect(html).toContain("Selected: 🔊 Lounge, 🔊 AFK");
   });
 
   it("renders a role_list-type setting as a multi-select with CSV pre-selection", () => {
@@ -882,7 +857,9 @@ describe("renderSettingsPage", () => {
     // so saving the form doesn't silently clear the setting.
     const singleSelect = renderSettingsPage({
       ...COMMON,
-      textChannels: [{ id: "111", name: "general" }],
+      textChannels: [
+        { id: "111", name: "general", type: ChannelType.GuildText },
+      ],
       categoryChannels: [],
       roles: [],
       groups: [
@@ -903,7 +880,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(singleSelect).toContain(
-      '<option value="999-deleted" selected>(missing) 999-deleted</option>',
+      '<option value="999-deleted" selected>⚠ 999-deleted (unavailable)</option>',
     );
     // And the "(none)" placeholder should NOT be the selected one in this
     // case — the missing-ID option carries the selection.
@@ -915,7 +892,9 @@ describe("renderSettingsPage", () => {
     // Multi-select case: one known + one missing.
     const multiSelect = renderSettingsPage({
       ...COMMON,
-      textChannels: [{ id: "111", name: "general" }],
+      textChannels: [
+        { id: "111", name: "general", type: ChannelType.GuildText },
+      ],
       categoryChannels: [],
       roles: [],
       groups: [
@@ -936,10 +915,10 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(multiSelect).toContain(
-      '<option value="111" selected>#general</option>',
+      '<option value="111" selected># general</option>',
     );
     expect(multiSelect).toContain(
-      '<option value="999-deleted" selected>(missing) 999-deleted</option>',
+      '<option value="999-deleted" selected>⚠ 999-deleted (unavailable)</option>',
     );
   });
 
@@ -1512,6 +1491,7 @@ describe("renderAnnouncementsPage", () => {
         {
           id: "a1",
           channelName: "general",
+          channelType: ChannelType.GuildText,
           cron: "0 9 * * *",
           enabled: true,
           messagePreview: "<b>hi</b>",
@@ -1520,11 +1500,16 @@ describe("renderAnnouncementsPage", () => {
           createdAt: "2026-05-08T00:00:00.000Z",
         },
       ],
-      textChannels: [{ id: "c1", name: "general" }],
+      textChannels: [
+        { id: "c1", name: "general", type: ChannelType.GuildText },
+      ],
     });
     expect(html).toContain("0 9 * * *");
     expect(html).toContain("&lt;b&gt;hi&lt;/b&gt;");
-    expect(html).toContain("#general");
+    // The channel is a text channel: an icon named for its kind, then the name.
+    expect(html).toContain('aria-label="Text channel"');
+    expect(html).toContain("general</span>");
+    expect(html).not.toContain("#general");
   });
 
   it("renders the create form and post-vc-stats button", () => {
@@ -1532,7 +1517,9 @@ describe("renderAnnouncementsPage", () => {
       ...COMMON,
       enabled: true,
       rows: [],
-      textChannels: [{ id: "c1", name: "general" }],
+      textChannels: [
+        { id: "c1", name: "general", type: ChannelType.GuildText },
+      ],
     });
     expect(html).toContain("/admin/announcements/create");
     expect(html).toContain("/admin/announcements/post-vc-stats");
@@ -1559,6 +1546,7 @@ describe("renderAnnouncementsPage", () => {
         {
           id: "a1",
           channelName: "general",
+          channelType: ChannelType.GuildText,
           cron: "0 9 * * *",
           enabled: true,
           messagePreview: "hi",
@@ -1567,7 +1555,9 @@ describe("renderAnnouncementsPage", () => {
           createdAt: "2026-05-08T00:00:00.000Z",
         },
       ],
-      textChannels: [{ id: "c1", name: "general" }],
+      textChannels: [
+        { id: "c1", name: "general", type: ChannelType.GuildText },
+      ],
     });
     expect(html).toContain("/admin/announcements/a1/post-now");
     expect(html).toContain(">Post now<");
@@ -1578,7 +1568,9 @@ describe("renderAnnouncementsPage", () => {
       ...COMMON,
       enabled: true,
       rows: [],
-      textChannels: [{ id: "c1", name: "general" }],
+      textChannels: [
+        { id: "c1", name: "general", type: ChannelType.GuildText },
+      ],
     });
     expect(html).toContain("/admin/announcements/post-once");
     expect(html).toContain("Compose &amp; send once");
@@ -1852,8 +1844,12 @@ describe("renderEventsPage settings card (#975)", () => {
       rows: [],
       settingRows,
       settingsPickers: {
-        textChannels: [{ id: "t1", name: "announcements" }],
-        categoryChannels: [{ id: "cat1", name: "Events" }],
+        textChannels: [
+          { id: "t1", name: "announcements", type: ChannelType.GuildText },
+        ],
+        categoryChannels: [
+          { id: "cat1", name: "Events", type: ChannelType.GuildCategory },
+        ],
       },
       ...extra,
     });
@@ -2006,6 +2002,7 @@ describe("renderPollsPage", () => {
           id: "s1",
           channelId: "c1",
           channelName: "polls",
+          channelType: ChannelType.GuildText,
           cron: "0 12 * * 1",
           durationHours: 12,
           pingRoleId: "r1",
@@ -2027,7 +2024,7 @@ describe("renderPollsPage", () => {
           source: "manual",
         },
       ],
-      textChannels: [{ id: "c1", name: "polls" }],
+      textChannels: [{ id: "c1", name: "polls", type: ChannelType.GuildText }],
       roles: [{ id: "r1", name: "Members" }],
     });
     expect(html).toContain("Pineapple on pizza?");
@@ -2049,6 +2046,7 @@ describe("renderPollsPage", () => {
           id: "s1",
           channelId: "c1",
           channelName: "polls",
+          channelType: ChannelType.GuildText,
           cron: "0 12 * * 1",
           durationHours: 12,
           pingRoleId: "r1",
@@ -2070,7 +2068,7 @@ describe("renderPollsPage", () => {
           source: "manual",
         },
       ],
-      textChannels: [{ id: "c1", name: "polls" }],
+      textChannels: [{ id: "c1", name: "polls", type: ChannelType.GuildText }],
       roles: [{ id: "r1", name: "Members" }],
     });
     // Edit routes are present per row.
@@ -2098,6 +2096,7 @@ describe("renderPollsPage", () => {
           id: "s1",
           channelId: "gone-chan",
           channelName: "gone-chan",
+          channelType: ChannelType.GuildText,
           cron: "0 12 * * 1",
           durationHours: 12,
           pingRoleId: "gone-role",
@@ -2107,7 +2106,7 @@ describe("renderPollsPage", () => {
         },
       ],
       items: [],
-      textChannels: [{ id: "c1", name: "polls" }],
+      textChannels: [{ id: "c1", name: "polls", type: ChannelType.GuildText }],
       roles: [{ id: "r1", name: "Members" }],
     });
     // The saved-but-missing ids stay selected so a cron-only edit can't
@@ -2126,7 +2125,7 @@ describe("renderPollsPage", () => {
       settingRows: [],
       schedules: [],
       items: [],
-      textChannels: [{ id: "c1", name: "polls" }],
+      textChannels: [{ id: "c1", name: "polls", type: ChannelType.GuildText }],
       roles: [{ id: "r1", name: "Members" }],
     });
     expect(html).toContain("/admin/polls/schedules/create");
@@ -2260,9 +2259,12 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
       ...COMMON,
       enabled,
       managedOnly,
-      voiceChannels: [{ id: "vc-1", name: "Hangout" }],
+      voiceChannels: [
+        { id: "vc-1", name: "Hangout", type: ChannelType.GuildVoice },
+      ],
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -2270,7 +2272,13 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
       totalEmpty: 0,
       channels: [],
       categoryFound: true,
-      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      categoryChannels: [
+        {
+          id: "cat-1",
+          name: "Voice Channels",
+          type: ChannelType.GuildCategory,
+        },
+      ],
       settingRows,
     });
 
@@ -2283,7 +2291,7 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
       expect(html).toContain(`name="value_${key}"`);
     }
     expect(html).toContain(
-      '<option value="cat-1" selected>#Voice Channels</option>',
+      '<option value="cat-1" selected>📁 Voice Channels</option>',
     );
   });
 
@@ -2495,13 +2503,13 @@ describe("renderModerationPage settings card (#977)", () => {
       settingRows: moderationRows({ "core.moderation.channel_id": "c2" }),
       pickers: {
         textChannels: [
-          { id: "c1", name: "general" },
-          { id: "c2", name: "mod-log" },
+          { id: "c1", name: "general", type: ChannelType.GuildText },
+          { id: "c2", name: "mod-log", type: ChannelType.GuildText },
         ],
       },
     });
-    expect(html).toMatch(/<option value="c2" selected>#mod-log<\/option>/);
-    expect(html).toContain('<option value="c1">#general</option>');
+    expect(html).toMatch(/<option value="c2" selected># mod-log<\/option>/);
+    expect(html).toContain('<option value="c1"># general</option>');
   });
 
   it("renders the flash the save redirects back with", () => {
@@ -2560,10 +2568,15 @@ describe("renderReactionRolesPage", () => {
     // its channel is shown (escaped) under the message id.
     const remembered = renderReactionRolesPage({
       ...base,
-      active: [mapping({ pickerChannelName: "old<b>chan" })],
+      active: [
+        mapping({
+          pickerChannelName: "old<b>chan",
+          pickerChannelType: ChannelType.GuildText,
+        }),
+      ],
     });
     expect(remembered).not.toContain("remembered their channel");
-    expect(remembered).toContain("in #old&lt;b&gt;chan");
+    expect(remembered).toContain("old&lt;b&gt;chan");
     expect(remembered).not.toContain("old<b>chan");
     // An older mapping (no stored channel) still follows the setting.
     const older = renderReactionRolesPage({
@@ -2602,7 +2615,7 @@ describe("renderReactionRolesPage", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
       enabled: true,
-      configChannel: { name: "roles", id: "c1" },
+      configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
       active: [
         {
           mappingId: "aaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2610,7 +2623,9 @@ describe("renderReactionRolesPage", () => {
           roleName: "Gamer",
           roleId: "r1",
           categoryName: "Roles",
+          categoryType: ChannelType.GuildCategory,
           channelName: "roles",
+          channelType: ChannelType.GuildText,
           messageId: "m1",
           autoCreated: true,
           mode: "sticky",
@@ -2623,7 +2638,8 @@ describe("renderReactionRolesPage", () => {
     });
     expect(html).toContain("🎮");
     expect(html).toContain("Gamer");
-    expect(html).toContain("#roles");
+    expect(html).toContain("Message channel # roles");
+    expect(html).toContain("roles</span>");
     expect(html).toContain('class="tag tag-on">active');
     expect(html).toContain("sticky");
     expect(html).toContain("/admin/reaction-roles/create");
@@ -2642,7 +2658,7 @@ describe("renderReactionRolesPage", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
       enabled: true,
-      configChannel: { name: "roles", id: "c1" },
+      configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
       active: [
         {
           mappingId: "bbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2650,7 +2666,9 @@ describe("renderReactionRolesPage", () => {
           roleName: "Artist",
           roleId: "r9",
           categoryName: "—",
+          categoryType: ChannelType.GuildCategory,
           channelName: "—",
+          channelType: ChannelType.GuildText,
           messageId: "m9",
           autoCreated: false,
           mode: "toggle",
@@ -2670,7 +2688,7 @@ describe("renderReactionRolesPage", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
       enabled: true,
-      configChannel: { name: "roles", id: "c1" },
+      configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
       active: [
         {
           mappingId: "dddddddddddddddddddddddd",
@@ -2678,7 +2696,9 @@ describe("renderReactionRolesPage", () => {
           roleName: "Red",
           roleId: "r1",
           categoryName: "Colour",
+          categoryType: ChannelType.GuildCategory,
           channelName: "colour",
+          channelType: ChannelType.GuildText,
           messageId: "grp1",
           autoCreated: true,
           mode: "unique",
@@ -2706,8 +2726,8 @@ describe("renderReactionRolesPage", () => {
       active: [],
       archived: [],
       textChannels: [
-        { id: "chan-1", name: "roles" },
-        { id: "chan-2", name: "general" },
+        { id: "chan-1", name: "roles", type: ChannelType.GuildText },
+        { id: "chan-2", name: "general", type: ChannelType.GuildText },
       ],
       settingRows: [
         {
@@ -2778,8 +2798,8 @@ describe("renderReactionRolesPage", () => {
     // Channel is a text-channel picker with the current channel selected.
     expect(html).toContain('id="set-reactionroles.message_channel_id"');
     expect(html).toContain('name="value_reactionroles.message_channel_id"');
-    expect(html).toContain('<option value="chan-1" selected>#roles</option>');
-    expect(html).toContain("#general</option>");
+    expect(html).toContain('<option value="chan-1" selected># roles</option>');
+    expect(html).toContain("# general</option>");
     // Style has three short options, so it is a segmented control built from
     // the schema options, with the current one checked.
     expect(html).toContain(
@@ -2833,7 +2853,7 @@ describe("renderReactionRolesPage", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
       enabled: true,
-      configChannel: { name: "roles", id: "c1" },
+      configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
       active: [],
       archived: [
         {
@@ -2842,7 +2862,9 @@ describe("renderReactionRolesPage", () => {
           roleName: "Old",
           roleId: "r2",
           categoryName: "Roles",
+          categoryType: ChannelType.GuildCategory,
           channelName: "old",
+          channelType: ChannelType.GuildText,
           messageId: "m2",
           autoCreated: true,
           mode: "toggle",
@@ -2882,7 +2904,7 @@ describe("renderNoticesPage", () => {
     const html = renderNoticesPage({
       ...COMMON,
       enabled: true,
-      channel: { name: "notices", id: "c1" },
+      channel: { name: "notices", id: "c1", type: ChannelType.GuildText },
       total: 1,
       settingRows: [],
       textChannels: [],
@@ -2927,13 +2949,13 @@ describe("renderNoticesPage", () => {
     const html = renderNoticesPage({
       ...COMMON,
       enabled: true,
-      channel: { name: "notices", id: "c1" },
+      channel: { name: "notices", id: "c1", type: ChannelType.GuildText },
       total: 3,
       groups: [],
       categoryOptions: NOTICE_CATEGORY_OPTIONS,
       textChannels: [
-        { id: "c1", name: "notices" },
-        { id: "c2", name: "rules" },
+        { id: "c1", name: "notices", type: ChannelType.GuildText },
+        { id: "c2", name: "rules", type: ChannelType.GuildText },
       ],
       settingRows: [
         row("notices.enabled", "boolean", true),
@@ -2966,8 +2988,8 @@ describe("renderNoticesPage", () => {
     }
     expect(html).not.toContain("notices.header_message_id");
     // The channel key renders as a text-channel picker.
-    expect(html).toContain('<option value="c1" selected>#notices</option>');
-    expect(html).toContain('<option value="c2">#rules</option>');
+    expect(html).toContain('<option value="c1" selected># notices</option>');
+    expect(html).toContain('<option value="c2"># rules</option>');
     // Moving the channel points the admin at Resync.
     expect(html).toContain("Changing the channel does not move notices");
     // Total count and the resync action stay.
@@ -3004,7 +3026,7 @@ describe("renderBirthdaysPage (#986)", () => {
   const BASE = {
     ...COMMON,
     enabled: true,
-    channel: { name: "general", id: "c1" },
+    channel: { name: "general", id: "c1", type: ChannelType.GuildText },
     role: null as { name: string; id: string } | null,
     cron: "0 * * * *",
     settingRows: [] as SettingRow[],
@@ -3031,7 +3053,7 @@ describe("renderBirthdaysPage (#986)", () => {
     expect(html).toContain("No member has set a birthday yet.");
     expect(html).toContain('action="/admin/birthdays/run-now"');
     expect(html).not.toMatch(/disabled>Run now/);
-    expect(html).toContain("#general");
+    expect(html).toContain("Channel # general");
     expect(html).toContain('<a href="/admin/birthdays" aria-current="page">');
   });
 
@@ -3118,7 +3140,7 @@ describe("renderQuotesPage (#984)", () => {
   const QUOTE_BASE = {
     ...COMMON,
     enabled: true,
-    channel: { name: "quotes", id: "c1" },
+    channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
     headerMessageId: "900000000000000001",
     settingRows: [] as SettingRow[],
     maxLength: 1000,
@@ -3209,7 +3231,9 @@ describe("renderQuotesPage (#984)", () => {
     const html = renderQuotesPage({
       ...QUOTE_BASE,
       settingsPickers: {
-        textChannels: [{ id: "c1", name: "quotes" }],
+        textChannels: [
+          { id: "c1", name: "quotes", type: ChannelType.GuildText },
+        ],
         roles: [{ id: "r1", name: "Mods" }],
       },
       settingRows: [
@@ -3243,7 +3267,7 @@ describe("renderQuotesPage (#984)", () => {
         `<input type="hidden" name="keys" value="${key}">`,
       );
     }
-    expect(html).toContain('<option value="c1" selected>#quotes</option>');
+    expect(html).toContain('<option value="c1" selected># quotes</option>');
     expect(html).toContain("Mods");
   });
 
@@ -3378,6 +3402,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: false,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3397,6 +3422,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: true,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3421,6 +3447,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: true,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3462,6 +3489,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: false,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3484,6 +3512,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: true,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3491,7 +3520,13 @@ describe("renderVoiceChannelsPage", () => {
       totalEmpty: 0,
       channels: [],
       categoryFound: true,
-      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      categoryChannels: [
+        {
+          id: "cat-1",
+          name: "Voice Channels",
+          type: ChannelType.GuildCategory,
+        },
+      ],
       settingRows: [
         {
           key: "voicechannels.category_id",
@@ -3535,7 +3570,7 @@ describe("renderVoiceChannelsPage", () => {
     );
     // The category key renders as a picker sourced from categoryChannels.
     expect(html).toContain(
-      '<option value="cat-1" selected>#Voice Channels</option>',
+      '<option value="cat-1" selected>📁 Voice Channels</option>',
     );
     // The lobby name renders as a text input carrying its current value.
     expect(html).toContain('name="value_voicechannels.lobby.name"');
@@ -3550,6 +3585,7 @@ describe("renderVoiceChannelsPage", () => {
       enabled: true,
       controlPanelEnabled: true,
       categoryName: "Voice",
+      categoryType: ChannelType.GuildCategory,
       lobbyName: "Lobby",
       offlineLobbyName: "Offline Lobby",
       prefix: "🎮",
@@ -3679,9 +3715,15 @@ describe("renderFeatureSettingsCard (#971)", () => {
         }),
       ],
       pickers: {
-        textChannels: [{ id: "t1", name: "general" }],
-        voiceChannels: [{ id: "v1", name: "Lounge" }],
-        categoryChannels: [{ id: "c1", name: "Voice" }],
+        textChannels: [
+          { id: "t1", name: "general", type: ChannelType.GuildText },
+        ],
+        voiceChannels: [
+          { id: "v1", name: "Lounge", type: ChannelType.GuildVoice },
+        ],
+        categoryChannels: [
+          { id: "c1", name: "Voice", type: ChannelType.GuildCategory },
+        ],
         roles: [
           { id: "r1", name: "Mods" },
           { id: "r2", name: "VIP" },
@@ -3699,11 +3741,11 @@ describe("renderFeatureSettingsCard (#971)", () => {
       '<input type="text" class="kb-input" id="set-x.name"',
     );
     expect(html).toContain('value="hi"');
-    expect(html).toContain('<option value="t1" selected>#general</option>');
+    expect(html).toContain('<option value="t1" selected># general</option>');
     // Voice-kind list draws from the voice picker, not the text one.
     expect(html).toContain('name="value_x.voice_list" multiple');
-    expect(html).toContain('<option value="v1" selected>#Lounge</option>');
-    expect(html).toContain('<option value="c1" selected>#Voice</option>');
+    expect(html).toContain('<option value="v1" selected>🔊 Lounge</option>');
+    expect(html).toContain('<option value="c1" selected>📁 Voice</option>');
     expect(html).toContain('<option value="r1" selected>@Mods</option>');
     expect(html).toContain('<option value="r2" selected>@VIP</option>');
     expect(html).toContain("cron-picker");
@@ -4246,8 +4288,8 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       textChannels: [
-        { id: "chan-1", name: "general" },
-        { id: "chan-2", name: "announcements" },
+        { id: "chan-1", name: "general", type: ChannelType.GuildText },
+        { id: "chan-2", name: "announcements", type: ChannelType.GuildText },
       ],
       stepIndex: 0,
       totalSteps: 1,
@@ -4285,7 +4327,7 @@ describe("renderWizardStepPage", () => {
       /<select[^>]*name="value_reactionroles.message_channel_id"/,
     );
     expect(html).toContain(
-      '<option value="chan-2" selected>#announcements</option>',
+      '<option value="chan-2" selected># announcements</option>',
     );
     expect(html).toContain("Reaction-role message channel");
     expect(html).not.toMatch(
@@ -4298,10 +4340,16 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       textChannels: [
-        { id: "chan-1", name: "announcements" },
-        { id: "chan-2", name: "general" },
+        { id: "chan-1", name: "announcements", type: ChannelType.GuildText },
+        { id: "chan-2", name: "general", type: ChannelType.GuildText },
       ],
-      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      categoryChannels: [
+        {
+          id: "cat-1",
+          name: "Voice Channels",
+          type: ChannelType.GuildCategory,
+        },
+      ],
       roles: [{ id: "role-1", name: "Moderator" }],
       stepIndex: 0,
       totalSteps: 1,
@@ -4349,14 +4397,14 @@ describe("renderWizardStepPage", () => {
     );
     expect(html).toContain('for="wiz-reactionroles.message_channel_id"');
     expect(html).toContain(
-      '<option value="chan-1" selected>#announcements</option>',
+      '<option value="chan-1" selected># announcements</option>',
     );
-    expect(html).toContain('<option value="chan-2">#general</option>');
+    expect(html).toContain('<option value="chan-2"># general</option>');
     // Category key → category dropdown.
     expect(html).toMatch(
       /<select class="kb-select" id="wiz-voicechannels\.category_id"[^>]*name="value_voicechannels\.category_id"[^>]*>/,
     );
-    expect(html).toContain('<option value="cat-1">#Voice Channels</option>');
+    expect(html).toContain('<option value="cat-1">📁 Voice Channels</option>');
     // Role key → role dropdown with the `@` prefix.
     expect(html).toMatch(
       /<select class="kb-select" id="wiz-leaderboard_roles\.some_role"[^>]*name="value_leaderboard_roles\.some_role"[^>]*>/,
@@ -5702,7 +5750,7 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(tbody).toContain('value="3"');
     // The stored role stays selected, including one that no longer exists.
     expect(tbody).toContain('<option value="111" selected>@Champion</option>');
-    expect(tbody).toContain('value="222" selected>@222 (unavailable)');
+    expect(tbody).toContain('value="222" selected>⚠ 222 (unavailable)');
     expect(html).toContain('action="/admin/leaderboard-roles/tiers"');
     expect(html).toContain('<template id="lb-tier-template">');
   });

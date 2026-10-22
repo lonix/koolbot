@@ -6,6 +6,14 @@
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import {
+  channelGroupLabel,
+  channelMention,
+  channelText,
+  missingText,
+  roleText,
+} from "./discord-labels.js";
+import { ChannelType } from "discord.js";
+import {
   ACTION_WORDS,
   CASE_OUTCOME_WORDS,
   CASE_STATUS_WORDS,
@@ -69,9 +77,11 @@ import {
 } from "../services/event-groups.js";
 import {
   EVENT_GROUP_PRESETS,
+  LIBRARY_PRESET_PREFIX,
   PERSONAL_PRESET_PREFIX,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
+import { MARKER_COLOURS, groupRowsScript } from "./event-group-form.js";
 import {
   MAX_GROUP_ENTRIES,
   reactionRoleGroupPresets,
@@ -86,9 +96,11 @@ import type {
 import type { TicketStatus } from "../models/ticket.js";
 import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
-import { formatVersion } from "../utils/semver.js";
 import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
+import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
+import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
+import type { HostReview } from "../services/wizard-host-role.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
 interface CommonProps {
@@ -114,33 +126,15 @@ function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
 // ---------- Dashboard ----------
 
 export interface DashboardProps extends CommonProps {
-  guild: {
-    name: string | null;
-    id: string;
-    memberCount: number | null;
-    voiceUsers: number | null;
-    botTag: string | null;
-  };
-  mongoState: string;
-  counts: {
-    announcements: number;
-    pollSchedules: number;
-    pollItems: number;
-    reactionRoles: number;
-    notices: number;
-  };
-  features: Array<{ key: string; label: string; on: boolean }>;
-  /** Update-check result (#1029). Omitted → the card is not rendered. */
+  /** What the page reads, each source on its own (see `dashboard-data.ts`). */
+  data: DashboardData;
+  /** Update-check result (#1029). Omitted: the Version tile says nothing is known. */
   version?: VersionCheckSnapshot;
   flash?: FlashMessage | null;
 }
 
-function formatUtc(date: Date | null | undefined): string {
-  if (!date || Number.isNaN(date.getTime())) return "—";
-  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-const CHANGELOG_URL = "https://github.com/lonix/koolbot/blob/main/CHANGELOG.md";
+// The Version panel moved with the Dashboard (#1322); the name stays importable from here.
+export { renderVersionCard };
 
 /** Consequence lists for the confirmation dialogs (#1343); see `confirmListAttr`. */
 export const REACTION_ROLE_DELETE_ITEMS: readonly string[] = [
@@ -195,159 +189,16 @@ export const EVENT_CANCEL_SERIES_ITEMS: readonly string[] = [
 ];
 const EVENT_CANCEL_SERIES_LIST = confirmListAttr(EVENT_CANCEL_SERIES_ITEMS);
 
-/**
- * Dashboard "Version" card (#1029): running vs latest release, the update
- * state, a "Check now" button and, when behind, how to update. A failed
- * check is a state of the card ("couldn't check", with the last good
- * result), never an error page.
- */
-export function renderVersionCard(
-  v: VersionCheckSnapshot,
-  csrfToken: string,
-): string {
-  const running = formatVersion(v.running);
-  const statusTag = ((): string => {
-    switch (v.status) {
-      case "disabled":
-        return `<span class="tag tag-off">check off</span>`;
-      case "unchecked":
-        return `<span class="tag tag-info">not checked yet</span>`;
-      case "error":
-        return `<span class="tag tag-off">couldn't check</span>`;
-      case "unknown-running":
-        return `<span class="tag tag-warn">running version unknown</span>`;
-      case "up-to-date":
-        return `<span class="tag tag-on">up to date</span>`;
-      case "ahead":
-        return `<span class="tag tag-info">newer than latest release</span>`;
-      case "update-available":
-        return `<span class="tag tag-warn">update available</span>`;
-    }
-  })();
-
-  if (!v.enabled) {
-    return `
-<div class="card" id="version">
-  <h2>Version</h2>
-  <dl class="kv">
-    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
-    <dt>Status</dt><dd>${statusTag}</dd>
-  </dl>
-  <p class="muted">The update check is off (<span class="mono">core.updatecheck.enabled</span>), so only the running version is shown. Turn it on in <a href="/admin/settings#section-core">Settings</a>.</p>
-</div>`;
-  }
-
-  const latest = v.latest;
-  const kindTag = v.updateKind
-    ? ` <span class="tag ${v.updateKind === "major" ? "tag-off" : "tag-info"}">${escapeHtml(v.updateKind)}</span>`
-    : "";
-  const latestHtml = latest
-    ? `<span class="mono">${escapeHtml(latest.version)}</span>${kindTag}` +
-      (latest.publishedAt
-        ? ` <span class="muted">released ${escapeHtml(formatUtc(latest.publishedAt))}</span>`
-        : "")
-    : `<span class="muted">—</span>`;
-
-  const errorNotice =
-    v.status === "error"
-      ? `<div class="notice warn">Couldn't check for updates: ${escapeHtml(v.lastError ?? "unknown error")}` +
-        (latest
-          ? ` Showing the last successful result, fetched ${escapeHtml(formatUtc(latest.fetchedAt))}.`
-          : "") +
-        `</div>`
-      : "";
-
-  const majorNotice =
-    v.updateKind === "major"
-      ? `<div class="notice warn">This is a <strong>major</strong> update and may include breaking changes. Read the release notes before updating.</div>`
-      : "";
-
-  const links = latest
-    ? `<p><a href="${escapeHtml(latest.url)}" rel="noopener noreferrer" target="_blank">Release notes for ${escapeHtml(latest.version)}</a> · <a href="${CHANGELOG_URL}" rel="noopener noreferrer" target="_blank">CHANGELOG</a></p>`
-    : "";
-
-  const instructions = v.updateKind
-    ? `
-  <details class="helper">
-    <summary>How to update</summary>
-    <p>Docker Compose (the published image):</p>
-    <pre class="mono">docker compose pull &amp;&amp; docker compose up -d</pre>
-    <p>Plain Docker: <span class="mono">docker pull ghcr.io/lonix/koolbot:latest</span>, then recreate the container.</p>
-    <p>From source:</p>
-    <pre class="mono">git pull &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; npm start</pre>
-    <p class="muted">See <a href="https://github.com/lonix/koolbot#-docker-management" rel="noopener noreferrer" target="_blank">Docker Management</a> in the README for details.</p>
-  </details>`
-    : "";
-
-  return `
-<div class="card" id="version">
-  <h2>Version</h2>
-  ${errorNotice}${majorNotice}
-  <dl class="kv">
-    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
-    <dt>Latest release</dt><dd>${latestHtml}</dd>
-    <dt>Status</dt><dd>${statusTag}</dd>
-    <dt>Last checked</dt><dd>${escapeHtml(formatUtc(latest?.fetchedAt ?? null))}</dd>
-  </dl>
-  ${links}${instructions}
-  <form method="POST" action="/admin/version/check" class="inline-form">
-    <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
-    <button type="submit" class="btn btn-secondary">Check now</button>
-    <span class="muted">Anonymous request for public release data; nothing about this instance is sent.</span>
-  </form>
-</div>`;
-}
-
 export function renderDashboardPage(props: DashboardProps): string {
-  const featuresHtml = props.features
-    .map(
-      (f) =>
-        `<tr><td>${escapeHtml(f.label)}</td><td>${tagOnOff(f.on)}</td>` +
-        `<td class="mono muted">${escapeHtml(f.key)}</td></tr>`,
-    )
-    .join("");
-
-  const body = `
-<h1>Dashboard</h1>
-<p class="subtitle">Read-only overview of the bot's current state.</p>
-${renderFlash(props.flash)}
-${props.version ? renderVersionCard(props.version, props.csrfToken) : ""}
-
-<div class="card">
-  <h2>Discord</h2>
-  <dl class="kv">
-    <dt>Guild</dt><dd>${escapeHtml(props.guild.name ?? "(unknown)")} <span class="muted mono">${escapeHtml(props.guild.id)}</span></dd>
-    <dt>Members</dt><dd>${props.guild.memberCount ?? "—"}</dd>
-    <dt>In voice now</dt><dd>${props.guild.voiceUsers ?? "—"}</dd>
-    <dt>Bot user</dt><dd>${escapeHtml(props.guild.botTag ?? "(not ready)")}</dd>
-  </dl>
-</div>
-
-<div class="card">
-  <h2>Database</h2>
-  <dl class="kv">
-    <dt>Connection</dt><dd>${tagOnOff(props.mongoState === "connected", props.mongoState, props.mongoState)}</dd>
-    <dt>Scheduled announcements</dt><dd>${props.counts.announcements}</dd>
-    <dt>Poll schedules</dt><dd>${props.counts.pollSchedules}</dd>
-    <dt>Poll questions</dt><dd>${props.counts.pollItems}</dd>
-    <dt>Active reaction roles</dt><dd>${props.counts.reactionRoles}</dd>
-    <dt>Notices</dt><dd>${props.counts.notices}</dd>
-  </dl>
-</div>
-
-<div class="card">
-  <h2>Features</h2>
-  <table>
-    <caption class="visually-hidden">Feature enablement</caption>
-    <thead><tr><th scope="col">Feature</th><th scope="col">Status</th><th scope="col">Config key</th></tr></thead>
-    <tbody>${featuresHtml}</tbody>
-  </table>
-</div>
-`;
   return renderAdminPage({
     title: "Dashboard",
     active: "/admin/",
-    body,
+    body: renderDashboardBody({
+      data: props.data,
+      version: props.version,
+      csrfToken: props.csrfToken,
+      flashHtml: renderFlash(props.flash),
+    }),
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
     navFeatureStatus: props.navFeatureStatus,
@@ -575,7 +426,7 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
  *
  * Stored IDs that aren't in the live options list (channel was deleted,
  * role was renamed and the cache is stale, …) are surfaced as
- * `(missing) <id>` options that stay `selected` on render. Without this
+ * `⚠ <id> (unavailable)` options that stay `selected` on render. Without this
  * the browser would default the single-select to the first option
  * (typically the "(none)" row) and an operator could silently clear the
  * setting by saving the form without touching the control.
@@ -583,7 +434,6 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
 function buildOptionsHtml(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
-  prefix: string,
   includeNoneRow: boolean,
 ): string {
   const parts: string[] = [];
@@ -592,19 +442,44 @@ function buildOptionsHtml(
     parts.push(`<option value=""${noneSel}>(none)</option>`);
   }
   const knownIds = new Set(options.map((o) => o.id));
+  // Channels are grouped the way Discord's autocomplete groups them (#1303):
+  // one <optgroup> per kind, in the order the kinds first appear.
+  const groups = new Map<string, string[]>();
   for (const opt of options) {
     const sel = selected.has(opt.id) ? " selected" : "";
+    const html = `<option value="${escapeHtml(opt.id)}"${sel}>${escapeHtml(optionText(opt))}</option>`;
+    if (!isChannelOption(opt)) {
+      parts.push(html);
+      continue;
+    }
+    const group = channelGroupLabel(opt.type);
+    const members = groups.get(group);
+    if (members) members.push(html);
+    else groups.set(group, [html]);
+  }
+  for (const [label, members] of groups) {
     parts.push(
-      `<option value="${escapeHtml(opt.id)}"${sel}>${prefix}${escapeHtml(opt.name)}</option>`,
+      `<optgroup label="${escapeHtml(label)}">${members.join("")}</optgroup>`,
     );
   }
   for (const id of selected) {
     if (id === "" || knownIds.has(id)) continue;
     parts.push(
-      `<option value="${escapeHtml(id)}" selected>(missing) ${escapeHtml(id)}</option>`,
+      `<option value="${escapeHtml(id)}" selected>${escapeHtml(missingText(id))}</option>`,
     );
   }
   return parts.join("");
+}
+
+function isChannelOption(o: ChannelOption | RoleOption): o is ChannelOption {
+  return "type" in o;
+}
+
+/** Plain-text label of one picker option: a channel by kind, a role as `@Name`. */
+function optionText(o: ChannelOption | RoleOption): string {
+  return isChannelOption(o)
+    ? channelText(o, o.parentName ?? undefined)
+    : roleText(o.name);
 }
 
 /**
@@ -865,22 +740,23 @@ function rolesFor(
  * Render a compact, readable summary of the currently-selected entries below a
  * multi-select. A `<select multiple>` buries its picks among unselected rows,
  * and a long voice-exclusion list otherwise reads as an unseparated blob
- * (issue #611); this surfaces them as a clean, comma-separated `#name` /
- * `@name` list. Ids no longer in the live option set render as a `(missing)`
- * entry followed by the raw id, so a stale selection is visible rather than
- * silently dropped (mirroring the `(missing)` option label `buildOptionsHtml`
+ * (issue #611); this surfaces them as a clean, comma-separated list labelled
+ * by kind (`# general`, `🔊 Lobby`, `@Moderators`, #1303). Ids no longer in the
+ * live option set render as `⚠ <id> (unavailable)`, so a stale selection is
+ * visible rather than silently dropped (the same label `buildOptionsHtml`
  * emits). Returns an empty string when nothing is selected.
  */
 function renderSelectionSummary(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
-  prefix: string,
 ): string {
   if (selected.size === 0) return "";
-  const byId = new Map(options.map((o) => [o.id, o.name]));
+  const byId = new Map<string, ChannelOption | RoleOption>(
+    (options as Array<ChannelOption | RoleOption>).map((o) => [o.id, o]),
+  );
   const tokens = Array.from(selected).map((id) => {
-    const name = byId.get(id);
-    return name ? `${prefix}${name}` : `(missing) ${id}`;
+    const opt = byId.get(id);
+    return opt ? optionText(opt) : missingText(id);
   });
   return (
     `<div class="settings-selected muted" style="margin-top:.4rem;font-size:.85em">` +
@@ -1066,11 +942,10 @@ function renderControlInput(
         : r.type === "category"
           ? pickers.categoryChannels
           : rolesFor(r, pickers);
-    const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, prefix, true) +
+      buildOptionsHtml(options, selected, true) +
       `</select>`
     );
   }
@@ -1079,7 +954,6 @@ function renderControlInput(
       r.type === "channel_list"
         ? channelOptionsFor(r, pickers)
         : rolesFor(r, pickers);
-    const prefix = r.type === "role_list" ? "@" : "#";
     const selected = new Set(
       currentStr
         .split(",")
@@ -1088,9 +962,9 @@ function renderControlInput(
     );
     return (
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, prefix, false) +
+      buildOptionsHtml(options, selected, false) +
       `</select>` +
-      renderSelectionSummary(options, selected, prefix)
+      renderSelectionSummary(options, selected)
     );
   }
   if (r.type === "cron") {
@@ -2163,14 +2037,17 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessGaps?: AccessGap[];
   /** What Review showed; posted back so Apply can tell if it went stale. */
   accessFingerprint?: string;
+  /** The plan for creating the Event host role (#1365), when it was chosen. */
+  hostRole?: HostReview | null;
   flash?: FlashMessage | null;
 }
 
 export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
   const accessChanges = props.accessChanges ?? [];
+  const hostRole = props.hostRole ?? null;
   const nothingToApply =
-    props.pending.length === 0 && accessChanges.length === 0;
+    props.pending.length === 0 && accessChanges.length === 0 && !hostRole;
   const rows =
     props.pending.length === 0
       ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
@@ -2190,7 +2067,7 @@ ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
-${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [])}
+${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
 <div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
@@ -2201,7 +2078,8 @@ ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGap
   <form method="POST" action="/admin/wizard/apply">
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem ? " disabled" : ""}>Apply</button>
+    ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || (hostRole && hostRole.problems.length > 0) ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">
@@ -2224,6 +2102,8 @@ ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGap
 export interface AnnouncementRow {
   id: string;
   channelName: string;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   cron: string;
   enabled: boolean;
   messagePreview: string;
@@ -2235,6 +2115,10 @@ export interface AnnouncementRow {
 export interface ChannelOption {
   id: string;
   name: string;
+  /** Discord channel type: decides the icon and the group the option is listed under (#1303). */
+  type: ChannelType;
+  /** Name of the category the channel sits in, shown after the name where the control cannot show it separately. */
+  parentName?: string | null;
 }
 
 export interface RoleOption {
@@ -2417,23 +2301,19 @@ function channelOptionsHtml(
   options: ChannelOption[],
   selectedId?: string,
 ): string {
-  const rendered = options.map(
-    (c) =>
-      `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
-  );
-  // Preserve a selected channel that's no longer in the list (deleted, or the
-  // bot lost access). Without a matching <option> the browser would default to
-  // the first channel, so editing only the cron/duration would silently
-  // reassign the schedule's channel on submit. Keep the saved id selectable.
-  if (selectedId && !options.some((c) => c.id === selectedId)) {
-    rendered.unshift(
-      `<option value="${escapeHtml(selectedId)}" selected>#${escapeHtml(selectedId)} (unavailable)</option>`,
-    );
-  }
-  if (rendered.length === 0) {
+  if (options.length === 0 && !selectedId) {
     return `<option value="">(no text channels available)</option>`;
   }
-  return rendered.join("");
+  // buildOptionsHtml keeps a selected channel that's no longer in the list
+  // (deleted, or the bot lost access) as a selected "unavailable" option.
+  // Without a matching <option> the browser would default to the first
+  // channel, so editing only the cron/duration would silently reassign the
+  // schedule's channel on submit.
+  return buildOptionsHtml(
+    options,
+    new Set(selectedId ? [selectedId] : []),
+    false,
+  );
 }
 
 function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
@@ -2445,13 +2325,13 @@ function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   // clear the role by defaulting the select back to "(none)".
   if (selectedId && !options.some((r) => r.id === selectedId)) {
     out.push(
-      `<option value="${escapeHtml(selectedId)}" selected>@${escapeHtml(selectedId)} (unavailable)</option>`,
+      `<option value="${escapeHtml(selectedId)}" selected>${escapeHtml(missingText(selectedId))}</option>`,
     );
   }
   out.push(
     ...options.map(
       (r) =>
-        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
+        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>${escapeHtml(roleText(r.name))}</option>`,
     ),
   );
   return out.join("");
@@ -2502,7 +2382,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     .map(
       (a) => `<tr>
 <td class="mono">${escapeHtml(a.id)}</td>
-<td>#${escapeHtml(a.channelName)}</td>
+<td>${channelMention({ name: a.channelName, type: a.channelType })}</td>
 <td class="mono">${escapeHtml(a.cron)}</td>
 <td>${tagOnOff(a.enabled)}</td>
 <td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="muted mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
@@ -2753,8 +2633,14 @@ const LEADS_KIND_OPTION: [string, string] = [
 ];
 
 /**
- * One group row. `index` and `position` are numbers for a rendered row and the
- * `__N__` / `__P__` placeholders for the template the script clones.
+ * One group row, on one line: marker, name, size, tag, and a "More" button for
+ * the kind (Team is right for almost everything). `index` and `position` are
+ * numbers for a rendered row and the `__N__` / `__P__` placeholders for the
+ * template the script clones.
+ *
+ * Without scripts the marker is a text box and the kind select is shown, as
+ * before; `event-group-form.ts` turns the marker into an emoji picker and folds
+ * the kind behind "More".
  */
 export function renderGroupRow(
   index: string,
@@ -2778,25 +2664,100 @@ export function renderGroupRow(
         `<option value="${value}"${group?.kind === value ? " selected" : ""}>${escapeHtml(label)}</option>`,
     )
     .join("");
-  return `<fieldset data-group-row>
-        <legend>Group ${position}</legend>
-        <label>Group ${position} name
-          <input type="text" name="${field("name")}" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
-        </label>
-        <label>Group ${position} kind
-          <select name="${field("kind")}">${kinds}</select>
-        </label>
-        <label>Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)
-          <input type="number" name="${field("size")}" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
-        </label>
-        <label>Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)
-          <input type="text" name="${field("tag")}" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
-        </label>
-        <label>Group ${position} marker (optional, e.g. a coloured circle)
-          <input type="text" name="${field("marker")}" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
-        </label>
-      </fieldset>`;
+  return `<div data-group-row role="group" aria-label="Group ${position}" class="kb-grouprows__item">
+        <div class="kb-grouprow">
+          <div data-marker-wrap class="kb-emoji-wrap">
+            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
+            <button type="button" data-marker-btn class="kb-emoji-btn kb-emoji-btn--sm" aria-haspopup="true" aria-expanded="false" aria-label="Group ${position} marker: choose one" hidden>+</button>
+          </div>
+          <input type="text" class="kb-input kb-input--sm" name="${field("name")}" aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
+          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
+          <input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
+          <button type="button" data-kind-toggle class="kb-btn kb-btn--ghost kb-btn--sm" aria-expanded="true" aria-label="Group ${position}: more options" hidden>More</button>
+        </div>
+        <div data-kind-panel class="kb-grouprows__more">
+          <label class="kb-label">Group ${position} kind
+            <select class="kb-select kb-input--sm" name="${field("kind")}">${kinds}</select>
+          </label>
+        </div>
+      </div>`;
 }
+
+/** The labels over the group rows' columns, matching `.kb-grouprow`. */
+const GROUP_ROWS_HEAD =
+  '<div class="kb-grouprows__head" aria-hidden="true"><span>Marker</span><span>Name</span><span>Max size</span><span>Tag</span><span></span></div>';
+
+const CHECK_ICON = icon("check", { className: "kb-choice__check" });
+
+/** Where a preset comes from, in the words a host would use. */
+function presetSource(id: string): string {
+  if (id.startsWith(PERSONAL_PRESET_PREFIX)) return "Yours";
+  if (id.startsWith(LIBRARY_PRESET_PREFIX)) return "Server preset";
+  return "Built in";
+}
+
+/** One preset as a choice card: a radio, so the posted field is the same as the old select's. */
+function renderPresetCard(
+  preset: EventGroupPreset,
+  limits: { maxCount: number },
+): string {
+  const groups = JSON.stringify(
+    preset.groups.map((g) => ({
+      name: g.name,
+      kind: g.kind,
+      size: g.size,
+      tag: g.tag,
+      marker: g.marker,
+    })),
+  );
+  // A preset bigger than the cap cannot be applied whole, so it is not offered
+  // (the server refuses it too).
+  const tooBig = preset.groups.length > limits.maxCount;
+  // Library presets may carry a leader label and a lead time; the script
+  // fills those fields only when the attribute is there. An explicit null
+  // (a library preset that uses the server default) is an empty attribute,
+  // which clears the field; a built-in has none and leaves it alone.
+  const extra =
+    (preset.leaderLabel
+      ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
+      : "") +
+    (typeof preset.channelLeadMinutes === "number"
+      ? ` data-lead="${preset.channelLeadMinutes}"`
+      : preset.channelLeadMinutes === null
+        ? ' data-lead=""'
+        : "") +
+    // The preset's default for the clan tags box (#1194); absent = off. The
+    // script sets the box from it when the preset is chosen.
+    ` data-tags="${preset.tagsEnabled === true ? "1" : "0"}"`;
+  const markers = preset.groups
+    .map((g) => g.marker)
+    .filter(Boolean)
+    .join(" ");
+  const shape = `${preset.groups.length} ${preset.groups.length === 1 ? "group" : "groups"}`;
+  const meta = tooBig
+    ? `needs ${preset.groups.length} groups, limit is ${limits.maxCount}`
+    : `${presetSource(preset.id)} · ${shape}`;
+  return `<label class="kb-choice"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>
+          <span class="kb-choice__title">${escapeHtml(preset.label)}</span>
+          <span class="kb-choice__meta">${escapeHtml(meta)}</span>${preset.description ? `\n          <span class="kb-choice__meta">${escapeHtml(preset.description)}</span>` : ""}${markers ? `\n          <span class="kb-choice__marks">${escapeHtml(markers)}</span>` : ""}
+          ${CHECK_ICON}</label>`;
+}
+
+/** A switch with its help line underneath, for the options of the group setup. */
+function groupSwitch(
+  name: string,
+  label: string,
+  help: string,
+  idSuffix: string,
+): string {
+  return `<div class="kb-groupopt">
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${name}" value="1" aria-describedby="groups-${idSuffix}-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>${escapeHtml(label)}</label>
+        <p class="kb-help" id="groups-${idSuffix}-help">${escapeHtml(help)}</p>
+      </div>`;
+}
+
+/** Names offered for the group wording; any text is still accepted. */
+const GROUP_LABEL_SUGGESTIONS = ["Team", "Squad", "Room", "Party"];
 
 function renderGroupsSection(
   limits: {
@@ -2806,193 +2767,313 @@ function renderGroupsSection(
   presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
   presetsNotice: string | null = null,
 ): string {
-  const presetOptions = presets
-    .map((preset) => {
-      const groups = JSON.stringify(
-        preset.groups.map((g) => ({
-          name: g.name,
-          kind: g.kind,
-          size: g.size,
-          tag: g.tag,
-          marker: g.marker,
-        })),
-      );
-      // A preset bigger than the cap cannot be applied whole, so it is not offered
-      // (the server refuses it too).
-      const tooBig = preset.groups.length > limits.maxCount;
-      const note =
-        (preset.id.startsWith(PERSONAL_PRESET_PREFIX) ? " (yours)" : "") +
-        (tooBig
-          ? ` (needs ${preset.groups.length} groups, limit is ${limits.maxCount})`
-          : "");
-      // Library presets may carry a leader label and a lead time; the script
-      // fills those fields only when the attribute is there. An explicit null
-      // (a library preset that uses the server default) is an empty attribute,
-      // which clears the field; a built-in has none and leaves it alone.
-      const extra =
-        (preset.leaderLabel
-          ? ` data-leader-label="${escapeHtml(preset.leaderLabel)}"`
-          : "") +
-        (typeof preset.channelLeadMinutes === "number"
-          ? ` data-lead="${preset.channelLeadMinutes}"`
-          : preset.channelLeadMinutes === null
-            ? ' data-lead=""'
-            : "") +
-        // The preset's default for the clan tags box (#1194); absent = off. The
-        // script sets the box from it when the preset is chosen.
-        ` data-tags="${preset.tagsEnabled === true ? "1" : "0"}"`;
-      return `<option value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>${escapeHtml(preset.label)}: ${escapeHtml(preset.description)}${escapeHtml(note)}</option>`;
-    })
-    .join("");
+  const presetCards = presets.map((p) => renderPresetCard(p, limits)).join("");
   const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1)),
   ).join("\n      ");
+  // The quick builder's own fields belong to no form (`form="none"`): they
+  // are neither posted nor checked on submit, they only drive the script.
+  const detached = ' form="none"';
+  const sizeChoices = [
+    ["", "No limit"],
+    ["5", "5"],
+    ["10", "10"],
+    ["20", "20"],
+  ]
+    .map(
+      ([value, label], i) =>
+        `<label><input type="radio" name="groups_size_quick"${detached} value="${value}"${i === 0 ? " checked" : ""}><span>${label}</span></label>`,
+    )
+    .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups (optional)</legend>
-      <p class="muted">Split the event into groups, such as teams, squads or breakout rooms. Each group gets its own voice channel next to the event's channel, created at the channel creation time and removed when the event is over. Leave this off for a plain event.</p>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.enabled}" value="1"> Use groups for this event</label>
-      <label>Preset
-        <select name="${GROUP_FORM_FIELDS.preset}">
-          <option value="">Custom: any number of groups and names</option>
-          ${presetOptions}
-        </select>
-      </label>
-      ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
-      <p class="muted">With scripts on, choosing a preset fills in the rows below. Without them, a preset with all rows left empty uses the preset's groups. Which presets are offered is managed on the <a href="/admin/events/presets">group presets page</a>.</p>
-      <label>What a group is called (e.g. Team, Squad, Room, Party)
-        <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}">
-      </label>
-      <label>What a leader is called (e.g. Leader, Captain)
-        <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}">
-      </label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captains}" value="1"> Group leaders: the host picks one member of each team as its leader and can move just the leaders</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainCustom}" value="1"> Leaders can customise: each leader may rename their own team and set its tag from a button in the team's channel chat. Only used when group leaders is ticked. The host can reset any team from the host panel.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"> Captains lobby: a separate voice channel that only you and the current leaders can join. Nobody is assigned to it. Only used when group leaders is ticked; leave it off and leaders talk in the main channel. You can switch it on or off from the host panel while the event runs.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"> Clan tags: while the event runs, put each team's tag on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.</label>
-      <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tagsSuffix}" value="1"> Put the tag after the name (Alice [RED]) instead of before it</label>
-      <label>Create channels this many minutes before the start (empty = server default)
-        <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Server default">
-      </label>
-      <div data-group-rows data-max="${limits.maxCount}" class="stack">
+      <legend>Groups</legend>
+      <div class="kb-groupopt">
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1" aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
+        <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
+      </div>
+      <div data-groups-body class="kb-stack">
+      <div class="kb-field">
+        <p class="kb-label" id="groups-setup-label">Group setup</p>
+        <div class="kb-choices" role="radiogroup" aria-labelledby="groups-setup-label">${presetCards}
+          <label class="kb-choice kb-choice--custom"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="" checked>
+          <span class="kb-choice__title">Custom</span>
+          <span class="kb-choice__meta">Any number of groups and names</span>
+          ${CHECK_ICON}</label>
+        </div>
+        ${presetsNotice ? `<div class="notice warn" role="status">${escapeHtml(presetsNotice)}</div>` : ""}
+        <p class="kb-help">Choose a setup to fill in the groups, or Custom to write your own. Without scripts, a preset with all rows left empty uses the preset's groups. Presets are managed on the <a href="/admin/events/presets">group presets page</a>.</p>
+      </div>
+      <p class="kb-help" data-preset-summary aria-live="polite" hidden></p>
+      <button type="button" class="kb-btn kb-btn--sm" data-customise aria-expanded="true" hidden>Customise</button>
+      <div class="kb-field" data-size-quick hidden>
+        <p class="kb-label" id="groups-size-quick-label">Max per group</p>
+        <div class="kb-segmented" role="radiogroup" aria-labelledby="groups-size-quick-label">${sizeChoices}</div>
+      </div>
+      <div class="kb-field" data-group-builder hidden>
+        <p class="kb-label" id="groups-build-label">Build groups</p>
+        <div class="kb-row" role="group" aria-labelledby="groups-build-label">
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-count${detached} min="1" max="${limits.maxCount}" value="${Math.min(4, limits.maxCount)}" aria-label="Number of groups">
+          <span class="kb-unit">groups of</span>
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-size${detached} min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="5" aria-label="Members in each group (empty = no limit)">
+          <div class="kb-segmented" role="radiogroup" aria-label="Names for the groups"><label><input type="radio" name="groups_build_names"${detached} value="colours" checked><span>Colours</span></label><label><input type="radio" name="groups_build_names"${detached} value="numbers"><span>Numbered</span></label></div>
+          <button type="button" class="kb-btn kb-btn--sm" data-build>Generate</button>
+        </div>
+        <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
+      </div>
+      <div data-group-editor class="kb-stack">
+      ${GROUP_ROWS_HEAD}
+      <div data-group-rows data-max="${limits.maxCount}" class="kb-grouprows">
       ${rows}
       </div>
       <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
-      <button type="button" class="btn" data-add-group hidden>Add a group</button>
-      <p class="muted">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored.</p>
+      <button type="button" class="kb-btn kb-btn--sm" data-add-group hidden>Add a group</button>
+      <p class="kb-help">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored. Max size empty means no limit. The tag is shown on nicknames when clan tags are on; it starts as the name in capitals.</p>
       <div class="notice err" role="alert" data-group-errors hidden></div>
+      </div>
+      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains")}
+      <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.captains}">
+        <div class="kb-field">
+          <label class="kb-label" for="groups-leader-label">What a leader is called</label>
+          <input type="text" id="groups-leader-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}" aria-describedby="groups-leader-label-help">
+          <p class="kb-help" id="groups-leader-label-help">For example Leader or Captain. It names the captains lobby and is used in the leader messages.</p>
+        </div>
+        ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom")}
+        ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby")}
+      </div>
+      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags")}
+      <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.tags}">
+        ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix")}
+      </div>
+      <details class="kb-disclosure" data-groups-advanced open>
+        <summary>${icon("chevron-right", { className: "kb-chev" })}Advanced</summary>
+        <div class="kb-disclosure__body kb-stack">
+          <div class="kb-field">
+            <label class="kb-label" for="groups-label">What a group is called</label>
+            <input type="text" id="groups-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}" list="groups-label-options" aria-describedby="groups-label-help">
+            <datalist id="groups-label-options">${GROUP_LABEL_SUGGESTIONS.map((s) => `<option value="${s}"></option>`).join("")}</datalist>
+            <p class="kb-help" id="groups-label-help">For example Team, Squad, Room or Party. Choosing a preset sets it.</p>
+          </div>
+          <div class="kb-field">
+            <label class="kb-label" for="groups-lead-minutes">Create channels this many minutes before the start</label>
+            <input type="number" id="groups-lead-minutes" class="kb-input kb-input--sm kb-input--num" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Default" aria-describedby="groups-lead-minutes-help">
+            <p class="kb-help" id="groups-lead-minutes-help">Empty uses the server default. ${CHANNEL_LEAD_MIN} to ${CHANNEL_LEAD_MAX} minutes.</p>
+          </div>
+        </div>
+      </details>
+      </div>
     </fieldset>`;
 }
 
-// Progressive enhancement for the Groups section. Presets fill the rows, "Add a
-// group" clones the template, and the submit is checked in the browser first so
-// a mistake is shown next to the fields without losing the filled-in form. The
-// server repeats every check and stays the source of truth. If the server
-// still refuses, the entered values are kept in sessionStorage (this browser
-// tab only) and put back when the page comes back with the error. Everything
-// storage-related is wrapped in try/catch: it is a convenience only.
-const EVENT_GROUPS_SCRIPT =
-  "(function(){" +
-  "var form=document.querySelector('form[data-event-form]');" +
-  "var box=form&&form.querySelector('[data-group-rows]');" +
-  "var tpl=form&&form.querySelector('template[data-group-row-template]');" +
-  "if(!box||!tpl)return;" +
-  "var add=form.querySelector('[data-add-group]');" +
-  "var errBox=form.querySelector('[data-group-errors]');" +
-  "var preset=form.elements['groups_preset'];" +
-  "var KEY='koolbot-event-form-draft';" +
-  `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
-  "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
-  "function rows(){return box.querySelectorAll('[data-group-row]')}" +
-  "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
-  // The captains lobby is a channel and counts toward the cap while it will be
-  // posted (ticked and not disabled), exactly as the server counts it.
-  "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
-  "function addRow(){var n=rows().length;if(used()>=max)return false;" +
-  "var d=document.createElement('div');" +
-  "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
-  "box.appendChild(d.firstElementChild);sync();validity();return true}" +
-  "function sync(){if(add)add.hidden=used()>=max}" +
-  "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
-  "sync();" +
-  // While groups are off the section's number fields leave native validation
-  // (the server ignores them then); ticking the box restores min, max and step.
-  "function validity(){var on=form.elements['groups_enabled'].checked;" +
-  "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
-  "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
-  "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
-  "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
-  "form.elements['groups_enabled'].addEventListener('change',validity);" +
-  "validity();" +
-  // The captains lobby needs group leaders: the box is disabled (and so not
-  // posted) while leaders are unticked, the server ignores it then too.
-  "function lobby(){var c=form.elements['groups_captains'],l=form.elements['groups_captains_lobby'];if(c&&l)l.disabled=!c.checked;sync()}" +
-  // One recompute (the lobby box's state, then the cap and the button) for every
-  // change in the form: the lobby and leaders boxes, and a preset choice, whose
-  // handler sets the lobby box by hand (that fires no change event of its own, and
-  // the preset's own event bubbles here after its handler has run).
-  "form.addEventListener('change',lobby);" +
-  "lobby();" +
-  "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
-  "form.elements['group_'+i+'_name'].value=g.name||'';" +
-  "form.elements['group_'+i+'_kind'].value=g.kind||'team';" +
-  "form.elements['group_'+i+'_size'].value=g.size==null?'':g.size;" +
-  "form.elements['group_'+i+'_tag'].value=g.tag||'';" +
-  "form.elements['group_'+i+'_marker'].value=g.marker||''}" +
-  // Typing in a group row switches groups on, so rows are never silently dropped.
-  "box.addEventListener('input',function(){form.elements['groups_enabled'].checked=true;validity()});" +
-  "if(preset)preset.addEventListener('change',function(){" +
-  "var o=preset.options[preset.selectedIndex];var raw=o&&o.getAttribute('data-groups');if(!raw)return;" +
-  "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
-  // A preset's leads row (an old preset) is the captains lobby: it ticks the
-  // switch instead of becoming a row of the list. It still counts toward the cap.
-  "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
-  "if(g.length+(hadLobby?1:0)>max){preset.value='';return}" +
-  "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
-  "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
-  "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
-  "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
-  // The preset's clan tags default (#1194); the host can still change the box.
-  "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
-  "var n=Math.max(rows().length,g.length);" +
-  "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
-  "form.elements['groups_enabled'].checked=true;validity()});" +
-  "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
-  "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
-  "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
-  "if(!name&&!size&&!tag&&!mk)return;filled++;" +
-  "if(!name)errs.push('Group '+p+' name: a name is required.');" +
-  "else if(name.length>MAXNAME)errs.push('Group '+p+' name: at most '+MAXNAME+' characters.');" +
-  "else{var f=name.toLowerCase();if(seen[f])errs.push('Group '+p+' name: \"'+name+'\" is already used by group '+seen[f]+'.');else seen[f]=p}" +
-  "if(size&&!(/^\\d{1,3}$/.test(size)&&+size>=MINSIZE&&+size<=MAXSIZE))errs.push('Group '+p+' size: a whole number from '+MINSIZE+' to '+MAXSIZE+', or empty.');" +
-  "if(tag.length>MAXTAG)errs.push('Group '+p+' tag: at most '+MAXTAG+' characters.');" +
-  "if(val('group_'+i+'_kind')==='leads'&&++leads>1)errs.push('Group '+p+' kind: only one leads group is allowed.')});" +
-  "if(!filled&&!val('groups_preset'))errs.push('Add at least one group, or switch groups off.');" +
-  "return errs}" +
-  "form.addEventListener('submit',function(e){" +
-  "if(form.elements['groups_enabled'].checked){var errs=check();" +
-  "if(errs.length){e.preventDefault();errBox.textContent='';" +
-  "errs.forEach(function(m){var p=document.createElement('p');p.textContent=m;errBox.appendChild(p)});" +
-  "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
-  "errBox.hidden=true;" +
-  "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
-  "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
-  "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
-  "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
-  "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
-  "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
-  // A draft from before the switch can hold a row of kind leads (the select no
-  // longer offers it): that row is the captains lobby now, so it ticks the box
-  // and is not restored as a team. The other rows are left as they are.
-  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
-  "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(f){delete d['group_'+m[1]+'_'+f]});d['groups_captains_lobby']=true}});" +
-  "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
-  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el||el.type==='file')return;" +
-  // A saved choice that is no longer offered (e.g. a preset now over the cap) is not put back.
-  "if(el.tagName==='SELECT'){var ok=false;Array.prototype.forEach.call(el.options,function(o){if(o.value===d[k]&&!o.disabled)ok=true});if(!ok)return}" +
-  "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
-  // Setting `checked` fires no change event, so reapply the number limits by hand.
-  "validity();lobby()}}catch(x){}" +
-  "})();";
+// Progressive enhancement for the Groups section. Without scripts everything
+// is shown and the form posts as it always has. With them: the switch folds the
+// section, a preset card fills the rows and folds them behind a one-line
+// summary (Customise opens them), the quick builder generates rows, a tag and a
+// size follow the name and the first row until they are edited, and the submit
+// is checked in the browser first so a mistake is shown next to the fields
+// without losing the filled-in form. The server repeats every check and stays
+// the source of truth. If the server still refuses, the entered values are kept
+// in sessionStorage (this browser tab only) and put back when the page comes
+// back with the error. Everything storage-related is wrapped in try/catch: it
+// is a convenience only.
+function eventGroupsScript(): string {
+  const colours = JSON.stringify(
+    MARKER_COLOURS.map((c) => [c.emoji, c.colour]),
+  );
+  return (
+    "(function(){" +
+    "var form=document.querySelector('form[data-event-form]');" +
+    "var box=form&&form.querySelector('[data-group-rows]');" +
+    "var tpl=form&&form.querySelector('template[data-group-row-template]');" +
+    "if(!box||!tpl)return;" +
+    "var add=form.querySelector('[data-add-group]');" +
+    "var errBox=form.querySelector('[data-group-errors]');" +
+    "var body=form.querySelector('[data-groups-body]');" +
+    "var editor=form.querySelector('[data-group-editor]');" +
+    "var summary=form.querySelector('[data-preset-summary]');" +
+    "var customise=form.querySelector('[data-customise]');" +
+    "var builder=form.querySelector('[data-group-builder]');" +
+    "var sizeQuick=form.querySelector('[data-size-quick]');" +
+    "var adv=form.querySelector('[data-groups-advanced]');" +
+    "var enabled=form.elements['groups_enabled'];" +
+    "var KEY='koolbot-event-form-draft';" +
+    `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
+    `var COLOURS=${colours};` +
+    "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
+    "function rows(){return box.querySelectorAll('[data-group-row]')}" +
+    "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
+    "function f(i,k){return form.elements['group_'+i+'_'+k]}" +
+    "function kr(){return window.koolGroupRows}" +
+    "function tagsOn(){var t=form.elements['groups_tags'];return !!(t&&t.checked)}" +
+    "function chosen(){return form.querySelector('input[type=radio][name=groups_preset]:checked')}" +
+    // The captains lobby is a channel and counts toward the cap while it will be
+    // posted (ticked and not disabled), exactly as the server counts it.
+    "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
+    "function addRow(){var n=rows().length;if(used()>=max)return false;" +
+    "var d=document.createElement('div');" +
+    "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
+    "var r=d.firstElementChild;box.appendChild(r);if(kr())kr().enhance(r);sync();validity();return true}" +
+    "function sync(){if(add)add.hidden=used()>=max}" +
+    "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
+    "sync();" +
+    // The pieces that need scripts are unhidden here; the Advanced section starts
+    // folded; the rows are one line each.
+    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv)adv.open=false;" +
+    // While groups are off the section's number fields leave native validation
+    // (the server ignores them then); ticking the box restores min, max and step.
+    "function validity(){var on=enabled.checked;" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-groups-section] input[type=number]'),function(el){" +
+    "if(!el.hasAttribute('data-min')){el.setAttribute('data-min',el.getAttribute('min')||'');el.setAttribute('data-max',el.getAttribute('max')||'')}" +
+    "['min','max'].forEach(function(a){var v=el.getAttribute('data-'+a);if(on&&v)el.setAttribute(a,v);else el.removeAttribute(a)});" +
+    "if(on)el.removeAttribute('step');else el.setAttribute('step','any')})}" +
+    // The switch folds the whole section; an option that depends on another is
+    // hidden (and not posted) until its parent is on, never shown greyed out.
+    "function show(){body.hidden=!enabled.checked}" +
+    "function nest(){Array.prototype.forEach.call(form.querySelectorAll('[data-nested-for]'),function(n){" +
+    "var p=form.elements[n.getAttribute('data-nested-for')];var on=!!(p&&p.checked);n.hidden=!on;" +
+    "Array.prototype.forEach.call(n.querySelectorAll('input,select'),function(el){el.disabled=!on})})}" +
+    "enabled.addEventListener('change',function(){show();validity()});" +
+    "show();validity();" +
+    // Cap and button follow the lobby box, which nest() disables with its parent.
+    "function lobby(){nest();sync()}" +
+    // One recompute for every change in the form: the lobby and leaders boxes, and a
+    // preset choice, whose handler sets boxes by hand (that fires no change event of
+    // its own, and the preset's own event bubbles here after its handler has run).
+    "form.addEventListener('change',function(){lobby();summarise()});" +
+    "lobby();" +
+    "function setEditor(open){editor.hidden=!open;customise.setAttribute('aria-expanded',open?'true':'false');customise.textContent=open?'Hide group rows':'Customise'}" +
+    "customise.addEventListener('click',function(){setEditor(editor.hidden)});" +
+    // The browser checks min, max and maxlength before the submit listener runs and cannot
+    // focus a hidden field, so a control that fails is shown first: its rows, its Advanced
+    // section or any other folded container around it.
+    "form.addEventListener('invalid',function(e){var el=e.target;if(!el||!el.closest||!body.contains(el))return;" +
+    "for(var a=el.parentElement;a&&a!==form;a=a.parentElement){if(a===editor){if(editor.hidden)setEditor(true)}" +
+    "else{if(a.hidden)a.hidden=false;if(a.tagName==='DETAILS')a.open=true}}},true);" +
+    "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
+    "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
+    "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
+    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto');f(i,k).removeAttribute('data-manual')})}" +
+    // The tag follows the name (Red -> RED) while clan tags are on, until it is edited.
+    "function derive(name){var w=name.replace(/[^\\p{L}\\p{N}\\s]/gu,' ').trim().split(/\\s+/).filter(Boolean);" +
+    "var s=w.length>1?w.map(function(x){return Array.from(x)[0]}).join(''):Array.from(w[0]||'').slice(0,4).join('');" +
+    "return s.toUpperCase().slice(0,MAXTAG)}" +
+    "function deriveTags(){if(!tagsOn())return;Array.prototype.forEach.call(rows(),function(r,i){" +
+    "var t=f(i,'tag'),n=val('group_'+i+'_name');if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
+    "if(n){t.value=derive(n);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
+    "function firstFree(){var taken={};Array.prototype.forEach.call(rows(),function(r,i){var m=val('group_'+i+'_marker');if(m)taken[m]=1});" +
+    "for(var k=0;k<COLOURS.length;k++)if(!taken[COLOURS[k][0]])return COLOURS[k][0];return ''}" +
+    "function anyMarker(){var any=false;Array.prototype.forEach.call(rows(),function(r,i){if(val('group_'+i+'_marker'))any=true});return any}" +
+    // A row that gets a name takes the first row's size, and the next colour when the
+    // other rows have markers; a row whose name is cleared gives those back, so a row
+    // is never left holding only automatic values (it would count as filled in).
+    "function autoFill(i,n){var s=f(i,'size'),m=f(i,'marker'),t=f(i,'tag');" +
+    "if(n){var s0=val('group_0_size');if(i>0&&s0&&!s.value&&!s.hasAttribute('data-manual')){s.value=s0;s.setAttribute('data-auto','1')}" +
+    "if(i>0&&!m.value&&!m.hasAttribute('data-manual')&&anyMarker()){m.value=firstFree();m.setAttribute('data-auto','1');if(kr())kr().syncAll()}}" +
+    "else{[s,m,t].forEach(function(el){if(el.hasAttribute('data-auto')){el.value='';el.removeAttribute('data-auto')}});if(kr())kr().syncAll()}}" +
+    "function copySize(){var s0=val('group_0_size');Array.prototype.forEach.call(rows(),function(r,i){if(i===0||!val('group_'+i+'_name'))return;" +
+    "var s=f(i,'size');if(s.hasAttribute('data-manual'))return;if(!s.value||s.hasAttribute('data-auto')){s.value=s0;if(s0)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}})}" +
+    // Typing in a group row switches groups on, so rows are never silently dropped.
+    "box.addEventListener('input',function(e){enabled.checked=true;show();var t=e.target,m=/^group_(\\d+)_(\\w+)$/.exec(t.name||'');" +
+    "if(m){var i=+m[1];if(m[2]==='size'||m[2]==='tag'||m[2]==='marker'){t.removeAttribute('data-auto');t.setAttribute('data-manual','1')}" +
+    "if(m[2]==='size'&&i===0)copySize();" +
+    "if(m[2]==='name'){autoFill(i,t.value.trim());deriveTags()}}validity()});" +
+    "form.elements['groups_tags']&&form.elements['groups_tags'].addEventListener('change',deriveTags);" +
+    // The one-line summary of what the rows will create.
+    "function sizeText(list){var u={};list.forEach(function(x){u[x]=1});var k=Object.keys(u);" +
+    "if(k.length===1)return k[0]?k[0]+' each':'no size limit';return 'sizes differ'}" +
+    "function syncQuick(list){var u={};list.forEach(function(x){u[x]=1});var k=Object.keys(u);var v=k.length===1?k[0]:null;" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-size-quick] input'),function(r){r.checked=v!==null&&r.value===v})}" +
+    "function summarise(){var names=[],sizes=[];Array.prototype.forEach.call(rows(),function(r,i){var n=val('group_'+i+'_name');if(!n)return;" +
+    "var t=val('group_'+i+'_tag'),m=val('group_'+i+'_marker');names.push(n+(t&&tagsOn()?' ['+t+']':'')+(m?' '+m:''));sizes.push(val('group_'+i+'_size'))});" +
+    "if(!names.length){summary.textContent='';syncQuick(['']);return}" +
+    "var s=names.length+(names.length===1?' group':' groups')+' · '+names.join(', ')+' · '+sizeText(sizes);" +
+    "if(tagsOn())s+=' · clan tags on';var c=form.elements['groups_captains'];if(c&&c.checked)s+=' · leaders on';" +
+    "summary.textContent=s;syncQuick(sizes)}" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-size-quick] input'),function(r){r.addEventListener('change',function(){" +
+    "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-manual');if(r.value)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}});summarise()})});" +
+    // A preset card fills the rows, then folds them behind the summary.
+    "function compact(on){summary.hidden=!on;customise.hidden=!on;setEditor(!on)}" +
+    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;compact(false)}" +
+    "function onPreset(){var o=chosen();if(!o||!o.value){compact(false);return}" +
+    "var raw=o.getAttribute('data-groups');if(!raw)return;" +
+    "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
+    // A preset's leads row (an old preset) is the captains lobby: it ticks the
+    // switch instead of becoming a row of the list. It still counts toward the cap.
+    "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
+    "if(g.length+(hadLobby?1:0)>max){custom();return}" +
+    "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
+    "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
+    "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
+    "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
+    // The preset's clan tags default (#1194); the host can still change the box.
+    "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
+    "var n=Math.max(rows().length,g.length);" +
+    "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
+    "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();lobby();validity();summarise();compact(true)}" +
+    "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',onPreset)});" +
+    // The quick builder: N groups of S, named by colour or number, one marker each.
+    "var build=form.querySelector('[data-build]');" +
+    "if(build)build.addEventListener('click',function(){var cnt=form.querySelector('[data-build-count]'),sz=form.querySelector('[data-build-size]');" +
+    "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
+    "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
+    "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
+    "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
+    "var word=val('groups_label')||'Team';" +
+    "var total=Math.max(rows().length,n);" +
+    "for(var i=0;i<total&&i<max;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
+    "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
+    "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
+    "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
+    "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
+    "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
+    "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +
+    "if(!name&&!size&&!tag&&!mk)return;filled++;" +
+    "if(!name)errs.push('Group '+p+' name: a name is required.');" +
+    "else if(name.length>MAXNAME)errs.push('Group '+p+' name: at most '+MAXNAME+' characters.');" +
+    "else{var f2=name.toLowerCase();if(seen[f2])errs.push('Group '+p+' name: \"'+name+'\" is already used by group '+seen[f2]+'.');else seen[f2]=p}" +
+    "if(size&&!(/^\\d{1,3}$/.test(size)&&+size>=MINSIZE&&+size<=MAXSIZE))errs.push('Group '+p+' size: a whole number from '+MINSIZE+' to '+MAXSIZE+', or empty.');" +
+    "if(tag.length>MAXTAG)errs.push('Group '+p+' tag: at most '+MAXTAG+' characters.');" +
+    "if(val('group_'+i+'_kind')==='leads'&&++leads>1)errs.push('Group '+p+' kind: only one leads group is allowed.')});" +
+    "if(!filled&&!val('groups_preset'))errs.push('Add at least one group, or switch groups off.');" +
+    "return errs}" +
+    "form.addEventListener('submit',function(e){" +
+    "if(enabled.checked){var errs=check();" +
+    "if(errs.length){e.preventDefault();errBox.textContent='';" +
+    "errs.forEach(function(m){var p=document.createElement('p');p.textContent=m;errBox.appendChild(p)});" +
+    // The rows are shown so the mistake is next to the field it names.
+    "setEditor(true);" +
+    "errBox.hidden=false;errBox.setAttribute('tabindex','-1');errBox.focus();return}}" +
+    "errBox.hidden=true;" +
+    "try{var d={};Array.prototype.forEach.call(form.elements,function(el){" +
+    "if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;" +
+    // Only the chosen radio is saved, or the last card would win.
+    "if(el.type==='radio'){if(el.checked)d[el.name]=el.value;return}" +
+    "d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
+    "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
+    "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
+    "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
+    "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+    // A draft from before the switch can hold a row of kind leads (the select no
+    // longer offers it): that row is the captains lobby now, so it ticks the box
+    // and is not restored as a team. The other rows are left as they are.
+    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
+    "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(x){delete d['group_'+m[1]+'_'+x]});d['groups_captains_lobby']=true}});" +
+    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
+    "Object.keys(d).forEach(function(k){" +
+    // A saved preset that is no longer offered (e.g. now over the cap, so its card is disabled) is not put back.
+    "if(k==='groups_preset'){Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){if(r.value===d[k]&&!r.disabled)r.checked=true});return}" +
+    "var el=form.elements[k];if(!el||el.type==='file'||el.type==='radio')return;" +
+    "if(el.type==='checkbox')el.checked=d[k]===true;else if(typeof d[k]==='string')el.value=d[k]});" +
+    // The person gets the rows back, open, so they can fix what the server refused.
+    "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
+    "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
+    "if(adv&&(val('groups_label')||val('groups_lead_minutes')))adv.open=true;" +
+    // Setting `checked` fires no change event, so reapply the dependent state by hand.
+    "if(kr())kr().syncAll();show();validity();lobby();summarise();setEditor(true)}}catch(x){}" +
+    "})();"
+  );
+}
+
+const EVENT_GROUPS_SCRIPT = eventGroupsScript();
 
 /** Which optional columns an events table shows (#1301). */
 interface EventCols {
@@ -3030,10 +3111,11 @@ export function renderEventsPage(props: EventsProps): string {
             },
           )}</details>`
         : "";
-    // Edit (#1298): an open one-off event of our own. A series and an adopted
-    // event are not editable yet, so no link is offered for them.
+    // Edit (#1298): an open event of our own, one-off or a series occurrence
+    // (the form asks how far the change reaches). An adopted event is edited in
+    // Discord, so no link is offered for it.
     const editLink =
-      !finished && !e.recurrence && e.nativeAdopted !== true
+      !finished && e.nativeAdopted !== true
         ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
         : "";
     const actions = finished
@@ -3209,6 +3291,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
+${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
 `;
 
@@ -3228,6 +3311,8 @@ export interface PollScheduleRow {
   id: string;
   channelId: string;
   channelName: string;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   cron: string;
   durationHours: number;
   pingRoleId: string | null;
@@ -3315,7 +3400,7 @@ export function renderPollsPage(props: PollsProps): string {
     .map(
       (s) => `<tr>
 <td class="mono">${escapeHtml(s.id)}</td>
-<td>#${escapeHtml(s.channelName)}</td>
+<td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
 <td>${s.pingRoleName ? `@${escapeHtml(s.pingRoleName)}` : '<span class="muted">none</span>'}</td>
@@ -3484,7 +3569,10 @@ export interface ReactionRoleRow {
   roleName: string;
   roleId: string;
   categoryName: string;
+  /** Discord types of the category, channel and picker channel; null when one no longer resolves. */
+  categoryType: ChannelType | null;
   channelName: string;
+  channelType: ChannelType | null;
   messageId: string;
   /**
    * Name of the channel the picker message was posted in, remembered with the
@@ -3492,6 +3580,7 @@ export interface ReactionRoleRow {
    * up in the configured `reactionroles.message_channel_id`.
    */
   pickerChannelName?: string | null;
+  pickerChannelType?: ChannelType | null;
   /**
    * Whether the bot auto-created the role + category + channel for this
    * mapping. Bound mappings (issue #813) point at a pre-existing role and set
@@ -3506,7 +3595,7 @@ export interface ReactionRoleRow {
 
 export interface ReactionRolesProps extends CommonProps {
   enabled: boolean;
-  configChannel: { name: string; id: string } | null;
+  configChannel: { name: string; id: string; type: ChannelType | null } | null;
   active: ReactionRoleRow[];
   archived: ReactionRoleRow[];
   /**
@@ -3559,7 +3648,13 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     ? `<span class="tag tag-on">managed</span>`
     : `<span class="tag">bound</span>`;
   const channelCell =
-    rr.channelName === "—" ? "—" : `#${escapeHtml(rr.channelName)}`;
+    rr.channelName === "—"
+      ? "—"
+      : channelMention({ name: rr.channelName, type: rr.channelType });
+  const categoryCell =
+    rr.categoryName === "—"
+      ? "—"
+      : channelMention({ name: rr.categoryName, type: rr.categoryType });
 
   const modeCell = rr.groupId
     ? `${escapeHtml(rr.mode)} <span class="tag">group</span>`
@@ -3569,9 +3664,9 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 <td class="mono">${escapedEmoji}</td>
 <td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
 <td>${typeTag}</td>
-<td>${escapeHtml(rr.categoryName)}</td>
+<td>${categoryCell}</td>
 <td>${channelCell}</td>
-<td class="mono">${escapedMessageId}${rr.pickerChannelName ? `<div class="muted">in #${escapeHtml(rr.pickerChannelName)}</div>` : ""}</td>
+<td class="mono">${escapedMessageId}${rr.pickerChannelName ? `<div class="muted">in ${channelMention({ name: rr.pickerChannelName, type: rr.pickerChannelType })}</div>` : ""}</td>
 <td>${modeCell}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
@@ -3624,7 +3719,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.configChannel
-      ? { text: `Message channel #${props.configChannel.name}` }
+      ? {
+          text: `Message channel ${channelText({ name: props.configChannel.name, type: props.configChannel.type })}`,
+        }
       : {
           text: "No message channel set",
           warn: true,
@@ -3781,7 +3878,7 @@ export interface NoticeCategoryOption {
 
 export interface NoticesProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   total: number;
   /**
    * The editable `notices.*` settings rendered in place on the page (#972),
@@ -3860,7 +3957,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -3938,7 +4037,7 @@ export interface QuoteRow {
 
 export interface QuotesProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   /** The auto-managed `quotes.header_message_id`, shown read-only. */
   headerMessageId: string;
   /**
@@ -4027,7 +4126,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -4127,7 +4228,7 @@ export interface BirthdayPreviewView {
 
 export interface BirthdaysProps extends CommonProps {
   enabled: boolean;
-  channel: { name: string; id: string } | null;
+  channel: { name: string; id: string; type: ChannelType | null } | null;
   role: { name: string; id: string } | null;
   cron: string;
   /** Every `birthdays.*` key, rendered in place on the page (#986). */
@@ -4268,7 +4369,9 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.channel
-      ? { text: `Channel #${props.channel.name}` }
+      ? {
+          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+        }
       : {
           text: "No channel set",
           warn: true,
@@ -4877,7 +4980,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
         : `<span class="tag tag-warn">dynamic</span>`;
       const live = ch.isLive ? ' <span class="tag tag-warn">LIVE</span>' : "";
       return `<tr>
-<td>${escapeHtml(ch.name)}${live}</td>
+<td>${channelMention({ name: ch.name, type: ChannelType.GuildVoice })}${live}</td>
 <td>${tag}</td>
 <td>${ch.memberCount}</td>
 <td class="muted">${escapeHtml(ch.customName ?? "")}</td>
@@ -5397,6 +5500,8 @@ export interface CommandAuditRow {
   subcommand: string | null;
   channelId: string | null;
   channelLabel: string | null;
+  /** Discord type of the channel; null when it no longer resolves. */
+  channelType: ChannelType | null;
   result: "success" | "error" | "denied";
   errorMessage: string | null;
   durationMs: number;
@@ -5494,7 +5599,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
 <td class="muted mono">${escapeHtml(r.createdAt)}</td>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
 <td class="mono">${cmd}</td>
-<td class="muted">${escapeHtml(r.channelLabel ?? r.channelId ?? "—")}</td>
+<td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType }) : "—"}</td>
 <td>${resultTag(r.result)}</td>
 <td class="muted">${r.durationMs}ms</td>
 <td class="muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>

@@ -13,6 +13,10 @@ import {
   type AccessScope,
   type AccessSelection,
 } from "../services/wizard-access.js";
+import type {
+  HostCreateState,
+  HostReview,
+} from "../services/wizard-host-role.js";
 
 /**
  * The Setup wizard's Access step (#1321) and the step indicator the other
@@ -155,6 +159,23 @@ function roleSelect(
 <p class="kb-help" id="${id}-help">Hold Ctrl or Cmd to pick more than one. Leave it empty for none.</p>`;
 }
 
+/**
+ * The Event host card's option to create the role (#1365). Offered only when
+ * no such role exists; a bot without Manage Roles gets the switch disabled and
+ * the reason beside it, so the refusal is never silent.
+ */
+function hostCreateControl(state: HostCreateState, checked: boolean): string {
+  if (!state.available && state.reason === "exists") return "";
+  const id = "access-host-create";
+  const help = state.available
+    ? "There is no Event host role yet. Applying creates one with no Discord permissions and adds nobody to it. Review shows exactly what it will do first."
+    : state.message;
+  return `<div class="kb-field">
+  <label class="kb-switch"><input type="checkbox" role="switch" name="create_host" value="1" aria-describedby="${id}-help"${state.available && checked ? " checked" : ""}${state.available ? "" : " disabled"}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Create @Event host</label>
+  <p class="kb-help" id="${id}-help">${escapeHtml(help)}</p>
+</div>`;
+}
+
 export interface WizardAccessPageProps {
   csrfToken: string;
   remainingMs: number;
@@ -163,6 +184,10 @@ export interface WizardAccessPageProps {
   /** Roles that may be picked; `null` when Discord or the groups couldn't be read. */
   options: AccessRole[] | null;
   gaps: AccessGap[];
+  /** Whether the Event host role can be created here; `null` = not known. */
+  hostCreate?: HostCreateState | null;
+  /** *Create @Event host* is ticked. */
+  createHost?: boolean;
   flash?: { type: "ok" | "warn" | "err"; text: string } | null;
 }
 
@@ -184,10 +209,8 @@ export function renderWizardAccessPage(props: WizardAccessPageProps): string {
         ? `<p class="kb-help">Roles can't be listed right now.</p>`
         : roleSelect(c.scope, options, props.selection[c.scope]);
     const noRole =
-      options !== null &&
-      c.scope === "host" &&
-      !options.some((r) => /event host/i.test(r.name))
-        ? `<p class="kb-help">There is no Event host role yet. Create one in Discord, or start from the Event host preset on <a href="/admin/role-groups">Role groups</a>, then pick it here.</p>`
+      options !== null && c.scope === "host" && props.hostCreate
+        ? hostCreateControl(props.hostCreate, props.createHost === true)
         : "";
     return `<article class="kb-access__card" aria-labelledby="access-${c.scope}-title">
   <header class="kb-access__head"><div><h3 class="kb-access__title" id="access-${c.scope}-title">${escapeHtml(c.title)}</h3><p class="kb-access__how">${escapeHtml(c.how)}</p></div></header>
@@ -260,8 +283,10 @@ export function renderAccessReview(
   changes: readonly AccessChange[],
   problem: string | null,
   gaps: readonly AccessGap[],
+  host: HostReview | null = null,
 ): string {
   const parts: string[] = [];
+  const hostBlock = host ? renderHostReview(host) : "";
   if (problem) {
     parts.push(
       callout(
@@ -274,7 +299,8 @@ export function renderAccessReview(
   }
   parts.push(gapCallouts(gaps));
   if (changes.length === 0) {
-    if (!problem) {
+    parts.push(hostBlock);
+    if (!problem && !host) {
       parts.push(
         `<div class="card"><h2>Role access</h2><p class="muted">No role mapping changes.</p></div>`,
       );
@@ -299,5 +325,29 @@ export function renderAccessReview(
     <tbody>${rows}</tbody>
   </table>
 </div>`);
+  parts.push(hostBlock);
   return parts.filter(Boolean).join("\n");
+}
+
+/** The plan for creating the Event host role: what the engine will do, or why it can't. */
+function renderHostReview(host: HostReview): string {
+  const problems =
+    host.problems.length > 0
+      ? callout(
+          "err",
+          "The Event host role can't be created.",
+          `${host.problems.join(" ")} Go back to Access and untick it, or apply is blocked.`,
+          "alert",
+        )
+      : "";
+  const ops =
+    host.problems.length === 0 && host.operations.length > 0
+      ? `<ul>${host.operations.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>
+  <p class="muted">Applying starts this as a background job and takes you to Role groups to follow it. The role has no Discord permissions and nobody is added to it. The group is mapped to Event hosts when the role exists; if the job fails, no group is mapped.</p>`
+      : "";
+  return `${problems}
+<div class="card">
+  <h2>Event host role</h2>
+  ${ops || `<p class="muted">Not created.</p>`}
+</div>`;
 }

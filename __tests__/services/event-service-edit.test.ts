@@ -101,8 +101,8 @@ describe("editModeOf", () => {
     ],
     ["an ended event", { state: "ended" }, "refused"],
     ["a cancelled event", { state: "cancelled" }, "refused"],
-    ["a weekly event", { recurrence: "weekly" }, "refused"],
-    ["a series occurrence", { seriesId: "s1" }, "refused"],
+    ["a weekly event", { recurrence: "weekly" }, "full"],
+    ["a series occurrence", { seriesId: "s1" }, "full"],
     ["an adopted event", { nativeAdopted: true }, "refused"],
   ])("classifies %s", (_n, over, mode) => {
     expect(editModeOf(row(over), NOW).mode).toBe(mode);
@@ -324,12 +324,8 @@ describe("EventService.editEvent", () => {
     expect(EventStatics.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("refuses finished, recurring, adopted and ending events", async () => {
-    for (const over of [
-      { state: "ended" },
-      { recurrence: "weekly", seriesId: "s" },
-      { nativeAdopted: true },
-    ]) {
+  it("refuses finished, adopted and ending events", async () => {
+    for (const over of [{ state: "ended" }, { nativeAdopted: true }]) {
       stored = row(over);
       expect(
         await service.editEvent(input({ title: "New" }) as never),

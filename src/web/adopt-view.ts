@@ -74,7 +74,7 @@ const SEVERITY_LABEL: Record<ScanSeverity, string> = {
 };
 
 /** Issue codes whose fix is on Bot permissions (the permission or role position). */
-function fixedOnBotPermissions(code: string): boolean {
+export function fixedOnBotPermissions(code: string): boolean {
   return (
     code.startsWith("missing-") ||
     code.startsWith("bound-role-unmanageable-") ||

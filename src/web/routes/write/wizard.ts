@@ -12,6 +12,15 @@ import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { WizardService } from "../../../services/wizard-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
+import { planRoleGroups } from "../../../services/role-group-adoption.js";
+import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
+import {
+  hostCreateState,
+  reviewHostRole,
+  startHostRole,
+  type HostReview,
+  type HostRoleResult,
+} from "../../../services/wizard-host-role.js";
 import {
   accessFingerprint,
   accessGaps,
@@ -109,6 +118,16 @@ export function createWizardRouter(client: Client): Router {
     return readAccessContext(guild);
   }
 
+  /** The plan for creating the Event host role, previewed with nothing written. */
+  async function previewHostRole(
+    session: { guildId: string; discordUserId: string },
+    ctx: AccessContext,
+    changes: readonly AccessChange[],
+  ): Promise<HostReview> {
+    const guild = await client.guilds.fetch(session.guildId);
+    return reviewHostRole(guild, session.discordUserId, ctx, changes);
+  }
+
   /**
    * Which gap-prone features end up switched on: what the admin set in this
    * wizard run, else the stored value for a feature being configured; a
@@ -189,8 +208,16 @@ export function createWizardRouter(client: Client): Router {
               selection,
               options: ctx ? pickableRoles(ctx) : null,
               gaps: ctx
-                ? accessGaps(await enabledGapFeatures(existing), selection)
+                ? accessGaps(
+                    await enabledGapFeatures(existing),
+                    selection,
+                    existing.createHost
+                      ? new Set(["host"] as const)
+                      : undefined,
+                  )
                 : [],
+              hostCreate: ctx ? hostCreateState(ctx) : null,
+              createHost: existing.createHost === true,
               flash,
             }),
           );
@@ -203,6 +230,7 @@ export function createWizardRouter(client: Client): Router {
           let accessProblem: string | null = null;
           let gaps: AccessGap[] = [];
           let fingerprint: string | undefined;
+          let hostRole: HostReview | null = null;
           if (existing.access) {
             try {
               const ctx = await readAccess(session);
@@ -216,7 +244,11 @@ export function createWizardRouter(client: Client): Router {
               gaps = accessGaps(
                 await enabledGapFeatures(existing),
                 existing.access,
+                existing.createHost ? new Set(["host"] as const) : undefined,
               );
+              if (existing.createHost) {
+                hostRole = await previewHostRole(session, ctx, accessChanges);
+              }
             } catch (err) {
               logger.warn("wizard: review could not read the server", err);
               accessProblem =
@@ -234,6 +266,7 @@ export function createWizardRouter(client: Client): Router {
               accessProblem,
               accessGaps: gaps,
               accessFingerprint: fingerprint,
+              hostRole,
               flash,
             }),
           );
@@ -453,6 +486,7 @@ export function createWizardRouter(client: Client): Router {
         staff: pickedRoles(body["roles_staff"]),
         host: pickedRoles(body["roles_host"]),
       });
+      const createHost = body["create_host"] === "1";
       const stay = (text: string): void => {
         res.redirect(
           303,
@@ -465,6 +499,15 @@ export function createWizardRouter(client: Client): Router {
         problem =
           validateSelection(ctx, selection) ??
           pendingConfigOverlap(state.configuration, selection);
+        if (!problem && createHost) {
+          const offer = hostCreateState(ctx);
+          if (!offer.available) {
+            problem = offer.message;
+          } else if (selection.host.length > 0) {
+            problem =
+              "Pick existing Event host roles or create a new one, not both.";
+          }
+        }
       } catch (err) {
         logger.warn("wizard: access picks could not be checked", err);
         await recordAudit(session, {
@@ -488,11 +531,17 @@ export function createWizardRouter(client: Client): Router {
         stay(problem);
         return;
       }
-      wizard.setAccess(session.discordUserId, session.guildId, selection);
+      wizard.setAccess(
+        session.discordUserId,
+        session.guildId,
+        selection,
+        createHost,
+      );
       await recordAudit(session, {
         action: "wizard.access",
         details: {
           selection,
+          createHost,
           counts: Object.fromEntries(
             ACCESS_SCOPES.map((sc) => [sc, selection[sc].length]),
           ),
@@ -802,6 +851,37 @@ export function createWizardRouter(client: Client): Router {
           );
           return;
         }
+        // The Event host role (#1365): the plan Review showed must still be the
+        // plan, and it must hold that one role and nothing else. Checked before
+        // the first write so a refusal leaves everything as it was.
+        if (state.createHost) {
+          const posted = (req.body as Record<string, unknown> | undefined)
+            ?.hostPlanId;
+          let refusal: string | null = null;
+          try {
+            const host = await previewHostRole(session, ctx, changes);
+            if (host.problems.length > 0) {
+              refusal = host.problems[0];
+            } else if (posted !== host.planId) {
+              refusal =
+                "the server or the role groups changed since you opened Review. Look at the updated plan and apply again.";
+            }
+          } catch (err) {
+            logger.warn("wizard: host role plan could not be made", err);
+            refusal =
+              "Discord could not be read, so the Event host role can't be checked.";
+          }
+          if (refusal) {
+            await recordAudit(session, {
+              action: "wizard.apply",
+              details: { stage: "host-role" },
+              result: "failure",
+              errorMessage: refusal,
+            });
+            confirmFailure(`Nothing was applied: ${refusal}`);
+            return;
+          }
+        }
         if (changes.length > 0) {
           const written = await applyAccessChanges(
             accessDeps(session),
@@ -871,13 +951,67 @@ export function createWizardRouter(client: Client): Router {
         });
         if (result.success) {
           wizard.endSession(session.discordUserId, session.guildId);
+          const summary = `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
+            accessApplied.length > 0
+              ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
+              : ""
+          }`;
+          if (state.createHost) {
+            // Last, because the engine's job is the one step that can't be
+            // taken back inside this request. It reports only that the job
+            // started; Role groups shows how it ended.
+            const started = await startHostRole(
+              {
+                groups: RoleGroupService.getInstance(),
+                audit: async (entry): Promise<void> => {
+                  await recordAudit(session, entry);
+                },
+                plan: async () =>
+                  planRoleGroups(
+                    await client.guilds.fetch(session.guildId),
+                    session.discordUserId,
+                  ),
+                start: async (plan) =>
+                  (
+                    await ServerAdoptionService.getInstance(
+                      client,
+                      await client.guilds.fetch(session.guildId),
+                    )
+                  ).startApply(plan, { actor: session }),
+              },
+              session.guildId,
+              String(
+                (req.body as Record<string, unknown> | undefined)?.hostPlanId ??
+                  "",
+              ),
+            ).catch((err: unknown): HostRoleResult => ({
+              ok: false,
+              error: `The Event host role could not be started (${err instanceof Error ? err.message : String(err)}).`,
+              groupStuck: false,
+            }));
+            if (started.ok) {
+              res.redirect(
+                303,
+                `/admin/role-groups?${flashRedirectQuery({
+                  type: "ok",
+                  text: `${summary}. The Event host role is being created.`,
+                })}&job=${encodeURIComponent(started.jobId)}`,
+              );
+              return;
+            }
+            flashRedirect(res, "/admin/role-groups", {
+              type: "err",
+              text: `${summary}, but the Event host role was not created. ${started.error}${
+                started.groupStuck
+                  ? " The Event host group could not be removed again; check it here."
+                  : " Nothing was left behind for it; add it again with the Event host preset."
+              }`,
+            });
+            return;
+          }
           flashRedirect(res, "/admin/settings", {
             type: "ok",
-            text: `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
-              accessApplied.length > 0
-                ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
-                : ""
-            }.`,
+            text: `${summary}.`,
           });
           return;
         }

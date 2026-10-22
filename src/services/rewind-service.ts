@@ -55,6 +55,12 @@ export interface RewindCompanion {
 export interface RewindTextChannel {
   channelId: string;
   channelName: string;
+  /**
+   * Discord channel type, so the page labels it by kind (#1303); null when the
+   * channel no longer resolves. Absent on snapshots frozen before #1303, which
+   * the route resolves from `channelId`.
+   */
+  channelType?: number | null;
   count: number;
 }
 
@@ -1368,6 +1374,7 @@ export class RewindService {
       const topTextChannels = computeTopTextChannels(inYear, 3).map((c) => ({
         channelId: c.channelId,
         channelName: this.resolveChannelName(c.channelId),
+        channelType: this.resolveChannelType(c.channelId),
         count: c.count,
       }));
 
@@ -1497,6 +1504,11 @@ export class RewindService {
    * Resolve a channel id to its current name via the client cache,
    * falling back to a placeholder for deleted / uncached channels.
    */
+  private resolveChannelType(channelId: string): number | null {
+    const channel = this.client.channels.cache.get(channelId);
+    return channel && typeof channel.type === "number" ? channel.type : null;
+  }
+
   private resolveChannelName(channelId: string): string {
     const channel = this.client.channels.cache.get(channelId);
     if (channel && "name" in channel && typeof channel.name === "string") {
