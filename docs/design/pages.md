@@ -151,6 +151,7 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
 carries only the title and one sentence about *Start now* and *New event*. *Start now* is a link to the New event form with *Now* preselected
 (`?when=now`), not a one-click action: a title is still needed. Both buttons are left out while Events is off, and a callout says so. *Live now* has
 one line saying how Start now works when empty; a live row links to its host panel and has no Cancel (a running event is ended from its panel).
+Running is `isEventRunning`: active and the start has arrived, so an event whose channel was prepared early stays in *Upcoming*.
 *Upcoming* rows have Edit and a confirmed Cancel (`POST /me/events/:id/host/cancel`, this occurrence only); the empty state links to *New event*.
 *Past events* is a folded `kb-disclosure` with a count. The list is filtered on the session's server and user, an admin session included, and
 leaves adopted events out as the overview card does. A failed read says so instead of showing an empty list.

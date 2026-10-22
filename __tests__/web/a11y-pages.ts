@@ -2851,6 +2851,7 @@ function yourEventRow(over: Partial<HostEventListRow>): HostEventListRow {
     when: "2030-01-01 19:00 (UTC)",
     state: "scheduled",
     durationMinutes: 90,
+    running: false,
     editable: true,
     recurring: false,
     ...over,
@@ -2993,6 +2994,7 @@ export function userPages(): A11yPage[] {
               yourEventRow({
                 id: "65a000000000000000000002",
                 state: "active",
+                running: true,
                 title: "Live quiz",
               }),
             ],

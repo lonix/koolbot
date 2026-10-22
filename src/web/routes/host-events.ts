@@ -60,7 +60,11 @@ import { renderEventEditBody } from "../event-edit-view.js";
 import { validateEventForm } from "../event-form.js";
 import { renderErrorPage } from "../views.js";
 import { isEventHost } from "../event-host.js";
-import { hostControlsAvailable, hostPanelPath } from "../host-panel-shared.js";
+import {
+  hostControlsAvailable,
+  hostPanelPath,
+  isEventRunning,
+} from "../host-panel-shared.js";
 import {
   renderHostPanelBody,
   type HostPanelEvent,
@@ -1864,20 +1868,24 @@ function registerEditRoutes(router: Router, client: Client): void {
  */
 function registerCancelAction(router: Router, client: Client): void {
   hostAction(router, "cancel", "/cancel", async ({ event, session }) => {
-    if (event.state !== "scheduled") {
-      return {
-        ok: false,
-        message:
-          "This event is running. End it from its host panel instead of cancelling it.",
-        errorMessage: `event is ${event.state}`,
-        redirectTo: "/me/events",
-      };
-    }
+    const now = new Date();
+    const running = {
+      ok: false,
+      message:
+        "This event is running. End it from its host panel instead of cancelling it.",
+      errorMessage: "event is running",
+      redirectTo: "/me/events",
+    };
+    // Early answer from the gate's read; the real guard is the atomic claim.
+    if (isEventRunning(event, now)) return running;
     const after = await EventService.getInstance(client).cancelEvent(
       String(event._id),
       session.guildId,
+      { refuseRunningAt: now },
     );
     const ok = after !== null && after.state === "cancelled";
+    // A refusal by the claim: the event became running after the gate's read.
+    if (!ok && after !== null && isEventRunning(after, now)) return running;
     return {
       ok,
       message: ok

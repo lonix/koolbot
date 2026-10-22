@@ -1661,7 +1661,10 @@ else's (the query is filtered on the session's server and user, an admin session
 says so and still lists earlier events. The scope line under the title says why the person can host ("You can host because you are in @Event
 hosts"). **Cancel** asks for confirmation and posts to `/me/events/<id>/host/cancel`, behind the same gate as every host action (CSRF, then
 creator-or-admin, 403 otherwise, a refused write audited as `event.host.denied`); it cancels this event only, is audited as `event.host.cancel`, and
-is refused for a running event, which is ended from its host panel instead. Nothing on the page links to `/admin` or shows a server-wide setting.
+is refused for a running event, which is ended from its host panel instead. **Running** means the event is active and its start has arrived: an event
+whose channel was prepared ahead of its start (the lead time) is still Upcoming, with Edit and Cancel. The refusal is made inside the cancel's own
+atomic claim, so an activation that lands after the page was read cannot be cancelled by it. (A planned event a host starts early stays Upcoming until
+its start time, since the event does not record an early start.) Nothing on the page links to `/admin` or shows a server-wide setting.
 
 The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
 folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.
@@ -2215,7 +2218,8 @@ set its clan tag from Discord; the host can put any team back at any time.
 
 **Live settings** (#1239) is the section of the host panel where the host changes the settings of
 a running event and saves once. It is the first step of live editing (#1197); the rows below work
-today, and a later step adds a group's kind as another row of the same form. Leaders and clan tags are described under **Leaders and tags in Live settings** below,
+today, and a later step adds a group's kind as another row of the same form. Leaders and clan tags are described under **Leaders and tags in Live
+settings** below,
 names, sizes and presets under **Group names, sizes and presets** (#1241), and adding and removing
 groups under **Adding and removing groups** (#1242), and switching groups on or off under
 **Groups on or off** (#1243).
@@ -2973,7 +2977,8 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
   legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms (including ones the voice feature
-  holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that have not ended,
+  holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that
+have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break

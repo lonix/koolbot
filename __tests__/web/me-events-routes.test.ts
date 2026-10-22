@@ -181,6 +181,7 @@ beforeEach(() => {
     [ID_LIVE]: makeEvent(ID_LIVE, {
       title: "Live quiz",
       state: "active",
+      startTime: new Date(Date.now() - 600_000),
       channelId: "c1",
     }),
     [ID_PLANNED]: makeEvent(ID_PLANNED, { title: "Planned quiz" }),
@@ -358,7 +359,9 @@ describe("Cancel from Your events (#1319)", () => {
     const r = await call(cancelPath(ID_PLANNED), { method: "POST" });
     expect(r.status).toBe(303);
     expect(r.location).toMatch(/^\/me\/events\?flash=ok/);
-    expect(cancelEvent).toHaveBeenCalledWith(ID_PLANNED, GUILD);
+    expect(cancelEvent).toHaveBeenCalledWith(ID_PLANNED, GUILD, {
+      refuseRunningAt: expect.any(Date),
+    });
     expect(auditRows.map((a) => a.action)).toContain("event.host.cancel");
   });
 
@@ -387,6 +390,46 @@ describe("Cancel from Your events (#1319)", () => {
     });
     expect(r.status).toBe(403);
     expect(cancelEvent).not.toHaveBeenCalled();
+  });
+
+  it("keeps a future event whose channel was prepared early in Upcoming, with Edit and Cancel", async () => {
+    const id = "65a000000000000000000009";
+    events[id] = makeEvent(id, {
+      title: "Prepared quiz",
+      state: "active",
+      channelId: "c9",
+      startTime: new Date(Date.now() + 600_000),
+    });
+    const { text } = await call("/me/events");
+    const live = text.indexOf('id="live-events"');
+    const upcoming = text.indexOf('id="upcoming-events"');
+    const past = text.indexOf('id="past-events"');
+    expect(text.slice(live, upcoming)).not.toContain("Prepared quiz");
+    const rows = text.slice(upcoming, past);
+    expect(rows).toContain("Prepared quiz");
+    expect(rows).toContain(`/me/events/${id}/host/edit`);
+    expect(rows).toContain(`/me/events/${id}/host/cancel`);
+    const r = await call(cancelPath(id), { method: "POST" });
+    expect(r.location).toMatch(/^\/me\/events\?flash=ok/);
+    expect(cancelEvent).toHaveBeenCalledWith(id, GUILD, {
+      refuseRunningAt: expect.any(Date),
+    });
+  });
+
+  it("refuses when the claim finds the event running after the gate read", async () => {
+    // The gate saw a planned event; the service's own atomic claim refuses.
+    cancelEvent.mockResolvedValue({
+      ...events[ID_PLANNED],
+      state: "active",
+      startTime: new Date(Date.now() - 1000),
+    });
+    const r = await call(cancelPath(ID_PLANNED), { method: "POST" });
+    expect(r.location).toMatch(/^\/me\/events\?flash=err/);
+    expect(
+      decodeURIComponent((r.location ?? "").replace(/\+/g, " ")),
+    ).toContain("is running");
+    const entry = auditRows.find((a) => a.action === "event.host.cancel");
+    expect(entry?.result).toBe("failure");
   });
 
   it("does not cancel a running event: it is ended from its panel", async () => {

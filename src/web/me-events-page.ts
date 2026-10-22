@@ -28,6 +28,8 @@ export interface HostEventListRow {
   when: string;
   state: string;
   durationMinutes: number;
+  /** Running (`isEventRunning`): offered the host panel, not Cancel. */
+  running: boolean;
   /** An Edit link is offered. */
   editable: boolean;
   /** Part of a repeating series: Cancel reaches this occurrence only. */
@@ -50,23 +52,21 @@ function minutes(n: number): string {
   return n > 0 ? `${n} min` : "";
 }
 
-function stateBadge(state: string): string {
-  const cls =
-    state === "active"
-      ? "kb-badge--on"
-      : state === "cancelled"
-        ? "kb-badge--off"
-        : "kb-badge--info";
-  const label =
-    state === "active"
-      ? "Live"
-      : state === "scheduled"
-        ? "Planned"
-        : state === "ended"
-          ? "Ended"
-          : state === "cancelled"
-            ? "Cancelled"
-            : state;
+function stateBadge(state: string, running: boolean): string {
+  const cls = running
+    ? "kb-badge--on"
+    : state === "cancelled"
+      ? "kb-badge--off"
+      : "kb-badge--info";
+  const label = running
+    ? "Live"
+    : state === "scheduled" || state === "active"
+      ? "Planned"
+      : state === "ended"
+        ? "Ended"
+        : state === "cancelled"
+          ? "Cancelled"
+          : state;
   return `<span class="kb-badge ${cls}">${escapeHtml(label)}</span>`;
 }
 
@@ -81,10 +81,9 @@ function rowHtml(
     e.editable && opts.cancel
       ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(panel)}/edit" aria-label="Edit ${label}">Edit</a> `
       : "";
-  const open =
-    e.state === "active"
-      ? `<a class="kb-btn kb-btn--sm kb-btn--primary" href="${escapeHtml(panel)}" aria-label="Open the host panel for ${label}">Host panel</a>`
-      : "";
+  const open = e.running
+    ? `<a class="kb-btn kb-btn--sm kb-btn--primary" href="${escapeHtml(panel)}" aria-label="Open the host panel for ${label}">Host panel</a>`
+    : "";
   const cancel = opts.cancel
     ? `<form method="POST" action="${escapeHtml(panel)}/cancel" class="kb-row" data-confirm="Cancel the event '${label}'?"${confirmListAttr(eventCancelItems(false, e.recurring))}>` +
       `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">` +
@@ -93,7 +92,7 @@ function rowHtml(
   return `<tr>
 <th scope="row"><a href="${escapeHtml(panel)}">${label}</a></th>
 <td>${escapeHtml(e.when)}${e.durationMinutes > 0 ? ` <span class="kb-muted">· ${escapeHtml(minutes(e.durationMinutes))}</span>` : ""}</td>
-<td>${stateBadge(e.state)}</td>
+<td>${stateBadge(e.state, e.running)}</td>
 <td class="kb-actions"><span class="kb-row">${open}${edit}${cancel}</span></td>
 </tr>`;
 }

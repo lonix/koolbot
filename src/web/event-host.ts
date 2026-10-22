@@ -34,7 +34,12 @@ export interface HostEventRef {
 }
 
 // Model-free helpers live in their own module so layouts can import them.
-export { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
+export {
+  hostControlsAvailable,
+  hostPanelPath,
+  isEventRunning,
+} from "./host-panel-shared.js";
+import { isEventRunning } from "./host-panel-shared.js";
 
 /**
  * Whether a row may be shown on the host panel at all. A discarded duplicate
@@ -147,6 +152,8 @@ export interface HostEventRow {
   timezone: string;
   state: string;
   durationMinutes: number;
+  /** `isEventRunning`: active and the start has arrived. */
+  running: boolean;
   /** The row can still be edited (open, not adopted). */
   editable: boolean;
   /** Part of a recurring series: Cancel then only reaches this occurrence. */
@@ -183,6 +190,7 @@ export async function listHostEvents(
     nativeCleanupOnly: { $ne: true },
     nativeAdopted: { $ne: true },
   };
+  const now = new Date();
   const toRows = (rows: unknown): HostEventRow[] =>
     Array.isArray(rows)
       ? rows.map((r) => ({
@@ -192,6 +200,7 @@ export async function listHostEvents(
           timezone: String(r.timezone ?? ""),
           state: String(r.state ?? ""),
           durationMinutes: Number(r.durationMinutes ?? 0),
+          running: isEventRunning(r, now),
           editable: r.state === "scheduled" || r.state === "active",
           recurring: Boolean(
             r.recurrence && r.recurrence !== "none" && r.seriesId,
@@ -208,10 +217,12 @@ export async function listHostEvents(
       .limit(HOST_PAST_EVENTS_LIMIT)
       .lean() as unknown,
   ]);
+  // Running is `isEventRunning`: an `active` event whose start is still ahead
+  // (its channel was prepared early) stays upcoming, with Edit and Cancel.
   const openRows = toRows(open);
   return {
-    live: openRows.filter((r) => r.state === "active"),
-    upcoming: openRows.filter((r) => r.state === "scheduled"),
+    live: openRows.filter((r) => r.running),
+    upcoming: openRows.filter((r) => !r.running),
     past: toRows(past),
   };
 }

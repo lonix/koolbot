@@ -32,6 +32,7 @@ function toListRow(e: HostEventRow): HostEventListRow {
     when: formatEventWhen(e),
     state: e.state,
     durationMinutes: e.durationMinutes,
+    running: e.running,
     editable: e.editable,
     recurring: e.recurring,
   };
