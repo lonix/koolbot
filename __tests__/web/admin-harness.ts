@@ -66,6 +66,8 @@ export interface ParsedFlash {
   type: string | null;
   msg: string | null;
   invalid: string[];
+  /** `open` when the redirect asks a feature page to open its folded settings (#1301). */
+  settings: string | null;
 }
 
 /** Parse a 303 flash redirect's `Location` into its path and flash parts. */
@@ -78,6 +80,7 @@ export function parseFlashRedirect(location: string | null): ParsedFlash {
     type: params.get("flash"),
     msg: params.get("msg"),
     invalid: invalid ? invalid.split(",") : [],
+    settings: params.get("settings"),
   };
 }
 

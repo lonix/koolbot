@@ -39,7 +39,7 @@ A person with only the Member scope has one section, so there is no sidebar at a
 | Group | Pages |
 | --- | --- |
 | (top) | Dashboard |
-| Features | the switched-on features, A to Z; then *Turned off (n)*, folded |
+| Features | the switched-on features, A to Z; then *N turned off*, folded |
 | Access | Command permissions, Role groups, Bot permissions |
 | Server setup | Setup wizard, Server scan, Channel claims, Channel manager, Adoption history |
 | Bot | Presence, Database, Environment, Command audit, Command metrics |
@@ -48,7 +48,7 @@ A person with only the Member scope has one section, so there is no sidebar at a
 - Renamed to say what the page does: Permissions → **Command permissions**, Bot Status → **Presence**, Bootstrap → **Environment**, Adoption →
   **Adoption history**, Settings → **All settings**.
 - Mark the current page with `aria-current="page"`; a page with problems gets a warn count badge.
-- *Turned off* is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch).
+- *N turned off* is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch). It is open when the current page is inside it.
 - Below 760px the nav sits above the content (reflow, #855).
 
 ### PageHeader
@@ -258,6 +258,15 @@ A sketch of how a KoolBot message reads in Discord, to design and review embeds 
 
 The card pairs today's messages with the rewritten ones. The rules are in the *Messages in Discord* section of the brand book.
 
+**Message line.** Where it matters who posted, when, and what sits outside the embed (an alert's role mention, an edited post), wrap the embed in
+`article.kb-message` → `span.kb-avatar` (the bot's initial), `div.kb-message__body` → `p.kb-message__head` (the name, a `kb-badge--info` *App*
+badge, `span.kb-message__time` with "(edited)" for a post the bot keeps up to date), an optional `p.kb-message__text` (the mention line, as
+Mentions), then the `kb-embed`.
+
+- A password members need is `span.kb-spoiler[role=img]` with an `aria-label` ("Password, hidden behind a spoiler"): a plain `span` cannot
+  carry a name, and the sketch never prints the password.
+- Review alerts with the message line: a role mention inside the embed would not notify anyone (*Alerts that mention a role* in `discord.md`).
+
 ### EmbedColours
 
 The six embed accents and when to use each. They are tokens (`embed-brand`, `embed-ok`, `embed-warn`, `embed-danger`, `embed-neutral`, `embed-lore`)
@@ -394,6 +403,19 @@ weekday a `span.kb-heatmap__row` and 24 `span.kb-heatmap__cell[data-l=0..4]`; th
 - Intensity is `lore-fill` at four opacities; the peak is `lore-peak` and is named in text beside the chart.
 - Always pair the grid with the bar list or a table: the grid alone is not readable as numbers.
 
+### UptimeStrip
+
+Whether something was up, hour by hour, for the last 24 hours: game servers on their list and edit pages (#1376). A status, not activity, so it
+uses the status colours, never the lore colours.
+
+**Markup.** `div.kb-uptime` → `div.kb-uptime__bar[role=img][aria-label]` with 24 `span` cells, oldest first, then the figure in text
+(`98.6 % up, last 24 h`). A cell is up by default; `is-part` when some checks failed or maintenance ran that hour, `is-down` when every check
+failed, `is-none` before the first check. `kb-uptime--lg` draws a taller bar for a page about one thing.
+
+- Up is `ok-text`, part is `warn-text`, down is `err-text`, no data is `heat-empty`.
+- The figure is always next to the bar, and the `aria-label` names each outage ("Down 20 minutes, 03:12 to 03:32 UTC"): never colour alone.
+- Maintenance does not count as down in the figure; the help line under a large strip says so.
+
 ## Disclosure and overlays
 
 ### Disclosure
@@ -407,6 +429,12 @@ summarising what is inside) and `div.kb-disclosure__body`. Inline: `details.kb-d
   Server scan folds *Notes*.
 - The summary must say what is inside, so people can skip it.
 - Never hide something a person must read before acting; that belongs in the Dialog for that action.
+
+**Settings fold (#1301).** A feature page's settings are one `details.kb-disclosure#feature-settings[data-settings-fold]` at the bottom of the page. Its
+summary reads *Settings*, a count badge and a `kb-disclosure__hint` ("2 changed from the default"). It is `open` (and carries `data-fold-forced`) when the
+feature is off, a required value is missing, or a save or reset has just happened; otherwise it is folded, and a script remembers per page whether the
+admin left it open (`localStorage` in try/catch; only a click on the summary counts as a choice). Above it, the page's status line is a
+`div.kb-statusline` of an On/Off badge and `kb-chip`s; a chip for something missing is `a.kb-chip.kb-chip--warn` with an icon, linking to the setting.
 
 ### Dialog
 

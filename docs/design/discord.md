@@ -23,6 +23,33 @@ so this is the larger half of the brand.
 - **Time:** the embed `timestamp`, or `<t:…:f>` / `<t:…:R>` in text, so each reader sees their own timezone and format. Never a preformatted date string.
 - **Version** appears only on help and about messages, in the footer.
 
+## Posts that track live state
+
+A post that shows something live, such as a game server's status, is one message the bot edits in place.
+
+- **Edit, never delete and re-post**, so members keep their place and links to the message keep working. If someone deletes it, the bot posts
+  it again and keeps the new id.
+- **The one exception is a reorder by an admin.** Discord cannot move a message, so the bot re-posts every post from the first one whose position
+  changed, in the new order, and stores the new ids. Links to those old messages stop working; the Web UI says so before the reorder is saved.
+- **The state is a word** in a *Status* field (*Online*, *Offline*, *Maintenance*) as well as the accent: `embed-ok`, `embed-danger`, `embed-warn`.
+- The embed `timestamp` is the time of the last check, so every reader sees how fresh it is in their own timezone.
+- A change of state edits the post at once; smaller changes (players, map) edit it at most once a minute.
+- A password members need goes behind a spoiler (`||…||`). What the bot itself uses (RCON passwords, internal addresses, error details) is
+  never posted.
+- Player names are personal data: shown only when an admin switches them on.
+
+## Alerts that mention a role
+
+- **A mention that must notify goes in the message text**, above the embed. Discord does not notify mentions inside an embed.
+- `allowedMentions` lists exactly the roles the admin chose, so a mention typed into a name or a note never pings anyone.
+- One alert per event (down, back up), with a cooldown per source, so a source that keeps dropping does not ping people over and over.
+- The title says what happened ("Valheim — Friday crew is down"); the description says since when, as a Discord timestamp, and where the details are.
+- When the bot cannot mention a role (the role is not mentionable and the bot lacks *Mention @everyone, @here, and All Roles*), it posts without
+  the mention, and the Web UI says so next to the setting. It never fails silently.
+- Planned downtime never mentions anyone, and silences the down alerts until it ends.
+
+![Game server posts and alerts](mockups/game-servers/discord.png)
+
 ## Replies
 
 - A command that can fail answers ephemerally, in an `embed-danger` embed whose description says what to do next ("Pick a voice channel you own, then

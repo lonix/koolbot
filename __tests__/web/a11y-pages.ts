@@ -971,6 +971,21 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The sidebar's "N turned off" list is only rendered when a feature is
+      // off, so no other fixture puts it in front of axe (#1296).
+      name: "Bootstrap (features switched off, list folded)",
+      html: renderBootstrapPage({
+        ...COMMON,
+        navFeatureStatus: { "polls.enabled": false, "notices.enabled": false },
+        groups: [
+          {
+            category: "Discord",
+            rows: [{ key: "GUILD_ID", present: false, isSecret: false }],
+          },
+        ],
+      }),
+    },
+    {
       name: "Settings",
       html: renderSettingsPage({
         ...COMMON,
@@ -1342,6 +1357,57 @@ export function adminPages(): A11yPage[] {
         ],
         groupLimits: { defaultCount: 3, maxCount: 8 },
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Events (past events folded, settings just saved)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "Europe/Oslo",
+        settingRows: [
+          {
+            key: "events.enabled",
+            label: "Events enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled events.",
+            category: "events",
+          },
+          {
+            key: "events.reminder_minutes",
+            label: "Reminder lead time (minutes)",
+            current: 45,
+            defaultValue: 30,
+            type: "number",
+            description: "How long before start the reminder is posted.",
+            category: "events",
+          },
+        ],
+        rows: [
+          {
+            id: "e1",
+            title: "Game night",
+            when: "2099-02-01 20:00",
+            state: "scheduled",
+            channelId: null,
+          },
+          {
+            id: "e2",
+            title: "Last week's quiz",
+            when: "2026-01-01 20:00",
+            state: "ended",
+            channelId: null,
+          },
+        ],
+        flash: {
+          type: "ok",
+          text: "Saved 1 setting in events.",
+          openSettings: true,
+        },
       }),
     },
     {
@@ -2400,6 +2466,32 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // A switched-off feature's own page: the sidebar's "N turned off" list
+      // opens so the current link is not hidden (#1296).
+      name: "Rules acceptance (feature off, sidebar list open)",
+      html: renderRulesPage({
+        ...COMMON,
+        navFeatureStatus: { "rules.enabled": false },
+        enabled: false,
+        channelId: "",
+        roleId: "",
+        messagePosted: false,
+        accepted: 0,
+        native: { screening: false, community: true },
+        intentMissing: false,
+        plan: null,
+        channels: [{ id: "100000000000000010", name: "rules" }],
+        roleName: null,
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      }),
+    },
+    {
       name: "Support tickets",
       html: renderTicketsPage({
         ...COMMON,
@@ -2410,6 +2502,37 @@ export function adminPages(): A11yPage[] {
         total: 2,
         page: 1,
         pageSize: 50,
+        settingRows: [
+          {
+            key: "tickets.enabled",
+            label: "Tickets enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Let members open private help channels.",
+            category: "tickets",
+          },
+          {
+            key: "tickets.staff_role_id",
+            label: "Staff role",
+            current: "r1",
+            defaultValue: "",
+            type: "role",
+            description: "Role that sees and handles every ticket.",
+            category: "tickets",
+          },
+          {
+            key: "tickets.transcript_on_close",
+            label: "Save a transcript on close",
+            current: true,
+            defaultValue: true,
+            type: "boolean",
+            description:
+              "Attach a plain-text message log when a ticket closes.",
+            category: "tickets",
+          },
+        ],
+        pickers: { roles: ROLES },
         rows: [
           {
             id: "a".repeat(24),

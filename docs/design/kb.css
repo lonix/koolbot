@@ -46,6 +46,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .kb-sidenav a[aria-current="page"] .kb-icon { color: var(--info-text); }
 .kb-sidenav a.is-off { color: var(--muted); }
 .kb-sidenav__end { margin-left: auto; }
+.kb-sidenav__pinned { margin-top: auto; }
 .kb-sidenav details > summary { list-style: none; display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem var(--space-3); border-radius: var(--radius-md); color: var(--muted); cursor: pointer; font-size: var(--type-description-size); }
 .kb-sidenav details > summary::-webkit-details-marker { display: none; }
 .kb-sidenav details > summary:hover { background: var(--chrome); color: var(--text-secondary); }
@@ -373,6 +374,7 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 /* ---------- Status line (top of a feature page) ---------- */
 .kb-statusline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; font-size: var(--type-description-size); color: var(--text-secondary); }
 .kb-statusline > span:not([class]) { color: var(--muted); }
+.kb-statusline .kb-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .kb-chip--warn { border-color: var(--warn-bg); background: var(--warn-bg); color: var(--warn-text); text-decoration: none; }
 .kb-chip--warn .kb-icon { color: var(--warn-text); }
 a.kb-chip--warn:hover { text-decoration: underline; }
@@ -518,6 +520,23 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-embed--lore { --accent: var(--embed-lore); }
 .kb-embed-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); align-items: start; }
 .kb-embed-pair > div { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+/* The message line around an embed: who posted, when, and the mention line an alert carries outside the embed. */
+.kb-message { display: flex; gap: var(--space-3); align-items: flex-start; min-width: 0; }
+.kb-message > .kb-avatar { width: 2.5rem; height: 2.5rem; font-size: var(--type-ui-size); }
+.kb-message__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.kb-message__head { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--type-ui-size); font-weight: 600; color: var(--text); }
+.kb-message__time { font-size: var(--type-help-size); font-weight: 400; color: var(--muted); }
+.kb-message__text { margin: 0; font-size: var(--type-ui-size); color: var(--text); }
+.kb-spoiler { display: inline-block; min-width: 4.5rem; border-radius: var(--radius-xs); background: var(--fill); color: transparent; user-select: none; }
+
+/* ---------- Uptime strip: 24 hourly cells, always next to its figure in text ---------- */
+.kb-uptime { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--type-help-size); color: var(--muted); }
+.kb-uptime__bar { display: flex; gap: 1px; height: 0.75rem; }
+.kb-uptime__bar > span { flex: 1; border-radius: var(--radius-xs); background: var(--ok-text); }
+.kb-uptime__bar > span.is-part { background: var(--warn-text); }
+.kb-uptime__bar > span.is-down { background: var(--err-text); }
+.kb-uptime__bar > span.is-none { background: var(--heat-empty); }
+.kb-uptime--lg .kb-uptime__bar { height: 1rem; }
 
 /* Group rows on narrow screens (reflow, #855): marker, name and remove on the first line; size and tag under the name.
    The column headings hide; every control keeps its own aria-label. */

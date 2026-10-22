@@ -860,11 +860,19 @@ export async function loadLeaderboardRoleState(
   return { tiers: views, roles };
 }
 
-function readFlash(req: Request): FlashMessage | null {
+export function readFlash(req: Pick<Request, "query">): FlashMessage | null {
   const flash = readSignedFlash(req.query);
   // Cap the rendered message length so a hostile redirect cannot pump
   // megabytes through the banner. Pages already escape on output.
-  return flash ? { type: flash.type, text: flash.text.slice(0, 500) } : null;
+  if (!flash) return null;
+  return {
+    type: flash.type,
+    text: flash.text.slice(0, 500),
+    // `settings=open` is added by the settings save and reset routes (#1301).
+    // It is not signed: all it can do is open a fold, and only beside a flash
+    // the server did sign.
+    ...(req.query.settings === "open" ? { openSettings: true } : {}),
+  };
 }
 
 /**

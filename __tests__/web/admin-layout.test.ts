@@ -3,7 +3,6 @@ import {
   escapeHtml,
   getDisplayedRemainingMs,
   getInactivityWindowMs,
-  NAV_GROUP_ORDER,
   NAV_ITEMS,
   renderAdminPage,
   resolveNavFeatureStatus,
@@ -35,15 +34,15 @@ describe("admin-layout NAV_ITEMS", () => {
     expect(labels).toEqual(
       expect.arrayContaining([
         "Dashboard",
-        "Settings",
-        "Permissions",
+        "All settings",
+        "Command permissions",
         "Announcements",
         "Polls",
-        "Reaction Roles",
+        "Reaction roles",
         "Notices",
-        "Voice Channels",
+        "Voice channels",
         "Database",
-        "Bootstrap",
+        "Environment",
       ]),
     );
   });
@@ -238,7 +237,6 @@ describe("renderAdminPage", () => {
     expect(html).toContain(
       "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}",
     );
-    expect(html).toContain("nav.side a:focus-visible{background:var(--chrome)");
     // The ring rule is declared after the aria-invalid outline so it wins on
     // focus (same specificity, later wins).
     expect(html.indexOf('[aria-invalid="true"]{outline')).toBeLessThan(
@@ -251,9 +249,7 @@ describe("renderAdminPage", () => {
     expect(html).toContain('<main id="main" tabindex="-1">');
     expect(html).toContain(".skip-link:focus{left:0");
     // aria-current marks the active page, not just a CSS class.
-    expect(html).toContain(
-      'href="/admin/settings" class="active" aria-current="page"',
-    );
+    expect(html).toContain('<a href="/admin/settings" aria-current="page">');
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   });
 
@@ -262,7 +258,6 @@ describe("renderAdminPage", () => {
     expect(html).toContain(
       "@media (max-width:760px){.shell{flex-direction:column}",
     );
-    expect(html).toContain("nav.side{width:auto;border-right:0;");
     // Wide tables scroll inside their container, not the page.
     expect(html).toContain(
       "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
@@ -359,7 +354,7 @@ describe("renderAdminPage", () => {
       csrfToken: "",
       remainingMs: 0,
     });
-    expect(html).toContain('href="/admin/settings" class="active"');
+    expect(html).toContain('<a href="/admin/settings" aria-current="page">');
   });
 
   it("shows every nav item when navFeatureStatus is omitted", () => {
@@ -395,21 +390,22 @@ describe("renderAdminPage", () => {
     expect(html).toContain('href="/admin/reaction-roles"');
     expect(html).toContain('href="/admin/notices"');
     // ...but greyed and tagged "off".
-    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
-    expect(html).toContain('href="/admin/reaction-roles" class="nav-disabled"');
-    expect(html).toContain('href="/admin/notices" class="nav-disabled"');
-    expect(html).toContain('<span class="nav-badge">off</span>');
+    expect(html).toContain('href="/admin/announcements" class="is-off"');
+    expect(html).toContain('href="/admin/reaction-roles" class="is-off"');
+    expect(html).toContain('href="/admin/notices" class="is-off"');
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--off kb-sidenav__end">off</span>',
+    );
     // Enabled features render as plain links (no disabled marker).
     expect(html).toContain('href="/admin/polls"');
-    expect(html).not.toContain('href="/admin/polls" class="nav-disabled"');
+    expect(html).not.toContain('href="/admin/polls" class="is-off"');
     expect(html).toContain('href="/admin/voice-channels"');
-    expect(html).not.toContain(
-      'href="/admin/voice-channels" class="nav-disabled"',
-    );
+    expect(html).not.toContain('href="/admin/voice-channels" class="is-off"');
     // Ungated items are always present and never marked disabled.
     expect(html).toContain('href="/admin/settings"');
     expect(html).toContain('href="/admin/database"');
     expect(html).toContain('href="/admin/bootstrap"');
+    expect(html).not.toContain('href="/admin/settings" class="is-off"');
   });
 
   it("keeps an item visible when its featureKey is missing from the status map", () => {
@@ -427,116 +423,250 @@ describe("renderAdminPage", () => {
   });
 });
 
-describe("renderAdminPage grouped sidebar (#613)", () => {
-  const render = (navFeatureStatus?: Record<string, boolean>): string =>
+describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
+  // Every feature switched on, unless a test says otherwise.
+  const featureKeys = NAV_ITEMS.flatMap((n) =>
+    n.featureKey ? [n.featureKey] : [],
+  );
+  const status = (off: string[] = []): Record<string, boolean> =>
+    Object.fromEntries(featureKeys.map((k) => [k, !off.includes(k)]));
+  const render = (
+    navFeatureStatus?: Record<string, boolean>,
+    active = "/admin/",
+  ): string =>
     renderAdminPage({
       title: "Dashboard",
-      active: "/admin/",
+      active,
       body: "",
       csrfToken: "",
       remainingMs: 0,
       navFeatureStatus,
     });
+  /** The side nav only: the top bar shares `/admin/` and other links. */
+  const navOf = (html: string): string =>
+    html.slice(html.indexOf('<nav class="kb-sidenav"'), html.indexOf("</nav>"));
+  const hrefsIn = (html: string): string[] =>
+    [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]);
+  const FOLD = /<details data-nav-off( open)?>[\s\S]*?<\/details>/;
 
-  it("renders every group heading in the fixed order", () => {
-    const html = render();
-    const positions = NAV_GROUP_ORDER.map((g) =>
-      html.indexOf(`nav-group-heading">${g}<`),
-    );
-    // All present...
-    for (const pos of positions) expect(pos).toBeGreaterThan(-1);
-    // ...and in ascending (fixed) order.
-    const sorted = [...positions].sort((a, b) => a - b);
-    expect(positions).toEqual(sorted);
-  });
-
-  it("groups each nav item under its declared group heading", () => {
-    const html = render();
-    // Heading order maps to the fixed group order; an item must appear after
-    // its own group's heading and before the next group's heading.
-    const headingPos = (g: string): number =>
-      html.indexOf(`nav-group-heading">${g}<`);
-    for (const item of NAV_ITEMS) {
-      const groupIdx = NAV_GROUP_ORDER.indexOf(item.group);
-      const start = headingPos(item.group);
-      const nextGroup = NAV_GROUP_ORDER[groupIdx + 1];
-      const end = nextGroup === undefined ? html.length : headingPos(nextGroup);
-      // From the group's heading on: the top bar's brand link shares `/admin/`.
-      const itemPos = html.indexOf(`href="${item.href}"`, start);
-      expect(itemPos).toBeGreaterThan(start);
-      expect(itemPos).toBeLessThan(end);
+  it("renders the four headed groups in the fixed order, none of the old ones", () => {
+    const nav = navOf(render());
+    const headings = [
+      ...nav.matchAll(/kb-sidenav__heading" id="[^"]+">([^<]+)</g),
+    ].map((m) => m[1]);
+    expect(headings).toEqual(["Features", "Access", "Server setup", "Bot"]);
+    for (const old of ["Info", "Settings"]) {
+      expect(nav).not.toContain(`>${old}<`);
     }
   });
 
-  it("keeps the Features group with items greyed when all are disabled (#610)", () => {
-    // Every Features-group item is feature-gated; turn them all off.
-    const html = render({
-      "announcements.enabled": false,
-      "polls.enabled": false,
-      "reactionroles.enabled": false,
-      "notices.enabled": false,
-      "voicechannels.enabled": false,
-    });
-    // The Features group stays visible — every item is shown, just greyed —
-    // so a disabled feature's page is still reachable from the sidebar.
-    expect(html).toContain('nav-group-heading">Features<');
-    expect(html).toContain('href="/admin/polls" class="nav-disabled"');
-    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
-    // The always-present groups remain.
-    expect(html).toContain('nav-group-heading">Info<');
-    expect(html).toContain('nav-group-heading">Settings<');
-  });
-
-  it("renders every Features item, greying only the disabled ones (#610)", () => {
-    const html = render({
-      "announcements.enabled": false,
-      "polls.enabled": true,
-      "reactionroles.enabled": false,
-      "notices.enabled": false,
-      "voicechannels.enabled": false,
-    });
-    expect(html).toContain('nav-group-heading">Features<');
-    // Enabled item: plain link.
-    expect(html).toContain('href="/admin/polls"');
-    expect(html).not.toContain('href="/admin/polls" class="nav-disabled"');
-    // Disabled item: still present, greyed.
-    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
-  });
-
-  it("sorts enabled Features nav items above disabled ones, stable within the group (#706)", () => {
-    // reactionroles + voicechannels on; announcements + polls + notices off.
-    const html = render({
-      "announcements.enabled": false,
-      "polls.enabled": false,
-      "reactionroles.enabled": true,
-      "notices.enabled": false,
-      "voicechannels.enabled": true,
-      "digest.enabled": false,
-      "voicetracking.enabled": false,
-    });
-    // Enabled items sink no lower than any disabled item. Enabled hrefs
-    // (reaction-roles, voice-channels) and disabled hrefs (announcements,
-    // polls, notices, digest, analytics) partition cleanly.
-    const pos = (href: string): number => html.indexOf(`href="${href}"`);
-    const enabled = ["/admin/reaction-roles", "/admin/voice-channels"].map(pos);
-    const disabled = [
-      "/admin/announcements",
-      "/admin/polls",
-      "/admin/notices",
-      "/admin/digest",
-      "/admin/analytics",
-    ].map(pos);
-    for (const p of [...enabled, ...disabled]) expect(p).toBeGreaterThan(-1);
-    expect(Math.max(...enabled)).toBeLessThan(Math.min(...disabled));
-    // Enabled items preserve their fixed NAV_ITEMS order (reaction-roles
-    // precedes voice-channels), confirming the stable secondary sort.
-    expect(pos("/admin/reaction-roles")).toBeLessThan(
-      pos("/admin/voice-channels"),
+  it("puts Dashboard first with no heading, and All settings last, pinned", () => {
+    const nav = navOf(render());
+    const hrefs = hrefsIn(nav);
+    expect(hrefs[0]).toBe("/admin/");
+    expect(hrefs[hrefs.length - 1]).toBe("/admin/settings");
+    expect(nav).toContain(
+      '<div class="kb-sidenav__group kb-sidenav__pinned"><ul><li><a href="/admin/settings"',
+    );
+    // Dashboard precedes the first heading.
+    expect(nav.indexOf('href="/admin/"')).toBeLessThan(
+      nav.indexOf("kb-sidenav__heading"),
     );
   });
 
-  it("ships muted CSS for the group heading consistent with the sidebar", () => {
-    expect(render()).toContain("nav.side .nav-group-heading{");
+  it("lists each page under the group the issue names, in its order", () => {
+    const nav = navOf(render(status()));
+    const sectionOf = (heading: string): string => {
+      const start = nav.indexOf(`">${heading}</p>`);
+      const rest = nav.slice(start + 1);
+      const next = rest.indexOf("kb-sidenav__heading");
+      const pinned = rest.indexOf("kb-sidenav__pinned");
+      const ends = [next, pinned].filter((i) => i > -1);
+      return rest.slice(0, ends.length ? Math.min(...ends) : undefined);
+    };
+    expect(hrefsIn(sectionOf("Access"))).toEqual([
+      "/admin/permissions",
+      "/admin/role-groups",
+      "/admin/bot-permissions",
+    ]);
+    expect(hrefsIn(sectionOf("Server setup"))).toEqual([
+      "/admin/wizard",
+      "/admin/adopt",
+      "/admin/adopt/claims",
+      "/admin/channels",
+      "/admin/adopt/history",
+    ]);
+    expect(hrefsIn(sectionOf("Bot"))).toEqual([
+      "/admin/bot-status",
+      "/admin/database",
+      "/admin/bootstrap",
+      "/admin/audit/commands",
+      "/admin/metrics",
+    ]);
+  });
+
+  it("labels the renamed pages and keeps their routes", () => {
+    const nav = navOf(render());
+    const labelled: Array<[string, string]> = [
+      ["/admin/permissions", "Command permissions"],
+      ["/admin/bot-status", "Presence"],
+      ["/admin/bootstrap", "Environment"],
+      ["/admin/adopt/history", "Adoption history"],
+      ["/admin/settings", "All settings"],
+      ["/admin/bot-permissions", "Bot permissions"],
+    ];
+    for (const [href, label] of labelled) {
+      expect(nav).toContain(`<a href="${href}">${label}</a>`);
+    }
+  });
+
+  it("lists the switched-on features A to Z, Moderation among them", () => {
+    const nav = navOf(render(status()));
+    const features = hrefsIn(
+      nav.slice(nav.indexOf('">Features</p>'), nav.indexOf('">Access</p>')),
+    );
+    const labels = features.map(
+      (h) => NAV_ITEMS.find((n) => n.href === h)?.label ?? "",
+    );
+    expect(labels).toContain("Moderation");
+    expect(labels).toEqual(
+      [...labels].sort((a, b) => a.localeCompare(b, "en")),
+    );
+    expect(labels).toHaveLength(
+      NAV_ITEMS.filter((n) => n.group === "Features").length,
+    );
+    // Nothing is folded away while everything is on.
+    expect(nav).not.toContain("<details");
+  });
+
+  it("sorts the features itself: declaration order does not decide the list", () => {
+    const saved = [...NAV_ITEMS];
+    NAV_ITEMS.reverse();
+    try {
+      const nav = navOf(
+        render(status(["polls.enabled", "events.enabled", "quotes.enabled"])),
+      );
+      const fold = FOLD.exec(nav)?.[0] ?? "";
+      const labelsOf = (html: string): string[] =>
+        hrefsIn(html).map((h) => saved.find((n) => n.href === h)?.label ?? "");
+      const inFold = labelsOf(fold);
+      const outside = labelsOf(
+        nav.slice(nav.indexOf('">Features</p>'), nav.indexOf("<details")),
+      );
+      expect(inFold).toEqual(["Events", "Polls", "Quotes"]);
+      expect(outside.length).toBeGreaterThan(3);
+      expect(outside).toEqual(
+        [...outside].sort((a, b) => a.localeCompare(b, "en")),
+      );
+    } finally {
+      NAV_ITEMS.splice(0, NAV_ITEMS.length, ...saved);
+    }
+  });
+
+  it("folds the switched-off features into 'N turned off', A to Z, after the switched-on ones", () => {
+    const html = render(
+      status([
+        "voicechannels.enabled",
+        "announcements.enabled",
+        "moderation.enabled",
+      ]),
+    );
+    const nav = navOf(html);
+    const fold = FOLD.exec(nav);
+    expect(fold).not.toBeNull();
+    const [folded, open] = fold as RegExpExecArray;
+    expect(open).toBeUndefined();
+    expect(folded).toContain("</svg>3 turned off</summary>");
+    expect(hrefsIn(folded)).toEqual([
+      "/admin/announcements",
+      "/admin/moderation",
+      "/admin/voice-channels",
+    ]);
+    for (const href of hrefsIn(folded)) {
+      expect(folded).toContain(`<a href="${href}" class="is-off"`);
+    }
+    // The switched-on features sit outside the fold and are not marked off.
+    const outside = nav.replace(folded, "");
+    expect(outside).toContain('<a href="/admin/polls">');
+    expect(outside).not.toContain("is-off");
+    expect(outside).not.toContain('href="/admin/moderation"');
+    // The fold comes after the last switched-on feature, before Access.
+    expect(nav.indexOf("<details")).toBeGreaterThan(
+      nav.indexOf('href="/admin/digest"'),
+    );
+    expect(nav.indexOf("<details")).toBeLessThan(nav.indexOf('">Access</p>'));
+  });
+
+  it("counts one turned-off feature, and still renders the Features heading when all are off (#610)", () => {
+    const one = navOf(render(status(["polls.enabled"])));
+    expect(one).toContain("</svg>1 turned off</summary>");
+    const all = navOf(render(status(featureKeys)));
+    expect(all).toContain('">Features</p>');
+    expect(all).toContain(`</svg>${featureKeys.length} turned off</summary>`);
+    // Every feature is still linked, so each page stays reachable and enable-able.
+    for (const item of NAV_ITEMS.filter((n) => n.featureKey)) {
+      expect(all).toContain(`href="${item.href}"`);
+    }
+  });
+
+  it("leaves the fold closed by default and opens it when the current page is inside it", () => {
+    const off = status(["polls.enabled"]);
+    expect(
+      FOLD.exec(navOf(render(off, "/admin/notices")))?.[1],
+    ).toBeUndefined();
+    const onPage = render(off, "/admin/polls");
+    expect(FOLD.exec(navOf(onPage))?.[1]).toBe(" open");
+    expect(onPage).toContain(
+      '<a href="/admin/polls" class="is-off" aria-current="page"',
+    );
+  });
+
+  it("remembers the fold per browser, in try/catch, and never writes a forced-open state", () => {
+    const html = render(status(["polls.enabled"]));
+    expect(html).toContain("details[data-nav-off]");
+    expect(html).toContain("localStorage.getItem(k)==='1'");
+    expect(html).toContain("localStorage.setItem(k,d.open?'0':'1')");
+    // Both storage touches are guarded, and the write happens on click (before
+    // `open` flips), not on `toggle`, which also fires for a server-set `open`.
+    expect(html).toMatch(
+      /try\{if\(localStorage\.getItem\(k\)==='1'\)d\.open=true\}catch\(e\)\{\}/,
+    );
+    expect(html).toMatch(
+      /addEventListener\('click',function\(\)\{try\{localStorage\.setItem/,
+    );
+    expect(html).not.toContain("addEventListener('toggle'");
+  });
+
+  it("keeps the Bot permissions issue-count badge in Access (#1217)", async () => {
+    const { setPermissionIssueCount, resetPermissionIssueCount } =
+      await import("../../src/services/bot-permission-status.js");
+    setPermissionIssueCount("guild-1", 3);
+    try {
+      expect(navOf(render())).toContain(
+        '<a href="/admin/bot-permissions">Bot permissions<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">3</span></a>',
+      );
+    } finally {
+      resetPermissionIssueCount();
+    }
+    expect(navOf(render())).not.toContain("kb-badge--warn");
+  });
+
+  it("renders every nav entry exactly once, whatever the feature status", () => {
+    for (const nav of [
+      navOf(render()),
+      navOf(render(status(featureKeys))),
+      navOf(render(status(["polls.enabled"]))),
+    ]) {
+      const hrefs = hrefsIn(nav);
+      expect([...hrefs].sort()).toEqual(NAV_ITEMS.map((n) => n.href).sort());
+    }
+  });
+
+  it("uses design-system classes only: no legacy nav.side styles", () => {
+    const html = render();
+    expect(html).not.toContain("nav.side");
+    expect(html).not.toContain("nav-group");
+    expect(html).not.toContain("nav-disabled");
   });
 });
 

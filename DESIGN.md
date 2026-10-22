@@ -112,12 +112,13 @@ should not send its admins' browsers to a font CDN, and the native face is the f
   | Admin | the `admin` capability, Administrator, or server owner | `/config` | the admin console |
 
 - **Navigation:** non-admins get one section per scope in the sidebar, and no sidebar at all when they only have one. The admin console is grouped by
-  task: Dashboard, Features (switched-on, A to Z, the rest folded), Access, Server setup, Bot, and All settings pinned at the bottom.
+  task: Dashboard, Features (switched-on, A to Z, the rest folded under *N turned off*), Access, Server setup, Bot, and All settings pinned at the bottom.
   [SideNav](docs/design/components.md#sidenav) has the full lists and the renames.
 - **Setup wizard:** Features → Access → Channels → Review. The Access step maps Discord roles to the four scopes before anything else is set up.
 - **Member pages** (My preferences, host panel): TopBar, then one centred column up to `member-content-max`, with Tabs under the bar.
 - **As built (#1317):** the TopBar and the non-admin SideNav are rendered by `src/web/app-shell.ts` (the nav registry is `SHELL_NAV`), a section shows
-  once it has a page that exists, and the sidebar once two sections do. The admin console still uses its legacy `nav.side` until the nav reorganisation (#1296).
+  once it has a page that exists, and the sidebar once two sections do. The admin console's sidebar is the same
+  `kb-sidenav`, grouped by task in `NAV_ITEMS` (`src/web/admin-layout.ts`, #1296).
 - **Reflow:** below 760px the nav sits above the content, columns stack and setting controls drop under their names (#855).
 
 ## Iconography
@@ -141,12 +142,13 @@ Lucide icons (ISC licence), copied into the repo and inlined as SVG, never loade
 | Rules | `book-open` | Bot permissions | `shield-check` |
 | Reaction roles | `smile-plus` | Command metrics | `chart-column` |
 | Database | `database` | Environment | `server-cog` |
-| All settings | `sliders-horizontal` | | |
+| All settings | `sliders-horizontal` | Game servers | `gamepad-2` |
 
 Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, `chevron-right` (disclosures, links out of a row), `chevron-down`
 (*More*), `external-link`, `user`, `log-out`, `clock`, `bell`, `hash` (text channel), `volume-2` (voice channel), `crown` (team leader), `tag`,
 `settings` (a feature's settings section), `shuffle` (Randomise), `arrow-right-left` (move people), `lock`, `lock-open`, `plus`, `trash-2`,
-`shield-half` (staff scope).
+`shield-half` (staff scope), `grip-vertical` (drag handle), `ellipsis` (a row's menu), `refresh-cw` (check again), `zap` (test a connection),
+`wrench` (maintenance), `server` (servers).
 
 KoolBot has no logo; the name is set in type in the TopBar.
 

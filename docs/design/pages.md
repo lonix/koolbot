@@ -68,6 +68,48 @@ chips), what it looks like it could be (*looks like Quotes* plus *Claim*, which 
 and *Custom permissions* when it is not synced to its category. Filters on top narrow it to what is used, what could be claimed, or what has custom
 permissions. A row's overwrites open on demand.
 
+### GameServersPage
+
+Game servers (#1376): one post per game server in Discord that KoolBot keeps up to date, and the alerts that mention a role when a server goes
+down. The feature-page pattern, with the down servers first.
+
+1. **Status line** under the title: where the posts go (a Mention), the check interval, and a warn chip for anything that needs fixing, such as
+   a role the bot cannot mention. Actions: *Check all now* and *Add server*.
+2. A warn Callout per server that is down: since when, what the post and the alert said, with *Check now* and *Set maintenance…*.
+3. Tiles: Servers, Online (warn when any is down), Players now, Last check.
+4. **Servers**, in the order they are posted: status word and dot, name, game and check method, the address in mono, two facts (players, then
+   map or version), an UptimeStrip and *Edit*, *Jump to post* and a row menu. Rows drag to reorder; the menu has *Move up* / *Move down*.
+   Saving a new order re-posts those posts in Discord (`discord.md`, *Posts that track live state*), and the page says so before it saves.
+5. *Settings (n)*, folded, with the summary line.
+6. *Recent changes* (state changes, alerts sent or not, maintenance, edits; times in UTC) beside *In #notices*, the posts as DiscordEmbed sketches.
+
+![Game servers page](mockups/game-servers/list.png)
+
+### GameServerEditPage
+
+One server, in two columns. The form on the left, saved with one SaveBar:
+
+- **Game and address**: the game, the name in Discord, the address and port members use; *Check a different address* nested under its switch.
+- **How KoolBot checks it**: a SegmentedControl of the methods the game supports (*Port check*, *Game query*, *RCON*), one line on what each
+  does, its ports and setup hint, and *Test connection* with its result as a status word. The RCON password is write-only: *Change*, never shown.
+- **Shown in the post**: one SettingRow per field the game reads, each showing its current value (*12 of 40 now*); player names off by default;
+  the member password; *Rules and notes*.
+- **Down and back up**: the alert channel and roles (Pickers), the back-up post and *Announce maintenance*, nested under *Mention people when it
+  goes down*.
+- **Remove server** last, in a danger panel, behind a Dialog.
+
+On the right: the post as it will read (DiscordEmbed), the last 24 hours (UptimeStrip and numbers) and *About <game>*, read from the game's file.
+
+![Game server edit page](mockups/game-servers/edit.png)
+
+### AddGameServerDialog
+
+Adding a server starts with the game, because the game sets the ports, the check methods and what can be read. PresetCards of the games KoolBot
+knows, *Other game* last; *LinuxGSM server* adds a searchable *LinuxGSM game* picker. Then the name and the address, with the port filled in
+from the game. The footer line says how a missing game gets added: each game is one file.
+
+![Add a game server dialog](mockups/game-servers/add-server.png)
+
 ### WizardAccessPage
 
 The Setup wizard's Access step: who can do what, before any channel is set up.

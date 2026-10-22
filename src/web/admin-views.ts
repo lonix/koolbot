@@ -15,6 +15,12 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { renderSaveBar } from "./savebar.js";
+import {
+  CHEVRON_ICON,
+  SETTINGS_FOLD_SCRIPT,
+  renderStatusLine,
+  settingHref,
+} from "./feature-page.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
@@ -93,6 +99,11 @@ interface CommonProps {
    * features. Optional: when absent the nav shows every item.
    */
   navFeatureStatus?: NavFeatureStatus;
+}
+
+/** "1 schedule", "3 schedules". */
+function countOf(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
@@ -382,13 +393,13 @@ export function renderBootstrapPage(props: BootstrapProps): string {
     .join("");
 
   const body = `
-<h1>Bootstrap</h1>
+<h1>Environment</h1>
 <p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
 <div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
 ${sections}
 `;
   return renderAdminPage({
-    title: "Bootstrap",
+    title: "Environment",
     active: "/admin/bootstrap",
     body,
     csrfToken: props.csrfToken,
@@ -1497,7 +1508,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 </div>`;
 
   const body = `
-<h1>Settings</h1>
+<h1>All settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${actionBar}
@@ -1510,7 +1521,7 @@ ${importSection}
 ${dangerSection}
 `;
   return renderAdminPage({
-    title: "Settings",
+    title: "All settings",
     active: "/admin/settings",
     body,
     csrfToken: props.csrfToken,
@@ -1782,7 +1793,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
     .join("");
 
   const body = `
-<h1>Permissions</h1>
+<h1>Command permissions</h1>
 <p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one Moderator or Admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to Moderators unless you set a restriction here; with no groups they stay open.</p>
 ${renderFlash(props.flash)}
 <div class="card">
@@ -1795,7 +1806,7 @@ ${renderFlash(props.flash)}
 <div class="card"><h2>Matrix</h2>${matrixHtml}</div>
 `;
   return renderAdminPage({
-    title: "Permissions",
+    title: "Command permissions",
     active: "/admin/permissions",
     body,
     csrfToken: props.csrfToken,
@@ -2233,6 +2244,12 @@ export interface RoleOption {
 export interface FlashMessage {
   type: "ok" | "warn" | "err";
   text: string;
+  /**
+   * The flash belongs to a save or reset of the folded settings on a feature
+   * page (#1301): the page shows it inside the settings, opens them, and does
+   * not repeat it at the top.
+   */
+  openSettings?: boolean;
 }
 
 export interface AnnouncementsProps extends CommonProps {
@@ -2348,6 +2365,16 @@ export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   // layout's on-load script focuses (when nothing is aria-invalid) so the
   // outcome of a post-redirect save is actually announced (WCAG 4.1.3, #855).
   return `<div class="notice ${cls}"${idAttr} role="status" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+}
+
+/**
+ * The flash at the top of a feature page. One that belongs to the folded
+ * settings (#1301) is shown inside them by `renderFeatureSettingsCard`, so it
+ * is left out here: the page must not say it twice, and the load-time focus
+ * then lands on it in the settings instead of scrolling back to the top.
+ */
+export function renderPageFlash(flash?: FlashMessage | null): string {
+  return flash?.openSettings ? "" : renderFlash(flash);
 }
 
 /**
@@ -2497,32 +2524,20 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const body = `
 <h1>Announcements</h1>
 <p class="subtitle">Scheduled announcements posted on a cron.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [{ text: countOf(props.rows.length, "schedule") }],
+})}
+
 <div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Total schedules</dt><dd>${props.rows.length}</dd>
-  </dl>
+  <h2>Schedules</h2>${tableHtml}
   <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
     ${csrfInput}
     <button type="submit" class="btn btn-primary">Post weekly VC stats now</button>
     <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
   </form>
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Switch scheduled announcements on or off here without leaving the page. Saved through the shared settings route.",
-  category: "announcements",
-  settingRows: props.settingRows ?? [],
-  returnTo: "/admin/announcements",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
-})}
-<div class="card">
-  <h2>Schedules</h2>${tableHtml}
 </div>
 <div class="card">
   <h2>Create a new announcement</h2>
@@ -2589,6 +2604,18 @@ ${renderFeatureSettingsCard({
     <button type="submit" class="btn btn-primary">Post now</button>
   </form>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Switch scheduled announcements on or off here without leaving the page. Saved through the shared settings route.",
+  category: "announcements",
+  settingRows: props.settingRows ?? [],
+  returnTo: "/admin/announcements",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Announcements",
@@ -2966,6 +2993,13 @@ const EVENT_GROUPS_SCRIPT =
   "validity();lobby()}}catch(x){}" +
   "})();";
 
+/** Which optional columns an events table shows (#1301). */
+interface EventCols {
+  expected: boolean;
+  channel: boolean;
+  cover: boolean;
+}
+
 export function renderEventsPage(props: EventsProps): string {
   const groupLimits = resolveGroupCountLimits(
     props.groupLimits?.defaultCount ?? 2,
@@ -2973,98 +3007,142 @@ export function renderEventsPage(props: EventsProps): string {
   );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
-  const tableRows = props.rows
-    .map((e) => {
-      const finished = e.state === "cancelled" || e.state === "ended";
-      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?"${EVENT_CANCEL_SERIES_LIST}>${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
-      // A finished occurrence still awaiting its successor (e.g. recurrence
-      // was switched off meanwhile) keeps the series live: allow stopping it.
-      // The host panel lives on the member surface (#1189); an admin may open
-      // it for any event, including a finished one (read-only summary).
-      const hostLink = `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
-      // End now (#1193): only a running event, behind a confirmation the server
-      // checks again. Shared with the host panel's End section.
-      const endNow =
-        e.state === "active"
-          ? `<details class="end-now"><summary class="btn btn-danger">End now</summary>${renderEndEventForm(
-              {
-                actionPath: `/admin/events/${encodeURIComponent(e.id)}/end-now`,
-                csrfToken: props.csrfToken,
-                idSuffix: e.id,
-                offerPullBack: e.hasGroupChannels === true,
-                adopted: e.nativeAdopted === true,
-              },
-            )}</details>`
-          : "";
-      // Edit (#1298): an open one-off event of our own. A series and an adopted
-      // event are not editable yet, so no link is offered for them.
-      const editLink =
-        !finished && !e.recurrence && e.nativeAdopted !== true
-          ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
-          : "";
-      const actions = finished
-        ? e.awaitingSuccessor
-          ? `${hostLink}\n  ${seriesForm}`
-          : hostLink
-        : `${hostLink}
+  const renderEventRow = (e: EventRow, cols: EventCols): string => {
+    const finished = e.state === "cancelled" || e.state === "ended";
+    const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?"${EVENT_CANCEL_SERIES_LIST}>${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
+    // A finished occurrence still awaiting its successor (e.g. recurrence
+    // was switched off meanwhile) keeps the series live: allow stopping it.
+    // The host panel lives on the member surface (#1189); an admin may open
+    // it for any event, including a finished one (read-only summary).
+    const hostLink = `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
+    // End now (#1193): only a running event, behind a confirmation the server
+    // checks again. Shared with the host panel's End section.
+    const endNow =
+      e.state === "active"
+        ? `<details class="end-now"><summary class="btn btn-danger">End now</summary>${renderEndEventForm(
+            {
+              actionPath: `/admin/events/${encodeURIComponent(e.id)}/end-now`,
+              csrfToken: props.csrfToken,
+              idSuffix: e.id,
+              offerPullBack: e.hasGroupChannels === true,
+              adopted: e.nativeAdopted === true,
+            },
+          )}</details>`
+        : "";
+    // Edit (#1298): an open one-off event of our own. A series and an adopted
+    // event are not editable yet, so no link is offered for them.
+    const editLink =
+      !finished && !e.recurrence && e.nativeAdopted !== true
+        ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
+        : "";
+    const actions = finished
+      ? e.awaitingSuccessor
+        ? `${hostLink}\n  ${seriesForm}`
+        : hostLink
+      : `${hostLink}
   ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
   <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${eventCancelList(e.nativeAdopted === true, Boolean(e.recurrence))}>${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
-      const channelCell = e.channelId
-        ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
-        : '<span class="muted">—</span>';
-      return `<tr>
+    const channelCell = e.channelId
+      ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
+      : '<span class="muted">—</span>';
+    return `<tr>
 <td>${escapeHtml(e.title)}${
-        e.recurrence
-          ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
-          : ""
-      }${
-        e.groupCount
-          ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
-          : ""
-      }</td>
+      e.recurrence
+        ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
+        : ""
+    }${
+      e.groupCount
+        ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
+        : ""
+    }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
 <td>${eventStateTag(e.state)}</td>
-<td>${renderExpected(e)}</td>
-<td>${channelCell}</td>
-<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>
-<td class="mono">${escapeHtml(e.id)}</td>
-<td class="actions">${actions}</td>
+${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="actions">${actions}</td>
 </tr>`;
-    })
-    .join("");
+  };
 
-  const tableHtml =
-    props.rows.length > 0
-      ? `<table class="data">
-<thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th><th scope="col">Expected to show up</th><th scope="col">Channel</th><th scope="col">Cover image</th><th scope="col">ID</th><th scope="col">Actions</th></tr></thead>
-<tbody>${tableRows}</tbody>
-</table>`
-      : '<p class="muted">No events scheduled yet.</p>';
+  // A column that is empty for every row of a table is left out (#1301), judged
+  // from the data and not from the rendered dash. The raw event id is not a
+  // column: the row's own links carry it.
+  const colsFor = (rows: EventRow[]): EventCols => ({
+    expected: rows.some((e) => e.expected || e.legacyRsvps),
+    channel: rows.some((e) => e.channelId),
+    cover: rows.some((e) => e.cover),
+  });
+  const renderEventsTable = (rows: EventRow[]): string => {
+    const cols = colsFor(rows);
+    return `<table class="data">
+<thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th>${cols.expected ? '<th scope="col">Expected to show up</th>' : ""}${cols.channel ? '<th scope="col">Channel</th>' : ""}${cols.cover ? '<th scope="col">Cover image</th>' : ""}<th scope="col">Actions</th></tr></thead>
+<tbody>${rows.map((e) => renderEventRow(e, cols)).join("")}</tbody>
+</table>`;
+  };
+  // Ended and cancelled events fold away. A finished occurrence still waiting
+  // for its successor stays in the list: its row carries the only way to
+  // cancel the series that is still live.
+  const isPast = (e: EventRow): boolean =>
+    (e.state === "cancelled" || e.state === "ended") && !e.awaitingSuccessor;
+  const currentRows = props.rows.filter((e) => !isPast(e));
+  const pastRows = props.rows.filter(isPast);
+  const currentHtml =
+    currentRows.length > 0
+      ? renderEventsTable(currentRows)
+      : `<p class="muted">${props.rows.length > 0 ? "No upcoming events." : "No events scheduled yet."}</p>`;
+  const pastHtml =
+    pastRows.length > 0
+      ? `<details class="kb-disclosure" id="past-events">
+    <summary>${CHEVRON_ICON}Past events <span class="kb-badge kb-badge--count">${pastRows.length}</span></summary>
+    <div class="kb-disclosure__body">${renderEventsTable(pastRows)}</div>
+  </details>`
+      : "";
 
-  // Point at the settings card only when it actually renders controls: while
-  // the config snapshot is unreadable the card is just a notice (#975).
-  const where = props.settingsUnavailable
-    ? "once settings can be loaded again"
-    : "in the settings below";
-  const categoryWarn = props.categoryConfigured
-    ? ""
-    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category ${where}.</div>`;
-  const announcementWarn = props.announcementConfigured
-    ? ""
-    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — event announcements and reminders won't be posted until you pick a channel ${where}.</div>`;
-
-  const permissionWarn = props.nativePermissionMissing
-    ? `<div class="notice warn">The bot lacks the <strong>Create Events</strong> (or Manage Events) permission, so events are not created in Discord's Events list: announcements have no event card and members cannot mark Interested. Grant it to the bot's role.</div>`
+  // The chips link to the setting that fixes them, but only while the settings
+  // card renders controls: with the stored config unreadable it is a notice
+  // (#975).
+  const settingLink = (key: string): string | undefined =>
+    props.settingsUnavailable ? undefined : settingHref(key);
+  const needsSetup = !props.categoryConfigured || !props.announcementConfigured;
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    chips: [
+      props.categoryConfigured
+        ? { text: "Channel category set" }
+        : {
+            text: "No channel category: event channels won't be created",
+            warn: true,
+            href: settingLink("events.category_id"),
+          },
+      props.announcementConfigured
+        ? { text: "Announcement channel set" }
+        : {
+            text: "No announcement channel: announcements and reminders won't be posted",
+            warn: true,
+            href: settingLink("events.announcement_channel_id"),
+          },
+      ...(props.nativePermissionMissing
+        ? [
+            {
+              text: "Bot lacks Create Events",
+              warn: true,
+              href: "/admin/bot-permissions",
+            },
+          ]
+        : []),
+      { text: props.timezone, mono: true },
+      { text: `${countOf(props.rows.length, "event")} scheduled` },
+    ],
+  });
+  const permissionNote = props.nativePermissionMissing
+    ? `<p class="muted">Without <strong>Create Events</strong> (or Manage Events) events are not created in Discord's Events list: announcements have no event card and members cannot mark Interested. Grant it to the bot's role.</p>`
     : "";
 
   const body = `
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({
   enabled: props.enabled,
   label: "Events",
@@ -3072,34 +3150,15 @@ ${renderFeatureDisabledNotice({
   returnTo: "/admin/events",
   csrfToken: props.csrfToken,
 })}
+${statusLine}
+${permissionNote}
+<div class="kb-pagehead__actions"><a class="kb-btn" href="#schedule-event">Schedule event</a></div>
+
 <div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Channel category</dt><dd>${tagOnOff(props.categoryConfigured, "set", "not set")}</dd>
-    <dt>Announcement channel</dt><dd>${tagOnOff(props.announcementConfigured, "set", "not set")}</dd>
-    <dt>Timezone</dt><dd class="mono">${escapeHtml(props.timezone)}</dd>
-    <dt>Scheduled events</dt><dd>${props.rows.length}</dd>
-  </dl>
-  ${categoryWarn}
-  ${announcementWarn}
-  ${permissionWarn}
+  <h2>Events</h2>${currentHtml}
+  ${pastHtml}
 </div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change event settings here without leaving the page. Saved through the shared settings route.",
-  category: "events",
-  settingRows: props.settingRows,
-  pickers: props.settingsPickers,
-  returnTo: "/admin/events",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
-})}
-<div class="card">
-  <h2>Events</h2>${tableHtml}
-</div>
-<div class="card">
+<div class="card" id="schedule-event">
   <h2>Schedule a new event</h2>
   <form method="POST" action="/admin/events/create" class="stack" data-event-form>
     ${csrfInput}
@@ -3109,11 +3168,11 @@ ${renderFeatureSettingsCard({
     <label>Description
       <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
     </label>
-    <label>Date (YYYY-MM-DD)
-      <input type="text" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="2026-07-04">
+    <label>Date
+      <input type="date" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
     </label>
-    <label>Time (24h HH:MM)
-      <input type="text" name="time" required pattern="\\d{2}:\\d{2}" placeholder="20:00">
+    <label>Time
+      <input type="time" name="time" required pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
     </label>
     <label>Duration (minutes, optional)
       <input type="number" name="duration" min="1" max="1440" placeholder="120">
@@ -3132,8 +3191,22 @@ ${renderFeatureSettingsCard({
     ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
-  <p class="muted">A cover image is added to a scheduled event from the Cover image column above; it is shown on the Discord event.</p>
+  <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change event settings here without leaving the page. Saved through the shared settings route.",
+  category: "events",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/events",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  needsSetup,
+  flash: props.flash,
+})}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
 `;
@@ -3294,28 +3367,18 @@ export function renderPollsPage(props: PollsProps): string {
   const body = `
 <h1>Polls</h1>
 <p class="subtitle">Poll schedules and the question library.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Default duration</dt><dd>${props.defaultDurationHours}h</dd>
-    <dt>Cooldown</dt><dd>${props.cooldownDays} days</dd>
-    <dt>Schedules</dt><dd>${props.schedules.length}</dd>
-    <dt>Question library</dt><dd>${props.items.length}</dd>
-  </dl>
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change poll settings here without leaving the page. Saved through the shared settings route.",
-  category: "polls",
-  settingRows: props.settingRows,
-  returnTo: "/admin/polls",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    { text: `Default duration ${props.defaultDurationHours}h` },
+    { text: `Cooldown ${countOf(props.cooldownDays, "day")}` },
+    { text: countOf(props.schedules.length, "schedule") },
+    { text: `${countOf(props.items.length, "question")} in the library` },
+  ],
 })}
+
 <div class="card">
   <h2>Schedules</h2>
   ${
@@ -3387,6 +3450,18 @@ ${renderFeatureSettingsCard({
     <button type="submit" class="btn btn-primary">Import</button>
   </form>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change poll settings here without leaving the page. Saved through the shared settings route.",
+  category: "polls",
+  settingRows: props.settingRows,
+  returnTo: "/admin/polls",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 ${scriptTag(POLL_IMPORT_UPLOAD_SCRIPT)}
 `;
   return renderAdminPage({
@@ -3539,43 +3614,28 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const olderPickers = props.active.filter(
     (rr) => !rr.pickerChannelName,
   ).length;
-  const channelLine = props.configChannel
-    ? `<dt>Message channel</dt><dd>#${escapeHtml(props.configChannel.name)} <span class="muted mono">${escapeHtml(props.configChannel.id)}</span></dd>`
-    : `<dt>Message channel</dt><dd class="muted">unset — set <code>reactionroles.message_channel_id</code> before creating reaction roles.</dd>`;
-  // `reactionroles.enabled` is among the rows, so the card treats it as the
-  // cascade master: turning the feature off writes only that flag (#974).
-  const settingsCard = props.settingsUnavailable
-    ? `
-<div class="card">
-  <h2>Settings</h2>
-  <div class="notice warn">Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>
-</div>`
-    : renderFeatureSettingsCard({
-        intro:
-          "Turn reaction roles on or off, pick the message channel and the surface style for new role messages. Turning the feature off keeps the other settings as they are.",
-        category: "reactionroles",
-        settingRows: props.settingRows ?? [],
-        pickers: { textChannels: props.textChannels },
-        returnTo: "/admin/reaction-roles",
-        csrfToken: props.csrfToken,
-      });
-
   const body = `
 <h1>Reaction Roles</h1>
 <p class="subtitle">Per-message reaction-role mappings.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    ${channelLine}
-    <dt>Active mappings</dt><dd>${props.active.length}</dd>
-    <dt>Archived mappings</dt><dd>${props.archived.length}</dd>
-  </dl>
-</div>
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    props.configChannel
+      ? { text: `Message channel #${props.configChannel.name}` }
+      : {
+          text: "No message channel set",
+          warn: true,
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("reactionroles.message_channel_id"),
+        },
+    { text: `${props.active.length} active` },
+    { text: `${props.archived.length} archived` },
+  ],
+})}
 ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPickers} active ${olderPickers === 1 ? "mapping was" : "mappings were"} created before pickers remembered their channel.</strong> ${olderPickers === 1 ? "Its picker is" : "Their pickers are"} still looked up in the channel set by <code>reactionroles.message_channel_id</code>, and changing that setting does not move ${olderPickers === 1 ? "it" : "them"}. Delete ${olderPickers === 1 ? "that picker and mapping" : "those pickers and mappings"} <em>before</em> changing the channel, or change it back before cleaning up. Startup keeps such mappings while none of them is found in the configured channel, and archives the ones that are missing once another is. Pickers created from now on remember their channel (shown under the message ID) and are not affected by later changes to the setting.</div>` : ""}
-${settingsCard}
 <div class="card">
   <h2>Active</h2>
   ${
@@ -3676,6 +3736,19 @@ ${settingsCard}
       : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role grant</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Turn reaction roles on or off, pick the message channel and the surface style for new role messages. Turning the feature off keeps the other settings as they are.",
+  category: "reactionroles",
+  settingRows: props.settingRows ?? [],
+  pickers: { textChannels: props.textChannels },
+  returnTo: "/admin/reaction-roles",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  needsSetup: !props.configChannel,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Reaction Roles",
@@ -3779,36 +3852,24 @@ export function renderNoticesPage(props: NoticesProps): string {
   const body = `
 <h1>Notices</h1>
 <p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
-${props.settingsUnavailable ? `<div class="notice warn">Notices settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>` : ""}
-${renderFeatureSettingsCard({
-  intro:
-    "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel below to repost them in the new channel.",
-  category: "notices",
-  settingRows: props.settingRows,
-  pickers: { textChannels: props.textChannels },
-  returnTo: "/admin/notices",
-  csrfToken: props.csrfToken,
+
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    props.channel
+      ? { text: `Channel #${props.channel.name}` }
+      : {
+          text: "No channel set",
+          warn: true,
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("notices.channel_id"),
+        },
+    { text: countOf(props.total, "notice") },
+  ],
 })}
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
-    <dt>Total notices</dt><dd>${props.total}</dd>
-  </dl>
-  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
-    [
-      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
-      "Every notice is posted again from the saved list.",
-    ],
-  )}>
-    ${csrfInput}
-    <button type="submit" class="btn btn-primary">Resync notices to channel</button>
-    <span class="muted">Deletes and reposts every notice message in the channel.</span>
-  </form>
-</div>
 <div class="card">
   <h2>Create a notice</h2>
   <form method="POST" action="/admin/notices/create" class="stack">
@@ -3821,6 +3882,32 @@ ${renderFeatureSettingsCard({
   </form>
 </div>
 ${groupSections}
+<div class="card">
+  <h2>Resync to the channel</h2>
+  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
+    [
+      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
+      "Every notice is posted again from the saved list.",
+    ],
+  )}>
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary">Resync notices to channel</button>
+    <span class="muted">Deletes and reposts every notice message in the channel.</span>
+  </form>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel above to repost them in the new channel.",
+  category: "notices",
+  settingRows: props.settingRows,
+  pickers: { textChannels: props.textChannels },
+  returnTo: "/admin/notices",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  needsSetup: !props.channel,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Notices",
@@ -3933,16 +4020,41 @@ export function renderQuotesPage(props: QuotesProps): string {
   const body = `
 <h1>Quotes</h1>
 <p class="subtitle">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    props.channel
+      ? { text: `Channel #${props.channel.name}` }
+      : {
+          text: "No channel set",
+          warn: true,
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("quotes.channel_id"),
+        },
+    props.headerMessageId
+      ? { text: `Header post ${props.headerMessageId}`, mono: true }
+      : { text: "No header post yet" },
+    {
+      text: `${props.search ? "Matching quotes" : "Total quotes"}: ${props.total}`,
+    },
+  ],
+})}
+
 <div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
-    <dt>Header post</dt><dd>${props.headerMessageId ? `<span class="mono">${escapeHtml(props.headerMessageId)}</span> <span class="muted">(auto-managed)</span>` : '<span class="muted">none</span>'}</dd>
-    <dt>${props.search ? "Matching quotes" : "Total quotes"}</dt><dd>${props.total}</dd>
-  </dl>
+  <h2>Quotes</h2>
+  <form method="GET" action="/admin/quotes" class="inline-form" role="search">
+    <label for="quote-search">Search</label>
+    <input type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID">
+    <button type="submit" class="btn">Search</button>${clearLink}
+  </form>
+  ${tableHtml}
+  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
+</div>
+<div class="card">
+  <h2>Quote channel</h2>
   <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
     [
       "Every message in the quote channel is deleted, including anything that is not a quote.",
@@ -3965,17 +4077,10 @@ ${renderFeatureSettingsCard({
   csrfToken: props.csrfToken,
   dependencyState: props.dependencyState,
   unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+  needsSetup: !props.channel,
 })}
-<div class="card">
-  <h2>Quotes</h2>
-  <form method="GET" action="/admin/quotes" class="inline-form" role="search">
-    <label for="quote-search">Search</label>
-    <input type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID">
-    <button type="submit" class="btn">Search</button>${clearLink}
-  </form>
-  ${tableHtml}
-  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
-</div>
 `;
   return renderAdminPage({
     title: "Quotes",
@@ -4156,17 +4261,31 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
   const body = `
 <h1>Birthdays</h1>
 <p class="subtitle">Members set their own birthday on <code>/me/birthday</code>. Here you can see who is coming up, correct or remove an entry, and check the message before it goes live.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", featureKey: "birthdays.enabled", returnTo: "/admin/birthdays", csrfToken: props.csrfToken })}
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    props.channel
+      ? { text: `Channel #${props.channel.name}` }
+      : {
+          text: "No channel set",
+          warn: true,
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("birthdays.channel_id"),
+        },
+    { text: props.role ? `Role @${props.role.name}` : "No birthday role" },
+    { text: `Schedule ${props.cron}`, mono: true },
+    {
+      text: props.listUnavailable
+        ? "Stored birthdays unavailable"
+        : `${countOf(props.total, "stored birthday")}`,
+    },
+  ],
+})}
 <div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
-    <dt>Birthday role</dt><dd>${props.role ? `@${escapeHtml(props.role.name)} <span class="muted mono">${escapeHtml(props.role.id)}</span>` : '<span class="muted">none</span>'}</dd>
-    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron)}</dd>
-    <dt>Stored birthdays</dt><dd>${props.listUnavailable ? '<span class="muted">unavailable</span>' : props.total}</dd>
-  </dl>
+  <h2>Run the check</h2>
   <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
     <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
@@ -4182,6 +4301,13 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", feat
   </dl>
   <p class="muted">${previewNotes.join(" ")}</p>
 </div>
+
+<div class="card">
+  <h2>Stored birthdays</h2>
+  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. <em>Last handled</em> is the year the check last dealt with the member: it posted for them, or skipped them because they had left the server. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
+  ${tableHtml}
+  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
+</div>
 ${renderFeatureSettingsCard({
   intro:
     "Change birthday settings here without leaving the page. A schedule change re-arms the birthday check on save — no restart needed.",
@@ -4192,13 +4318,10 @@ ${renderFeatureSettingsCard({
   csrfToken: props.csrfToken,
   dependencyState: props.dependencyState,
   unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+  needsSetup: !props.channel,
 })}
-<div class="card">
-  <h2>Stored birthdays</h2>
-  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. <em>Last handled</em> is the year the check last dealt with the member: it posted for them, or skipped them because they had left the server. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
-  ${tableHtml}
-  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
-</div>
 `;
   return renderAdminPage({
     title: "Birthdays",
@@ -4480,13 +4603,13 @@ export function renderBotStatusPage(props: BotStatusProps): string {
     .join("");
 
   const body = `
-<h1>Bot Status</h1>
+<h1>Presence</h1>
 <p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
 ${renderFlash(props.flash)}
 ${editors}
 `;
   return renderAdminPage({
-    title: "Bot Status",
+    title: "Presence",
     active: "/admin/bot-status",
     body,
     csrfToken: props.csrfToken,
@@ -4587,6 +4710,25 @@ export interface FeatureSettingsCardProps {
    * the real values.
    */
   unavailable?: boolean;
+  /**
+   * Whether the feature is on. The settings are folded (#1301) unless the
+   * feature is off, since then the usable part cannot work and the admin is
+   * here to set it up. A card with a `<feature>.enabled` row also reads that
+   * row; pass this for the pages whose master key is not a two-segment one
+   * (`core.command_audit.enabled`).
+   */
+  enabled?: boolean;
+  /**
+   * A setting the feature cannot work without is missing (no category, no
+   * channel). Opens the settings. The caller knows what is required; the
+   * card does not guess from the schema.
+   */
+  needsSetup?: boolean;
+  /**
+   * The page's flash. When it belongs to a settings save (`openSettings`) it
+   * is rendered inside the settings, which then start open.
+   */
+  flash?: FlashMessage | null;
 }
 
 /**
@@ -4629,14 +4771,17 @@ export function findFeatureMasterKey(rows: SettingRow[]): string | null {
 export function renderFeatureSettingsCard(
   props: FeatureSettingsCardProps,
 ): string {
+  // A flash from a settings save is shown with the settings (#1301). When the
+  // card has no form to put it in, it still shows here rather than vanishing.
+  const flashHtml = props.flash?.openSettings ? renderFlash(props.flash) : "";
   if (props.unavailable) {
     return `
 <div class="card">
   <h2>${escapeHtml(props.title ?? "Settings")}</h2>
-  ${renderSettingsUnavailableNotice()}
+  ${flashHtml}${renderSettingsUnavailableNotice()}
 </div>`;
   }
-  if (props.settingRows.length === 0) return "";
+  if (props.settingRows.length === 0) return flashHtml;
   const pickers = {
     textChannels: props.pickers?.textChannels ?? [],
     voiceChannels: props.pickers?.voiceChannels ?? [],
@@ -4671,9 +4816,39 @@ export function renderFeatureSettingsCard(
   const cascadeInput = masterKey
     ? ""
     : `\n    <input type="hidden" name="no_cascade" value="1">`;
+  const title = props.title ?? "Settings";
+
+  // Folded (#1301), except where the admin is here to set things up: the
+  // feature is off or misses a required value, or a save just happened and the
+  // result (and any rejected field) must be seen where it was made.
+  const master = masterKey
+    ? props.settingRows.find((r) => r.key === masterKey)
+    : undefined;
+  const featureOff =
+    props.enabled === false ||
+    (master ? !isEnabledValue(master.current) : false);
+  const forced =
+    featureOff ||
+    props.needsSetup === true ||
+    props.flash?.openSettings === true;
+  // Counted exactly as the rows mark themselves changed: a row whose
+  // dependency lives on another form has no control and never counts.
+  const inForm = new Set(props.settingRows.map((r) => r.key));
+  const changed = props.settingRows.filter((r) => {
+    const offForm = unmetDependenciesFor(r.key, enabledByKey).some(
+      (d) => !inForm.has(d.key),
+    );
+    return !offForm && differsFromDefault(r);
+  }).length;
+  const hint =
+    changed > 0
+      ? `<span class="kb-disclosure__hint" data-fold-hint>${changed} changed from the default</span>`
+      : "";
   return `
 <div class="card card--savebar">
-  <h2>${escapeHtml(props.title ?? "Settings")}</h2>${introHtml}
+  <details class="kb-disclosure" id="feature-settings" data-settings-fold data-fold-key="${escapeHtml(props.returnTo)}"${forced ? " open data-fold-forced" : ""}>
+    <summary>${CHEVRON_ICON}${escapeHtml(title)} <span class="kb-badge kb-badge--count">${props.settingRows.length}</span>${hint}</summary>
+    <div class="kb-disclosure__body">${flashHtml}${introHtml}
   ${renderSettingsForms({
     formId,
     saveAttrs: scopeAttr,
@@ -4682,10 +4857,13 @@ export function renderFeatureSettingsCard(
     <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}`,
     rowsHtml,
     submitLabel: props.submitLabel ?? "Save settings",
-    title: props.title ?? "Settings",
+    title,
     csrfToken: props.csrfToken,
     returnTo: props.returnTo,
   })}
+    </div>
+  </details>
+  ${scriptTag(SETTINGS_FOLD_SCRIPT)}
 </div>`;
 }
 
@@ -4723,22 +4901,42 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
   const body = `
 <h1>Voice Channels</h1>
 <p class="subtitle">Voice-channel category contents and live state.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    props.categoryFound
+      ? { text: `Category ${props.categoryName}`, mono: true }
+      : {
+          text: "Category not found",
+          warn: true,
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("voicechannels.category_id"),
+        },
+    { text: `Lobby ${props.lobbyName}`, mono: true },
+    { text: `Offline lobby ${props.offlineLobbyName}`, mono: true },
+    { text: `Prefix ${props.prefix}`, mono: true },
+    { text: `Control panel ${props.controlPanelEnabled ? "on" : "off"}` },
+    {
+      text: `Cleanup scope: ${props.managedOnly ? "Only channels KoolBot created" : "Every empty voice channel in the category"}`,
+    },
+    { text: `${props.totalManaged} in the category` },
+    { text: `${props.totalEmpty} empty` },
+  ],
+})}
+
 <div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Control panel</dt><dd>${tagOnOff(props.controlPanelEnabled, "enabled", "disabled")}</dd>
-    <dt>Category</dt><dd class="mono">${escapeHtml(props.categoryName)}</dd>
-    <dt>Cleanup scope</dt><dd>${props.managedOnly ? "Only channels KoolBot created" : "Every empty voice channel in the category"}</dd>
-    <dt>Lobby (online)</dt><dd class="mono">${escapeHtml(props.lobbyName)}</dd>
-    <dt>Lobby (offline)</dt><dd class="mono">${escapeHtml(props.offlineLobbyName)}</dd>
-    <dt>Channel prefix</dt><dd class="mono">${escapeHtml(props.prefix)}</dd>
-    <dt>Total in category</dt><dd>${props.totalManaged}</dd>
-    <dt>Empty channels</dt><dd>${props.totalEmpty}</dd>
-  </dl>
+  <h2>Cleanup actions</h2>
+  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" data-confirm="${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}">
+    ${csrfInput}
+    <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
+    <span class="muted">${props.managedOnly ? "Removes empty channels KoolBot created in the category (channels it did not create are never touched, and occupied ones are kept until they empty)" : "Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty)"}, then ensures the lobby exists: ${props.managedOnly ? "an existing lobby is kept and renamed back online if needed, and one is only created when missing." : "an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}</span>
+  </form>
+  ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
 </div>
+<div class="card"><h2>Channels</h2>${channelsHtml}</div>
 ${renderFeatureSettingsCard({
   intro:
     "Change voice-channel settings here without leaving the page. Saved through the shared settings route.",
@@ -4751,17 +4949,10 @@ ${renderFeatureSettingsCard({
   returnTo: "/admin/voice-channels",
   csrfToken: props.csrfToken,
   unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+  needsSetup: !props.categoryFound,
 })}
-<div class="card">
-  <h2>Cleanup actions</h2>
-  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" data-confirm="${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}">
-    ${csrfInput}
-    <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
-    <span class="muted">${props.managedOnly ? "Removes empty channels KoolBot created in the category (channels it did not create are never touched, and occupied ones are kept until they empty)" : "Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty)"}, then ensures the lobby exists: ${props.managedOnly ? "an existing lobby is kept and renamed back online if needed, and one is only created when missing." : "an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}</span>
-  </form>
-  ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
-</div>
-<div class="card"><h2>Channels</h2>${channelsHtml}</div>
 `;
   return renderAdminPage({
     title: "Voice Channels",
@@ -4907,19 +5098,10 @@ export function renderDigestPage(props: DigestProps): string {
 </style>
 <h1>Weekly Digest</h1>
 <p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Weekly Digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
-${renderFeatureSettingsCard({
-  intro:
-    "Change the digest schedule and thresholds here without leaving the page. A schedule change re-arms the digest job on save — no restart needed.",
-  category: "digest",
-  settingRows: props.settingRows,
-  pickers: props.settingsPickers,
-  returnTo: "/admin/digest",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
-})}
+${renderStatusLine({ enabled: props.enabled, chips: [] })}
+
 <div class="card">
   <h2>Actions</h2>
   <form method="GET" action="/admin/digest" class="inline-form">
@@ -4933,6 +5115,19 @@ ${renderFeatureSettingsCard({
   </form>
 </div>
 ${previewHtml}
+${renderFeatureSettingsCard({
+  intro:
+    "Change the digest schedule and thresholds here without leaving the page. A schedule change re-arms the digest job on save — no restart needed.",
+  category: "digest",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/digest",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Weekly Digest",
@@ -5122,29 +5317,18 @@ export function renderLeaderboardRolesPage(
   const body = `
 <h1>Leaderboard Roles</h1>
 <p class="subtitle">Reward the top voice-leaderboard members with Discord roles. Each tier gives its role to everyone ranked within its Top N.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Leaderboard roles", featureKey: "leaderboard_roles.enabled", returnTo: "/admin/leaderboard-roles", csrfToken: props.csrfToken })}
 ${trackingNotice}
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Period</dt><dd>${escapeHtml(props.period)}</dd>
-    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron || "(unset)")}</dd>
-    <dt>Tiers</dt><dd>${props.tiers.length}</dd>
-  </dl>
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change leaderboard role settings here without leaving the page. Saved through the shared settings route.",
-  category: "leaderboard_roles",
-  settingRows: props.settingRows,
-  pickers: props.pickers,
-  returnTo: "/admin/leaderboard-roles",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    { text: `Period ${props.period}` },
+    { text: `Schedule ${props.cron || "(unset)"}`, mono: true },
+    { text: countOf(props.tiers.length, "tier") },
+  ],
 })}
+
 <div class="card">
   <h2>Current holders</h2>
   ${holdersHtml}
@@ -5177,6 +5361,19 @@ ${renderFeatureSettingsCard({
   </form>`
   }
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change leaderboard role settings here without leaving the page. Saved through the shared settings route.",
+  category: "leaderboard_roles",
+  settingRows: props.settingRows,
+  pickers: props.pickers,
+  returnTo: "/admin/leaderboard-roles",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 ${scriptTag(LEADERBOARD_TIER_EDITOR_SCRIPT)}
 `;
   return renderAdminPage({
@@ -5316,26 +5513,19 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
   const body = `
 <h1>Slash-command audit log</h1>
 <p class="subtitle">One row per Discord slash-command invocation, and per button, select-menu or modal interaction (listed as <code>component:&hellip;</code>). Raw command arguments, custom ids and submitted text are deliberately omitted.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Audit logging</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
-    <dt>Retention</dt><dd>${props.retentionDays} days</dd>
-    <dt>Rows matched</dt><dd>${props.total}</dd>
-  </dl>
-  ${props.enabled ? "" : `<p class="muted">Enable <code>core.command_audit.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording.</p>`}
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change audit logging and retention here without leaving the page. Saved through the shared settings route.",
-  category: "core",
-  settingRows: props.settingRows,
-  returnTo: "/admin/audit/commands",
-  csrfToken: props.csrfToken,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  onLabel: "Logging on",
+  offLabel: "Logging off",
+  chips: [
+    { text: `Kept for ${countOf(props.retentionDays, "day")}` },
+    { text: `${countOf(props.total, "row")} matched` },
+  ],
 })}
+${props.enabled ? "" : `<p class="muted">Enable <code>core.command_audit.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording.</p>`}
+
 
 <div class="card">
   <h2>Filters</h2>
@@ -5380,6 +5570,17 @@ ${renderFeatureSettingsCard({
     <span class="muted">${props.pageSize} per page</span>
   </div>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change audit logging and retention here without leaving the page. Saved through the shared settings route.",
+  category: "core",
+  settingRows: props.settingRows,
+  returnTo: "/admin/audit/commands",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Command audit",
@@ -5673,28 +5874,17 @@ ${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
   const body = `
 <h1>Moderation log</h1>
 <p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
 
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Moderation log</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
-    <dt>Actions matched</dt><dd>${props.total}</dd>
-  </dl>
-  <p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change moderation-log settings here without leaving the page, including the Discord channel moderation actions are logged to. Saved through the shared settings route.",
-  category: "moderation",
-  settingRows: props.settingRows ?? [],
-  pickers: props.pickers,
-  returnTo: "/admin/moderation",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  onLabel: "Log on",
+  offLabel: "Log off",
+  chips: [{ text: `${countOf(props.total, "action")} matched` }],
 })}
+<p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
+
 
 ${renderCasesSection(props)}
 
@@ -5727,6 +5917,19 @@ ${renderCasesSection(props)}
     <span class="muted">${props.pageSize} per page</span>
   </div>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change moderation-log settings here without leaving the page, including the Discord channel moderation actions are logged to. Saved through the shared settings route.",
+  category: "moderation",
+  settingRows: props.settingRows ?? [],
+  pickers: props.pickers,
+  returnTo: "/admin/moderation",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Moderation log",
@@ -5789,6 +5992,13 @@ function buildTicketsQueryString(statusFilter: string, page: number): string {
 export function renderTicketsPage(props: TicketsProps): string {
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
   const page = Math.min(Math.max(1, props.page), totalPages);
+  // Opening a ticket needs the staff role (`no-staff-role` otherwise), so a
+  // missing one keeps the settings open (#1301).
+  const staffRoleMissing = (props.settingRows ?? []).some(
+    (r) =>
+      r.key === "tickets.staff_role_id" &&
+      String(r.current ?? "").trim() === "",
+  );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
   const statusOptionsHtml = props.statusOptions
@@ -5854,28 +6064,28 @@ export function renderTicketsPage(props: TicketsProps): string {
   const body = `
 <h1>Support tickets</h1>
 <p class="subtitle">Private help channels members open with <code>/ticket open</code>. Closing archives the channel (locked, never deleted); reopen restores it.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Tickets", featureKey: "tickets.enabled", returnTo: "/admin/tickets", csrfToken: props.csrfToken })}
 
-<div class="card">
-  <h2>Status</h2>
-  <dl class="kv">
-    <dt>Tickets</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
-    <dt>Tickets matched</dt><dd>${props.total}</dd>
-  </dl>
-  <p class="muted">The bot needs <strong>Manage Channels</strong> and <strong>Manage Roles</strong> (to set the private permissions) and, for a category, access to it.</p>
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Choose the staff role and category, and whether a transcript is saved when a ticket closes. Saved through the shared settings route.",
-  category: "tickets",
-  settingRows: props.settingRows ?? [],
-  pickers: props.pickers,
-  returnTo: "/admin/tickets",
-  csrfToken: props.csrfToken,
-  dependencyState: props.dependencyState,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  chips: [
+    ...(staffRoleMissing
+      ? [
+          {
+            text: "No staff role: members cannot open tickets",
+            warn: true,
+            href: props.settingsUnavailable
+              ? undefined
+              : settingHref("tickets.staff_role_id"),
+          },
+        ]
+      : []),
+    { text: `${countOf(props.total, "ticket")} matched` },
+  ],
 })}
+<p class="muted">The bot needs <strong>Manage Channels</strong> and <strong>Manage Roles</strong> (to set the private permissions) and, for a category, access to it.</p>
+
 
 <div class="card">
   <h2>Filter</h2>
@@ -5900,6 +6110,20 @@ ${renderFeatureSettingsCard({
     <span class="muted">${props.pageSize} per page</span>
   </div>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Choose the staff role and category, and whether a transcript is saved when a ticket closes. Saved through the shared settings route.",
+  category: "tickets",
+  settingRows: props.settingRows ?? [],
+  pickers: props.pickers,
+  returnTo: "/admin/tickets",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  needsSetup: staffRoleMissing,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Support tickets",
@@ -6060,31 +6284,26 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
   const body = `
 <h1>Command metrics</h1>
 <p class="subtitle">Historical per-command usage, error rate, and latency persisted to MongoDB. Complements the live in-memory view and the Prometheus <code>/metrics</code> endpoint.</p>
-${renderFlash(props.flash)}
+${renderPageFlash(props.flash)}
 
-<div class="card">
-  <h2>Overview</h2>
-  <dl class="kv">
-    <dt>Persistence</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
-    <dt>Retention</dt><dd>${props.retentionDays} days</dd>
-    <dt>Window</dt><dd>${props.windowDays} days &nbsp; ${windowToggle}</dd>
-    <dt>Total invocations</dt><dd>${props.totalUsage}</dd>
-    <dt>Total errors</dt><dd>${props.totalErrors}</dd>
-  </dl>
-  ${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording. Counts already shown were captured before it was disabled.</p>`}
-</div>
-${renderFeatureSettingsCard({
-  intro:
-    "Change metrics persistence and retention here without leaving the page. Saved through the shared settings route.",
-  category: "core",
-  settingRows: props.settingRows,
-  returnTo: "/admin/metrics",
-  csrfToken: props.csrfToken,
-  unavailable: props.settingsUnavailable,
+${renderStatusLine({
+  enabled: props.enabled,
+  onLabel: "Recording on",
+  offLabel: "Recording off",
+  chips: [
+    { text: `Kept for ${countOf(props.retentionDays, "day")}` },
+    {
+      text: `${countOf(props.totalUsage, "invocation")} in ${props.windowDays} days`,
+    },
+    { text: `${countOf(props.totalErrors, "error")}` },
+  ],
 })}
+${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording. Counts already shown were captured before it was disabled.</p>`}
+
 
 <div class="card">
   <h2>Commands by usage</h2>
+  <p class="inline-form"><span class="muted">Window</span> ${windowToggle}</p>
   ${usageRowsHtml}
 </div>
 
@@ -6103,6 +6322,17 @@ ${renderFeatureSettingsCard({
   <h2>Usage trend</h2>
   ${trendHtml}
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change metrics persistence and retention here without leaving the page. Saved through the shared settings route.",
+  category: "core",
+  settingRows: props.settingRows,
+  returnTo: "/admin/metrics",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+  enabled: props.enabled,
+  flash: props.flash,
+})}
 `;
   return renderAdminPage({
     title: "Command metrics",

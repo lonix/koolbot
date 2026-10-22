@@ -289,7 +289,7 @@ describe("renderSettingsPage", () => {
     // so they stay available.
     expect(html).toContain('action="/admin/settings/import"');
     // The wizard pre-fills from the same store, so its link is hidden too.
-    expect(html).not.toContain(">Setup wizard</a>");
+    expect(html).not.toContain('class="btn">Setup wizard</a>');
   });
 
   it("renders the human label as primary text and the dotted key as a muted reference", () => {
@@ -1905,8 +1905,15 @@ describe("renderEventsPage settings card (#975)", () => {
       categoryConfigured: false,
       announcementConfigured: false,
     });
-    expect(html).toContain("pick a category in the settings below");
-    expect(html).toContain("pick a channel in the settings below");
+    // Warning chips on the status line link to the control that fixes them
+    // (#1301), which sits in the settings the warning has just opened.
+    expect(html).toMatch(
+      /<a class="kb-chip kb-chip--warn" href="#set-events\.category_id">[^]*?No channel category/,
+    );
+    expect(html).toMatch(
+      /<a class="kb-chip kb-chip--warn" href="#set-events\.announcement_channel_id">[^]*?No announcement channel/,
+    );
+    expect(html).toContain('id="set-events.category_id"');
   });
 
   it("does not point the warnings at controls that aren't rendered", () => {
@@ -1915,9 +1922,10 @@ describe("renderEventsPage settings card (#975)", () => {
       announcementConfigured: false,
       settingsUnavailable: true,
     });
-    expect(html).not.toContain("in the settings below");
-    expect(html).toContain("pick a category once settings can be loaded again");
-    expect(html).toContain("pick a channel once settings can be loaded again");
+    // No controls are rendered, so the chips name the problem and link nowhere.
+    expect(html).not.toContain('href="#set-events');
+    expect(html).toContain("No channel category");
+    expect(html).toContain("No announcement channel");
   });
 
   it("shows a notice instead of controls when settings can't be read", () => {
@@ -2963,7 +2971,7 @@ describe("renderNoticesPage", () => {
     // Moving the channel points the admin at Resync.
     expect(html).toContain("Changing the channel does not move notices");
     // Total count and the resync action stay.
-    expect(html).toContain("<dt>Total notices</dt><dd>3</dd>");
+    expect(html).toContain('<span class="kb-chip">3 notices</span>');
     expect(html).toContain("Resync notices to channel");
   });
 
@@ -2979,7 +2987,7 @@ describe("renderNoticesPage", () => {
       settingRows: [],
       settingsUnavailable: true,
     });
-    expect(html).toContain("Notices settings could not be loaded");
+    expect(html).toContain("Settings could not be loaded");
     expect(html).not.toContain('name="value_notices.enabled"');
   });
 });
@@ -3024,7 +3032,7 @@ describe("renderBirthdaysPage (#986)", () => {
     expect(html).toContain('action="/admin/birthdays/run-now"');
     expect(html).not.toMatch(/disabled>Run now/);
     expect(html).toContain("#general");
-    expect(html).toContain('href="/admin/birthdays" class="active"');
+    expect(html).toContain('<a href="/admin/birthdays" aria-current="page">');
   });
 
   it("previews the message with an escaped mention chip, not raw markup", () => {
@@ -3140,7 +3148,7 @@ describe("renderQuotesPage (#984)", () => {
     // The auto-managed header id is shown read-only, never as a control.
     expect(html).toContain("900000000000000001");
     expect(html).not.toContain('name="value_quotes.header_message_id"');
-    expect(html).toContain('href="/admin/quotes" class="active"');
+    expect(html).toContain('<a href="/admin/quotes" aria-current="page">');
   });
 
   it("says a search matched nothing rather than that no quotes exist", () => {
@@ -3637,7 +3645,7 @@ describe("renderFeatureSettingsCard (#971)", () => {
     expect(html).toContain(
       '<input type="hidden" name="keys" value="digest.cron">',
     );
-    expect(html).toContain("<h2>Digest settings</h2>");
+    expect(html).toMatch(/<summary>[^]*Digest settings [^]*<\/summary>/);
     expect(html).toContain("Tune &lt;the&gt; digest.");
     expect(html).toContain(">Save digest</button>");
   });
@@ -4990,7 +4998,7 @@ describe("renderCommandAuditPage", () => {
     });
     expect(html).toContain("Slash-command audit log");
     expect(html).toContain("No command invocations match");
-    expect(html).toContain('class="tag tag-on">enabled');
+    expect(html).toContain('class="kb-badge kb-badge--on">Logging on');
     expect(html).toContain("90 days");
     // Prev/Next are disabled buttons on a single-page result set.
     expect(html).toMatch(/<button[^>]*disabled[^>]*>← Prev<\/button>/);
@@ -5137,7 +5145,7 @@ describe("renderCommandAuditPage", () => {
       page: 1,
       pageSize: 50,
     });
-    expect(html).toContain('class="tag tag-off">disabled');
+    expect(html).toContain('class="kb-badge kb-badge--off">Logging off');
     expect(html).toContain("core.command_audit.enabled");
   });
 });

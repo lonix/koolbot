@@ -891,43 +891,49 @@ No dashboard JSON ships with the bot — wire these up to taste:
 
 ### Admin panel (`/admin/*`, admin-role sessions only)
 
-| Page                  | Replaces                                                                                            |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| **Dashboard**         | `/botstats`                                                                                         |
-| **Settings**          | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
-| **Permissions**       | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
-| **Setup Wizard**      | `/setup wizard`                                                                                     |
-| **Announcements**     | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
-| **Birthdays**         | (new — upcoming list, edit/remove, message preview, **Run now**) + editable `birthdays.*` settings  |
-| **Events**            | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
-| **Polls**             | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
-| **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
-| **Notices**           | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
-| **Quotes**            | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
-| **Bot Permissions**   | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
-| **Bot Status**        | (new — edit the "Watching …" presence message pools)                                                |
-| **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
-| **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
-| **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
-| **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
-| **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
-| **Channel Claims**    | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
-| **Channel Manager**   | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
-| **Adopt Events**      | (new — adopt existing Discord scheduled events as KoolBot events; plan → preview → apply)           |
-| **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
-| **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
-| **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
-| **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
-| **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
-| **Tickets**           | (new — `/ticket` overview: claim / close / reopen) + editable `tickets.*` settings                  |
-| **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
+| Page                    | Replaces                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **Dashboard**           | `/botstats`                                                                                         |
+| **All settings**        | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
+| **Command permissions** | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
+| **Setup wizard**        | `/setup wizard`                                                                                     |
+| **Announcements**       | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
+| **Birthdays**           | (new — upcoming list, edit/remove, message preview, **Run now**) + editable `birthdays.*` settings  |
+| **Events**              | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
+| **Polls**               | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
+| **Reaction roles**      | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
+| **Notices**             | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
+| **Quotes**              | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
+| **Bot permissions**     | (new — which Discord permissions the bot is missing for the enabled features, and where)            |
+| **Presence**            | (new — edit the "Watching …" presence message pools)                                                |
+| **Voice channels**      | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
+| **Weekly digest**       | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
+| **Leaderboard roles**   | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
+| **Role groups**         | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
+| **Rules**               | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
+| **Channel claims**      | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
+| **Channel manager**     | (new — create, rename, reorder and delete categories and text/voice channels; see below)            |
+| **Adopt Events**        | (new — adopt existing Discord scheduled events as KoolBot events; plan → preview → apply)           |
+| **Voice analytics**     | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
+| **Database**            | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Command audit**       | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
+| **Command metrics**     | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
+| **Moderation**          | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
+| **Tickets**             | (new — `/ticket` overview: claim / close / reopen) + editable `tickets.*` settings                  |
+| **Environment**         | (new — read-only env diagnostics)                                                                   |
 
-The sidebar groups the pages under three headings, in this order: **Info**
-(Dashboard, Bot Status, Bot Permissions, Database, Command Audit, Command Metrics, Moderation,
-Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
-(Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
-Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature pages that
-are switched off sort to the bottom of their group.
+The sidebar groups the pages by what you are trying to do (#1296), in this order:
+**Dashboard** on its own at the top; **Features** (the switched-on features, A to Z:
+Announcements, Birthdays, Events, Leaderboard roles, Moderation, Notices, Polls, Quotes,
+Reaction roles, Rules, Tickets, Voice analytics, Voice channels, Weekly digest);
+**Access** (Command permissions, Role groups, Bot permissions); **Server setup**
+(Setup wizard, Server scan, Channel claims, Channel manager, Adoption history); **Bot**
+(Presence, Database, Environment, Command audit, Command metrics); and **All settings**
+pinned at the bottom. Features that are switched off are not listed with the others: they
+fold into **N turned off** under Features, so each one stays one click from being enabled.
+The folded list opens on a switched-off feature's own page, and is otherwise remembered
+open or closed per browser. The routes did not change with the names (Command permissions
+is still `/admin/permissions`, Presence `/admin/bot-status`, Environment `/admin/bootstrap`).
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
@@ -966,6 +972,15 @@ page renders a banner explaining the state with an inline **Enable** button
 (flips the flag via `/admin/settings/set` and returns you to the page) plus
 an **Open Settings** link.
 
+Every feature page reads in the same order (#1301): a **status line** (an On or Off badge and chips for
+the facts worth knowing, with a warning chip that links to the setting or the permission when something
+is missing), then the usable part (what the feature holds and its main actions), then the **Settings**,
+folded. The summary reads `Settings` with the number of settings and how many differ from the default.
+The settings open by themselves when the feature is off or a required value is missing (no channel, no
+category), and after a save or a reset, with the flash shown inside them. Otherwise they stay folded,
+and the browser remembers per page whether you left them open (`localStorage`; the page works the same
+without it, and without JavaScript the fold is the browser's own `details` element).
+
 Every feature page also has a **Settings** card (#970) that edits all of that
 feature's config keys in place, with the same controls, validation, dependency
 locks and accessibility wiring as the Settings page. The card saves through the
@@ -997,7 +1012,7 @@ The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
 (`notices.header_enabled`) and whether it is pinned
 (`notices.header_pin_enabled`). Changing the channel does not move notices that
 are already posted: after saving, use **Resync notices to channel** to repost
-them in the new channel. The Status card keeps the total notice count.
+them in the new channel. The status line keeps the total notice count.
 
 The **Polls** page manages poll schedules and the question library. Questions
 are imported from a file you upload or a YAML/JSON document you paste into the
@@ -1102,7 +1117,7 @@ Its **Settings** card edits every `quotes.*` key in place: the enable toggle
 channel, the header and pin toggles, `quotes.clear_on_sync`, the cooldown,
 maximum length and vote-history retention, and the roles allowed to delete
 quotes. The auto-managed `quotes.header_message_id` is shown read-only in the
-status card.
+status line.
 
 The **Birthdays** page (#986) is for the admin side of birthdays; members still
 set their own date on `/me/birthday`. It lists every stored birthday, soonest
@@ -1192,7 +1207,7 @@ a bot group, a role a feature hands out to members (rules, birthday, leaderboard
 and removing `admin` from a group (that goes through Role groups, where it is reviewed). A callout says when Events or
 Moderation is on and no role is mapped to run it. To create an Event host role, use the Event host preset on Role groups first.
 
-The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
+The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
 not have to guess why a feature does nothing. It is read-only and writes nothing
 to Discord. When something is missing, the first card is **How to fix**: a numbered
@@ -1231,7 +1246,7 @@ Links) are not covered yet.
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
   be reached the page says it is using the bot's cached view; a feature that cannot
   be checked is shown as _Not checked_, never as fine.
-- **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
+- **Status indicator.** The **Bot permissions** entry in the sidebar shows a badge
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
@@ -1240,7 +1255,7 @@ Links) are not covered yet.
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
   #1303.
 
-The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
+The **Presence** page (`/admin/bot-status`, formerly Bot Status) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
 are in voice: the _empty_, _one user_, and _multiple users_ pools. Each
 pool has an add / edit / remove / reorder list plus a paste-a-list
@@ -1533,13 +1548,17 @@ The **Events** page (`/admin/events`) is the Web UI surface for the event
 scheduler: events are created, cancelled and started here (the `/event` command was removed), and members see them in
 Discord's Events list and the announcement channel (the bot needs Create Events or Manage Events for the event card) — events that spin up a
 temporary voice channel shortly before they start, are announced with a Discord
-event link, remind attendees, and clean themselves up afterward. A status card shows whether the
+event link, remind attendees, and clean themselves up afterward. A status line shows whether the
 feature, the `events.category_id` channel category, and the
-`events.announcement_channel_id` are configured (with inline warnings when a
+`events.announcement_channel_id` are configured (with warning chips that link to the setting when a
 category or announcement channel is missing, since event channels and
-announcements won't be created without them, or when the bot lacks Create Events) plus the resolved event timezone. The
+announcements won't be created without them, or to Bot Permissions when the bot lacks Create Events) plus the resolved event timezone.
+A **Schedule event** button at the top jumps to the form. The
 events table lists each event's title, start time, lifecycle state
-(_scheduled_ / _active_ / _ended_ / _cancelled_), an **Expected to show up** column, channel, and id. For each upcoming event
+(_scheduled_ / _active_ / _ended_ / _cancelled_), and, when at least one event has something in it, an **Expected to show up** column, channel
+and cover image; empty columns are left out and the raw event id is not shown. Ended and cancelled events are folded under
+**Past events (n)**; a finished occurrence that still holds a live series stays in the main list, since its row has the only
+**Cancel series** button. For each upcoming event
 (the next ten) that column lists who marked **Interested** on its native Discord
 event, with the count, read live from Discord when the page is opened and
 never stored; it shows a short message when the event is not on Discord's Events
@@ -1550,7 +1569,7 @@ lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — and a running (`active`) event also gets
 **End now** (#1193, below), while finished events show no lifecycle
 actions. Every row has a **Host panel** link (see below). A
-**Schedule a new event** form creates events without leaving the page. The page
+**Schedule a new event** form (native date and time inputs) creates events without leaving the page. The page
 is gated by `events.enabled` (the #610 disabled-feature pattern).
 
 The **Groups** section of the schedule form (#1188) is optional and off unless
