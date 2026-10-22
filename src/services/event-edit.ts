@@ -13,11 +13,12 @@
  *   lead time, or the start has passed) but still open. Description and
  *   duration only: moving the start would leave a channel up early or late,
  *   and the voice channel's name does not follow a new title.
- * - **refused**: finished, recurring, adopted, or being ended right now.
+ * - **refused**: finished, adopted, or being ended right now.
  *
- * Recurring events are refused on purpose: the next occurrence is built from
- * this one's title, description and duration, so "edit this occurrence" would
- * silently change the series.
+ * A recurring event is edited with a scope, `occurrence` or `following`: the
+ * next occurrence is built from this one's title, description, duration and
+ * timezone, so the edit must say whether those carry on. See
+ * `EventService.editEvent` and the series template (`models/event.ts`).
  */
 
 import { createHash } from "node:crypto";
@@ -44,9 +45,80 @@ export interface EditableEventRef extends EventEditFields {
   recurrence?: string | null;
   seriesId?: string | null;
   nativeAdopted?: boolean | null;
+  /** Series fields; they are part of the version token (#1298). */
+  seriesStart?: Date | null;
+  nextSpawned?: boolean | null;
+  seriesTemplate?: SeriesTemplate | null;
 }
 
-export type EditRefusalReason = "finished" | "recurring" | "adopted" | "ending";
+/** What the next occurrence takes from the series (the model's `ISeriesTemplate`). */
+export interface SeriesTemplate {
+  title: string;
+  description: string;
+  durationMinutes: number;
+  timezone: string;
+}
+
+export type EditRefusalReason = "finished" | "adopted" | "ending";
+
+/**
+ * How far an edit of a recurring event reaches: only this occurrence (the next
+ * one keeps the series' values) or this one and every later one.
+ */
+export type EditScope = "occurrence" | "following";
+
+/** A posted scope, or null when it is neither (missing, empty or forged). Never defaulted. */
+export function parseEditScope(value: string): EditScope | null {
+  return value === "occurrence" || value === "following" ? value : null;
+}
+
+/** Whether the row belongs to a recurring series (the edit then needs a scope). */
+export function isSeriesRow(event: {
+  recurrence?: string | null;
+  seriesId?: string | null;
+}): boolean {
+  return (
+    (!!event.recurrence && event.recurrence !== "none") ||
+    (typeof event.seriesId === "string" && event.seriesId.length > 0)
+  );
+}
+
+/** The four fields a series template holds, read from a row's own values. */
+export function templateFromRow(row: EventEditFields): SeriesTemplate {
+  return {
+    title: row.title,
+    description: row.description ?? "",
+    durationMinutes: row.durationMinutes,
+    timezone: row.timezone ?? "",
+  };
+}
+
+/**
+ * The template a scoped edit writes. `base` is the stored template, or the row
+ * as it was before the edit when none is stored, so an earlier one-off change
+ * never leaks into the series. `following` overlays only the fields this edit
+ * changed; `occurrence` keeps `base` as it is.
+ */
+export function nextSeriesTemplate(
+  scope: EditScope,
+  row: EventEditFields & { seriesTemplate?: SeriesTemplate | null },
+  want: EventEditFields,
+): SeriesTemplate {
+  const base = row.seriesTemplate ?? templateFromRow(row);
+  if (scope === "occurrence") return base;
+  const out = { ...base };
+  if (want.title !== row.title) out.title = want.title;
+  if ((want.description ?? "") !== (row.description ?? "")) {
+    out.description = want.description ?? "";
+  }
+  if (want.durationMinutes !== row.durationMinutes) {
+    out.durationMinutes = want.durationMinutes;
+  }
+  if ((want.timezone ?? "") !== (row.timezone ?? "")) {
+    out.timezone = want.timezone ?? "";
+  }
+  return out;
+}
 
 export type EditMode =
   | { mode: "full" }
@@ -56,8 +128,14 @@ export type EditMode =
 export const EDIT_MESSAGES = {
   finished:
     "This event has finished or was cancelled, so it can no longer be edited.",
-  recurring:
-    "This event is part of a recurring series. Editing a series or one occurrence is not supported yet: changing one occurrence would change every later one. Cancel the occurrence and create a new event instead.",
+  scope:
+    "Choose whether the change is for this occurrence only or for this and the following occurrences.",
+  seriesAdvanced:
+    "The next occurrence of this series has already been created, so this one can no longer be edited. Edit the next occurrence instead.",
+  pastNextSlot:
+    'For this occurrence only, the new start must be before the next occurrence of the series. Choose "This and following occurrences" to move the whole series.',
+  anchor:
+    "That start cannot be applied to the whole series (a monthly date that some months do not have, or a time that does not exist on some days). Pick another day or time, or change this occurrence only.",
   adopted:
     "This event was adopted from a Discord scheduled event. Edit it in Discord: the bot follows it there.",
   ending: "This event is being ended right now. Reload the page.",
@@ -105,16 +183,6 @@ export function editModeOf(
       message: EDIT_MESSAGES.adopted,
     };
   }
-  if (
-    (event.recurrence && event.recurrence !== "none") ||
-    (typeof event.seriesId === "string" && event.seriesId.length > 0)
-  ) {
-    return {
-      mode: "refused",
-      reason: "recurring",
-      message: EDIT_MESSAGES.recurring,
-    };
-  }
   const started =
     event.state === "active" ||
     (event.channelId ?? null) !== null ||
@@ -156,6 +224,16 @@ export function eventEditVersion(
         event.startTime.getTime(),
         event.timezone ?? "",
         event.durationMinutes,
+        event.seriesStart?.getTime() ?? null,
+        event.nextSpawned === true,
+        event.seriesTemplate
+          ? [
+              event.seriesTemplate.title,
+              event.seriesTemplate.description,
+              event.seriesTemplate.durationMinutes,
+              event.seriesTemplate.timezone,
+            ]
+          : null,
       ]),
     )
     .digest("hex")

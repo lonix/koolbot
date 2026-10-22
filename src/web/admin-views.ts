@@ -3029,10 +3029,11 @@ export function renderEventsPage(props: EventsProps): string {
             },
           )}</details>`
         : "";
-    // Edit (#1298): an open one-off event of our own. A series and an adopted
-    // event are not editable yet, so no link is offered for them.
+    // Edit (#1298): an open event of our own, one-off or a series occurrence
+    // (the form asks how far the change reaches). An adopted event is edited in
+    // Discord, so no link is offered for it.
     const editLink =
-      !finished && !e.recurrence && e.nativeAdopted !== true
+      !finished && e.nativeAdopted !== true
         ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
         : "";
     const actions = finished
