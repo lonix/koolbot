@@ -200,7 +200,15 @@ export type NativeCache = Collection<Snowflake, GuildScheduledEvent>;
 // allows `null` to clear it. Edits that clear a description are cast through this.
 type EditOptions = Parameters<Guild["scheduledEvents"]["edit"]>[1];
 
-type ApiCaller = <T>(call: () => Promise<T>, name: string) => Promise<T>;
+/** `quiet`: the caller reports failures itself, so the shared wrapper must not
+ * log each rejection as an error (timeouts and retries are unchanged). */
+type ApiCaller = <T>(
+  call: () => Promise<T>,
+  name: string,
+  opts?: { quiet?: boolean },
+) => Promise<T>;
+
+const DISCORD_UNKNOWN_CHANNEL = 10003;
 
 export class NativeEventSync {
   private readonly warned = new Set<string>();
@@ -489,6 +497,53 @@ export class NativeEventSync {
     return want;
   }
 
+  /**
+   * A stored `channelId` does not prove the room still exists: the channel
+   * delete handler only clears it for ended/cancelled events. Only a confirmed
+   * Unknown Channel counts as gone; any other failure is `unknown` and the
+   * caller keeps the current state and retries next scan.
+   */
+  private async roomState(
+    guild: Guild,
+    channelId: string,
+  ): Promise<"exists" | "gone" | "unknown"> {
+    if (guild.channels.cache.get(channelId)) return "exists";
+    try {
+      const found = await guild.channels.fetch(channelId);
+      return found ? "exists" : "gone";
+    } catch (error) {
+      if (
+        error instanceof DiscordAPIError &&
+        error.code === DISCORD_UNKNOWN_CHANNEL
+      ) {
+        return "gone";
+      }
+      return "unknown";
+    }
+  }
+
+  /** The wanted fields for an existing native event, with the room checked. */
+  private async wantedFieldsFor(
+    event: IEvent,
+    guild: Guild,
+    native: GuildScheduledEvent,
+  ): Promise<NativeEventFields> {
+    const want = await this.wantedFields(event);
+    if (!want.voiceChannelId) return want;
+    const state = await this.roomState(guild, want.voiceChannelId);
+    if (state === "gone") {
+      want.voiceChannelId = null;
+    } else if (state === "unknown") {
+      // Keep what is there: a voice event stays linked, an external one stays
+      // external. Nothing is converted on a transient failure.
+      want.voiceChannelId =
+        native.entityType === GuildScheduledEventEntityType.Voice
+          ? native.channelId
+          : null;
+    }
+    return want;
+  }
+
   /** `events.native.link_room`: the switch: off = never link, and an existing
    * link is put back to external by the normal diff. */
   private async linkRoomEnabled(): Promise<boolean> {
@@ -737,7 +792,7 @@ export class NativeEventSync {
       return;
     }
 
-    const want = await this.wantedFields(event);
+    const want = await this.wantedFieldsFor(event, guild, native);
     const diff = diffNativeFields(native, want);
     if (Object.keys(diff).length === 0) {
       await this.syncCover(event, guild, native.id);
@@ -752,7 +807,11 @@ export class NativeEventSync {
     // Linking the room is a type change too, but only for a native event that
     // has not started: a running event keeps its type (and its end/text sync).
     const linking = diff.linkChannel !== undefined && !startPast;
-    const converting = restoring || linking;
+    // Edits to the type the native event has now (name, description, start,
+    // end, location) never depend on a link/restore patch succeeding.
+    const external =
+      native.entityType === GuildScheduledEventEntityType.External;
+    const endDiffers = native.scheduledEndTimestamp !== want.end.getTime();
 
     // Safe patch. A start in the past cannot be moved, and location metadata
     // is only valid on a native event that is already external.
@@ -762,11 +821,13 @@ export class NativeEventSync {
     if (!startPast) {
       if (diff.scheduledStartTime)
         safe.scheduledStartTime = diff.scheduledStartTime;
-      if (diff.scheduledEndTime && !converting) {
+      // The restore patch carries its own end time.
+      if (diff.scheduledEndTime && endDiffers && !restoring) {
         safe.scheduledEndTime = diff.scheduledEndTime;
       }
     }
-    if (!converting && diff.entityMetadata) {
+    // Location is only valid on an event that is already external.
+    if (external && diff.entityMetadata) {
       safe.entityMetadata = diff.entityMetadata;
     }
     if (Object.keys(safe).length > 0) {
@@ -798,7 +859,7 @@ export class NativeEventSync {
     // is logged once per event and the next scan tries again.
     if (
       startPast &&
-      !converting &&
+      endDiffers &&
       diff.scheduledEndTime &&
       want.end.getTime() > Date.now()
     ) {
@@ -888,6 +949,7 @@ export class NativeEventSync {
             },
           ),
         "link guild scheduled event to voice room",
+        { quiet: true },
       );
       this.warned.delete(key);
       logger.info(
@@ -1097,7 +1159,11 @@ function isUnknownNative(error: unknown): boolean {
 /** Route REST work through `CommandManager.makeDiscordApiCall` (timeout +
  * backoff). Imported lazily to keep this module cheap to load and to test. */
 function defaultApiCaller(client: Client): ApiCaller {
-  return async <T>(call: () => Promise<T>, name: string): Promise<T> => {
+  return async <T>(
+    call: () => Promise<T>,
+    name: string,
+    opts?: { quiet?: boolean },
+  ): Promise<T> => {
     const { CommandManager } = await import("./command-manager.js");
     // Creates are not safe to replay after a timeout; everything else is.
     const retryOnTimeout = !name.startsWith("create ");
@@ -1107,6 +1173,7 @@ function defaultApiCaller(client: Client): ApiCaller {
       30000,
       3,
       retryOnTimeout,
+      !opts?.quiet,
     );
   };
 }

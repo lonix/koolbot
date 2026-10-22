@@ -106,6 +106,12 @@ function makeGuild(natives: unknown[]) {
     }),
     edit: jest.fn<(...a: unknown[]) => Promise<unknown>>(async () => ({})),
   };
+  const channels = {
+    cache: new Map<string, unknown>(),
+    fetch: jest.fn<(id: string) => Promise<unknown>>(async () => ({
+      id: ROOM,
+    })),
+  };
   const rest = {
     patch: jest.fn<(...a: unknown[]) => Promise<unknown>>(async () => ({})),
   };
@@ -118,9 +124,11 @@ function makeGuild(natives: unknown[]) {
       client: { rest },
       members: { me, fetchMe: jest.fn() },
       scheduledEvents,
+      channels,
     } as never,
     scheduledEvents,
     rest,
+    channels,
   };
 }
 
@@ -348,5 +356,111 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
         logger.warn.mock.calls.filter((c) => String(c[0]).includes("link")),
       ).toHaveLength(2);
     });
+  });
+});
+
+const unknownChannel = () =>
+  Object.assign(Object.create(DiscordAPIError.prototype), { code: 10003 });
+
+describe("link-room review fixes (#1421, Copilot round 1)", () => {
+  it("switch turned off during an Active voice event: a duration change still syncs, with no location in the payload", async () => {
+    config.getBoolean.mockImplementation(
+      async (k: string) => k !== "events.native.link_room",
+    );
+    const want = buildNativeFields(
+      makeEvent({ startTime: PAST, durationMinutes: 180 }) as never,
+      "Somewhere",
+    );
+    const { guild, rest, scheduledEvents } = makeGuild([
+      voiceNative(ROOM, {
+        status: GuildScheduledEventStatus.Active,
+        scheduledStartTimestamp: PAST.getTime(),
+        scheduledEndTimestamp: want.end.getTime() - 60 * 60 * 1000,
+      }),
+    ]);
+    await makeSync().syncEvent(
+      makeEvent({ channelId: ROOM, startTime: PAST, durationMinutes: 180 }),
+      guild,
+    );
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).toHaveBeenCalledTimes(1);
+    const patch = (scheduledEvents.edit.mock.calls[0] as unknown[])[1];
+    expect(patch).toMatchObject({ scheduledEndTime: want.end });
+    expect(patch).not.toHaveProperty("entityMetadata");
+    expect(patch).not.toHaveProperty("entityType");
+  });
+
+  it("a stored id for a deleted room (Unknown Channel) falls back to the text", async () => {
+    const { guild, rest, scheduledEvents, channels } = makeGuild([
+      voiceNative(ROOM),
+    ]);
+    channels.fetch.mockRejectedValue(unknownChannel());
+    await makeSync().syncEvent(makeEvent({ channelId: ROOM }), guild);
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({
+        entityType: GuildScheduledEventEntityType.External,
+        entityMetadata: { location: "Somewhere" },
+      }),
+    );
+  });
+
+  it("an external native event is never linked to a deleted room", async () => {
+    const { guild, rest, scheduledEvents, channels } = makeGuild([
+      makeNative(),
+    ]);
+    channels.fetch.mockRejectedValue(unknownChannel());
+    await makeSync().syncEvent(makeEvent({ channelId: ROOM }), guild);
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("a transient fetch failure keeps the current state (linked stays linked)", async () => {
+    const { guild, rest, scheduledEvents, channels } = makeGuild([
+      voiceNative(ROOM),
+    ]);
+    channels.fetch.mockRejectedValue(new Error("socket hang up"));
+    await makeSync().syncEvent(makeEvent({ channelId: ROOM }), guild);
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("a transient fetch failure does not link an external native event, and retries next scan", async () => {
+    const { guild, rest, scheduledEvents, channels } = makeGuild([
+      makeNative(),
+    ]);
+    channels.fetch.mockRejectedValueOnce(new Error("503"));
+    const sync = makeSync();
+    const event = makeEvent({ channelId: ROOM });
+    await sync.syncEvent(event, guild);
+    expect(rest.patch).not.toHaveBeenCalled();
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+    await sync.syncEvent(event, guild);
+    expect(rest.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rejected link still sends the changed duration and location", async () => {
+    const want = buildNativeFields(
+      makeEvent({ durationMinutes: 180 }) as never,
+      "New place",
+    );
+    config.getString.mockImplementation(async () => "New place");
+    const { guild, rest, scheduledEvents } = makeGuild([makeNative()]);
+    rest.patch.mockRejectedValue(new Error("Invalid Form Body"));
+    await expect(
+      makeSync().syncEvent(
+        makeEvent({ channelId: ROOM, durationMinutes: 180 }),
+        guild,
+      ),
+    ).resolves.toBeUndefined();
+    expect(rest.patch).toHaveBeenCalledTimes(1);
+    expect(scheduledEvents.edit).toHaveBeenCalledWith(
+      "n1",
+      expect.objectContaining({
+        scheduledEndTime: want.end,
+        entityMetadata: { location: "New place" },
+      }),
+    );
   });
 });
