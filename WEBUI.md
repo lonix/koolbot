@@ -2758,8 +2758,8 @@ Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions th
 repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the
 Overview), plain links that work without JavaScript. The **Channel ownership hints** switch in the header is a GET form
 and the only form on the page. The tabs share one scan for a minute per admin and hints setting, so clicking through them
-does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which only counts scans that start; the header says when Discord was read and **Scan again** bypasses
-the cache. What follows describes the data each tab shows. It lists **roles** (position, colour, cached member count, `managed` flag,
+does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which
+only counts scans that start. The header says when Discord was read and **Scan again** bypasses the cache. What follows describes the data each tab shows. It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
 whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
 channel by a `*.channel_id` / `*.category_id` / `*_channels` setting), **other bots** (integration role and the
