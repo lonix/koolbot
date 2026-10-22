@@ -799,6 +799,102 @@ describe("VoiceChannelTracker", () => {
         (c) => c[1].$push.sessions,
       );
 
+    function companionSetup() {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation((key: string) =>
+        Promise.resolve(
+          key === "voicetracking.enabled" ||
+            key === "voicetracking.companions.enabled",
+        ),
+      );
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockImplementation((id: string) =>
+          Promise.resolve({ username: id, id }),
+        );
+      const rooms = new Map([
+        ["R", { id: "R", name: "Room R", members: new Map() } as any],
+      ]);
+      const memberFor = (id: string) =>
+        ({
+          id,
+          displayName: id,
+          guild: { id: "guild-1", channels: { cache: rooms } },
+        }) as unknown as GuildMember;
+      const state = (m: GuildMember, id: string | null) =>
+        ({
+          member: m,
+          channel: id ? rooms.get(id) : null,
+        }) as unknown as VoiceState;
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      return { tracker, memberFor, state };
+    }
+
+    it("does not open a companion interval for a member who left during the lookup", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const bob = memberFor("bob");
+      const alice = memberFor("alice");
+      mockClassify.mockResolvedValueOnce(undefined);
+      await tracker.handleVoiceStateUpdate(state(bob, null), state(bob, "R"));
+
+      const lookup = deferred<string | undefined>();
+      mockClassify.mockReturnValueOnce(lookup.promise);
+      const join = tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+      await flush();
+      await tracker.handleVoiceStateUpdate(
+        state(alice, "R"),
+        state(alice, null),
+      );
+      lookup.resolve("dynamic");
+      await join;
+      await flush();
+
+      // Bob stays in the room: no interval with Alice is left open for him,
+      // and Alice has no session or kind.
+      const since = (tracker as any).companionSince.get("bob");
+      expect(since.has("alice")).toBe(false);
+      expect((tracker as any).activeSessions.has("alice")).toBe(false);
+      expect(
+        (tracker as any).activeSessions.get("bob").roomKind,
+      ).toBeUndefined();
+    });
+
+    it("returns from the join without waiting for a lookup that never resolves", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const alice = memberFor("alice");
+      mockClassify.mockReturnValueOnce(
+        new Promise<string | undefined>(() => {}),
+      );
+
+      await tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+
+      const session = (tracker as any).activeSessions.get("alice");
+      expect(session.channelId).toBe("R");
+      expect(session.roomKind).toBeUndefined();
+    });
+
+    it("swallows a failing lookup and stamps nothing", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const alice = memberFor("alice");
+      mockClassify.mockRejectedValueOnce(new Error("boom"));
+
+      await tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+      await flush();
+
+      expect(
+        (tracker as any).activeSessions.get("alice").roomKind,
+      ).toBeUndefined();
+    });
+
     it("leaves no session behind when the member disconnects during the lookup", async () => {
       const { tracker, state } = setup();
       const lookup = deferred<string | undefined>();

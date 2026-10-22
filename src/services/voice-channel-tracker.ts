@@ -836,20 +836,23 @@ export class VoiceChannelTracker {
         );
       }
 
-      // Read while the room still exists; its records go with it (#1420). The
-      // kind goes onto this very session object, and only while it is still
-      // the member's active session: a disconnect or a switch during the
-      // lookup must neither get a session back nor inherit this room's kind.
-      // A session that ended before the lookup finished keeps no kind.
-      const roomKind = await this.classifyRoom({
-        guildId,
-        guild,
-        channelId,
-        channelName,
-      });
-      if (roomKind && this.activeSessions.get(member.id) === session) {
-        session.roomKind = roomKind;
-      }
+      // Read while the room still exists; its records go with it (#1420).
+      // Deliberately NOT awaited: the join path (companion bookkeeping in the
+      // caller included) must not wait on a database lookup. The kind goes onto
+      // this very session object, and only while it is still the member's
+      // active session, so a disconnect or switch during the lookup neither
+      // gets a session back nor inherits this room's kind. A session that was
+      // saved before the lookup finished keeps no kind: the stored record is
+      // not amended afterwards. A failed lookup stamps nothing.
+      void this.classifyRoom({ guildId, guild, channelId, channelName })
+        .then((roomKind) => {
+          if (roomKind && this.activeSessions.get(member.id) === session) {
+            session.roomKind = roomKind;
+          }
+        })
+        .catch((error: unknown) => {
+          logger.warn("Could not record voice room kind:", error);
+        });
     } catch (error: unknown) {
       logger.error("Error starting voice tracking:", error);
     }
