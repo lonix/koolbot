@@ -1247,14 +1247,17 @@ Links) are not covered yet.
   be reached the page says it is using the bot's cached view; a feature that cannot
   be checked is shown as _Not checked_, never as fine.
 - **All Discord permissions.** A folded card at the bottom of the page lists every Discord
-  permission with whether the bot's role holds it (the role's own server-wide list, without
+  permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
   _checked in the table above_, _used, not checked on this page_ (posting, moderation and
   the overwrite permissions of read-only channels, each with what for), or _not used by
   KoolBot_. A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as unused. Administrator is not required: if the role holds it, the row names
   the permissions the switched-on features need that the role itself lacks, to be given
-  before Administrator is removed. The classification is in
+  before Administrator is removed, and says to check the permissions that are used but not
+  checked here and any channel overwrite that denies something (they apply again once
+  Administrator is gone). The list is the bot's managed role only, not @everyone or other
+  roles; it is left out when that role is not known. The classification is in
   `src/services/bot-permission-flags.ts`; a test fails when discord.js gains a flag that is
   not listed. There is no re-authorise link yet: whether Discord applies new bits to the
   bot's existing role is not verified (#1366).

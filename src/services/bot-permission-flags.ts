@@ -52,13 +52,18 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   UseExternalEmojis: used(
     "Only when a reaction or message uses a custom emoji from another server.",
   ),
+  MentionEveryone: used(
+    "Scheduled announcements that mention @everyone, @here or a role, and pinging a role that members cannot mention themselves.",
+  ),
+  SendPolls: used("Scheduled polls are sent as native Discord polls."),
+  ManageGuild: used(
+    "Reading the server's onboarding settings during the scan.",
+  ),
   Administrator: UNUSED,
   CreateInstantInvite: UNUSED,
-  ManageGuild: UNUSED,
   PrioritySpeaker: UNUSED,
   Stream: UNUSED,
   SendTTSMessages: UNUSED,
-  MentionEveryone: UNUSED,
   ViewGuildInsights: UNUSED,
   MuteMembers: UNUSED,
   DeafenMembers: UNUSED,
@@ -75,7 +80,6 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   CreateGuildExpressions: UNUSED,
   UseExternalSounds: UNUSED,
   SendVoiceMessages: UNUSED,
-  SendPolls: UNUSED,
   UseExternalApps: UNUSED,
   BypassSlowmode: UNUSED,
 };

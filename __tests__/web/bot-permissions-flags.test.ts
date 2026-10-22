@@ -115,6 +115,9 @@ describe("flag classification", () => {
     ]) {
       expect(byKey.get(key)).toBe("used");
     }
+    for (const key of ["MentionEveryone", "SendPolls", "ManageGuild"]) {
+      expect(byKey.get(key)).toBe("used");
+    }
     expect(byKey.get("CreateInstantInvite")).toBe("unused");
   });
 });
@@ -152,8 +155,8 @@ describe("the All Discord permissions list", () => {
     expect(html).toContain('<details class="kb-disclosure">');
     expect(rowOf(html, "Send Messages")).toContain("Has");
     expect(rowOf(html, "Send Messages")).toContain("Used, not checked");
-    expect(rowOf(html, "Manage Server")).toContain("Not in the role");
-    expect(rowOf(html, "Manage Server")).toContain("Not used by KoolBot");
+    expect(rowOf(html, "Create Invite")).toContain("Not in the role");
+    expect(rowOf(html, "Create Invite")).toContain("Not used by KoolBot");
     expect(rowOf(html, "Manage Nicknames")).toContain("Checked in the table");
     expect(html).not.toContain("Administrator covers it");
   });
@@ -171,16 +174,21 @@ describe("the All Discord permissions list", () => {
     expect(admin).toContain("not required");
     expect(admin).toContain("<strong>Manage Nicknames</strong>");
     expect(admin).toContain("Before you remove it");
+    expect(admin).toContain("channel overwrites that deny something");
   });
 
-  it("says Administrator can be considered for removal only when the role holds everything needed", () => {
+  it("never says Administrator is safe to remove without the unchecked permissions and overwrites", () => {
     const html = page(
       report({
         serverPermissions: ADMIN | PERM.manageNicknames.bit,
         checks: [check("event-tags")],
       }),
     );
-    expect(rowOf(html, "Administrator")).toContain("consider removing");
+    const admin = rowOf(html, "Administrator");
+    expect(admin).toContain("holds the checked server-wide permissions");
+    expect(admin).toContain("Used, not checked on this page");
+    expect(admin).toContain("channel overwrites that deny something");
+    expect(admin).not.toContain("consider removing");
   });
 
   it("does not mention removing Administrator when the role does not hold it", () => {

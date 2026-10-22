@@ -387,9 +387,11 @@ function flagRowHtml(
     use =
       "Not used by KoolBot, and not required." +
       (held
-        ? lackingWithoutAdmin.length > 0
-          ? ` Before you remove it, give the bot’s role ${boldList(lackingWithoutAdmin)}: the switched-on features need them and the role does not hold them itself.`
-          : " The role itself holds everything the switched-on features need, so you can consider removing it."
+        ? ` Before you remove it, check three things. ${
+            lackingWithoutAdmin.length > 0
+              ? `The role itself lacks ${boldList(lackingWithoutAdmin)}, which the switched-on features need server-wide: give them first. `
+              : "The role itself holds the checked server-wide permissions the switched-on features need. "
+          }The permissions marked “Used, not checked on this page” are not verified here, so make sure the role holds the ones you rely on. And channel overwrites that deny something start to apply once Administrator is gone.`
         : "");
   } else {
     use = '<span class="kb-muted">Not used by KoolBot.</span>';

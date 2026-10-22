@@ -125,8 +125,8 @@ export interface BotPermissionReport {
    */
   checks: FeatureCheck[];
   /**
-   * The bot role's own server-wide permission bits (no channel overwrites, not
-   * widened by Administrator), for the "All Discord permissions" list. Null
+   * The bot's managed role's own server-wide permission bits (not @everyone's
+   * or another role's, no channel overwrites, not widened by Administrator), for the "All Discord permissions" list. Null
    * when they could not be read.
    */
   serverPermissions?: bigint | null;
@@ -629,9 +629,11 @@ export async function checkBotPermissions(
     okFeatures,
     notes,
     checks,
+    // The managed role's own bits: `me.permissions` also folds in @everyone
+    // and any other role the bot was given.
     serverPermissions:
-      typeof me?.permissions?.bitfield === "bigint"
-        ? me.permissions.bitfield
+      typeof me?.roles?.botRole?.permissions?.bitfield === "bigint"
+        ? me.roles.botRole.permissions.bitfield
         : null,
   };
 }
