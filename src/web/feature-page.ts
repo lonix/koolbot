@@ -76,6 +76,8 @@ export function settingHref(key: string): string {
  *   script (a remembered state, a link to a control) is not remembered.
  * - Storage can be unavailable (private window, blocked site data): every
  *   access is in try/catch and the page works the same without it.
+ * - A save made in place (`kb-saved`) removes the changed-from-default count,
+ *   which was true only for the loaded values.
  * - Without JavaScript the `details` element still works natively.
  */
 export const SETTINGS_FOLD_SCRIPT =
@@ -84,6 +86,11 @@ export const SETTINGS_FOLD_SCRIPT =
   "Array.prototype.forEach.call(document.querySelectorAll('details[data-settings-fold]'),function(d){" +
   "var key=PREFIX+(d.getAttribute('data-fold-key')||'');" +
   "try{if(window.localStorage.getItem(key)==='1')d.open=true}catch(e){}" +
+  // The count was worked out when the page was built. A save through the page
+  // makes it stale, so it goes until the next load rather than saying a wrong
+  // number.
+  "var h=d.querySelector('[data-fold-hint]');" +
+  "if(h)d.addEventListener('kb-saved',function(){if(h.parentNode)h.parentNode.removeChild(h)});" +
   "var chosen=false;var s=d.querySelector('summary');" +
   "if(s)s.addEventListener('click',function(){chosen=true});" +
   "d.addEventListener('toggle',function(){if(!chosen)return;chosen=false;" +

@@ -403,6 +403,33 @@ describe("the fold script", () => {
     expect(fold().open).toBe(true);
   });
 
+  it("drops the changed-from-default count once a save is accepted, since it is stale", () => {
+    mount(
+      card({
+        settingRows: [
+          row({ key: "x.a", type: "number", current: 5, defaultValue: 1 }),
+        ],
+      }),
+    );
+    run();
+    expect(summaryText()).toContain("1 changed from the default");
+    // An edit that has not been saved leaves the loaded count alone.
+    document
+      .querySelector("form")
+      ?.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(summaryText()).toContain("1 changed from the default");
+    document
+      .querySelector("form[action$='save-section']")
+      ?.dispatchEvent(new Event("kb-saved", { bubbles: true }));
+    expect(summaryText()).not.toContain("changed from the default");
+    expect(summaryText()).toContain("Settings");
+  });
+
+  it("works for a card with no count to drop", () => {
+    mount(card({ settingRows: [ROWS[1]] }));
+    expect(() => run()).not.toThrow();
+  });
+
   it("opens the fold for a link to a control inside it", () => {
     mount(card({ enabled: true }));
     window.location.hash = "#set-x.size";
@@ -892,5 +919,31 @@ describe("status line chips", () => {
     expect(rule).toContain("white-space: normal");
     expect(rule).toContain("max-width: 100%");
     expect(rule).toContain("overflow-wrap: anywhere");
+  });
+});
+
+describe("warning chips when the settings cannot be read", () => {
+  it("name the problem without a link to a control that is not there", () => {
+    const html = renderEventsPage({
+      csrfToken: "tok",
+      remainingMs: 60_000,
+      enabled: true,
+      categoryConfigured: false,
+      announcementConfigured: true,
+      timezone: "UTC",
+      rows: [],
+      settingRows: [],
+      settingsUnavailable: true,
+    });
+    expect(html).not.toContain('href="#set-');
+  });
+
+  it("holds on every page that links a missing setting", () => {
+    const src = readFileSync("src/web/admin-views.ts", "utf8");
+    const at = [...src.matchAll(/settingHref\("/g)].map((m) => m.index ?? 0);
+    expect(at.length).toBeGreaterThanOrEqual(6);
+    for (const i of at) {
+      expect(src.slice(i - 90, i)).toContain("props.settingsUnavailable");
+    }
   });
 });

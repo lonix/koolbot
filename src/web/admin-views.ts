@@ -3599,7 +3599,9 @@ ${renderStatusLine({
       : {
           text: "No message channel set",
           warn: true,
-          href: settingHref("reactionroles.message_channel_id"),
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("reactionroles.message_channel_id"),
         },
     { text: `${props.active.length} active` },
     { text: `${props.archived.length} archived` },
@@ -3833,7 +3835,9 @@ ${renderStatusLine({
       : {
           text: "No channel set",
           warn: true,
-          href: settingHref("notices.channel_id"),
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("notices.channel_id"),
         },
     { text: countOf(props.total, "notice") },
   ],
@@ -3998,7 +4002,9 @@ ${renderStatusLine({
       : {
           text: "No channel set",
           warn: true,
-          href: settingHref("quotes.channel_id"),
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("quotes.channel_id"),
         },
     props.headerMessageId
       ? { text: `Header post ${props.headerMessageId}`, mono: true }
@@ -4237,7 +4243,9 @@ ${renderStatusLine({
       : {
           text: "No channel set",
           warn: true,
-          href: settingHref("birthdays.channel_id"),
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("birthdays.channel_id"),
         },
     { text: props.role ? `Role @${props.role.name}` : "No birthday role" },
     { text: `Schedule ${props.cron}`, mono: true },
@@ -4806,7 +4814,7 @@ export function renderFeatureSettingsCard(
   }).length;
   const hint =
     changed > 0
-      ? `<span class="kb-disclosure__hint">${changed} changed from the default</span>`
+      ? `<span class="kb-disclosure__hint" data-fold-hint>${changed} changed from the default</span>`
       : "";
   return `
 <div class="card card--savebar">
@@ -4875,7 +4883,9 @@ ${renderStatusLine({
       : {
           text: "Category not found",
           warn: true,
-          href: settingHref("voicechannels.category_id"),
+          href: props.settingsUnavailable
+            ? undefined
+            : settingHref("voicechannels.category_id"),
         },
     { text: `Lobby ${props.lobbyName}`, mono: true },
     { text: `Offline lobby ${props.offlineLobbyName}`, mono: true },
