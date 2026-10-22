@@ -5976,6 +5976,13 @@ function buildTicketsQueryString(statusFilter: string, page: number): string {
 export function renderTicketsPage(props: TicketsProps): string {
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
   const page = Math.min(Math.max(1, props.page), totalPages);
+  // Opening a ticket needs the staff role (`no-staff-role` otherwise), so a
+  // missing one keeps the settings open (#1301).
+  const staffRoleMissing = (props.settingRows ?? []).some(
+    (r) =>
+      r.key === "tickets.staff_role_id" &&
+      String(r.current ?? "").trim() === "",
+  );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
   const statusOptionsHtml = props.statusOptions
@@ -6046,7 +6053,20 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Tickets", featur
 
 ${renderStatusLine({
   enabled: props.enabled,
-  chips: [{ text: `${countOf(props.total, "ticket")} matched` }],
+  chips: [
+    ...(staffRoleMissing
+      ? [
+          {
+            text: "No staff role: members cannot open tickets",
+            warn: true,
+            href: props.settingsUnavailable
+              ? undefined
+              : settingHref("tickets.staff_role_id"),
+          },
+        ]
+      : []),
+    { text: `${countOf(props.total, "ticket")} matched` },
+  ],
 })}
 <p class="muted">The bot needs <strong>Manage Channels</strong> and <strong>Manage Roles</strong> (to set the private permissions) and, for a category, access to it.</p>
 
@@ -6085,6 +6105,7 @@ ${renderFeatureSettingsCard({
   dependencyState: props.dependencyState,
   unavailable: props.settingsUnavailable,
   enabled: props.enabled,
+  needsSetup: staffRoleMissing,
   flash: props.flash,
 })}
 `;

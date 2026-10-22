@@ -15,6 +15,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import {
   renderEventsPage,
+  renderTicketsPage,
   renderFeatureSettingsCard,
   renderPageFlash,
   type EventRow,
@@ -826,5 +827,70 @@ describe("the Events page", () => {
     );
     expect(d?.open).toBe(false);
     expect(d?.contains(flash!)).toBe(false);
+  });
+});
+
+describe("the Tickets page", () => {
+  const ticketsDoc = (staffRole: string, over: object = {}): Document =>
+    new DOMParser().parseFromString(
+      renderTicketsPage({
+        csrfToken: "tok",
+        remainingMs: 60_000,
+        enabled: true,
+        statusFilter: "",
+        statusOptions: ["open", "closed"],
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        settingRows: [
+          row({
+            key: "tickets.enabled",
+            type: "boolean",
+            current: true,
+            defaultValue: false,
+          }),
+          row({
+            key: "tickets.staff_role_id",
+            type: "role",
+            current: staffRole,
+          }),
+        ],
+        pickers: { roles: [{ id: "r1", name: "Mods" }] },
+        ...over,
+      }),
+      "text/html",
+    );
+
+  it("opens the settings when the staff role is missing, with a chip that links to it", () => {
+    const doc = ticketsDoc("");
+    expect(
+      doc.querySelector<HTMLDetailsElement>("details[data-settings-fold]")
+        ?.open,
+    ).toBe(true);
+    expect(doc.querySelector("a.kb-chip--warn")?.getAttribute("href")).toBe(
+      "#set-tickets.staff_role_id",
+    );
+  });
+
+  it("keeps them folded once a staff role is set", () => {
+    const doc = ticketsDoc("r1");
+    expect(
+      doc.querySelector<HTMLDetailsElement>("details[data-settings-fold]")
+        ?.open,
+    ).toBe(false);
+    expect(doc.querySelector(".kb-chip--warn")).toBeNull();
+  });
+});
+
+describe("status line chips", () => {
+  it("wrap long messages instead of running off a narrow screen", () => {
+    const css = readFileSync("docs/design/kb.css", "utf8");
+    const rule = css
+      .split("\n")
+      .find((l) => l.startsWith(".kb-statusline .kb-chip"));
+    expect(rule).toContain("white-space: normal");
+    expect(rule).toContain("max-width: 100%");
+    expect(rule).toContain("overflow-wrap: anywhere");
   });
 });
