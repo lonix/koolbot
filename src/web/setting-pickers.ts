@@ -192,6 +192,10 @@ export const COLOUR_INPUT_SCRIPT =
   // came from. Edits made while the request is out are not part of it.
   "document.addEventListener('submit',function(e){var f=e.target;if(!f||!f.querySelectorAll)return;" +
   "Array.prototype.forEach.call(f.querySelectorAll('[data-colour-mirror]'),function(m){var p=parts(m);if(!p)return;" +
+  "m.removeAttribute('data-sent');m.removeAttribute('data-sent-raw');" +
+  // A disabled box means the section is off (or locked): the server skips
+  // the key, so what was sent is not the new baseline.
+  "if(p.def&&p.def.disabled)return;" +
   "m.setAttribute('data-sent',p.def&&p.def.checked?'':m.value);m.setAttribute('data-sent-raw',m.value)})},true);" +
   // An accepted save makes the sent value the stored one. The field follows
   // unless it was edited since submit, in which case that edit is still unsaved.

@@ -1,4 +1,4 @@
-/* global HTMLElement, HTMLInputElement, HTMLFormElement */
+/* global HTMLElement, HTMLButtonElement, HTMLInputElement, HTMLFormElement */
 /**
  * The colour input and the save bar, both scripts loaded together in jsdom
  * (#1426): Discard must put the swatch, the Use default box and the stored
@@ -277,5 +277,118 @@ describe("the section cascade", () => {
       (dom.window.document.querySelector(".kb-emoji-pop") as HTMLElement)
         .hidden,
     ).toBe(false);
+  });
+});
+
+describe("a save made while the section is off", () => {
+  function twoScopes(): JSDOM {
+    const scope = (n: number, field: string): string =>
+      `<div data-cascade-scope id="s${n}">` +
+      `<input type="checkbox" name="m${n}" data-cascade-master id="m${n}" checked>` +
+      `<div class="kb-setting">${field}</div></div>`;
+    const dom = new JSDOM(
+      `<!doctype html><body><form>` +
+        scope(
+          1,
+          renderEmojiField("value_a", "🎮", { label: "Voice prefix", id: "a" }),
+        ) +
+        scope(
+          2,
+          renderEmojiField("value_b", "📅", { label: "Event prefix", id: "b" }),
+        ) +
+        `${renderSaveBar("Save")}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    dom.window.eval(CASCADE_DISABLE_SCRIPT);
+    dom.window.eval(groupRowsScript());
+    dom.window.eval(SAVEBAR_SCRIPT);
+    return dom;
+  }
+
+  it("does not commit a pick the server will skip: Discard still returns to the stored text", () => {
+    const scoped = new JSDOM(
+      `<!doctype html><body><form><div data-cascade-scope>` +
+        `<input type="checkbox" name="master" data-cascade-master checked>` +
+        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, "red")}</div>` +
+        `</div><input type="text" name="sibling" value="a">${renderSaveBar("Save")}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    scoped.window.eval(CASCADE_DISABLE_SCRIPT);
+    scoped.window.eval(COLOUR_INPUT_SCRIPT);
+    scoped.window.eval(SAVEBAR_SCRIPT);
+    const mirror = q<HTMLInputElement>(scoped, "[data-colour-mirror]");
+    const master = q<HTMLInputElement>(scoped, "[data-cascade-master]");
+    const flip = (on: boolean): void => {
+      master.checked = on;
+      master.dispatchEvent(
+        new scoped.window.Event("change", { bubbles: true }),
+      );
+    };
+    pick(scoped, "#123456");
+    // The sibling changes, so the bar stays up and the form can be saved.
+    const sibling = q<HTMLInputElement>(scoped, "[name=sibling]");
+    sibling.value = "b";
+    sibling.dispatchEvent(new scoped.window.Event("input", { bubbles: true }));
+    flip(false);
+    submitAndSave(scoped);
+    // Nothing was sent for the colour, so nothing was committed for it.
+    expect(mirror.getAttribute("data-stored")).toBe("red");
+    flip(true);
+    expect(q<HTMLInputElement>(scoped, "[data-colour-input]").disabled).toBe(
+      false,
+    );
+    discard(scoped);
+    expect(mirror.value).toBe("red");
+    expect(posted(scoped)[NAME]).toBe("red");
+  });
+
+  it("an earlier submission's snapshot is dropped when the next one skips the colour", () => {
+    const scoped = new JSDOM(
+      `<!doctype html><body><form><div data-cascade-scope>` +
+        `<input type="checkbox" name="master" data-cascade-master checked>` +
+        `<div class="kb-setting">${renderColourInput(NAME, DEFAULT, "red")}</div>` +
+        `</div>${renderSaveBar("Save")}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    scoped.window.eval(CASCADE_DISABLE_SCRIPT);
+    scoped.window.eval(COLOUR_INPUT_SCRIPT);
+    scoped.window.eval(SAVEBAR_SCRIPT);
+    const mirror = q<HTMLInputElement>(scoped, "[data-colour-mirror]");
+    const master = q<HTMLInputElement>(scoped, "[data-cascade-master]");
+    pick(scoped, "#123456");
+    const form = q<HTMLFormElement>(scoped, "form");
+    // A save that failed leaves its snapshot behind.
+    form.dispatchEvent(
+      new scoped.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    master.checked = false;
+    master.dispatchEvent(new scoped.window.Event("change", { bubbles: true }));
+    submitAndSave(scoped);
+    expect(mirror.getAttribute("data-stored")).toBe("red");
+  });
+
+  it("the shared emoji grid is usable in a section that is on after another section went off", () => {
+    const dom = twoScopes();
+    const d = dom.window.document;
+    const clickBtn = (id: string): void =>
+      (
+        d
+          .querySelector(`#${id}`)
+          ?.closest("[data-emoji-field]")
+          ?.querySelector("[data-marker-btn]") as HTMLButtonElement
+      ).click();
+    clickBtn("a");
+    const search = d.querySelector("[data-emoji-search]") as HTMLInputElement;
+    expect(search.disabled).toBe(false);
+    const m1 = q<HTMLInputElement>(dom, "#m1");
+    m1.checked = false;
+    m1.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(search.disabled).toBe(true);
+    clickBtn("b");
+    expect(search.closest("#s2")).not.toBeNull();
+    expect(search.disabled).toBe(false);
+    expect((d.querySelector(".kb-emoji-pop") as HTMLElement).hidden).toBe(
+      false,
+    );
   });
 });

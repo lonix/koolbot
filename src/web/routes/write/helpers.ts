@@ -607,7 +607,8 @@ export function coerceConfigValue(
     }
     return { ok: true, value: n };
   }
-  let value = String(raw ?? "");
+  const submitted = String(raw ?? "");
+  let value = submitted;
   // Emoji shortcode resolution (#558). For the name-style keys that feed
   // Discord channel names, convert any recognised `:shortcode:` (e.g.
   // `:green_circle:`) to its Unicode codepoint at the write boundary, so the
@@ -636,11 +637,16 @@ export function coerceConfigValue(
     const checked = validateSettingFormat(format, value);
     if (checked.ok) {
       value = checked.value;
-    } else if (!(
+    } else if (
       current !== undefined &&
       current !== null &&
-      value === String(current)
-    )) {
+      // The stored value is exempt as it was submitted: a shortcode in it
+      // resolves to a longer text above, which must not make the unchanged
+      // field fail.
+      (submitted === String(current) || value === String(current))
+    ) {
+      value = String(current);
+    } else {
       return { ok: false, reason: checked.reason };
     }
   }

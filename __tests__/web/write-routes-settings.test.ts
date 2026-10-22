@@ -2419,6 +2419,23 @@ describe("picker settings (#1426)", () => {
     expect(written().get("events.channel_prefix")).toBe("🎉");
   });
 
+  it("saves an unchanged stored prefix that holds a shortcode beside a sibling edit", async () => {
+    stored({ "voicechannels.channel.prefix": "[VC] :sparkles:" });
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix", "voicechannels.channel.suffix"],
+      "value_voicechannels.channel.prefix": "[VC] :sparkles:",
+      "value_voicechannels.channel.suffix": "🎉",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
+      "err",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "[VC] :sparkles:",
+    );
+    expect(written().get("voicechannels.channel.suffix")).toBe("🎉");
+  });
+
   it("still refuses a different invalid value for a key that holds a legacy one", async () => {
     stored(LEGACY);
     const res = await harness.post("/settings/save-section", {

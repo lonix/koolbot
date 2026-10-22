@@ -159,6 +159,30 @@ describe("the picker keys", () => {
     ).toBe(false);
   });
 
+  it("keeps an unchanged stored prefix that holds a shortcode, which resolves to a longer text", () => {
+    const stored = "[VC] :sparkles:";
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", stored, stored),
+    ).toEqual({ ok: true, value: stored });
+  });
+
+  it("still checks a changed value that holds a shortcode after it is resolved", () => {
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", "[VC]:sparkles:", "x")
+        .ok,
+    ).toBe(false);
+    expect(
+      coerceConfigValue(
+        "voicechannels.channel.prefix",
+        "[VC] :sparkles:!",
+        "[VC] :sparkles:",
+      ).ok,
+    ).toBe(false);
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", ":sparkles:", "x"),
+    ).toEqual({ ok: true, value: "✨" });
+  });
+
   it("an import or adoption plan (no stored value) stays strict", () => {
     expect(
       coerceConfigValue("reactionroles.group_role_colour", "red", undefined).ok,

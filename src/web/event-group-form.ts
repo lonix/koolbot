@@ -142,7 +142,7 @@ export function groupRowsScript(): string {
     "pop.querySelector('[data-emoji-empty]').textContent=f?'No emoji match.':'No markers match.'}" +
     "function openPop(row){if(field(row)&&input(row)&&input(row).disabled)return;if(!pop)build();if(popFor===row){closePop(true);return}closePop(false);words(row);" +
     "popFor=row;var w=wrapOf(row);w.appendChild(pop);pop.hidden=false;btn(row).setAttribute('aria-expanded','true');" +
-    "var s=pop.querySelector('[data-emoji-search]');s.value='';s.dispatchEvent(new Event('input'));mark(input(row));s.focus()}" +
+    "var s=pop.querySelector('[data-emoji-search]');s.disabled=false;s.value='';s.dispatchEvent(new Event('input'));mark(input(row));s.focus()}" +
     "function enhance(row){if(!row||row.hasAttribute('data-enhanced'))return;row.setAttribute('data-enhanced','');" +
     "var w=wrapOf(row),i=input(row),b=btn(row);" +
     "if(w&&i&&b){if(!field(row))i.hidden=true;b.hidden=false;label(row);" +
