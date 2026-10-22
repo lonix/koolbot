@@ -8,8 +8,12 @@
 import { describe, it, expect } from "@jest/globals";
 import {
   renderUserPage,
+  renderUserIndexBody,
   renderUserVoiceBody,
   renderUserNotificationsBody,
+  renderUserTimezoneBody,
+  renderUserPrivacyBody,
+  USER_NAV_ITEMS,
 } from "../../src/web/user-layout.js";
 
 function render(overrides: Partial<Parameters<typeof renderUserPage>[0]> = {}) {
@@ -103,7 +107,6 @@ describe("renderUserVoiceBody (#855)", () => {
         },
       ],
       maxPerUser: 5,
-      featureEnabled: true,
     });
     expect(html).toContain(
       '<h2>Chill <span class="pill"><span aria-hidden="true">⭐</span> Default</span></h2>',
@@ -116,7 +119,14 @@ describe("renderUserNotificationsBody (#855)", () => {
   it("gives the preferences table a caption and scoped column headers", () => {
     const html = renderUserNotificationsBody({
       csrfToken: "csrf",
-      rows: [],
+      rows: [
+        {
+          key: "digest",
+          label: "Weekly digest",
+          description: "A weekly DM.",
+          enabled: true,
+        },
+      ],
     });
     expect(html).toContain(
       '<caption class="visually-hidden">Direct-message notification channels and whether each is on</caption>',
@@ -124,5 +134,158 @@ describe("renderUserNotificationsBody (#855)", () => {
     expect(html).toContain('<th scope="col">Notification</th>');
     expect(html).toContain('<th scope="col">Current state</th>');
     expect(html).not.toContain("<th>");
+  });
+});
+
+// ---- /me only shows features that are switched on (#1292) -----------------
+
+const SURFACES = [
+  { flag: "presetsEnabled", href: "/me/voice", label: "Voice" },
+  { flag: "birthdayEnabled", href: "/me/birthday", label: "Birthday" },
+  { flag: "rewindEnabled", href: "/me/rewind", label: "Rewind" },
+  { flag: "privacyEnabled", href: "/me/privacy", label: "Privacy" },
+] as const;
+
+const ALWAYS = ["/me/", "/me/notifications", "/me/timezone"];
+
+function tabs(html: string): string[] {
+  const nav = html.match(/<nav class="page-nav"[^>]*>(.*?)<\/nav>/s)?.[1] ?? "";
+  return [...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+}
+
+function overview(flags: Record<string, boolean> = {}): string {
+  return renderUserIndexBody({
+    discordUserId: "u1",
+    guildId: "g1",
+    isAdmin: false,
+    ...flags,
+  });
+}
+
+describe("tabs leave out a switched-off feature (#1292)", () => {
+  it("shows every tab when nothing says a feature is off", () => {
+    expect(tabs(render())).toEqual(USER_NAV_ITEMS.map((i) => i.href));
+  });
+
+  it.each(SURFACES)("drops $label when $flag is false, keeps the rest", (s) => {
+    const html = render({ [s.flag]: false });
+    const hrefs = tabs(html);
+    expect(hrefs).not.toContain(s.href);
+    expect(html).not.toContain(`>${s.label}</a>`);
+    for (const other of [
+      ...ALWAYS,
+      ...SURFACES.filter((o) => o !== s).map((o) => o.href),
+    ]) {
+      expect(hrefs).toContain(other);
+    }
+  });
+
+  it("carries no off badge, dashed pill or tooltip for anything", () => {
+    const html = render({
+      presetsEnabled: false,
+      birthdayEnabled: false,
+      rewindEnabled: false,
+      privacyEnabled: false,
+    });
+    expect(html).not.toContain("nav-badge");
+    expect(html).not.toContain("nav-disabled");
+    expect(html).not.toContain("hasn't enabled");
+    expect(tabs(html)).toEqual(ALWAYS);
+  });
+});
+
+describe("overview leaves out a switched-off feature (#1292)", () => {
+  it("lists every card when nothing says a feature is off", () => {
+    const html = overview();
+    for (const s of SURFACES) expect(html).toContain(`href="${s.href}"`);
+  });
+
+  it.each(SURFACES)("omits the $label card when $flag is false", (s) => {
+    const html = overview({ [s.flag]: false });
+    expect(html).not.toContain(`href="${s.href}"`);
+    expect(html).not.toContain("tag-off");
+    for (const other of SURFACES.filter((o) => o !== s)) {
+      expect(html).toContain(`href="${other.href}"`);
+    }
+  });
+
+  it("keeps the cards that are not gated", () => {
+    const html = overview({
+      presetsEnabled: false,
+      birthdayEnabled: false,
+      rewindEnabled: false,
+      privacyEnabled: false,
+    });
+    expect(html).toContain('href="/me/notifications"');
+    expect(html).toContain('href="/me/timezone"');
+  });
+});
+
+describe("copy does not name a feature that is off (#1292)", () => {
+  it("drops the Rewind sentence from the poll card, and keeps it while Rewind is on", () => {
+    const poll = {
+      totalVotes: 3,
+      thisYearVotes: 2,
+      lastVoted: null,
+    };
+    const off = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      rewindEnabled: false,
+      pollParticipation: poll,
+    });
+    expect(off).toContain("Poll participation");
+    expect(off).not.toMatch(/rewind/i);
+    const on = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      pollParticipation: poll,
+    });
+    expect(on).toContain("yearly tally on Rewind");
+  });
+
+  it("does not name Rewind or digests on the timezone card or page", () => {
+    expect(overview({ rewindEnabled: false })).not.toMatch(/rewind/i);
+    const page = renderUserTimezoneBody({
+      csrfToken: "c",
+      zones: ["Europe/Oslo"],
+      selected: null,
+      serverTimezone: "UTC",
+    });
+    expect(page).not.toMatch(/rewind|digest/i);
+  });
+});
+
+describe("notifications page with nothing to offer (#1292)", () => {
+  it("says so and renders no form or Save button", () => {
+    const html = renderUserNotificationsBody({ csrfToken: "c", rows: [] });
+    expect(html).toContain("kb-empty__title");
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain("Save preferences");
+  });
+});
+
+describe("privacy page does not link to Rewind while it is off (#1292)", () => {
+  const base = {
+    featureEnabled: true,
+    included: [],
+    excluded: [],
+    maxItems: 100,
+    reset: { enabled: false, cooldownHours: 0, csrfToken: "c" },
+    trackingOptOut: { offered: false, optedOutAt: null, csrfToken: "c" },
+  } as unknown as Parameters<typeof renderUserPrivacyBody>[0];
+
+  it("drops the recap sentence and link", () => {
+    const html = renderUserPrivacyBody({ ...base, rewindEnabled: false });
+    expect(html).not.toContain("/me/rewind");
+    expect(html).not.toContain(">Rewind</a>");
+    expect(html).toContain("It is a record.");
+  });
+
+  it("keeps it while Rewind is on", () => {
+    const html = renderUserPrivacyBody({ ...base, rewindEnabled: true });
+    expect(html).toContain('<a href="/me/rewind">Rewind</a>');
   });
 });

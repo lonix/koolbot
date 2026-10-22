@@ -2534,6 +2534,49 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      // Every gated feature off (#1292): a short tab bar, no cards for them,
+      // and a notifications page with nothing to offer (no form).
+      name: "/me notifications with no feature on",
+      html: renderUserPage({
+        title: "Notifications",
+        active: "/me/notifications",
+        body: renderUserNotificationsBody({
+          csrfToken: COMMON.csrfToken,
+          rows: [],
+        }),
+        csrfToken: COMMON.csrfToken,
+        remainingMs: COMMON.remainingMs,
+        isAdmin: false,
+        rewindEnabled: false,
+        presetsEnabled: false,
+        birthdayEnabled: false,
+        privacyEnabled: false,
+      }),
+    },
+    {
+      name: "/me overview with every gated feature off",
+      html: renderUserPage({
+        title: "Overview",
+        active: "/me/",
+        body: renderUserIndexBody({
+          discordUserId: "u1",
+          guildId: "g1",
+          isAdmin: false,
+          rewindEnabled: false,
+          presetsEnabled: false,
+          birthdayEnabled: false,
+          privacyEnabled: false,
+        }),
+        csrfToken: COMMON.csrfToken,
+        remainingMs: COMMON.remainingMs,
+        isAdmin: false,
+        rewindEnabled: false,
+        presetsEnabled: false,
+        birthdayEnabled: false,
+        privacyEnabled: false,
+      }),
+    },
+    {
       name: "/me overview with hosted events",
       html: shell(
         "Overview",
@@ -2987,7 +3030,6 @@ export function userPages(): A11yPage[] {
         renderUserBirthdayBody({
           csrfToken: COMMON.csrfToken,
           selected: { month: 4, day: 12, year: null },
-          featureEnabled: false,
         }),
       ),
     },
@@ -3024,7 +3066,6 @@ export function userPages(): A11yPage[] {
             },
           ],
           maxPerUser: 5,
-          featureEnabled: true,
         }),
       ),
     },

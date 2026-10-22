@@ -1664,14 +1664,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "rewind.enabled": {
     label: "Rewind enabled",
     description:
-      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page returns a disabled state and isn't linked. The end-of-year DM nudge has its own toggle below.",
+      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page answers 404 and isn't linked. The end-of-year DM nudge has its own toggle below.",
     category: "rewind",
     type: "boolean",
   },
   "rewind.nudge.enabled": {
     label: "Rewind end-of-year nudge enabled",
     description:
-      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. Independent of the Rewind feature toggle above. Existing installs that set the old `rewind.enabled` key keep their nudge behaviour via a backward-compat fallback.",
+      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. Only runs while the Rewind feature toggle above is on, because the page it links to is not available otherwise. Existing installs that set the old `rewind.enabled` key keep their nudge behaviour via a backward-compat fallback.",
     category: "rewind",
     type: "boolean",
   },

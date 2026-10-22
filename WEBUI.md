@@ -3054,23 +3054,18 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
 
-**Disabled-feature handling is uniform across `/me/*` (#709).** A
-feature-gated page whose feature an admin has turned off is never hidden
-behind a 404 or silently dropped: the nav link stays visible (greyed with
-an "off" badge, mirroring the admin nav), the Overview lists its card with
-an "off" tag, and opening the page shows one consistent banner — _"Your
-server admin hasn't enabled X yet."_ Settings pages (Voice, Birthday) keep
-their editable form so members can pre-set a choice that applies the moment
-the feature is enabled; the read-only Rewind page simply shows the banner in
-place of the recap. This makes "not enabled yet, but my choice is
-remembered" clearly distinguishable from "broken".
-
-**Privacy is the exception (#1066).** None of its choices (tracking opt-in/out, export,
-deletion) can be pre-set while the feature is off, so while `privacy.enabled` is off the Privacy nav entry and the
-Overview card are not rendered at all, and `GET /me/privacy` and
-`GET /me/privacy/export` return `404`. Enabling the key brings everything
-back on the next request (the settings save reloads the config cache; no
-restart).
+**A switched-off feature is not shown on `/me/*` (#1292, extending #1066).**
+Voice, Birthday, Rewind and Privacy each follow their feature switch
+(`voicechannels.presets.enabled`, `birthdays.enabled`, `rewind.enabled`,
+`privacy.enabled`). While one is off it has no tab, no Overview card and no
+mention in other pages' text, and its page answers `404` for every `GET` and
+`POST` (Rewind and Privacy's export are refused before their rate limiters, so
+a bookmark spends no allowance). Nothing a member saved is deleted: turn the
+feature back on and the tab, the page and the saved name pattern, presets,
+birthday and notification choices are back on the next request. If the switch
+cannot be read (a database error) the page answers an error rather than a
+`404`, so a hiccup never takes away a page that is on. The one list of what
+gates `/me` is `GATED_ME_SURFACES` in `src/web/me-surfaces.ts`.
 
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
@@ -3082,27 +3077,29 @@ votes. The weekly figure comes from per-ISO-week buckets kept for
 whose only votes predate the weekly capture.
 
 Notification preferences are scoped per `(userId, guildId)`. The page
-lists every notification type with the current state and a checkbox;
+lists the notification types whose DM can actually be sent, each with the
+current state and a checkbox: **Achievement DMs** need `achievements.enabled`
+and `achievements.dm_notifications.enabled`, **Weekly digest** needs
+`digest.enabled`, and **Year-in-review** needs `rewind.enabled` and the
+nudge (`rewind.nudge.enabled`). A row that is not offered keeps its stored
+value and is skipped when the form is saved. With none on, the page says so
+and shows no form;
 toggling one row is a single POST that records the diff in the audit
 log and PRG-redirects back to the page.
 
 The **Birthday** page (`#657`) stores a month/day and an optional year
 per `(userId, guildId)`. The year is optional by design — many people
 share the date but not the age — and when omitted no age is computed or
-shown. The page stays reachable even when `birthdays.enabled` is off so a
-member can pre-set their date (it shows an informational notice that
-nothing will be posted until an admin enables the feature), mirroring how
-the Notifications page exposes toggles for not-yet-active paths. A
-"Remove my birthday" button clears the stored date. The daily birthday
+shown. The page is gated by `birthdays.enabled` and answers `404` while it
+is off. A "Remove my birthday" button clears the stored date. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
 The whole feature is gated by `rewind.enabled` (`#608`). When it is off
-the route renders the shared "off" banner (HTTP 200) instead of the recap
-and skips the data work — Rewind is read-only, so there is nothing to
-pre-set — while the nav link stays visible, greyed with an "off" badge
-(`#709`); the end-of-year DM nudge is a separate toggle
-(`rewind.nudge.enabled`).
+the page (and `/me/rewind/:year`) answers `404` and skips the data work
+(`#1292`); the end-of-year DM nudge is a separate toggle
+(`rewind.nudge.enabled`), offered on Notifications only while Rewind is on
+too.
 
 The **Voice** page (`/me/voice`, `#656`) lets a member manage the
 per-user voice preferences that back the Discord control panel's
@@ -3118,12 +3115,8 @@ your next lobby spawn), and **delete**. Every write goes through the same
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
 (`user.voice.namepattern.set`, `user.voice.preset.edit|default|delete`).
-The whole page is gated by `voicechannels.presets.enabled`, but stays
-reachable when off: the editable form still renders (so a member can
-pre-set their name pattern and manage presets before an admin enables the
-feature) above the shared "off" banner, and its nav link stays visible,
-greyed with an "off" badge (`#709`) — mirroring how the Birthday page has
-always let members pre-set their date.
+The whole page is gated by `voicechannels.presets.enabled` and answers
+`404` (its writes too) while it is off; saved presets stay stored.
 
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows

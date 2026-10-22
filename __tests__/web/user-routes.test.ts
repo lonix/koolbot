@@ -28,6 +28,7 @@ import { signValue } from "../../src/web/cookies.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
 import type { WebSessionContext } from "../../src/web/session.js";
 import { createHmac } from "node:crypto";
+import { meConfigStub } from "../test-utils.js";
 
 // The CSRF token is derived from the session id (#1150), not a cookie.
 // Computed here (not imported) so no web module loads before the mocks.
@@ -253,9 +254,11 @@ describe("createUserRouter / index page", () => {
   async function enablePollParticipationGate(): Promise<void> {
     const { ConfigService } =
       await import("../../src/services/config-service.js");
-    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-      getBoolean: async (key: string) => key === "polls.participation.enabled",
-    } as never);
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(
+        meConfigStub({ "polls.participation.enabled": true }) as never,
+      );
   }
 
   it("renders the poll-participation card when the member has a tracking row (#655)", async () => {
@@ -331,6 +334,10 @@ describe("/me/notifications", () => {
     prefs?: { achievements: boolean; digest: boolean; rewind: boolean };
     setPrefsImpl?: jest.Mock;
     role?: "admin" | "user";
+    // Stored switches; defaults to every notification feature on (#1292).
+    config?: Record<string, boolean>;
+    // Extra ConfigService members, e.g. a `getBooleanStrict` that throws.
+    configExtra?: Record<string, unknown>;
   }): Promise<{
     statusCode: number;
     body: string;
@@ -365,6 +372,20 @@ describe("/me/notifications", () => {
       checkCommandPermission: async () => true,
       isAdministrator: async () => true,
     } as never);
+
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue(
+      meConfigStub(
+        opts.config ?? {
+          "achievements.enabled": true,
+          "digest.enabled": true,
+          "rewind.enabled": true,
+          "rewind.nudge.enabled": true,
+        },
+        opts.configExtra,
+      ) as never,
+    );
 
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
@@ -720,10 +741,11 @@ describe("/me/rewind", () => {
     const { ConfigService } =
       await import("../../src/services/config-service.js");
     const rewindEnabled = opts.rewindEnabled ?? true;
-    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-      getBoolean: async (key: string) =>
-        key === "rewind.enabled" ? rewindEnabled : false,
-    } as never);
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(
+        meConfigStub({ "rewind.enabled": rewindEnabled }) as never,
+      );
 
     const { RewindService } =
       await import("../../src/services/rewind-service.js");
@@ -1011,33 +1033,26 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Could not load your year-in-review");
   });
 
-  it("renders a consistent disabled banner (200) and skips data work when rewind.enabled is off (#709)", async () => {
+  it("answers 404 and skips data work when rewind.enabled is off (#1292)", async () => {
     const out = await dispatchRewind({
       pathSuffix: "",
       summary: makeSummary(),
       rewindEnabled: false,
     });
-    // No longer a 404 — the gated page renders like every other /me/*
-    // surface, with the shared "off" banner instead of a hard error (#709).
-    expect(out.statusCode).toBe(200);
-    expect(out.body).toContain("hasn't enabled the year-in-review (Rewind)");
-    // The banner short-circuits before any data work.
+    // Not a disabled banner: a switched-off feature has no page (#1292).
+    expect(out.statusCode).toBe(404);
+    expect(out.body).toBe("Not found");
     expect(out.getSummary).not.toHaveBeenCalled();
     expect(out.getDefaultRewindYear).not.toHaveBeenCalled();
-    // The nav link stays visible (greyed with an "off" badge) rather than
-    // being suppressed.
-    expect(out.body).toContain('href="/me/rewind"');
-    expect(out.body).toContain('class="nav-badge">off</span>');
   });
 
-  it("shows the banner on the explicit :year deep-link too when disabled (#709)", async () => {
+  it("answers 404 on the explicit :year deep-link too when disabled (#1292)", async () => {
     const out = await dispatchRewind({
       pathSuffix: "/2024",
       summary: makeSummary({ year: 2024 }),
       rewindEnabled: false,
     });
-    expect(out.statusCode).toBe(200);
-    expect(out.body).toContain("hasn't enabled the year-in-review (Rewind)");
+    expect(out.statusCode).toBe(404);
     expect(out.getSummary).not.toHaveBeenCalled();
   });
 });
@@ -1098,11 +1113,14 @@ describe("/me/voice (#656)", () => {
     const presetsEnabled = opts.presetsEnabled ?? true;
     const { ConfigService } =
       await import("../../src/services/config-service.js");
-    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-      getBoolean: async (key: string) =>
-        key === "voicechannels.presets.enabled" ? presetsEnabled : false,
-      getNumber: async () => 3,
-    } as never);
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(
+        meConfigStub(
+          { "voicechannels.presets.enabled": presetsEnabled },
+          { getNumber: async () => 3 },
+        ) as never,
+      );
 
     const { UserVoicePrefsService } =
       await import("../../src/services/user-voice-prefs-service.js");
@@ -1224,20 +1242,13 @@ describe("/me/voice (#656)", () => {
     expect(out.body).toContain("Preview:");
   });
 
-  it("renders the editable page with a consistent banner (200) when presets are off, keeping the nav link (#709)", async () => {
+  it("answers 404 when presets are off, with no form and no nav link (#1292)", async () => {
     const out = await dispatch({ method: "GET", presetsEnabled: false });
-    // No longer a 404 — the member can still pre-set their name pattern and
-    // manage presets, so the form renders with the shared "off" banner (#709).
-    expect(out.statusCode).toBe(200);
-    expect(out.body).toContain("hasn't enabled voice presets");
-    // The editable form is still present.
-    expect(out.body).toContain('action="/me/voice/name-pattern"');
-    // The nav link stays visible (greyed with an "off" badge).
-    expect(out.body).toContain('href="/me/voice"');
-    expect(out.body).toContain('class="nav-badge">off</span>');
+    expect(out.statusCode).toBe(404);
+    expect(out.body).toBe("Not found");
   });
 
-  it("still saves the name pattern when presets are off, so pre-setting works (#709)", async () => {
+  it("refuses to save the name pattern when presets are off (#1292)", async () => {
     const setNamePattern = jest
       .fn<(u: string, raw: string) => Promise<string | null>>()
       .mockResolvedValue("{username} HQ");
@@ -1249,8 +1260,8 @@ describe("/me/voice (#656)", () => {
       csrfHeader: csrf(),
       serviceImpl: { setNamePattern },
     });
-    expect(setNamePattern).toHaveBeenCalledWith("user-1", "{username} HQ");
-    expect(out.redirectedTo).toMatch(/^\/me\/voice\?/);
+    expect(out.statusCode).toBe(404);
+    expect(setNamePattern).not.toHaveBeenCalled();
   });
 
   it("saves the name pattern and audits it", async () => {
@@ -1670,6 +1681,12 @@ describe("/me/birthday clear (#1033)", () => {
       checkCommandPermission: async () => true,
       isAdministrator: async () => true,
     } as never);
+
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(meConfigStub({ "birthdays.enabled": true }) as never);
 
     const { BirthdayService } =
       await import("../../src/services/birthday-service.js");

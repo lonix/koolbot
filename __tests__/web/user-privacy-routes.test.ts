@@ -117,7 +117,10 @@ function simulateDisconnect(captured: Captured): void {
 /** Audit rows written during the current test. */
 let auditRows: Array<Record<string, unknown>> = [];
 
-async function installCommonMocks(privacyEnabled: boolean): Promise<void> {
+async function installCommonMocks(
+  privacyEnabled: boolean,
+  rewindEnabled = false,
+): Promise<void> {
   const svc = WebSessionService.getInstance();
   jest.spyOn(svc, "findById").mockResolvedValue({
     discordUserId: USER,
@@ -136,9 +139,15 @@ async function installCommonMocks(privacyEnabled: boolean): Promise<void> {
 
   const { ConfigService } =
     await import("../../src/services/config-service.js");
+  const readBoolean = async (key: string): Promise<boolean> =>
+    key === "privacy.enabled"
+      ? privacyEnabled
+      : key === "rewind.enabled"
+        ? rewindEnabled
+        : false;
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
-    getBoolean: async (key: string) =>
-      key === "privacy.enabled" ? privacyEnabled : false,
+    getBoolean: readBoolean,
+    getBooleanStrict: readBoolean,
     getNumber: async (_key: string, fallback: number) => fallback,
   } as never);
 
@@ -250,6 +259,15 @@ describe("/me/privacy", () => {
     expect(captured.body).toContain("voice-channel-tracking");
     expect(captured.body).toContain("moderation-log");
     expect(captured.body).toContain("What's not in it");
+  });
+
+  it("links to Rewind only while Rewind is on (#1292)", async () => {
+    await installCommonMocks(true, false);
+    const off = await dispatch("/privacy");
+    expect(off.captured.body).not.toContain('href="/me/rewind"');
+    await installCommonMocks(true, true);
+    const on = await dispatch("/privacy");
+    expect(on.captured.body).toContain('href="/me/rewind"');
   });
 
   it("returns 404 and renders no page when off (#1066)", async () => {

@@ -264,3 +264,24 @@ export function mockModel(name: string): ModelStub {
   }
   return stubFor(name);
 }
+
+/**
+ * A `ConfigService` stand-in for the `/me` pages (#1292), which read their
+ * feature switches strictly. `values` maps a key to its stored boolean; an
+ * absent key reads as the caller's fallback, as the real service does.
+ * `getBoolean` and `getBooleanStrict` answer alike, so a test can make either
+ * one throw through `extra` to exercise a failed read.
+ */
+export function meConfigStub(
+  values: Record<string, boolean> = {},
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const read = async (key: string, fallback = false): Promise<boolean> =>
+    key in values ? values[key] : fallback;
+  return {
+    getBoolean: read,
+    getBooleanStrict: read,
+    getNumber: async (_key: string, fallback = 0): Promise<number> => fallback,
+    ...extra,
+  };
+}
