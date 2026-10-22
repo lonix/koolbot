@@ -327,12 +327,12 @@ describe("the navigation badge", () => {
         remainingMs: 1000,
       });
     const none = render();
-    expect(none).toContain("Bot Permissions");
+    expect(none).toContain("Bot permissions");
     expect(none).not.toContain("Missing permissions affect enabled features");
     status.setPermissionIssueCount("guild-1", 3);
     const some = render();
     expect(some).toContain(
-      '<span class="nav-badge" title="Missing permissions affect enabled features">3</span>',
+      '<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">3</span>',
     );
   });
 

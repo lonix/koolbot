@@ -46,6 +46,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .kb-sidenav a[aria-current="page"] .kb-icon { color: var(--info-text); }
 .kb-sidenav a.is-off { color: var(--muted); }
 .kb-sidenav__end { margin-left: auto; }
+.kb-sidenav__pinned { margin-top: auto; }
 .kb-sidenav details > summary { list-style: none; display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem var(--space-3); border-radius: var(--radius-md); color: var(--muted); cursor: pointer; font-size: var(--type-description-size); }
 .kb-sidenav details > summary::-webkit-details-marker { display: none; }
 .kb-sidenav details > summary:hover { background: var(--chrome); color: var(--text-secondary); }

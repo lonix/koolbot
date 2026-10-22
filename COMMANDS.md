@@ -1300,29 +1300,29 @@ personal settings).
 
 Once in the admin Web UI (admin sessions):
 
-| Page              | Replaces (legacy slash command)                                     |
-| ----------------- | ------------------------------------------------------------------- |
-| Dashboard         | `/botstats`                                                         |
-| Bot Status        | `/botstats` (live health, uptime, connection detail)                |
-| Database          | `/dbtrunk status`, `/dbtrunk run`                                   |
-| Command Audit     | (new — slash-command audit log)                                     |
-| Command Metrics   | (new — per-command usage metrics)                                   |
-| Moderation        | (new — history browser; the moderation commands stay in Discord)    |
-| Bootstrap         | (new — read-only `.env` diagnostics)                                |
-| Settings          | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
-| Permissions       | `/permissions set/add/remove/clear/list/view`                       |
-| Setup Wizard      | `/setup wizard`                                                     |
-| Announcements     | `/announce create/list/delete`, `/announce-vc-stats`                |
-| Events            | `/event create/list/cancel/start`                                   |
-| Polls             | `/poll create/list/add-item/delete/delete-item/test/list-items`     |
-| Reaction Roles    | `/reactrole create/archive/unarchive/delete/list/status`            |
-| Birthdays         | (new — birthday announcements and schedule)                         |
-| Quotes            | (new — list, search, edit, delete, resync and export quotes)        |
-| Leaderboard Roles | (new — roles rewarded to top voice-time members)                    |
-| Notices           | `/notice add/edit/delete/sync`                                      |
-| Voice Channels    | `/vc reload`, `/vc force-reload`                                    |
-| Weekly Digest     | (new — weekly DM digest configuration and preview)                  |
-| Voice Analytics   | (new — voice activity charts and channel breakdowns)                |
+| Page                | Replaces (legacy slash command)                                     |
+| ------------------- | ------------------------------------------------------------------- |
+| Dashboard           | `/botstats`                                                         |
+| Presence            | `/botstats` (live health, uptime, connection detail)                |
+| Database            | `/dbtrunk status`, `/dbtrunk run`                                   |
+| Command audit       | (new — slash-command audit log)                                     |
+| Command metrics     | (new — per-command usage metrics)                                   |
+| Moderation          | (new — history browser; the moderation commands stay in Discord)    |
+| Environment         | (new — read-only `.env` diagnostics)                                |
+| All settings        | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
+| Command permissions | `/permissions set/add/remove/clear/list/view`                       |
+| Setup wizard        | `/setup wizard`                                                     |
+| Announcements       | `/announce create/list/delete`, `/announce-vc-stats`                |
+| Events              | `/event create/list/cancel/start`                                   |
+| Polls               | `/poll create/list/add-item/delete/delete-item/test/list-items`     |
+| Reaction roles      | `/reactrole create/archive/unarchive/delete/list/status`            |
+| Birthdays           | (new — birthday announcements and schedule)                         |
+| Quotes              | (new — list, search, edit, delete, resync and export quotes)        |
+| Leaderboard Roles   | (new — roles rewarded to top voice-time members)                    |
+| Notices             | `/notice add/edit/delete/sync`                                      |
+| Voice Channels      | `/vc reload`, `/vc force-reload`                                    |
+| Weekly Digest       | (new — weekly DM digest configuration and preview)                  |
+| Voice Analytics     | (new — voice activity charts and channel breakdowns)                |
 
 The `/event` command was removed after 2.0: administrators schedule, edit, cancel and start events on the **Events** page, and
 members see them in Discord's own Events list (every event is mirrored as a native Discord scheduled event) and in the
@@ -1358,7 +1358,7 @@ disabled, so it is already saved when an admin turns the feature on.
 
 1. Run `/config` in Discord.
 2. Open the DM'd link.
-3. Click **Setup Wizard** in the navigation.
+3. Click **Setup wizard** in the navigation.
 4. Pick the features you want (voice channels, voice tracking, quotes,
    achievements, logging, etc.). The wizard auto-detects existing
    channels and applies the related settings for you.

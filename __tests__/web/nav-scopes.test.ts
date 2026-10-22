@@ -5,8 +5,9 @@
  * silently break:
  *
  *  - `NAV_ITEMS` (`admin-layout.ts`), the admin console sidebar. Every entry
- *    needs a group from the fixed set, a unique `/admin` href, and a valid
- *    `featureKey` where the page is feature-gated.
+ *    needs a group from the fixed task-based set (#1296), the `admin` scope, a
+ *    unique `/admin` href, and a valid `featureKey` where the page is
+ *    feature-gated (and only those pages are in Features).
  *  - `SHELL_NAV` (`app-shell.ts`), the `/me` sidebar. Every entry belongs to
  *    exactly one non-admin scope, and a viewer is only ever shown the sections
  *    of the scopes they hold; nothing in it links into `/admin`.
@@ -16,9 +17,6 @@
  * `admin-scope-refusal.test.ts`. This file adds the nav side of it: every page
  * the admin sidebar links to is refused for those sessions.
  *
- * Waiting for #1296: `NAV_ITEMS` has no `scope` field and its group set is still
- * Info / Settings / Features. The checks below pin what exists today and the
- * `it.todo` entries name what #1296 will add; no registry is invented here.
  */
 import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
 import type { RequestHandler } from "express";
@@ -27,7 +25,11 @@ import {
   createTestSession,
   type AdminHarness,
 } from "./admin-harness.js";
-import { NAV_ITEMS, NAV_GROUP_ORDER } from "../../src/web/admin-layout.js";
+import {
+  NAV_ITEMS,
+  NAV_GROUP_ORDER,
+  NAV_HEADED_GROUPS,
+} from "../../src/web/admin-layout.js";
 import {
   SHELL_NAV,
   renderSideNav,
@@ -48,9 +50,23 @@ const { createReadOnlyRouter } =
 /** The scopes a non-admin `/me` sidebar section can belong to. */
 const SHELL_SCOPES = ["member", "host", "moderator"] as const;
 
+/**
+ * The admin console's groups (#1296), written out here on purpose: a group
+ * added or renamed in `NAV_GROUP_ORDER` fails this file until the person doing
+ * it has decided that the sidebar should change.
+ */
+const ADMIN_GROUPS = [
+  "Top",
+  "Features",
+  "Access",
+  "Server setup",
+  "Bot",
+  "Pinned",
+] as const;
+
 describe("admin NAV_ITEMS: group and feature key", () => {
   it("has a group from the allowed set on every entry", () => {
-    const allowed = new Set<string>(NAV_GROUP_ORDER);
+    const allowed = new Set<string>(ADMIN_GROUPS);
     const bad = NAV_ITEMS.filter(
       (item) => typeof item.group !== "string" || !allowed.has(item.group),
     ).map((item) => `${item.label} (${String(item.group)})`);
@@ -90,9 +106,42 @@ describe("admin NAV_ITEMS: group and feature key", () => {
     }
   });
 
-  // Waiting for #1296: NAV_ITEMS gains a scope and a new group set.
-  it.todo("has a scope on every NAV_ITEMS entry (#1296)");
-  it.todo("takes its groups from the #1296 set, not Info/Settings/Features");
+  it("has a scope on every entry, and it is the admin console's, not a /me scope", () => {
+    const bad = NAV_ITEMS.filter(
+      (item) => (item.scope as unknown) !== "admin",
+    ).map((item) => `${item.label} (${String(item.scope)})`);
+    expect(bad).toEqual([]);
+    for (const item of NAV_ITEMS) {
+      expect(SHELL_SCOPES as readonly string[]).not.toContain(item.scope);
+    }
+  });
+
+  it("takes its groups from the task-based set, not Info/Settings/Features", () => {
+    expect([...NAV_GROUP_ORDER]).toEqual([...ADMIN_GROUPS]);
+    expect([...NAV_HEADED_GROUPS]).toEqual([
+      "Features",
+      "Access",
+      "Server setup",
+      "Bot",
+    ]);
+    const used = new Set<string>(NAV_ITEMS.map((item) => item.group));
+    expect(used).not.toContain("Info");
+    expect(used).not.toContain("Settings");
+  });
+
+  it("keeps Dashboard alone at the top and All settings alone at the bottom", () => {
+    const groupOf = (group: string): string[] =>
+      NAV_ITEMS.filter((item) => item.group === group).map((item) => item.href);
+    expect(groupOf("Top")).toEqual(["/admin/"]);
+    expect(groupOf("Pinned")).toEqual(["/admin/settings"]);
+  });
+
+  it("only puts feature-gated pages in Features", () => {
+    const stray = NAV_ITEMS.filter(
+      (item) => item.featureKey && item.group !== "Features",
+    ).map((item) => `${item.label} (${item.group})`);
+    expect(stray).toEqual([]);
+  });
 });
 
 describe("SHELL_NAV: scope and feature key", () => {

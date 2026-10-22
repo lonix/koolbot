@@ -351,8 +351,11 @@ describe("top bar", () => {
     const form = bar?.querySelector("form");
     expect(form?.getAttribute("action")).toBe("/admin/finish");
     expect(text(form?.querySelector("button"))).toBe("Finish");
-    expect(doc.querySelector("nav.side")).not.toBeNull();
-    expect(doc.querySelector(".kb-sidenav")).toBeNull();
+    // The console's sidebar is the shared SideNav too (#1296), labelled for admins.
+    expect(
+      doc.querySelector("nav.kb-sidenav")?.getAttribute("aria-label"),
+    ).toBe("Admin sections");
+    expect(doc.querySelector("nav.side")).toBeNull();
   });
 
   it("escapes the display name and takes its initial by code point", () => {

@@ -41,35 +41,61 @@ export type NavFeatureStatus = Partial<Record<keyof ConfigSchema, boolean>>;
 export { escapeHtml, escapeJsInAttr };
 
 /**
- * Sidebar groups, rendered in this fixed order (#613). Splitting the
- * formerly-flat list into a few labelled sections keeps related pages
- * together as the page count grows:
- *   - Info     — read-only diagnostics / status surfaces.
- *   - Settings — configuration & setup surfaces.
- *   - Features — the feature-gated pages (these line up with `featureKey`).
+ * Sidebar groups, rendered in this fixed order (#613, regrouped by task in
+ * #1296). The admin is looking for a job to do, so the groups name the job:
+ *   - Top           - Dashboard, alone and without a heading.
+ *   - Features      - the feature pages (these line up with `featureKey`); the
+ *                     switched-on ones A to Z, the rest folded away.
+ *   - Access        - who may do what: command and bot permissions, role groups.
+ *   - Server setup  - the shape of the Discord server and how KoolBot adopts it.
+ *   - Bot           - the bot itself: presence, database, environment, audit, metrics.
+ *   - Pinned        - All settings, at the bottom and without a heading.
  */
-export type NavGroup = "Info" | "Settings" | "Features";
+export type NavGroup =
+  "Top" | "Features" | "Access" | "Server setup" | "Bot" | "Pinned";
 
 /** Fixed render order of the sidebar groups. */
 export const NAV_GROUP_ORDER: readonly NavGroup[] = [
-  "Info",
-  "Settings",
+  "Top",
   "Features",
+  "Access",
+  "Server setup",
+  "Bot",
+  "Pinned",
 ];
+
+/** The groups that carry a heading; Top and Pinned stand on their own. */
+export const NAV_HEADED_GROUPS: readonly NavGroup[] = [
+  "Features",
+  "Access",
+  "Server setup",
+  "Bot",
+];
+
+/**
+ * Who may open the page. Every console page is admin-only, and the refusal of
+ * a host or moderator session is walked route by route in
+ * `__tests__/web/admin-scope-refusal.test.ts`. It is a literal type of its own,
+ * not a `WebScope`: `admin` is not a `/me` scope, and a `/me` scope must never
+ * be put on a console page.
+ */
+export type NavScope = "admin";
 
 interface NavItem {
   href: string;
   label: string;
-  /** Which sidebar section this item belongs to (#613). */
+  /** Which sidebar section this item belongs to (#613, #1296). */
   group: NavGroup;
+  /** Whose sidebar this is (#1333): the admin console's only. */
+  scope: NavScope;
   /**
    * Config key (a `<feature>.enabled` boolean) that gates this page. When
-   * set and the feature resolves to `false`, the item is still shown but
-   * rendered greyed with an "off" badge (#610) — hiding it left the page
-   * undiscoverable, since the natural place to enable a feature is its own
-   * page. Items without a `featureKey` — Dashboard, Settings, etc. — render
-   * as plain links. The page URL is reachable either way; the gating only
-   * changes how the nav advertises it.
+   * set and the feature resolves to `false`, the item is still reachable but
+   * sits under the folded "N turned off" list, greyed with an "off" badge
+   * (#610, #1296) — hiding it left the page undiscoverable, since the natural
+   * place to enable a feature is its own page. Items without a `featureKey` —
+   * Dashboard, All settings, etc. — render as plain links. The page URL is
+   * reachable either way; the gating only changes how the nav advertises it.
    *
    * Typed as `keyof ConfigSchema` so a typo in `NAV_ITEMS` fails at
    * compile time rather than silently never matching at runtime.
@@ -77,113 +103,191 @@ interface NavItem {
   featureKey?: keyof ConfigSchema;
 }
 
+// Labels are sentence case and say what the page does. The routes did not
+// change with the labels.
 export const NAV_ITEMS: NavItem[] = [
-  // Info — read-only diagnostics / status surfaces.
-  { href: "/admin/", label: "Dashboard", group: "Info" },
-  { href: "/admin/bot-status", label: "Bot Status", group: "Info" },
-  { href: "/admin/bot-permissions", label: "Bot Permissions", group: "Info" },
-  { href: "/admin/database", label: "Database", group: "Info" },
-  { href: "/admin/audit/commands", label: "Command Audit", group: "Info" },
-  { href: "/admin/metrics", label: "Command Metrics", group: "Info" },
-  {
-    href: "/admin/moderation",
-    label: "Moderation",
-    group: "Info",
-    featureKey: "moderation.enabled",
-  },
-  { href: "/admin/bootstrap", label: "Bootstrap", group: "Info" },
-  { href: "/admin/adopt", label: "Server Scan", group: "Info" },
-  // Settings — configuration & setup surfaces.
-  { href: "/admin/settings", label: "Settings", group: "Settings" },
-  { href: "/admin/permissions", label: "Permissions", group: "Settings" },
-  { href: "/admin/role-groups", label: "Role Groups", group: "Settings" },
-  {
-    href: "/admin/rules",
-    label: "Rules",
-    group: "Features",
-    featureKey: "rules.enabled",
-  },
-  { href: "/admin/adopt/claims", label: "Channel Claims", group: "Settings" },
-  { href: "/admin/adopt/history", label: "Adoption", group: "Settings" },
-  { href: "/admin/wizard", label: "Setup Wizard", group: "Settings" },
-  // Features — feature-gated pages. A page whose feature is off is greyed
-  // with an "off" badge and sorted last, never hidden (#610, #706).
+  { href: "/admin/", label: "Dashboard", group: "Top", scope: "admin" },
+  // Features - every feature-gated page, A to Z (the render sorts them again
+  // by state, so a new entry here never has to be placed by hand).
   {
     href: "/admin/announcements",
     label: "Announcements",
     group: "Features",
+    scope: "admin",
     featureKey: "announcements.enabled",
   },
   {
     href: "/admin/birthdays",
     label: "Birthdays",
     group: "Features",
+    scope: "admin",
     featureKey: "birthdays.enabled",
   },
   {
     href: "/admin/events",
     label: "Events",
     group: "Features",
+    scope: "admin",
     featureKey: "events.enabled",
   },
   {
-    href: "/admin/polls",
-    label: "Polls",
+    href: "/admin/leaderboard-roles",
+    label: "Leaderboard roles",
     group: "Features",
-    featureKey: "polls.enabled",
+    scope: "admin",
+    featureKey: "leaderboard_roles.enabled",
   },
   {
-    href: "/admin/reaction-roles",
-    label: "Reaction Roles",
+    href: "/admin/moderation",
+    label: "Moderation",
     group: "Features",
-    featureKey: "reactionroles.enabled",
+    scope: "admin",
+    featureKey: "moderation.enabled",
   },
   {
     href: "/admin/notices",
     label: "Notices",
     group: "Features",
+    scope: "admin",
     featureKey: "notices.enabled",
+  },
+  {
+    href: "/admin/polls",
+    label: "Polls",
+    group: "Features",
+    scope: "admin",
+    featureKey: "polls.enabled",
   },
   {
     href: "/admin/quotes",
     label: "Quotes",
     group: "Features",
+    scope: "admin",
     featureKey: "quotes.enabled",
   },
   {
-    href: "/admin/channels",
-    label: "Channel Manager",
-    group: "Settings",
+    href: "/admin/reaction-roles",
+    label: "Reaction roles",
+    group: "Features",
+    scope: "admin",
+    featureKey: "reactionroles.enabled",
+  },
+  {
+    href: "/admin/rules",
+    label: "Rules",
+    group: "Features",
+    scope: "admin",
+    featureKey: "rules.enabled",
   },
   {
     href: "/admin/tickets",
     label: "Tickets",
     group: "Features",
+    scope: "admin",
     featureKey: "tickets.enabled",
   },
   {
-    href: "/admin/voice-channels",
-    label: "Voice Channels",
+    href: "/admin/analytics",
+    label: "Voice analytics",
     group: "Features",
+    scope: "admin",
+    featureKey: "voicetracking.enabled",
+  },
+  {
+    href: "/admin/voice-channels",
+    label: "Voice channels",
+    group: "Features",
+    scope: "admin",
     featureKey: "voicechannels.enabled",
   },
   {
     href: "/admin/digest",
-    label: "Weekly Digest",
+    label: "Weekly digest",
     group: "Features",
+    scope: "admin",
     featureKey: "digest.enabled",
   },
+  // Access - the two permission pages read as a pair.
   {
-    href: "/admin/leaderboard-roles",
-    label: "Leaderboard Roles",
-    group: "Features",
-    featureKey: "leaderboard_roles.enabled",
+    href: "/admin/permissions",
+    label: "Command permissions",
+    group: "Access",
+    scope: "admin",
   },
   {
-    href: "/admin/analytics",
-    label: "Voice Analytics",
-    group: "Features",
-    featureKey: "voicetracking.enabled",
+    href: "/admin/role-groups",
+    label: "Role groups",
+    group: "Access",
+    scope: "admin",
+  },
+  {
+    href: "/admin/bot-permissions",
+    label: "Bot permissions",
+    group: "Access",
+    scope: "admin",
+  },
+  // Server setup.
+  {
+    href: "/admin/wizard",
+    label: "Setup wizard",
+    group: "Server setup",
+    scope: "admin",
+  },
+  {
+    href: "/admin/adopt",
+    label: "Server scan",
+    group: "Server setup",
+    scope: "admin",
+  },
+  {
+    href: "/admin/adopt/claims",
+    label: "Channel claims",
+    group: "Server setup",
+    scope: "admin",
+  },
+  {
+    href: "/admin/channels",
+    label: "Channel manager",
+    group: "Server setup",
+    scope: "admin",
+  },
+  {
+    href: "/admin/adopt/history",
+    label: "Adoption history",
+    group: "Server setup",
+    scope: "admin",
+  },
+  // Bot.
+  {
+    href: "/admin/bot-status",
+    label: "Presence",
+    group: "Bot",
+    scope: "admin",
+  },
+  { href: "/admin/database", label: "Database", group: "Bot", scope: "admin" },
+  {
+    href: "/admin/bootstrap",
+    label: "Environment",
+    group: "Bot",
+    scope: "admin",
+  },
+  {
+    href: "/admin/audit/commands",
+    label: "Command audit",
+    group: "Bot",
+    scope: "admin",
+  },
+  {
+    href: "/admin/metrics",
+    label: "Command metrics",
+    group: "Bot",
+    scope: "admin",
+  },
+  {
+    href: "/admin/settings",
+    label: "All settings",
+    group: "Pinned",
+    scope: "admin",
   },
 ];
 
@@ -285,22 +389,8 @@ const STYLE = [
   // its Finish form needs a reset here.
   ".kb-topbar form{margin:0}",
   ".shell{display:flex;min-height:calc(100vh - var(--topbar-height))}",
-  "nav.side{background:var(--surface);border-right:1px solid var(--border);width:220px;padding:1rem .5rem;flex-shrink:0}",
-  "nav.side ul{list-style:none;padding:0;margin:0}",
-  // Grouped sidebar sections (#613): a muted, small uppercase heading sits
-  // above each group's <ul>, consistent with the dark sidebar palette.
-  "nav.side .nav-group+.nav-group{margin-top:1rem}",
-  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}",
-  "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:var(--text-secondary)}",
-  "nav.side a:hover{background:var(--chrome);text-decoration:none}",
-  "nav.side a.active{background:var(--selected);color:var(--on-primary)}",
-  // Feature-gated pages whose feature is off are shown but greyed with an
-  // "off" badge so they stay discoverable (#610). The active page keeps its
-  // highlight even when disabled, so the greying only applies when inactive.
-  // Greyed, but still 6.8:1 on the sidebar (a darker grey was 3.6:1 — #855).
-  `nav.side a.nav-disabled:not(.active){color:var(--muted)}`,
-  "nav.side a.nav-disabled:not(.active):hover{color:var(--text-secondary)}",
-  "nav.side a .nav-badge{float:right;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);background:var(--fill);border-radius:4px;padding:.05rem .3rem;margin-top:.1rem}",
+  // The side nav is the shared kb-sidenav (kb.css, #1296): group headings, the folded "N turned off" list and the
+  // count badge all come from there.
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
@@ -418,7 +508,6 @@ const STYLE = [
   // button hover surfaces are mirrored so keyboard users get the same
   // affordance. Declared after `[aria-invalid]` so the ring wins on focus.
   `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
-  "nav.side a:focus-visible{background:var(--chrome);text-decoration:none}",
   ".btn:focus-visible{text-decoration:none}",
   // Skip link: off-screen until focused, then pinned top-left so keyboard
   // users can jump past the ~20 sidebar links on every page.
@@ -459,17 +548,10 @@ const STYLE = [
   ".heat-bars .hbar .track{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;height:.9rem;overflow:hidden}",
   ".heat-bars .hbar .track .fill{height:100%;background:var(--lore-fill)}",
   `.heat-bars .hbar .val{width:6rem;text-align:right;color:var(--muted);flex-shrink:0;font-size:.7rem}`,
-  // Reflow (WCAG 1.4.10, #855): below ~760px the 220px sidebar would take
-  // most of the viewport, so it collapses into a wrapping row of links above
-  // the content and the definition grid stacks.
+  // Reflow (WCAG 1.4.10, #855): below ~760px the sidebar would take most of
+  // the viewport, so kb.css puts it above the content and the definition grid stacks.
   "@media (max-width:760px){" +
     ".shell{flex-direction:column}" +
-    "nav.side{width:auto;border-right:0;border-bottom:1px solid var(--border);padding:.5rem .75rem}" +
-    "nav.side .nav-group{display:inline-block;vertical-align:top;margin:.25rem 1rem .25rem 0}" +
-    "nav.side .nav-group+.nav-group{margin-top:.25rem}" +
-    "nav.side ul{display:flex;flex-wrap:wrap;gap:.25rem}" +
-    "nav.side a{padding:.3rem .5rem}" +
-    "nav.side a .nav-badge{float:none;margin-left:.3rem}" +
     "main{padding:1rem}" +
     ".kv{grid-template-columns:1fr;gap:.1rem 0}" +
     ".kv dd{margin-bottom:.4rem}" +
@@ -788,61 +870,100 @@ const INVALID_FOCUS_SCRIPT =
   "if(f){try{f.focus()}catch(e){}}" +
   "})();";
 
+// Remembers whether the "N turned off" list is open, per browser (#1296).
+// Reads and writes sit in try/catch: storage can be blocked, and the page must
+// work without it. The state is written on click, before the browser flips
+// `open`, so a list the server forced open (the current page is inside it) never
+// overwrites what the person chose.
+const NAV_OFF_KEY = "koolbot.admin.nav.off-open";
+const NAV_OFF_SCRIPT =
+  "(function(){" +
+  "var d=document.querySelector('details[data-nav-off]');" +
+  "if(!d)return;" +
+  `var k=${JSON.stringify(NAV_OFF_KEY)};` +
+  "if(!d.open){try{if(localStorage.getItem(k)==='1')d.open=true}catch(e){}}" +
+  "var s=d.querySelector('summary');" +
+  "if(s)s.addEventListener('click',function(){" +
+  "try{localStorage.setItem(k,d.open?'0':'1')}catch(e){}" +
+  "});" +
+  "})();";
+
+const NAV_CHEVRON =
+  '<svg class="kb-icon kb-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>';
+
+/** Group name as an element id: "Server setup" -> "admin-nav-server-setup". */
+function navGroupId(group: NavGroup): string {
+  return `admin-nav-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 function renderNav(
   active: string,
   navFeatureStatus?: NavFeatureStatus,
 ): string {
   // Feature-gated items are shown even when their feature is off (#610) so
-  // the page stays discoverable; a disabled item is greyed and tagged "off"
-  // but the link still works, and the page itself renders an "enable here"
-  // prompt. An unknown featureKey (missing from the map) and items without a
-  // featureKey render as plain links — a wiring gap fails open, not greyed.
+  // the page stays discoverable; a switched-off item is greyed and tagged
+  // "off", lives in the folded "N turned off" list (#1296), but the link still
+  // works and the page itself renders an "enable here" prompt. An unknown
+  // featureKey (missing from the map) and items without a featureKey render as
+  // plain links - a wiring gap fails open, not greyed.
   const isDisabled = (item: NavItem): boolean => {
     if (!navFeatureStatus || !item.featureKey) return false;
     return navFeatureStatus[item.featureKey] === false;
   };
+  const isActiveItem = (item: NavItem): boolean =>
+    item.href === active || (item.href === "/admin/" && active === "/admin");
   const renderItem = (item: NavItem): string => {
-    const isActive =
-      item.href === active || (item.href === "/admin/" && active === "/admin");
     const disabled = isDisabled(item);
-    const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
-      .filter(Boolean)
-      .join(" ");
-    const cls = classes ? ` class="${classes}"` : "";
-    // The active page is conveyed by class alone visually; `aria-current`
-    // says the same thing to assistive tech (#855).
-    const current = isActive ? ' aria-current="page"' : "";
-    const title = disabled
-      ? ' title="This feature is disabled — open it to enable it"'
-      : "";
+    // The active page is conveyed by `aria-current` (which kb.css styles) so
+    // it is said to assistive tech too, not by colour alone (#855).
+    const attrs =
+      (disabled ? ' class="is-off"' : "") +
+      (isActiveItem(item) ? ' aria-current="page"' : "") +
+      (disabled
+        ? ' title="This feature is disabled — open it to enable it"'
+        : "");
     const issues =
       item.href === "/admin/bot-permissions" ? getPermissionIssueCount() : 0;
     const badge = disabled
-      ? '<span class="nav-badge">off</span>'
+      ? '<span class="kb-badge kb-badge--off kb-sidenav__end">off</span>'
       : issues > 0
-        ? `<span class="nav-badge" title="Missing permissions affect enabled features">${issues}</span>`
+        ? `<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">${issues}</span>`
         : "";
-    return `<li><a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a></li>`;
+    return `<li><a href="${escapeHtml(item.href)}"${attrs}>${escapeHtml(item.label)}${badge}</a></li>`;
   };
-  // One <ul> per group, preceded by a small heading. Feature items are now
-  // always shown, so a group only renders empty if it genuinely has no items
-  // — no dangling header (#613).
+  const renderList = (items: NavItem[], labelledBy?: string): string => {
+    const label = labelledBy ? ` aria-labelledby="${labelledBy}"` : "";
+    return `<ul${label}>${items.map(renderItem).join("")}</ul>`;
+  };
+  const byLabel = (a: NavItem, b: NavItem): number =>
+    a.label.localeCompare(b.label, "en");
+
   return NAV_GROUP_ORDER.map((group) => {
-    // Sort enabled/on features to the top and let disabled/off ones sink to the
-    // bottom, preserving the fixed NAV_ITEMS order as a stable secondary sort
-    // within each group (Array.prototype.sort is stable). Non-feature items are
-    // never disabled, so other groups are unaffected. Pure display-order change
-    // (#706).
-    const items = NAV_ITEMS.filter((item) => item.group === group).sort(
-      (a, b) => Number(isDisabled(a)) - Number(isDisabled(b)),
-    );
+    const items = NAV_ITEMS.filter((item) => item.group === group);
     if (items.length === 0) return "";
-    return (
-      `<div class="nav-group">` +
-      `<div class="nav-group-heading">${escapeHtml(group)}</div>` +
-      `<ul>${items.map(renderItem).join("")}</ul>` +
-      `</div>`
-    );
+    // Dashboard and All settings stand alone, without a heading; All settings
+    // is pinned to the bottom of the sidebar.
+    if (!NAV_HEADED_GROUPS.includes(group)) {
+      const pinned = group === "Pinned" ? " kb-sidenav__pinned" : "";
+      return `<div class="kb-sidenav__group${pinned}">${renderList(items)}</div>`;
+    }
+    const id = navGroupId(group);
+    const heading = `<p class="kb-overline kb-sidenav__heading" id="${id}">${escapeHtml(group)}</p>`;
+    if (group !== "Features") {
+      return `<div class="kb-sidenav__group">${heading}${renderList(items, id)}</div>`;
+    }
+    // Features: the switched-on ones A to Z, the rest folded into a `details`
+    // that stays open when the current page is inside it (an `aria-current`
+    // link in a closed list would be hidden from the person who is on it).
+    const on = items.filter((item) => !isDisabled(item)).sort(byLabel);
+    const off = items.filter(isDisabled).sort(byLabel);
+    const fold =
+      off.length === 0
+        ? ""
+        : `<details data-nav-off${off.some(isActiveItem) ? " open" : ""}>` +
+          `<summary>${NAV_CHEVRON}${off.length} turned off</summary>` +
+          `${renderList(off)}</details>`;
+    return `<div class="kb-sidenav__group">${heading}${on.length > 0 ? renderList(on, id) : ""}${fold}</div>`;
   }).join("");
 }
 
@@ -879,7 +1000,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<div class="shell">',
     // Named so it stays distinguishable from any other nav landmark a page
     // body introduces (axe `landmark-unique`, #856).
-    `<nav class="side" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
+    `<nav class="kb-sidenav" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
     // The body is built on the server and user text in it is HTML-escaped (quotes included), so
     // this literal can only come from `renderSaveBar`; a false positive would only clip `main`.
     `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
@@ -890,6 +1011,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `${scriptTag(SETTINGS_SAVE_SCRIPT)}`,
     `${scriptTag(SAVEBAR_SCRIPT)}`,
     `${scriptTag(INVALID_FOCUS_SCRIPT)}`,
+    `${scriptTag(NAV_OFF_SCRIPT)}`,
     "</body></html>",
   ].join("");
 }

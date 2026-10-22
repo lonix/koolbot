@@ -39,7 +39,7 @@ A person with only the Member scope has one section, so there is no sidebar at a
 | Group | Pages |
 | --- | --- |
 | (top) | Dashboard |
-| Features | the switched-on features, A to Z; then *Turned off (n)*, folded |
+| Features | the switched-on features, A to Z; then *N turned off*, folded |
 | Access | Command permissions, Role groups, Bot permissions |
 | Server setup | Setup wizard, Server scan, Channel claims, Channel manager, Adoption history |
 | Bot | Presence, Database, Environment, Command audit, Command metrics |
@@ -48,7 +48,7 @@ A person with only the Member scope has one section, so there is no sidebar at a
 - Renamed to say what the page does: Permissions → **Command permissions**, Bot Status → **Presence**, Bootstrap → **Environment**, Adoption →
   **Adoption history**, Settings → **All settings**.
 - Mark the current page with `aria-current="page"`; a page with problems gets a warn count badge.
-- *Turned off* is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch).
+- *N turned off* is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch). It is open when the current page is inside it.
 - Below 760px the nav sits above the content (reflow, #855).
 
 ### PageHeader

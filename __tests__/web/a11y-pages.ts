@@ -970,6 +970,21 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The sidebar's "N turned off" list is only rendered when a feature is
+      // off, so no other fixture puts it in front of axe (#1296).
+      name: "Bootstrap (features switched off, list folded)",
+      html: renderBootstrapPage({
+        ...COMMON,
+        navFeatureStatus: { "polls.enabled": false, "notices.enabled": false },
+        groups: [
+          {
+            category: "Discord",
+            rows: [{ key: "GUILD_ID", present: false, isSecret: false }],
+          },
+        ],
+      }),
+    },
+    {
       name: "Settings",
       html: renderSettingsPage({
         ...COMMON,
@@ -2330,6 +2345,32 @@ export function adminPages(): A11yPage[] {
         plan: null,
         channels: [{ id: "100000000000000010", name: "rules" }],
         roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      // A switched-off feature's own page: the sidebar's "N turned off" list
+      // opens so the current link is not hidden (#1296).
+      name: "Rules acceptance (feature off, sidebar list open)",
+      html: renderRulesPage({
+        ...COMMON,
+        navFeatureStatus: { "rules.enabled": false },
+        enabled: false,
+        channelId: "",
+        roleId: "",
+        messagePosted: false,
+        accepted: 0,
+        native: { screening: false, community: true },
+        intentMissing: false,
+        plan: null,
+        channels: [{ id: "100000000000000010", name: "rules" }],
+        roleName: null,
         unavailable: null,
         options: {
           createRole: false,

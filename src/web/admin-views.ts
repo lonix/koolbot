@@ -380,13 +380,13 @@ export function renderBootstrapPage(props: BootstrapProps): string {
     .join("");
 
   const body = `
-<h1>Bootstrap</h1>
+<h1>Environment</h1>
 <p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
 <div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
 ${sections}
 `;
   return renderAdminPage({
-    title: "Bootstrap",
+    title: "Environment",
     active: "/admin/bootstrap",
     body,
     csrfToken: props.csrfToken,
@@ -1495,7 +1495,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 </div>`;
 
   const body = `
-<h1>Settings</h1>
+<h1>All settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${actionBar}
@@ -1508,7 +1508,7 @@ ${importSection}
 ${dangerSection}
 `;
   return renderAdminPage({
-    title: "Settings",
+    title: "All settings",
     active: "/admin/settings",
     body,
     csrfToken: props.csrfToken,
@@ -1780,7 +1780,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
     .join("");
 
   const body = `
-<h1>Permissions</h1>
+<h1>Command permissions</h1>
 <p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one Moderator or Admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to Moderators unless you set a restriction here; with no groups they stay open.</p>
 ${renderFlash(props.flash)}
 <div class="card">
@@ -1793,7 +1793,7 @@ ${renderFlash(props.flash)}
 <div class="card"><h2>Matrix</h2>${matrixHtml}</div>
 `;
   return renderAdminPage({
-    title: "Permissions",
+    title: "Command permissions",
     active: "/admin/permissions",
     body,
     csrfToken: props.csrfToken,
@@ -4461,13 +4461,13 @@ export function renderBotStatusPage(props: BotStatusProps): string {
     .join("");
 
   const body = `
-<h1>Bot Status</h1>
+<h1>Presence</h1>
 <p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
 ${renderFlash(props.flash)}
 ${editors}
 `;
   return renderAdminPage({
-    title: "Bot Status",
+    title: "Presence",
     active: "/admin/bot-status",
     body,
     csrfToken: props.csrfToken,

@@ -289,7 +289,7 @@ describe("renderSettingsPage", () => {
     // so they stay available.
     expect(html).toContain('action="/admin/settings/import"');
     // The wizard pre-fills from the same store, so its link is hidden too.
-    expect(html).not.toContain(">Setup wizard</a>");
+    expect(html).not.toContain('class="btn">Setup wizard</a>');
   });
 
   it("renders the human label as primary text and the dotted key as a muted reference", () => {
@@ -3024,7 +3024,7 @@ describe("renderBirthdaysPage (#986)", () => {
     expect(html).toContain('action="/admin/birthdays/run-now"');
     expect(html).not.toMatch(/disabled>Run now/);
     expect(html).toContain("#general");
-    expect(html).toContain('href="/admin/birthdays" class="active"');
+    expect(html).toContain('<a href="/admin/birthdays" aria-current="page">');
   });
 
   it("previews the message with an escaped mention chip, not raw markup", () => {
@@ -3140,7 +3140,7 @@ describe("renderQuotesPage (#984)", () => {
     // The auto-managed header id is shown read-only, never as a control.
     expect(html).toContain("900000000000000001");
     expect(html).not.toContain('name="value_quotes.header_message_id"');
-    expect(html).toContain('href="/admin/quotes" class="active"');
+    expect(html).toContain('<a href="/admin/quotes" aria-current="page">');
   });
 
   it("says a search matched nothing rather than that no quotes exist", () => {
