@@ -486,18 +486,23 @@ export function renderRepostCard(o: RepostCardOptions): string {
     ? `Current message ID <code>${escapeHtml(o.messageId)}</code>.`
     : "Not posted yet.";
   const blocked = o.blockedReason
-    ? `<p class="muted" role="status">${escapeHtml(o.blockedReason)}</p>`
+    ? `<p class="kb-help" role="status">${escapeHtml(o.blockedReason)}</p>`
     : "";
-  return `<div class="card" id="${escapeHtml(o.id)}">
-  <h2>${escapeHtml(o.heading)}</h2>
-  <p class="muted">${escapeHtml(o.intro)} ${state}</p>
-  <form method="POST" action="${escapeHtml(o.action)}" class="inline-form" data-confirm="${escapeHtml(o.confirmText)}"${confirmListAttr(o.consequences)}>
-    ${o.csrfInput}
-    <input type="hidden" name="expectedId" value="${escapeHtml(o.messageId)}">
-    <button type="submit" class="btn"${o.blockedReason ? " disabled" : ""}>${escapeHtml(o.buttonLabel)}</button>
-  </form>
-  ${blocked}
-</div>`;
+  const titleId = `${o.id}-title`;
+  // Design-system Panel and Button (docs/design/patterns.md); the red button
+  // matches the red confirm, as the action deletes a message.
+  return `<section class="kb-panel" id="${escapeHtml(o.id)}" aria-labelledby="${escapeHtml(titleId)}">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${escapeHtml(titleId)}">${escapeHtml(o.heading)}</h2></header>
+  <div class="kb-panel__body">
+    <p class="kb-help">${escapeHtml(o.intro)} ${state}</p>
+    <form method="POST" action="${escapeHtml(o.action)}" data-confirm="${escapeHtml(o.confirmText)}"${confirmListAttr(o.consequences)}>
+      ${o.csrfInput}
+      <input type="hidden" name="expectedId" value="${escapeHtml(o.messageId)}">
+      <button type="submit" class="kb-btn kb-btn--danger"${o.blockedReason ? " disabled" : ""}>${escapeHtml(o.buttonLabel)}</button>
+    </form>
+    ${blocked}
+  </div>
+</section>`;
 }
 
 function coerceToDisplayValue(value: unknown): string | number | boolean {

@@ -146,6 +146,21 @@ describe.each(PAGES)("$name page Re-post card", (p) => {
     expect(list.join(" ")).toMatch(/old (header|message)/i);
   });
 
+  it("uses the design-system Panel and Button, not the legacy card and btn classes", () => {
+    const card = p.doc().getElementById(p.anchor)!;
+    expect(card.classList.contains("kb-panel")).toBe(true);
+    expect(
+      card.querySelector(".kb-panel__head .kb-panel__title"),
+    ).not.toBeNull();
+    expect(card.getAttribute("aria-labelledby")).toBe(
+      card.querySelector(".kb-panel__title")!.id,
+    );
+    const button = card.querySelector("button") as HTMLButtonElement;
+    expect(button.classList.contains("kb-btn")).toBe(true);
+    expect(button.classList.contains("kb-btn--danger")).toBe(true);
+    expect(card.querySelector(".card, .btn, .muted")).toBeNull();
+  });
+
   it("sends back the id the page showed, so a double submit re-posts once", () => {
     const hidden = p
       .doc()
