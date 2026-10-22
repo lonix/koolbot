@@ -70,7 +70,7 @@ import {
 } from "../services/config-schema.js";
 import { ServerScanService } from "../services/server-scan-service.js";
 import { parseScanTab, renderAdoptPage } from "./adopt-view.js";
-import { cachedScan, hasFreshScan, scanCacheKey } from "./server-scan-cache.js";
+import { cachedScan, scanCacheKey } from "./server-scan-cache.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -1072,32 +1072,36 @@ export function createReadOnlyRouter(
         req.webSession?.discordUserId,
         sampled,
       );
-      // Resolve the common data first: from the freshness check to the cache
-      // insertion below there must be no await, or concurrent cold requests all
-      // pass the check, each spend limiter quota, then share one scan (#1323).
+      // Resolve the common data first, so that nothing is awaited between the
+      // cache lookup, the limiter and the insertion of a new scan (#1323).
       const common = await commonFromReq(req);
-      if (refresh || !hasFreshScan(key)) {
-        let allowed = false;
-        scanLimiter(req, res, () => {
-          allowed = true;
-        });
-        if (!allowed) return; // the limiter has answered 429
-      }
       let scan = null;
       let error: string | undefined;
       try {
         const adminUserId = req.webSession?.discordUserId;
-        // One scan is shared across the tabs for a minute: each tab is its own
-        // GET, and a scan costs a REST round of its own (#1323).
-        scan = await cachedScan(
+        // One scan is shared across the tabs: each tab is its own GET, and a
+        // scan costs a REST round of its own. The limiter is spent only when
+        // a new scan starts, not for a tab served from the shared one.
+        const pending = cachedScan(
           key,
           () =>
             ServerScanService.getInstance(client).scan(common.guildId, {
               adminUserId,
               sampleMessages: sampled,
             }),
-          { refresh },
+          {
+            refresh,
+            admit: () => {
+              let allowed = false;
+              scanLimiter(req, res, () => {
+                allowed = true;
+              });
+              return allowed;
+            },
+          },
         );
+        if (!pending) return; // the limiter has answered 429
+        scan = await pending;
       } catch (err) {
         logger.warn("server scan failed", err);
         error = err instanceof Error ? err.message : String(err);

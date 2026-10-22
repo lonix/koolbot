@@ -8,14 +8,25 @@ import type { ServerScan } from "../services/server-scan-service.js";
  * five tabs would otherwise rescan five times and trip the page's rate limit.
  * One scan is shared for a minute per guild, admin and hints setting; the
  * page says when it was read and offers *Scan again* to bypass the cache.
+ *
+ * An entry is *pending* while its scan runs and *done* once it has succeeded:
+ *  - a pending scan is shared by everyone who asks, however long it takes,
+ *    until it finishes or `MAX_PENDING_MS` passes (so a hung read cannot
+ *    block the page for good);
+ *  - the minute starts when the scan finishes, not when it starts, so a slow
+ *    scan is not already stale when it arrives;
+ *  - a failed scan is dropped at once, so the next request tries again.
  */
 
 export const SCAN_CACHE_TTL_MS = 60_000;
+export const SCAN_PENDING_MAX_MS = 5 * 60_000;
 const MAX_ENTRIES = 8;
 
 interface Entry {
-  at: number;
   scan: Promise<ServerScan>;
+  startedAt: number;
+  /** When the scan succeeded; null while it is pending. */
+  doneAt: number | null;
 }
 
 const entries = new Map<string, Entry>();
@@ -28,39 +39,70 @@ export function scanCacheKey(
   return `${guildId}:${adminUserId ?? ""}:${sampled ? "sampled" : "plain"}`;
 }
 
-/** Whether a fresh scan for `key` is held (or still loading), so a request needs no new one. */
-export function hasFreshScan(key: string, now: number = Date.now()): boolean {
-  const e = entries.get(key);
-  return e !== undefined && now - e.at < SCAN_CACHE_TTL_MS;
+function usable(e: Entry, now: number): boolean {
+  return e.doneAt === null
+    ? now - e.startedAt < SCAN_PENDING_MAX_MS
+    : now - e.doneAt < SCAN_CACHE_TTL_MS;
+}
+
+export interface CachedScanOptions {
+  /** Bypass the cache and scan again. */
+  refresh?: boolean;
+  /** The clock; a function so the finish time of a slow scan is read when it finishes. */
+  now?: () => number;
+  /**
+   * Called synchronously, only when a new scan is about to start, so whatever
+   * it spends (the rate limit) is spent for scans and not for cache hits.
+   * Returning `false` refuses the scan and `cachedScan` returns `null`.
+   */
+  admit?: () => boolean;
 }
 
 /**
- * The scan for `key`: the cached one while it is fresh, otherwise `load()`.
- * A failed load is never kept, so the next request tries again.
+ * The scan for `key`: the shared one while it is pending or fresh, otherwise a
+ * new one from `load()`. Returns `null` when a new scan was needed and `admit`
+ * refused it. Nothing here awaits, so the check, `admit` and the insertion
+ * cannot interleave with another request.
  */
 export function cachedScan(
   key: string,
   load: () => Promise<ServerScan>,
-  opts: { refresh?: boolean; now?: number } = {},
-): Promise<ServerScan> {
-  const now = opts.now ?? Date.now();
+  opts: CachedScanOptions = {},
+): Promise<ServerScan> | null {
+  const clock = opts.now ?? Date.now;
+  const now = clock();
   for (const [k, e] of entries) {
-    if (now - e.at >= SCAN_CACHE_TTL_MS) entries.delete(k);
+    if (!usable(e, now)) entries.delete(k);
   }
   const hit = entries.get(key);
   if (hit && !opts.refresh) return hit.scan;
 
-  const scan = load();
+  if (opts.admit && !opts.admit()) return null;
+
+  let scan: Promise<ServerScan>;
+  try {
+    scan = load();
+  } catch (err) {
+    scan = Promise.reject(err);
+  }
+  const entry: Entry = { scan, startedAt: now, doneAt: null };
   entries.delete(key);
-  entries.set(key, { at: now, scan });
+  entries.set(key, entry);
   while (entries.size > MAX_ENTRIES) {
     const oldest = entries.keys().next().value;
     if (oldest === undefined) break;
     entries.delete(oldest);
   }
-  scan.catch(() => {
-    if (entries.get(key)?.scan === scan) entries.delete(key);
-  });
+  // Only this entry's own outcome counts: a refresh or an eviction may have
+  // replaced it while the scan ran.
+  scan.then(
+    () => {
+      entry.doneAt = clock();
+    },
+    () => {
+      if (entries.get(key) === entry) entries.delete(key);
+    },
+  );
   return scan;
 }
 
