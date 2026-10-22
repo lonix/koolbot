@@ -1631,6 +1631,117 @@ describe("POST /settings/save-section — feature card with its master (#971)", 
   });
 });
 
+describe("a feature page's folded settings reopen after a save or reset (#1301)", () => {
+  const settingsOf = (res: Response): string | null =>
+    parseFlashRedirect(res.headers.get("location")).settings;
+
+  it("asks the feature page to open them after a save", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.cooldown_days"],
+      "value_polls.cooldown_days": "7",
+      no_cascade: "1",
+    });
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("asks for them to open when the save was rejected, so the bad field is seen", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.cooldown_days"],
+      "value_polls.cooldown_days": "bad",
+      no_cascade: "1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("asks for them to open when only some of the keys were saved", async () => {
+    mockConfigSet
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("write failed"));
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.cooldown_days", "polls.default_duration_hours"],
+      "value_polls.cooldown_days": "7",
+      "value_polls.default_duration_hours": "48",
+      no_cascade: "1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Failed",
+    );
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("asks for them to open when nothing was submitted", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+    });
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("carries the request in the reload URL of an AJAX save that flips the feature", async () => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled", "polls.cooldown_days"],
+        "value_polls.enabled": "true",
+        "value_polls.cooldown_days": "7",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { reload?: string };
+    expect(parseFlashRedirect(body.reload ?? null).settings).toBe("open");
+  });
+
+  it("asks for them to open after a per-row reset", async () => {
+    mockConfigGet.mockResolvedValue("0 16 * * 5");
+    const res = await harness.post("/settings/reset", {
+      key: "digest.cron",
+      redirect: "/admin/digest",
+    });
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("asks for them to open after a reset that failed", async () => {
+    mockConfigDelete.mockRejectedValue(new Error("nope"));
+    const res = await harness.post("/settings/reset", {
+      key: "digest.cron",
+      redirect: "/admin/digest",
+    });
+    expect(settingsOf(res)).toBe("open");
+  });
+
+  it("leaves the global Settings page alone", async () => {
+    const save = await harness.post("/settings/save-section", {
+      category: "quotes",
+      keys: ["quotes.max_length"],
+      "value_quotes.max_length": "250",
+      no_cascade: "1",
+    });
+    expect(settingsOf(save)).toBeNull();
+    const reset = await harness.post("/settings/reset", {
+      key: "quotes.max_length",
+    });
+    expect(settingsOf(reset)).toBeNull();
+  });
+
+  it("does not open them after the Enable button, which leaves them folded once the feature is on", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "digest.enabled",
+      value: "true",
+      redirect: "/admin/digest",
+    });
+    expect(settingsOf(res)).toBeNull();
+  });
+});
+
 describe("POST /settings/reload", () => {
   it("re-registers the commands and audits the reload", async () => {
     mockRegisterCommands.mockResolvedValue(undefined);

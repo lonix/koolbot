@@ -1300,6 +1300,57 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Events (past events folded, settings just saved)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "Europe/Oslo",
+        settingRows: [
+          {
+            key: "events.enabled",
+            label: "Events enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled events.",
+            category: "events",
+          },
+          {
+            key: "events.reminder_minutes",
+            label: "Reminder lead time (minutes)",
+            current: 45,
+            defaultValue: 30,
+            type: "number",
+            description: "How long before start the reminder is posted.",
+            category: "events",
+          },
+        ],
+        rows: [
+          {
+            id: "e1",
+            title: "Game night",
+            when: "2099-02-01 20:00",
+            state: "scheduled",
+            channelId: null,
+          },
+          {
+            id: "e2",
+            title: "Last week's quiz",
+            when: "2026-01-01 20:00",
+            state: "ended",
+            channelId: null,
+          },
+        ],
+        flash: {
+          type: "ok",
+          text: "Saved 1 setting in events.",
+          openSettings: true,
+        },
+      }),
+    },
+    {
       name: "Events (running events with End now)",
       html: renderEventsPage({
         ...COMMON,
@@ -2391,6 +2442,37 @@ export function adminPages(): A11yPage[] {
         total: 2,
         page: 1,
         pageSize: 50,
+        settingRows: [
+          {
+            key: "tickets.enabled",
+            label: "Tickets enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Let members open private help channels.",
+            category: "tickets",
+          },
+          {
+            key: "tickets.staff_role_id",
+            label: "Staff role",
+            current: "r1",
+            defaultValue: "",
+            type: "role",
+            description: "Role that sees and handles every ticket.",
+            category: "tickets",
+          },
+          {
+            key: "tickets.transcript_on_close",
+            label: "Save a transcript on close",
+            current: true,
+            defaultValue: true,
+            type: "boolean",
+            description:
+              "Attach a plain-text message log when a ticket closes.",
+            category: "tickets",
+          },
+        ],
+        pickers: { roles: ROLES },
         rows: [
           {
             id: "a".repeat(24),

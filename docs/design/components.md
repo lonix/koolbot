@@ -430,6 +430,12 @@ summarising what is inside) and `div.kb-disclosure__body`. Inline: `details.kb-d
 - The summary must say what is inside, so people can skip it.
 - Never hide something a person must read before acting; that belongs in the Dialog for that action.
 
+**Settings fold (#1301).** A feature page's settings are one `details.kb-disclosure#feature-settings[data-settings-fold]` at the bottom of the page. Its
+summary reads *Settings*, a count badge and a `kb-disclosure__hint` ("2 changed from the default"). It is `open` (and carries `data-fold-forced`) when the
+feature is off, a required value is missing, or a save or reset has just happened; otherwise it is folded, and a script remembers per page whether the
+admin left it open (`localStorage` in try/catch; only a click on the summary counts as a choice). Above it, the page's status line is a
+`div.kb-statusline` of an On/Off badge and `kb-chip`s; a chip for something missing is `a.kb-chip.kb-chip--warn` with an icon, linking to the setting.
+
 ### Dialog
 
 The larger context for an action: its options and consequences, shown at the moment it is taken.
