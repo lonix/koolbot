@@ -385,16 +385,17 @@ function flagRowHtml(
     use = "Not classified yet. Do not remove it on this page’s account.";
   } else if (row.bit === ADMINISTRATOR_BIT) {
     use =
-      "Not used by KoolBot, and not required." +
+      "Not required for the bot's own features, but the bot can only hand out permissions it holds: without Administrator, a Role group cannot grant it (the Admin preset does), and every other permission a Role group grants must be held by the bot's role." +
       (held
-        ? ` Before you remove it, check three things. ${
+        ? ` If you ever remove it, check three things. ${
             lackingWithoutAdmin.length > 0
               ? `The role itself lacks ${boldList(lackingWithoutAdmin)}, which the switched-on features need server-wide: give them first. `
               : "The role itself holds the checked server-wide permissions the switched-on features need. "
           }The permissions marked “Used, not checked on this page” are not verified here, so make sure the role holds the ones you rely on. And channel overwrites that deny something start to apply once Administrator is gone.`
         : "");
   } else {
-    use = '<span class="kb-muted">Not used by KoolBot.</span>';
+    use =
+      "Only needed if a Role group grants it. KoolBot itself does not use it, but the bot can only hand out a permission it holds.";
   }
   return `<tr><th scope="row">${escapeHtml(row.name)}</th><td>${role}</td><td>${use}</td></tr>`;
 }

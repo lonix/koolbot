@@ -7,11 +7,13 @@
  *   feature (names and bits come from `PERM`, not from here);
  * - `used`: the bot's code needs it but the page does not check it yet (posting,
  *   moderation, ...; the posting features are #1254). Each entry says what for;
- * - `unused`: nothing in KoolBot's code needs it from the bot.
+ * - `grant-only`: KoolBot's code does not use it itself. It may still be needed:
+ *   Role groups can grant any Discord permission to a role, and the bot can only
+ *   hand out permissions it holds (server-adoption-planner.ts, "bot-lacks-permission").
+ *   So no flag is ever labelled plain "unused".
  *
- * A flag missing from `FLAG_USE` is `unclassified`, never `unused`: telling an
- * admin "KoolBot does not use this" about a permission it does use would invite
- * them to remove it. `__tests__/services/bot-permission-flags.test.ts` fails when
+ * A flag missing from `FLAG_USE` is `unclassified`: it is never presented as
+ * safe to remove. `__tests__/services/bot-permission-flags.test.ts` fails when
  * discord.js gains a flag that is not classified here.
  */
 
@@ -19,10 +21,12 @@ import { PermissionFlagsBits } from "discord.js";
 import { PERM } from "./bot-permission-registry.js";
 
 export type FlagUse =
-  { kind: "used"; for: string } | { kind: "unused" } | { kind: "unclassified" };
+  | { kind: "used"; for: string }
+  | { kind: "grant-only" }
+  | { kind: "unclassified" };
 
 const used = (what: string): FlagUse => ({ kind: "used", for: what });
-const UNUSED: FlagUse = { kind: "unused" };
+const GRANT_ONLY: FlagUse = { kind: "grant-only" };
 
 const CHANNEL_OVERWRITES =
   "Set in channel overwrites (read-only channels, tickets); Discord lets the bot only pass on permissions it holds.";
@@ -59,29 +63,29 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   ManageGuild: used(
     "Reading the server's onboarding settings during the scan.",
   ),
-  Administrator: UNUSED,
-  CreateInstantInvite: UNUSED,
-  PrioritySpeaker: UNUSED,
-  Stream: UNUSED,
-  SendTTSMessages: UNUSED,
-  ViewGuildInsights: UNUSED,
-  MuteMembers: UNUSED,
-  DeafenMembers: UNUSED,
-  UseVAD: UNUSED,
-  ChangeNickname: UNUSED,
-  ManageEmojisAndStickers: UNUSED,
-  ManageGuildExpressions: UNUSED,
-  UseApplicationCommands: UNUSED,
-  ManageThreads: UNUSED,
-  UseExternalStickers: UNUSED,
-  UseEmbeddedActivities: UNUSED,
-  ViewCreatorMonetizationAnalytics: UNUSED,
-  UseSoundboard: UNUSED,
-  CreateGuildExpressions: UNUSED,
-  UseExternalSounds: UNUSED,
-  SendVoiceMessages: UNUSED,
-  UseExternalApps: UNUSED,
-  BypassSlowmode: UNUSED,
+  Administrator: GRANT_ONLY,
+  CreateInstantInvite: GRANT_ONLY,
+  PrioritySpeaker: GRANT_ONLY,
+  Stream: GRANT_ONLY,
+  SendTTSMessages: GRANT_ONLY,
+  ViewGuildInsights: GRANT_ONLY,
+  MuteMembers: GRANT_ONLY,
+  DeafenMembers: GRANT_ONLY,
+  UseVAD: GRANT_ONLY,
+  ChangeNickname: GRANT_ONLY,
+  ManageEmojisAndStickers: GRANT_ONLY,
+  ManageGuildExpressions: GRANT_ONLY,
+  UseApplicationCommands: GRANT_ONLY,
+  ManageThreads: GRANT_ONLY,
+  UseExternalStickers: GRANT_ONLY,
+  UseEmbeddedActivities: GRANT_ONLY,
+  ViewCreatorMonetizationAnalytics: GRANT_ONLY,
+  UseSoundboard: GRANT_ONLY,
+  CreateGuildExpressions: GRANT_ONLY,
+  UseExternalSounds: GRANT_ONLY,
+  SendVoiceMessages: GRANT_ONLY,
+  UseExternalApps: GRANT_ONLY,
+  BypassSlowmode: GRANT_ONLY,
 };
 
 /** Names as Discord's role editor shows them, where they differ from the flag name. */

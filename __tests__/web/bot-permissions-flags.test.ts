@@ -84,7 +84,7 @@ describe("flag classification", () => {
     }
   });
 
-  it("shows a flag discord.js adds later as unclassified, never as unused", () => {
+  it("shows a flag discord.js adds later as unclassified, never as safe to remove", () => {
     const rows = allFlagRows({
       ...PermissionFlagsBits,
       BrandNewFlag: 1n << 60n,
@@ -100,7 +100,7 @@ describe("flag classification", () => {
     expect(rows.length).toBe(new Set(Object.values(PermissionFlagsBits)).size);
   });
 
-  it("marks what the page checks, and never calls a permission KoolBot posts or moderates with unused", () => {
+  it("marks what the page checks, and never calls a permission KoolBot posts or moderates with grant-only", () => {
     const byKey = new Map(allFlagRows().map((r) => [r.key, r.use.kind]));
     expect(byKey.get("ManageNicknames")).toBe("checked");
     for (const key of [
@@ -118,7 +118,32 @@ describe("flag classification", () => {
     for (const key of ["MentionEveryone", "SendPolls", "ManageGuild"]) {
       expect(byKey.get(key)).toBe("used");
     }
-    expect(byKey.get("CreateInstantInvite")).toBe("unused");
+    expect(byKey.get("CreateInstantInvite")).toBe("grant-only");
+  });
+});
+
+describe("what the page says about flags KoolBot does not use itself", () => {
+  const html = page(report({ serverPermissions: 0n }));
+
+  it("gives every flag that is neither checked nor used the Role group label", () => {
+    const rows = allFlagRows();
+    const grantOnly = rows.filter((r) => r.use.kind === "grant-only");
+    expect(grantOnly.length).toBeGreaterThan(10);
+    for (const r of grantOnly) {
+      if (r.key === "Administrator") continue;
+      expect(rowOf(html, r.name)).toContain(
+        "Only needed if a Role group grants it",
+      );
+    }
+  });
+
+  it("never says a permission is unused or safe to remove, and Administrator names the Role group dependency", () => {
+    expect(html).not.toMatch(
+      /Not used by KoolBot|safe to remove|consider removing/,
+    );
+    const admin = rowOf(html, "Administrator");
+    expect(admin).toContain("cannot grant it");
+    expect(admin).toContain("Role group");
   });
 });
 
@@ -156,7 +181,9 @@ describe("the All Discord permissions list", () => {
     expect(rowOf(html, "Send Messages")).toContain("Has");
     expect(rowOf(html, "Send Messages")).toContain("Used, not checked");
     expect(rowOf(html, "Create Invite")).toContain("Not in the role");
-    expect(rowOf(html, "Create Invite")).toContain("Not used by KoolBot");
+    expect(rowOf(html, "Create Invite")).toContain(
+      "Only needed if a Role group grants it",
+    );
     expect(rowOf(html, "Manage Nicknames")).toContain("Checked in the table");
     expect(html).not.toContain("Administrator covers it");
   });
@@ -171,9 +198,9 @@ describe("the All Discord permissions list", () => {
     expect(rowOf(html, "Manage Channels")).toContain("Has");
     expect(rowOf(html, "Kick Members")).toContain("Administrator covers it");
     const admin = rowOf(html, "Administrator");
-    expect(admin).toContain("not required");
+    expect(admin).toContain("Not required for the bot");
     expect(admin).toContain("<strong>Manage Nicknames</strong>");
-    expect(admin).toContain("Before you remove it");
+    expect(admin).toContain("If you ever remove it");
     expect(admin).toContain("channel overwrites that deny something");
   });
 

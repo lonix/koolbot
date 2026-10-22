@@ -1250,9 +1250,11 @@ Links) are not covered yet.
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
   _checked in the table above_, _used, not checked on this page_ (posting, moderation and
-  the overwrite permissions of read-only channels, each with what for), or _not used by
-  KoolBot_. A permission that is not classified yet (a flag Discord added later) is shown as
-  such, never as unused. Administrator is not required: if the role holds it, the row names
+  the overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
+  (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
+  labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
+  such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
+  Role group cannot grant Administrator (the Admin preset does). If the role holds it, the row names
   the permissions the switched-on features need that the role itself lacks, to be given
   before Administrator is removed, and says to check the permissions that are used but not
   checked here and any channel overwrite that denies something (they apply again once
