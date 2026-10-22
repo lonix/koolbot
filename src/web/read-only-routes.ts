@@ -290,6 +290,7 @@ export const EVENTS_SETTING_KEYS = [
   "events.reminder_minutes",
   "events.recurrence_enabled",
   "events.native.location",
+  "events.native.link_room",
   "events.groups.default_count",
   "events.groups.max_count",
 ] as const;

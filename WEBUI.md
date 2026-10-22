@@ -2849,7 +2849,9 @@ be read, the card shows a notice instead of controls pre-filled with defaults.
 
 The same card holds the native event's location text (`events.native.location`, #1034). Every event is created in the server's native Events list (there is no
 switch any more, #1175); the bot needs the Create Events or Manage Events
-permission, and the page warns when it is missing.
+permission, and the page warns when it is missing. The location text is shown until the event's main voice room is created; with **Link the native event to
+the voice room** (`events.native.link_room`, on by default) the native event then points at that room (the main room only when Groups are on). If Discord
+refuses the change the text stays and the bot retries on the next scan; turn the switch off to keep the text only.
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.
