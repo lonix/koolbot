@@ -155,11 +155,17 @@ describe("GET /bot-permissions", () => {
     const res = await harness.get("/bot-permissions");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Manage Channels");
-    expect(html).toContain("in the category “Event nights”");
-    expect(html).toContain("Event and group channels");
-    expect(html).toContain("make sure the events category does not deny it");
-    expect(html).toContain("1 missing permission affects");
+    expect(html).toContain("How to fix");
+    expect(html).toContain(
+      "Give the bot’s role <strong>Manage Channels</strong>, and make sure the category “Event nights” does not deny it.",
+    );
+    expect(html).toMatch(
+      /<tr class="is-missing"><th scope="row">Manage Channels<\/th><td><span class="kb-perm kb-perm--missing">.*?Missing<\/span><\/td><td>.*?Event nights.*?<\/td><td>.*?Events: Event and group channels/,
+    );
+    // The other permissions the events feature needs are listed as held.
+    expect(html).toMatch(
+      /Manage Nicknames<\/th><td><span class="kb-perm kb-perm--has">/,
+    );
   });
 
   it("says everything is in place when nothing is missing", async () => {
@@ -171,20 +177,22 @@ describe("GET /bot-permissions", () => {
     );
     const html = await (await harness.get("/bot-permissions")).text();
     expect(html).toContain(
-      "Every permission the enabled features need is in place",
+      "All permissions your switched-on features need are in place.",
     );
-    expect(html).not.toContain("Missing permissions</h2>");
+    expect(html).not.toContain("How to fix");
+    expect(html).not.toContain("kb-perm--missing");
   });
 
-  it("does not report a feature that is switched off, only a quiet note", async () => {
+  it("does not report a feature that is switched off, only a Not needed row with a greyed chip", async () => {
     settings = { "reactionroles.enabled": false };
     await start(clientWith({ serverBits: ALL & ~P.ManageRoles }));
     const html = await (await harness.get("/bot-permissions")).text();
-    expect(html).not.toContain("Missing permissions</h2>");
-    expect(html).toContain("Not needed right now");
-    expect(html).toContain("Handing out roles");
-    expect(html).toContain("stays missing whatever is switched on");
-    expect(html).not.toContain("nothing is broken today");
+    expect(html).not.toContain("How to fix");
+    expect(html).not.toContain("kb-perm--missing");
+    expect(html).toContain("Not needed");
+    expect(html).toMatch(
+      /<tr class="is-quiet"><th scope="row">Manage Roles<\/th>.*?kb-perm--quiet.*?Reaction roles: Handing out roles \(off\)/,
+    );
   });
 
   it("says the check is unavailable when the server cannot be read", async () => {
@@ -204,10 +212,9 @@ describe("GET /bot-permissions", () => {
 });
 
 describe("a role the bot cannot hand out is not shown as in place", () => {
-  const inPlace =
-    "<li><strong>Rules</strong>: Granting the acceptance role</li>";
+  const rulesChip = "Rules: Granting the acceptance role";
 
-  it("lists the feature under Missing, not In place, when the role is above the bot", async () => {
+  it("puts the role in a Role position row and a fix step, not as in place, when the role is above the bot", async () => {
     settings = { "rules.enabled": true, "rules.role_id": "55" };
     await start(
       clientWith({
@@ -216,21 +223,30 @@ describe("a role the bot cannot hand out is not shown as in place", () => {
       }),
     );
     const html = await (await harness.get("/bot-permissions")).text();
-    expect(html).toContain("Role above the bot");
-    expect(html).toContain("for the role \u201cStaff\u201d");
-    expect(html).not.toContain(inPlace);
+    expect(html).toMatch(
+      /<tr class="is-missing"><th scope="row">Role position<\/th>.*?Too low.*?Staff.*?Rules: Granting the acceptance role/,
+    );
+    expect(html).toContain(
+      "Move the bot’s role <strong>above</strong> the role “Staff” in Server Settings → Roles.",
+    );
+    // Manage Roles itself is held: that row is not turned red by the role.
+    expect(html).toMatch(
+      /Manage Roles<\/th><td><span class="kb-perm kb-perm--has">/,
+    );
   });
 
-  it("lists it under Could not be checked, not In place, when the role is not found", async () => {
+  it("marks the role position Not checked, not in place, when the role is not found", async () => {
     settings = { "rules.enabled": true, "rules.role_id": "55" };
     await start(clientWith({ serverBits: ALL, roles: [] }));
     const html = await (await harness.get("/bot-permissions")).text();
-    expect(html).toContain("Could not be checked");
-    expect(html).toContain("The configured role could not be found.");
-    expect(html).not.toContain(inPlace);
+    expect(html).toMatch(
+      /Role position<\/th><td><span class="kb-perm kb-perm--unknown">.*?Not checked.*?The configured role could not be found\./,
+    );
+    expect(html).not.toContain("All permissions your switched-on");
+    expect(html).not.toContain("How to fix");
   });
 
-  it("lists it under In place when the role is below the bot", async () => {
+  it("shows the role position as Above when the role is below the bot", async () => {
     settings = { "rules.enabled": true, "rules.role_id": "55" };
     await start(
       clientWith({
@@ -239,7 +255,10 @@ describe("a role the bot cannot hand out is not shown as in place", () => {
       }),
     );
     const html = await (await harness.get("/bot-permissions")).text();
-    expect(html).toContain(inPlace);
+    expect(html).toMatch(
+      /Role position<\/th><td><span class="kb-perm kb-perm--has">.*?Above.*?Fans/,
+    );
+    expect(html).toContain(rulesChip);
   });
 });
 
@@ -271,6 +290,22 @@ describe("the view escapes what Discord and settings supply", () => {
         quiet: [],
         okFeatures: [],
         notes: ["<i>note</i>"],
+        checks: [
+          {
+            feature: {
+              id: "event-channels",
+              area: "A<",
+              feature: "F&",
+              effect: "E",
+              fix: "X",
+            },
+            kind: "permission",
+            enabled: true,
+            outcome: "missing",
+            target: { kind: "category", id: "c", name: "<b>x</b>" },
+            missing: ["Manage Channels"],
+          },
+        ],
       },
     });
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");

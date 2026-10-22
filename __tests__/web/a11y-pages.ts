@@ -51,6 +51,13 @@ import type { CaseView } from "../../src/web/moderation-case-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
+import type {
+  BotPermissionReport,
+  FeatureCheck,
+  FeatureRef,
+  PermissionTarget,
+} from "../../src/services/bot-permission-check.js";
+import { FEATURE_REQUIREMENTS } from "../../src/services/bot-permission-registry.js";
 import { renderRulesPage } from "../../src/web/rules-page.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
@@ -120,6 +127,94 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+/** A bot-permission report from real registry ids, so the matrix joins to the registry. */
+function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
+  const ref = (id: string): FeatureRef => {
+    const r = FEATURE_REQUIREMENTS.find((x) => x.id === id);
+    if (!r) throw new Error(`no registry entry ${id}`);
+    return {
+      id: r.id,
+      area: r.area,
+      feature: r.feature,
+      effect: r.effect,
+      fix: r.fix,
+    };
+  };
+  const server: PermissionTarget = {
+    kind: "server",
+    id: null,
+    name: "Test Guild",
+  };
+  const events: PermissionTarget = {
+    kind: "category",
+    id: "c1",
+    name: "Events",
+  };
+  const check = (
+    id: string,
+    outcome: FeatureCheck["outcome"],
+    target: PermissionTarget | null,
+    enabled = true,
+    missing: string[] = [],
+  ): FeatureCheck => ({
+    feature: ref(id),
+    kind: "permission",
+    enabled,
+    outcome,
+    target,
+    missing,
+  });
+  const base = {
+    available: true,
+    reason: null,
+    fresh: true,
+    problems: [],
+    unknown: [],
+    quiet: [],
+    okFeatures: [],
+    notes: [],
+  };
+  if (kind === "ok") {
+    return {
+      ...base,
+      checks: [
+        check("event-tags", "ok", server),
+        check("event-channels", "ok", events),
+        check("reaction-roles", "ok", server, false),
+      ],
+    };
+  }
+  return {
+    ...base,
+    problems: [
+      {
+        permission: "Manage Nicknames",
+        target: server,
+        features: [ref("event-tags")],
+      },
+    ],
+    unknown: [
+      {
+        feature: ref("voice-rooms"),
+        target: { kind: "category", id: "c2", name: "Voice" },
+        note: "The configured category could not be found.",
+      },
+    ],
+    notes: ["Polls are on but no channel is set."],
+    checks: [
+      check("event-tags", "missing", server, true, ["Manage Nicknames"]),
+      check("event-channels", "ok", events),
+      check("event-moves", "unchecked", null),
+      check("voice-rooms", "unknown", {
+        kind: "category",
+        id: "c2",
+        name: "Voice",
+      }),
+      check("reaction-roles", "ok", server, false),
+    ],
+  };
+}
 
 const MANAGER_CHANNELS: ManagedChannelView[] = [
   {
@@ -2075,30 +2170,14 @@ export function adminPages(): A11yPage[] {
       name: "Bot permissions",
       html: renderBotPermissionsPage({
         ...COMMON,
-        report: {
-          available: true,
-          reason: null,
-          fresh: true,
-          problems: [
-            {
-              permission: "ManageRoles",
-              target: { kind: "server", id: null, name: "Test Guild" },
-              features: [
-                {
-                  id: "rules",
-                  area: "Members",
-                  feature: "Rules acceptance",
-                  effect: "The acceptance role cannot be given.",
-                  fix: "Give the bot Manage Roles.",
-                },
-              ],
-            },
-          ],
-          unknown: [],
-          quiet: [],
-          okFeatures: [],
-          notes: ["Polls are on but no channel is set."],
-        },
+        report: botPermissionReport("mixed"),
+      }),
+    },
+    {
+      name: "Bot permissions (all in place)",
+      html: renderBotPermissionsPage({
+        ...COMMON,
+        report: botPermissionReport("ok"),
       }),
     },
     {
@@ -2114,6 +2193,7 @@ export function adminPages(): A11yPage[] {
           quiet: [],
           okFeatures: [],
           notes: [],
+          checks: [],
         },
       }),
     },

@@ -1181,9 +1181,17 @@ in lockstep and can't drift apart.
 The **Bot Permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
 not have to guess why a feature does nothing. It is read-only and writes nothing
-to Discord. For each missing permission it shows where it is missing (server-wide,
-or in the configured category or channel), which enabled features it affects, what
-stops working and how to fix it. What each feature needs is listed in one place in
+to Discord. When something is missing, the first card is **How to fix**: a numbered
+list with one step per place (one step for everything missing server-wide, one per
+category or channel, one for roles above the bot's role). When nothing is missing it
+is one green line instead. Below it, **Permissions** is a matrix with one row per
+Discord permission, in the order of Discord's role editor: its status (an icon and a
+word: Missing, Not checked, Has), where it applies (server-wide, or the configured
+category or channel) and the features that need it, with switched-off features
+greyed and marked _(off)_. Rows are sorted Missing, Not checked, Has; a permission
+with different results in different places gets one row per result. **Role position**
+is a row of its own for roles the bot must be able to hand out. Permissions only
+switched-off features would use are folded under _Not needed_. What each feature needs is listed in one place in
 the code (`src/services/bot-permission-registry.ts`), and the services that act
 (event group channels, clan tags, Events list sync, member moves, voice rooms) take
 their permission bits and warning texts from the same list. It covers voice
@@ -1199,8 +1207,8 @@ Links) are not covered yet.
   Roles, Manage Nicknames, Create Events) are checked server-wide and shown as such.
 - **Only features in use count.** A feature is listed as affected only while its
   `*.enabled` setting is on and its category or channel is set. A permission that
-  only a switched-off feature would need is shown under _Not needed right now_,
-  not as a problem. An enabled feature with no category set is skipped with a note.
+  only a switched-off feature would need is folded under _Not needed_, not a
+  problem. An enabled feature with no category set is shown as _Not checked_, with a note.
   Role groups have no switch of their own, so they count as in use when the server
   has at least one role group. If a setting cannot be read, the page says the check
   is unavailable instead of treating features as off.
@@ -1208,11 +1216,15 @@ Links) are not covered yet.
   from Discord when the page opens (through the same timeout and rate-limit helpers
   as other Discord calls) and the read is shared for 30 seconds. If Discord cannot
   be reached the page says it is using the bot's cached view; a feature that cannot
-  be checked is listed as _could not be checked_, never as fine.
+  be checked is shown as _Not checked_, never as fine.
 - **Status indicator.** The **Bot Permissions** entry in the sidebar shows a badge
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
+- **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
+  applies new permission bits to the bot's existing role) and a "Show all Discord
+  permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
+  #1303.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
