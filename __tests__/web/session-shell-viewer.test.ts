@@ -138,8 +138,9 @@ describe("session middleware: who is looking (#1317)", () => {
       role: "user",
       scopes: ["member", "host"],
       reasons: { host: ["Event hosts"], staff: [], elevated: false },
-      // No sidebar page is gated by a feature yet, so nothing was read.
-      features: {},
+      // New event (#1305) is the one built page gated by a feature, so
+      // `events.enabled` is read; it is off in this test's config.
+      features: { "events.enabled": false },
     });
     // Nothing leaks past the request.
     expect(currentViewer()).toBeNull();
