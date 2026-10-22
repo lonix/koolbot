@@ -657,6 +657,39 @@ describe("bounded numbers and managed keys on the write routes (#1304)", () => {
   });
 });
 
+// The tier string is hidden from the All settings table (it has its own
+// editor), but it is still an ordinary stored setting: exported, imported and
+// still accepted by the write routes (#1428).
+describe("leaderboard tiers are hidden from All settings but not from export and import (#1428)", () => {
+  const FREE_ROLE = "888888888888888888";
+
+  it("still exports a stored tier string", async () => {
+    mockConfigGetAll.mockResolvedValue([
+      { key: "leaderboard_roles.tiers", value: `1:${FREE_ROLE}` },
+    ]);
+    const body = await (await harness.get("/settings/export")).text();
+    expect(body).toContain("leaderboard_roles.tiers");
+    expect(body).toContain(FREE_ROLE);
+  });
+
+  it("still imports a tier string, with the same role checks", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: `leaderboard_roles.tiers: "1:${FREE_ROLE}"`,
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0]).toContain("leaderboard_roles.tiers");
+    expect(mockConfigSet.mock.calls[0]).toContain(`1:${FREE_ROLE}`);
+  });
+
+  it("still saves a tier string through /settings/set (the tier editor's own route is separate)", async () => {
+    await harness.post("/settings/set", {
+      key: "leaderboard_roles.tiers",
+      value: `1:${FREE_ROLE}`,
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("POST /settings/reset", () => {
   it("does not re-arm when resetting a schedule that was never overridden (#976)", async () => {
     await harness.post("/settings/reset", { key: "digest.cron" });
