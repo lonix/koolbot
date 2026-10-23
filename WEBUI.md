@@ -2821,11 +2821,11 @@ the host panel (shown for every open event; the form only for an `active` one, a
 event says it can be ended once it has started) and an **End now** control on every
 `active` row of the Events table (admin only). Both are one small form with a required tick
 box, "I want to end this event now", that the server checks again: a post without it changes
-nothing, so the confirmation holds without scripts. An event with group channels also offers
-"Move everyone in the group channels back to the main channel first", ticked by default. With it
-ticked, a manual end moves people first; unticked, it ends the event without moving anyone, and
-a group channel that still holds someone is left (never deleted while occupied) and goes within a
-minute of the last person leaving.
+nothing, so the confirmation holds without scripts. An event with group channels needs no extra choice: a host end
+always moves everyone in a group channel back to the main channel first (there is no option to skip it). A
+group channel that still holds someone afterwards (for example when the bot may not move members) is left
+(never deleted while occupied) and goes within a minute of the last person leaving. The main channel follows
+the usual grace period after the end, once it is empty.
 Only an `active` event can be ended: a scheduled one (not started) and a cancelled one are
 refused with a message, and an event that has already ended answers "already ended" and
 changes nothing (pressed twice, or by two people, or while the scheduled end runs: exactly
