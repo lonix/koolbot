@@ -50,6 +50,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
             ? "UTC"
             : fallback,
       getNumber: async (_key: string, fallback: number) => fallback,
+      getNumberStrict: async (_key: string, fallback: number) => fallback,
       getBoolean: async () => false,
       getBooleanStrict: async (key: string) =>
         key === "events.enabled" ? eventsEnabled : false,

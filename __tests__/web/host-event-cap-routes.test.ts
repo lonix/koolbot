@@ -31,6 +31,17 @@ const mockCreateImpromptu =
   jest.fn<(input: unknown, now?: Date) => Promise<unknown>>();
 const mockCount = jest.fn<(guild: string, user: string) => Promise<number>>();
 let cap = 0;
+let capReadFails = false;
+const mockIsAdministrator =
+  jest.fn<(user: string, guild: string) => Promise<boolean>>();
+const actualPermissions =
+  await import("../../src/services/permissions-service.js");
+jest.unstable_mockModule("../../src/services/permissions-service.js", () => ({
+  ...actualPermissions,
+  PermissionsService: {
+    getInstance: (): unknown => ({ isAdministrator: mockIsAdministrator }),
+  },
+}));
 
 const actualAudit = await import("../../src/web/audit.js");
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
@@ -49,8 +60,12 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
           : key === "events.timezone"
             ? "UTC"
             : fallback,
-      getNumber: async (key: string, fallback: number) =>
-        key === "events.max_active_per_host" ? cap : fallback,
+      getNumber: async (_key: string, fallback: number) => fallback,
+      getNumberStrict: async (key: string, fallback: number) => {
+        if (key !== "events.max_active_per_host") return fallback;
+        if (capReadFails) throw new Error("db down");
+        return cap;
+      },
       getBoolean: async () => false,
       getBooleanStrict: async (key: string) => key === "events.enabled",
       registerReloadCallback: jest.fn(),
@@ -132,6 +147,8 @@ const now = { title: "Right now", when: "now" };
 beforeEach(() => {
   jest.clearAllMocks();
   cap = 0;
+  capReadFails = false;
+  mockIsAdministrator.mockResolvedValue(false);
   mockCount.mockResolvedValue(0);
   current = createTestSession({
     discordUserId: HOST,
@@ -234,6 +251,63 @@ describe("events.max_active_per_host", () => {
     });
     expect((await flashOf(planned)).type).toBe("ok");
     expect(mockCount).not.toHaveBeenCalled();
+  });
+
+  it("never limits an administrator on a user-role (/me) session", async () => {
+    cap = 1;
+    mockCount.mockResolvedValue(9);
+    mockIsAdministrator.mockResolvedValue(true);
+    expect((await flashOf(planned)).type).toBe("ok");
+    expect(mockIsAdministrator).toHaveBeenCalledWith(HOST, GUILD);
+    expect(mockCount).not.toHaveBeenCalled();
+  });
+
+  it("applies the limit when the Administrator check fails", async () => {
+    cap = 1;
+    mockCount.mockResolvedValue(1);
+    mockIsAdministrator.mockRejectedValue(new Error("discord down"));
+    const flash = await flashOf(planned);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("limit is 1");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not ask Discord when there is no limit", async () => {
+    cap = 0;
+    await flashOf(planned);
+    expect(mockIsAdministrator).not.toHaveBeenCalled();
+  });
+
+  it("refuses and creates nothing when the limit cannot be read", async () => {
+    capReadFails = true;
+    const flash = await flashOf(planned);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Could not check the limit");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+    expect(mockCreateImpromptu).not.toHaveBeenCalled();
+  });
+
+  it("lets only one of two overlapping requests through at a limit of one", async () => {
+    cap = 1;
+    let open = 0;
+    mockCount.mockImplementation(async () => {
+      const seen = open;
+      // Yield so an unserialised second request would read the same count.
+      await new Promise((r) => setTimeout(r, 20));
+      return seen;
+    });
+    mockCreateEvent.mockImplementation(async (input) => {
+      await new Promise((r) => setTimeout(r, 20));
+      open += 1;
+      return {
+        _id: EVENT_ID,
+        startTime: (input as { startTime: Date }).startTime,
+      };
+    });
+    const [a, b] = await Promise.all([flashOf(planned), flashOf(planned)]);
+    expect([a.type, b.type].sort()).toEqual(["err", "ok"]);
+    expect(mockCreateEvent).toHaveBeenCalledTimes(1);
+    expect([a, b].find((f) => f.type === "err")?.msg).toContain("limit is 1");
   });
 
   it("applies a changed setting to the next attempt without a restart", async () => {

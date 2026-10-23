@@ -1747,8 +1747,11 @@ from the form), the scope is checked on every request, and the host reaches only
 have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
 and Upcoming; ended and cancelled events do not count, nor do events an admin adopted. A host at the limit who tries **New event** or
 **Start now** (a Now event) gets a plain message naming the limit, nothing is created, and the refusal is audited as `event.host.limit`.
-Administrators are never limited. The setting is read at each attempt, so a change applies at once with no restart. A host cannot make a
-repeating series, so the limit never meets one.
+Administrators are never limited: a person who holds the Administrator permission is exempt even when they signed in through `/me`, which is
+checked live with Discord only when a limit is set; if that check cannot be made they are treated as not an administrator and the limit
+applies. The setting is read at each attempt, so a change applies at once with no restart; if it cannot be read, the attempt is refused
+and nothing is created, rather than treated as no limit. Counting and creating run one at a time per host, so two overlapping requests
+(a double click, two tabs) cannot both pass the limit. A host cannot make a repeating series, so the limit never meets one.
 
 **Your events** (#1319) is the home of the Hosting section, at `/me/events`. It lists the events the signed-in person created, never anyone
 else's (the query is filtered on the session's server and user, an admin session included): **Live now**, **Upcoming** with **Edit** and
