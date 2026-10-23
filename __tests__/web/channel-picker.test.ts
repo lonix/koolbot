@@ -492,6 +492,76 @@ describe("script", () => {
       expect(vars(dom).y).toBe("60px");
     });
 
+    it("scrolls the selected row into view using the cut list height, not the old one", () => {
+      const dom = mount(MIXED);
+      const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+      const pop = $(dom, ".kb-picker__pop");
+      layout(dom, 400);
+      const calls: Array<{ row: string; cap: string }> = [];
+      for (const r of dom.window.document.querySelectorAll<HTMLElement>(
+        ".kb-picker__opt",
+      )) {
+        r.scrollIntoView = () => {
+          calls.push({
+            row: r.id,
+            cap: pop.style.getPropertyValue("--kb-picker-list-h"),
+          });
+        };
+      }
+      rect(dom, trig, { left: 10, top: 190, bottom: 226 });
+      trig.click();
+      // The stored (missing) row is last in the list; it is revealed last, at the 78px height.
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[calls.length - 1]).toEqual({
+        row: "kb-picker-1-list-6",
+        cap: "78px",
+      });
+      // A filter changes the height again: the active row is revealed after the new placement.
+      calls.length = 0;
+      type(dom, "scratch");
+      expect(calls[calls.length - 1].row).toBe("kb-picker-1-list-3");
+      expect(calls[calls.length - 1].cap).toBe(
+        pop.style.getPropertyValue("--kb-picker-list-h"),
+      );
+      calls.length = 0;
+      dom.window.dispatchEvent(new dom.window.Event("resize"));
+      expect(calls[calls.length - 1].row).toBe("kb-picker-1-list-3");
+    });
+
+    it("leaves every key to an input method that is composing", () => {
+      const dom = mount(MIXED);
+      const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+      trig.click();
+      const inp = $<HTMLInputElement>(dom, ".kb-picker__search input");
+      type(dom, "lob");
+      for (const k of [
+        "Enter",
+        "Escape",
+        "ArrowDown",
+        "ArrowUp",
+        "Home",
+        "End",
+        "Tab",
+      ]) {
+        for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+          const ev = new dom.window.KeyboardEvent("keydown", {
+            key: k,
+            bubbles: true,
+            cancelable: true,
+            ...init,
+          });
+          inp.dispatchEvent(ev);
+          expect(ev.defaultPrevented).toBe(false);
+        }
+      }
+      expect($(dom, ".kb-picker__pop").hidden).toBe(false);
+      expect(posted(dom)).toBe("77");
+      expect(dom.window.document.activeElement).toBe(inp);
+      // The same keys work once composition is over.
+      key(dom, inp, "Enter");
+      expect(posted(dom)).toBe("3");
+    });
+
     it("scrolling the list itself does not move the menu or reset the list", () => {
       const dom = mount(MIXED);
       const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");

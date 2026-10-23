@@ -222,7 +222,11 @@ export const CHANNEL_PICKER_SCRIPT =
   "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
   "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
   "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);" +
-  "if(rows[k].scrollIntoView)rows[k].scrollIntoView({block:'nearest'})}" +
+  "reveal()}" +
+  // Scrolls the active row into the visible part of the list. `place()` runs it
+  // again after it has set the list's height, so a row that was in view at the
+  // old height is not left outside the cut one.
+  "function reveal(){var r=rows[act];if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
   "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
   "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
   "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
@@ -246,7 +250,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "if(h>room){var cap=Math.max(64,room-over);pop.style.setProperty('--kb-picker-list-h',cap+'px');h=over+cap}" +
   "var y=down?r.bottom+4:r.top-4-h;" +
   "pop.style.setProperty('--kb-picker-x',Math.max(0,Math.min(r.left,window.innerWidth-w))+'px');" +
-  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px');ul.scrollTop=top0}" +
+  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px');ul.scrollTop=top0;reveal()}" +
   "function onScroll(e){var t=e.target;if(!(t&&t.nodeType&&pop.contains(t)))place()}" +
   "function close(back){if(!open)return;open=false;pop.hidden=true;box.appendChild(pop);" +
   "window.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',place);" +
@@ -261,6 +265,8 @@ export const CHANNEL_PICKER_SCRIPT =
   "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();show()}});" +
   "inp.addEventListener('input',filter);" +
   "inp.addEventListener('keydown',function(e){var m=e.key;" +
+  // An input method is composing (Enter confirms the composition, Escape cancels it): leave every key to it.
+  "if(e.isComposing||e.keyCode===229)return;" +
   "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
   "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
   "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(true)});" +
