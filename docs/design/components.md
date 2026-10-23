@@ -175,10 +175,11 @@ Numbers that cannot be wrong (#1304): a stepper for small ranges, preset duratio
 
 - The stepper is `span.kb-stepper[data-stepper]` with the box (`name` `value_<key>`, `required`, `data-min`, `data-max`) between two
   `button[type=button][data-step]` elements (`aria-label` "Decrease/Increase <setting>"). The buttons are `hidden` until the script runs.
-  They are disabled at the bounds, re-checked on every `input` and `change` and after the section's master changes, since the cascade script
-  only re-enables inputs. A stored value outside the range is shown as it is, never clamped on render.
+  The focus ring is on `.kb-stepper:focus-within`, since the wrapper clips an outline on its children. They are disabled at the bounds,
+  re-checked on every `input` and `change` and after the section's master changes, since the cascade script only re-enables inputs. A stored value outside the range is shown as it is, never clamped on render.
 - Presets are `div.kb-duration[data-duration]` → a `kb-segmented` radiogroup (`name` `preset_<key>`, `Custom…` last, `aria-labelledby` the row
-  name), `span[data-duration-custom]` with the box (`name` `value_<key>`, not `required`, `aria-label` "Custom <setting> in minutes") and
+  name), `span[data-duration-custom]` with the box (`name` `value_<key>`; no `pattern` and not `required` in the markup, the script makes it
+  required while Custom… is ticked; `aria-label` "Custom <setting> in minutes") and
   `span.kb-unit`. A numeric preset wins over the box; `custom` or no radio means the box. The script hides the wrapper unless Custom… is
   ticked and copies a ticked preset into the box, so a hidden box never holds a number that blocks the submit. No JavaScript: the box stays
   visible next to Custom….

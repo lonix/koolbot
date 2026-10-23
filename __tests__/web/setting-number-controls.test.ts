@@ -8,6 +8,7 @@
  * posts is what the screen shows.
  */
 import { describe, it, expect } from "@jest/globals";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import {
   defaultConfig,
@@ -205,6 +206,38 @@ describe("without JavaScript", () => {
         (d.querySelector("[data-duration-input]") as HTMLInputElement).required,
       ).toBe(false);
     }
+  });
+
+  it("has no pattern on the custom box, so a stray 1e3 cannot block a ticked preset; Custom… with it is refused", () => {
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${durationHtml(45)}</form></body>`,
+    );
+    const form = dom.window.document.querySelector("form") as HTMLFormElement;
+    const box = form.querySelector("[data-duration-input]") as HTMLInputElement;
+    expect(box.hasAttribute("pattern")).toBe(false);
+    box.value = "1e3";
+    (
+      form.querySelector('input[type=radio][value="15"]') as HTMLInputElement
+    ).checked = true;
+    expect(form.checkValidity()).toBe(true);
+    const read = (): unknown =>
+      readSettingField(
+        Object.fromEntries(
+          [...new dom.window.FormData(form).entries()].map(([k, v]) => [
+            k,
+            String(v),
+          ]),
+        ),
+        REMINDER,
+      );
+    expect(read()).toBe("15");
+    (
+      form.querySelector(
+        'input[type=radio][value="custom"]',
+      ) as HTMLInputElement
+    ).checked = true;
+    expect(read()).toBe("1e3");
+    expect(coerceConfigValue(REMINDER, read(), 45).ok).toBe(false);
   });
 
   it("stored 45, box cleared, preset 15 ticked: the form is valid and the server reads 15; Custom… with an empty box is refused", () => {
@@ -448,6 +481,47 @@ const barText = (dom: JSDOM): string =>
   q(dom, "[data-savebar-text]").textContent ?? "";
 const customWrap = (dom: JSDOM): HTMLElement =>
   q(dom, "[data-duration-custom]");
+
+describe("the script still validates the digit shape of the box without a pattern", () => {
+  it("flags non-digits and out-of-range numbers on input, and clears the flag when a preset is ticked", () => {
+    const dom = mount(45);
+    const box = q<HTMLInputElement>(dom, "[data-duration-input]");
+    box.value = "1e3";
+    box.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    expect(box.validity.valid).toBe(false);
+    box.value = "10081";
+    box.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    expect(box.validity.valid).toBe(false);
+    tickRadio(dom, "15");
+    expect(q<HTMLFormElement>(dom, "form").checkValidity()).toBe(true);
+  });
+});
+
+describe("the stepper keeps its pattern", () => {
+  it("is always visible, required and meant to hold a number, so the pattern is its own validation", () => {
+    const d = doc(renderStepper(`value_${STEP_KEY}`, 2, STEP_BOUNDS, "Groups"));
+    expect(
+      (d.querySelector("input") as HTMLInputElement).getAttribute("pattern"),
+    ).toBe("[0-9]*");
+  });
+});
+
+describe("the stepper's focus ring", () => {
+  const css = readFileSync(
+    new URL("../../docs/design/kb.css", import.meta.url),
+    "utf8",
+  );
+
+  it("sits on the clipping wrapper, not on the input or a button inside it", () => {
+    expect(css).toMatch(/\.kb-stepper \{[^}]*overflow: hidden/);
+    expect(css).toMatch(
+      /\.kb-stepper:focus-within \{ outline: 2px solid var\(--focus\); outline-offset: 2px; \}/,
+    );
+    expect(css).toMatch(
+      /\.kb-stepper input:focus-visible, \.kb-stepper button:focus-visible \{ outline: none; \}/,
+    );
+  });
+});
 
 describe("preset durations in the page", () => {
   it("hides the box while a preset is ticked and shows it for Custom…", () => {

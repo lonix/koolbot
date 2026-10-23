@@ -334,6 +334,11 @@ export function pickPreset(
  *   would produce (`readSettingField`).
  * - A stored value that is not a preset (an old 45, or one outside the range)
  *   ticks Custom… and shows in the box, posting unchanged.
+ * - The box has no `pattern`: a pattern is native validation that applies
+ *   whether or not a preset is ticked, so without JavaScript a stray `1e3` in
+ *   the box would block a form that posts the ticked preset. `NUMBER_INPUT_SCRIPT`
+ *   checks the digit shape itself and the server refuses a malformed Custom
+ *   value (`coerceConfigValue`).
  * - The script hides the box's wrapper unless Custom… is ticked; the save bar
  *   treats a hidden control as inactive.
  */
@@ -369,7 +374,7 @@ export function renderDurationPresets(
     group +
     `<span class="kb-duration__custom" data-duration-custom>` +
     `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
-    ` inputmode="numeric" autocomplete="off" pattern="[0-9]*" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
+    ` inputmode="numeric" autocomplete="off" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
     ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
     `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
     `</div>`

@@ -455,6 +455,9 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-stepper--sm { height: 1.9rem; }
 .kb-stepper--sm input { width: 2.5rem; font-size: var(--type-description-size); }
 .kb-stepper button[hidden] { display: none; }
+/* The wrapper clips (overflow: hidden), so the ring sits on it rather than on the input or a button. */
+.kb-stepper:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kb-stepper input:focus-visible, .kb-stepper button:focus-visible { outline: none; }
 .kb-duration { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .kb-duration [hidden] { display: none; }
 .kb-unit { font-size: var(--type-description-size); color: var(--muted); }
