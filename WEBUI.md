@@ -1408,7 +1408,9 @@ two channels at startup. The lock-down follows Discord's rule for channel overwr
 Manage Roles _in the channel_, and every permission it allows or denies there (including Send
 Messages in Threads and the thread-creation permissions) must be held server-wide or on the channel's
 category, unless the bot has a Manage Roles override on the channel itself, which waives that second
-part. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
+part (when Manage Roles is missing, or the override waives the rest, the matrix lists only Manage Roles for it,
+never the unevaluated permissions as "Has"). The weekly announcement is checked per section (stats, accolades, quote of the week,
+poll turnout), each only while its own switches are on. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
 moderation, moderation cases, the update check), and anti-raid alerts only while the moderation log
 is on. A configured channel that is a category, a forum or a thread (or not found) is shown as
 _Not checked_; threads are not checked because they need Send Messages in Threads and are not in

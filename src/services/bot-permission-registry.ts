@@ -391,22 +391,56 @@ const noticesRequirements = managedChannelRequirements({
   votes: false,
 });
 
+/**
+ * The weekly voice announcement posts four independent sections, each behind its
+ * own switches (`voice-channel-announcer.ts`); a section whose switches are off
+ * returns without sending, so each is its own requirement. All four send plain
+ * text, so View Channel and Send Messages.
+ */
+const weeklyAnnouncementRequirements: FeatureRequirement[] = (
+  [
+    {
+      id: "stats",
+      what: "voice stats",
+      include: "voicetracking.announcements.include_voice_stats",
+      also: [],
+    },
+    {
+      id: "accolades",
+      what: "accolades",
+      include: "voicetracking.announcements.include_accolades",
+      also: ["achievements.enabled", "achievements.announcements.enabled"],
+    },
+    {
+      id: "quote",
+      what: "quote of the week",
+      include: "voicetracking.announcements.include_quote_of_week",
+      also: ["quotes.enabled"],
+    },
+    {
+      id: "polls",
+      what: "poll turnout",
+      include: "voicetracking.announcements.include_poll_turnout",
+      also: ["polls.participation.enabled"],
+    },
+  ] as const
+).map((section) => ({
+  id: `voice-weekly-${section.id}`,
+  area: "Voice stats",
+  feature: `Weekly announcement: ${section.what}`,
+  scope: "channel",
+  targetType: "guild-text",
+  needs: [PERM.viewChannel, PERM.sendMessages],
+  enabledKey: "voicetracking.announcements.enabled",
+  alsoKeys: ["voicetracking.enabled", section.include, ...section.also],
+  targetKey: "voicetracking.announcements.channel_id",
+  effect: `The weekly ${section.what} post is not sent. It logs an error in the bot's log only.`,
+  fix: "Give the bot's role View Channel and Send Messages, and make sure the announcement channel does not deny them.",
+}));
+
 /** Posting features that are not a managed channel (#1254): each sends plain messages to one configured channel. */
 const postingRequirements: FeatureRequirement[] = [
-  {
-    id: "voice-weekly-announcements",
-    area: "Voice stats",
-    feature: "Weekly voice-activity announcement",
-    scope: "channel",
-    targetType: "guild-text",
-    needs: [PERM.viewChannel, PERM.sendMessages],
-    enabledKey: "voicetracking.announcements.enabled",
-    alsoKeys: ["voicetracking.enabled"],
-    targetKey: "voicetracking.announcements.channel_id",
-    effect:
-      "The weekly stats, accolades, quote and poll posts are not sent. Each part logs an error in the bot's log only.",
-    fix: "Give the bot's role View Channel and Send Messages, and make sure the announcement channel does not deny them.",
-  },
+  ...weeklyAnnouncementRequirements,
   {
     id: "raid-alerts",
     area: "Moderation",
@@ -650,16 +684,22 @@ export interface OverwriteGrantHolder {
 export function missingOverwriteGrant(
   needs: readonly PermissionNeed[],
   has: OverwriteGrantHolder,
-): string[] {
+): { missing: string[]; assessed: string[] } {
   const [manageRoles, ...grants] = needs;
   if (!has.inChannel(manageRoles.bit)) {
-    // Without Manage Roles nothing can be edited, so name only that.
-    return [manageRoles.name];
+    // Without Manage Roles nothing can be edited: the grants are not assessed.
+    return { missing: [manageRoles.name], assessed: [manageRoles.name] };
   }
-  if (has.exempt) return [];
-  return grants
-    .filter((n) => !has.inGuild(n.bit) && !has.inParent(n.bit))
-    .map((n) => n.name);
+  if (has.exempt) {
+    // The exemption waives the grants: they are neither held nor missing.
+    return { missing: [], assessed: [manageRoles.name] };
+  }
+  return {
+    missing: grants
+      .filter((n) => !has.inGuild(n.bit) && !has.inParent(n.bit))
+      .map((n) => n.name),
+    assessed: needs.map((n) => n.name),
+  };
 }
 
 /**

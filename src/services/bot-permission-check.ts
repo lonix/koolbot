@@ -102,6 +102,13 @@ export interface FeatureCheck {
   target: PermissionTarget | null;
   /** The permission names (or `ROLE_ABOVE_BOT`) that are missing there. */
   missing: string[];
+  /**
+   * The permission names this check actually evaluated, when it did not
+   * evaluate all of the entry's needs (a lock-down whose grants are waived by an
+   * overwrite exemption, or not reached because Manage Roles is missing). The
+   * matrix shows only these; absent means every need was evaluated.
+   */
+  assessed?: string[];
 }
 
 export interface BotPermissionReport {
@@ -532,6 +539,7 @@ export async function checkBotPermissions(
       }
       const feature = ref(r);
       let missing: string[] | null = null;
+      let assessed: string[] | undefined;
       let why = "";
       if (!me) {
         why = "The bot's own membership could not be read.";
@@ -562,7 +570,7 @@ export async function checkBotPermissions(
             r.scope === "guild" || !channel
               ? me.permissions
               : me.permissionsIn(channel);
-          missing =
+          const grant =
             r.overwriteGrant && channel
               ? missingOverwriteGrant(r.needs, {
                   inChannel: (bit) => perms.has(bit),
@@ -576,7 +584,11 @@ export async function checkBotPermissions(
                   },
                   exempt: hasManageRolesOverwrite(me, channel),
                 })
-              : missingNeeds(r, (bit) => perms.has(bit));
+              : null;
+          missing = grant
+            ? grant.missing
+            : missingNeeds(r, (bit) => perms.has(bit));
+          assessed = grant?.assessed;
         } catch (err) {
           logger.warn("Bot permission check: permissions unreadable:", err);
           why = "The bot's permissions could not be read.";
@@ -594,6 +606,7 @@ export async function checkBotPermissions(
               : "missing",
         target,
         missing: missing ?? [],
+        ...(assessed ? { assessed } : {}),
       });
       if (missing === null) {
         if (inUse) unknown.push({ feature, target, note: why });

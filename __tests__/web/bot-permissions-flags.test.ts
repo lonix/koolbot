@@ -8,6 +8,7 @@ import { PermissionFlagsBits } from "discord.js";
 import {
   allFlagRows,
   FLAG_USE,
+  REGISTRY_NAMES,
 } from "../../src/services/bot-permission-flags.js";
 import type {
   BotPermissionReport,
@@ -72,7 +73,7 @@ function rowOf(html: string, name: string): string {
 
 describe("flag classification", () => {
   it("classifies every discord.js permission flag (a new flag must be added to FLAG_USE)", () => {
-    const registryBits = new Set(Object.values(PERM).map((p) => p.bit));
+    const registryBits = new Set(REGISTRY_NAMES.keys());
     const unclassified = allFlagRows().filter(
       (r) => r.use.kind === "unclassified",
     );
@@ -110,6 +111,10 @@ describe("flag classification", () => {
       "ReadMessageHistory",
       "ManageMessages",
       "PinMessages",
+      // Named by the lock-down entry, which has no PERM entry for them.
+      "SendMessagesInThreads",
+      "CreatePublicThreads",
+      "CreatePrivateThreads",
     ]) {
       expect(byKey.get(key)).toBe("checked");
     }

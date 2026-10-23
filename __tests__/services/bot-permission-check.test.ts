@@ -1210,7 +1210,7 @@ describe("channel-posting features (#1254)", () => {
       "Send Messages",
     ]);
     // ...except for the announcer, which refuses a voice channel.
-    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-announcements"]);
+    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-stats"]);
   });
 
   it("shows a configured thread as could not check, with the reason, never ok", async () => {
@@ -1374,6 +1374,26 @@ describe("channel-posting features (#1254)", () => {
         outcome: "missing",
         missing: ["Manage Roles"],
       });
+      // The grants were not reached, so the check says it assessed only Manage Roles.
+      expect(
+        report.checks.find((x) => x.feature.id === "notices-lock")?.assessed,
+      ).toEqual(["Manage Roles"]);
+    });
+
+    it("records which needs it assessed: all, or only Manage Roles when the exemption waives the rest", async () => {
+      const assessedOf = (
+        r: Awaited<ReturnType<typeof run>>,
+      ): string[] | undefined =>
+        r.checks.find((x) => x.feature.id === "notices-lock")?.assessed;
+      const full = await runPost({ channels: [text("n")] });
+      expect(assessedOf(full)).toContain("Create Public Threads");
+      const waived = await runPost({
+        serverBits: ALL,
+        channels: [
+          { ...text("n"), overwrites: [{ id: "bot-1", allow: P.ManageRoles }] },
+        ],
+      });
+      expect(assessedOf(waived)).toEqual(["Manage Roles"]);
     });
   });
 
@@ -1389,7 +1409,7 @@ describe("channel-posting features (#1254)", () => {
       channels: [text("a", TEXT, ChannelType.GuildAnnouncement)],
     });
     expect(ids(report.okFeatures)).toEqual(["log-cron"]);
-    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-announcements"]);
+    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-stats"]);
   });
 
   it("needs both voice tracking and the announcement switch for the weekly announcer", async () => {
@@ -1402,7 +1422,59 @@ describe("channel-posting features (#1254)", () => {
       channels: [text("a", bits(P.ViewChannel))],
     });
     expect(report.problems).toEqual([]);
-    expect(unknownIds(report.quiet)).toEqual(["voice-weekly-announcements"]);
+    expect(unknownIds(report.quiet)).toEqual([
+      "voice-weekly-accolades",
+      "voice-weekly-polls",
+      "voice-weekly-quote",
+      "voice-weekly-stats",
+    ]);
+  });
+
+  it("only checks the weekly announcement sections that would be sent", async () => {
+    const channels = [text("a", bits(P.ViewChannel))];
+    const base = {
+      "voicetracking.enabled": true,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "a",
+    };
+    const sections = {
+      "voicetracking.announcements.include_voice_stats": false,
+      "voicetracking.announcements.include_accolades": false,
+      "voicetracking.announcements.include_quote_of_week": false,
+      "voicetracking.announcements.include_poll_turnout": false,
+    };
+    // Every section switched off: nothing is sent, so nothing is a problem.
+    settings = { ...base, ...sections, "quotes.enabled": true };
+    let report = await run({ channels });
+    expect(report.problems).toEqual([]);
+    expect(report.unknown).toEqual([]);
+    // One section on, with its own producer switches.
+    settings = {
+      ...base,
+      ...sections,
+      "voicetracking.announcements.include_accolades": true,
+      "achievements.enabled": true,
+      "achievements.announcements.enabled": false,
+    };
+    report = await run({ channels });
+    expect(report.problems).toEqual([]);
+    settings["achievements.announcements.enabled"] = true;
+    report = await run({ channels });
+    expect(report.problems).toHaveLength(1);
+    expect(ids(report.problems[0].features)).toEqual([
+      "voice-weekly-accolades",
+    ]);
+    // The quote and poll sections follow quotes and poll participation.
+    settings = {
+      ...base,
+      ...sections,
+      "voicetracking.announcements.include_quote_of_week": true,
+      "voicetracking.announcements.include_poll_turnout": true,
+      "quotes.enabled": true,
+      "polls.participation.enabled": false,
+    };
+    report = await run({ channels });
+    expect(ids(report.problems[0].features)).toEqual(["voice-weekly-quote"]);
   });
 
   it("says could not check when the configured channel is not found", async () => {

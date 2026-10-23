@@ -4,7 +4,7 @@
  *
  * Three kinds of flag:
  * - `checked`: in `bot-permission-registry.ts`, so the page checks it per
- *   feature (names and bits come from `PERM`, not from here);
+ *   feature (names and bits come from the registry, not from here);
  * - `used`: the bot's code needs it but the page does not check it yet (moderation,
  *   the posting channels that are not covered yet, ...). Each entry says what for;
  * - `grant-only`: KoolBot's code does not use it itself. It may still be needed:
@@ -18,7 +18,7 @@
  */
 
 import { PermissionFlagsBits } from "discord.js";
-import { PERM } from "./bot-permission-registry.js";
+import { FEATURE_REQUIREMENTS, PERM } from "./bot-permission-registry.js";
 
 export type FlagUse =
   | { kind: "used"; for: string }
@@ -39,9 +39,6 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   BanMembers: used("/ban."),
   ViewAuditLog: used("Reading who changed a channel."),
   ManageWebhooks: used("Reading the server's webhooks during the scan."),
-  CreatePublicThreads: used(CHANNEL_OVERWRITES),
-  CreatePrivateThreads: used(CHANNEL_OVERWRITES),
-  SendMessagesInThreads: used(CHANNEL_OVERWRITES),
   RequestToSpeak: used(CHANNEL_OVERWRITES),
   UseExternalEmojis: used(
     "Only when a reaction or message uses a custom emoji from another server.",
@@ -107,9 +104,17 @@ export interface FlagRow {
   use: FlagUse | { kind: "checked" };
 }
 
-const REGISTRY_NAMES = new Map<bigint, string>(
-  Object.values(PERM).map((p) => [p.bit, p.name] as const),
-);
+/**
+ * Every permission the page checks: `PERM`, plus any need of a registry entry
+ * (a requirement may name a permission that has no `PERM` entry), so the list
+ * cannot call a permission "not checked" that the matrix reports on.
+ */
+export const REGISTRY_NAMES = new Map<bigint, string>([
+  ...Object.values(PERM).map((p) => [p.bit, p.name] as const),
+  ...FEATURE_REQUIREMENTS.flatMap((r) =>
+    r.needs.map((n) => [n.bit, n.name] as const),
+  ),
+]);
 
 /** One row per distinct permission bit (discord.js keeps deprecated aliases for some), in discord.js order. */
 export function allFlagRows(

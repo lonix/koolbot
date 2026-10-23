@@ -135,6 +135,10 @@ export function buildMatrix(report: BotPermissionReport): MatrixRow[] {
       labels = req.anyOf
         ? [req.needs.map((n) => n.name).join(" or ")]
         : req.needs.map((n) => n.name);
+      // A check that did not evaluate every need (waived or not reached) shows
+      // only what it evaluated, so a skipped need is never a green "Has".
+      const assessed = check.assessed;
+      if (assessed) labels = labels.filter((l) => assessed.includes(l));
     }
     for (const label of labels) {
       let status: MatrixStatus;
