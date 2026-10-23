@@ -31,6 +31,7 @@ import {
   settingsMetadata,
 } from "../../../services/config-schema.js";
 import { signFlash, truncateFlash, wantsJson } from "../../http-flash.js";
+import { loadReactionRoleMessageIds } from "../../reaction-role-messages.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { pickCascadeMasterKey } from "../../cascade-master.js";
 import type { AuthenticatedRequest } from "../../session.js";
@@ -462,7 +463,6 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "leaderboard_roles.enabled",
     "leaderboard_roles.period",
     "leaderboard_roles.update_cron",
-    "leaderboard_roles.tiers",
     "leaderboard_roles.announcement_channel_id",
   ],
 };
@@ -516,6 +516,91 @@ export const EMOJI_NAME_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * What `coerceConfigValue` may need besides the value and the stored value.
+ */
+export interface CoerceContext {
+  /**
+   * The ids of the guild's reaction-role messages, for a
+   * `reaction_role_message` key (#1433). Without it a non-empty id is refused
+   * (fail closed) unless it is the stored value.
+   */
+  reactionRoleMessageIds?: ReadonlySet<string>;
+}
+
+/** Why a message id outside the bot's reaction-role messages is refused (#1433). */
+export const NOT_A_REACTION_ROLE_MESSAGE_REASON =
+  "not one of this server's reaction-role messages (pick one from the list, or leave empty to link the channel)";
+
+/** Why a reaction-role message choice is refused when the stored one cannot be read (#1433). */
+export const ROLES_MESSAGE_STORED_READ_FAILED_REASON =
+  "the stored choice could not be read, so it was left unchanged; try again";
+
+/** Why it is refused when the list of reaction-role messages cannot be read (#1433). */
+export const ROLES_MESSAGE_LIST_READ_FAILED_REASON =
+  "the reaction-role messages could not be read, so it was left unchanged; try again";
+
+/** True for a setting that holds the id of one of the bot's reaction-role messages. */
+export function isReactionRoleMessageKey(key: string): boolean {
+  return (
+    settingsMetadata[key as keyof typeof settingsMetadata]?.format ===
+    "reaction_role_message"
+  );
+}
+
+/**
+ * The stored value of a reaction-role message key, from a read that must
+ * succeed. The exemption for an unchanged value hangs on this value, so a
+ * failed read refuses the save: falling back to the default (or to "no
+ * stored value") would either let a crafted id through or rewrite a choice
+ * the operator never touched (#1433). Callers use this one value both as the
+ * baseline and for the raw value, so the two cannot come from different reads.
+ */
+export async function readReactionRoleMessageBaseline(
+  key: string,
+): Promise<{ ok: true; value: string } | { ok: false; reason: string }> {
+  try {
+    return {
+      ok: true,
+      value: await ConfigService.getInstance().getStringStrict(key),
+    };
+  } catch {
+    return { ok: false, reason: ROLES_MESSAGE_STORED_READ_FAILED_REASON };
+  }
+}
+
+/**
+ * `coerceConfigValue` for a save in a guild. Everything except a
+ * reaction-role message key is passed straight through. For one, the guild's
+ * message ids are loaded only when the value is a non-empty id that is not the
+ * stored one (an empty choice or an unchanged value never needs them), and a
+ * failed load refuses the save.
+ */
+export async function coerceConfigValueForGuild(
+  key: string,
+  raw: unknown,
+  current: unknown,
+  guildId: string,
+): Promise<
+  { ok: true; value: string | number | boolean } | { ok: false; reason: string }
+> {
+  const first = coerceConfigValue(key, raw, current);
+  if (
+    first.ok ||
+    !isReactionRoleMessageKey(key) ||
+    first.reason !== NOT_A_REACTION_ROLE_MESSAGE_REASON
+  ) {
+    return first;
+  }
+  let ids: Set<string>;
+  try {
+    ids = await loadReactionRoleMessageIds(guildId);
+  } catch {
+    return { ok: false, reason: ROLES_MESSAGE_LIST_READ_FAILED_REASON };
+  }
+  return coerceConfigValue(key, raw, current, { reactionRoleMessageIds: ids });
+}
+
+/**
  * Coerce a raw form value to match the expected type of `key` in
  * `defaultConfig`. Returns the coerced value on success, or a typed
  * failure describing why coercion was refused.
@@ -532,6 +617,7 @@ export function coerceConfigValue(
   key: string,
   raw: unknown,
   current?: unknown,
+  context: CoerceContext = {},
 ):
   | { ok: true; value: string | number | boolean }
   | { ok: false; reason: string } {
@@ -650,7 +736,26 @@ export function coerceConfigValue(
   // are conveniences, so the value is checked again here. The stored value is
   // exempt, whatever it is: refusing it would block the whole section save.
   const format = settingsMetadata[key as keyof typeof settingsMetadata]?.format;
-  if (
+  if (format === "reaction_role_message") {
+    // #1433: an empty choice clears, the stored value is kept as stored (a
+    // message archived or deleted later must not block saving the rest of the
+    // section), anything else must be one of the guild's reaction-role messages.
+    const stored =
+      current !== undefined && current !== null ? String(current) : null;
+    if (stored !== null && submitted === stored) {
+      value = submitted;
+    } else {
+      const checked = validateSettingFormat(format, submitted);
+      if (!checked.ok) return { ok: false, reason: checked.reason };
+      if (
+        checked.value !== "" &&
+        !context.reactionRoleMessageIds?.has(checked.value)
+      ) {
+        return { ok: false, reason: NOT_A_REACTION_ROLE_MESSAGE_REASON };
+      }
+      value = checked.value;
+    }
+  } else if (
     format === "affix" &&
     current !== undefined &&
     current !== null &&

@@ -44,6 +44,9 @@ import {
   coerceConfigValue,
   readStoredBaseline,
   IMPORT_BASELINE_FAILED_REASON,
+  coerceConfigValueForGuild,
+  isReactionRoleMessageKey,
+  readReactionRoleMessageBaseline,
   findSectionMasterKey,
   resetConfigToDefaults,
   findGroupRoleReuseForSetting,
@@ -76,14 +79,26 @@ export function createSettingsRouter(client: Client): Router {
 
       const config = ConfigService.getInstance();
       let before: unknown;
-      try {
-        before = await config.get(key);
-      } catch {
-        before = defaultConfig[key as keyof typeof defaultConfig];
+      let baselineFailure: string | null = null;
+      if (isReactionRoleMessageKey(key)) {
+        // The exemption for an unchanged value rests on the stored one, so it
+        // comes from a read that must succeed (#1433).
+        const baseline = await readReactionRoleMessageBaseline(key);
+        if (baseline.ok) before = baseline.value;
+        else baselineFailure = baseline.reason;
+      } else {
+        try {
+          before = await config.get(key);
+        } catch {
+          before = defaultConfig[key as keyof typeof defaultConfig];
+        }
       }
       // The stored value is passed so a legacy value a picker cannot produce
       // still saves unchanged (#1426).
-      const coerced = coerceConfigValue(key, raw, before);
+      const coerced: ReturnType<typeof coerceConfigValue> =
+        baselineFailure !== null
+          ? { ok: false, reason: baselineFailure }
+          : await coerceConfigValueForGuild(key, raw, before, session.guildId);
       if (!coerced.ok) {
         await recordAudit(session, {
           action: "setting.set",
@@ -532,8 +547,24 @@ export function createSettingsRouter(client: Client): Router {
             continue;
           }
         }
+        // A reaction-role message key (#1433) is also read strictly: its
+        // exemption for an unchanged value rests on this one value, which is
+        // also what the raw value is read against.
+        if (isReactionRoleMessageKey(key)) {
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            rejected.push({ key, reason: baseline.reason });
+            continue;
+          }
+          kept = baseline.value;
+        }
         const raw = readSettingField(body, key, kept);
-        const r = coerceConfigValue(key, raw, kept);
+        const r = await coerceConfigValueForGuild(
+          key,
+          raw,
+          kept,
+          session.guildId,
+        );
         if (r.ok) {
           coerced.push({ key, value: r.value });
         } else {
@@ -900,18 +931,43 @@ export function createSettingsRouter(client: Client): Router {
           continue;
         }
         // Surface type-mismatch in the preview so a silent drop at apply
-        // isn't the first sign the user sees. The stored value is passed so a
-        // legacy value re-imported unchanged is accepted, as at apply (#1437).
-        const baseline = await readStoredBaseline(key);
-        if (!baseline.ok) {
-          rows.push({
-            key,
-            status: "rejected",
-            reason: IMPORT_BASELINE_FAILED_REASON,
-          });
-          continue;
+        // isn't the first sign the user sees. A reaction-role message key
+        // (#1433) is checked against the guild's messages, and its stored
+        // value stays importable. A picker-format or bounded-number key
+        // (#1437) is checked against its stored value too. The stored value is
+        // the same strict read apply uses (it also resolves environment-backed
+        // settings, which the Mongo snapshot above does not), so preview and
+        // apply agree.
+        let stored: unknown;
+        if (isReactionRoleMessageKey(key)) {
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            rows.push({
+              key,
+              status: "rejected",
+              reason: `type mismatch (${baseline.reason})`,
+            });
+            continue;
+          }
+          stored = baseline.value;
+        } else {
+          const baseline = await readStoredBaseline(key);
+          if (!baseline.ok) {
+            rows.push({
+              key,
+              status: "rejected",
+              reason: IMPORT_BASELINE_FAILED_REASON,
+            });
+            continue;
+          }
+          stored = baseline.current;
         }
-        const coerced = coerceConfigValue(key, value, baseline.current);
+        const coerced = await coerceConfigValueForGuild(
+          key,
+          value,
+          stored,
+          session.guildId,
+        );
         if (!coerced.ok) {
           rows.push({
             key,
@@ -920,12 +976,9 @@ export function createSettingsRouter(client: Client): Router {
           });
           continue;
         }
-        // The value read for the check is also what the row compares with, so
-        // a legacy value that comes from the environment (no Mongo row) shows
-        // as "no change" rather than a change from the schema default.
         const before =
-          baseline.current !== undefined
-            ? baseline.current
+          stored !== undefined
+            ? stored
             : currentByKey.has(key)
               ? currentByKey.get(key)
               : defaultConfig[key as keyof typeof defaultConfig];
@@ -1008,12 +1061,31 @@ export function createSettingsRouter(client: Client): Router {
           failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
-        const baseline = await readStoredBaseline(key);
-        if (!baseline.ok) {
-          failed.push({ key, reason: IMPORT_BASELINE_FAILED_REASON });
-          continue;
+        let stored: unknown;
+        if (isReactionRoleMessageKey(key)) {
+          // Strict read, as on the other save paths (#1433).
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            failed.push({ key, reason: baseline.reason });
+            continue;
+          }
+          stored = baseline.value;
+        } else {
+          // Strict read of the stored value for a picker-format or bounded
+          // number key, so an unchanged legacy value is kept (#1437).
+          const baseline = await readStoredBaseline(key);
+          if (!baseline.ok) {
+            failed.push({ key, reason: IMPORT_BASELINE_FAILED_REASON });
+            continue;
+          }
+          stored = baseline.current;
         }
-        const coerced = coerceConfigValue(key, value, baseline.current);
+        const coerced = await coerceConfigValueForGuild(
+          key,
+          value,
+          stored,
+          session.guildId,
+        );
         if (!coerced.ok) {
           failed.push({ key, reason: coerced.reason });
           continue;

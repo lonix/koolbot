@@ -20,6 +20,7 @@ import {
   pickPreset,
   renderDurationPresets,
   renderStepper,
+  formatPresetLabel,
 } from "../../src/web/setting-pickers.js";
 import { renderNumberInput } from "../../src/web/setting-controls.js";
 import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
@@ -31,6 +32,33 @@ import { coerceConfigValue } from "../../src/web/routes/write/helpers.js";
 const REMINDER = "events.reminder_minutes";
 const PRESETS = [0, 5, 10, 15, 30, 60];
 const BOUNDS = { min: 0, max: 10080 };
+const EVENT_AND_LFG_PRESET_KEYS = [
+  "events.channel_grace_minutes",
+  "events.create_lead_minutes",
+  "events.default_duration_minutes",
+  "events.reminder_minutes",
+  "lfg.expiry_minutes",
+];
+const REST_PRESET_KEYS = [
+  "birthdays.change_cooldown_seconds",
+  "birthdays.role_duration_hours",
+  "core.webui.signin_cooldown_seconds",
+  "digest.min_active_minutes",
+  "digest.streak_min_minutes",
+  "moderation.cases.default_review_days",
+  "moderation.raid.lockdown_max_minutes",
+  "moderation.raid.min_account_age_hours",
+  "moderation.raid.timeout_minutes",
+  "moderation.raid.window_seconds",
+  "polls.cooldown_days",
+  "polls.default_duration_hours",
+  "privacy.delete.cooldown_hours",
+  "ratelimit.window_seconds",
+  "reactionroles.toggle_window_seconds",
+  "rewind.min_minutes",
+  "tickets.open_cooldown_seconds",
+  "voicechannels.lobby.room_window_seconds",
+];
 const STEP_KEY = "events.groups.default_count";
 const STEP_BOUNDS = { min: 1, max: 25 };
 
@@ -70,7 +98,15 @@ describe("renderDurationPresets", () => {
     const labels = [...doc(durationHtml(30)).querySelectorAll("label")].map(
       (l) => l.textContent,
     );
-    expect(labels).toEqual(["Off", "5", "10", "15", "30", "60", "Custom…"]);
+    expect(labels).toEqual([
+      "Off",
+      "5 min",
+      "10 min",
+      "15 min",
+      "30 min",
+      "1 h",
+      "Custom…",
+    ]);
   });
 
   it("ticks Custom… for a stored number that is not a preset, and shows it", () => {
@@ -339,14 +375,10 @@ describe("which keys get which control", () => {
     ([, m]) => "stepper" in m && m.stepper,
   );
 
-  it("is the five durations and three small ranges of #1427", () => {
-    expect(withPresets.map(([k]) => k).sort()).toEqual([
-      "events.channel_grace_minutes",
-      "events.create_lead_minutes",
-      "events.default_duration_minutes",
-      "events.reminder_minutes",
-      "lfg.expiry_minutes",
-    ]);
+  it("is the duration keys and three small ranges of #1427", () => {
+    expect(withPresets.map(([k]) => k).sort()).toEqual(
+      [...EVENT_AND_LFG_PRESET_KEYS, ...REST_PRESET_KEYS].sort(),
+    );
     expect(withStepper.map(([k]) => k).sort()).toEqual([
       "events.groups.default_count",
       "events.groups.max_count",
@@ -921,5 +953,138 @@ describe("a stored out-of-range number in the browser (#1437)", () => {
     expect(validityFor(stepper(999), "26")).toBe(false);
     expect(validityFor(stepper(5), "26")).toBe(false);
     expect(validityFor(stepper(999), "999")).toBe(true);
+  });
+});
+
+describe("presets for the remaining duration keys (#1427)", () => {
+  type Meta = {
+    min: number;
+    max: number;
+    label: string;
+    presets: number[];
+    presetZeroLabel?: string;
+  };
+  const meta = (k: string): Meta =>
+    settingsMetadata[k as keyof typeof settingsMetadata] as unknown as Meta;
+  const unitOf = (k: string): string =>
+    /_(seconds|minutes|hours|days)$/.exec(k)?.[1] ?? "";
+  const html = (k: string, current: string | number): string => {
+    const m = meta(k);
+    return renderDurationPresets(
+      `preset_${k}`,
+      `value_${k}`,
+      current,
+      m.presets,
+      { min: m.min, max: m.max },
+      {
+        id: "set-x",
+        labelledBy: "name-x",
+        label: m.label,
+        unit: unitOf(k),
+        zeroLabel: m.presetZeroLabel,
+      },
+    );
+  };
+
+  it.each(REST_PRESET_KEYS)(
+    "%s: default is a preset, sorted, short, unit in the name",
+    (k) => {
+      const m = meta(k);
+      expect(m.presets).toContain(
+        defaultConfig[k as keyof typeof defaultConfig],
+      );
+      expect([...m.presets].sort((a, b) => a - b)).toEqual(m.presets);
+      expect(m.presets.length).toBeLessThanOrEqual(12);
+      expect(unitOf(k)).not.toBe("");
+      // 0 is a preset only where the key allows it, and then it is named.
+      if (m.presets.includes(0)) expect(m.presetZeroLabel).toBeTruthy();
+      else expect(m.presetZeroLabel).toBeUndefined();
+    },
+  );
+
+  it.each(REST_PRESET_KEYS)(
+    "%s: ticks the default, and a stored non-preset shows under Custom…",
+    (k) => {
+      const m = meta(k);
+      const def = defaultConfig[k as keyof typeof defaultConfig] as number;
+      const d = doc(html(k, def));
+      expect(
+        (d.querySelector("input[type=radio]:checked") as HTMLInputElement)
+          .value,
+      ).toBe(String(def));
+      let odd = m.min;
+      while (m.presets.includes(odd)) odd += 1;
+      expect(odd).toBeLessThanOrEqual(m.max);
+      const c = doc(html(k, odd));
+      expect(
+        (c.querySelector("input[type=radio]:checked") as HTMLInputElement)
+          .value,
+      ).toBe("custom");
+      expect(
+        (c.querySelector("[data-duration-input]") as HTMLInputElement).value,
+      ).toBe(String(odd));
+      // The stored value posts unchanged and the box is the only number field.
+      expect(
+        readSettingField(
+          {
+            [`value_${k}`]: String(odd),
+            [`preset_${k}`]: "custom",
+          },
+          k,
+        ),
+      ).toBe(String(odd));
+      expect(
+        readSettingField(
+          {
+            [`value_${k}`]: "1",
+            [`preset_${k}`]: String(def),
+          },
+          k,
+        ),
+      ).toBe(String(def));
+    },
+  );
+
+  it("names the unit in each preset", () => {
+    expect(formatPresetLabel(30, "seconds")).toBe("30 s");
+    expect(formatPresetLabel(60, "seconds")).toBe("1 min");
+    expect(formatPresetLabel(3600, "seconds")).toBe("1 h");
+    expect(formatPresetLabel(86400, "seconds")).toBe("1 day");
+    expect(formatPresetLabel(90, "seconds")).toBe("90 s");
+    expect(formatPresetLabel(1440, "minutes")).toBe("1 day");
+    expect(formatPresetLabel(10080, "minutes")).toBe("7 days");
+    expect(formatPresetLabel(120, "minutes")).toBe("2 h");
+    expect(formatPresetLabel(6, "hours")).toBe("6 h");
+    expect(formatPresetLabel(168, "hours")).toBe("7 days");
+    expect(formatPresetLabel(1, "days")).toBe("1 day");
+    expect(formatPresetLabel(90, "days")).toBe("90 days");
+    expect(formatPresetLabel(5, "fortnights")).toBe("5");
+  });
+
+  it("labels the lockdown 0 as Until cleared and the others as Off or None", () => {
+    const labels = [
+      ...doc(html("moderation.raid.lockdown_max_minutes", 0)).querySelectorAll(
+        "label",
+      ),
+    ].map((l) => l.textContent);
+    expect(labels).toEqual([
+      "Until cleared",
+      "15 min",
+      "30 min",
+      "1 h",
+      "3 h",
+      "12 h",
+      "1 day",
+      "Custom…",
+    ]);
+    expect(meta("polls.cooldown_days").presetZeroLabel).toBe("None");
+    expect(meta("tickets.open_cooldown_seconds").presetZeroLabel).toBe("Off");
+  });
+
+  it("keeps the unit next to the box only, so Custom… reads '45 minutes'", () => {
+    const d = doc(html("moderation.raid.timeout_minutes", 45));
+    const wrap = d.querySelector("[data-duration-custom]") as HTMLElement;
+    expect(wrap.querySelector(".kb-unit")?.textContent).toBe("minutes");
+    expect(d.querySelectorAll(".kb-unit")).toHaveLength(1);
   });
 });

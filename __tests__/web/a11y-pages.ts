@@ -143,6 +143,41 @@ export interface A11yPage {
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
 
+/** The bot's reaction-role messages as the welcome roles picker lists them (#1433). */
+const WELCOME_MESSAGES = {
+  options: [
+    {
+      messageId: "100000000000000001",
+      label: "# roles · 🎮 Gamer, 🎨 Artist",
+    },
+    { messageId: "100000000000000002", label: "# roles · 📚 Reader" },
+  ],
+  truncated: false,
+};
+
+/** A Settings group holding the welcome roles message row, `current` stored. */
+function WELCOME_ROLES_GROUP(current: string): {
+  category: string;
+  rows: SettingRow[];
+} {
+  return {
+    category: "welcome",
+    rows: [
+      {
+        key: "welcome.roles_message_id",
+        label: "Self-assign roles message",
+        current,
+        defaultValue: "",
+        type: "string",
+        description:
+          "Optional reaction-role message that {roles} links to, picked from the messages the bot posted.",
+        category: "welcome",
+        format: "reaction_role_message",
+      },
+    ],
+  };
+}
+
 /** A bot-permission report from real registry ids, so the matrix joins to the registry. */
 function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
   const ref = (id: string): FeatureRef => {
@@ -1251,6 +1286,59 @@ export function adminPages(): A11yPage[] {
         ],
         guildId: "g1",
         guildName: "Test Guild",
+      }),
+    },
+    {
+      // The welcome roles message picker (#1433): the bot's reaction-role
+      // messages by label, and a stored id that is not among them.
+      name: "Settings (welcome roles message picker, stored id not found)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [WELCOME_ROLES_GROUP("999999999999999999")],
+        reactionRoleMessages: WELCOME_MESSAGES,
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
+      // No reaction-role messages yet, the choice rejected on the last save:
+      // the plain empty state points at the Reaction Roles page.
+      name: "Settings (welcome roles message picker, none yet, rejected)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [WELCOME_ROLES_GROUP("")],
+        reactionRoleMessages: { options: [], truncated: false },
+        guildId: "g1",
+        guildName: "Test Guild",
+        flash: { type: "err", text: "One value was rejected." },
+        invalidKeys: ["welcome.roles_message_id"],
+      }),
+    },
+    {
+      name: "Setup wizard step (welcome roles message picker)",
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 0,
+        totalSteps: 1,
+        featureKey: "welcome",
+        settingKeys: ["welcome.enabled", "welcome.roles_message_id"],
+        currentValues: {
+          "welcome.enabled": true,
+          "welcome.roles_message_id": "100000000000000001",
+        },
+        metadata: settingsMetadata,
+        defaultValues: {
+          "welcome.enabled": false,
+          "welcome.roles_message_id": "",
+        },
+        reactionRoleMessages: {
+          ...WELCOME_MESSAGES,
+          truncated: true,
+        },
+        enabledByKey: { "welcome.enabled": true },
       }),
     },
     {

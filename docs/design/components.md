@@ -180,9 +180,10 @@ Numbers that cannot be wrong (#1304): a stepper for small ranges, preset duratio
   A stored value outside the range is shown as it is, never clamped on render.
 - Presets are `div.kb-duration[data-duration]` → a `kb-segmented` radiogroup (`name` `preset_<key>`, `Custom…` last, `aria-labelledby` the row
   name), `span[data-duration-custom]` with the box (`name` `value_<key>`; no `pattern` and not `required` in the markup, the script makes it
-  required while Custom… is ticked; `aria-label` "Custom <setting> in minutes") and
-  `span.kb-unit`. A numeric preset wins over the box; `custom` or no radio means the box. The script hides the wrapper unless Custom… is
-  ticked and copies a ticked preset into the box, so a hidden box never holds a number that blocks the submit. No JavaScript: the box stays
+  required while Custom… is ticked; `aria-label` "Custom <setting> in <unit>") and
+  `span.kb-unit` (inside the wrapper, so the unit shows only next to the box). Preset labels carry the unit in the largest whole
+  step: `30 s`, `5 min`, `1 h`, `1 day`, `7 days`. A numeric preset wins over the box; `custom` or no radio means the box. The script hides the wrapper unless
+  Custom… is ticked and copies a ticked preset into the box, so a hidden box never holds a number that blocks the submit. No JavaScript: the box stays
   visible next to Custom….
 - A stored number that is not a preset ticks Custom… and shows in the box; presets never act as a whitelist.
 
@@ -207,7 +208,7 @@ optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permissi
   line) and has no field. *Re-post* is only a link to the owning feature page (#1428): the action itself is a `renderRepostCard` card there (a
   confirm-gated POST form, red confirm, consequences listed, the shown id sent back as `expectedId`), never a button on All settings.
 - **A setting with its own editor** (`editedElsewhere`, the leaderboard tiers) is not listed on All settings (#1428).
-- Controls follow #1304: Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect or ColourField.
+- Controls follow #1304: Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect, MessageSelect or ColourField.
   A free-text box is only for free text (names, messages, descriptions).
 
 ### EmojiPicker
@@ -241,6 +242,22 @@ An IANA zone for a setting or an event (#1426).
   match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
 - No JavaScript: the plain select.
 - Also used on `/me/timezone` (#1436): *Server default* is the blank first option, and the live "Current time" preview listens to the same select.
+
+### MessageSelect
+
+One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#1433). The stored value is the message id; the operator never types it.
+
+**Markup.** `span.kb-msgpick` → `select.kb-select` and an optional `span.kb-help` under it.
+
+- The first option is empty, *Link the channel instead*. Each message is an option labelled where it is and what it hands out
+  (`# roles · 🎮 Gamer, 🎨 Artist +2`, at most 100 characters), newest first, at most 50.
+- Labels come from stored rows and the channel names the page already holds: no Discord call per option. A channel that is gone reads
+  `⚠ <id> (unavailable)`.
+- A stored id that is not in the list is a selected `<id> (not found)` option (`(could not check)` when the list could not be read), so it is
+  shown and posts unchanged. No option is ever `disabled`: a disabled option is not posted.
+- The line under the select says what is missing: no messages yet (with a plain link to the Reaction Roles page, not a primary button), the
+  list could not be read, or the list is cut at 50. It never says "none" when the read failed.
+- No JavaScript is needed: it is a plain select.
 
 ### ColourField
 

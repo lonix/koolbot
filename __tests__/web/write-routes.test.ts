@@ -387,10 +387,75 @@ describe("coerceConfigValue", () => {
       });
     });
 
-    it("still accepts the operator-set welcome.roles_message_id", () => {
+    it("still accepts the operator-set welcome.roles_message_id when it is one of the bot's reaction-role messages (#1433)", () => {
       expect(
-        coerceConfigValue("welcome.roles_message_id", "123456789012345678"),
+        coerceConfigValue(
+          "welcome.roles_message_id",
+          "123456789012345678",
+          "",
+          {
+            reactionRoleMessageIds: new Set(["123456789012345678"]),
+          },
+        ),
       ).toEqual({ ok: true, value: "123456789012345678" });
+    });
+  });
+
+  describe("reaction-role message ids (#1433)", () => {
+    const KEY = "welcome.roles_message_id";
+    const ID = "123456789012345678";
+    const OTHER = "223456789012345678";
+    const ids = new Set([ID]);
+
+    it("clears on the empty choice, with or without a set", () => {
+      expect(coerceConfigValue(KEY, "", ID)).toEqual({ ok: true, value: "" });
+      expect(
+        coerceConfigValue(KEY, "", ID, { reactionRoleMessageIds: ids }),
+      ).toEqual({ ok: true, value: "" });
+    });
+
+    it("refuses an id outside the set", () => {
+      const r = coerceConfigValue(KEY, OTHER, "", {
+        reactionRoleMessageIds: ids,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toMatch(/reaction-role messages/);
+    });
+
+    it("fails closed without a set", () => {
+      expect(coerceConfigValue(KEY, ID, "").ok).toBe(false);
+      expect(coerceConfigValue(KEY, ID).ok).toBe(false);
+    });
+
+    it("refuses something that is not a message id at all", () => {
+      expect(
+        coerceConfigValue(KEY, "not-an-id", "", { reactionRoleMessageIds: ids })
+          .ok,
+      ).toBe(false);
+    });
+
+    it("keeps the stored value even when it is not in the set", () => {
+      expect(
+        coerceConfigValue(KEY, OTHER, OTHER, { reactionRoleMessageIds: ids }),
+      ).toEqual({ ok: true, value: OTHER });
+      expect(coerceConfigValue(KEY, "legacy", "legacy")).toEqual({
+        ok: true,
+        value: "legacy",
+      });
+    });
+
+    it("exempts only the stored value, not a different one", () => {
+      expect(
+        coerceConfigValue(KEY, "999999999999999999", OTHER, {
+          reactionRoleMessageIds: ids,
+        }).ok,
+      ).toBe(false);
+    });
+
+    it("rejects an array post", () => {
+      expect(
+        coerceConfigValue(KEY, [ID], "", { reactionRoleMessageIds: ids }).ok,
+      ).toBe(false);
     });
   });
 

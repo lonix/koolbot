@@ -13,6 +13,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { renderSegmented, type ControlAttrs } from "./setting-controls.js";
 import { listSupportedTimezones } from "../utils/timezone.js";
 import {
@@ -245,6 +246,81 @@ export function renderEmojiField(
   );
 }
 
+// ---------- Reaction-role message (#1433) ----------
+
+export interface ReactionRoleMessageSelectOptions extends ControlAttrs {
+  /**
+   * The bot's reaction-role messages for this guild, newest first. `null` when
+   * the list could not be read (the stored value is then kept and the control
+   * says so, instead of claiming there are none).
+   */
+  messages: ReactionRoleMessageOptions | null;
+}
+
+/** What the empty option is called: `{roles}` then mentions the channel. */
+export const REACTION_ROLE_MESSAGE_NONE_LABEL = "Link the channel instead";
+
+/**
+ * A select of the bot's own reaction-role messages, the stored value being the
+ * message id (`welcome.roles_message_id`, #1433).
+ *
+ * - The first option is empty: "Link the channel instead".
+ * - A stored id that is not in the list (archived or deleted since, or older
+ *   than the cap) is a selected `<id> (not found)` option, so it is shown and
+ *   posts unchanged. If the list could not be read, it reads `(could not check)`.
+ * - No option is ever `disabled`: a disabled option is not posted, so a
+ *   selected one would clear the setting.
+ * - With no messages the select still holds the empty choice (and the stored
+ *   value), and a line beneath points at the Reaction Roles page.
+ * - When the list is cut at the cap, a line says the newest are shown.
+ *
+ * It is a plain select, so it works without JavaScript; the server checks the
+ * id again (`coerceConfigValue`).
+ */
+export function renderReactionRoleMessageSelect(
+  name: string,
+  current: string,
+  o: ReactionRoleMessageSelectOptions,
+): string {
+  // The value is matched and posted exactly as stored: a legacy id with
+  // surrounding spaces (the welcome service trims it) must round-trip
+  // unchanged, because the server's exemption compares the exact string.
+  const trimmed = current.trim();
+  const list = o.messages?.options ?? [];
+  const listed = list.find((m) => m.messageId === current);
+  const option = (value: string, label: string): string =>
+    `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  const stray = (): string => {
+    const known = list.find((m) => m.messageId === trimmed);
+    if (known) return known.label;
+    if (trimmed === "")
+      return `${REACTION_ROLE_MESSAGE_NONE_LABEL} (stored as blank text)`;
+    return `${trimmed} (${o.messages ? "not found" : "could not check"})`;
+  };
+  const options = [
+    option("", REACTION_ROLE_MESSAGE_NONE_LABEL),
+    ...(current === "" || listed ? [] : [option(current, stray())]),
+    ...list.map((m) => option(m.messageId, m.label)),
+  ].join("");
+  let note = "";
+  if (o.messages === null) {
+    note =
+      "The list of reaction-role messages could not be read. The stored choice is kept.";
+  } else if (list.length === 0) {
+    note =
+      'There are no reaction-role messages yet. Post one on the <a href="/admin/reaction-roles">Reaction Roles</a> page, then choose it here.';
+  } else if (o.messages.truncated) {
+    note = `Showing the ${list.length} newest reaction-role messages. A choice made earlier stays selected.`;
+  }
+  return (
+    `<span class="kb-msgpick">` +
+    `<select class="kb-select"${attr("id", o.id)}${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} ` +
+    `name="${escapeHtml(name)}"${o.disabled ? LOCK : ""}>${options}</select>` +
+    (note ? `<span class="kb-help">${note}</span>` : "") +
+    `</span>`
+  );
+}
+
 // ---------- Numbers: stepper and duration presets (#1427) ----------
 
 export interface NumberControlBounds {
@@ -312,6 +388,35 @@ export interface DurationPresetOptions extends ControlAttrs {
 
 const PRESET_VALUE = /^\d+$/;
 
+const UNIT_SECONDS: Record<string, number> = {
+  seconds: 1,
+  minutes: 60,
+  hours: 3600,
+  days: 86400,
+};
+const UNIT_STEPS: Array<[string, string, number]> = [
+  ["s", "s", 1],
+  ["min", "min", 60],
+  ["h", "h", 3600],
+  ["day", "days", 86400],
+];
+
+/**
+ * A preset as people read it: "30 s", "5 min", "1 h", "2 days". The number is in
+ * the key's unit (`seconds`, `minutes`, `hours`, `days`) and is shown in the
+ * largest unit that divides it evenly, so `3600` seconds reads "1 h" and `10080`
+ * minutes "7 days". An unknown unit shows the bare number.
+ */
+export function formatPresetLabel(n: number, unit: string): string {
+  const base = UNIT_SECONDS[unit];
+  if (!base || n === 0) return String(n);
+  const total = n * base;
+  let pick = UNIT_STEPS[0];
+  for (const step of UNIT_STEPS) if (total % step[2] === 0) pick = step;
+  const v = total / pick[2];
+  return `${v} ${v === 1 ? pick[0] : pick[1]}`;
+}
+
 /**
  * The posted preset radio value when it names one of `presets`, else null.
  * The save handlers use it: a numeric preset wins over the box, anything else
@@ -364,7 +469,8 @@ export function renderDurationPresets(
   const options = [
     ...presets.map((n) => ({
       value: String(n),
-      label: n === 0 && o.zeroLabel ? o.zeroLabel : String(n),
+      label:
+        n === 0 && o.zeroLabel ? o.zeroLabel : formatPresetLabel(n, o.unit),
     })),
     { value: "custom", label: "Custom…" },
   ];
@@ -382,7 +488,7 @@ export function renderDurationPresets(
     `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
     ` inputmode="numeric" autocomplete="off" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
     ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
-    `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
+    `<span class="kb-unit">${escapeHtml(o.unit)}</span></span>` +
     `</div>`
   );
 }

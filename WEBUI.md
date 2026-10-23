@@ -1197,14 +1197,17 @@ number.
 - `stepper: true` (for ranges under about 30 values: `events.groups.default_count`, `events.groups.max_count`,
   `lfg.default_size`) renders minus and plus buttons around the same bounded box. The buttons are hidden until the script
   runs and are disabled at the bounds, so without JavaScript the box is all there is.
-- `presets: [...]` (`events.reminder_minutes`, `events.create_lead_minutes`, `events.channel_grace_minutes`,
-  `events.default_duration_minutes`, `lfg.expiry_minutes`) renders a radio group of the common values with a last
+- `presets: [...]` (the selected duration keys configured with presets; the retention keys and
+  `moderation.raid.join_threshold`, a count of 2 to 1000, stay the box) renders a radio group of the common values with a last
   _Custom…_ and the bounded box. `presetZeroLabel` names a `0` that is not a number (_Off_, _None_). The group posts
   `preset_<key>`, the box `value_<key>`; `readSettingField` takes a ticked numeric preset, and otherwise the box
   (Custom…, or no radio at all), so a browser without JavaScript posts what a script would, with the box shown next to
   _Custom…_. With the script the box is hidden unless _Custom…_ is ticked, and ticking a preset copies it into the box.
   Presets are a shortcut, not a whitelist: any number inside `min`..`max` still saves, so a stored `45` shows under
   _Custom…_ and posts unchanged. A drift test checks that every preset is in range and that the default is one.
+  Each preset is labelled in the largest unit that divides it evenly (`30 s`, `5 min`, `1 h`, `7 days`) and the key's own
+  unit (`seconds`, `minutes`, `hours`, `days`, from the end of its name) follows the box, so _Custom…_ reads "45 minutes".
+  No key needs a `step` field, so none was added.
 
 **Pickers for known value sets (#1426).** A free-text setting whose values are a known set declares a `format` in
 `settingsMetadata`, and the Settings page, the feature cards and the wizard render it as a picker
@@ -1224,6 +1227,15 @@ number.
 - `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and `events.channel_prefix` are free text (#1435: not emoji-only, so
   `Looking for group:` or `'s last resort` are fine). The text box is the field, and the event group marker's emoji grid beside it is only
   a convenience. A pick replaces the value.
+- `welcome.roles_message_id` (#1433) is a select of the bot's own reaction-role messages for this server, never a typed
+  id. The stored value stays the message id. The first option is empty, _Link the channel instead_ (`{roles}` then
+  mentions the reaction-role channel); each message is listed by where it is and what it hands out
+  (`# roles · 🎮 Gamer, 🎨 Artist +2`), newest first, at most 50 (a line under the select says when the list is cut).
+  The labels come from the stored mapping rows and the channel names the page already holds, so there is no Discord call
+  per option, and a channel that is gone shows as `(unavailable)`. A stored id that is not in the list (the message was
+  archived or deleted, or is older than the cap) is a selected `<id> (not found)` option, and one that cannot be checked
+  because the list could not be read is `<id> (could not check)`. With no messages the select keeps the empty choice and
+  the stored value, and a line points at the Reaction Roles page. No option is ever `disabled`.
 
 The server checks every value again in `coerceConfigValue` (`src/utils/setting-formats.ts`): a timezone must be one
 `Intl.DateTimeFormat` knows, a colour `#RRGGBB` (stored as `#rrggbb`), and a prefix or suffix
@@ -1238,12 +1250,24 @@ re-importing an export of the same server keeps a legacy value that is posted un
 "no change"; a changed value is still checked. If the stored value cannot be read, that key is refused for that import
 with a message and nothing is written for it.
 
+`welcome.roles_message_id` adds a database rule on top (`coerceConfigValueForGuild`): a non-empty id must be one of this
+server's active (not archived) reaction-role messages, on `/admin/settings/set`, a section save, the wizard step and
+YAML import alike. The set is loaded only when it is needed (an empty choice or an unchanged value never needs it), is
+never capped, and a failed load refuses the save. The unchanged stored value is exempt, so one old id never blocks the
+rest of its section, and that stored value comes from `ConfigService.getStringStrict`: a failed read refuses the save
+instead of falling back to the default, and the same read is both the baseline and the value the post is compared with
+(in the wizard it is the database's value, never one staged earlier in the run). The wizard's apply checks each staged
+choice again against the stored value and the active set before any write, so a message archived while the wizard was
+open applies nothing. A stored id with surrounding spaces round-trips unchanged (the select posts it as stored). A
+message's channel in the label is any recorded picker channel of its mappings, archived siblings included. An adoption plan passes no set and is
+refused for a non-empty id.
+
 **Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the
 id of a message the bot posted. The Settings page shows them as text with a _Jump to message_ link (built from the
 setting that names the channel), without a field and without an entry in the form's `keys`, so saving the section
 cannot blank them. The write routes refuse them, a YAML export leaves them out, and a per-key reset is refused. The
-feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, so it
-stays a text field.
+feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, by
+picking one of the bot's reaction-role messages from a select (#1433).
 
 **Re-posting a bot-managed message (#1428).** Each managed id has a **Re-post** action on the page of the feature that
 owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
@@ -1275,7 +1299,7 @@ a different stored id and does nothing ("already re-posted"). The service also q
 (Resync quote channel, Resync notices to channel, `/quote reset`) and behind another re-post, so two clicks at once
 produce one new message and a resync can't delete the new header. The button is off, with the reason shown, when the
 feature or its header is switched off or no channel is set. `welcome.roles_message_id` is a different case (an operator
-points it at a reaction-role message) and is not re-posted.
+points it at a reaction-role message, chosen from a select) and is not re-posted.
 
 On the **Settings** page and the feature cards, a setting whose feature declares
 a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
@@ -1514,7 +1538,8 @@ announcement); concurrent runs coalesce, and the per-tier grant/revoke counts ar
 reported in the flash message. Tier saves and runs are audited. **All settings** leaves
 `leaderboard_roles.tiers` out (`editedElsewhere` in `settingsMetadata`, #1428): the raw `topN:roleId` string is easy
 to break, so the tier editor is the only place it is edited. The key is still stored, exported, imported and reset
-like any other, so a YAML backup carries the tiers.
+like any other, so a YAML backup carries the tiers. The Setup Wizard's Leaderboard Roles step does not ask for it either (#1433): the
+step says the tiers are set in the tier editor once the wizard is applied, and links to it.
 
 The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
 lets admins name the roles that matter on their server and rank them: as many or as few as

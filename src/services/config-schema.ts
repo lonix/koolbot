@@ -741,7 +741,8 @@ export interface SettingMetadata {
    * The value set of a free-text `string` key, so the Web UI can offer a picker
    * and the write boundary can refuse a value the picker could not have
    * produced (#1426): `timezone` (IANA zone select), `colour` (`#RRGGBB`
-   * colour input) or `affix` (free text for a channel name prefix or suffix, at most 32 characters, with an emoji grid beside the box). A stored
+   * colour input) or `affix` (free text for a channel name prefix or suffix, at most 32 characters, with an emoji grid beside the box) or `reaction_role_message` (a
+   * select of the bot's own reaction-role messages, #1433). A stored
    * value that fails the rule still displays and saves unchanged.
    */
   format?: SettingFormat;
@@ -1295,6 +1296,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 86400,
+    presets: [30, 60, 300, 900, 3600, 86400],
   },
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
@@ -1656,6 +1658,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 3600,
+    presets: [1, 5, 10, 30, 60, 300],
   },
   "ratelimit.bypass_admin": {
     label: "Admins bypass rate limit",
@@ -1744,6 +1747,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 10080,
+    presets: [0, 15, 30, 60, 120, 180, 300],
+    presetZeroLabel: "None",
   },
   "digest.streak_min_minutes": {
     label: "Streak threshold (minutes per week)",
@@ -1753,6 +1758,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 10080,
+    presets: [0, 15, 30, 60, 120, 180, 300],
+    presetZeroLabel: "None",
   },
   "digest.include_achievements": {
     label: "Include weekly achievements in digest",
@@ -1793,6 +1800,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 525600,
+    presets: [0, 30, 60, 120, 300, 600, 1200],
+    presetZeroLabel: "None",
   },
 
   // Reaction Roles
@@ -1845,6 +1854,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 8760,
+    presets: [6, 12, 24, 48, 72, 168],
   },
   "birthdays.change_cooldown_seconds": {
     label: "Birthday change cooldown (seconds)",
@@ -1854,6 +1864,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 2592000,
+    presets: [0, 60, 300, 900, 3600, 86400],
+    presetZeroLabel: "Off",
   },
   "welcome.enabled": {
     label: "Welcome messages enabled",
@@ -1882,11 +1894,12 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "boolean",
   },
   "welcome.roles_message_id": {
-    label: "Self-assign role message ID",
+    label: "Self-assign roles message",
     description:
-      "Optional ID of the reaction-role message (in the reaction-role message channel) that {roles} links to. Leave empty to link the channel instead.",
+      'Optional reaction-role message that {roles} links to, picked from the messages the bot posted (see Reaction Roles). Choose "Link the channel instead" to mention the reaction-role channel.',
     category: "welcome",
     type: "string",
+    format: "reaction_role_message",
   },
   "welcome.rules_channel_id": {
     label: "Rules channel",
@@ -2170,6 +2183,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 86400,
+    presets: [0, 60, 300, 900, 3600, 86400],
+    presetZeroLabel: "Off",
   },
   "reminders.max_pending": {
     label: "Pending reminders per member",
@@ -2211,6 +2226,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 8760,
+    presets: [0, 24, 72, 168, 336, 720],
+    presetZeroLabel: "Off",
   },
   "privacy.tracking_opt_out.enabled": {
     label: "Member tracking opt-out enabled",
@@ -2271,6 +2288,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 3600,
+    presets: [10, 15, 30, 60, 120, 300],
   },
 
   // Notices System
@@ -2327,6 +2345,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 768,
+    presets: [1, 6, 12, 24, 48, 72, 168, 336],
   },
   "polls.cooldown_days": {
     label: "Reuse cooldown (days)",
@@ -2336,6 +2355,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 3650,
+    presets: [0, 1, 3, 7, 14, 30, 90],
+    presetZeroLabel: "None",
   },
   "polls.participation.enabled": {
     label: "Poll participation tracking enabled",
@@ -2436,6 +2457,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 3600,
+    presets: [0, 10, 30, 60, 300, 900, 3600],
+    presetZeroLabel: "Off",
   },
   "core.startup.enabled": {
     label: "Startup log to Discord",
@@ -2642,6 +2665,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 3650,
+    presets: [7, 14, 30, 60, 90, 180, 365],
   },
   "moderation.cases.retention_days": {
     label: "Resolved case retention (days)",
@@ -2692,6 +2716,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 5,
     max: 3600,
+    presets: [10, 15, 30, 60, 120, 300],
   },
   "moderation.raid.lockdown_action": {
     label: "Lockdown action",
@@ -2716,6 +2741,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 8760,
+    presets: [0, 1, 6, 24, 72, 168, 720],
+    presetZeroLabel: "Off",
   },
   "moderation.raid.new_account_action": {
     label: "New-account action",
@@ -2740,6 +2767,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 40320,
+    presets: [5, 10, 30, 60, 360, 720, 1440, 10080],
   },
   "moderation.raid.quarantine_role_id": {
     label: "Quarantine role",
@@ -2756,6 +2784,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 43200,
+    presets: [0, 15, 30, 60, 180, 720, 1440],
+    presetZeroLabel: "Until cleared",
   },
   "moderation.raid.alert_channel_id": {
     label: "Raid alert channel",
