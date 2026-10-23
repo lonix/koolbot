@@ -322,11 +322,75 @@ describe("coerceConfigValue", () => {
       );
     });
 
-    it("leaves keys without a declared min unbounded", () => {
-      expect(coerceConfigValue("quotes.max_length", -5)).toEqual({
+    it("refuses a value below the min of a key that used to be unbounded (#1304)", () => {
+      const r = coerceConfigValue("quotes.max_length", -5);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("must be at least 1");
+    });
+  });
+
+  describe("bounded whole numbers (#1304)", () => {
+    it("rejects a value above the key's max with a field-level reason, never clamping", () => {
+      const r = coerceConfigValue("events.groups.max_count", "99");
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("must be at most 25");
+      expect(coerceConfigValue("events.groups.max_count", 25)).toEqual({
         ok: true,
-        value: -5,
+        value: 25,
       });
+    });
+
+    it("rejects an oversized number outright rather than a truncated one", () => {
+      const r = coerceConfigValue("events.default_duration_minutes", "14400");
+      expect(r).toEqual({ ok: false, reason: "must be at most 1440" });
+    });
+
+    it("rejects signs, decimals and exponents on a retention key instead of reading another number", () => {
+      const key = "voicetracking.cleanup.retention.detailed_sessions_days";
+      for (const raw of ["-1", "1.5", "1e3"]) {
+        expect(coerceConfigValue(key, raw).ok).toBe(false);
+      }
+    });
+
+    it("rejects words, however they are sent", () => {
+      for (const raw of ["TEN", "ten", "NaN", "Infinity", "12abc"]) {
+        const r = coerceConfigValue("quotes.max_length", raw);
+        expect(r).toEqual({ ok: false, reason: "invalid number" });
+      }
+    });
+
+    it("rejects notations a digit box would never produce", () => {
+      for (const raw of ["1e3", "0x10", "1.5", "1 2"]) {
+        const r = coerceConfigValue("quotes.max_length", raw);
+        expect(r.ok).toBe(false);
+      }
+      expect(coerceConfigValue("quotes.max_length", 1.5)).toEqual({
+        ok: false,
+        reason: "must be a whole number",
+      });
+      expect(coerceConfigValue("quotes.max_length", " 250 ")).toEqual({
+        ok: true,
+        value: 250,
+      });
+    });
+  });
+
+  describe("bot-managed keys (#1304)", () => {
+    it.each([
+      "quotes.header_message_id",
+      "notices.header_message_id",
+      "rules.message_id",
+    ])("refuses %s", (key) => {
+      expect(coerceConfigValue(key, "123456789012345678")).toEqual({
+        ok: false,
+        reason: "managed by KoolBot and cannot be set here",
+      });
+    });
+
+    it("still accepts the operator-set welcome.roles_message_id", () => {
+      expect(
+        coerceConfigValue("welcome.roles_message_id", "123456789012345678"),
+      ).toEqual({ ok: true, value: "123456789012345678" });
     });
   });
 
@@ -937,6 +1001,7 @@ describe("createWriteRouter (#850)", () => {
         "POST /notices/:id/order",
         "POST /notices/:id/update",
         "POST /notices/create",
+        "POST /notices/header/repost",
         "POST /notices/sync",
         "POST /permissions/set",
         "POST /polls/items/:id/delete",
@@ -951,6 +1016,7 @@ describe("createWriteRouter (#850)", () => {
         "POST /polls/schedules/create",
         "POST /quotes/:id/delete",
         "POST /quotes/:id/edit",
+        "POST /quotes/header/repost",
         "POST /quotes/sync",
         "POST /reaction-roles/archive",
         "POST /reaction-roles/bind",
@@ -971,6 +1037,7 @@ describe("createWriteRouter (#850)", () => {
         "POST /role-groups/reorder",
         "POST /rules/apply",
         "POST /rules/post",
+        "POST /rules/repost",
         "POST /rules/sync",
         "POST /settings/import",
         "POST /settings/import/apply",

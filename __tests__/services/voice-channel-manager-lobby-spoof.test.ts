@@ -19,7 +19,10 @@ jest.mock("../../src/services/voice-channel-tracker.js");
 jest.mock("../../src/services/config-service.js");
 
 // Import after mocks
-import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  isLobbyByIdentity,
+} from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { applyPresetToChannel } from "../../src/handlers/vc-preset-handler.js";
 
@@ -115,6 +118,55 @@ describe("VoiceChannelManager - name spoofing and control-panel tracking (#1148,
       expect(await manager.isReservedChannelName("Lobby party")).toBe(false);
       expect(await manager.isReservedChannelName("Gaming")).toBe(false);
       expect(await manager.isReservedChannelName("   ")).toBe(false);
+    });
+  });
+
+  describe("isLobbyByIdentity without a registry row (#1420)", () => {
+    const configureLobbyId = (id: string): void => {
+      const base = mockConfigService.getString as jest.Mock<any>;
+      const previous = base.getMockImplementation() as (
+        key: string,
+        def?: string,
+      ) => Promise<string>;
+      mockConfigService.getString = jest
+        .fn<any>()
+        .mockImplementation((key: string, def?: string) =>
+          key === "voicechannels.lobby.channel_id"
+            ? Promise.resolve(id)
+            : previous(key, def),
+        );
+    };
+
+    it("recognises a name-matched lobby that was reused and never recorded", async () => {
+      const lobby = voice("lobby-1", "Lobby", { guild });
+      guild.channels.cache.set("lobby-1", lobby);
+      expect(await isLobbyByIdentity(lobby)).toBe(true);
+      expect(await isLobbyByIdentity(voice("other", "Gaming", { guild }))).toBe(
+        false,
+      );
+    });
+
+    it("recognises a lobby configured by ID whatever it is named", async () => {
+      const lobby = voice("lobby-2", "Join to create", { guild });
+      guild.channels.cache.set("lobby-2", lobby);
+      configureLobbyId("lobby-2");
+      expect(await isLobbyByIdentity(lobby)).toBe(true);
+    });
+
+    it("with a lobby ID configured, a channel merely named like the lobby is not it", async () => {
+      const lobby = voice("lobby-2", "Join to create", { guild });
+      const lookalike = voice("fake", "Lobby", { guild });
+      guild.channels.cache.set("lobby-2", lobby);
+      guild.channels.cache.set("fake", lookalike);
+      configureLobbyId("lobby-2");
+      expect(await isLobbyByIdentity(lookalike)).toBe(false);
+    });
+
+    it("skips a tracked member room renamed to the lobby name", async () => {
+      const room = voice("room-1", "Lobby", { guild });
+      expect(await isLobbyByIdentity(room, (id) => id === "room-1")).toBe(
+        false,
+      );
     });
   });
 

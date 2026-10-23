@@ -30,6 +30,14 @@ import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { embedColor } from "../utils/embed-style.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
 import { NO_MENTIONS } from "../utils/allowed-mentions.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
+import {
+  notReady,
+  repostManagedMessage,
+  staleRepost,
+  unexpectedRepostFailure,
+  type RepostResult,
+} from "./managed-message-repost.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // quote channel. Demoted from `quotes.cleanup_interval` config key in
@@ -108,6 +116,8 @@ export class QuoteChannelManager {
   private client: Client;
   private configService: ConfigService;
   private isInitialized: boolean = false;
+  /** Serialises a channel rebuild and a header re-post (#1428). */
+  private readonly channelLock = createKeyedLock();
   private cleanupJob: CronJob | null = null;
   // Pending debounced vote-count writes, keyed by Discord message ID.
   private voteWriteTimers: Map<string, ReturnType<typeof setTimeout>> =
@@ -289,6 +299,16 @@ export class QuoteChannelManager {
    * await this.ensureHeaderPost(channel);
    */
   private async ensureHeaderPost(channel: TextChannel): Promise<void> {
+    // Every header creation runs under the channel lock, so an automatic
+    // recreation can't interleave with a Re-post or a rebuild and leave two
+    // headers (#1428). A caller that already holds the lock uses the
+    // Unlocked variant.
+    return this.channelLock.run("channel", () =>
+      this.ensureHeaderPostUnlocked(channel),
+    );
+  }
+
+  private async ensureHeaderPostUnlocked(channel: TextChannel): Promise<void> {
     try {
       // Check if header is enabled
       const headerEnabled = await this.configService.getBoolean(
@@ -505,41 +525,96 @@ export class QuoteChannelManager {
    */
   private async createHeaderPost(channel: TextChannel): Promise<void> {
     try {
-      const embed = this.buildHeaderEmbed();
-
-      const headerMessage = await channel.send({
-        embeds: [embed],
-        allowedMentions: NO_MENTIONS,
-      });
-      logger.info(`Created quote channel header post: ${headerMessage.id}`);
-
-      // Pin the message if enabled
-      const pinEnabled = await this.configService.getBoolean(
-        "quotes.header_pin_enabled",
-        true,
-      );
-      if (pinEnabled) {
-        try {
-          await headerMessage.pin();
-          logger.info("Pinned quote channel header post");
-        } catch (error) {
-          logger.warn(
-            "Failed to pin header post (missing permissions?):",
-            error,
-          );
-        }
-      }
+      const headerMessage = await this.sendHeaderMessage(channel);
 
       // Store the header message ID (this will persist across bot restarts)
-      await this.configService.set(
-        "quotes.header_message_id",
-        headerMessage.id,
-        "Message ID of the quote channel header post",
-        "quotes",
-      );
+      await this.storeHeaderId(headerMessage.id);
     } catch (error) {
       logger.error("Error creating header post:", error);
     }
+  }
+
+  /** Send the header embed and pin it when pinning is on. Throws if the send fails; a failed pin is only logged. */
+  private async sendHeaderMessage(channel: TextChannel): Promise<Message> {
+    const headerMessage = await channel.send({
+      embeds: [this.buildHeaderEmbed()],
+      allowedMentions: NO_MENTIONS,
+    });
+    logger.info(`Created quote channel header post: ${headerMessage.id}`);
+
+    // Pin the message if enabled
+    const pinEnabled = await this.configService.getBoolean(
+      "quotes.header_pin_enabled",
+      true,
+    );
+    if (pinEnabled) {
+      try {
+        await headerMessage.pin();
+        logger.info("Pinned quote channel header post");
+      } catch (error) {
+        logger.warn("Failed to pin header post (missing permissions?):", error);
+      }
+    }
+    return headerMessage;
+  }
+
+  private async storeHeaderId(id: string): Promise<void> {
+    await this.configService.set(
+      "quotes.header_message_id",
+      id,
+      "Message ID of the quote channel header post",
+      "quotes",
+    );
+  }
+
+  /**
+   * Post the header again and take the old one down (#1428). Posts first,
+   * stores the new id, deletes the old message last, so a failure at any step
+   * never leaves two live headers. Queued behind a channel rebuild and behind
+   * another re-post; `expectedId` (the id the admin's page showed) makes a
+   * second submit of the same form a no-op instead of a second re-post.
+   * Never throws.
+   */
+  public async repostHeader(expectedId?: string): Promise<RepostResult> {
+    return this.channelLock.run("channel", async () => {
+      try {
+        if (!(await this.configService.getBoolean("quotes.enabled", false))) {
+          return notReady("Turn on Quotes in Settings first.");
+        }
+        if (
+          !(await this.configService.getBoolean("quotes.header_enabled", true))
+        ) {
+          return notReady(
+            "The header is switched off. Turn on the header post in the Quotes settings first.",
+          );
+        }
+        const channel = await this.getQuoteChannel();
+        if (!channel) {
+          return notReady(
+            "The quote channel isn't set or can't be found. Check the channel in the Quotes settings.",
+          );
+        }
+        const oldId = (
+          await this.configService.getString("quotes.header_message_id", "")
+        ).trim();
+        if (expectedId !== undefined && expectedId.trim() !== oldId) {
+          return staleRepost();
+        }
+        return await repostManagedMessage({
+          channel,
+          botUserId: this.client.user?.id,
+          oldId,
+          send: () => this.sendHeaderMessage(channel),
+          store: (id) => this.storeHeaderId(id),
+          label: "quote channel header",
+        });
+      } catch (error) {
+        logger.error(
+          `Re-posting the quote channel header failed: ${describeDiscordError(error)}`,
+        );
+        return unexpectedRepostFailure();
+      }
+    });
   }
 
   private async startCleanupJob(): Promise<void> {
@@ -1152,6 +1227,15 @@ export class QuoteChannelManager {
    * every quote in the channel.
    */
   private async syncExistingQuotes(clearFirst = false): Promise<number> {
+    return this.channelLock.run("channel", () =>
+      this.syncExistingQuotesUnlocked(clearFirst),
+    );
+  }
+
+  /** `syncExistingQuotes` for a caller that already holds the channel lock. */
+  private async syncExistingQuotesUnlocked(
+    clearFirst = false,
+  ): Promise<number> {
     try {
       const channel = await this.getQuoteChannel();
       if (!channel) {
@@ -1179,7 +1263,7 @@ export class QuoteChannelManager {
         "Message ID of the quote channel header post",
         "quotes",
       );
-      await this.ensureHeaderPost(channel);
+      await this.ensureHeaderPostUnlocked(channel);
 
       // Get every stored quote (unbounded): a rebuild must include all quotes,
       // not just the first page.
@@ -1290,11 +1374,15 @@ export class QuoteChannelManager {
    * command to recover a channel left in a bad state (e.g. after a reinstall).
    */
   public async resetChannel(): Promise<{ reposted: number }> {
-    const channel = await this.getQuoteChannel();
-    if (!channel) {
-      throw new Error("Quote channel not configured or not found");
-    }
-    const reposted = await this.syncExistingQuotes(true);
-    return { reposted };
+    // Queued with a header re-post: a rebuild that clears the channel while a
+    // re-post sits between "sent" and "stored" would delete the new header.
+    return this.channelLock.run("channel", async () => {
+      const channel = await this.getQuoteChannel();
+      if (!channel) {
+        throw new Error("Quote channel not configured or not found");
+      }
+      const reposted = await this.syncExistingQuotesUnlocked(true);
+      return { reposted };
+    });
   }
 }

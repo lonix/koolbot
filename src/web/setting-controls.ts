@@ -122,6 +122,68 @@ export function renderSegmented(
   );
 }
 
+// ---------- Numbers ----------
+
+/**
+ * A bounded whole number (#1304). A `type="number"` input lets letters in on
+ * Safari and Firefox and ignores `pattern`, so this is a text input with
+ * `inputmode="numeric"` (the digit keypad on phones) and `pattern`, plus
+ * `data-min` / `data-max` that `NUMBER_INPUT_SCRIPT` (number-input.ts) turns into a range
+ * check and a digit filter. There is deliberately no `maxlength`: it would cut
+ * an oversized paste down to a different, valid number before the range check
+ * saw it. Without the script the pattern still holds, and the server refuses
+ * anything out of range either way.
+ */
+export function renderNumberInput(
+  name: string,
+  value: string | number,
+  bounds: { min?: number; max?: number },
+  a: ControlAttrs = {},
+): string {
+  const { min, max } = bounds;
+  const signed = min !== undefined && min < 0;
+  const range =
+    min !== undefined && max !== undefined
+      ? `Whole number from ${min} to ${max}`
+      : "Whole number";
+  return (
+    `<input type="text" class="kb-input"${attr("id", a.id)}` +
+    `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
+    ` name="${escapeHtml(name)}" value="${escapeHtml(value)}"` +
+    ` inputmode="numeric" autocomplete="off" pattern="${signed ? "-?[0-9]*" : "[0-9]*"}"` +
+    ` title="${escapeHtml(range)}" data-number` +
+    `${min !== undefined ? ` data-min="${min}"` : ""}${max !== undefined ? ` data-max="${max}"` : ""}` +
+    ` required style="width:8rem"${a.disabled ? " disabled data-dep-locked" : ""}>`
+  );
+}
+
+// ---------- Bot-managed values ----------
+
+/**
+ * The value of a bot-managed key (the id of a message the bot posted) as text
+ * with a jump link, never an input (#1304). `jumpUrl` is absent when the
+ * message or its channel is not known. `repostHref` links to the page where an
+ * admin re-posts the message (#1428).
+ */
+export function renderManagedValue(
+  messageId: string,
+  jumpUrl: string | undefined,
+  repostHref?: string,
+): string {
+  if (!messageId) {
+    return `<span class="kb-help">Not posted yet. KoolBot sets this when it posts the message.</span>`;
+  }
+  const link = jumpUrl
+    ? ` <a class="kb-chip" href="${escapeHtml(jumpUrl)}" target="_blank" rel="noopener noreferrer">Jump to message</a>`
+    : "";
+  // Re-posting writes to Discord, so it lives on the feature's own page with
+  // its confirm step; this is only the way there (#1428).
+  const repost = repostHref
+    ? ` <a class="kb-chip" href="${escapeHtml(repostHref)}">Re-post</a>`
+    : "";
+  return `<span class="kb-mono">${escapeHtml(messageId)}</span>${link}${repost}`;
+}
+
 // ---------- Setting rows ----------
 
 /** Inline icon for the reset button: a counter-clockwise arrow. */

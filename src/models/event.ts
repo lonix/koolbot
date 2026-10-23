@@ -494,6 +494,11 @@ EventSchema.index({ "rsvps.userId": 1 });
 // channel it is by `groups.channelId`. Both were collection scans.
 EventSchema.index({ "groups.memberIds": 1 });
 EventSchema.index({ "groups.channelId": 1 });
+// Voice-room kind (#1420): every join to a channel the bot did not create asks
+// whether it is an event's main channel, `{ guildId, channelId }`, as well as a
+// group channel above. Without this the second `$or` branch scans the guild's
+// events.
+EventSchema.index({ guildId: 1, channelId: 1 });
 // Leaders (#1195): the member export and reset find events by `groups.captainId`.
 EventSchema.index({ "groups.captainId": 1 });
 // One row per occurrence of a series. This unique key is what makes spawning

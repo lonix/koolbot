@@ -10,6 +10,7 @@ import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { icon } from "./icons.js";
 import { SAVEBAR_SCRIPT } from "./savebar.js";
+import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
 import { getInactivityWindowMs } from "./session.js";
 import {
   CONFIRM_SCRIPT,
@@ -1008,6 +1009,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `${scriptTag(CONFIRM_SCRIPT)}`,
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,
+    `${scriptTag(NUMBER_INPUT_SCRIPT)}`,
     `${scriptTag(SETTINGS_SAVE_SCRIPT)}`,
     `${scriptTag(SAVEBAR_SCRIPT)}`,
     `${scriptTag(INVALID_FOCUS_SCRIPT)}`,

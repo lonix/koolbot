@@ -1062,6 +1062,59 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // A bounded number box and bot-managed values: text with a jump link, no
+      // field to submit (#1304).
+      name: "Settings (bounded number, bot-managed message id)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "quotes",
+            rows: [
+              {
+                key: "quotes.max_length",
+                label: "Maximum quote length (characters)",
+                current: 500,
+                defaultValue: 1000,
+                type: "number",
+                description: "Maximum length of a single quote in characters.",
+                category: "quotes",
+                min: 1,
+                max: 4000,
+              },
+              {
+                key: "quotes.header_message_id",
+                label: "Header message ID (auto-managed)",
+                current: "333333333333333333",
+                defaultValue: "",
+                type: "string",
+                description:
+                  "Auto-managed message ID of the quote channel header post.",
+                category: "quotes",
+                managed: { channelKey: "quotes.channel_id" },
+                jumpUrl:
+                  "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333",
+                repostHref: "/admin/quotes#repost-header",
+              },
+              {
+                key: "rules.message_id",
+                label: "Rules message ID",
+                current: "",
+                defaultValue: "",
+                type: "string",
+                description: "Managed by KoolBot.",
+                category: "rules",
+                managed: { channelKey: "rules.channel_id" },
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       // The state the save bar script leaves behind after two edits: the bar
       // shown with its count and Discard (#1330). The scripts do not run under
       // axe, so the markup is put in that state here.
@@ -1893,6 +1946,8 @@ export function adminPages(): A11yPage[] {
         enabled: true,
         channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
         total: 1,
+        headerMessageId: "900000000000000002",
+        headerEnabled: true,
         textChannels: [
           { id: "c1", name: "rules", type: ChannelType.GuildText },
         ],
@@ -2626,6 +2681,7 @@ export function adminPages(): A11yPage[] {
         channelId: "100000000000000010",
         roleId: "100000000000000011",
         messagePosted: true,
+        messageId: "900000000000000003",
         accepted: 12,
         native: { screening: false, community: true },
         intentMissing: true,
@@ -2658,6 +2714,7 @@ export function adminPages(): A11yPage[] {
         channelId: "",
         roleId: "",
         messagePosted: false,
+        messageId: "",
         accepted: 0,
         native: { screening: false, community: true },
         intentMissing: false,
@@ -2677,6 +2734,39 @@ export function adminPages(): A11yPage[] {
           gateChannelIds: [],
         },
         jobId: null,
+      }),
+    },
+    {
+      // The Re-post cards with the button off and the reason shown (#1428).
+      name: "Quotes (header switched off, re-post blocked)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        headerEnabled: false,
+        settingRows: [],
+        maxLength: 1000,
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: "",
+      }),
+    },
+    {
+      name: "Notices (no channel, re-post blocked)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: null,
+        total: 0,
+        headerMessageId: "",
+        headerEnabled: true,
+        textChannels: [],
+        settingRows: [],
+        groups: [],
+        categoryOptions: [],
       }),
     },
     {
@@ -3640,6 +3730,27 @@ export function userPages(): A11yPage[] {
       html: shell("Rewind", "/me/rewind", renderUserRewindBody(REWIND)),
     },
     {
+      name: "/me rewind (by room kind)",
+      html: shell(
+        "Rewind",
+        "/me/rewind",
+        renderUserRewindBody({
+          ...REWIND,
+          voiceByKind: [
+            { kind: "dynamic", duration: "30 hr" },
+            { kind: "event", duration: "8 hr 10 min" },
+            { kind: "permanent", duration: "2 hr" },
+            { kind: "other", duration: "2 hr" },
+          ],
+          longestSession: {
+            duration: "3 hr 5 min",
+            date: "2026-01-03",
+            roomKind: "dynamic",
+          },
+        }),
+      ),
+    },
+    {
       name: "/me privacy",
       html: shell(
         "Privacy",
@@ -3700,11 +3811,11 @@ const REWIND = {
   daysActive: 51,
   topCompanions: [{ userId: "u2", displayName: "bob", duration: "9 hr" }],
   peakDay: { date: "2026-01-03", duration: "4 hr 20 min" },
+  // No `voiceByKind` and no kind on the longest session: an older snapshot (#1420).
   longestSession: {
     duration: "3 hr 5 min",
     date: "2026-01-03",
-    channelName: "Lounge",
-    channelType: ChannelType.GuildStageVoice,
+    roomKind: "other",
   },
   longestStreakDays: 6,
   longestStreakRange: { startDate: "2026-01-01", endDate: "2026-01-06" },

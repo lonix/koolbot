@@ -183,6 +183,12 @@ describe("validateSetting", () => {
     expect(finding.message).toContain("minimum of 0");
   });
 
+  it("flags a number above its declared maximum as an error (#1304)", () => {
+    const finding = validateSetting("events.groups.max_count", 99);
+    expect(finding.severity).toBe("error");
+    expect(finding.message).toContain("maximum of 25");
+  });
+
   it("does not raise the Rewind warning for 0, which means keep forever (#835)", () => {
     const finding = validateSetting(
       "voicetracking.cleanup.retention.detailed_sessions_days",

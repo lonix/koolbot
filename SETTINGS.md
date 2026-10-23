@@ -635,8 +635,11 @@ DMs a member who has not opted in.
 ## ✨ Rewind (Year-in-Review)
 
 Per-user year-in-review page at **`/me/rewind`** (also `/me/rewind/:year`
-for past years). Renders total voice time, top voice companions, peak day,
-longest session, longest streak, badges earned, annual rank, a
+for past years). Renders total voice time, voice time by kind of room
+(dynamic, event, permanent, lobby; rooms are never listed by name, and
+sessions recorded before the kind was stamped count as "other voice
+channels"), top voice companions, peak day, longest session (date and kind
+of room, not its name), longest streak, badges earned, annual rank, a
 first/best/last weekly-rank journey, text activity, and reaction activity
 (given / received). Year picker bottom-anchored to years with data.
 
@@ -793,7 +796,7 @@ channels).
 | `rules.role_id`      | `""`                                 | Acceptance role granted on Accept; pick an existing role (its holders count as accepted) or create one on the Rules page |
 | `rules.message`      | `"Please read the server rules ..."` | Text posted with the button                                                                                              |
 | `rules.button_label` | `"I accept the rules"`               | Button text (up to 80 characters)                                                                                        |
-| `rules.message_id`   | `""`                                 | Managed by KoolBot: the posted message's ID. Clear it to post a fresh message                                            |
+| `rules.message_id`   | `""`                                 | Managed by KoolBot: the posted message's ID, read-only. The Rules page button edits it or posts anew if it was deleted   |
 
 When a member accepts, KoolBot stores _accepted at_ (and whether it was by
 button or because they already held the role). It is part of the member's
@@ -827,7 +830,7 @@ channel.
 | `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
 | `events.native.location`          | see Notes | Location text shown on the native Discord event (max 100 characters)                                                              |
 | `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |
-| `events.groups.max_count`         | `15`      | The most groups one event may have. Values above 25 count as 25 (a Discord category holds 50 channels)                            |
+| `events.groups.max_count`         | `15`      | The most groups one event may have, at most 25 (a Discord category holds 50 channels)                                             |
 
 **Notes:**
 
@@ -928,7 +931,7 @@ self-service, so there is no admin page — just the settings below (see
   and only while they are sitting in it.
 - Closing a post never deletes its voice channel — members may still be in
   it.
-- Party size is clamped to 2–25 so the roster fits in one embed field.
+- Party size runs from 2 to 25 so the roster fits in one embed field. Parties asked for outside that range are clamped.
 - Post rows are removed an hour after a post's expiry instant at the latest.
   That is enforced by a database TTL index as well as by the sweep, so
   turning the feature off mid-post does not leave roster IDs behind.
@@ -1163,11 +1166,11 @@ Anti-raid protection (#1045) adds these keys. See the anti-raid note below.
 | `moderation.raid.enabled`               | `false`   | Anti-raid protection (join-rate lockdown and new-account gate) and the `/raidmode` command. Requires `moderation.enabled` and the Server Members Intent |
 | `moderation.raid.dry_run`               | `true`    | Detect, enter lockdown and alert, but never act on a member; counts what it would have done. Switch off once the thresholds look right                  |
 | `moderation.raid.join_threshold`        | `10`      | Lockdown starts when more than this many members join within the window (minimum 2)                                                                     |
-| `moderation.raid.window_seconds`        | `30`      | The sliding window the threshold is counted over (clamped to 5 to 3600)                                                                                 |
+| `moderation.raid.window_seconds`        | `30`      | The sliding window the threshold is counted over (5 to 3600)                                                                                            |
 | `moderation.raid.lockdown_action`       | `timeout` | `timeout`, `quarantine` or `kick`, applied to each member who joins during lockdown                                                                     |
 | `moderation.raid.min_account_age_hours` | `0`       | New-account gate, independent of lockdown: accounts younger than this get the new-account action. `0` turns the gate off                                |
 | `moderation.raid.new_account_action`    | `timeout` | `timeout`, `quarantine` or `kick`, applied to a too-young account                                                                                       |
-| `moderation.raid.timeout_minutes`       | `60`      | Length of the timeout action (clamped to 1 minute to 28 days)                                                                                           |
+| `moderation.raid.timeout_minutes`       | `60`      | Length of the timeout action (1 minute to 28 days)                                                                                                      |
 | `moderation.raid.quarantine_role_id`    | `""`      | Role the quarantine action assigns. It should have no channel access and sit below the bot's role. A role that backs a role group is never assigned     |
 | `moderation.raid.lockdown_max_minutes`  | `0`       | End a lockdown automatically after this long. `0` keeps it on until a moderator runs `/raidmode off`                                                    |
 | `moderation.raid.alert_channel_id`      | `""`      | Text channel that gets a message when lockdown starts or ends. Nothing is posted while this is empty                                                    |
@@ -1606,20 +1609,25 @@ help. Every write path (single save, section save, YAML import, wizard)
 enforces these checks and refuses a bad value with a field-level error
 rather than clamping it:
 
-- Number fields refuse blank input (a cleared field is an error, not `0`)
-  and enforce the lower bound declared for the key. That covers the
-  retention keys (see [Retention values](#retention-values)) and a few
-  others, such as `lfg.default_size` (at least `2`),
-  `reminders.max_pending` and `privacy.export.max_items` (at least `1`).
+- Number fields are bounded whole numbers: every one has a minimum and a
+  maximum, shown on the field and enforced again on the server. A blank,
+  a word (`TEN`), a decimal or `1e3`, or a value outside the range is refused
+  with a message such as "must be at most 25", never clamped and never
+  stored as something else. The box only takes digits in the browser. The
+  ranges are declared as `min` and `max` in `src/services/config-schema.ts`;
+  a test fails if a number key has no `max`, or a default outside its range.
+  Retention keys (see [Retention values](#retention-values)) run from `0`
+  (keep forever) up to 36500 days, which is a hundred years and only exists
+  to catch a mistyped value. A stored value that is already above a new
+  maximum blocks the save of its section until you fix it.
 - Cron keys must parse as a valid cron expression.
 - Keys with a fixed set of choices (`leaderboard_roles.period`,
   `reactionroles.style`) only accept one of those values.
 - Text values are length-capped.
-
-The page does **not** enforce other numeric ranges (for example the
-1-768 hour window on `polls.default_duration_hours`), so double-check those
-inputs against the docs. After changing any `*.enabled` value, click **Reload
-commands to Discord** so Discord re-syncs the registration.
+- The ids of messages the bot posted itself (`quotes.header_message_id`,
+  `notices.header_message_id`, `rules.message_id`) are shown read-only with a
+  link to the message. They are not part of a YAML export, and a form, import
+  or adoption plan cannot set or reset them.
 
 ### Retention values
 
@@ -1818,7 +1826,8 @@ leave the graph in a broken state.
 - `leaderboard_roles.enabled` (bool, default: false)
 - `leaderboard_roles.period` (string, default: "alltime") — `week` / `month` / `alltime`
 - `leaderboard_roles.update_cron` (string, default: `"0 0 * * 1"`)
-- `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`
+- `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`; edited on the Leaderboard Roles page's
+  tier editor, so All settings does not list it (it is still exported and imported)
 - `leaderboard_roles.announcement_channel_id` (string, default: "")
 
 #### Quote System
