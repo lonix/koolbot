@@ -81,6 +81,31 @@ describe("renderDurationPresets", () => {
     ).toBe("45");
   });
 
+  it("does not treat a stored value with whitespace as a preset: Custom… is ticked, the box is visible and required", () => {
+    const d = doc(durationHtml("30 "));
+    expect(
+      (d.querySelector("input[type=radio]:checked") as HTMLInputElement).value,
+    ).toBe("custom");
+    const box = d.querySelector("[data-duration-input]") as HTMLInputElement;
+    expect(box.value).toBe("30 ");
+    expect(box.required).toBe(true);
+    // No hidden invalid box: with the script run, the wrapper is still shown.
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${durationHtml("30 ")}</form></body>`,
+      {
+        runScripts: "outside-only",
+      },
+    );
+    dom.window.eval(DURATION_PRESETS_SCRIPT);
+    expect(
+      (
+        dom.window.document.querySelector(
+          "[data-duration-custom]",
+        ) as HTMLElement
+      ).hidden,
+    ).toBe(false);
+  });
+
   it("shows a stored number outside the range as it is, under Custom…", () => {
     const d = doc(durationHtml(99999));
     expect(
@@ -103,7 +128,7 @@ describe("renderDurationPresets", () => {
     );
     expect(box.getAttribute("data-min")).toBe("0");
     expect(box.getAttribute("data-max")).toBe("10080");
-    expect(box.required).toBe(false);
+    expect(box.required).toBe(false); // a preset is ticked, so it needs no number
     expect(
       [...d.querySelectorAll("input[type=radio]")].every(
         (r) => (r as HTMLInputElement).name === `preset_${REMINDER}`,
@@ -400,6 +425,28 @@ describe("preset durations in the page", () => {
     expect(bar(dom).hidden).toBe(true);
   });
 
+  it("Custom… requires a number and a preset does not, through ticking, Discard and the cascade", () => {
+    const dom = mount(30);
+    const box = q<HTMLInputElement>(dom, "[data-duration-input]");
+    expect(box.required).toBe(false);
+    tickRadio(dom, "custom");
+    expect(box.required).toBe(true);
+    typeBox(dom, "");
+    expect(box.validity.valid).toBe(false);
+    expect(q<HTMLFormElement>(dom, "form").checkValidity()).toBe(false);
+    tickRadio(dom, "15");
+    expect(box.required).toBe(false);
+    expect(q<HTMLFormElement>(dom, "form").checkValidity()).toBe(true);
+    tickRadio(dom, "custom");
+    discard(dom);
+    expect(box.required).toBe(false);
+    expect(box.value).toBe("30");
+    flip(dom, false);
+    flip(dom, true);
+    expect(box.required).toBe(false);
+    expect(q<HTMLFormElement>(dom, "form").checkValidity()).toBe(true);
+  });
+
   it("an invalid custom number cannot block the form once a preset is chosen again", () => {
     const dom = mount(30);
     tickRadio(dom, "custom");
@@ -462,6 +509,18 @@ describe("the stepper in the page", () => {
     expect(dom.window.document.querySelector("button")?.hidden).toBe(true);
     dom.window.eval(STEPPER_SCRIPT);
     expect(dom.window.document.querySelector("button")?.hidden).toBe(false);
+  });
+
+  it("an emptied or whitespace box is flagged by the browser, and never hidden", () => {
+    const dom = mount(30);
+    const input = q<HTMLInputElement>(dom, "#row-s input");
+    typeStepper(dom, "");
+    expect(input.validity.valid).toBe(false);
+    typeStepper(dom, "2 ");
+    expect(input.validity.valid).toBe(false);
+    expect(input.closest("[hidden]")).toBeNull();
+    typeStepper(dom, "3");
+    expect(input.validity.valid).toBe(true);
   });
 
   it("moves by one, counts a change, and each button is off at its bound", () => {
@@ -530,6 +589,7 @@ describe("every order of events (random walk)", () => {
     "plus",
     "minus",
     "typeStep",
+    "clear",
     "submit",
     "saved",
     "discard",
@@ -581,6 +641,9 @@ describe("every order of events (random walk)", () => {
         case "minus":
           press(dom, "-1");
           break;
+        case "clear":
+          typeBox(dom, "");
+          break;
         case "typeStep":
           typeStepper(dom, pick(NUMBERS));
           break;
@@ -622,12 +685,19 @@ describe("every order of events (random walk)", () => {
         if (effective !== expected) {
           fail(`form posts ${String(effective)}, the screen shows ${expected}`);
         }
-        if (!isCustom && !q<HTMLFormElement>(dom, "form").checkValidity()) {
-          // A hidden box must never hold a number that blocks the submit.
-          const invalid = [
-            ...dom.window.document.querySelectorAll<HTMLInputElement>("input"),
-          ].filter((i) => !i.validity.valid && !i.closest("#row-s"));
-          if (invalid.length) fail("a hidden control blocks the form");
+        const durBox = q<HTMLInputElement>(dom, "[data-duration-input]");
+        if (durBox.required !== isCustom) {
+          fail(
+            `box required=${durBox.required} with ${ticked[0].value} ticked`,
+          );
+        }
+        // A ticked preset never depends on the hidden box: it is always valid.
+        if (!isCustom && !durBox.validity.valid) {
+          fail("a hidden box blocks the form");
+        }
+        // Custom… with an empty box is flagged by the browser, not the server.
+        if (isCustom && durBox.value === "" && durBox.validity.valid) {
+          fail("an empty custom box passes native validation");
         }
         const minus = q<HTMLButtonElement>(dom, '[data-step="-1"]');
         const plus = q<HTMLButtonElement>(dom, '[data-step="1"]');

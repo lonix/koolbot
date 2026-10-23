@@ -345,7 +345,10 @@ export function renderDurationPresets(
   b: NumberControlBounds,
   o: DurationPresetOptions,
 ): string {
-  const text = String(current).trim();
+  // Matched as stored, untrimmed: a value such as "30 " is not a preset, so it
+  // stays visible under Custom… where it can be corrected. Hiding a box that
+  // holds it would leave a pattern mismatch that blocks the submit unseen.
+  const text = String(current);
   const isPreset = PRESET_VALUE.test(text) && presets.includes(Number(text));
   const options = [
     ...presets.map((n) => ({
@@ -367,7 +370,7 @@ export function renderDurationPresets(
     `<span class="kb-duration__custom" data-duration-custom>` +
     `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
     ` inputmode="numeric" autocomplete="off" pattern="[0-9]*" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
-    ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
+    ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${isPreset ? "" : " required"}${lock}>` +
     `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
     `</div>`
   );
@@ -425,6 +428,9 @@ export const DURATION_PRESETS_SCRIPT =
   "var custom=!cur||cur.value==='custom';" +
   "if(input&&user&&cur&&!custom)input.value=cur.value;" +
   "if(input&&!custom)input.setCustomValidity('');" +
+  // Only Custom… needs a number in the box: required then, so the browser
+  // flags an empty box, and not otherwise, so a preset never depends on it.
+  "if(input)input.required=custom;" +
   "if(wrap)wrap.hidden=!custom}" +
   "document.addEventListener('change',function(e){var el=e.target;" +
   "if(!el||!el.matches||!el.matches('[data-duration] input[type=radio]'))return;" +
