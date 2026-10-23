@@ -9,6 +9,7 @@
 
 import { escapeHtml } from "./html.js";
 import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
+import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 
 export type HostSectionId =
@@ -247,9 +248,22 @@ function renderTags(e: HostPanelEvent): string {
 ${notices}${skipped}`;
 }
 
+/** What the folded settings say they hold, so people can skip them. */
+function settingsHint(e: HostPanelEvent): string {
+  const lead =
+    e.channelLeadMinutes === null
+      ? "Channels at the server default"
+      : `Channels ${e.channelLeadMinutes} min before the start`;
+  const groups = e.groupsEnabled
+    ? `${e.groups.length} ${e.groups.length === 1 ? "group" : "groups"}`
+    : "No groups";
+  return `${lead} · ${groups}`;
+}
+
 function renderControls(
   e: HostPanelEvent,
   controls: Partial<Record<HostSectionId, string>>,
+  settingsOpen: boolean,
 ): string {
   if (!hostControlsAvailable({ state: e.state })) {
     return `<div class="notice info" role="note">This event is ${escapeHtml(e.state)}, so this page is a read-only summary.</div>`;
@@ -261,6 +275,15 @@ function renderControls(
       const inner =
         html ??
         `<p class="muted">${escapeHtml(s.placeholder)} Not available yet.</p>`;
+      // Settings and group changes sit folded at the bottom (#1319): they are
+      // not what a host does while the event runs. Open after a save, so the
+      // flash and the result are in view.
+      if (s.id === "settings") {
+        return `<details class="kb-disclosure" id="host-settings"${settingsOpen ? " open" : ""}>
+<summary>${CHEVRON_ICON}Event settings and groups<span class="kb-disclosure__hint">${escapeHtml(settingsHint(e))}</span></summary>
+<div class="kb-disclosure__body">${inner}</div>
+</details>`;
+      }
       return `<section class="card" id="host-${s.id}" aria-labelledby="host-${s.id}-h">
 <h2 id="host-${s.id}-h">${escapeHtml(s.title)}</h2>
 ${inner}
@@ -273,11 +296,21 @@ export function renderHostPanelBody(opts: {
   event: HostPanelEvent;
   /** Section HTML supplied by later issues, keyed by section id. */
   controls?: Partial<Record<HostSectionId, string>>;
+  /** Open the folded settings (after a save, a flash is showing). */
+  settingsOpen?: boolean;
 }): string {
   const e = opts.event;
-  return `<h1>Host panel</h1>
-<p class="subtitle"><strong>${escapeHtml(e.title)}</strong> · <a href="/me/">Back to overview</a></p>
-${e.editable ? `<p><a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></p>\n` : ""}${renderSummary(e)}
+  const edit = e.editable
+    ? `\n  <div class="kb-pagehead__actions"><a class="kb-btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></div>`
+    : "";
+  return `<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <p class="kb-pagehead__crumbs"><a href="/me/events">Your events</a></p>
+    <h1 class="kb-pagehead__title">Host panel</h1>
+    <p class="kb-pagehead__sub"><strong>${escapeHtml(e.title)}</strong></p>
+  </div>${edit}
+</header>
+${renderSummary(e)}
 ${renderGroups(e)}
-${renderControls(e, opts.controls ?? {})}`;
+${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
 }

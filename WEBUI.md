@@ -106,7 +106,7 @@ the console links back to **My preferences**. The display name comes from the me
 (the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
 
 On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
-(New event and Event presets today; Your events with #1319) and **Moderation** (Mod log and Command audit; Tickets once
+(Your events, New event and Event presets) and **Moderation** (Mod log and Command audit; Tickets once
 it has a page and is on). A section appears when the person holds the scope and it has at least one page that exists. A
 person with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So a Moderator sees You
 and Moderation with a sidebar, a host and moderator sees You, Hosting and Moderation, and a plain member sees no sidebar.
@@ -1009,7 +1009,8 @@ normally shows the result inside the card without reloading. A save that turns
 a feature on or off reloads the page instead, so the disabled banner, the Status
 card, the sidebar badge and the page's action buttons all match the new state.
 Auto-managed keys (`notices.header_message_id`, `quotes.header_message_id`) are
-never editable here.
+never editable here. Both pages have a **Header post** card with a **Re-post the header** button (see
+_Re-posting a bot-managed message_ below).
 
 The **Announcements** page lists the scheduled announcements, each with a
 **Post now** button that sends it to its channel immediately, off schedule, plus
@@ -1124,7 +1125,7 @@ success.
 **Export quotes (JSON)** downloads the `/quote export` backup; restoring one is
 still done with `/quote import` in Discord. Every action is CSRF-protected and
 written to the Web UI audit log (`quote.edit`, `quote.delete`, `quote.sync`,
-`quote.export`).
+`quote.header-repost`, `quote.export`).
 
 Its **Settings** card edits every `quotes.*` key in place: the enable toggle
 (the cascade master, so switching quotes off keeps the rest), the quote
@@ -1222,6 +1223,38 @@ setting that names the channel), without a field and without an entry in the for
 cannot blank them. The write routes refuse them, a YAML export leaves them out, and a per-key reset is refused. The
 feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, so it
 stays a text field.
+
+**Re-posting a bot-managed message (#1428).** Each managed id has a **Re-post** action on the page of the feature that
+owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
+_Re-post_ chip next to _Jump to message_, shown once a message exists), so the action has one home:
+
+| Message | Page and card | Audit action | What Update/refresh already does |
+| --- | --- | --- | --- |
+| Quote channel header | Quotes, **Header post** | `quote.header-repost` | The bot edits the header in place when its wording changes |
+| Notices channel header | Notices, **Header post** | `notice.header-repost` | The same, for the notices header |
+| Rules message | Rules, **Re-post the rules message** | `rules.repost` | **Update the rules message** edits it in place (a new one only if it was deleted) |
+
+Re-post is a form POST behind the confirm dialog (red, with the consequences listed: a new message at the bottom of the
+channel, the old one deleted if the bot can find it in this channel, nothing else touched), CSRF and the admin check,
+and it is audited with the old and new ids and what happened to the old message. The order is what keeps there from
+ever being two live copies:
+
+1. The new message is sent (and pinned, where pinning is on). If that fails, for example because the bot lacks View
+   Channel, Send Messages or Embed Links there, nothing has changed, the old message stays live and the flash names the
+   permissions.
+2. The new id is stored. If that fails, the new message is deleted again and the old one stays live.
+3. The old message is deleted last, and only if the bot wrote it. A message that is already gone counts as done. One
+   the bot can't find in the current channel (it was deleted, or it is still in the channel it was posted in before a
+   channel change; the old channel id is not stored) is reported as a warning so the admin can delete it by hand. A
+   delete that fails is a warning too, with the old message id. The old Accept button on the rules message stops
+   working as soon as step 2 is done, because the accept handler only honours the stored id.
+
+The form carries the id the page showed (`expectedId`). A second submit of the same form, or one from a stale tab, finds
+a different stored id and does nothing ("already re-posted"). The service also queues a re-post behind a channel rebuild
+(Resync quote channel, Resync notices to channel, `/quote reset`) and behind another re-post, so two clicks at once
+produce one new message and a resync can't delete the new header. The button is off, with the reason shown, when the
+feature or its header is switched off or no channel is set. `welcome.roles_message_id` is a different case (an operator
+points it at a reaction-role message) and is not re-posted.
 
 On the **Settings** page and the feature cards, a setting whose feature declares
 a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
@@ -1452,8 +1485,10 @@ roster — not a live read of the role — is the source of truth), and flags ro
 are missing or above the bot's role. **Run now** recalculates immediately through
 `ScheduledService.runNow()`, the same run the cron triggers (including the
 announcement); concurrent runs coalesce, and the per-tier grant/revoke counts are
-reported in the flash message. Tier saves and runs are audited. **Settings** keeps the
-raw text field for `leaderboard_roles.tiers`.
+reported in the flash message. Tier saves and runs are audited. **All settings** leaves
+`leaderboard_roles.tiers` out (`editedElsewhere` in `settingsMetadata`, #1428): the raw `topN:roleId` string is easy
+to break, so the tier editor is the only place it is edited. The key is still stored, exported, imported and reset
+like any other, so a YAML backup carries the tiers.
 
 The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
 lets admins name the roles that matter on their server and rank them: as many or as few as
@@ -1610,6 +1645,10 @@ settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_la
   members in Discord. A press grants the acceptance role and records _accepted at_ for the member.
   Removing the role again, for example when the rules change and you want re-acceptance, is up
   to you; KoolBot never takes the role back on its own.
+- **Re-post the rules message (#1428).** **Update** edits the posted message in place. **Re-post the rules message**
+  makes a brand new one and deletes the old one (confirm dialog, audited as `rules.repost`); see _Re-posting a
+  bot-managed message_ under Settings for the order of steps and the double-submit guard. The old message's Accept
+  button stops working at once, so members must use the new one; those who already accepted keep their role.
 - **Use an existing role.** Pick any role as the acceptance role (for example a "verified" role
   you already use as a gate), or tick _Create a role_ in the rollout to have the engine make one.
   Members who already hold the role count as accepted: **Record current role holders as
@@ -1698,6 +1737,18 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 `events.announcement_channel_id` is used). The event is owned by the signed-in host (`createdBy` and the server come from the session, never
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
+
+**Your events** (#1319) is the home of the Hosting section, at `/me/events`. It lists the events the signed-in person created, never anyone
+else's (the query is filtered on the session's server and user, an admin session included): **Live now**, **Upcoming** with **Edit** and
+**Cancel** per row, and **Past events** folded. The header has **Start now**, which opens the New event form with **When: Now** already chosen
+(`/me/events/new?when=now`; any other value of `when` is ignored), and **New event**; both are left out while Events is switched off, and the page then
+says so and still lists earlier events. The scope line under the title says why the person can host ("You can host because you are in @Event
+hosts"). **Cancel** asks for confirmation and posts to `/me/events/<id>/host/cancel`, behind the same gate as every host action (CSRF, then
+creator-or-admin, 403 otherwise, a refused write audited as `event.host.denied`); it cancels this event only, is audited as `event.host.cancel`, and
+is refused for a running event, which is ended from its host panel instead. **Running** means the event is active and its start has arrived: an event
+whose channel was prepared ahead of its start (the lead time) is still Upcoming, with Edit and Cancel. The refusal is made inside the cancel's own
+atomic claim, so an activation that lands after the page was read cannot be cancelled by it. (A planned event a host starts early stays Upcoming until
+its start time, since the event does not record an early start.) Nothing on the page links to `/admin` or shows a server-wide setting.
 
 The **Groups** section of the schedule form (#1188, reshaped in #1299) is optional and
 folded to one line, "Split into groups", until that switch is ticked; a plain event is created exactly as before.
@@ -1970,8 +2021,8 @@ matters when events share the voice channels' category and managed-only cleanup 
 The **host panel** (#1189) is the page where the person running an event manages
 it, at `/me/events/<event id>/host`. It lives on the member surface (`/me`), not
 under `/admin`, because the host is the event's creator, who may have signed in with `/me`
-rather than `/config`. The creator signs in with `/me` like any member and finds their open events
-under **Events you host** on the overview; admins open it from the **Host panel**
+rather than `/config`. The creator signs in with `/me` like any member and finds their events
+under **Your events** (Hosting), and their open ones under **Events you host** on the overview; admins open it from the **Host panel**
 link on each row of the Events page. Who may open it:
 
 - the member who created the event (through the schedule form), and
@@ -1989,6 +2040,9 @@ The page shows a summary (state, start, duration, repeat, main voice channel) an
 event's groups. Scheduled and active events also show a section for each control:
 **Assign people**, **Move people**, **End the event**, **Team names and tags** (below) and, when
 the event has leaders switched on, **Leaders** (below) and **Live settings** (below) work today.
+**Live settings** (settings, leaders, tags and changes to the groups) is one folded section, **Event settings and groups**, at the bottom
+of the page (#1319); its summary states the channel lead time and the number of groups, and it opens by itself after a save, so the
+result is in view. The page is part of the Hosting section: its breadcrumb returns to **Your events**.
 Ended and cancelled events show the read-only summary only. Each action a host takes is recorded in the audit
 log with the event id. The Web UI must be on and the member must be able to get a
 sign-in link (`/me`) to reach the page.
@@ -2248,7 +2302,8 @@ set its clan tag from Discord; the host can put any team back at any time.
 
 **Live settings** (#1239) is the section of the host panel where the host changes the settings of
 a running event and saves once. It is the first step of live editing (#1197); the rows below work
-today, and a later step adds a group's kind as another row of the same form. Leaders and clan tags are described under **Leaders and tags in Live settings** below,
+today, and a later step adds a group's kind as another row of the same form. Leaders and clan tags are described under **Leaders and tags in Live
+settings** below,
 names, sizes and presets under **Group names, sizes and presets** (#1241), and adding and removing
 groups under **Adding and removing groups** (#1242), and switching groups on or off under
 **Groups on or off** (#1243).
@@ -3006,7 +3061,8 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
   legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms (including ones the voice feature
-  holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that have not ended,
+  holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that
+have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break

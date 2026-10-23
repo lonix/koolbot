@@ -188,8 +188,10 @@ optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permissi
   above it (#1299).
 - **Missing permission next to the setting it breaks** (#1253): `a.kb-chip.kb-chip--warn` ("Bot lacks Manage Nicknames") linking to Bot permissions.
 - **Bot-managed values** (message ids) are never inputs (#1304): show *Jump to message* and *Re-post* instead.
-  Today the row shows the id as text with *Jump to message* (`span.kb-mono` and `a.kb-chip`, or a "Not posted yet" line) and has no field; *Re-post* is
-  #1428.
+  The row shows the id as text with *Jump to message* and, once a message exists, a *Re-post* chip (`span.kb-mono` and `a.kb-chip`, or a "Not posted yet"
+  line) and has no field. *Re-post* is only a link to the owning feature page (#1428): the action itself is a `renderRepostCard` card there (a
+  confirm-gated POST form, red confirm, consequences listed, the shown id sent back as `expectedId`), never a button on All settings.
+- **A setting with its own editor** (`editedElsewhere`, the leaderboard tiers) is not listed on All settings (#1428).
 - Controls follow #1304: Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect or ColourField.
   A free-text box is only for free text (names, messages, descriptions).
 

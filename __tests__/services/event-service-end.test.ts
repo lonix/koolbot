@@ -176,6 +176,13 @@ beforeEach(() => {
       }
       const states = (filter.state as { $in: string[] }).$in;
       if (!states.includes(r.state as string)) return null;
+      // `$nor: [{ state, startTime: { $lte } }]` (a host's cancel, #1319).
+      for (const clause of (filter.$nor as Array<Row>) ?? []) {
+        const lte = (clause.startTime as { $lte: Date }).$lte;
+        if (r.state === clause.state && +(r.startTime as Date) <= +lte) {
+          return null;
+        }
+      }
       if (
         filter.startTime &&
         +(r.startTime as Date) !== +(filter.startTime as Date)
@@ -1109,6 +1116,52 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     const result = await svc.cancelEvent(ID, "guild-1");
     expect(store.get(ID)?.state).toBe("cancelled");
     expect(result?.state).toBe("cancelled");
+  });
+
+  describe("a host's cancel refuses a running event inside the claim (#1319)", () => {
+    type Svc = {
+      cancelEvent: (
+        id: string,
+        g: string,
+        opts?: { refuseRunningAt?: Date },
+      ) => Promise<{ state: string } | null>;
+      getEvent: (id: string) => Promise<unknown>;
+    };
+    const NOW = new Date("2030-06-01T19:30:00Z");
+    // The caller read `scheduled`; the row is `active` by the time of the claim.
+    function raced(start: Date): Svc {
+      const { service } = setup();
+      statefulUpdateOne();
+      store.set(ID, stored({ state: "active", startTime: start }));
+      const svc = service as unknown as Svc;
+      svc.getEvent = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValueOnce(row({ state: "scheduled", startTime: start }))
+        .mockImplementation(async () => store.get(ID));
+      return svc;
+    }
+
+    it("does not cancel an active event whose start has arrived", async () => {
+      const svc = raced(new Date("2030-06-01T19:00:00Z"));
+      const result = await svc.cancelEvent(ID, "guild-1", {
+        refuseRunningAt: NOW,
+      });
+      expect(result?.state).toBe("active");
+      expect(store.get(ID)?.state).toBe("active");
+      expect(store.get(ID)?.channelId).toBe("main-1");
+    });
+
+    it("cancels an active event whose channel was prepared before its start", async () => {
+      const svc = raced(new Date("2030-06-01T19:45:00Z"));
+      await svc.cancelEvent(ID, "guild-1", { refuseRunningAt: NOW });
+      expect(store.get(ID)?.state).toBe("cancelled");
+    });
+
+    it("keeps the admin cancel unchanged: it still cancels a running event", async () => {
+      const svc = raced(new Date("2030-06-01T19:00:00Z"));
+      await svc.cancelEvent(ID, "guild-1");
+      expect(store.get(ID)?.state).toBe("cancelled");
+    });
   });
 
   it("a lost cancel claim is reported, not counted, and spawns no successor (series and one-off)", async () => {

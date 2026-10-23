@@ -210,6 +210,7 @@ describe("sidebar per scope (non-admin /me)", () => {
     const on = { ...host, features: { "events.enabled": true } as const };
     expect(links(userPage(on))).toEqual([
       "My preferences",
+      "Your events",
       "New event",
       "Event presets",
     ]);
@@ -222,7 +223,11 @@ describe("sidebar per scope (non-admin /me)", () => {
 
   it("uses the real registry: host, moderator, both and member", () => {
     expect(headings(userPage(host))).toEqual(["You", "Hosting"]);
-    expect(links(userPage(host))).toEqual(["My preferences", "Event presets"]);
+    expect(links(userPage(host))).toEqual([
+      "My preferences",
+      "Your events",
+      "Event presets",
+    ]);
     // A moderator now sees You and Moderation and a sidebar; Tickets has no
     // page yet, so it never renders.
     expect(headings(userPage(moderator))).toEqual(["You", "Moderation"]);
@@ -235,6 +240,7 @@ describe("sidebar per scope (non-admin /me)", () => {
     expect(headings(userPage(both))).toEqual(["You", "Hosting", "Moderation"]);
     expect(links(userPage(both))).toEqual([
       "My preferences",
+      "Your events",
       "Event presets",
       "Mod log",
       "Command audit",

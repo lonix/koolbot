@@ -26,8 +26,10 @@ import { parseRulesOptions } from "../../rules-page.js";
 import {
   asyncHandler,
   flashRedirect,
+  getString,
   requireSessionContext,
 } from "./helpers.js";
+import { finishRepost } from "./repost-response.js";
 
 const PAGE = "/admin/rules";
 
@@ -88,6 +90,41 @@ export function createRulesRouter(client: Client): Router {
               text: result.error ?? "Could not post the message.",
             },
       );
+    }),
+  );
+
+  // Post the rules message again and take the old one down (#1428). Unlike
+  // /rules/post, which edits the posted message in place, this makes a new one.
+  // `expectedId` is the id the page showed, so a double submit re-posts once.
+  router.post(
+    "/rules/repost",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const guild = await fetchGuild(session.guildId);
+      if (!guild) {
+        await recordAudit(session, {
+          action: "rules.repost",
+          details: { reason: "discord-unreachable" },
+          result: "failure",
+          errorMessage: "Discord couldn't be reached.",
+        });
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "Discord couldn't be reached, so nothing was re-posted.",
+        });
+        return;
+      }
+      const result = await RulesService.getInstance(client).repostMessage(
+        guild,
+        getString(req, "expectedId"),
+      );
+      await finishRepost(res, session, result, {
+        page: PAGE,
+        action: "rules.repost",
+        what: "The rules message",
+        extra:
+          " Members must use the new message; the old Accept button no longer works.",
+      });
     }),
   );
 
