@@ -140,10 +140,10 @@ describe("picker settings reach the rendered pages (#1426)", () => {
       ),
     ).toEqual({
       "events.timezone": "timezone",
-      "events.channel_prefix": "emoji",
+      "events.channel_prefix": "affix",
       "reactionroles.group_role_colour": "colour",
-      "voicechannels.channel.prefix": "emoji",
-      "voicechannels.channel.suffix": "emoji",
+      "voicechannels.channel.prefix": "affix",
+      "voicechannels.channel.suffix": "affix",
     });
   });
 

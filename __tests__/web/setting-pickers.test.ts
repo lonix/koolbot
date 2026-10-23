@@ -206,6 +206,17 @@ describe("the picker keys", () => {
     ).toBe(false);
   });
 
+  it("keeps an affix posted exactly as stored, shortcode and all (#1438)", () => {
+    const stored = "[VC] :sparkles:";
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", stored, stored),
+    ).toEqual({ ok: true, value: stored });
+    // A changed value is resolved and checked after resolution.
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", stored, "other"),
+    ).toEqual({ ok: true, value: "[VC] ✨" });
+  });
+
   it("measures a value after its shortcodes are resolved", () => {
     expect(
       coerceConfigValue(

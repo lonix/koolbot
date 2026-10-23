@@ -2555,6 +2555,39 @@ describe("picker settings (#1426)", () => {
     expect(written().get("events.channel_prefix")).toBe("🎉");
   });
 
+  it("saves an unchanged stored prefix that holds a shortcode beside a sibling edit, and resolves a changed one", async () => {
+    stored({ "voicechannels.channel.prefix": "[VC] :sparkles:" });
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix", "voicechannels.channel.suffix"],
+      "value_voicechannels.channel.prefix": "[VC] :sparkles:",
+      "value_voicechannels.channel.suffix": "🎉",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
+      "err",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "[VC] :sparkles:",
+    );
+    expect(written().get("voicechannels.channel.suffix")).toBe("🎉");
+    mockConfigSet.mockClear();
+    stored({ "voicechannels.channel.prefix": "[VC] :sparkles:" });
+    await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix"],
+      "value_voicechannels.channel.prefix": "[VC] :video_game:",
+    });
+    expect(written().get("voicechannels.channel.prefix")).toBe("[VC] 🎮");
+    mockConfigSet.mockClear();
+    const over = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix"],
+      "value_voicechannels.channel.prefix": `${"x".repeat(32)}:sparkles:`,
+    });
+    expect(parseFlashRedirect(over.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
   it("saves a stored over-cap prefix unchanged beside a sibling edit (#1435)", async () => {
     const legacy = "x".repeat(40);
     stored({ "voicechannels.channel.prefix": legacy });

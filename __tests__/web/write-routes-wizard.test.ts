@@ -300,6 +300,20 @@ describe("POST /wizard/step/:n", () => {
     );
   });
 
+  it("keeps an unchanged stored prefix with a shortcode in a wizard step (#1438)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["events"]));
+    mockConfigGet.mockImplementation((async (key: string) =>
+      key === "events.channel_prefix" ? "[VC] :sparkles:" : null) as never);
+    await harness.post("/wizard/step/0", {
+      "value_events.enabled": "true",
+      "value_events.channel_prefix": "[VC] :sparkles:",
+    });
+    const recorded = Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+    );
+    expect(recorded["events.channel_prefix"]).toBe("[VC] :sparkles:");
+  });
+
   it("accepts a long text prefix in a wizard step (#1435)", async () => {
     mockGetSession.mockReturnValue(wizardState(["events"]));
     await harness.post("/wizard/step/0", {

@@ -637,7 +637,18 @@ export function coerceConfigValue(
   // are conveniences, so the value is checked again here. The stored value is
   // exempt, whatever it is: refusing it would block the whole section save.
   const format = settingsMetadata[key as keyof typeof settingsMetadata]?.format;
-  if (format) {
+  if (
+    format === "affix" &&
+    current !== undefined &&
+    current !== null &&
+    submitted === String(current)
+  ) {
+    // An affix posted exactly as stored is kept as stored: resolving a
+    // shortcode in it (`[VC] :sparkles:` to `[VC] ✨`) would silently rewrite
+    // the stored text, and with it every future channel name, whenever a
+    // sibling setting in the section or a wizard step is saved.
+    value = submitted;
+  } else if (format) {
     // Shortcode resolution above would turn the `:name:` of `<:name:id>` into a
     // Unicode emoji and hide the markup, so an affix is also checked as submitted.
     const checked =
