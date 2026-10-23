@@ -238,6 +238,7 @@ An IANA zone for a setting or an event (#1426).
   so option indexes never move; the selected and the original option always stay visible; `new york` finds `America/New_York`; Enter picks the first
   match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
 - No JavaScript: the plain select.
+- Also used on `/me/timezone` (#1436): *Server default* is the blank first option, and the live "Current time" preview listens to the same select.
 
 ### ColourField
 
@@ -283,7 +284,8 @@ name in the UI: options, tables, definition lists, sentences.
 | Forum | `messages-square` icon + name |
 | Category | `folder` icon + NAME in uppercase (`kb-mention--category`), never a `#` |
 | Role | `@Name`, no icon |
-| Deleted or unknown id | `kb-mention--missing`: an alert icon and "(unavailable)" |
+| Deleted voice room with a stored name | `kb-mention` with the `volume-2` icon and the stored name, then a muted `(deleted)` (`kb-muted`) |
+| Deleted or unknown id, no stored name | `kb-mention--missing`: an alert icon and "(unavailable)" |
 
 Inside a native `<option>`, where SVG cannot go, use the Unicode fallback from #1303 (`🔊 Lobby · VOICE`).
 

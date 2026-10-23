@@ -2,7 +2,6 @@ import { describe, it, expect } from "@jest/globals";
 import { renderEventsPage } from "../../src/web/admin-views.js";
 import {
   END_CONFIRM_FIELD,
-  END_PULL_BACK_FIELD,
   renderEndEventForm,
   renderEndSection,
 } from "../../src/web/event-end-view.js";
@@ -45,23 +44,24 @@ describe("renderEventsPage: End now (#1193)", () => {
       `<input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required>`,
     );
     expect(html).toContain('<details class="end-now">');
-    // No pull-back for an event without group channels.
-    expect(form).not.toContain(END_PULL_BACK_FIELD);
+    // No pull-back option, ever (#1441).
+    expect(form).not.toContain("pullBack");
   });
 
-  it("offers the pull-back, ticked, only when the event has group channels", () => {
+  it("says everyone is moved back first, without an option, only when the event has group channels", () => {
     const html = renderEventsPage({
       ...COMMON,
       rows: [row({ groupCount: 2, hasGroupChannels: true })],
     } as never);
-    expect(endForm(html)).toContain(
-      `<input type="checkbox" name="${END_PULL_BACK_FIELD}" value="1" checked>`,
-    );
+    expect(endForm(html)).toContain("moved back to the main channel first");
+    expect(endForm(html)).not.toContain("pullBack");
     const noChannels = renderEventsPage({
       ...COMMON,
       rows: [row({ groupCount: 2, hasGroupChannels: false })],
     } as never);
-    expect(endForm(noChannels)).not.toContain(END_PULL_BACK_FIELD);
+    expect(endForm(noChannels)).not.toContain(
+      "moved back to the main channel first",
+    );
   });
 
   it("the Events table says which of the two it does to the Discord event", () => {
@@ -108,7 +108,7 @@ describe("renderEndEventForm and renderEndSection", () => {
     actionPath: '/x/"><i>',
     csrfToken: '"><b>',
     idSuffix: "a<b>",
-    offerPullBack: true,
+    hasGroupChannels: true,
   };
 
   it("escapes every value", () => {
@@ -124,7 +124,7 @@ describe("renderEndEventForm and renderEndSection", () => {
     expect(html).toContain("group leaders are cleared");
     expect(html).toContain("usual grace period");
     expect(html).toContain("cannot be undone");
-    const plain = renderEndEventForm({ ...base, offerPullBack: false });
+    const plain = renderEndEventForm({ ...base, hasGroupChannels: false });
     expect(plain).not.toContain("group leaders");
   });
 
@@ -141,7 +141,7 @@ describe("renderEndEventForm and renderEndSection", () => {
       state: "active",
       actionPath: "/p/end",
       csrfToken: "t",
-      offerPullBack: false,
+      hasGroupChannels: false,
       adopted: true,
     });
     expect(section).toContain("the Discord event is left as it is");
@@ -159,14 +159,14 @@ describe("renderEndEventForm and renderEndSection", () => {
         state: "active",
         actionPath: "/p/end",
         csrfToken: "t",
-        offerPullBack: false,
+        hasGroupChannels: false,
       }),
     ).toContain('action="/p/end"');
     const scheduled = renderEndSection({
       state: "scheduled",
       actionPath: "/p/end",
       csrfToken: "t",
-      offerPullBack: true,
+      hasGroupChannels: true,
     });
     expect(scheduled).not.toContain("<form");
     expect(scheduled).toContain("Only a running event can be ended");

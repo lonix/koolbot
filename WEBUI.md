@@ -1245,11 +1245,11 @@ stays a text field.
 owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
 _Re-post_ chip next to _Jump to message_, shown once a message exists), so the action has one home:
 
-| Message | Page and card | Audit action | What Update/refresh already does |
-| --- | --- | --- | --- |
-| Quote channel header | Quotes, **Header post** | `quote.header-repost` | The bot edits the header in place when its wording changes |
-| Notices channel header | Notices, **Header post** | `notice.header-repost` | The same, for the notices header |
-| Rules message | Rules, **Re-post the rules message** | `rules.repost` | **Update the rules message** edits it in place (a new one only if it was deleted) |
+| Message                | Page and card                        | Audit action           | What Update/refresh already does                                                  |
+| ---------------------- | ------------------------------------ | ---------------------- | --------------------------------------------------------------------------------- |
+| Quote channel header   | Quotes, **Header post**              | `quote.header-repost`  | The bot edits the header in place when its wording changes                        |
+| Notices channel header | Notices, **Header post**             | `notice.header-repost` | The same, for the notices header                                                  |
+| Rules message          | Rules, **Re-post the rules message** | `rules.repost`         | **Update the rules message** edits it in place (a new one only if it was deleted) |
 
 Re-post is a form POST behind the confirm dialog (red, with the consequences listed: a new message at the bottom of the
 channel, the old one deleted if the bot can find it in this channel, nothing else touched), CSRF and the admin check,
@@ -1445,6 +1445,11 @@ the WebUI audit's `core.web_audit.retention_days`. This is
 complementary to the Prometheus `/metrics` endpoint, which is a live
 scrape target (command counters since the last restart, process metrics)
 rather than a persisted per-day history.
+
+A command run in a voice room stores the room's name with its audit row, because
+most voice rooms are deleted when they empty. Once the room is gone (Discord's channel list was read and no longer has it), the
+page shows it by that name with a muted `(deleted)` instead of `(unavailable)`. If the channel list could not be read, rooms stay
+`(unavailable)`; rows from before this, and rows from other channel types, read as before.
 
 The **Weekly Digest** page (`/admin/digest`) lets an admin **preview** the
 weekly voice digest before it sends (#539). **Preview** is a read-only dry run:
@@ -2838,11 +2843,11 @@ the host panel (shown for every open event; the form only for an `active` one, a
 event says it can be ended once it has started) and an **End now** control on every
 `active` row of the Events table (admin only). Both are one small form with a required tick
 box, "I want to end this event now", that the server checks again: a post without it changes
-nothing, so the confirmation holds without scripts. An event with group channels also offers
-"Move everyone in the group channels back to the main channel first", ticked by default. With it
-ticked, a manual end moves people first; unticked, it ends the event without moving anyone, and
-a group channel that still holds someone is left (never deleted while occupied) and goes within a
-minute of the last person leaving.
+nothing, so the confirmation holds without scripts. An event with group channels needs no extra choice: a host end
+always moves everyone in a group channel back to the main channel first (there is no option to skip it). A
+group channel that still holds someone afterwards (for example when the bot may not move members) is left
+(never deleted while occupied) and goes within a minute of the last person leaving. The main channel follows
+the usual grace period after the end, once it is empty.
 Only an `active` event can be ended: a scheduled one (not started) and a cancelled one are
 refused with a message, and an event that has already ended answers "already ended" and
 changes nothing (pressed twice, or by two people, or while the scheduled end runs: exactly
@@ -2861,7 +2866,8 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    people while the later steps run), and because the group channel cleanup and the mover are
    written for an event that is already ended.
 2. The announcement post is refreshed (it no longer shows a running event).
-3. **Pull back** (manual end, when ticked, only for an event with group channels): everyone
+3. **Pull back** (manual end, always, only for an event with group channels; there is no option
+   to skip it, and a posted `pullBack` field from an older form is ignored): everyone
    connected to a group, open or leader-only channel goes to the main channel with the
    **Move people** helper, the host included (someone left in a channel that is about to go
    would be stranded as much as anyone). At most 60 people per run, 500 ms apart, only people
@@ -3121,7 +3127,7 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
   legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms (including ones the voice feature
   holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that
-have not ended,
+  have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break
@@ -3350,7 +3356,7 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
 | **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.     |
 | **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.           |
-| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row. |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                  |
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row. |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |

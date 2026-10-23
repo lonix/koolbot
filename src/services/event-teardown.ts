@@ -19,7 +19,7 @@
  *      for it.
  *    If the claim cannot be saved nothing else happens.
  * 2. The announcement post is refreshed (it no longer shows a running event).
- * 3. **Pull back** (manual end, when asked): everyone connected to a group
+ * 3. **Pull back** (manual end, always, #1441): everyone connected to a group
  *    channel goes to the main channel, through `moveEventMembers`. Nobody is
  *    left out, the host included.
  * 4. **End-of-event hooks** (`event-end-hooks.ts`; the clan tags' nickname restore, #1194).
@@ -134,8 +134,6 @@ export interface TeardownInput {
   eventId: string;
   guildId: string;
   trigger: EventEndTrigger;
-  /** Manual end only; ignored (false) for the scheduled end. */
-  pullBack: boolean;
   now: Date;
   /** The instant recorded as `endedAt` (the press, or the scheduled end). */
   endedAt: Date;
@@ -246,7 +244,7 @@ export class EventTeardown {
     push(await this.announce(event));
 
     let movedBack = 0;
-    if (input.trigger === "manual" && input.pullBack) {
+    if (input.trigger === "manual") {
       const pulled = await this.pullBack(event);
       movedBack = pulled?.counts?.moved ?? 0;
       push(pulled);

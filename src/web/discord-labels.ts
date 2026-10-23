@@ -65,6 +65,12 @@ export function channelKindOf(
 export interface ChannelRef {
   name: string;
   type: ChannelType | number | null | undefined;
+  /**
+   * Name kept when the row was written, for a voice room that may be gone by
+   * now (#1420). Used only when `type` is not found: the row is shown as a
+   * deleted voice room by this name rather than as unavailable.
+   */
+  storedName?: string | null;
 }
 
 interface KindInfo {
@@ -150,7 +156,11 @@ export function channelGroupLabel(type: ChannelType | number): string {
  */
 export function channelMention(ref: ChannelRef): string {
   const kind = channelKindOf(ref.type);
-  if (!kind) return missingMention(ref.name);
+  if (!kind) {
+    return ref.storedName
+      ? deletedVoiceMention(ref.storedName)
+      : missingMention(ref.name);
+  }
   const info = KINDS[kind];
   const cls =
     kind === "category" ? "kb-mention kb-mention--category" : "kb-mention";
@@ -160,6 +170,14 @@ export function channelMention(ref: ChannelRef): string {
 /** A role as a `kb-mention`: `@Name`, no icon, as Discord shows it. */
 export function roleMention(name: string): string {
   return `<span class="kb-mention">@${escapeHtml(name)}</span>`;
+}
+
+/**
+ * A voice room Discord no longer knows, by the name stored when the row was
+ * written (#1420): the neutral voice icon, the name and a muted "(deleted)".
+ */
+export function deletedVoiceMention(storedName: string): string {
+  return `<span class="kb-mention">${svg(KINDS.voice.icon, "Voice channel")}${escapeHtml(storedName)}</span> <span class="kb-muted">(deleted)</span>`;
 }
 
 /** An id that no longer resolves to anything: an alert icon and "(unavailable)". */
@@ -177,7 +195,11 @@ export function missingMention(id: string): string {
  */
 export function channelText(ref: ChannelRef, parentName?: string): string {
   const kind = channelKindOf(ref.type);
-  if (!kind) return missingText(ref.name);
+  if (!kind) {
+    return ref.storedName
+      ? `${KINDS.voice.glyph} ${ref.storedName} (deleted)`
+      : missingText(ref.name);
+  }
   const head = `${KINDS[kind].glyph} ${ref.name}`;
   return parentName && kind !== "category"
     ? `${head} · ${parentName.toUpperCase()}`

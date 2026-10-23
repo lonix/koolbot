@@ -64,10 +64,7 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
-import {
-  getServerTimezone,
-  listSupportedTimezones,
-} from "../utils/timezone.js";
+import { getServerTimezone } from "../utils/timezone.js";
 import {
   RewindService,
   formatFunComparison,
@@ -869,7 +866,6 @@ export function createUserRouter(
           active: "/me/timezone",
           body: renderUserTimezoneBody({
             csrfToken: getCsrfToken(req),
-            zones: listSupportedTimezones(),
             selected,
             serverTimezone: getServerTimezone(),
           }),
