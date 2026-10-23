@@ -224,6 +224,41 @@ describe("findRemovedBotCandidates", () => {
     expect(unsure).toBeGreaterThan(25);
   });
 
+  it("always checks the chosen bot, whichever page it is on, without moving the cursor", async () => {
+    const late = "999999999999999999";
+    for (let i = 0; i < 30; i += 1) {
+      const id = `h${String(i).padStart(3, "0")}`;
+      s.world.members.set(id, { bot: false, roleIds: [] });
+      s.world.channels.get(s.chA)!.overwrites.push({
+        id,
+        type: "member",
+        allow: VIEW,
+        deny: "0",
+      });
+    }
+    s.world.channels.get(s.chB)!.overwrites.push({
+      id: late,
+      type: "member",
+      allow: VIEW,
+      deny: "0",
+    });
+    const g = guildFor(s.world, { bots: new Set([REMOVED, late]) });
+    const found = findRemovedBotCandidates(await scanOf(s.world));
+    // First window, no cursor: the late bot is outside it, yet included.
+    const first = await confirmRemovedBots(g, found, { include: late });
+    expect(first.candidates.some((c) => c.userId === late)).toBe(true);
+    // The cursor still points at the last account of the window, so the next
+    // view continues from there.
+    const plain = await confirmRemovedBots(g, found);
+    expect(first.next).toBe(plain.next);
+    // An included account that is not a bot is still dropped.
+    const human = found.find((c) => c.userId === "h029")!;
+    const dropped = await confirmRemovedBots(g, found, {
+      include: human.userId,
+    });
+    expect(dropped.candidates.some((c) => c.userId === "h029")).toBe(false);
+  });
+
   it("finds an uncatalogued removed bot when the GuildMembers intent is off", async () => {
     const mystery = "888888888888888888";
     s.world.channels.get(s.chB)!.overwrites.push({

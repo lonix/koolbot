@@ -214,15 +214,70 @@ describe("GET /adopt/cleanup", () => {
     ).text();
     expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({
       after: "555555555555555555",
+      include: null,
     });
     expect(html).toContain("after=777777777777777777");
     expect(html).toContain("Check the next accounts");
   });
 
+  it("keeps a bot found on a later page selectable: its Review link names it and the route always checks it", async () => {
+    const late = { ...candidate, userId: "999999999999999999", name: "Late" };
+    // Page 2: the batch holds the late bot.
+    mockConfirm.mockImplementation(async (_g, _list, opts) => ({
+      candidates: [late],
+      unchecked: 0,
+      next: null,
+      // A real run also returns the included bot even when it is off-window.
+      ...(opts?.include ? {} : {}),
+    }));
+    await mount();
+    const page2 = await (
+      await harness.get("/adopt/cleanup?after=555555555555555555")
+    ).text();
+    const href = /href="(\/admin\/adopt\/cleanup\?bot=[^"]+)"/.exec(page2)?.[1];
+    expect(href).toBeDefined();
+    // Follow the link as the browser does: no cursor, only the bot.
+    mockFind.mockReturnValue([late]);
+    const choice = await (
+      await harness.get(href!.replace(/&amp;/g, "&").replace(/^\/admin/, ""))
+    ).text();
+    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({
+      after: null,
+      include: "999999999999999999",
+    });
+    expect(choice).toContain('name="ch"');
+    expect(choice).not.toContain("not in the list below any more");
+    // And the preview form it renders (a GET with the bot) does the same.
+    const form = /<form method="get"[^>]*>([^]*?)<\/form>/.exec(choice)![1]!;
+    const fields = [...form.matchAll(/name="(\w+)" value="([^"]*)"/g)];
+    // Hidden fields as posted; the admin ticks one channel box.
+    const q = new URLSearchParams(
+      fields.filter((m) => m[1] !== "ch").map((m) => [m[1]!, m[2]!]),
+    );
+    q.append("ch", CH);
+    const preview = await (await harness.get(`/adopt/cleanup?${q}`)).text();
+    expect(mockPlan).toHaveBeenCalledWith(
+      expect.anything(),
+      session.discordUserId,
+      "999999999999999999",
+      [CH],
+      expect.any(String),
+      { sampleMessages: false },
+    );
+    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({
+      after: null,
+      include: "999999999999999999",
+    });
+    expect(preview).toContain("Destructive steps (1)");
+  });
+
   it("ignores a malformed continuation", async () => {
     await mount();
     await harness.get("/adopt/cleanup?after=%3Cx%3E");
-    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({ after: null });
+    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({
+      after: null,
+      include: null,
+    });
   });
 
   it("shows the overwrites of the chosen bot, none ticked", async () => {

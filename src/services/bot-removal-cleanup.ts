@@ -272,7 +272,12 @@ export interface ConfirmedBots {
 export async function confirmRemovedBots(
   guild: Guild,
   candidates: readonly RemovedBotCandidate[],
-  options: { limit?: number; after?: string | null } = {},
+  options: {
+    limit?: number;
+    after?: string | null;
+    /** Always asked about, whatever the cursor and limit say (the chosen bot). */
+    include?: string | null;
+  } = {},
 ): Promise<ConfirmedBots> {
   const limit = options.limit ?? CONFIRM_LIMIT;
   const cursor = options.after
@@ -289,13 +294,18 @@ export async function confirmRemovedBots(
       out.push(c);
       continue;
     }
-    if (i <= cursor) continue; // asked on an earlier view
-    if (asked >= limit) {
-      next = last;
+    const inWindow = i > cursor && asked < limit;
+    if (!inWindow && c.userId !== options.include) {
+      // Either asked on an earlier view, or left for the next one.
+      if (i > cursor) next = last;
       continue;
     }
-    asked += 1;
-    last = c.userId;
+    // The chosen bot outside this view's window costs one extra lookup and
+    // leaves the cursor alone.
+    if (inWindow) {
+      asked += 1;
+      last = c.userId;
+    }
     const problem = await verifyBotRemoved(guild, c.userId);
     if (problem === null) out.push({ ...c, needsCheck: false });
     else if (

@@ -136,7 +136,7 @@ export function createBotCleanupRouter(client: Client): Router {
             const confirmed = await confirmRemovedBots(
               guild,
               findRemovedBotCandidates(planned.scan),
-              { after },
+              { after, include: botId },
             );
             candidates = confirmed.candidates;
             unchecked = confirmed.unchecked;
@@ -149,7 +149,7 @@ export function createBotCleanupRouter(client: Client): Router {
             const confirmed = await confirmRemovedBots(
               guild,
               findRemovedBotCandidates(scan),
-              { after },
+              { after, include: botId },
             );
             candidates = confirmed.candidates;
             unchecked = confirmed.unchecked;
