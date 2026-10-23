@@ -35,6 +35,10 @@ const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
 const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => []);
 const mockConfigGet = jest.fn(async () => null);
+const mockConfigGetStringStrict = jest.fn(
+  async (_key: string, defaultValue: string = ""): Promise<string> =>
+    defaultValue,
+);
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -70,6 +74,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       get: mockConfigGet,
+      getStringStrict: mockConfigGetStringStrict,
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
       getBoolean: jest.fn(async () => false),
@@ -326,6 +331,41 @@ describe("POST /wizard/step/:n", () => {
       ),
     ).toMatchObject({ "reactionroles.group_role_colour": "" });
     mockConfigGet.mockImplementation((async () => null) as never);
+  });
+
+  it("stages nothing for a Keep colour when the stored value cannot be read, and keeps the user on the step", async () => {
+    mockGetSession.mockReturnValue(wizardState(["reactionroles"]));
+    mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post("/wizard/step/0", {
+      "value_reactionroles.enabled": "true",
+      "value_reactionroles.group_role_colour": "#99aab5",
+      "keep_reactionroles.group_role_colour": "true",
+    });
+    const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
+    expect(recorded).not.toContain("reactionroles.group_role_colour");
+    const loc = res.headers.get("location") ?? "";
+    expect(loc).toContain("step=0");
+    expect(parseFlashRedirect(loc).type).not.toBe("ok");
+    expect(decodeURIComponent(loc.replace(/\+/g, " "))).toContain(
+      "could not be read",
+    );
+  });
+
+  it("stages the recovered legacy colour for Keep when get() failed but the strict read succeeds", async () => {
+    mockGetSession.mockReturnValue(wizardState(["reactionroles"]));
+    // `get()` failed (null) but the strict read recovered the legacy colour:
+    // the recovered value is also the coercion baseline, so `red` is accepted.
+    mockConfigGetStringStrict.mockResolvedValueOnce("red");
+    await harness.post("/wizard/step/0", {
+      "value_reactionroles.enabled": "true",
+      "value_reactionroles.group_role_colour": "#99aab5",
+      "keep_reactionroles.group_role_colour": "true",
+    });
+    expect(
+      Object.fromEntries(
+        mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+      ),
+    ).toMatchObject({ "reactionroles.group_role_colour": "red" });
   });
 
   it("advances to the next step when more features remain", async () => {
