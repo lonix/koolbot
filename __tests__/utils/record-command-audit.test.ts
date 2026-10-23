@@ -36,6 +36,7 @@ describe("recordCommandAudit", () => {
       commandName: "quote",
       subcommand: "add",
       channelId: "c1",
+      channelName: "Alice's room",
       result: "success",
       errorMessage: null,
       durationMs: 42,
@@ -47,6 +48,7 @@ describe("recordCommandAudit", () => {
       commandName: "quote",
       subcommand: "add",
       channelId: "c1",
+      channelName: "Alice's room",
       result: "success",
       errorMessage: null,
       durationMs: 42,
@@ -64,6 +66,7 @@ describe("recordCommandAudit", () => {
     const arg = createMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(arg.subcommand).toBeNull();
     expect(arg.channelId).toBeNull();
+    expect(arg.channelName).toBeNull();
     expect(arg.errorMessage).toBeNull();
   });
 

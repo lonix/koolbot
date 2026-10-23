@@ -470,6 +470,7 @@ export function createMeModerationRouter(client: Client): Router {
           pageSize: PAGE_SIZE,
           channelNames: channelData.names,
           channelTypes: channelData.types,
+          channelsListed: channelData.listed,
         }),
       ]);
       await wrap(

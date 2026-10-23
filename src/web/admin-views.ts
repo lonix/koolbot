@@ -5771,6 +5771,8 @@ export interface CommandAuditRow {
   channelLabel: string | null;
   /** Discord type of the channel; null when it no longer resolves. */
   channelType: ChannelType | null;
+  /** Voice room name stored with the row (#1420); shown when the room is gone. */
+  channelStoredName: string | null;
   result: "success" | "error" | "denied";
   errorMessage: string | null;
   durationMs: number;
@@ -5868,7 +5870,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
 <td class="muted mono">${escapeHtml(r.createdAt)}</td>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
 <td class="mono">${cmd}</td>
-<td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType }) : "—"}</td>
+<td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType, storedName: r.channelStoredName }) : "—"}</td>
 <td>${resultTag(r.result)}</td>
 <td class="muted">${r.durationMs}ms</td>
 <td class="muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>
