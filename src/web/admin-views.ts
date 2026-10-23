@@ -800,6 +800,28 @@ export function settingPresetFieldName(key: string): string {
 }
 
 /**
+ * True when a colour setting's "Keep the stored value" box is ticked (and Use
+ * default, which wins, is not). The save handlers then resolve the stored value
+ * with `ConfigService.getStringStrict()` and pass it to `readSettingField`: a
+ * failed read must refuse the save, never fall back to the swatch placeholder.
+ */
+export function wantsKeptColour(
+  body: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  return (
+    settingsMetadata[key as keyof typeof settingsMetadata]?.format ===
+      "colour" &&
+    body?.[settingDefaultFieldName(key)] !== "true" &&
+    body?.[settingKeepFieldName(key)] === "true"
+  );
+}
+
+/** Why a Keep colour is refused when its stored value cannot be read. */
+export const KEEP_READ_FAILED_REASON =
+  "the stored colour could not be read, so it was left unchanged; try again";
+
+/**
  * The raw posted value of a setting: its `value_<key>` field, or `""` when the
  * key is a colour and "Use default" is ticked, or a preset when a duration's
  * preset radio is ticked (Custom… and no radio both mean the box). Every save path reads values
