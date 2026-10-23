@@ -554,6 +554,8 @@ describe("the timezone search and the save bar", () => {
     expect(sel(dom).value).toBe("Europe/Berlin");
     expect([...sel(dom).options].filter((o) => o.disabled)).toEqual([]);
     expect(postedZone(dom)).toBe("Europe/Berlin");
+    // The restored zone is visible in the list, not only posted.
+    expect(sel(dom).selectedOptions[0].hidden).toBe(false);
     expect(bar(dom).hidden).toBe(true);
   });
 });

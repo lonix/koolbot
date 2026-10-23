@@ -100,7 +100,9 @@ export function renderTimezoneSelect(
  * committing it as the baseline, then Discard) would post nothing and clear the
  * setting. Options are only hidden, so the option indexes the save bar compares
  * never change, and the selected and the original option always stay visible.
- * Enter picks the first match. Underscores and slashes count as spaces, so
+ * The filter runs again whenever the select changes, Discard's restoring
+ * `change` included, so a restored zone is never left hidden. Enter picks the
+ * first match. Underscores and slashes count as spaces, so
  * "new york" finds America/New_York.
  */
 export const TIMEZONE_SELECT_SCRIPT =
@@ -114,6 +116,10 @@ export const TIMEZONE_SELECT_SCRIPT =
   "if(st){st.hidden=!q;st.textContent=n?n+(n===1?' timezone matches':' timezones match'):'No timezones match'}" +
   "return first}" +
   "s.addEventListener('input',run);" +
+  // The selection can change without the search changing: the user picks, or
+  // the save bar's Discard restores the select and fires `change`. Filtering
+  // again keeps the selected and original option visible.
+  "sel.addEventListener('change',run);" +
   "s.addEventListener('keydown',function(e){if(e.key!=='Enter')return;e.preventDefault();var f=run();" +
   "if(f&&s.value.trim()){sel.value=f.value;sel.dispatchEvent(new Event('change',{bubbles:true}));sel.focus()}})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-tz]'),init)" +
