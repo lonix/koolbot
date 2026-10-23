@@ -780,6 +780,20 @@ describe("EVENTS_SETTING_KEYS (#975)", () => {
     expect(EVENTS_SETTING_KEYS[0]).toBe("events.enabled");
   });
 
+  it("renders the host event limit row on the Events card (#1408)", async () => {
+    const data = await loadFeatureSettings(
+      { guilds: { fetch: async () => ({ id: "guild-1" }) } } as any,
+      "guild-1",
+      ["events.max_active_per_host"],
+      [{ key: "events.max_active_per_host", value: 3 }],
+    );
+    expect(data.settingRows).toHaveLength(1);
+    expect(data.settingRows[0]).toMatchObject({
+      key: "events.max_active_per_host",
+      current: 3,
+    });
+  });
+
   it("fetches the channel pickers but not roles", async () => {
     const calls = { channels: 0, roles: 0 };
     const guild = {

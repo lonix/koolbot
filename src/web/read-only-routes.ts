@@ -295,6 +295,7 @@ export const EVENTS_SETTING_KEYS = [
   "events.native.link_room",
   "events.groups.default_count",
   "events.groups.max_count",
+  "events.max_active_per_host",
 ] as const;
 
 /**
