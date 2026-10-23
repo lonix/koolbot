@@ -27,7 +27,7 @@ const {
   prepareGroupEditBody,
   PRESET_PICK_FIELD,
 } = await import("../../src/web/host-settings-groups.js");
-const { renderSettingsSection } =
+const { renderGroupChanges, renderEventSettings } =
   await import("../../src/web/host-settings-view.js");
 type GroupEditViewData =
   import("../../src/web/host-settings-groups.js").GroupEditViewData;
@@ -164,7 +164,7 @@ describe("renderPresetForm", () => {
   });
 });
 
-describe("the section puts the editor inside the settings form and the preset in its own", () => {
+describe("Change the groups puts the editor in a form of its own, apart from Event settings", () => {
   it("renders both, and falls back to the read-only table without a group editor", () => {
     const base = {
       csrfToken: "tok",
@@ -172,14 +172,13 @@ describe("the section puts the editor inside the settings form and the preset in
       blocker: null,
       leadMinutes: null,
       leadReadOnly: null,
-      locked: false,
       groupLabel: "Squad",
       groups: [
         { name: "G", marker: "", size: 1, memberCount: 0, overSize: false },
       ],
     };
-    const withEditor = renderSettingsSection({ ...base, groupEdit: view() });
-    // The settings form, the preset form, and the remove and add forms (#1242).
+    const withEditor = renderGroupChanges({ ...base, groupEdit: view() });
+    // The names form, the preset form, and the remove and add forms (#1242).
     expect(withEditor.split("<form ").length - 1).toBe(4);
     const first = withEditor.slice(0, withEditor.indexOf("</form>"));
     expect(first).toContain('name="s_groupNameA"');
@@ -187,19 +186,22 @@ describe("the section puts the editor inside the settings form and the preset in
     expect(withEditor.slice(withEditor.indexOf("</form>"))).toContain(
       "preset_pick",
     );
-    const plain = renderSettingsSection(base);
+    // Event settings never carries the group rows, so a save there leaves them alone.
+    expect(renderEventSettings({ ...base, groupEdit: view() })).not.toContain(
+      "s_groupNameA",
+    );
+    const plain = renderGroupChanges(base);
     expect(plain).not.toContain("s_groupNameA");
     expect(plain).toContain("prefs-table");
   });
 
   it("shows no editor while the section is blocked", () => {
-    const html = renderSettingsSection({
+    const html = renderGroupChanges({
       csrfToken: "t",
       actionPath: (a) => a,
       blocker: "Events are turned off",
       leadMinutes: null,
       leadReadOnly: null,
-      locked: null,
       groupLabel: "Squad",
       groups: [],
       groupEdit: view(),

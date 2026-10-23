@@ -111,17 +111,17 @@ import {
   type EventEditView,
 } from "../../src/web/event-edit-view.js";
 import { renderNewEventBody } from "../../src/web/event-new-view.js";
-import { renderAssignmentSection } from "../../src/web/host-assignment-view.js";
+import {
+  renderHostBoard,
+  type HostBoardData,
+} from "../../src/web/host-board-view.js";
 import {
   renderConfirmBody,
-  renderSettingsSection,
+  renderEventSettings,
+  renderGroupChanges,
+  type SettingsViewData,
 } from "../../src/web/host-settings-view.js";
-import { renderMovesSection } from "../../src/web/host-moves-view.js";
 import { renderEndSection } from "../../src/web/event-end-view.js";
-import {
-  renderLeadersSection,
-  type LeadersViewData,
-} from "../../src/web/host-leaders-view.js";
 import {
   SHELL_NAV,
   type ShellNavItem,
@@ -2843,34 +2843,177 @@ export function adminPages(): A11yPage[] {
 }
 
 /** A host-panel event (#1189); `groupsEnabled` adds two groups. */
-function leadersView(blocker: string | null): LeadersViewData {
+/** A host panel board (#1424): two teams with people, one of them led, and people in no team. */
+function boardData(over: Partial<HostBoardData> = {}): HostBoardData {
   return {
     csrfToken: "token",
     actionPath: (name) => `/me/events/65a000000000000000000001/host/${name}`,
-    leaderLabel: "Captain",
     groupLabel: "Team",
-    blocker,
-    defaultWhere:
-      "the main channel (the event has no leaders-only channel yet).",
-    destinations: [
-      { value: "default", label: "Default" },
-      { value: "main", label: "Main channel" },
-      { value: "here", label: "The channel I am in" },
-      { value: "g_a", label: "Reds" },
-    ],
-    groups: [
+    leaderLabel: "Captain",
+    locked: false,
+    presenceOk: true,
+    teams: [
       {
-        key: "g_a",
+        key: "g_00000001",
         name: "Reds",
         marker: "🔴",
-        leaderId: "111111111111111111",
-        members: [
-          { id: "111111111111111111", name: "Ana" },
-          { id: "222222222222222222", name: "Ben" },
+        tag: "RED",
+        size: 4,
+        hasChannel: true,
+        customised: true,
+        people: [
+          {
+            id: "111111111111111111",
+            name: "Ana",
+            connected: true,
+            where: "Reds",
+            leaderLabel: null,
+          },
+          {
+            id: "222222222222222222",
+            name: "Ben",
+            connected: false,
+            where: null,
+            leaderLabel: null,
+          },
         ],
       },
-      { key: "g_b", name: "Blues", marker: "", leaderId: null, members: [] },
+      {
+        key: "g_00000002",
+        name: "Blues",
+        marker: "",
+        tag: "",
+        size: null,
+        hasChannel: false,
+        customised: false,
+        people: [],
+      },
     ],
+    loose: [
+      {
+        id: "333333333333333333",
+        name: "Cal",
+        connected: true,
+        where: "Main channel",
+        leaderLabel: null,
+      },
+    ],
+    connectedCount: 2,
+    moveBlocker: null,
+    sendableTeams: 1,
+    waitingForChannel: 0,
+    hasMain: true,
+    destinations: [
+      { value: "main", label: "Main channel", occupants: 1, limit: 0 },
+      { value: "g_00000001", label: "🔴 Reds", occupants: 4, limit: 4 },
+    ],
+    movePeople: [
+      { id: "111111111111111111", name: "Ana", where: "Reds" },
+      { id: "333333333333333333", name: "Cal", where: "Main channel" },
+    ],
+    ...over,
+  };
+}
+
+/** The whole host panel body around a board (the folds are filled by their own fixtures). */
+function boardPage(
+  data: HostBoardData,
+  over: Partial<HostPanelEvent> = {},
+): string {
+  return renderHostPanelBody({
+    event: {
+      ...hostEvent({ groupsEnabled: true, state: "active" }),
+      ...over,
+    },
+    controls: {
+      board: renderHostBoard(data),
+      end: renderEndSection({
+        state: "active",
+        actionPath: "/me/events/65a000000000000000000001/host/end",
+        csrfToken: "token",
+        offerPullBack: true,
+      }),
+    },
+  });
+}
+
+/** What the two folds read: lead time, leaders and tags, and the groups. */
+function settingsData(over: Partial<SettingsViewData> = {}): SettingsViewData {
+  return {
+    csrfToken: COMMON.csrfToken,
+    actionPath: (name) => `/me/events/65a000000000000000000001/host/${name}`,
+    blocker: null,
+    leadMinutes: 30,
+    leadReadOnly: "The channels already exist.",
+    groupLabel: "Team",
+    groups: [],
+    groupEdit: {
+      groupLabel: "Team",
+      presets: [],
+      presetNotice: null,
+      presetBase: "[]",
+      addKey: "g_00000003",
+      groups: [
+        {
+          key: "g_00000001",
+          kind: "team",
+          name: "Red",
+          marker: "",
+          size: null,
+          memberCount: 2,
+          overSize: false,
+          namePending: false,
+          sizePending: false,
+          hasChannel: true,
+        },
+        {
+          key: "g_00000002",
+          kind: "team",
+          name: "Blue",
+          marker: "",
+          size: 4,
+          memberCount: 0,
+          overSize: false,
+          namePending: false,
+          sizePending: false,
+          hasChannel: false,
+        },
+      ],
+    },
+    groupsSwitch: {
+      on: true,
+      groupLabel: "Team",
+      channelOwed: false,
+      blocked: null,
+      kept: [],
+      presets: [],
+      presetNotice: null,
+      groupCount: 2,
+      channelCount: 1,
+    },
+    leadersTags: {
+      leaders: true,
+      customisation: true,
+      leaderLabel: "Captain",
+      tags: true,
+      tagsSuffix: false,
+      lobby: false,
+      teams: [
+        { key: "g_00000001", name: "Red", marker: "", tag: "RED" },
+        { key: "g_00000002", name: "Blue", marker: "", tag: "" },
+      ],
+    },
+    leaderExtras: {
+      leaderLabel: "Captain",
+      edits: [
+        {
+          at: "2030-01-01T18:00:00.000Z",
+          who: "Ana",
+          text: 'renamed Red to "Rubies"',
+        },
+      ],
+    },
+    ...over,
   };
 }
 
@@ -3170,73 +3313,59 @@ export function userPages(): A11yPage[] {
         "/me/events",
         renderHostPanelBody({
           event: hostEvent({ groupsEnabled: true }),
-          controls: { settings: "<p>Settings body.</p>" },
+          controls: {
+            settings: "<p>Settings body.</p>",
+            groupchanges: "<p>Group changes body.</p>",
+          },
           settingsOpen: true,
         }),
       ),
     },
     {
       // The two always-confirmed forms (#1344): switch groups off and remove
-      // groups, each with its empty live region for a fetch problem.
+      // groups, each with its empty live region for a fetch problem; now in
+      // the "Change the groups" fold (#1424).
       name: "/me host panel settings (groups on: switch off and remove)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderSettingsSection({
-          csrfToken: COMMON.csrfToken,
-          actionPath: (name) =>
-            `/me/events/65a000000000000000000001/host/${name}`,
-          blocker: null,
-          leadMinutes: 30,
-          leadReadOnly: "The channels already exist.",
-          locked: false,
-          groupLabel: "Team",
-          groups: [],
-          groupEdit: {
-            groupLabel: "Team",
-            presets: [],
-            presetNotice: null,
-            presetBase: "[]",
-            addKey: "g_00000003",
-            groups: [
-              {
-                key: "g_00000001",
-                kind: "team",
-                name: "Red",
-                marker: "",
-                size: null,
-                memberCount: 2,
-                overSize: false,
-                namePending: false,
-                sizePending: false,
-                hasChannel: true,
-              },
-              {
-                key: "g_00000002",
-                kind: "team",
-                name: "Blue",
-                marker: "",
-                size: 4,
-                memberCount: 0,
-                overSize: false,
-                namePending: false,
-                sizePending: false,
-                hasChannel: false,
-              },
-            ],
-          },
-          groupsSwitch: {
-            on: true,
-            groupLabel: "Team",
-            channelOwed: false,
-            blocked: null,
-            kept: [],
-            presets: [],
-            presetNotice: null,
-            groupCount: 2,
-            channelCount: 1,
-          },
-        }),
+        renderGroupChanges(settingsData()),
+      ),
+    },
+    {
+      // The "Event settings" fold: lead time, group leaders and clan tags
+      // (children nested), the leader label and what leaders changed.
+      name: "/me host panel (event settings, leaders and tags on)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderEventSettings(settingsData()),
+      ),
+    },
+    {
+      name: "/me host panel (event settings, blocked)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderEventSettings(
+          settingsData({
+            blocker: "Events are turned off, so settings cannot be changed.",
+          }),
+        ) +
+          renderGroupChanges(
+            settingsData({
+              blocker: "Events are turned off, so settings cannot be changed.",
+              groups: [
+                {
+                  name: "Red",
+                  marker: "",
+                  size: null,
+                  memberCount: 2,
+                  overSize: false,
+                },
+              ],
+            }),
+          ),
       ),
     },
     {
@@ -3258,172 +3387,161 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
-      name: "/me host panel (assign people, with people and a locked event)",
+      // Unlocked, with people: a team with a leader-less member who is not
+      // connected, an empty team and a person in no team.
+      name: "/me host panel (board, unlocked, with people)",
+      html: shell("Host panel: Quiz night", "/me/", boardPage(boardData())),
+    },
+    {
+      name: "/me host panel (board, locked)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true }),
-          controls: {
-            assignment: renderAssignmentSection({
-              csrfToken: "token",
-              actionPath: (name) =>
-                `/me/events/65a000000000000000000001/host/${name}`,
-              groupLabel: "Team",
-              locked: true,
-              presenceOk: true,
-              groups: [
-                {
-                  key: "g_a",
-                  name: "Reds",
-                  marker: "🔴",
-                  size: 2,
-                  memberCount: 2,
-                  isTeam: true,
-                },
-                {
-                  key: "g_b",
-                  name: "Blues",
-                  marker: "",
-                  size: null,
-                  memberCount: 1,
-                  isTeam: true,
-                },
-                {
-                  key: "g_c",
-                  name: "Spectators",
-                  marker: "",
-                  size: null,
-                  memberCount: 0,
-                  isTeam: false,
-                },
-              ],
-              people: [
-                {
-                  id: "111111111111111111",
-                  name: "Ana",
-                  connected: true,
-                  groupKey: "g_a",
-                },
-                {
-                  id: "222222222222222222",
-                  name: "Ben",
-                  connected: true,
-                  groupKey: null,
-                },
-                {
-                  id: "333333333333333333",
-                  name: "Cal",
-                  connected: false,
-                  groupKey: "g_b",
-                },
-              ],
-            }),
-          },
-        }),
+        boardPage(boardData({ locked: true })),
       ),
     },
     {
-      name: "/me host panel (assign people, voice state unreadable)",
+      // An empty team and nobody in "Not in a team".
+      name: "/me host panel (board, empty team, nobody unassigned)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true }),
-          controls: {
-            assignment: renderAssignmentSection({
-              csrfToken: "token",
-              actionPath: (name) =>
-                `/me/events/65a000000000000000000001/host/${name}`,
-              groupLabel: "Team",
-              locked: false,
-              presenceOk: false,
-              groups: [
-                {
-                  key: "g_a",
-                  name: "Reds",
-                  marker: "",
-                  size: 2,
-                  memberCount: 1,
-                  isTeam: true,
-                },
-              ],
-              people: [
-                {
-                  id: "333333333333333333",
-                  name: "Cal",
-                  connected: false,
-                  groupKey: "g_a",
-                },
-              ],
-            }),
-          },
-        }),
+        boardPage(
+          boardData({
+            loose: [],
+            connectedCount: 0,
+            movePeople: [],
+            teams: boardData().teams.map((t) => ({ ...t, people: [] })),
+          }),
+        ),
       ),
     },
     {
-      name: "/me host panel (move people, with people)",
+      // Only people in no team: the "Not in a team" column is the whole board.
+      name: "/me host panel (board, not in a team)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true }),
-          controls: {
-            moves: renderMovesSection({
-              csrfToken: "token",
-              actionPath: (name) =>
-                `/me/events/65a000000000000000000001/host/${name}`,
-              blocker: null,
-              sendableGroups: 2,
-              waitingForChannel: 1,
-              hasMain: true,
-              groupLabel: "Team",
+        boardPage(
+          boardData({
+            teams: boardData().teams.map((t) => ({ ...t, people: [] })),
+            loose: [
+              {
+                id: "333333333333333333",
+                name: "Cal",
+                connected: true,
+                where: "Main channel",
+                leaderLabel: null,
+              },
+              {
+                id: "444444444444444444",
+                name: "Dee",
+                connected: true,
+                where: "Reds",
+                leaderLabel: null,
+              },
+            ],
+            connectedCount: 2,
+          }),
+        ),
+      ),
+    },
+    {
+      name: "/me host panel (board, leaders on, with a leader and the pull form)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        boardPage(
+          boardData({
+            teams: boardData().teams.map((t, i) =>
+              i === 0
+                ? {
+                    ...t,
+                    people: t.people.map((p, j) =>
+                      j === 0 ? { ...p, leaderLabel: "Captain" } : p,
+                    ),
+                  }
+                : t,
+            ),
+            leaders: {
+              defaultWhere:
+                "the main channel (the event has no leaders-only channel yet).",
               destinations: [
-                {
-                  value: "main",
-                  label: "Main channel",
-                  occupants: 2,
-                  limit: 0,
-                },
-                { value: "g_a", label: "Reds", occupants: 2, limit: 2 },
-                { value: "g_b", label: "Blues", occupants: 0, limit: 0 },
+                { value: "default", label: "Default" },
+                { value: "main", label: "Main channel" },
+                { value: "here", label: "The channel I am in" },
+                { value: "g_00000001", label: "Reds" },
               ],
-              people: [
-                {
-                  id: "111111111111111111",
-                  name: "Ana",
-                  where: "Main channel",
-                },
-                { id: "222222222222222222", name: "Ben", where: "Reds" },
-              ],
-            }),
-          },
-        }),
+            },
+          }),
+          { captainsEnabled: true, leaderLabel: "Captain" },
+        ),
       ),
     },
     {
-      name: "/me host panel (move people, switched off)",
+      name: "/me host panel (board, voice state unreadable, moves switched off)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true }),
-          controls: {
-            moves: renderMovesSection({
-              csrfToken: "token",
-              actionPath: (name) =>
-                `/me/events/65a000000000000000000001/host/${name}`,
-              blocker:
-                "The bot lacks the Move Members permission, so nobody was moved. Grant it to the bot's role.",
-              sendableGroups: 0,
-              waitingForChannel: 0,
-              hasMain: false,
-              groupLabel: "Team",
-              destinations: [],
-              people: [],
-            }),
-          },
-        }),
+        boardPage(
+          boardData({
+            presenceOk: false,
+            loose: [],
+            connectedCount: 0,
+            movePeople: [],
+            moveBlocker:
+              "The bot could not read who is in the voice channels, so moving people is switched off.",
+          }),
+        ),
+      ),
+    },
+    {
+      name: "/me host panel (board, channels missing, people waiting)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        boardPage(
+          boardData({
+            sendableTeams: 0,
+            waitingForChannel: 2,
+            hasMain: false,
+            destinations: [],
+            teams: boardData().teams.map((t) => ({ ...t, hasChannel: false })),
+          }),
+        ),
+      ),
+    },
+    {
+      // Long unbroken member, team and channel names. Axe cannot see overflow;
+      // the wrapping rules are asserted on kb.css in host-board-view.test.ts.
+      name: "/me host panel (board, long names)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        boardPage(
+          boardData({
+            teams: boardData().teams.map((t, i) => ({
+              ...t,
+              name:
+                i === 0 ? "TheVeryLongTeamNameWithoutAnySpacesAtAll" : t.name,
+              people: t.people.map((p) => ({
+                ...p,
+                name: "AVeryLongUnbrokenMemberNameFromDiscord0123456789",
+                where: p.connected
+                  ? "a-very-long-voice-channel-name-for-the-team"
+                  : null,
+              })),
+            })),
+          }),
+        ),
+      ),
+    },
+    {
+      name: "/me host panel (board, no team groups, people and Move people kept)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        boardPage(boardData({ teams: [], sendableTeams: 0 })),
       ),
     },
     {
@@ -3505,41 +3623,6 @@ export function userPages(): A11yPage[] {
               csrfToken: "token",
               offerPullBack: false,
             }),
-          },
-        }),
-      ),
-    },
-    {
-      name: "/me host panel (leaders, with a leader and a group without members)",
-      html: shell(
-        "Host panel: Quiz night",
-        "/me/",
-        renderHostPanelBody({
-          event: {
-            ...hostEvent({ groupsEnabled: true }),
-            captainsEnabled: true,
-            leaderLabel: "Captain",
-          },
-          controls: { leaders: renderLeadersSection(leadersView(null)) },
-        }),
-      ),
-    },
-    {
-      name: "/me host panel (leaders, pulling switched off)",
-      html: shell(
-        "Host panel: Quiz night",
-        "/me/",
-        renderHostPanelBody({
-          event: {
-            ...hostEvent({ groupsEnabled: true }),
-            captainsEnabled: true,
-          },
-          controls: {
-            leaders: renderLeadersSection(
-              leadersView(
-                "The bot lacks the Move Members permission, so nobody was moved. Grant it to the bot's role.",
-              ),
-            ),
           },
         }),
       ),

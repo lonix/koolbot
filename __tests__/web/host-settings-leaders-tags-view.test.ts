@@ -3,7 +3,7 @@ import {
   leadersTagsViewOf,
   renderLeadersTagsFields,
 } from "../../src/web/host-settings-leaders-tags-view.js";
-import { renderSettingsSection } from "../../src/web/host-settings-view.js";
+import { renderEventSettings } from "../../src/web/host-settings-view.js";
 
 /**
  * The leaders and tags fields of the Live settings form (#1240): what each field
@@ -118,6 +118,42 @@ describe("renderLeadersTagsFields", () => {
     expect(html).toContain('value="Cap&quot;tain"');
   });
 
+  it("nests the leader label, customisation and lobby under Leaders, and the tag position and team tags under Clan tags", () => {
+    const html = renderLeadersTagsFields(view);
+    const leaders = html.slice(
+      html.indexOf("<legend>Leaders</legend>"),
+      html.indexOf("<legend>Clan tags</legend>"),
+    );
+    const tags = html.slice(html.indexOf("<legend>Clan tags</legend>"));
+    const nestedOf = (part: string): string => {
+      const i = part.indexOf('<div class="kb-nested"');
+      expect(i).toBeGreaterThan(0);
+      return part.slice(i);
+    };
+    // The parent switch sits above its children, never inside them.
+    expect(leaders.indexOf('name="s_captainsEnabled"')).toBeLessThan(
+      leaders.indexOf('<div class="kb-nested"'),
+    );
+    const lc = nestedOf(leaders);
+    for (const name of [
+      "s_leaderLabel",
+      "s_captainCustomisationEnabled",
+      "s_captainsLobby",
+    ]) {
+      expect(lc).toContain(`name="${name}"`);
+    }
+    expect(lc).not.toContain('name="s_captainsEnabled"');
+    expect(tags.indexOf('name="s_tagsEnabled"')).toBeLessThan(
+      tags.indexOf('<div class="kb-nested"'),
+    );
+    const tc = nestedOf(tags);
+    expect(tc).toContain('name="s_tagsSuffix"');
+    expect(tc).toContain("s_groupTags_g_00000001");
+    expect(tc).not.toContain('name="s_tagsEnabled"');
+    // Every field name is still posted by the one form.
+    expect(html).toContain('name="b_tagsEnabled"');
+  });
+
   describe("the Captains lobby switch (#1251)", () => {
     const viewWith = (
       over: Record<string, unknown>,
@@ -181,14 +217,13 @@ describe("renderLeadersTagsFields", () => {
     expect(html).not.toContain("s_groupTags_g_00000002");
   });
 
-  it("is part of the Live settings form, inside the one form that posts to settings", () => {
-    const page = renderSettingsSection({
+  it("is part of the Event settings form, inside the one form that posts to settings", () => {
+    const page = renderEventSettings({
       csrfToken: "tok",
       actionPath: (n) => `/me/events/e/host/${n}`,
       blocker: null,
       leadMinutes: null,
       leadReadOnly: null,
-      locked: null,
       groupLabel: "Team",
       groups: [],
       leadersTags: view,
@@ -200,13 +235,12 @@ describe("renderLeadersTagsFields", () => {
   });
 
   it("is absent from the form when the section has no leaders and tags view", () => {
-    const page = renderSettingsSection({
+    const page = renderEventSettings({
       csrfToken: "tok",
       actionPath: (n) => `/x/${n}`,
       blocker: null,
       leadMinutes: null,
       leadReadOnly: null,
-      locked: null,
       groupLabel: "Team",
       groups: [],
     });

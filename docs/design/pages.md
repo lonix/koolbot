@@ -179,10 +179,24 @@ The host panel for a live event, as an event host who is neither admin nor moder
 - At the bottom, folded: *Event settings* (Group leaders and Clan tags, children nested) and *Change the groups* (add, remove, preset, switch off).
   Each summary states the current values.
 
-**As built (#1319).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). *Event settings and groups* is one
-`kb-disclosure` at the bottom holding the former *Live settings* section (lead time, lock, leaders and tags, and the changes to the groups); its summary
-states the lead time and group count, and it is open after a save. The board with drag-and-drop columns, the toolbar dialogs, and the split into two
-folds are not built: the sections *Assign people*, *Move people*, *Leaders*, *Team names and tags* and *End the event* are still the cards of #1189.
+**As built (#1319, #1424).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the Summary and
+Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event*, then the two folds.
+
+- *Toolbar* (`kb-toolbar`, `role=group` with a label): the lock state as a `kb-badge` with *Lock groups* / *Unlock groups*, a separator, *Randomise…* and
+  *Move people…*, then *Send to teams* at the end. *Randomise…* and *Move people…* are `details.kb-toolbar__action` (a disclosure, so they work
+  without script); the page script moves the panel into a `dialog.kb-dialog` with *Go back*, and puts it back on close. A control that cannot work
+  is disabled and `aria-describedby` points at the line under the toolbar that says why. *Send to teams* is a plain form, with no confirm dialog.
+- *Board* (`kb-board`): a `kb-board__col` per team, then `kb-board__col--loose` *Not in a team*. A column head is the tag (`kb-team__tag`), the name
+  (`h3`) and the count; a sized team has a `kb-meter` with an `aria-label`. A person is `li.kb-board__person`: avatar initial, name, a leader badge
+  with the crown and the label, *where* (*In Main channel*, *In Reds* or *Not connected*), and a *Move* menu (`kb-disclosure--inline`) with a
+  labelled select and the *Add to / Move to team* and *Not in a team* buttons. The menu is the baseline for keyboard and no-JavaScript use.
+- *Drag* is progressive enhancement: the script sets `draggable` on each person, highlights the column under the pointer (`.is-over`), and on a drop
+  fills in and submits that person's own menu form, so there is no separate route. A refused drop (a full team) is read out through a polite live
+  region. Touch has no drag; the menu is the way.
+- *Folds* at the bottom, as `kb-disclosure`: *Event settings* (lead time, *Group leaders* and *Clan tags* with their children, the leader label and what
+  leaders changed) and *Change the groups* (names and sizes, preset, add, remove, switch off). Their summaries state the current values (for example
+  *Channels 20 min before the start · Captains on · Clan tags on* and *2 groups: Reds, Blues*). They open only after a settings save.
+- Not built here: the Summary, Groups and *End the event* parts are still the cards of #1189, and the edit page is #1298's.
 
 ## Moderator
 

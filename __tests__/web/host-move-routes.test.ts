@@ -365,14 +365,12 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("the moves section", () => {
+describe("the toolbar's moves (Send to teams, Move people)", () => {
   it("shows the three forms with CSRF, escapes names, and posts keys, never channel ids", async () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
-    expect(r.text).toContain('id="host-moves"');
-    expect(r.text).not.toContain(
-      "Send people to their groups, bring them back, or move one person. Not available yet",
-    );
+    expect(r.text).toContain('id="host-board"');
+    expect(r.text).not.toContain("Not available yet");
     for (const action of ["send-to-groups", "return-to-main", "move-one"]) {
       expect(r.text).toContain(`action="${PANEL}/${action}"`);
     }
@@ -382,6 +380,11 @@ describe("the moves section", () => {
     );
     expect(moveForms).toHaveLength(3);
     for (const f of moveForms) expect(f).toContain('name="_csrf"');
+    // Send to teams sits in the toolbar; the other two in the Move people set.
+    const toolbar = r.text.slice(r.text.indexOf('role="group"'));
+    expect(toolbar.indexOf("Move people…")).toBeLessThan(
+      toolbar.indexOf(`${PANEL}/send-to-groups`),
+    );
     // Destinations are the main channel and keys; no channel id appears in an option.
     expect(r.text).toContain('<option value="main">');
     expect(r.text).toContain('<option value="g_heli">');
@@ -395,27 +398,60 @@ describe("the moves section", () => {
       /<input type="checkbox" name="skipSpecial" value="1">/,
     );
     expect(r.text).not.toMatch(/name="skipSpecial"[^>]*checked/);
-    // Heli is full for a move (2 of 2 are needed in the channel).
   });
 
-  it("disables the buttons with an explanation when the bot cannot move members", async () => {
+  it("switches Send to teams and Move people off, with an explanation, when the bot cannot move members", async () => {
     botMayMove = false;
     const r = await call(PANEL);
     expect(r.text).toContain("Move Members");
-    const section = r.text.slice(r.text.indexOf('id="host-moves"'));
-    expect(section.match(/ disabled aria-disabled="true"/g)?.length).toBe(3);
+    const toolbar = r.text.slice(r.text.indexOf('role="group"'));
+    const bar = toolbar.slice(0, toolbar.indexOf("</div>\n<p"));
+    // Move people… and Send to teams are disabled and point at the reason.
+    expect(bar.match(/ disabled aria-disabled="true"/g)?.length).toBe(2);
+    expect(bar).toContain('aria-describedby="host-board-notes"');
+    expect(r.text).toContain('id="host-board-notes"');
+    for (const action of ["return-to-main", "move-one"]) {
+      expect(r.text).not.toContain(`action="${PANEL}/${action}"`);
+    }
+  });
+
+  it("with only an open group and no team, still lists the connected people and offers Move people; Randomise and Send are off", async () => {
+    events[EVENT_ID] = makeEvent({
+      groups: [
+        {
+          key: "g_open",
+          name: "Spectators",
+          kind: "open",
+          size: null,
+          tag: "",
+          marker: "",
+          channelId: CH_OPEN,
+          captainId: null,
+          memberIds: [],
+        },
+      ],
+    });
+    const r = await call(PANEL);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('id="host-board-loose"');
+    expect(r.text).toContain(`action="${PANEL}/return-to-main"`);
+    expect(r.text).toContain(`action="${PANEL}/move-one"`);
+    expect(r.text).toContain('<option value="g_open">');
+    expect(r.text).not.toContain(`action="${PANEL}/randomise"`);
+    expect(r.text).toMatch(/disabled aria-disabled="true"[^>]*>Send to teams</);
   });
 
   it("is not on the page for an event without groups", async () => {
     events[EVENT_ID] = makeEvent({ groupsEnabled: false, groups: [] });
     const r = await call(PANEL);
-    expect(r.text).not.toContain('id="host-moves"');
+    expect(r.text).not.toContain('id="host-board"');
+    expect(r.text).not.toContain(`${PANEL}/send-to-groups`);
   });
 
   it("is not on the page for an ended event", async () => {
     events[EVENT_ID] = makeEvent({ state: "ended" });
     const r = await call(PANEL);
-    expect(r.text).not.toContain('id="host-moves"');
+    expect(r.text).not.toContain('id="host-board"');
   });
 });
 
@@ -670,5 +706,66 @@ describe("move one person", () => {
     expect(flash.msg).toContain("not part of the event");
     expect(patch).not.toHaveBeenCalled();
     expect(voice.get(BEN)).toBe(CH_OTHER);
+  });
+});
+
+describe("an event host with no other rights moves people from the toolbar (#1424)", () => {
+  it("posts the forms the page carries (send, return, move one) and each is one audited run; another host gets 403", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
+    const page = await call(PANEL);
+    const forms = (page.text.match(/<form[\s\S]*?<\/form>/g) ?? []).map(
+      (f) => ({
+        action: /action="([^"]*)"/.exec(f)?.[1] ?? "",
+        fields: Object.fromEntries(
+          [
+            ...f.matchAll(
+              /<input type="hidden" name="([^"]+)" value="([^"]*)">/g,
+            ),
+          ].map((m) => [m[1], m[2]]),
+        ) as Record<string, string>,
+      }),
+    );
+    const formFor = (a: string) =>
+      forms.find((f) => f.action === `${PANEL}/${a}`);
+    for (const a of ["send-to-groups", "return-to-main", "move-one"]) {
+      expect(formFor(a)).toBeDefined();
+    }
+    // The page's own token, with the person and destination chosen as the dialog would.
+    const send = await post("send-to-groups", {
+      ...formFor("send-to-groups")?.fields,
+    });
+    expect(send.status).toBe(303);
+    const back = await post("return-to-main", {
+      ...formFor("return-to-main")?.fields,
+    });
+    expect(back.status).toBe(303);
+    const one = await post("move-one", {
+      ...formFor("move-one")?.fields,
+      userId: ANA,
+      to: "main",
+    });
+    expect(one.status).toBe(303);
+    for (const action of ["send-to-groups", "return-to-main", "move-one"]) {
+      expect(
+        auditRows.filter((a) => a.action === `event.host.${action}`),
+      ).toHaveLength(1);
+    }
+    // Somebody else's event: refused at the gate, nothing moved.
+    const before = auditRows.length;
+    sessionUser = OTHER;
+    for (const action of ["send-to-groups", "return-to-main", "move-one"]) {
+      expect(
+        (await post(action, { ...formFor(action)?.fields }, { user: OTHER }))
+          .status,
+      ).toBe(403);
+    }
+    expect(
+      auditRows.slice(before).every((a) => a.action === "event.host.denied"),
+    ).toBe(true);
   });
 });

@@ -297,17 +297,18 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("the Live settings section", () => {
+describe("the Event settings and Change the groups folds", () => {
   it("shows the form with the fresh values and what was shown as the base, escaping names", async () => {
     const r = await call(panel());
     expect(r.status).toBe(200);
     expect(r.text).toContain('id="host-settings"');
-    expect(r.text).not.toContain(
-      "Change the settings of the event while it runs. Not available yet",
-    );
+    expect(r.text).toContain('id="host-groupchanges"');
+    expect(r.text).not.toContain("Not available yet");
     expect(r.text).toContain('name="s_channelLeadMinutes" value="30"');
     expect(r.text).toContain('name="b_channelLeadMinutes" value="30"');
-    expect(r.text).toContain('name="b_groupsLocked" value="0"');
+    // The lock lives in the toolbar now (its own route), not in the settings form.
+    expect(r.text).not.toContain('name="s_groupsLocked"');
+    expect(r.text).toContain('name="locked" value="1"');
     expect(r.text).toContain(`action="${panel()}/settings"`);
     expect(r.text).toContain(`name="_csrf" value="${csrf()}"`);
     // Over size is derived (3 people in a group of 2), names are escaped.
@@ -318,9 +319,23 @@ describe("the Live settings section", () => {
 
   it("reads the event fresh, not from the gate's copy", async () => {
     // The gate and the section both read through getEvent; a changed store is seen.
-    (store.get(EVENT_ID) as Json).groupsLocked = true;
+    (store.get(EVENT_ID) as Json).channelLeadMinutes = 45;
     const r = await call(panel());
-    expect(r.text).toContain('name="b_groupsLocked" value="1"');
+    expect(r.text).toContain('name="b_channelLeadMinutes" value="45"');
+  });
+
+  it("splits the settings into two folds with separate forms, and sends the confirm script once", async () => {
+    const r = await call(panel());
+    const settings = r.text.slice(
+      r.text.indexOf('id="host-settings"'),
+      r.text.indexOf('id="host-groupchanges"'),
+    );
+    expect(settings).toContain('name="s_channelLeadMinutes"');
+    expect(settings).not.toContain('name="s_groupNameA"');
+    const groups = r.text.slice(r.text.indexOf('id="host-groupchanges"'));
+    expect(groups).toContain('name="s_groupNameA"');
+    expect(groups).not.toContain('name="s_channelLeadMinutes"');
+    expect(r.text.match(/var HEAD_ONLY=/g)?.length).toBe(1);
   });
 
   it("shows the lead time read-only, with the reason, once a channel exists", async () => {
@@ -328,7 +343,7 @@ describe("the Live settings section", () => {
     const r = await call(panel());
     expect(r.text).toContain("The channels already exist");
     expect(r.text).not.toContain('name="s_channelLeadMinutes"');
-    expect(r.text).toContain('name="s_groupsLocked"');
+    expect(r.text).toContain('name="s_groupNameA"');
   });
 
   it("offers only the lead time for an event without groups", async () => {
@@ -338,7 +353,7 @@ describe("the Live settings section", () => {
     );
     const r = await call(panel());
     expect(r.text).toContain('name="s_channelLeadMinutes" value=""');
-    expect(r.text).not.toContain('name="s_groupsLocked"');
+    expect(r.text).not.toContain('name="s_groupNameA"');
   });
 
   it("shows a notice and no form while events.enabled is off or unreadable", async () => {
@@ -358,7 +373,7 @@ describe("the Live settings section", () => {
       "This event is being ended, so nothing was changed.",
     );
     expect(r.text).not.toContain('name="s_channelLeadMinutes"');
-    expect(r.text).not.toContain('name="s_groupsLocked"');
+    expect(r.text).not.toContain('name="s_groupNameA"');
     // The same page with no hold offers the form again.
     ending = false;
     expect((await call(panel())).text).toContain('name="s_channelLeadMinutes"');

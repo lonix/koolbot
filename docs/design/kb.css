@@ -347,7 +347,7 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 }
 
 /* ---------- Team board (host panel) ---------- */
-.kb-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); align-items: start; }
+.kb-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); gap: var(--space-3); align-items: start; }
 .kb-board__col { display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .kb-board__col--loose { background: transparent; border-style: dashed; border-color: var(--control); }
 .kb-board__head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-2); }
@@ -362,6 +362,46 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 .kb-toolbar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) var(--space-4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .kb-toolbar__sep { width: 1px; align-self: stretch; background: var(--border); }
 .kb-toolbar__end { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+/* Toolbar option sets: a disclosure without script, a dialog with it (host panel board). */
+.kb-toolbar__action > summary { list-style: none; }
+.kb-toolbar__action > summary::-webkit-details-marker { display: none; }
+.kb-toolbar__action[open] { flex: 1 1 100%; }
+.kb-toolbar__panel { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.kb-dialog .kb-toolbar__panel { margin-top: 0; padding: 0; background: transparent; border: 0; }
+/* A person on the board: the Move menu wraps under the name; dragging is an enhancement and shows where a drop lands. */
+.kb-board__person { flex-wrap: wrap; }
+.kb-board__who { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.kb-board__menu { flex-basis: 100%; }
+.kb-board__person.is-dragging { opacity: 0.5; }
+/* A column can be as narrow as 11rem: the foot wraps, its form takes the full row when it must, and a long button label wraps inside the column. */
+.kb-board__foot { flex-wrap: wrap; }
+.kb-board__foot form { max-width: 100%; }
+.kb-board__foot .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.kb-board__where { min-width: 0; overflow-wrap: anywhere; }
+.kb-board__col.is-over { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+/* Long text cannot widen a column. Member names are arbitrary user text and team and channel names can be long, so every flex or grid item of the board may
+   shrink (min-width: 0) and wraps anywhere; a select and a button stay inside their container. */
+.kb-board__head { min-width: 0; }
+.kb-board__head .kb-team__name { white-space: normal; overflow-wrap: anywhere; }
+.kb-board__head .kb-team__tag { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.kb-board__head .kb-team__count { flex: none; }
+.kb-board__list > li { min-width: 0; }
+.kb-board__who { flex: 1 1 5rem; }
+.kb-board__where { flex: 0 1 auto; }
+.kb-board__person .kb-badge { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.kb-board__menu { min-width: 0; max-width: 100%; }
+.kb-board__menu > summary { max-width: 100%; overflow-wrap: anywhere; }
+.kb-board__menu .kb-disclosure__body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.kb-board__menu .kb-stack > *, .kb-board__menu .kb-field, .kb-board__menu .kb-row { min-width: 0; max-width: 100%; }
+.kb-board__menu .kb-label { overflow-wrap: anywhere; }
+.kb-board__menu .kb-select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.kb-board__menu .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.kb-board__foot { min-width: 0; overflow-wrap: anywhere; }
+.kb-toolbar > * { min-width: 0; max-width: 100%; }
+.kb-toolbar__end .kb-btn, .kb-toolbar__action > summary.kb-btn, .kb-toolbar__panel .kb-btn { max-width: 100%; height: auto; min-height: var(--button-height); white-space: normal; text-align: center; }
+.kb-toolbar__panel { min-width: 0; overflow-wrap: anywhere; }
+.kb-toolbar__panel .kb-select, .kb-toolbar__panel .kb-input { min-width: 0; max-width: 100%; }
+.kb-dialog .kb-select, .kb-dialog .kb-input { min-width: 0; max-width: 100%; }
 
 /* ---------- Side nav: pinned item ---------- */
 .kb-sidenav__pin { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--border); }

@@ -12,8 +12,7 @@ import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 
-export type HostSectionId =
-  "assignment" | "moves" | "leaders" | "customise" | "end" | "settings";
+export type HostSectionId = "board" | "end" | "settings" | "groupchanges";
 
 export interface HostSectionDef {
   id: HostSectionId;
@@ -22,41 +21,21 @@ export interface HostSectionDef {
   placeholder: string;
   /** Only meaningful when the event has groups. */
   needsGroups: boolean;
-  /** Only shown while the event has leaders switched on (#1195). */
-  needsLeaders?: boolean;
 }
 
 /**
  * The control sections, in page order. Anchors are `#host-<id>`. Owners:
- * `assignment` #1191, `moves` #1192, `leaders` #1195, `customise` #1196
- * (shown whatever the leaders' switches say: the host can always reset),
- * `end` #1193, `settings` #1197.
+ * `board` #1424 (the toolbar and the team board: assign, randomise, move,
+ * send, lock, leaders, reset a team; it replaced the cards of #1191, #1192,
+ * #1195 and #1196), `end` #1193, `settings` #1197 and `groupchanges` #1424
+ * (the folded "Live settings" of #1319, split in two). The last two are
+ * folds at the bottom of the page and are not cards.
  */
 export const HOST_SECTIONS: readonly HostSectionDef[] = [
   {
-    id: "assignment",
-    title: "Assign people",
-    placeholder: "Put people into groups, let them pick one, or randomise.",
-    needsGroups: true,
-  },
-  {
-    id: "moves",
-    title: "Move people",
-    placeholder:
-      "Send people to their groups, bring them back, or move one person.",
-    needsGroups: true,
-  },
-  {
-    id: "leaders",
-    title: "Leaders",
-    placeholder: "Pick a leader for each group and pull just the leaders.",
-    needsGroups: true,
-    needsLeaders: true,
-  },
-  {
-    id: "customise",
-    title: "Team names and tags",
-    placeholder: "See what leaders changed and put any team back.",
+    id: "board",
+    title: "Teams",
+    placeholder: "Put people into teams, randomise, and move them.",
     needsGroups: true,
   },
   {
@@ -67,10 +46,14 @@ export const HOST_SECTIONS: readonly HostSectionDef[] = [
   },
   {
     id: "settings",
-    title: "Live settings",
+    title: "Event settings",
     placeholder: "Change the settings of the event while it runs.",
-    // The channel creation time applies to every event; the lock row appears
-    // only while the event has groups (and #1243 switches groups on from here).
+    needsGroups: false,
+  },
+  {
+    id: "groupchanges",
+    title: "Change the groups",
+    placeholder: "Add or remove groups, switch preset, or switch groups off.",
     needsGroups: false,
   },
 ];
@@ -248,16 +231,44 @@ function renderTags(e: HostPanelEvent): string {
 ${notices}${skipped}`;
 }
 
-/** What the folded settings say they hold, so people can skip them. */
+/** What "Event settings" holds right now, so people can skip it. */
 function settingsHint(e: HostPanelEvent): string {
-  const lead =
+  const parts = [
     e.channelLeadMinutes === null
       ? "Channels at the server default"
-      : `Channels ${e.channelLeadMinutes} min before the start`;
-  const groups = e.groupsEnabled
-    ? `${e.groups.length} ${e.groups.length === 1 ? "group" : "groups"}`
-    : "No groups";
-  return `${lead} · ${groups}`;
+      : `Channels ${e.channelLeadMinutes} min before the start`,
+  ];
+  if (e.groupsEnabled) {
+    parts.push(
+      e.captainsEnabled === true
+        ? `${e.leaderLabel || "Leader"}s on`
+        : "Leaders off",
+      e.tagsEnabled === true ? "Clan tags on" : "Clan tags off",
+    );
+  }
+  return parts.join(" · ");
+}
+
+/** What "Change the groups" holds right now. */
+function groupChangesHint(e: HostPanelEvent): string {
+  if (!e.groupsEnabled) return "Groups are off";
+  const names = e.groups.map((g) => g.name);
+  const shown = names.slice(0, 3).join(", ");
+  const more = names.length > 3 ? ` and ${names.length - 3} more` : "";
+  return `${e.groups.length} ${e.groups.length === 1 ? "group" : "groups"}${names.length ? `: ${shown}${more}` : ""}`;
+}
+
+function fold(
+  id: string,
+  title: string,
+  hint: string,
+  open: boolean,
+  inner: string,
+): string {
+  return `<details class="kb-disclosure" id="${id}"${open ? " open" : ""}>
+<summary>${CHEVRON_ICON}${escapeHtml(title)}<span class="kb-disclosure__hint">${escapeHtml(hint)}</span></summary>
+<div class="kb-disclosure__body">${inner}</div>
+</details>`;
 }
 
 function renderControls(
@@ -269,20 +280,33 @@ function renderControls(
     return `<div class="notice info" role="note">This event is ${escapeHtml(e.state)}, so this page is a read-only summary.</div>`;
   }
   return HOST_SECTIONS.filter((s) => !s.needsGroups || e.groupsEnabled)
-    .filter((s) => !s.needsLeaders || e.captainsEnabled === true)
     .map((s) => {
       const html = controls[s.id];
       const inner =
         html ??
         `<p class="muted">${escapeHtml(s.placeholder)} Not available yet.</p>`;
-      // Settings and group changes sit folded at the bottom (#1319): they are
-      // not what a host does while the event runs. Open after a save, so the
-      // flash and the result are in view.
+      // The board is the page (#1424): it renders its own section.
+      if (s.id === "board") return html ?? "";
+      // Settings and group changes sit folded at the bottom (#1319, #1424):
+      // they are not what a host does while the event runs. Open after a
+      // settings save, so the flash and the result are in view.
       if (s.id === "settings") {
-        return `<details class="kb-disclosure" id="host-settings"${settingsOpen ? " open" : ""}>
-<summary>${CHEVRON_ICON}Event settings and groups<span class="kb-disclosure__hint">${escapeHtml(settingsHint(e))}</span></summary>
-<div class="kb-disclosure__body">${inner}</div>
-</details>`;
+        return fold(
+          "host-settings",
+          s.title,
+          settingsHint(e),
+          settingsOpen,
+          inner,
+        );
+      }
+      if (s.id === "groupchanges") {
+        return fold(
+          "host-groupchanges",
+          s.title,
+          groupChangesHint(e),
+          settingsOpen,
+          inner,
+        );
       }
       return `<section class="card" id="host-${s.id}" aria-labelledby="host-${s.id}-h">
 <h2 id="host-${s.id}-h">${escapeHtml(s.title)}</h2>
@@ -296,7 +320,7 @@ export function renderHostPanelBody(opts: {
   event: HostPanelEvent;
   /** Section HTML supplied by later issues, keyed by section id. */
   controls?: Partial<Record<HostSectionId, string>>;
-  /** Open the folded settings (after a save, a flash is showing). */
+  /** Open the two folds at the bottom (after a settings save, a flash is showing). */
   settingsOpen?: boolean;
 }): string {
   const e = opts.event;

@@ -318,26 +318,42 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("the assignment section", () => {
-  it("lists connected people (bots left out) with their group and each group's fill", async () => {
+describe("the team board (assign, randomise, lock)", () => {
+  it("lists connected people (bots left out) in their team column, with each team's fill", async () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
-    expect(r.text).toContain('id="host-assignment"');
-    expect(r.text).not.toContain(
-      "let them pick one, or randomise. Not available yet",
-    );
+    expect(r.text).toContain('id="host-board"');
+    expect(r.text).not.toContain("Not available yet");
     // Heli has Ana: 1 of 2. Logi has no size: just a count.
-    expect(r.text).toContain('Heli</strong> <span class="mono">1/2</span>');
-    expect(r.text).toContain('Logi</strong> <span class="mono">0</span>');
+    expect(r.text).toContain("1 person, limit 2");
+    expect(r.text).toContain('aria-label="People in Logi"');
     expect(r.text).toContain("Ana");
     expect(r.text).not.toContain(">Bot<");
     // Names are escaped.
     expect(r.text).toContain("Ben &lt;b&gt;x&lt;/b&gt;");
     expect(r.text).not.toContain("Ben <b>x</b>");
-    // Open groups take no members: not offered as a target.
+    // Open groups take no members: not a column and not offered as a target.
     const selects = r.text.match(/<select[\s\S]*?<\/select>/g) ?? [];
     expect(selects.length).toBeGreaterThan(0);
     for (const s of selects) expect(s).not.toContain("Spectators");
+    expect(r.text).not.toContain('aria-label="People in Spectators"');
+  });
+
+  it("puts a connected person who is in no team under Not in a team, and shows where they are", async () => {
+    const r = await call(PANEL);
+    const loose = r.text.slice(r.text.indexOf('id="host-board-loose"'));
+    const looseCol = loose.slice(0, loose.indexOf("</section>"));
+    expect(looseCol).toContain("Ben &lt;b&gt;x&lt;/b&gt;");
+    expect(looseCol).not.toContain("Ana");
+    expect(looseCol).toMatch(/In (Main channel|an event channel)/);
+  });
+
+  it("gives every person the no-JavaScript team menu: assign, and unassign by formaction", async () => {
+    const r = await call(PANEL);
+    expect(r.text).toContain(`action="${PANEL}/assign"`);
+    expect(r.text).toContain(`formaction="${PANEL}/unassign"`);
+    expect(r.text).toContain(`name="userId" value="${BEN}"`);
+    expect(r.text).toContain('name="group"');
   });
 
   it("offers a full group as disabled, except to its own members", async () => {
@@ -348,14 +364,14 @@ describe("the assignment section", () => {
       ],
     });
     const r = await call(PANEL);
-    const benRow =
-      r.text.split("<tr>").find((row) => row.includes("Ben")) ?? "";
-    expect(benRow).toMatch(
+    const benMenu = r.text.slice(r.text.indexOf(`data-user="${BEN}"`));
+    expect(benMenu.slice(0, benMenu.indexOf("</li>"))).toMatch(
       /<option value="g_heli" disabled>Heli \(1\/1, full\)/,
     );
-    const anaRow =
-      r.text.split("<tr>").find((row) => row.includes("Ana")) ?? "";
-    expect(anaRow).toMatch(/<option value="g_heli" selected>/);
+    const anaMenu = r.text.slice(r.text.indexOf(`data-user="${ANA}"`));
+    expect(anaMenu.slice(0, anaMenu.indexOf("</li>"))).toMatch(
+      /<option value="g_heli" selected>/,
+    );
   });
 
   it("still lists an assigned member who left voice, so they can be unassigned", async () => {
@@ -365,14 +381,17 @@ describe("the assignment section", () => {
     const r = await call(PANEL);
     expect(r.text).toContain("Not connected");
     expect(r.text).toContain(`name="userId" value="${AWAY}"`);
-    expect(r.text).toContain(">Unassign<");
+    expect(r.text).toMatch(/Not in a (team|group|squad)</);
+    expect(r.text).toContain(`formaction="${PANEL}/unassign"`);
   });
 
   it("shows the lock state and the randomise form", async () => {
     const open = await call(PANEL);
     expect(open.text).toContain("Lock groups");
+    expect(open.text).toContain("Unlocked");
     expect(open.text).toContain('name="locked" value="1"');
     expect(open.text).toContain('name="mode" value="unassigned" checked');
+    expect(open.text).toContain(`action="${PANEL}/randomise"`);
     events[EVENT_ID] = makeEvent({ groupsLocked: true });
     const locked = await call(PANEL);
     expect(locked.text).toContain("Unlock groups");
@@ -390,7 +409,14 @@ describe("the assignment section", () => {
   it("is absent from an event without groups", async () => {
     events[EVENT_ID] = makeEvent({ groupsEnabled: false, groups: [] });
     const r = await call(PANEL);
-    expect(r.text).not.toContain('id="host-assignment"');
+    expect(r.text).not.toContain('id="host-board"');
+  });
+
+  it("does not open the folds at the bottom after a board action", async () => {
+    const r = await post("lock", { locked: "1" });
+    const page = await call(r.location ?? PANEL);
+    expect(page.text).not.toMatch(/<details[^>]*id="host-settings" open/);
+    expect(page.text).not.toMatch(/<details[^>]*id="host-groupchanges" open/);
   });
 });
 
@@ -661,5 +687,102 @@ describe("lock", () => {
     const r = await post("lock", { locked: "toggle" });
     expect(flashOf(r.location).type).toBe("err");
     expect(setGroupsLocked).not.toHaveBeenCalled();
+  });
+});
+
+/** The forms of the page, as a browser without JavaScript would post them. */
+function formsOf(
+  html: string,
+): Array<{ action: string; fields: Record<string, string>; html: string }> {
+  return (html.match(/<form[\s\S]*?<\/form>/g) ?? []).map((f) => {
+    const action = /action="([^"]*)"/.exec(f)?.[1] ?? "";
+    const fields: Record<string, string> = {};
+    for (const m of f.matchAll(
+      /<input type="hidden" name="([^"]+)" value="([^"]*)">/g,
+    )) {
+      fields[m[1]] = m[2];
+    }
+    for (const m of f.matchAll(
+      /<input type="radio" name="([^"]+)" value="([^"]*)" checked>/g,
+    )) {
+      fields[m[1]] = m[2];
+    }
+    return { action, fields, html: f };
+  });
+}
+
+describe("an event host with no other rights runs the team board (#1424)", () => {
+  it("assigns, unassigns, randomises and locks with the forms the page itself carries, one audit row each", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
+    const page = await call(PANEL);
+    const forms = formsOf(page.text);
+    const bens = forms.find(
+      (f) => f.action === `${PANEL}/assign` && f.fields.userId === BEN,
+    );
+    expect(bens).toBeDefined();
+    // The page's own CSRF token and person id; only the team is picked.
+    const assign = await post("assign", { ...bens?.fields, group: "g_logi" });
+    expect(assign.status).toBe(303);
+    expect(flashOf(assign.location).type).toBe("ok");
+
+    const anas = forms.find(
+      (f) => f.action === `${PANEL}/assign` && f.fields.userId === ANA,
+    );
+    // The same form's second button posts to unassign, with the same person.
+    expect(anas?.html).toContain(`formaction="${PANEL}/unassign"`);
+    const unassign = await post("unassign", { ...anas?.fields });
+    expect(unassign.status).toBe(303);
+
+    const randomise = forms.find((f) => f.action === `${PANEL}/randomise`);
+    expect(randomise?.fields.mode).toBe("unassigned");
+    expect((await post("randomise", { ...randomise?.fields })).status).toBe(
+      303,
+    );
+
+    const lock = forms.find((f) => f.action === `${PANEL}/lock`);
+    expect((await post("lock", { ...lock?.fields })).status).toBe(303);
+
+    for (const action of ["assign", "unassign", "randomise", "lock"]) {
+      const rows = auditRows.filter((a) => a.action === `event.host.${action}`);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        targetId: EVENT_ID,
+        discordUserId: CREATOR,
+      });
+    }
+  });
+
+  it("cannot reach another host's event: the page and every board action answer 403 and the denial is audited", async () => {
+    // No other rights: not an administrator, only the Event host scope.
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      isAdministrator: async () => false,
+      checkCommandPermission: async () => true,
+      resolveWebScopes: async () => ["member", "host"],
+    } as never);
+    const forms = formsOf((await call(PANEL)).text);
+    const actions = [
+      ...new Set(forms.map((f) => f.action.slice(PANEL.length + 1))),
+    ].filter((a) => a !== "");
+    expect(actions).toEqual(
+      expect.arrayContaining(["assign", "randomise", "lock", "send-to-groups"]),
+    );
+    asUser(OTHER);
+    expect((await call(PANEL, { user: OTHER })).status).toBe(403);
+    for (const action of [...actions, "unassign"]) {
+      const f = forms.find((x) => x.action === `${PANEL}/${action}`);
+      const r = await post(action, { ...f?.fields }, { user: OTHER });
+      expect(r.status).toBe(403);
+    }
+    expect(assignMember).not.toHaveBeenCalled();
+    expect(randomiseMembers).not.toHaveBeenCalled();
+    expect(setGroupsLocked).not.toHaveBeenCalled();
+    expect(
+      auditRows.filter((a) => a.action === "event.host.denied").length,
+    ).toBeGreaterThanOrEqual(actions.length);
   });
 });
