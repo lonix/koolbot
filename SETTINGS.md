@@ -874,7 +874,9 @@ channel.
   `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to it. With event groups the
   MAIN room is linked too, never a group room. **Risk, untested:** for a grouped event everyone moves to the team rooms, so the main room can empty while the
   teams are still playing, and Discord may then mark the linked card finished early. KoolBot cannot undo that (it ignores a Completed native event).
-  `events.native.link_room` is the rollback switch.
+  `events.native.link_room` is the rollback switch. Turning the switch off stops new links and puts an existing link back to the text only while the
+  Discord event is still Scheduled and before its start time; once the start has passed the link stays (and a link still Scheduled then is still
+  started), so it is not a rollback for a running event.
   The bot starts a linked event (status Active) when its start time is reached, retrying each scan; this also holds for an existing link after the
   switch is turned off. Discord may complete a linked event on its own when its room empties for a while; the card then stays finished, and KoolBot
   ignores a Completed native event as it does for any finished one. If the room never gets created, or Discord refuses the switch, the text stays (a

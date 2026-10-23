@@ -2925,7 +2925,9 @@ permission, and the page warns when it is missing. The location text is shown un
 event to the voice room** (`events.native.link_room`, on by default) the native event then points at that room (also for events with groups: the main
 room, never a group room; a linked event is started at its start time). Untested risk: Discord may mark a linked card finished early when its room
 empties, which for grouped events can happen while the teams play in their own rooms; KoolBot cannot undo it, and the switch is the rollback. If
-Discord refuses the change the text stays and the bot retries on the next scan; turn the switch off to keep the text only.
+Discord refuses the change the text stays and the bot retries on the next scan; turn the switch off to keep the text only. Turning the switch off
+stops new links and puts an existing link back to the text only while the Discord event is still Scheduled and before its start time; once the start
+has passed the link stays (and a link still Scheduled then is still started), so it is not a rollback for a running event.
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.
