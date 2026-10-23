@@ -956,9 +956,9 @@ describe("presets for the remaining duration keys (#1427)", () => {
         (d.querySelector("input[type=radio]:checked") as HTMLInputElement)
           .value,
       ).toBe(String(def));
-      const odd = [...Array(m.max - m.min + 1).keys()]
-        .map((i) => m.min + i)
-        .find((n) => !m.presets.includes(n)) as number;
+      let odd = m.min;
+      while (m.presets.includes(odd)) odd += 1;
+      expect(odd).toBeLessThanOrEqual(m.max);
       const c = doc(html(k, odd));
       expect(
         (c.querySelector("input[type=radio]:checked") as HTMLInputElement)

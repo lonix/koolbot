@@ -1197,8 +1197,8 @@ number.
 - `stepper: true` (for ranges under about 30 values: `events.groups.default_count`, `events.groups.max_count`,
   `lfg.default_size`) renders minus and plus buttons around the same bounded box. The buttons are hidden until the script
   runs and are disabled at the bounds, so without JavaScript the box is all there is.
-- `presets: [...]` (every minute, hour, day and second duration key except `moderation.raid.join_threshold`, which is a count
-  of 2 to 1000 and stays the box) renders a radio group of the common values with a last
+- `presets: [...]` (the selected duration keys configured with presets; the retention keys and
+  `moderation.raid.join_threshold`, a count of 2 to 1000, stay the box) renders a radio group of the common values with a last
   _Custom…_ and the bounded box. `presetZeroLabel` names a `0` that is not a number (_Off_, _None_). The group posts
   `preset_<key>`, the box `value_<key>`; `readSettingField` takes a ticked numeric preset, and otherwise the box
   (Custom…, or no radio at all), so a browser without JavaScript posts what a script would, with the box shown next to
