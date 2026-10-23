@@ -42,6 +42,9 @@ import {
   safeAdminRedirect,
   EMOJI_NAME_KEYS,
   coerceConfigValue,
+  coerceConfigValueForGuild,
+  isReactionRoleMessageKey,
+  readReactionRoleMessageBaseline,
   findSectionMasterKey,
   resetConfigToDefaults,
   findGroupRoleReuseForSetting,
@@ -74,14 +77,26 @@ export function createSettingsRouter(client: Client): Router {
 
       const config = ConfigService.getInstance();
       let before: unknown;
-      try {
-        before = await config.get(key);
-      } catch {
-        before = defaultConfig[key as keyof typeof defaultConfig];
+      let baselineFailure: string | null = null;
+      if (isReactionRoleMessageKey(key)) {
+        // The exemption for an unchanged value rests on the stored one, so it
+        // comes from a read that must succeed (#1433).
+        const baseline = await readReactionRoleMessageBaseline(key);
+        if (baseline.ok) before = baseline.value;
+        else baselineFailure = baseline.reason;
+      } else {
+        try {
+          before = await config.get(key);
+        } catch {
+          before = defaultConfig[key as keyof typeof defaultConfig];
+        }
       }
       // The stored value is passed so a legacy value a picker cannot produce
       // still saves unchanged (#1426).
-      const coerced = coerceConfigValue(key, raw, before);
+      const coerced: ReturnType<typeof coerceConfigValue> =
+        baselineFailure !== null
+          ? { ok: false, reason: baselineFailure }
+          : await coerceConfigValueForGuild(key, raw, before, session.guildId);
       if (!coerced.ok) {
         await recordAudit(session, {
           action: "setting.set",
@@ -530,8 +545,24 @@ export function createSettingsRouter(client: Client): Router {
             continue;
           }
         }
+        // A reaction-role message key (#1433) is also read strictly: its
+        // exemption for an unchanged value rests on this one value, which is
+        // also what the raw value is read against.
+        if (isReactionRoleMessageKey(key)) {
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            rejected.push({ key, reason: baseline.reason });
+            continue;
+          }
+          kept = baseline.value;
+        }
         const raw = readSettingField(body, key, kept);
-        const r = coerceConfigValue(key, raw, kept);
+        const r = await coerceConfigValueForGuild(
+          key,
+          raw,
+          kept,
+          session.guildId,
+        );
         if (r.ok) {
           coerced.push({ key, value: r.value });
         } else {
@@ -898,8 +929,15 @@ export function createSettingsRouter(client: Client): Router {
           continue;
         }
         // Surface type-mismatch in the preview so a silent drop at apply
-        // isn't the first sign the user sees.
-        const coerced = coerceConfigValue(key, value);
+        // isn't the first sign the user sees. A reaction-role message key
+        // (#1433) is checked against the guild's messages, and its stored
+        // value stays importable (the snapshot above is a successful read).
+        const coerced = await coerceConfigValueForGuild(
+          key,
+          value,
+          isReactionRoleMessageKey(key) ? currentByKey.get(key) : undefined,
+          session.guildId,
+        );
         if (!coerced.ok) {
           rows.push({
             key,
@@ -990,7 +1028,22 @@ export function createSettingsRouter(client: Client): Router {
           failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
-        const coerced = coerceConfigValue(key, value);
+        let stored: string | undefined;
+        if (isReactionRoleMessageKey(key)) {
+          // Strict read, as on the other save paths (#1433).
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            failed.push({ key, reason: baseline.reason });
+            continue;
+          }
+          stored = baseline.value;
+        }
+        const coerced = await coerceConfigValueForGuild(
+          key,
+          value,
+          stored,
+          session.guildId,
+        );
         if (!coerced.ok) {
           failed.push({ key, reason: coerced.reason });
           continue;

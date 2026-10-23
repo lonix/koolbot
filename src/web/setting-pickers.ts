@@ -13,6 +13,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { renderSegmented, type ControlAttrs } from "./setting-controls.js";
 import { listSupportedTimezones } from "../utils/timezone.js";
 import {
@@ -242,6 +243,78 @@ export function renderEmojiField(
     `<button type="button" data-marker-btn class="kb-emoji-btn" aria-haspopup="true" aria-expanded="false" ` +
     `aria-label="Choose an emoji for ${escapeHtml(o.label)}" hidden${o.disabled ? LOCK : ""}>😀</button>` +
     `</span></span>`
+  );
+}
+
+// ---------- Reaction-role message (#1433) ----------
+
+export interface ReactionRoleMessageSelectOptions extends ControlAttrs {
+  /**
+   * The bot's reaction-role messages for this guild, newest first. `null` when
+   * the list could not be read (the stored value is then kept and the control
+   * says so, instead of claiming there are none).
+   */
+  messages: ReactionRoleMessageOptions | null;
+}
+
+/** What the empty option is called: `{roles}` then mentions the channel. */
+export const REACTION_ROLE_MESSAGE_NONE_LABEL = "Link the channel instead";
+
+/**
+ * A select of the bot's own reaction-role messages, the stored value being the
+ * message id (`welcome.roles_message_id`, #1433).
+ *
+ * - The first option is empty: "Link the channel instead".
+ * - A stored id that is not in the list (archived or deleted since, or older
+ *   than the cap) is a selected `<id> (not found)` option, so it is shown and
+ *   posts unchanged. If the list could not be read, it reads `(could not check)`.
+ * - No option is ever `disabled`: a disabled option is not posted, so a
+ *   selected one would clear the setting.
+ * - With no messages the select still holds the empty choice (and the stored
+ *   value), and a line beneath points at the Reaction Roles page.
+ * - When the list is cut at the cap, a line says the newest are shown.
+ *
+ * It is a plain select, so it works without JavaScript; the server checks the
+ * id again (`coerceConfigValue`).
+ */
+export function renderReactionRoleMessageSelect(
+  name: string,
+  current: string,
+  o: ReactionRoleMessageSelectOptions,
+): string {
+  const stored = current.trim();
+  const list = o.messages?.options ?? [];
+  const known = stored === "" || list.some((m) => m.messageId === stored);
+  const option = (value: string, label: string): string =>
+    `<option value="${escapeHtml(value)}"${value === stored ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  const options = [
+    option("", REACTION_ROLE_MESSAGE_NONE_LABEL),
+    ...(known
+      ? []
+      : [
+          option(
+            stored,
+            `${stored} (${o.messages ? "not found" : "could not check"})`,
+          ),
+        ]),
+    ...list.map((m) => option(m.messageId, m.label)),
+  ].join("");
+  let note = "";
+  if (o.messages === null) {
+    note =
+      "The list of reaction-role messages could not be read. The stored choice is kept.";
+  } else if (list.length === 0) {
+    note =
+      'There are no reaction-role messages yet. Post one on the <a href="/admin/reaction-roles">Reaction Roles</a> page, then choose it here.';
+  } else if (o.messages.truncated) {
+    note = `Showing the ${list.length} newest reaction-role messages. A choice made earlier stays selected.`;
+  }
+  return (
+    `<span class="kb-msgpick">` +
+    `<select class="kb-select"${attr("id", o.id)}${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} ` +
+    `name="${escapeHtml(name)}"${o.disabled ? LOCK : ""}>${options}</select>` +
+    (note ? `<span class="kb-help">${note}</span>` : "") +
+    `</span>`
   );
 }
 

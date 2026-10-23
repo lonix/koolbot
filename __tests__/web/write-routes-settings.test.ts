@@ -183,6 +183,8 @@ const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
+const { ReactionRoleConfig } =
+  await import("../../src/models/reaction-role-config.js");
 
 const client = {
   user: { id: "bot" },
@@ -2695,5 +2697,241 @@ describe("picker settings (#1426)", () => {
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("welcome roles message: only the bot's reaction-role messages (#1433)", () => {
+  const KEY = "welcome.roles_message_id";
+  const FIELD = `value_${KEY}`;
+  const MINE = "100000000000000001";
+  const STRAY = "200000000000000002";
+  let distinctSpy: jest.Mock<(f: string, q: unknown) => Promise<unknown[]>>;
+
+  function stored(values: Record<string, unknown>): void {
+    mockConfigGet.mockImplementation(async (key) => values[key] ?? null);
+  }
+
+  function written(): Map<string, unknown> {
+    return new Map(
+      (mockConfigSet.mock.calls as unknown as Array<[string, unknown]>).map(
+        (c) => [c[0], c[1]],
+      ),
+    );
+  }
+
+  async function saveSection(value: string) {
+    const res = await harness.post("/settings/save-section", {
+      category: "welcome",
+      keys: ["welcome.message", KEY],
+      "value_welcome.message": "Hi {user} {roles}",
+      [FIELD]: value,
+    });
+    return parseFlashRedirect(res.headers.get("location"));
+  }
+
+  // Mongoose is stubbed for the whole suite (`__tests__/setup.ts`), and the
+  // stub has no `distinct`, so the test supplies it.
+  const model = ReactionRoleConfig as unknown as {
+    distinct?: typeof distinctSpy;
+  };
+
+  beforeEach(() => {
+    distinctSpy = jest.fn<(f: string, q: unknown) => Promise<unknown[]>>();
+    distinctSpy.mockResolvedValue([MINE]);
+    model.distinct = distinctSpy;
+  });
+
+  afterEach(() => {
+    delete model.distinct;
+  });
+
+  describe("POST /settings/set", () => {
+    it("accepts one of the guild's reaction-role messages, asking only for this guild's", async () => {
+      stored({});
+      const res = await harness.post("/settings/set", {
+        key: KEY,
+        value: MINE,
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      expect(written().get(KEY)).toBe(MINE);
+      expect(distinctSpy).toHaveBeenCalledWith("messageId", {
+        guildId: "guild-1",
+        isArchived: false,
+      });
+    });
+
+    it("refuses an id that is not one, saving nothing", async () => {
+      stored({});
+      const res = await harness.post("/settings/set", {
+        key: KEY,
+        value: STRAY,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("reaction-role messages");
+      expect(flash.invalid).toEqual([KEY]);
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+
+    it("clears on the empty choice without asking the database for the list", async () => {
+      stored({ [KEY]: MINE });
+      await harness.post("/settings/set", { key: KEY, value: "" });
+      expect(written().get(KEY)).toBe("");
+      expect(distinctSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps an unchanged stored value that is no longer one of them", async () => {
+      stored({ [KEY]: STRAY });
+      const res = await harness.post("/settings/set", {
+        key: KEY,
+        value: STRAY,
+      });
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      expect(written().get(KEY)).toBe(STRAY);
+    });
+
+    it("refuses when the stored value cannot be read, never falling back", async () => {
+      stored({});
+      mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+      const res = await harness.post("/settings/set", {
+        key: KEY,
+        value: STRAY,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("could not be read");
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the list of messages cannot be read", async () => {
+      stored({});
+      distinctSpy.mockRejectedValueOnce(new Error("db down"));
+      const res = await harness.post("/settings/set", {
+        key: KEY,
+        value: MINE,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("could not be read");
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /settings/save-section", () => {
+    it("saves a chosen message with the rest of the section", async () => {
+      stored({});
+      const flash = await saveSection(MINE);
+      expect(flash.type).toBe("ok");
+      expect(written().get(KEY)).toBe(MINE);
+      expect(written().get("welcome.message")).toBe("Hi {user} {roles}");
+    });
+
+    it("blocks the whole section for an id outside the set", async () => {
+      stored({});
+      const flash = await saveSection(STRAY);
+      expect(flash.type).toBe("err");
+      expect(flash.invalid).toEqual([KEY]);
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+
+    it("lets the rest of the section save when an old stored value is posted back unchanged", async () => {
+      stored({ [KEY]: STRAY });
+      const flash = await saveSection(STRAY);
+      expect(flash.type).toBe("ok");
+      expect(written().get(KEY)).toBe(STRAY);
+      expect(written().get("welcome.message")).toBe("Hi {user} {roles}");
+    });
+
+    it("exempts only the stored value: another stray id is still refused", async () => {
+      stored({ [KEY]: STRAY });
+      const flash = await saveSection("300000000000000003");
+      expect(flash.type).toBe("err");
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+
+    it("clears the setting on the empty choice", async () => {
+      stored({ [KEY]: MINE });
+      const flash = await saveSection("");
+      expect(flash.type).toBe("ok");
+      expect(written().get(KEY)).toBe("");
+    });
+
+    it("refuses the save when the stored value cannot be read, writing nothing", async () => {
+      stored({ [KEY]: STRAY });
+      mockConfigGetStringStrict.mockImplementation(async (key) => {
+        if (key === KEY) throw new Error("db down");
+        return "";
+      });
+      try {
+        const flash = await saveSection(STRAY);
+        expect(flash.type).toBe("err");
+        expect(flash.invalid).toEqual([KEY]);
+        expect(mockConfigSet).not.toHaveBeenCalled();
+      } finally {
+        mockConfigGetStringStrict.mockImplementation(
+          async (key: string, defaultValue: string = "") => {
+            const v = await mockConfigGet(key);
+            return typeof v === "string" ? v : defaultValue;
+          },
+        );
+      }
+    });
+
+    it("uses the same strict read as the baseline and the raw value (a stale get() cannot launder an id)", async () => {
+      // `get()` says the stray id is stored; the strict read, which is the
+      // only baseline, says otherwise. The post is refused.
+      stored({ [KEY]: STRAY });
+      mockConfigGetStringStrict.mockImplementation(async () => MINE);
+      try {
+        const flash = await saveSection(STRAY);
+        expect(flash.type).toBe("err");
+        expect(mockConfigSet).not.toHaveBeenCalled();
+      } finally {
+        mockConfigGetStringStrict.mockImplementation(
+          async (key: string, defaultValue: string = "") => {
+            const v = await mockConfigGet(key);
+            return typeof v === "string" ? v : defaultValue;
+          },
+        );
+      }
+    });
+  });
+
+  describe("YAML import", () => {
+    it("refuses an id outside the set in the preview and at apply", async () => {
+      stored({});
+      mockConfigGetAll.mockResolvedValue([]);
+      const preview = await harness.post("/settings/import", {
+        yaml: `${KEY}: "${STRAY}"`,
+      });
+      expect(await preview.text()).toContain("reaction-role messages");
+      await harness.post("/settings/import/apply", {
+        yaml: `${KEY}: "${STRAY}"`,
+      });
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
+
+    it("imports one of the guild's messages", async () => {
+      stored({});
+      await harness.post("/settings/import/apply", {
+        yaml: `${KEY}: "${MINE}"`,
+      });
+      expect(written().get(KEY)).toBe(MINE);
+    });
+
+    it("keeps an unchanged stored value, and refuses when it cannot be read", async () => {
+      stored({ [KEY]: STRAY });
+      await harness.post("/settings/import/apply", {
+        yaml: `${KEY}: "${STRAY}"`,
+      });
+      expect(written().get(KEY)).toBe(STRAY);
+
+      mockConfigSet.mockClear();
+      mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+      await harness.post("/settings/import/apply", {
+        yaml: `${KEY}: "${STRAY}"`,
+      });
+      expect(mockConfigSet).not.toHaveBeenCalled();
+    });
   });
 });

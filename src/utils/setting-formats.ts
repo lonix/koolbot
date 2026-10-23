@@ -14,7 +14,11 @@
  *   decided these are not emoji-only, so `Looking for group: ` is fine), at
  *   most `CHANNEL_AFFIX_MAX_CHARS` code points, with no control characters and
  *   no custom emoji markup, neither of which can go in a Discord channel name.
- *   The emoji grid beside the box is only a convenience.
+ *   The emoji grid beside the box is only a convenience;
+ * - `reaction_role_message` (#1433): empty ("link the channel instead") or the
+ *   id of a message. This file only checks the shape. Whether the id is one of
+ *   the bot's own reaction-role messages needs the database, so
+ *   `coerceConfigValue` checks that against a set its caller loads.
  *
  * A value a picker cannot produce but that is already stored must keep saving
  * unchanged (an old custom timezone, a prefix that is not an emoji); that
@@ -23,7 +27,8 @@
 
 import { isValidTimezone } from "./timezone.js";
 
-export type SettingFormat = "timezone" | "colour" | "affix";
+export type SettingFormat =
+  "timezone" | "colour" | "affix" | "reaction_role_message";
 
 /**
  * Longest channel name prefix or suffix, in code points.
@@ -48,6 +53,7 @@ const COLOUR = /^#?([0-9A-Fa-f]{6})$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 const CUSTOM_EMOJI = /<a?:\w+:\d+>/;
+const MESSAGE_ID = /^\d{17,20}$/;
 
 export type FormatResult =
   { ok: true; value: string } | { ok: false; reason: string };
@@ -104,6 +110,18 @@ export function validateSettingFormat(
         };
       }
       return { ok: true, value };
+    }
+    case "reaction_role_message": {
+      const id = value.trim();
+      if (id === "") return { ok: true, value: "" };
+      if (!MESSAGE_ID.test(id)) {
+        return {
+          ok: false,
+          reason:
+            "pick one of the reaction-role messages, or leave empty to link the channel",
+        };
+      }
+      return { ok: true, value: id };
     }
   }
 }

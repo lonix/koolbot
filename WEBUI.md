@@ -1224,6 +1224,15 @@ number.
 - `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and `events.channel_prefix` are free text (#1435: not emoji-only, so
   `Looking for group:` or `'s last resort` are fine). The text box is the field, and the event group marker's emoji grid beside it is only
   a convenience. A pick replaces the value.
+- `welcome.roles_message_id` (#1433) is a select of the bot's own reaction-role messages for this server, never a typed
+  id. The stored value stays the message id. The first option is empty, _Link the channel instead_ (`{roles}` then
+  mentions the reaction-role channel); each message is listed by where it is and what it hands out
+  (`# roles · 🎮 Gamer, 🎨 Artist +2`), newest first, at most 50 (a line under the select says when the list is cut).
+  The labels come from the stored mapping rows and the channel names the page already holds, so there is no Discord call
+  per option, and a channel that is gone shows as `(unavailable)`. A stored id that is not in the list (the message was
+  archived or deleted, or is older than the cap) is a selected `<id> (not found)` option, and one that cannot be checked
+  because the list could not be read is `<id> (could not check)`. With no messages the select keeps the empty choice and
+  the stored value, and a line points at the Reaction Roles page. No option is ever `disabled`.
 
 The server checks every value again in `coerceConfigValue` (`src/utils/setting-formats.ts`): a timezone must be one
 `Intl.DateTimeFormat` knows, a colour `#RRGGBB` (stored as `#rrggbb`), and a prefix or suffix
@@ -1235,12 +1244,21 @@ selected "(custom)" option, a stored non-colour is kept by the ticked Keep box a
 that is not what a picker could produce is refused with a message. YAML import and adoption plans have no stored value
 to compare with and stay strict.
 
+`welcome.roles_message_id` adds a database rule on top (`coerceConfigValueForGuild`): a non-empty id must be one of this
+server's active (not archived) reaction-role messages, on `/admin/settings/set`, a section save, the wizard step and
+YAML import alike. The set is loaded only when it is needed (an empty choice or an unchanged value never needs it), is
+never capped, and a failed load refuses the save. The unchanged stored value is exempt, so one old id never blocks the
+rest of its section, and that stored value comes from `ConfigService.getStringStrict`: a failed read refuses the save
+instead of falling back to the default, and the same read is both the baseline and the value the post is compared with
+(in the wizard it is the database's value, never one staged earlier in the run). An adoption plan passes no set and is
+refused for a non-empty id.
+
 **Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the
 id of a message the bot posted. The Settings page shows them as text with a _Jump to message_ link (built from the
 setting that names the channel), without a field and without an entry in the form's `keys`, so saving the section
 cannot blank them. The write routes refuse them, a YAML export leaves them out, and a per-key reset is refused. The
-feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, so it
-stays a text field.
+feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, by
+picking one of the bot's reaction-role messages from a select (#1433).
 
 **Re-posting a bot-managed message (#1428).** Each managed id has a **Re-post** action on the page of the feature that
 owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
@@ -1272,7 +1290,7 @@ a different stored id and does nothing ("already re-posted"). The service also q
 (Resync quote channel, Resync notices to channel, `/quote reset`) and behind another re-post, so two clicks at once
 produce one new message and a resync can't delete the new header. The button is off, with the reason shown, when the
 feature or its header is switched off or no channel is set. `welcome.roles_message_id` is a different case (an operator
-points it at a reaction-role message) and is not re-posted.
+points it at a reaction-role message, chosen from a select) and is not re-posted.
 
 On the **Settings** page and the feature cards, a setting whose feature declares
 a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
@@ -1511,7 +1529,8 @@ announcement); concurrent runs coalesce, and the per-tier grant/revoke counts ar
 reported in the flash message. Tier saves and runs are audited. **All settings** leaves
 `leaderboard_roles.tiers` out (`editedElsewhere` in `settingsMetadata`, #1428): the raw `topN:roleId` string is easy
 to break, so the tier editor is the only place it is edited. The key is still stored, exported, imported and reset
-like any other, so a YAML backup carries the tiers.
+like any other, so a YAML backup carries the tiers. The Setup Wizard's Leaderboard Roles step does not ask for it either (#1433): the
+step says the tiers are set in the tier editor once the wizard is applied, and links to it.
 
 The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
 lets admins name the roles that matter on their server and rank them: as many or as few as

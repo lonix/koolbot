@@ -741,7 +741,8 @@ export interface SettingMetadata {
    * The value set of a free-text `string` key, so the Web UI can offer a picker
    * and the write boundary can refuse a value the picker could not have
    * produced (#1426): `timezone` (IANA zone select), `colour` (`#RRGGBB`
-   * colour input) or `affix` (free text for a channel name prefix or suffix, at most 32 characters, with an emoji grid beside the box). A stored
+   * colour input) or `affix` (free text for a channel name prefix or suffix, at most 32 characters, with an emoji grid beside the box) or `reaction_role_message` (a
+   * select of the bot's own reaction-role messages, #1433). A stored
    * value that fails the rule still displays and saves unchanged.
    */
   format?: SettingFormat;
@@ -1882,11 +1883,12 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "boolean",
   },
   "welcome.roles_message_id": {
-    label: "Self-assign role message ID",
+    label: "Self-assign roles message",
     description:
-      "Optional ID of the reaction-role message (in the reaction-role message channel) that {roles} links to. Leave empty to link the channel instead.",
+      'Optional reaction-role message that {roles} links to, picked from the messages the bot posted (see Reaction Roles). Choose "Link the channel instead" to mention the reaction-role channel.',
     category: "welcome",
     type: "string",
+    format: "reaction_role_message",
   },
   "welcome.rules_channel_id": {
     label: "Rules channel",

@@ -90,8 +90,10 @@ const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
-const { WIZARD_FEATURE_ORDER } =
+const { WIZARD_FEATURE_ORDER, WIZARD_FEATURE_SETTINGS } =
   await import("../../src/web/routes/write/helpers.js");
+const { ReactionRoleConfig } =
+  await import("../../src/models/reaction-role-config.js");
 
 /** The guild's roles by id, for the powerful-role check (#1145). */
 const roleCache = new Map<
@@ -480,6 +482,126 @@ describe("POST /wizard/step/:n", () => {
     const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
     expect(recorded).toContain("quotes.channel_id");
     expect(recorded).not.toContain("quotes.max_length");
+  });
+});
+
+describe("welcome step: the roles message is picked, never typed (#1433)", () => {
+  const KEY = "welcome.roles_message_id";
+  const FIELD = `value_${KEY}`;
+  const MINE = "100000000000000001";
+  const STRAY = "200000000000000002";
+  // Mongoose is stubbed for the whole suite (`__tests__/setup.ts`) and the
+  // stub has no `distinct`, so the test supplies it.
+  const model = ReactionRoleConfig as unknown as {
+    distinct?: jest.Mock<(f: string, q: unknown) => Promise<unknown[]>>;
+    aggregate: jest.Mock<(p: unknown[]) => Promise<unknown[]>>;
+  };
+
+  beforeEach(() => {
+    model.distinct = jest.fn<(f: string, q: unknown) => Promise<unknown[]>>();
+    model.distinct.mockResolvedValue([MINE]);
+    model.aggregate.mockReset();
+    model.aggregate.mockResolvedValue([
+      {
+        _id: MINE,
+        messageChannelId: "222222222222222222",
+        roles: [{ emoji: "🎮", roleName: "Gamer" }],
+      },
+    ]);
+  });
+
+  afterEach(() => {
+    delete model.distinct;
+    model.aggregate.mockReset();
+    model.aggregate.mockResolvedValue([]);
+  });
+
+  function staged(): Record<string, unknown> {
+    return Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [
+        (c as unknown[])[2],
+        (c as unknown[])[3],
+      ]),
+    );
+  }
+
+  it("renders a select of the guild's reaction-role messages in place of a text box", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).not.toMatch(
+      /<input[^>]*name="value_welcome\.roles_message_id"/,
+    );
+    expect(html).toMatch(
+      /<select class="kb-select"[^>]*name="value_welcome\.roles_message_id"/,
+    );
+    expect(html).toContain(`<option value="${MINE}">`);
+    expect(html).toContain("Link the channel instead");
+    expect(model.aggregate.mock.calls[0][0][0]).toEqual({
+      $match: { guildId: "guild-1", isArchived: false },
+    });
+  });
+
+  it("stages a chosen message", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    await harness.post("/wizard/step/0", {
+      "value_welcome.enabled": "true",
+      [FIELD]: MINE,
+    });
+    expect(staged()[KEY]).toBe(MINE);
+  });
+
+  it("stages nothing for an id outside the set and keeps the operator on the step", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    const res = await harness.post("/wizard/step/0", {
+      "value_welcome.enabled": "true",
+      [FIELD]: STRAY,
+    });
+    expect(Object.keys(staged())).not.toContain(KEY);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc).toContain("step=0");
+    expect(decodeURIComponent(loc.replace(/\+/g, " "))).toContain(
+      "reaction-role messages",
+    );
+  });
+
+  it("stages an unchanged stored value that is no longer one of them", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    mockConfigGetStringStrict.mockResolvedValueOnce(STRAY);
+    await harness.post("/wizard/step/0", {
+      "value_welcome.enabled": "true",
+      [FIELD]: STRAY,
+    });
+    expect(staged()[KEY]).toBe(STRAY);
+  });
+
+  it("stages nothing when the stored value cannot be read", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post("/wizard/step/0", {
+      "value_welcome.enabled": "true",
+      [FIELD]: STRAY,
+    });
+    expect(Object.keys(staged())).not.toContain(KEY);
+    expect(res.headers.get("location") ?? "").toContain("step=0");
+  });
+
+  it("clears the choice with the empty option", async () => {
+    mockGetSession.mockReturnValue(wizardState(["welcome"]));
+    await harness.post("/wizard/step/0", {
+      "value_welcome.enabled": "true",
+      [FIELD]: "",
+    });
+    expect(staged()[KEY]).toBe("");
+  });
+
+  it("no longer asks for the leaderboard tier string, and points at the tier editor", async () => {
+    expect(WIZARD_FEATURE_SETTINGS.leaderboard_roles).not.toContain(
+      "leaderboard_roles.tiers",
+    );
+    mockGetSession.mockReturnValue(wizardState(["leaderboard_roles"]));
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).not.toContain("value_leaderboard_roles.tiers");
+    expect(html).toContain('href="/admin/leaderboard-roles"');
   });
 });
 

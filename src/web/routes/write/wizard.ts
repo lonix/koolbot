@@ -65,6 +65,7 @@ import {
 } from "../../admin-views.js";
 import {
   fetchChannelData,
+  fetchReactionRoleMessages,
   fetchRoleData,
   withRoleGroupOptions,
 } from "../../read-only-routes.js";
@@ -80,7 +81,9 @@ import {
   WIZARD_FEATURE_ORDER,
   WIZARD_FEATURE_EXTRA_GATES,
   wizardApplyFailureMessage,
-  coerceConfigValue,
+  coerceConfigValueForGuild,
+  isReactionRoleMessageKey,
+  readReactionRoleMessageBaseline,
   findGroupRoleReuseForSetting,
   guardedRoleIds,
   findPowerfulRoleForSetting,
@@ -378,6 +381,13 @@ export function createWizardRouter(client: Client): Router {
           )
             ? await withRoleGroupOptions(session.guildId, roleData.roles)
             : undefined;
+          // The welcome step picks its roles message from the bot's own
+          // reaction-role messages (#1433).
+          const reactionRoleMessages = settingKeys.some((k) =>
+            isReactionRoleMessageKey(k),
+          )
+            ? await fetchReactionRoleMessages(session.guildId, chData)
+            : undefined;
           res.type("text/html").send(
             renderWizardStepPage({
               csrfToken,
@@ -398,6 +408,7 @@ export function createWizardRouter(client: Client): Router {
               categoryChannels: chData.categoryChannels,
               roles: roleData.roles,
               groupRoles,
+              reactionRoleMessages,
               enabledByKey,
               flash,
             }),
@@ -619,8 +630,24 @@ export function createWizardRouter(client: Client): Router {
             continue;
           }
         }
+        // A reaction-role message key (#1433) is read strictly too: its
+        // exemption for an unchanged value rests on the stored value, which
+        // must be the database's, never one staged earlier in this wizard run.
+        if (isReactionRoleMessageKey(k)) {
+          const baseline = await readReactionRoleMessageBaseline(k);
+          if (!baseline.ok) {
+            dropped.push({ key: k, reason: baseline.reason });
+            continue;
+          }
+          kept = baseline.value;
+        }
         const raw = readSettingField(body, k, kept);
-        const coerced = coerceConfigValue(k, raw, kept);
+        const coerced = await coerceConfigValueForGuild(
+          k,
+          raw,
+          kept,
+          session.guildId,
+        );
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.
         const stored = coerced.ok ? kept : undefined;

@@ -149,6 +149,7 @@ describe("the picker keys", () => {
     ).toEqual([
       ["voicechannels.channel.prefix", "affix", "string"],
       ["voicechannels.channel.suffix", "affix", "string"],
+      ["welcome.roles_message_id", "reaction_role_message", "string"],
       ["events.timezone", "timezone", "string"],
       ["events.channel_prefix", "affix", "string"],
       ["reactionroles.group_role_colour", "colour", "string"],
