@@ -57,6 +57,11 @@ describe("role group pickers on Settings and the wizard (#1023)", () => {
     );
     expect(html).toContain('<option value="group:g1">@Staff (group)</option>');
     expect(html).not.toContain("⚠ group:g1+");
+    // Headed like the design manual's picker (#1394): groups, then roles.
+    expect(html.indexOf('<optgroup label="Role groups">')).toBeGreaterThan(-1);
+    expect(html.indexOf('<optgroup label="Roles">')).toBeGreaterThan(
+      html.indexOf('<optgroup label="Role groups">'),
+    );
     // A role list that doesn't resolve groups never offers them; a stored
     // token there stays visible as unknown instead of silently vanishing.
     const other = html.slice(

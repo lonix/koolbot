@@ -445,6 +445,17 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-picker__cat { margin-left: auto; font-size: var(--type-overline-size); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .kb-picker__hint { margin: var(--space-2) var(--space-2) 0; font-size: var(--type-help-size); color: var(--muted); }
 .kb-picker__hint kbd { font-family: var(--font-mono); padding: 0 0.25rem; border: 1px solid var(--control); border-radius: var(--radius-xs); color: var(--text-secondary); }
+/* Script-built picker over a native select (#1394). While open the popover sits at the end of <main> (the settings rows and cards scroll and would clip it)
+   and is fixed at the trigger's position, set by the script as --kb-picker-x / --kb-picker-y. Rows the search hides stay out of the layout. */
+.kb-picker__pop--floating { --kb-picker-x: 0px; --kb-picker-y: 0px; --kb-picker-list-h: 16rem; position: fixed; left: var(--kb-picker-x); top: var(--kb-picker-y); z-index: 1000; max-width: calc(100vw - 1rem); box-sizing: border-box; }
+.kb-picker__pop--floating [hidden] { display: none; }
+.kb-picker__pop--floating .kb-picker__list { max-height: min(16rem, var(--kb-picker-list-h)); }
+.kb-picker--enhanced .kb-picker__trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kb-picker--enhanced .kb-picker__trigger[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 1px; }
+.kb-picker--enhanced .kb-picker__trigger[aria-invalid="true"]:focus-visible { outline-color: var(--focus); outline-offset: 2px; }
+.kb-picker--enhanced .kb-picker__trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+.kb-picker__pop--floating .kb-picker__opt > .kb-icon:last-child { margin-left: auto; }
+.kb-picker__pop--floating .kb-picker__cat + .kb-icon:last-child { margin-left: var(--space-2); }
 
 /* ---------- Bounded numbers: stepper and preset durations ---------- */
 .kb-stepper { display: inline-flex; align-items: stretch; height: var(--control-height); border: 1px solid var(--control); border-radius: var(--radius-md); background: var(--bg); overflow: hidden; }

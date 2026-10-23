@@ -1289,6 +1289,54 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The channel, category and role pickers (#1394) as the server renders
+      // them, before the script runs: a native select in span.kb-picker with
+      // optgroups, a voice setting, and a stored id that is not in the list.
+      // The script-built states are scanned in channel-picker-a11y.test.ts.
+      name: "Settings (channel, category and role pickers, stored id not listed)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "voicechannels",
+            rows: [
+              {
+                key: "voicechannels.lobby_channel_id",
+                label: "Lobby channel",
+                current: "v1",
+                defaultValue: "",
+                type: "channel",
+                channelKind: "voice",
+                description: "The channel members join to get their own room.",
+                category: "voicechannels",
+              },
+              {
+                key: "voicechannels.category_id",
+                label: "Category",
+                current: "999999999999999999",
+                defaultValue: "",
+                type: "category",
+                description: "Category the managed channels are created in.",
+                category: "voicechannels",
+              },
+              {
+                key: "voicetracking.announcer_role",
+                label: "Announcer role",
+                current: "r2",
+                defaultValue: "",
+                type: "role",
+                description: "Role pinged by the announcer.",
+                category: "voicetracking",
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       // The welcome roles message picker (#1433): the bot's reaction-role
       // messages by label, and a stored id that is not among them.
       name: "Settings (welcome roles message picker, stored id not found)",
