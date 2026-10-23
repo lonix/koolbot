@@ -36,6 +36,9 @@ import { validateEventForm } from "./event-form.js";
 import { parseEventWhen, plannedStartFor } from "./event-when.js";
 import { recordAudit, type AuditEntry } from "./audit.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import { countOpenHostEvents } from "./event-host.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
+import { PermissionsService } from "../services/permissions-service.js";
 import { signFlash, truncateFlash } from "./http-flash.js";
 import type { WebSessionContext } from "./session.js";
 
@@ -70,11 +73,93 @@ function field(body: Record<string, unknown>, name: string): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+/** One check-and-create at a time per host (this process is the only writer). */
+const hostCreateLock = createKeyedLock();
+
+/**
+ * What the per-host cap (#1408) means for this request: `limit` null when it
+ * does not apply (no limit, or an administrator), or a refusal.
+ */
+async function resolveHostCap(
+  client: Client,
+  session: WebSessionContext,
+  rawBody: unknown,
+  opts: CreateEventPipelineOptions,
+): Promise<{ limit: number | null } | { refusal: string }> {
+  // An admin-role session is never limited; nothing to read.
+  if (session.role === "admin") return { limit: null };
+  const whenRaw =
+    rawBody && typeof rawBody === "object"
+      ? (rawBody as Record<string, unknown>).when
+      : undefined;
+  let limit: number;
+  try {
+    // Strict: an unreadable setting must not quietly become "no limit".
+    limit = await ConfigService.getInstance().getNumberStrict(
+      "events.max_active_per_host",
+      0,
+    );
+  } catch (err) {
+    logger.error("Could not read events.max_active_per_host", err);
+    await (opts.audit ?? recordAudit)(session, {
+      action: "event.create",
+      details: {
+        via: opts.via,
+        when: typeof whenRaw === "string" ? whenRaw : "",
+      },
+      result: "failure",
+      errorMessage: "could not read the open event limit",
+    });
+    return {
+      refusal:
+        "Could not check the limit on open events, so nothing was created. Try again in a moment.",
+    };
+  }
+  if (!Number.isFinite(limit) || limit <= 0) return { limit: null };
+  // A /me session is issued to administrators too, so the role says how the
+  // person signed in, not what they may do: ask Discord. If that cannot be
+  // checked, they are treated as not an administrator and the limit applies.
+  try {
+    if (
+      await PermissionsService.getInstance(client).isAdministrator(
+        session.discordUserId,
+        session.guildId,
+      )
+    ) {
+      return { limit: null };
+    }
+  } catch (err) {
+    logger.warn(
+      "Could not check Administrator for the event limit; applying the limit",
+      err,
+    );
+  }
+  return { limit };
+}
+
 export async function createEventFromForm(
   client: Client,
   session: WebSessionContext,
   rawBody: unknown,
   opts: CreateEventPipelineOptions,
+): Promise<CreateEventResult> {
+  const cap = await resolveHostCap(client, session, rawBody, opts);
+  if ("refusal" in cap) return { ok: false, error: cap.refusal };
+  if (cap.limit === null) {
+    return createEventUnlocked(client, session, rawBody, opts, null);
+  }
+  const limit = cap.limit;
+  return hostCreateLock.run(`${session.guildId}:${session.discordUserId}`, () =>
+    createEventUnlocked(client, session, rawBody, opts, limit),
+  );
+}
+
+async function createEventUnlocked(
+  client: Client,
+  session: WebSessionContext,
+  rawBody: unknown,
+  opts: CreateEventPipelineOptions,
+  capLimit: number | null,
 ): Promise<CreateEventResult> {
   const body: Record<string, unknown> =
     rawBody && typeof rawBody === "object"
@@ -86,6 +171,47 @@ export async function createEventFromForm(
 
   const when = parseEventWhen(field(body, "when"));
   if (!when) return { ok: false, error: "Invalid choice for when." };
+
+  // The per-host cap (#1408). `capLimit` was resolved by the caller, which
+  // holds the host's lock from here to the insert, so two overlapping requests
+  // cannot both see room. Checked before anything is created.
+  {
+    const limit = capLimit;
+    if (limit !== null) {
+      let open: number;
+      try {
+        open = await countOpenHostEvents(
+          session.guildId,
+          session.discordUserId,
+        );
+      } catch (err) {
+        logger.error("Could not count a host's open events", err);
+        await audit({
+          action: "event.create",
+          details: { via: opts.via, when, limit },
+          result: "failure",
+          errorMessage: "could not check the open event limit",
+        });
+        return {
+          ok: false,
+          error:
+            "Could not check how many events you have open, so nothing was created. Try again in a moment.",
+        };
+      }
+      if (open >= limit) {
+        await audit({
+          action: "event.host.limit",
+          details: { via: opts.via, when, limit, open },
+          result: "failure",
+          errorMessage: "open event limit reached",
+        });
+        return {
+          ok: false,
+          error: `You already have ${open} open ${open === 1 ? "event" : "events"}, and the limit is ${limit}. End or cancel one before creating another.`,
+        };
+      }
+    }
+  }
 
   const recurrenceRaw = opts.allowRecurrence
     ? field(body, "recurrence") || "none"

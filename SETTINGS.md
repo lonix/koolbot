@@ -832,6 +832,7 @@ channel.
 | `events.native.link_room`         | `true`    | Point the native Discord event at the event's main voice room once it is created, instead of the location text                    |
 | `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |
 | `events.groups.max_count`         | `15`      | The most groups one event may have, at most 25 (a Discord category holds 50 channels)                                             |
+| `events.max_active_per_host`      | `0`       | The most open events (scheduled or running) a non-admin host may have at once. `0` = no limit; administrators are never limited   |
 
 **Notes:**
 
@@ -1986,6 +1987,7 @@ leave the graph in a broken state.
 - `events.native.link_room` (bool, default: true)
 - `events.groups.default_count` (number, default: 2)
 - `events.groups.max_count` (number, default: 15)
+- `events.max_active_per_host` (number, default: 0)
 
 #### LFG (Looking for Group)
 
