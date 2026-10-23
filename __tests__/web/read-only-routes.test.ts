@@ -137,6 +137,31 @@ describe("fetchChannelData (#611)", () => {
     expect(data.voiceChannels).toEqual([]);
     expect(data.textChannels).toEqual([]);
     expect(data.categoryChannels).toEqual([]);
+    expect(data.listed).toBe(false);
+  });
+
+  it("reports listed only when the channel list was read (#1420)", async () => {
+    const ok = await fetchChannelData(
+      mockClientWithChannels([
+        { id: "v1", name: "Lounge", type: ChannelType.GuildVoice },
+      ]),
+      "guild-1",
+    );
+    expect(ok.listed).toBe(true);
+
+    const failing = {
+      guilds: {
+        fetch: async () => ({
+          channels: {
+            fetch: async (): Promise<never> => {
+              throw new Error("discord down");
+            },
+            cache: new Map(),
+          },
+        }),
+      },
+    } as any;
+    expect((await fetchChannelData(failing, "guild-1")).listed).toBe(false);
   });
 });
 

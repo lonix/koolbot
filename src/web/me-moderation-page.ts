@@ -604,7 +604,7 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
 <td class="kb-mono">${escapeHtml(stamp(r.createdAt))}</td>
 <th scope="row" title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</th>
 <td class="kb-mono">${cmd}</td>
-<td>${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType }) : '<span class="kb-muted">—</span>'}</td>
+<td>${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType, storedName: r.channelStoredName }) : '<span class="kb-muted">—</span>'}</td>
 <td>${resultBadge(r.result)}</td>
 <td>${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : '<span class="kb-muted">—</span>'}</td>
 </tr>`;

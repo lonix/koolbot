@@ -60,11 +60,23 @@ describe("component command audit (#1147)", () => {
       commandName: "component:vc_control",
       subcommand: null,
       channelId: "chan-1",
+      channelName: null,
       result: "success",
       errorMessage: null,
     });
     expect(JSON.stringify(entry)).not.toContain("111111");
     expect(JSON.stringify(entry)).not.toContain("333333");
+  });
+
+  it("stores the name of the voice room a component was used in (#1420)", async () => {
+    const audit = startComponentAudit(
+      interaction("vc_control_letin_1_2_3", {
+        channel: { type: 2, name: "Alice's room" },
+      }),
+      "button",
+    );
+    await audit.done();
+    expect(recordMock.mock.calls[0][0].channelName).toBe("Alice's room");
   });
 
   it("records an unrecognised component as denied under the unknown label", async () => {

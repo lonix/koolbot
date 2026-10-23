@@ -691,6 +691,12 @@ interface ChannelData {
   textChannels: ChannelOption[];
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
+  /**
+   * True when the guild's channel list was read. False when the lookup failed,
+   * in which case the maps are empty and a missing channel is not known to be
+   * deleted (#1420).
+   */
+  listed: boolean;
 }
 
 interface RoleData {
@@ -717,6 +723,7 @@ export async function fetchChannelData(
   const textChannels: ChannelOption[] = [];
   const voiceChannels: ChannelOption[] = [];
   const categoryChannels: ChannelOption[] = [];
+  let listed = false;
   try {
     const guild = await client.guilds.fetch(guildId);
     await guild.channels.fetch();
@@ -748,10 +755,18 @@ export async function fetchChannelData(
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
     voiceChannels.sort((a, b) => a.name.localeCompare(b.name));
     categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
+    listed = true;
   } catch (err) {
     logger.debug("fetchChannelData failed", err);
   }
-  return { names, types, textChannels, voiceChannels, categoryChannels };
+  return {
+    names,
+    types,
+    textChannels,
+    voiceChannels,
+    categoryChannels,
+    listed,
+  };
 }
 
 /**
@@ -2797,6 +2812,7 @@ export function createReadOnlyRouter(
           pageSize,
           channelNames: channelData.names,
           channelTypes: channelData.types,
+          channelsListed: channelData.listed,
         }),
       ]);
       const { rows, total, userOptions } = audit;

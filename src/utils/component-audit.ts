@@ -27,6 +27,7 @@ import { ConfigService } from "../services/config-service.js";
 import { CooldownManager } from "../services/cooldown-manager.js";
 import logger from "./logger.js";
 import { recordCommandAudit } from "./record-command-audit.js";
+import { voiceRoomNameOf } from "./voice-room-name.js";
 
 export type ComponentKind = "button" | "select" | "modal";
 
@@ -110,7 +111,7 @@ export interface ComponentAudit {
 
 type AuditableInteraction = Pick<
   Interaction,
-  "guildId" | "channelId" | "user"
+  "guildId" | "channelId" | "channel" | "user"
 > & {
   customId: string;
 };
@@ -170,6 +171,7 @@ export function startComponentAudit(
         commandName: label,
         subcommand: null,
         channelId: interaction.channelId ?? null,
+        channelName: voiceRoomNameOf(interaction.channel),
         result,
         errorMessage,
         durationMs: Date.now() - startedAt,

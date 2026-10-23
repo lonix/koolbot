@@ -547,7 +547,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     field: "discordUserId",
     exportable: false,
     guildScoped: true,
-    note: "Admin audit trail, not member data.",
+    note: "Admin audit trail, not member data. Also keeps the name of a voice room the command ran in (`channelName`), so the page can show a deleted room (#1420); the name is not a member id.",
     onDelete: "retain",
     subject: "self",
     deleteNote:
