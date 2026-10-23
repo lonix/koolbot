@@ -277,6 +277,15 @@ describe("the board", () => {
     expect(rule(".kb-segmented--wrap span")).toMatch(
       /min-width: 0;[^}]*height: auto;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere/,
     );
+    // Component spacing comes from tokens (DESIGN.md), not literals.
+    for (const sel of [
+      ".kb-segmented--wrap span",
+      ".kb-board__menu .kb-btn",
+      ".kb-board__foot .kb-btn",
+    ]) {
+      expect(rule(sel)).toContain("padding-top: var(--space-1)");
+      expect(rule(sel)).toContain("padding-bottom: var(--space-1)");
+    }
     // Wrapping rows.
     expect(rule(".kb-board__person")).toContain("flex-wrap: wrap");
     expect(rule(".kb-board__foot")).toContain("flex-wrap: wrap");
