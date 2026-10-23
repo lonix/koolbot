@@ -1404,12 +1404,16 @@ to post (the weekly announcement is plain text, so no Embed Links), Read Message
 find its header and the messages it edits or deletes, Add Reactions for the quote votes,
 Manage Messages to delete what members post in the quotes and notices channels, Pin
 Messages for the header while it is pinned, and for the lock-down the bot applies to those
-two channels at startup, Manage Roles _in the channel_ plus every permission that lock-down
-grants (Discord lets the bot grant only what it holds there). A log category counts as in use
-only while the feature that writes to it is on (voice cleanup, moderation, moderation cases,
-the update check), and anti-raid alerts only while the moderation log is on. A configured channel
-that is a category or forum (or not found) is shown as _Not checked_; the text chat of a voice
-channel and threads are checked, except for the weekly announcement, which needs a plain text channel. The weekly digest is sent as
+two channels at startup. The lock-down follows Discord's rule for channel overwrites: the bot needs
+Manage Roles _in the channel_, and every permission it allows or denies there (including Send
+Messages in Threads and the thread-creation permissions) must be held server-wide or on the channel's
+category, unless the bot has a Manage Roles override on the channel itself, which waives that second
+part. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
+moderation, moderation cases, the update check), and anti-raid alerts only while the moderation log
+is on. A configured channel that is a category, a forum or a thread (or not found) is shown as
+_Not checked_; threads are not checked because they need Send Messages in Threads and are not in
+Discord's channel list. The text chat of a voice or stage channel is checked, except for the weekly
+announcement, which needs a plain text channel. The weekly digest is sent as
 direct messages and needs no channel. Birthdays, celebrations, welcome messages, looking
 for group, event and leaderboard announcements, the reaction-role picker and the rules
 message post too but are not checked yet (#1254). When one of these features cannot post,

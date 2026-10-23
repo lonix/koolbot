@@ -56,6 +56,11 @@ export interface FeatureRequirement {
   /** True: holding any one of `needs` is enough (Create Events or Manage Events). */
   anyOf?: boolean;
   needs: readonly PermissionNeed[];
+  /**
+   * `needs` are what the code grants with `permissionOverwrites.edit`, not what
+   * it holds in the channel: see `missingOverwriteGrant`.
+   */
+  overwriteGrant?: boolean;
   /** The feature's `*.enabled` setting. Absent when `usedWhen` decides. */
   enabledKey?: keyof ConfigSchema;
   /**
@@ -69,10 +74,12 @@ export interface FeatureRequirement {
   targetKey?: keyof ConfigSchema;
   /**
    * The kind of channel the service accepts there, for a channel scope that
-   * posts. `text`: anything with a text chat that `send` works on (text,
-   * announcement, voice and stage channels, threads), as `isTextBased()`;
+   * posts. `text`: a text, announcement, voice or stage channel (the services
+   * accept any `isTextBased()` channel, whose text chat `send` works on);
    * `guild-text`: a plain text channel only (the weekly announcer refuses the
-   * rest). A category or forum is reported as "could not check", never "ok".
+   * rest). A category, forum or thread is reported as "could not check", never
+   * "ok" (a thread needs Send Messages in Threads and is not in Discord's
+   * channel list, so this page does not check threads).
    */
   targetType?: "text" | "guild-text";
   /**
@@ -248,25 +255,33 @@ const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
 );
 
 /**
- * What the quotes and notices lock-down needs in the channel. The managers
- * apply `NOTICES_EVERYONE` to @everyone and `NOTICES_BOT` to the bot with
- * `permissionOverwrites.edit`, and Discord lets a bot grant only permissions it
- * holds itself in that channel, so it needs Manage Roles and every permission
- * those two sets allow. Derived from the same constants the managers use, so the
- * two cannot drift. (The managers call nothing with Manage Channels apart from
- * this grant; see the audit in #1254.)
+ * What the quotes and notices lock-down sets. The managers apply
+ * `NOTICES_EVERYONE` to @everyone and `NOTICES_BOT` to the bot with
+ * `permissionOverwrites.edit`: Manage Roles first, then the permissions in both
+ * the allow and the deny lists (Discord's rule for overwrites covers both),
+ * evaluated by `missingOverwriteGrant`. Derived from the same constants the
+ * managers use, so the two cannot drift. (The managers call nothing with
+ * Manage Channels apart from this grant; see the audit in #1254.)
  */
 const LOCK_DOWN_NEEDS: readonly PermissionNeed[] = ((): PermissionNeed[] => {
   const byBit = new Map<bigint, PermissionNeed>(
     Object.values(PERM).map((p) => [p.bit, p]),
   );
   const names: PermissionName[] = [
-    ...new Set([...NOTICES_BOT.allow, ...NOTICES_EVERYONE.allow]),
+    ...new Set([
+      ...NOTICES_BOT.allow,
+      ...NOTICES_BOT.deny,
+      ...NOTICES_EVERYONE.allow,
+      ...NOTICES_EVERYONE.deny,
+    ]),
   ];
   const granted = names.map((n) => {
     const bit = PermissionFlagsBits[n];
     return (
-      byBit.get(bit) ?? { bit, name: n.replace(/([a-z])([A-Z])/g, "$1 $2") }
+      byBit.get(bit) ?? {
+        bit,
+        name: n.replace(/([a-z])([A-Z])/g, "$1 $2").replace(" In ", " in "),
+      }
     );
   });
   return [PERM.manageRoles, ...granted.filter((n) => n !== PERM.manageRoles)];
@@ -337,8 +352,9 @@ function managedChannelRequirements(o: {
       id: `${o.id}-lock`,
       feature: `Making the ${name} channel read-only`,
       needs: LOCK_DOWN_NEEDS,
-      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). Discord only lets it grant permissions it holds in that channel, so it needs all of these there. It still works if you locked the channel by hand.`,
-      fix: `Give the bot's role these permissions, and make sure the ${name} channel does not deny them, or lock the channel yourself.`,
+      overwriteGrant: true,
+      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). Discord lets it allow or deny only permissions it holds server-wide or in the category, unless it has a Manage Roles override on the channel. It still works if you locked the channel by hand.`,
+      fix: `Give the bot's role Manage Roles in the ${name} channel, and either give the bot's role the other listed permissions server-wide (or on the category), or give the bot a Manage Roles permission override on the channel. Or lock the channel yourself.`,
     },
     {
       ...base,
@@ -611,6 +627,40 @@ export const ROLE_HIERARCHY_REQUIREMENTS: readonly RoleHierarchyRequirement[] =
       fix: ROLE_HIERARCHY_FIX,
     },
   ];
+
+/**
+ * What the bot holds, for an overwrite grant (`overwriteGrant`): Discord lets a
+ * bot with Manage Roles in the channel allow or deny only bits it holds in the
+ * guild or in the channel's parent category, unless the bot has a Manage Roles
+ * overwrite in that channel itself (the exemption). Both the allowed and the
+ * denied bits count. Manage Roles (the first need) must be held in the channel.
+ * Not verified against a live Discord server; see the PR for #1254.
+ */
+export interface OverwriteGrantHolder {
+  /** The bot's effective permissions in the target channel. */
+  inChannel: (bit: bigint) => boolean;
+  /** Held server-wide (the bot's guild permissions). */
+  inGuild: (bit: bigint) => boolean;
+  /** Held in the channel's parent category; false when there is none. */
+  inParent: (bit: bigint) => boolean;
+  /** The bot (or one of its roles) has a Manage Roles overwrite in the channel. */
+  exempt: boolean;
+}
+
+export function missingOverwriteGrant(
+  needs: readonly PermissionNeed[],
+  has: OverwriteGrantHolder,
+): string[] {
+  const [manageRoles, ...grants] = needs;
+  if (!has.inChannel(manageRoles.bit)) {
+    // Without Manage Roles nothing can be edited, so name only that.
+    return [manageRoles.name];
+  }
+  if (has.exempt) return [];
+  return grants
+    .filter((n) => !has.inGuild(n.bit) && !has.inParent(n.bit))
+    .map((n) => n.name);
+}
 
 /**
  * The names of the needs the holder lacks. With `anyOf`, either all of the
