@@ -8,12 +8,17 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { JSDOM } from "jsdom";
 
 const mockAggregate = jest.fn<(pipeline: unknown[]) => Promise<unknown[]>>();
+const mockFind = jest.fn<(q: unknown) => Promise<unknown[]>>();
 const mockDistinct =
   jest.fn<(field: string, q: unknown) => Promise<unknown[]>>();
 jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
   REACTION_ROLE_STYLES: ["reaction", "button", "select"],
   REACTION_ROLE_MODES: ["toggle", "sticky", "unique"],
-  ReactionRoleConfig: { aggregate: mockAggregate, distinct: mockDistinct },
+  ReactionRoleConfig: {
+    aggregate: mockAggregate,
+    distinct: mockDistinct,
+    find: mockFind,
+  },
 }));
 
 const { renderReactionRoleMessageSelect, REACTION_ROLE_MESSAGE_NONE_LABEL } =
@@ -144,6 +149,25 @@ describe("renderReactionRoleMessageSelect", () => {
     expect(doc(html).querySelector("a")).toBeNull();
   });
 
+  it("round-trips a stored id with surrounding spaces unchanged", () => {
+    const padded = ` ${A} `;
+    for (const messages of [
+      {
+        options: [{ messageId: A, label: "# roles · 🎮 Gamer" }],
+        truncated: false,
+      },
+      { options: [], truncated: false },
+      null,
+    ]) {
+      const html = renderReactionRoleMessageSelect(NAME, padded, { messages });
+      const sel = optionsOf(html).filter((o) => o.selected);
+      expect(sel).toHaveLength(1);
+      // What the browser would post for the untouched select.
+      expect(sel[0].value).toBe(padded);
+      expect(selectOf(html).value).toBe(padded);
+    }
+  });
+
   it("says that the list is cut when it is", () => {
     const html = renderReactionRoleMessageSelect(NAME, "", {
       messages: { ...messages, truncated: true },
@@ -271,6 +295,7 @@ describe("loading from the stored mappings", () => {
   beforeEach(() => {
     mockAggregate.mockReset();
     mockDistinct.mockReset();
+    mockFind.mockReset();
   });
 
   it("builds the set from this guild's active messages only", async () => {
@@ -307,6 +332,41 @@ describe("loading from the stored mappings", () => {
     expect(pipeline.at(-1)).toEqual({
       $limit: REACTION_ROLE_MESSAGE_LIST_CAP + 1,
     });
+  });
+
+  it("takes the picker channel from any mapping, an archived sibling included, when no active one records it", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: A, roles: [{ emoji: "🎮", roleName: "G" }] },
+      { _id: B, messageChannelId: "c1", roles: [] },
+    ]);
+    mockFind.mockResolvedValue([{ messageId: A, messageChannelId: "c1" }]);
+    const r = await loadReactionRoleMessageOptions("guild-1", {
+      ...LOOKUP,
+      configuredChannelId: "other",
+    });
+    expect(r?.options[0].label).toBe("# roles · 🎮 G");
+    // One batched, guild-scoped query for the messages that lack a channel,
+    // with no isArchived filter (the service's pickerChannelForMessage rule).
+    expect(mockFind).toHaveBeenCalledTimes(1);
+    expect(mockFind).toHaveBeenCalledWith({
+      guildId: "guild-1",
+      messageId: { $in: [A] },
+      messageChannelId: { $exists: true, $ne: "" },
+    });
+    const group = (
+      mockAggregate.mock.calls[0][0] as Array<Record<string, any>>
+    ).find((st) => st.$group)?.$group;
+    expect(group.messageChannelId).toEqual({ $max: "$messageChannelId" });
+  });
+
+  it("falls back to the configured channel when no mapping knows one, or the sibling lookup fails", async () => {
+    mockAggregate.mockResolvedValue([{ _id: A, roles: [] }]);
+    mockFind.mockRejectedValue(new Error("down"));
+    const r = await loadReactionRoleMessageOptions("guild-1", {
+      ...LOOKUP,
+      configuredChannelId: "c1",
+    });
+    expect(r?.options[0].label).toBe("# roles · no roles");
   });
 
   it("returns null, not an empty list, when the read fails", async () => {

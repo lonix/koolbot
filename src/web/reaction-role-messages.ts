@@ -133,6 +133,40 @@ export function buildReactionRoleMessageOptions(
 }
 
 /**
+ * Fill in the channel of a message none of whose active mappings records one,
+ * from a sibling mapping of the same message in this guild, archived ones
+ * included (role deletion archives a mapping but leaves the shared picker).
+ * The same rule as `ReactionRoleService.pickerChannelForMessage`, batched into
+ * one query. A failed lookup leaves the channel unknown: the label then falls
+ * back to the configured channel, as it did before.
+ */
+async function fillSiblingChannels(
+  guildId: string,
+  groups: ReactionRoleMessageGroup[],
+): Promise<void> {
+  const missing = groups.filter((g) => !g.messageChannelId);
+  if (missing.length === 0) return;
+  try {
+    const siblings = (await ReactionRoleConfig.find({
+      guildId,
+      messageId: { $in: missing.map((g) => g.messageId) },
+      messageChannelId: { $exists: true, $ne: "" },
+    })) as Array<{ messageId: string; messageChannelId?: string | null }>;
+    const byMessage = new Map<string, string>();
+    for (const row of siblings ?? []) {
+      if (row.messageChannelId && !byMessage.has(row.messageId)) {
+        byMessage.set(row.messageId, row.messageChannelId);
+      }
+    }
+    for (const g of missing) {
+      g.messageChannelId = byMessage.get(g.messageId) ?? null;
+    }
+  } catch {
+    // Keep the configured-channel fallback.
+  }
+}
+
+/**
  * The guild's reaction-role messages, newest first, for the picker. `null` when
  * the read fails: the page then renders without a list and keeps the stored
  * value, instead of claiming that there are none.
@@ -148,7 +182,10 @@ export async function loadReactionRoleMessageOptions(
       {
         $group: {
           _id: "$messageId",
-          messageChannelId: { $first: "$messageChannelId" },
+          // Any recorded channel: a legacy message can have an older active
+          // mapping without one and a newer sibling that has it. `$max` skips
+          // missing values and ranks "" lowest, so a real id wins.
+          messageChannelId: { $max: "$messageChannelId" },
           roles: { $push: { emoji: "$emoji", roleName: "$roleName" } },
           newest: { $max: "$createdAt" },
         },
@@ -161,14 +198,13 @@ export async function loadReactionRoleMessageOptions(
       messageChannelId?: string | null;
       roles: Array<{ emoji: string; roleName: string }>;
     }>;
-    return buildReactionRoleMessageOptions(
-      rows.map((r) => ({
-        messageId: r._id,
-        messageChannelId: r.messageChannelId ?? null,
-        roles: r.roles ?? [],
-      })),
-      lookup,
-    );
+    const groups: ReactionRoleMessageGroup[] = rows.map((r) => ({
+      messageId: r._id,
+      messageChannelId: r.messageChannelId || null,
+      roles: r.roles ?? [],
+    }));
+    await fillSiblingChannels(guildId, groups);
+    return buildReactionRoleMessageOptions(groups, lookup);
   } catch {
     return null;
   }

@@ -2842,6 +2842,15 @@ describe("welcome roles message: only the bot's reaction-role messages (#1433)",
       expect(written().get("welcome.message")).toBe("Hi {user} {roles}");
     });
 
+    it("keeps a stored id with surrounding spaces unchanged, even when its message is no longer active or the list cannot be read", async () => {
+      const padded = ` ${STRAY} `;
+      stored({ [KEY]: padded });
+      distinctSpy.mockRejectedValue(new Error("db down"));
+      const flash = await saveSection(padded);
+      expect(flash.type).toBe("ok");
+      expect(written().get(KEY)).toBe(padded);
+    });
+
     it("exempts only the stored value: another stray id is still refused", async () => {
       stored({ [KEY]: STRAY });
       const flash = await saveSection("300000000000000003");

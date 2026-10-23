@@ -594,6 +594,76 @@ describe("welcome step: the roles message is picked, never typed (#1433)", () =>
     expect(staged()[KEY]).toBe("");
   });
 
+  describe("apply rechecks the staged choice", () => {
+    const applied = {
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    };
+
+    function stage(id: string): void {
+      mockGetSession.mockReturnValue(
+        wizardState(["welcome"], { "welcome.enabled": true, [KEY]: id }),
+      );
+      mockApplyConfiguration.mockResolvedValue(applied);
+    }
+
+    it("applies a staged message that is still active", async () => {
+      stage(MINE);
+      await harness.post("/wizard/apply");
+      expect(mockApplyConfiguration).toHaveBeenCalled();
+    });
+
+    it("applies nothing when the message was archived after the step was saved", async () => {
+      stage(MINE);
+      model.distinct?.mockResolvedValue([]);
+      const res = await harness.post("/wizard/apply");
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("err");
+      expect(flash.msg).toContain("Nothing was applied");
+      expect(flash.msg).toContain(KEY);
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+      expect(mockAddConfiguration).not.toHaveBeenCalled();
+      expect(mockEndSession).not.toHaveBeenCalled();
+      expect(lastAudit()).toMatchObject({
+        action: "wizard.apply",
+        result: "failure",
+      });
+    });
+
+    it("still applies an unchanged stored value that is no longer active", async () => {
+      stage(STRAY);
+      mockConfigGetStringStrict.mockResolvedValueOnce(STRAY);
+      model.distinct?.mockResolvedValue([]);
+      await harness.post("/wizard/apply");
+      expect(mockApplyConfiguration).toHaveBeenCalled();
+    });
+
+    it("applies nothing when the stored value cannot be read", async () => {
+      stage(MINE);
+      mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+      const res = await harness.post("/wizard/apply");
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("applies nothing when the list of messages cannot be read", async () => {
+      stage(MINE);
+      model.distinct?.mockRejectedValue(new Error("db down"));
+      const res = await harness.post("/wizard/apply");
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("applies an empty choice without asking for the list", async () => {
+      stage("");
+      await harness.post("/wizard/apply");
+      expect(mockApplyConfiguration).toHaveBeenCalled();
+      expect(model.distinct).not.toHaveBeenCalled();
+    });
+  });
+
   it("no longer asks for the leaderboard tier string, and points at the tier editor", async () => {
     expect(WIZARD_FEATURE_SETTINGS.leaderboard_roles).not.toContain(
       "leaderboard_roles.tiers",

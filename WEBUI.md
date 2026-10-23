@@ -1250,7 +1250,10 @@ YAML import alike. The set is loaded only when it is needed (an empty choice or 
 never capped, and a failed load refuses the save. The unchanged stored value is exempt, so one old id never blocks the
 rest of its section, and that stored value comes from `ConfigService.getStringStrict`: a failed read refuses the save
 instead of falling back to the default, and the same read is both the baseline and the value the post is compared with
-(in the wizard it is the database's value, never one staged earlier in the run). An adoption plan passes no set and is
+(in the wizard it is the database's value, never one staged earlier in the run). The wizard's apply checks each staged
+choice again against the stored value and the active set before any write, so a message archived while the wizard was
+open applies nothing. A stored id with surrounding spaces round-trips unchanged (the select posts it as stored). A
+message's channel in the label is any recorded picker channel of its mappings, archived siblings included. An adoption plan passes no set and is
 refused for a non-empty id.
 
 **Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the

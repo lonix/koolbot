@@ -793,6 +793,37 @@ export function createWizardRouter(client: Client): Router {
         }
       }
 
+      // A reaction-role message choice (#1433) is checked when its step is
+      // saved, but the message's mappings can be archived while the wizard
+      // stays open, and apply writes the staged id as it is. Check again
+      // against the stored baseline and the guild's active messages, and
+      // apply nothing if a read fails or a choice is no longer valid.
+      for (const key of Object.keys(state.configuration)) {
+        if (!isReactionRoleMessageKey(key)) continue;
+        const baseline = await readReactionRoleMessageBaseline(key);
+        const checked = baseline.ok
+          ? await coerceConfigValueForGuild(
+              key,
+              state.configuration[key],
+              baseline.value,
+              session.guildId,
+            )
+          : baseline;
+        if (!checked.ok) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: { blockedKey: key },
+            result: "failure",
+            errorMessage: `${key}: ${checked.reason}`,
+          });
+          flashRedirect(res, "/admin/wizard", {
+            type: "err",
+            text: `Nothing was applied. ${key}: ${checked.reason}. Go back to that step and choose again.`,
+          });
+          return;
+        }
+      }
+
       // The wizard treats each run as a complete declaration of which
       // features should be enabled. Anything the admin didn't tick on the
       // landing page gets its `.enabled` flag explicitly set to false here,

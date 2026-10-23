@@ -282,21 +282,24 @@ export function renderReactionRoleMessageSelect(
   current: string,
   o: ReactionRoleMessageSelectOptions,
 ): string {
-  const stored = current.trim();
+  // The value is matched and posted exactly as stored: a legacy id with
+  // surrounding spaces (the welcome service trims it) must round-trip
+  // unchanged, because the server's exemption compares the exact string.
+  const trimmed = current.trim();
   const list = o.messages?.options ?? [];
-  const known = stored === "" || list.some((m) => m.messageId === stored);
+  const listed = list.find((m) => m.messageId === current);
   const option = (value: string, label: string): string =>
-    `<option value="${escapeHtml(value)}"${value === stored ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  const stray = (): string => {
+    const known = list.find((m) => m.messageId === trimmed);
+    if (known) return known.label;
+    if (trimmed === "")
+      return `${REACTION_ROLE_MESSAGE_NONE_LABEL} (stored as blank text)`;
+    return `${trimmed} (${o.messages ? "not found" : "could not check"})`;
+  };
   const options = [
     option("", REACTION_ROLE_MESSAGE_NONE_LABEL),
-    ...(known
-      ? []
-      : [
-          option(
-            stored,
-            `${stored} (${o.messages ? "not found" : "could not check"})`,
-          ),
-        ]),
+    ...(current === "" || listed ? [] : [option(current, stray())]),
     ...list.map((m) => option(m.messageId, m.label)),
   ].join("");
   let note = "";
