@@ -383,7 +383,17 @@ function isPostingChannel(
   want: NonNullable<FeatureRequirement["targetType"]>,
 ): boolean {
   if (type === ChannelType.GuildText) return true;
-  return want === "text" && type === ChannelType.GuildAnnouncement;
+  // The services accept any `isTextBased()` channel: announcement channels, the
+  // text chat of a voice or stage channel, and threads.
+  return (
+    want === "text" &&
+    (type === ChannelType.GuildAnnouncement ||
+      type === ChannelType.GuildVoice ||
+      type === ChannelType.GuildStageVoice ||
+      type === ChannelType.PublicThread ||
+      type === ChannelType.PrivateThread ||
+      type === ChannelType.AnnouncementThread)
+  );
 }
 
 async function defaultRoleGroupCount(guildId: string): Promise<number> {

@@ -1008,6 +1008,7 @@ describe("channel-posting features (#1254)", () => {
     P.ManageMessages,
     P.PinMessages,
     P.ManageRoles,
+    P.ManageChannels,
   );
   const text = (
     id: string,
@@ -1046,6 +1047,7 @@ describe("channel-posting features (#1254)", () => {
     settings = {
       "quotes.enabled": true,
       "quotes.channel_id": "q",
+      "moderation.enabled": true,
       "core.moderation.enabled": true,
       "core.moderation.channel_id": "q",
     };
@@ -1061,6 +1063,7 @@ describe("channel-posting features (#1254)", () => {
     });
     expect(ids(report.problems[0].features)).toEqual([
       "log-moderation",
+      "quotes-lock",
       "quotes-post",
     ]);
   });
@@ -1132,31 +1135,132 @@ describe("channel-posting features (#1254)", () => {
     expect(report.problems[0]).toMatchObject({ permission: "Pin Messages" });
   });
 
-  it("does not ask the notices channel for vote reactions (the code adds none)", async () => {
-    settings = { "notices.enabled": true, "notices.channel_id": "n" };
-    const report = await run({
-      channels: [text("n", without(TEXT, P.AddReactions))],
-    });
-    expect(report.problems).toEqual([]);
+  it("has no vote-reaction entry for notices (the code adds none), only for quotes", () => {
+    const ids = registry.FEATURE_REQUIREMENTS.map((r) => r.id);
+    expect(ids).toContain("quotes-votes");
+    expect(ids).not.toContain("notices-votes");
   });
 
-  it("reports a configured channel that is not a text channel as could not check, never ok", async () => {
+  it("reports a category or forum as the posting channel as could not check, never ok", async () => {
     settings = {
       "core.errors.enabled": true,
       "core.errors.channel_id": "cat",
+      "moderation.enabled": true,
       "moderation.raid.enabled": true,
-      "moderation.raid.alert_channel_id": "v",
+      "moderation.raid.alert_channel_id": "f",
     };
     const report = await run({
       channels: [
         text("cat", TEXT, ChannelType.GuildCategory),
-        text("v", TEXT, ChannelType.GuildVoice),
+        text("f", TEXT, ChannelType.GuildForum),
       ],
     });
     expect(report.problems).toEqual([]);
     expect(report.okFeatures).toEqual([]);
     expect(unknownIds(report.unknown)).toEqual(["log-errors", "raid-alerts"]);
     expect(report.unknown[0].note).toMatch(/not a text channel/);
+  });
+
+  it("checks the text chat of a voice channel and a thread where the service posts to any text-based channel", async () => {
+    settings = {
+      "core.errors.enabled": true,
+      "core.errors.channel_id": "v",
+      "moderation.enabled": true,
+      "moderation.raid.enabled": true,
+      "moderation.raid.alert_channel_id": "t",
+      "voicetracking.enabled": true,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "v",
+    };
+    const report = await run({
+      channels: [
+        text("v", bits(P.ViewChannel), ChannelType.GuildVoice),
+        text("t", TEXT, ChannelType.PublicThread),
+      ],
+    });
+    // The voice channel is really checked (Send Messages is missing there)...
+    expect(report.problems.map((p) => p.permission).sort()).toEqual([
+      "Embed Links",
+      "Send Messages",
+    ]);
+    // ...the thread is fine, and the announcer still refuses a voice channel.
+    expect(ids(report.okFeatures)).toEqual(["raid-alerts"]);
+    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-announcements"]);
+  });
+
+  it("treats a log category as off while the feature that produces it is off", async () => {
+    const channels = [text("l", bits(P.ViewChannel))];
+    const parents: Array<[string, string, string[]]> = [
+      ["updates", "log-updates", ["core.updatecheck.enabled"]],
+      ["moderation", "log-moderation", ["moderation.enabled"]],
+      [
+        "moderation_review",
+        "log-moderation-review",
+        ["moderation.enabled", "moderation.cases.enabled"],
+      ],
+      ["cleanup", "log-cleanup", ["voicetracking.cleanup.enabled"]],
+    ];
+    for (const [type, id, keys] of parents) {
+      // The log switch and channel are set; each parent in turn is off.
+      for (const off of keys) {
+        settings = {
+          [`core.${type}.enabled`]: true,
+          [`core.${type}.channel_id`]: "l",
+          ...Object.fromEntries(keys.map((k) => [k, k !== off])),
+        };
+        const report = await run({ channels });
+        expect(report.problems).toEqual([]);
+        expect(unknownIds(report.quiet)).toContain(id);
+      }
+      // All parents on: the missing permissions are real problems.
+      settings = {
+        [`core.${type}.enabled`]: true,
+        [`core.${type}.channel_id`]: "l",
+        ...Object.fromEntries(keys.map((k) => [k, true])),
+      };
+      const report = await run({ channels });
+      expect(report.problems.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("treats the update note as on by default, as the update check is", async () => {
+    settings = { "core.updates.enabled": true, "core.updates.channel_id": "l" };
+    const report = await run({ channels: [text("l", bits(P.ViewChannel))] });
+    expect(report.problems.length).toBeGreaterThan(0);
+  });
+
+  it("needs the moderation log on for anti-raid alerts", async () => {
+    const channels = [text("r", bits(P.ViewChannel))];
+    settings = {
+      "moderation.raid.enabled": true,
+      "moderation.raid.alert_channel_id": "r",
+      "moderation.enabled": false,
+    };
+    let report = await run({ channels });
+    expect(report.problems).toEqual([]);
+    expect(unknownIds(report.quiet)).toEqual(["raid-alerts"]);
+    settings["moderation.enabled"] = true;
+    report = await run({ channels });
+    expect(report.problems.map((p) => p.permission)).toEqual(["Send Messages"]);
+  });
+
+  it("also needs what the lock-down grants: Manage Roles alone does not cover it", async () => {
+    settings = { "notices.enabled": true, "notices.channel_id": "n" };
+    // Manage Roles held, but not Add Reactions or Manage Channels, which the
+    // startup overwrites grant.
+    const report = await run({
+      channels: [text("n", without(TEXT, P.AddReactions, P.ManageChannels))],
+    });
+    const lock = report.checks.find((c) => c.feature.id === "notices-lock");
+    expect(lock).toMatchObject({ outcome: "missing" });
+    expect([...(lock?.missing ?? [])].sort()).toEqual([
+      "Add Reactions",
+      "Manage Channels",
+    ]);
+    expect(report.problems.map((p) => p.permission).sort()).toEqual([
+      "Add Reactions",
+      "Manage Channels",
+    ]);
   });
 
   it("accepts an announcement channel for the log, but not for the weekly announcer, which needs a plain text channel", async () => {

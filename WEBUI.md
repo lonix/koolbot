@@ -1403,9 +1403,13 @@ What each needs is what the code calls there: View Channel, Send Messages and Em
 to post (the weekly announcement is plain text, so no Embed Links), Read Message History to
 find its header and the messages it edits or deletes, Add Reactions for the quote votes,
 Manage Messages to delete what members post in the quotes and notices channels, Pin
-Messages for the header while it is pinned, and Manage Roles _in the channel_ for the
-lock-down the bot applies to those two channels at startup. A configured channel that is
-not a text channel (or not found) is shown as _Not checked_. The weekly digest is sent as
+Messages for the header while it is pinned, and for the lock-down the bot applies to those
+two channels at startup, Manage Roles _in the channel_ plus every permission that lock-down
+grants (Discord lets the bot grant only what it holds there). A log category counts as in use
+only while the feature that writes to it is on (voice cleanup, moderation, moderation cases,
+the update check), and anti-raid alerts only while the moderation log is on. A configured channel
+that is a category or forum (or not found) is shown as _Not checked_; the text chat of a voice
+channel and threads are checked, except for the weekly announcement, which needs a plain text channel. The weekly digest is sent as
 direct messages and needs no channel. Birthdays, celebrations, welcome messages, looking
 for group, event and leaderboard announcements, the reaction-role picker and the rules
 message post too but are not checked yet (#1254). When one of these features cannot post,

@@ -33,6 +33,11 @@
 import { PermissionFlagsBits } from "discord.js";
 import { LEADS_REQUIRED_BOT_PERMISSIONS } from "./event-leads-access.js";
 import type { ConfigSchema } from "./config-schema.js";
+import {
+  NOTICES_BOT,
+  NOTICES_EVERYONE,
+  type PermissionName,
+} from "../utils/channel-permissions.js";
 
 export interface PermissionNeed {
   bit: bigint;
@@ -64,9 +69,10 @@ export interface FeatureRequirement {
   targetKey?: keyof ConfigSchema;
   /**
    * The kind of channel the service accepts there, for a channel scope that
-   * posts. `text`: a text or announcement channel; `guild-text`: a plain text
-   * channel only (the weekly announcer refuses an announcement channel). A
-   * channel of another kind is reported as "could not check", never "ok".
+   * posts. `text`: anything with a text chat that `send` works on (text,
+   * announcement, voice and stage channels, threads), as `isTextBased()`;
+   * `guild-text`: a plain text channel only (the weekly announcer refuses the
+   * rest). A category or forum is reported as "could not check", never "ok".
    */
   targetType?: "text" | "guild-text";
   /**
@@ -187,21 +193,46 @@ const ROLE_HIERARCHY_FIX =
  * this equal to `DISCORD_LOG_TYPES`; it is a literal here because the logger
  * imports the config service, which this table must not.
  */
-export const LOG_CHANNEL_TYPES = [
+export const LOG_CHANNEL_TYPES: readonly {
+  type: string;
+  label: string;
+  /**
+   * The feature that produces these posts, when it has a switch of its own: the
+   * category only posts while it is on (read from each producer's code).
+   */
+  alsoKeys?: readonly (keyof ConfigSchema)[];
+}[] = [
   { type: "startup", label: "Startup" },
   { type: "errors", label: "Errors" },
-  { type: "cleanup", label: "Cleanup" },
+  {
+    type: "cleanup",
+    label: "Cleanup",
+    // Only the voice-session cleanup job reports to it.
+    alsoKeys: ["voicetracking.cleanup.enabled"],
+  },
   { type: "config", label: "Config changes" },
   { type: "cron", label: "Scheduled jobs" },
-  { type: "moderation", label: "Moderation" },
-  { type: "moderation_review", label: "Moderation case review" },
-  { type: "updates", label: "Update available" },
+  {
+    type: "moderation",
+    label: "Moderation",
+    alsoKeys: ["moderation.enabled"],
+  },
+  {
+    type: "moderation_review",
+    label: "Moderation case review",
+    alsoKeys: ["moderation.enabled", "moderation.cases.enabled"],
+  },
+  {
+    type: "updates",
+    label: "Update available",
+    alsoKeys: ["core.updatecheck.enabled"],
+  },
   { type: "role_groups", label: "Role groups" },
-] as const;
+];
 
 /** `DiscordLogger.logToChannel` sends one embed with mentions suppressed: View Channel, Send Messages, Embed Links. */
 const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
-  ({ type, label }) => ({
+  ({ type, label, alsoKeys }) => ({
     id: `log-${type.replace(/_/g, "-")}`,
     area: "Discord logging",
     feature: `${label} log channel`,
@@ -209,6 +240,7 @@ const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
     targetType: "text",
     needs: [PERM.viewChannel, PERM.sendMessages, PERM.embedLinks],
     enabledKey: `core.${type}.enabled` as keyof ConfigSchema,
+    ...(alsoKeys ? { alsoKeys } : {}),
     targetKey: `core.${type}.channel_id` as keyof ConfigSchema,
     effect: `${label} log messages are not posted. The send fails with a line in the bot's log only; nothing appears in Discord.`,
     fix: "Give the bot's role View Channel, Send Messages and Embed Links, and make sure the log channel does not deny them.",
@@ -216,12 +248,37 @@ const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
 );
 
 /**
+ * What the quotes and notices lock-down needs in the channel. The managers
+ * apply `NOTICES_EVERYONE` to @everyone and `NOTICES_BOT` to the bot with
+ * `permissionOverwrites.edit`, and Discord lets a bot grant only permissions it
+ * holds itself in that channel, so it needs Manage Roles and every permission
+ * those two sets allow. Derived from the same constants the managers use, so the
+ * two cannot drift. (The managers call nothing with Manage Channels apart from
+ * this grant; see the audit in #1254.)
+ */
+const LOCK_DOWN_NEEDS: readonly PermissionNeed[] = ((): PermissionNeed[] => {
+  const byBit = new Map<bigint, PermissionNeed>(
+    Object.values(PERM).map((p) => [p.bit, p]),
+  );
+  const names: PermissionName[] = [
+    ...new Set([...NOTICES_BOT.allow, ...NOTICES_EVERYONE.allow]),
+  ];
+  const granted = names.map((n) => {
+    const bit = PermissionFlagsBits[n];
+    return (
+      byBit.get(bit) ?? { bit, name: n.replace(/([a-z])([A-Z])/g, "$1 $2") }
+    );
+  });
+  return [PERM.manageRoles, ...granted.filter((n) => n !== PERM.manageRoles)];
+})();
+
+/**
  * A read-only channel the bot keeps by itself (quotes, notices): what its
  * manager actually calls there. Reading history is how it finds its header and
  * the messages it edits or deletes; Manage Messages only for deleting what
  * others posted (the cleanup job runs every few minutes) and for clearing the
- * channel on a quote sync; Manage Roles in the channel for the lock-down it
- * applies to the channel at startup (`permissionOverwrites.edit`).
+ * channel on a quote sync; `LOCK_DOWN_NEEDS` for the lock-down it applies to the
+ * channel at startup (`permissionOverwrites.edit`).
  */
 function managedChannelRequirements(o: {
   id: string;
@@ -279,9 +336,9 @@ function managedChannelRequirements(o: {
       ...base,
       id: `${o.id}-lock`,
       feature: `Making the ${name} channel read-only`,
-      needs: [PERM.manageRoles],
-      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). It still works if you locked the channel by hand.`,
-      fix: `Give the bot's role Manage Roles, and make sure the ${name} channel does not deny it, or lock the channel yourself.`,
+      needs: LOCK_DOWN_NEEDS,
+      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). Discord only lets it grant permissions it holds in that channel, so it needs all of these there. It still works if you locked the channel by hand.`,
+      fix: `Give the bot's role these permissions, and make sure the ${name} channel does not deny them, or lock the channel yourself.`,
     },
     {
       ...base,
@@ -342,6 +399,8 @@ const postingRequirements: FeatureRequirement[] = [
     targetType: "text",
     needs: [PERM.viewChannel, PERM.sendMessages],
     enabledKey: "moderation.raid.enabled",
+    // Anti-raid stops when the moderation log is off (`getInactiveReason`).
+    alsoKeys: ["moderation.enabled"],
     targetKey: "moderation.raid.alert_channel_id",
     effect:
       "Raid alerts are not posted. A failed send is logged in the bot's log; a channel that is not a text channel is skipped with no message at all.",
