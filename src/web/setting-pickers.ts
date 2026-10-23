@@ -187,8 +187,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "var trig=el('button','kb-picker__trigger');trig.type='button';trig.id=tid;trig.setAttribute('aria-haspopup','listbox');trig.setAttribute('aria-expanded','false');" +
   "trig.setAttribute('aria-controls',lid);" +
   "if(ids.length){ids.push(tid);trig.setAttribute('aria-labelledby',ids.join(' '))}else trig.setAttribute('aria-label',name);" +
-  "var d=sel.getAttribute('aria-describedby');if(d)trig.setAttribute('aria-describedby',d);" +
-  "var pop=el('div','kb-picker__pop');pop.hidden=true;" +
+  "var pop=el('div','kb-picker__pop kb-picker__pop--floating');pop.hidden=true;" +
   "var lab=el('label','kb-picker__search'),inp=el('input');inp.type='search';inp.setAttribute('form','none');inp.autocomplete='off';inp.id=tid+'-search';" +
   "inp.setAttribute('role','combobox');inp.setAttribute('aria-autocomplete','list');inp.setAttribute('aria-controls',lid);inp.setAttribute('aria-expanded','true');" +
   "inp.setAttribute('aria-label','Search '+name);inp.placeholder='Search';lab.appendChild(inp);" +
@@ -204,11 +203,19 @@ export const CHANNEL_PICKER_SCRIPT =
   "li.appendChild(mention(it));if(it.cat)li.appendChild(el('span','kb-picker__cat',it.cat));ul.appendChild(li);rows.push(li)}" +
   "pop.appendChild(lab);pop.appendChild(ul);pop.appendChild(st);pop.appendChild(hint);" +
   "sel.classList.add('kb-visually-hidden');sel.tabIndex=-1;sel.setAttribute('aria-hidden','true');" +
-  "sel.addEventListener('focus',function(){trig.focus()});" +
+  // The save handlers mark a rejected field on the select (`aria-invalid`,
+  // `aria-describedby`) without firing `change`, and then focus it. Mirror both
+  // onto the trigger whenever they change, and again right before focus is
+  // handed over, so the trigger never lacks the rejection or keeps a removed note.
+  "function attrs(){var d=sel.getAttribute('aria-describedby');" +
+  "if(d)trig.setAttribute('aria-describedby',d);else trig.removeAttribute('aria-describedby');" +
+  "if(sel.getAttribute('aria-invalid')==='true')trig.setAttribute('aria-invalid','true');else trig.removeAttribute('aria-invalid');" +
+  "trig.disabled=sel.disabled}" +
+  "sel.addEventListener('focus',function(){attrs();trig.focus()});" +
+  "if(window.MutationObserver)new MutationObserver(attrs).observe(sel,{attributes:true,attributeFilter:['aria-invalid','aria-describedby','disabled']});" +
   "box.classList.add('kb-picker--enhanced');box.appendChild(trig);box.appendChild(pop);" +
   "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
-  "if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));trig.disabled=sel.disabled;" +
-  "if(sel.getAttribute('aria-invalid')==='true')trig.setAttribute('aria-invalid','true');else trig.removeAttribute('aria-invalid');" +
+  "if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
   "for(var k=0;k<rows.length;k++){var on=k===sel.selectedIndex,c=rows[k].querySelector('svg[data-check]');" +
   "rows[k].setAttribute('aria-selected',on?'true':'false');" +
   "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}}" +
@@ -221,8 +228,22 @@ export const CHANNEL_PICKER_SCRIPT =
   "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
   "var on=vis.indexOf(sel.selectedIndex);setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
   "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):''}" +
-  "function close(back){if(!open)return;open=false;pop.hidden=true;trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
-  "function show(){if(open||sel.disabled)return;open=true;pop.hidden=false;trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
+  // The popover is moved to the end of <body> while open and positioned with
+  // `position: fixed` from the trigger's rectangle (custom properties, see
+  // kb.css), because the settings rows and cards scroll (`overflow-x: auto`),
+  // which also clips vertically and would turn a menu near the bottom into an
+  // inner scroll area. It flips above the trigger when there is no room below,
+  // and follows the trigger on scroll (any ancestor) and resize.
+  "function place(){var r=trig.getBoundingClientRect(),h=pop.offsetHeight,w=pop.offsetWidth,y=r.bottom+4;" +
+  "if(y+h>window.innerHeight&&r.top-4-h>=0)y=r.top-4-h;" +
+  "pop.style.setProperty('--kb-picker-x',Math.max(0,Math.min(r.left,window.innerWidth-w))+'px');" +
+  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px')}" +
+  "function close(back){if(!open)return;open=false;pop.hidden=true;box.appendChild(pop);" +
+  "window.removeEventListener('scroll',place,true);window.removeEventListener('resize',place);" +
+  "trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
+  "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;place();" +
+  "window.addEventListener('scroll',place,true);window.addEventListener('resize',place);" +
+  "trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
   "function choose(k){if(k<0||!items[k])return;if(sel.selectedIndex!==k){sel.selectedIndex=k;" +
   "sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}paint();close(true)}" +
   "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
@@ -235,8 +256,10 @@ export const CHANNEL_PICKER_SCRIPT =
   "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(false)});" +
   "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
   "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
-  "document.addEventListener('click',function(e){if(open&&!box.contains(e.target))close(false)});" +
-  "box.addEventListener('focusout',function(e){if(open&&e.relatedTarget&&!box.contains(e.relatedTarget))close(false)});" +
+  "function inside(t){return box.contains(t)||pop.contains(t)}" +
+  "document.addEventListener('click',function(e){if(open&&!inside(e.target))close(false)});" +
+  "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
+  "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
   "sel.addEventListener('change',paint);" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',paint)});" +
   "paint()}" +

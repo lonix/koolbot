@@ -88,6 +88,31 @@ describe("channel picker accessibility (axe)", () => {
     expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
   });
 
+  it("rejected, then cleared", async () => {
+    mount();
+    const sel = document.getElementById("f") as HTMLElement;
+    const note = document.createElement("p");
+    note.id = "err";
+    note.textContent = "Rejected: pick a channel.";
+    document.querySelector("main")?.appendChild(note);
+    sel.setAttribute("aria-describedby", "err");
+    sel.setAttribute("aria-invalid", "true");
+    await Promise.resolve();
+    expect(trigger().getAttribute("aria-invalid")).toBe("true");
+    expect(trigger().getAttribute("aria-describedby")).toBe("err");
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+    trigger().click();
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+    // A later save accepts the value: the note is removed with the marks.
+    note.remove();
+    sel.removeAttribute("aria-invalid");
+    sel.removeAttribute("aria-describedby");
+    await Promise.resolve();
+    expect(trigger().hasAttribute("aria-invalid")).toBe(false);
+    expect(trigger().hasAttribute("aria-describedby")).toBe(false);
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
   it("disabled", async () => {
     mount(true);
     expect(trigger().disabled).toBe(true);
