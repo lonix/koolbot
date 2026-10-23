@@ -871,8 +871,10 @@ channel.
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
   KoolBot has no Going / Maybe / Can't buttons and sends no start-time ping. The native event is an _external_ event
   whose location is `events.native.location` until the event's main voice room is created (`events.create_lead_minutes` before the start). Then, with
-  `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to it. An event that has group rooms
-  (Groups on and at least one group) is not linked and keeps the text, because its main room can empty while the session goes on in the group rooms.
+  `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to it. With event groups the
+  MAIN room is linked too, never a group room. **Risk, untested:** for a grouped event everyone moves to the team rooms, so the main room can empty while the
+  teams are still playing, and Discord may then mark the linked card finished early. KoolBot cannot undo that (it ignores a Completed native event).
+  `events.native.link_room` is the rollback switch.
   The bot starts a linked event (status Active) when its start time is reached, retrying each scan; this also holds for an existing link after the
   switch is turned off. Discord may complete a linked event on its own when its room empties for a while; the card then stays finished, and KoolBot
   ignores a Completed native event as it does for any finished one. If the room never gets created, or Discord refuses the switch, the text stays (a

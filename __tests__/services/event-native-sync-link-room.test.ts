@@ -222,11 +222,9 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
     expect(scheduledEvents.edit).not.toHaveBeenCalled();
   });
 
-  // OWNER DECISION NEEDED (#1421): an event with group rooms is not linked
-  // (LINK_ROOM_WITH_GROUPS = false) because the main room can empty while the
-  // session goes on in the group rooms.
-  it("Groups with group rooms: stays external with the text, no voice PATCH (empty main room, occupied group rooms)", async () => {
-    const { guild, rest, scheduledEvents } = makeGuild([makeNative()]);
+  // Owner decision (#1421): events with group rooms link the MAIN room too.
+  it("Groups with group rooms: links the MAIN room, never a group room", async () => {
+    const { guild, rest } = makeGuild([makeNative()]);
     await makeSync().syncEvent(
       makeEvent({
         channelId: ROOM,
@@ -238,11 +236,14 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
       }),
       guild,
     );
-    expect(rest.patch).not.toHaveBeenCalled();
-    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+    expect(rest.patch).toHaveBeenCalledTimes(1);
+    const init = (rest.patch.mock.calls[0] as unknown[])[1] as {
+      body: { channel_id: string };
+    };
+    expect(init.body.channel_id).toBe(ROOM);
   });
 
-  it("Groups switched on after the link: the link is put back to the text", async () => {
+  it("Groups added after the link: the link to the main room is kept", async () => {
     const { guild, rest, scheduledEvents } = makeGuild([voiceNative(ROOM)]);
     await makeSync().syncEvent(
       makeEvent({
@@ -253,12 +254,19 @@ describe("NativeEventSync link to the voice room (#1421)", () => {
       guild,
     );
     expect(rest.patch).not.toHaveBeenCalled();
-    expect(scheduledEvents.edit).toHaveBeenCalledWith(
-      "n1",
-      expect.objectContaining({
-        entityType: GuildScheduledEventEntityType.External,
+    expect(scheduledEvents.edit).not.toHaveBeenCalled();
+  });
+
+  it("Groups with group rooms but the main room not created yet: nothing is linked", async () => {
+    const { guild, rest } = makeGuild([makeNative()]);
+    await makeSync().syncEvent(
+      makeEvent({
+        groupsEnabled: true,
+        groups: [{ key: "a", channelId: "grp1" }],
       }),
+      guild,
     );
+    expect(rest.patch).not.toHaveBeenCalled();
   });
 
   it("Groups on but no group defined: a plain event, still links", async () => {

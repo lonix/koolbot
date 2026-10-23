@@ -210,20 +210,13 @@ type ApiCaller = <T>(
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
-/**
- * OWNER DECISION NEEDED (#1421): may an event with group rooms be linked to its
- * main room? Claimed, unverified: Discord completes a voice-linked event a few
- * minutes after its channel empties, and sending everyone to their group rooms
- * empties the main room while the session goes on. Until that is settled the
- * answer is no: such an event stays external with the location text. Set this
- * to true to revert to "link the main room, also with Groups on".
+/*
+ * Events with group rooms link the MAIN room exactly like plain events (owner
+ * decision, #1421). Unverified risk: Discord may complete a voice-linked event
+ * shortly after its room empties, and with groups everyone moves to the group
+ * rooms while the session goes on. KoolBot cannot undo a Completed native
+ * event (it ignores it), so `events.native.link_room` is the rollback switch.
  */
-const LINK_ROOM_WITH_GROUPS = false;
-
-/** True for an event that has group rooms (Groups on and at least one group). */
-function hasGroupRooms(event: IEvent): boolean {
-  return event.groupsEnabled === true && (event.groups?.length ?? 0) > 0;
-}
 
 export class NativeEventSync {
   private readonly warned = new Set<string>();
@@ -506,11 +499,7 @@ export class NativeEventSync {
     // Link the MAIN room only (#1421): `channelId` is the event's own room;
     // group rooms live in `groups[].channelId` and are never linked. A row
     // with no room yet (or none any more) keeps the text.
-    if (
-      event.channelId &&
-      (LINK_ROOM_WITH_GROUPS || !hasGroupRooms(event)) &&
-      (await this.linkRoomEnabled())
-    ) {
+    if (event.channelId && (await this.linkRoomEnabled())) {
       want.voiceChannelId = event.channelId;
     }
     return want;
