@@ -1001,6 +1001,8 @@ export function adminPages(): A11yPage[] {
         planned: null,
         selectedChannelIds: [],
         sampled: true,
+        nextAfter: "300000000000000009",
+        unchecked: 1,
         approvedAt: null,
       }),
     },

@@ -114,6 +114,9 @@ export function createBotCleanupRouter(client: Client): Router {
       const guild = await fetchGuild(session.guildId);
       let candidates = null;
       let unchecked = 0;
+      let nextAfter: string | null = null;
+      const afterRaw = one(query, "after");
+      const after = SNOWFLAKE.test(afterRaw) ? afterRaw : null;
       let planned: BotCleanupPlan | null = null;
       let error: string | undefined;
       const approvedAt = new Date().toISOString();
@@ -133,9 +136,11 @@ export function createBotCleanupRouter(client: Client): Router {
             const confirmed = await confirmRemovedBots(
               guild,
               findRemovedBotCandidates(planned.scan),
+              { after },
             );
             candidates = confirmed.candidates;
             unchecked = confirmed.unchecked;
+            nextAfter = confirmed.next;
           } else {
             const scan = await ServerScanService.getInstance(client).scanGuild(
               guild,
@@ -144,9 +149,11 @@ export function createBotCleanupRouter(client: Client): Router {
             const confirmed = await confirmRemovedBots(
               guild,
               findRemovedBotCandidates(scan),
+              { after },
             );
             candidates = confirmed.candidates;
             unchecked = confirmed.unchecked;
+            nextAfter = confirmed.next;
           }
         } catch (err) {
           logger.warn("bot cleanup: scan failed", err);
@@ -164,6 +171,7 @@ export function createBotCleanupRouter(client: Client): Router {
           botId,
           candidates,
           unchecked,
+          nextAfter,
           planned,
           selectedChannelIds: planned ? planned.channelIds : selected,
           sampled,

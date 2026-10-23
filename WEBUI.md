@@ -3156,14 +3156,15 @@ out of date, and carries an _unverified entry_ note until the entry records what
 
 **Clean up after a removed bot** (`/admin/adopt/cleanup`, #1179, part of the server-adoption work #1017) is the part that
 comes after you have removed a bot in Discord yourself. KoolBot never removes another bot, and the page never does.
-The **Other bots** tab lists _Removed bots with leftovers_ (the ones the scan itself settles) and links to the page:
-a bot that is no longer in the server but whose catalogue id,
-a channel it mostly wrote to (needs channel ownership hints) or a member-specific permission overwrite still shows up in
-the scan. The scan's member cache is not trusted as proof that an account has left or is still here: a cached bot without an
-integration role, and a bare overwrite for an unknown account (which may be a current member), are only listed on the
-cleanup page after Discord has confirmed, with a forced lookup, that the account is a bot and no longer a member. An account
-that cannot be checked is not listed and is counted in a notice. Discord removes the bot's managed role when it leaves, but
-not those overwrites.
+The **Other bots** tab lists _Removed bots with leftovers_ (the ones the scan itself settles) and links to the page: a bot
+that is no longer in the server but whose catalogue id, a channel it mostly wrote to (needs channel ownership hints) or a
+member-specific permission overwrite still shows up in the scan. The scan's member cache is not trusted as proof that an
+account has left or is still here: a cached bot without an integration role, and a bare overwrite for an unknown account
+(which may be a current member), are only listed on the cleanup page after Discord has confirmed, with a forced lookup,
+that the account is a bot and no longer a member. This lookup does not need the GuildMembers intent. Discord is asked
+about at most 25 accounts per view; **Check the next accounts** continues with the rest. An account that cannot be
+checked is not listed and is counted in a notice. Discord removes the bot's managed role when it leaves, but not those
+overwrites.
 **Review cleanup** lists, per channel, the overwrite that still names the removed bot. Nothing is ticked for you.
 **Preview changes** shows the plan, and **Apply plan** runs it through the adoption engine like any other plan: a
 snapshot is saved first, one `adopt.cleanup.apply` audit entry is written, and the result can be restored from **Adoption

@@ -66,6 +66,8 @@ function guildFor(
     memberFails?: boolean;
     /** Cached as a member (no role), though Discord says it has left. */
     goneButCached?: boolean;
+    /** The bot does not request the GuildMembers intent. */
+    noIntent?: boolean;
   } = {},
 ) {
   h.useWorld(w);
@@ -79,6 +81,7 @@ function guildFor(
     if (rest.memberFails && id === REMOVED) throw new Error("Discord is down");
     return fetchMember(id);
   };
+  if (rest.noIntent) guild.client.options.intents.has = () => false;
   const bots = rest.bots ?? new Set([REMOVED]);
   guild.client.users = {
     fetch: async (id: string) => {
@@ -183,6 +186,83 @@ describe("findRemovedBotCandidates", () => {
     expect(confirmed.unchecked).toBe(0);
   });
 
+  it("walks more than 25 uncertain accounts over consecutive views", async () => {
+    // 30 people who are still here, then a removed bot that sorts after them.
+    const late = "999999999999999999";
+    for (let i = 0; i < 30; i += 1) {
+      const id = `h${String(i).padStart(3, "0")}`;
+      s.world.members.set(id, { bot: false, roleIds: [] });
+      s.world.channels.get(s.chA)!.overwrites.push({
+        id,
+        type: "member",
+        allow: VIEW,
+        deny: "0",
+      });
+    }
+    s.world.channels.get(s.chB)!.overwrites.push({
+      id: late,
+      type: "member",
+      allow: VIEW,
+      deny: "0",
+    });
+    const g = guildFor(s.world, { bots: new Set([REMOVED, late]) });
+    const found = findRemovedBotCandidates(await scanOf(s.world));
+    const seen: string[] = [];
+    let after: string | null = null;
+    let views = 0;
+    do {
+      const page: Awaited<ReturnType<typeof confirmRemovedBots>> =
+        await confirmRemovedBots(g, found, { after });
+      seen.push(...page.candidates.map((c) => c.userId));
+      after = page.next;
+      views += 1;
+    } while (after && views < 10);
+    expect(views).toBe(2);
+    expect(seen).toContain(late);
+    // No view asks about more than the limit.
+    const unsure = found.filter((f) => f.needsCheck).length;
+    expect(unsure).toBeGreaterThan(25);
+  });
+
+  it("finds an uncatalogued removed bot when the GuildMembers intent is off", async () => {
+    const mystery = "888888888888888888";
+    s.world.channels.get(s.chB)!.overwrites.push({
+      id: mystery,
+      type: "member",
+      allow: VIEW,
+      deny: "0",
+    });
+    const g = guildFor(s.world, { noIntent: true, bots: new Set([mystery]) });
+    const scan = await ServerScanService.getInstance(g.client).scanGuild(g, {
+      adminUserId: s.world.adminId,
+    });
+    expect(scan.readiness.membersIntent).toBe(false);
+    const found = findRemovedBotCandidates(scan);
+    expect(found.find((f) => f.userId === mystery)?.needsCheck).toBe(true);
+    const confirmed = await confirmRemovedBots(g, found);
+    expect(confirmed.candidates.some((f) => f.userId === mystery)).toBe(true);
+    // A direct preview reaches the checks and plans the removal.
+    const planned = await planBotCleanup(
+      g,
+      s.world.adminId,
+      mystery,
+      [s.chB],
+      STAMP,
+    );
+    expect(planned.errors).toEqual([]);
+    expect(planned.plan.operations).toHaveLength(1);
+    // A failed read still refuses.
+    const down = await planBotCleanup(
+      guildFor(s.world, { noIntent: true, userFails: true }),
+      s.world.adminId,
+      mystery,
+      [s.chB],
+      STAMP,
+    );
+    expect(down.errors[0]?.code).toBe("bot-check-failed");
+    expect(down.plan.operations).toEqual([]);
+  });
+
   it("never offers an account whose check fails, and counts it", async () => {
     for (const id of ["h2", "h3"]) {
       s.world.channels.get(s.chB)!.overwrites.push({
@@ -203,9 +283,12 @@ describe("findRemovedBotCandidates", () => {
     expect(down.candidates.map((f) => f.userId)).toEqual([REMOVED]);
     expect(down.unchecked).toBe(unsure);
     // Past the limit an account is not listed either.
-    const capped = await confirmRemovedBots(guildFor(s.world), found, 1);
+    const capped = await confirmRemovedBots(guildFor(s.world), found, {
+      limit: 1,
+    });
     expect(capped.candidates.map((f) => f.userId)).toEqual([REMOVED]);
-    expect(capped.unchecked).toBe(unsure - 1);
+    expect(capped.unchecked).toBe(0);
+    expect(capped.next).not.toBeNull();
   });
 });
 

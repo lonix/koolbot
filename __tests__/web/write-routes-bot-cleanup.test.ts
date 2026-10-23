@@ -147,6 +147,7 @@ beforeEach(() => {
   mockConfirm.mockImplementation(async (_g, list) => ({
     candidates: list,
     unchecked: 0,
+    next: null,
   }));
   mockScanGuild.mockResolvedValue({ channels: [] });
   mockStartApply.mockReturnValue({
@@ -199,6 +200,29 @@ describe("GET /adopt/cleanup", () => {
     expect(mockConfirm).toHaveBeenCalled();
     expect(html).not.toContain("Dyno &lt;b&gt;");
     expect(html).toContain("2 account(s)");
+  });
+
+  it("continues after the account the link names, and offers the next batch", async () => {
+    mockConfirm.mockResolvedValueOnce({
+      candidates: [candidate],
+      unchecked: 0,
+      next: "777777777777777777",
+    });
+    await mount();
+    const html = await (
+      await harness.get("/adopt/cleanup?after=555555555555555555")
+    ).text();
+    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({
+      after: "555555555555555555",
+    });
+    expect(html).toContain("after=777777777777777777");
+    expect(html).toContain("Check the next accounts");
+  });
+
+  it("ignores a malformed continuation", async () => {
+    await mount();
+    await harness.get("/adopt/cleanup?after=%3Cx%3E");
+    expect(mockConfirm.mock.calls.at(-1)![2]).toEqual({ after: null });
   });
 
   it("shows the overwrites of the chosen bot, none ticked", async () => {

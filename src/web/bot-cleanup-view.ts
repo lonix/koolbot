@@ -40,6 +40,8 @@ export interface BotCleanupPageProps {
   candidates: RemovedBotCandidate[] | null;
   /** Accounts Discord could not be asked about, so they are not listed. */
   unchecked?: number;
+  /** Continue checking after this account; null when all were asked about. */
+  nextAfter?: string | null;
   /** The previewed plan, when the admin asked for one. */
   planned: BotCleanupPlan | null;
   /** The channels ticked for the preview (default: none). */
@@ -89,12 +91,17 @@ function claimHref(channelId: string, key: string): string {
 
 function renderPicker(p: BotCleanupPageProps): string {
   const list = p.candidates ?? [];
-  const note = p.unchecked
-    ? callout(
-        "warn",
-        `${p.unchecked} account(s) with a leftover overwrite could not be checked with Discord and are not listed. Reload to try again.`,
-      )
+  const more = p.nextAfter
+    ? `<p><a class="kb-btn kb-btn--sm" href="${escapeHtml(`${BOT_CLEANUP_PATH}?${new URLSearchParams({ after: p.nextAfter, ...(p.sampled ? { sample: "1" } : {}) }).toString()}`)}">Check the next accounts</a> <span class="kb-muted">Discord is asked about at most 25 accounts per view; more leftover overwrites remain to be checked.</span></p>`
     : "";
+  const note =
+    more +
+    (p.unchecked
+      ? callout(
+          "warn",
+          `${p.unchecked} account(s) with a leftover overwrite could not be checked with Discord and are not listed. Reload to try again.`,
+        )
+      : "");
   if (list.length === 0) {
     return `${note}<div class="kb-empty"><p class="kb-empty__title">No removed bot found.</p><p class="kb-empty__text">Remove the bot in Discord first. Bots that were removed show up here when a permission overwrite, a catalogue id or a channel it wrote to still points at them. Turn on channel ownership hints on the <a href="/admin/adopt?sample=1&amp;tab=bots">Server scan</a> to also find channels a removed bot wrote to.</p></div>`;
   }

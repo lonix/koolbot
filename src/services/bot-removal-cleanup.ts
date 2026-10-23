@@ -113,7 +113,8 @@ export function findRemovedBotCandidates(
     for (const o of ch.overwrites) {
       if (o.type !== "member") continue;
       if (findKnownBot(o.id, catalog)) note(o.id, "catalogue");
-      else if (scan.readiness.membersIntent) note(o.id, "orphan-overwrite");
+      // The forced single-member lookup that confirms it needs no intent.
+      else note(o.id, "orphan-overwrite");
     }
     if (ch.ownerHint) {
       note(
@@ -245,34 +246,56 @@ export async function verifyBotRemoved(
   }
 }
 
-/** Most accounts one page asks Discord about; the rest are not listed. */
+/** Most accounts one view asks Discord about; the next view continues. */
 export const CONFIRM_LIMIT = 25;
 
+export interface ConfirmedBots {
+  candidates: RemovedBotCandidate[];
+  /** Accounts whose check failed this time: not listed, never guessed. */
+  unchecked: number;
+  /**
+   * Where the next view continues (pass it as `after`), or null when every
+   * account has been asked about. Candidates are in a fixed order, so
+   * consecutive views walk the whole list instead of re-asking the first ones.
+   */
+  next: string | null;
+}
+
 /**
- * Ask Discord about every candidate the scan could not settle (`needsCheck`).
- * One that is still a member, or is not a bot, is dropped. One that is
- * confirmed removed is kept. One whose read fails (or beyond the limit) is
- * dropped and counted in `unchecked`: it is never offered on the strength of
- * the cache.
+ * Ask Discord about the candidates the scan could not settle (`needsCheck`),
+ * at most `limit` per call, starting after the candidate `after`. One that is
+ * still a member, or is not a bot, is dropped. One confirmed removed is kept.
+ * One whose read fails is dropped and counted in `unchecked`: it is never
+ * offered on the strength of the cache. Candidates the scan settled are always
+ * returned.
  */
 export async function confirmRemovedBots(
   guild: Guild,
   candidates: readonly RemovedBotCandidate[],
-  limit: number = CONFIRM_LIMIT,
-): Promise<{ candidates: RemovedBotCandidate[]; unchecked: number }> {
+  options: { limit?: number; after?: string | null } = {},
+): Promise<ConfirmedBots> {
+  const limit = options.limit ?? CONFIRM_LIMIT;
+  const cursor = options.after
+    ? candidates.findIndex((c) => c.userId === options.after)
+    : -1;
   const out: RemovedBotCandidate[] = [];
   let unchecked = 0;
   let asked = 0;
-  for (const c of candidates) {
+  let next: string | null = null;
+  let last: string | null = null;
+  for (let i = 0; i < candidates.length; i += 1) {
+    const c = candidates[i]!;
     if (!c.needsCheck) {
       out.push(c);
       continue;
     }
+    if (i <= cursor) continue; // asked on an earlier view
     if (asked >= limit) {
-      unchecked += 1;
+      next = last;
       continue;
     }
     asked += 1;
+    last = c.userId;
     const problem = await verifyBotRemoved(guild, c.userId);
     if (problem === null) out.push({ ...c, needsCheck: false });
     else if (
@@ -282,7 +305,7 @@ export async function confirmRemovedBots(
       unchecked += 1;
     }
   }
-  return { candidates: out, unchecked };
+  return { candidates: out, unchecked, next };
 }
 
 export interface BotCleanupPlan {
