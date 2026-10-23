@@ -162,11 +162,13 @@ export function renderNumberInput(
 /**
  * The value of a bot-managed key (the id of a message the bot posted) as text
  * with a jump link, never an input (#1304). `jumpUrl` is absent when the
- * message or its channel is not known.
+ * message or its channel is not known. `repostHref` links to the page where an
+ * admin re-posts the message (#1428).
  */
 export function renderManagedValue(
   messageId: string,
   jumpUrl: string | undefined,
+  repostHref?: string,
 ): string {
   if (!messageId) {
     return `<span class="kb-help">Not posted yet. KoolBot sets this when it posts the message.</span>`;
@@ -174,7 +176,12 @@ export function renderManagedValue(
   const link = jumpUrl
     ? ` <a class="kb-chip" href="${escapeHtml(jumpUrl)}" target="_blank" rel="noopener noreferrer">Jump to message</a>`
     : "";
-  return `<span class="kb-mono">${escapeHtml(messageId)}</span>${link}`;
+  // Re-posting writes to Discord, so it lives on the feature's own page with
+  // its confirm step; this is only the way there (#1428).
+  const repost = repostHref
+    ? ` <a class="kb-chip" href="${escapeHtml(repostHref)}">Re-post</a>`
+    : "";
+  return `<span class="kb-mono">${escapeHtml(messageId)}</span>${link}${repost}`;
 }
 
 // ---------- Setting rows ----------

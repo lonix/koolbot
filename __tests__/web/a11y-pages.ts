@@ -1091,6 +1091,7 @@ export function adminPages(): A11yPage[] {
                 managed: { channelKey: "quotes.channel_id" },
                 jumpUrl:
                   "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333",
+                repostHref: "/admin/quotes#repost-header",
               },
               {
                 key: "rules.message_id",
@@ -1941,6 +1942,8 @@ export function adminPages(): A11yPage[] {
         enabled: true,
         channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
         total: 1,
+        headerMessageId: "900000000000000002",
+        headerEnabled: true,
         textChannels: [
           { id: "c1", name: "rules", type: ChannelType.GuildText },
         ],
@@ -2674,6 +2677,7 @@ export function adminPages(): A11yPage[] {
         channelId: "100000000000000010",
         roleId: "100000000000000011",
         messagePosted: true,
+        messageId: "900000000000000003",
         accepted: 12,
         native: { screening: false, community: true },
         intentMissing: true,
@@ -2706,6 +2710,7 @@ export function adminPages(): A11yPage[] {
         channelId: "",
         roleId: "",
         messagePosted: false,
+        messageId: "",
         accepted: 0,
         native: { screening: false, community: true },
         intentMissing: false,
@@ -2725,6 +2730,39 @@ export function adminPages(): A11yPage[] {
           gateChannelIds: [],
         },
         jobId: null,
+      }),
+    },
+    {
+      // The Re-post cards with the button off and the reason shown (#1428).
+      name: "Quotes (header switched off, re-post blocked)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        headerEnabled: false,
+        settingRows: [],
+        maxLength: 1000,
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: "",
+      }),
+    },
+    {
+      name: "Notices (no channel, re-post blocked)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: null,
+        total: 0,
+        headerMessageId: "",
+        headerEnabled: true,
+        textChannels: [],
+        settingRows: [],
+        groups: [],
+        categoryOptions: [],
       }),
     },
     {

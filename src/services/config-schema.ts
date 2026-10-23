@@ -764,6 +764,13 @@ export interface SettingMetadata {
    */
   managed?: { channelKey: keyof ConfigSchema };
   /**
+   * Set on a key that is edited only through its own editor (the leaderboard
+   * tiers), where the raw stored text is easy to break (#1428). The All
+   * settings table leaves it out. The value is unchanged otherwise: it is
+   * still stored, exported, imported and reset like any other key.
+   */
+  editedElsewhere?: boolean;
+  /**
    * Set when the rest of the feature page renders from this value (beyond the
    * `*.enabled` flags, which always reload): saving it from a feature page's
    * card reloads the page so nothing keeps describing the old value (#1090).
@@ -1527,6 +1534,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where quote messages are posted.",
     category: "quotes",
     type: "channel",
+    // The Quotes page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "quotes.delete_roles": {
     label: "Roles allowed to delete quotes",
@@ -1557,6 +1566,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Post and maintain a pinned informational header in the quote channel.",
     category: "quotes",
     type: "boolean",
+    // The Quotes page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "quotes.header_message_id": {
     label: "Header message ID (auto-managed)",
@@ -2214,6 +2225,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where notice messages are posted.",
     category: "notices",
     type: "channel",
+    // The Notices page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "notices.header_enabled": {
     label: "Pinned header post enabled",
@@ -2221,6 +2234,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Post and maintain a pinned informational header in the notices channel.",
     category: "notices",
     type: "boolean",
+    // The Notices page's Re-post card renders from this value (#1428).
+    reloadOnSave: true,
   },
   "notices.header_message_id": {
     label: "Header message ID (auto-managed)",
@@ -2321,6 +2336,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       'Comma-separated "topN:roleId" pairs (e.g. "1:111,3:222,10:333"). Each tier independently assigns the role to users whose rank is ≤ N. Admins pick any positions; nothing is hardcoded.',
     category: "leaderboard_roles",
     type: "string",
+    editedElsewhere: true,
   },
   "leaderboard_roles.announcement_channel_id": {
     label: "Role-change announcements channel",

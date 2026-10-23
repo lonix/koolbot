@@ -1826,7 +1826,8 @@ leave the graph in a broken state.
 - `leaderboard_roles.enabled` (bool, default: false)
 - `leaderboard_roles.period` (string, default: "alltime") — `week` / `month` / `alltime`
 - `leaderboard_roles.update_cron` (string, default: `"0 0 * * 1"`)
-- `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`
+- `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`; edited on the Leaderboard Roles page's
+  tier editor, so All settings does not list it (it is still exported and imported)
 - `leaderboard_roles.announcement_channel_id` (string, default: "")
 
 #### Quote System
