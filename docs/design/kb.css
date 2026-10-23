@@ -388,7 +388,7 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 .kb-board__list > li { min-width: 0; }
 .kb-board__who { flex: 1 1 5rem; }
 .kb-board__where { flex: 0 1 auto; }
-.kb-board__person .kb-badge { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.kb-board__person .kb-badge { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .kb-board__menu { min-width: 0; max-width: 100%; }
 .kb-board__menu > summary { max-width: 100%; overflow-wrap: anywhere; }
 .kb-board__menu .kb-disclosure__body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }

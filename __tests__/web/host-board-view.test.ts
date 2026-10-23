@@ -249,6 +249,12 @@ describe("the board", () => {
     expect(rule(".kb-board__head .kb-team__name")).toContain(
       "white-space: normal",
     );
+    // The base .kb-badge is nowrap, so the leader badge must override it or a
+    // long custom leader label cannot wrap inside a narrow column.
+    expect(css).toMatch(/^\.kb-badge \{[^}]*white-space: nowrap/m);
+    expect(rule(".kb-board__person .kb-badge")).toContain(
+      "white-space: normal",
+    );
     // The menu stays inside its column; selects and buttons inside the menu, the panel and the dialog.
     expect(rule(".kb-board__menu")).toContain("max-width: 100%");
     for (const sel of [
