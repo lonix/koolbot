@@ -24,8 +24,9 @@ group shows them applied.
 3. *Settings (n)* folded at the bottom, its summary saying how many differ from the default. It opens by default when the feature is off or a required
    value is missing, and stays open after a save.
 
-Inside settings: SettingRows grouped under overlines; Switch, SegmentedControl, NumberField, Picker or EmojiPicker as the control (choose, don't type:
-free text only for names, messages and descriptions); children nested under their parent; one SaveBar; destructive steps last, each with a Dialog.
+Inside settings: SettingRows grouped under overlines; Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect or ColourField as the control
+(choose, don't type: free text only for names, messages and descriptions); children nested under their parent; one SaveBar;
+destructive steps last, each with a Dialog.
 
 ## Grouping and ordering (people into teams, notices, presence messages, poll questions, role-group ranks)
 

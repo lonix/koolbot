@@ -65,7 +65,9 @@ export const SAVEBAR_SCRIPT =
   "function count(form){var rows=[];" +
   "changedControls(form).forEach(function(el){var r=rowOf(el);if(rows.indexOf(r)<0)rows.push(r)});" +
   "return rows.length}" +
-  "function fire(el,type){try{el.dispatchEvent(new Event(type,{bubbles:true}))}catch(e){}}" +
+  // Discard's events are marked `kbRestore`, so a picker script can tell a
+  // restore from a user's pick and put its own state back with it (#1426).
+  "function fire(el,type){try{var ev=new Event(type,{bubbles:true});ev.kbRestore=true;el.dispatchEvent(ev)}catch(err){}}" +
   "function restore(el){var t=el.type;" +
   "if(t==='checkbox'||t==='radio'){el.checked=el.defaultChecked}" +
   "else if(el.tagName==='SELECT'){" +

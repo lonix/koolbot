@@ -192,7 +192,8 @@ optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permissi
   line) and has no field. *Re-post* is only a link to the owning feature page (#1428): the action itself is a `renderRepostCard` card there (a
   confirm-gated POST form, red confirm, consequences listed, the shown id sent back as `expectedId`), never a button on All settings.
 - **A setting with its own editor** (`editedElsewhere`, the leaderboard tiers) is not listed on All settings (#1428).
-- Controls follow #1304: Switch, SegmentedControl, NumberField, Picker or EmojiPicker. A free-text box is only for free text (names, messages, descriptions).
+- Controls follow #1304: Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect or ColourField.
+  A free-text box is only for free text (names, messages, descriptions).
 
 ### EmojiPicker
 
@@ -204,6 +205,41 @@ The marker for an event group: a small button showing the current emoji that ope
 - The curated first page is the coloured circles and squares, then common team icons. *Generate* uses the same colour order.
 - Unicode only: Discord custom emoji cannot go in a channel name, so they are never offered, and neither is any emoji over the 4-code-point limit.
 - No JavaScript: the text input it replaces.
+- **In a setting row** (#1426: the channel name prefix and suffix, the event channel prefix) the field is `span.kb-emoji-field[data-emoji-field]` and the
+  text box stays visible, so a value like a marker with a separator after it can still be typed; the button
+  (`aria-label` "Choose an emoji for <setting>") opens the same grid,
+  with "No emoji" in place of "No marker", and a pick replaces the value. The grid also offers the emoji people put in front of a channel name
+  (🎮 🎧 🎤 🔊 📅 ✨ and a few more), so the defaults of those settings are in it.
+
+### TimezoneSelect
+
+An IANA zone for a setting or an event (#1426).
+
+**Markup.** `span.kb-tz[data-tz]` → `input[type=search][data-tz-search]` (hidden until the script runs, `form="none"` so it never posts, `aria-label`
+"Search timezones"), `select.kb-select` and `span.kb-help[data-tz-status][role=status]` ("3 timezones match").
+
+- The first option is the default: *Default (Europe/Oslo)*, posting nothing where blank means "the server zone" (settings), or the zone itself on a
+  form that must post one. A zone the runtime does not list but that is stored shows as a selected `Zone (custom)` option and posts unchanged.
+- UTC is always listed, once: the runtime's own list omits it.
+- Searching only hides non-matching options (`hidden`, never `disabled`: a disabled option is not posted, so a selected one must never be disabled),
+  so option indexes never move; the selected and the original option always stay visible; `new york` finds `America/New_York`; Enter picks the first
+  match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
+- No JavaScript: the plain select.
+
+### ColourField
+
+A role colour for a setting (#1426).
+
+**Markup.** `span.kb-colour[data-colour]` → `input[type=color].kb-colour__swatch` and `label.kb-colour__default` with a checkbox (*Use default*),
+plus a second one (*Keep the stored value*) when the stored value is not `#RRGGBB`.
+
+- A colour input cannot be empty, so the checkbox is the empty state. It posts `use_default_<key>=true` and wins over the swatch, with or without
+  JavaScript; with the script, picking a colour unticks it and the two boxes exclude each other.
+- The swatch of the default shows Discord's default grey (`#99aab5`).
+- A stored value that is not `#RRGGBB` is kept by the ticked *Keep the stored value* box (`keep_<key>=true`, read by the server as the stored value) and
+  noted under the control ("is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default").
+- Every state is a real control (swatch, two checkboxes), so the save bar compares, commits and restores them without help; the swatch is only
+  disabled while the section's feature is off.
 
 ### PresetCards
 

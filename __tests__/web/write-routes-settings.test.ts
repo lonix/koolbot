@@ -2317,3 +2317,205 @@ describe("rendered settings form -> POST /settings/save-section (#1318)", () => 
     expect(written.get("core.startup.enabled")).toBe(true);
   });
 });
+
+// Free-text settings with a known value set render as pickers (#1426). The
+// server refuses what a picker cannot produce, yet a stored value it could not
+// have produced must still save unchanged, whole section included.
+describe("picker settings (#1426)", () => {
+  const LEGACY = {
+    "events.timezone": "Mars/Olympus",
+    "events.channel_prefix": "[Events]",
+    "reactionroles.group_role_colour": "red",
+    "voicechannels.channel.prefix": "[Voice] ",
+  } as const;
+
+  function pickerRow(key: keyof typeof LEGACY, current: string): SettingRow {
+    const meta = settingsMetadata[key];
+    return {
+      key,
+      label: meta.label,
+      current,
+      defaultValue: "",
+      type: "string",
+      description: meta.description,
+      category: meta.category,
+      format: meta.format,
+    };
+  }
+
+  /** What a browser posts for the rendered form of `rows`, after `mutate`. */
+  async function postedBody(
+    rows: SettingRow[],
+    mutate: (form: HTMLFormElement) => void = () => undefined,
+  ): Promise<Record<string, string[]>> {
+    const { renderFeatureSettingsCard } =
+      await import("../../src/web/admin-views.js");
+    const { JSDOM } = await import("jsdom");
+    const html = renderFeatureSettingsCard({
+      category: "events",
+      settingRows: rows,
+      returnTo: "/admin/events",
+      csrfToken: "unused-the-harness-adds-its-own",
+    });
+    const dom = new JSDOM(`<!doctype html><body>${html}</body>`);
+    const form = dom.window.document.querySelector(
+      'form[action="/admin/settings/save-section"]',
+    ) as HTMLFormElement;
+    expect(form).not.toBeNull();
+    mutate(form);
+    const body: Record<string, string[]> = {};
+    for (const [name, value] of new dom.window.FormData(form).entries()) {
+      if (name === "_csrf" || typeof value !== "string") continue;
+      (body[name] ??= []).push(value);
+    }
+    return body;
+  }
+
+  function stored(values: Record<string, unknown>): void {
+    mockConfigGet.mockImplementation(async (key) => values[key] ?? null);
+  }
+
+  function written(): Map<string, unknown> {
+    return new Map(
+      (mockConfigSet.mock.calls as unknown as Array<[string, unknown]>).map(
+        (c) => [c[0], c[1]],
+      ),
+    );
+  }
+
+  async function setOne(key: string, value: string) {
+    const res = await harness.post("/settings/set", { key, value });
+    return parseFlashRedirect(res.headers.get("location"));
+  }
+
+  it("refuses a timezone the runtime does not know, and says why", async () => {
+    const flash = await setOne("events.timezone", "Mars/Olympus");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("unknown timezone");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("accepts blank, UTC and a listed zone", async () => {
+    for (const zone of ["", "UTC", "Europe/Oslo"]) {
+      mockConfigSet.mockClear();
+      expect((await setOne("events.timezone", zone)).type).toBe("ok");
+      expect(written().get("events.timezone")).toBe(zone);
+    }
+  });
+
+  it("refuses a colour that is not #RRGGBB and stores a valid one in lower case", async () => {
+    for (const bad of ["red", "#12345", "#GGGGGG", "#1234567", "rgb(1,2,3)"]) {
+      const flash = await setOne("reactionroles.group_role_colour", bad);
+      expect(flash.type).toBe("err");
+    }
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(
+      (await setOne("reactionroles.group_role_colour", "#A95F55")).type,
+    ).toBe("ok");
+    expect(written().get("reactionroles.group_role_colour")).toBe("#a95f55");
+  });
+
+  it("refuses a prefix over four characters and custom emoji markup", async () => {
+    for (const bad of ["abcde", "<:wave:123456789012345678>", "a\u0000b"]) {
+      expect((await setOne("voicechannels.channel.prefix", bad)).type).toBe(
+        "err",
+      );
+    }
+    expect((await setOne("events.channel_prefix", "👨‍👩‍👧‍👦")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect((await setOne("voicechannels.channel.prefix", "🎮 | ")).type).toBe(
+      "ok",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe("🎮 | ");
+  });
+
+  it("turns a Use default tick into an empty colour, whatever the swatch holds", async () => {
+    stored({ "reactionroles.group_role_colour": "#a95f55" });
+    const body = await postedBody(
+      [pickerRow("reactionroles.group_role_colour", "#a95f55")],
+      (form) => {
+        (
+          form.querySelector("[data-colour-default]") as HTMLInputElement
+        ).checked = true;
+      },
+    );
+    expect(body["value_reactionroles.group_role_colour"]).toEqual(["#a95f55"]);
+    const res = await harness.post("/settings/save-section", body);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(written().get("reactionroles.group_role_colour")).toBe("");
+  });
+
+  it("saves a stored default colour as empty rather than black", async () => {
+    stored({ "reactionroles.group_role_colour": "" });
+    const body = await postedBody([
+      pickerRow("reactionroles.group_role_colour", ""),
+    ]);
+    // The swatch posts its placeholder; the ticked Use default overrides it.
+    expect(body["use_default_reactionroles.group_role_colour"]).toEqual([
+      "true",
+    ]);
+    await harness.post("/settings/save-section", body);
+    expect(written().get("reactionroles.group_role_colour")).toBe("");
+  });
+
+  it("keeps every legacy value unchanged when the section is saved", async () => {
+    stored(LEGACY);
+    const rows = (Object.keys(LEGACY) as Array<keyof typeof LEGACY>).map(
+      (key) => pickerRow(key, LEGACY[key]),
+    );
+    const body = await postedBody(rows);
+    const res = await harness.post("/settings/save-section", body);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("ok");
+    for (const key of Object.keys(LEGACY) as Array<keyof typeof LEGACY>) {
+      expect(written().get(key)).toBe(LEGACY[key]);
+    }
+  });
+
+  it("saves a legacy value alongside an edit to a sibling setting", async () => {
+    stored(LEGACY);
+    const rows = [
+      pickerRow("events.timezone", LEGACY["events.timezone"]),
+      pickerRow("events.channel_prefix", LEGACY["events.channel_prefix"]),
+    ];
+    const body = await postedBody(rows, (form) => {
+      (
+        form.querySelector(
+          'input[name="value_events.channel_prefix"]',
+        ) as HTMLInputElement
+      ).value = "🎉";
+    });
+    const res = await harness.post("/settings/save-section", body);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(written().get("events.timezone")).toBe("Mars/Olympus");
+    expect(written().get("events.channel_prefix")).toBe("🎉");
+  });
+
+  it("saves an unchanged stored prefix that holds a shortcode beside a sibling edit", async () => {
+    stored({ "voicechannels.channel.prefix": "[VC] :sparkles:" });
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix", "voicechannels.channel.suffix"],
+      "value_voicechannels.channel.prefix": "[VC] :sparkles:",
+      "value_voicechannels.channel.suffix": "🎉",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
+      "err",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "[VC] :sparkles:",
+    );
+    expect(written().get("voicechannels.channel.suffix")).toBe("🎉");
+  });
+
+  it("still refuses a different invalid value for a key that holds a legacy one", async () => {
+    stored(LEGACY);
+    const res = await harness.post("/settings/save-section", {
+      category: "events",
+      keys: ["events.timezone"],
+      "value_events.timezone": "Mars/Phobos",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});

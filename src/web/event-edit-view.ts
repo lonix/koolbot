@@ -14,6 +14,10 @@ import { COVER_MAX_BYTES } from "../services/event-cover.js";
 import { EVENT_COVER_UPLOAD_SCRIPT } from "./event-cover-upload.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import {
+  TIMEZONE_SELECT_SCRIPT,
+  renderTimezoneSelect,
+} from "./setting-pickers.js";
+import {
   EVENT_DESCRIPTION_MAX,
   EVENT_DURATION_MAX,
   EVENT_DURATION_MIN,
@@ -168,8 +172,8 @@ export function renderEventEditBody(opts: {
           <input class="kb-input" id="edit-time" type="text" name="time" required pattern="\\d{2}:\\d{2}" value="${escapeHtml(e.time)}">
         </div>
         <div class="kb-field">
-          <label class="kb-label" for="edit-timezone">Timezone (IANA)</label>
-          <input class="kb-input" id="edit-timezone" type="text" name="timezone" value="${escapeHtml(e.timezone)}">
+          <label class="kb-label" for="edit-timezone">Timezone</label>
+          ${renderTimezoneSelect("timezone", e.timezone, { id: "edit-timezone", defaultZone: e.timezone, firstLabel: "Current" })}
         </div>
       </div>`
         : `<p class="kb-help">This event has already started, so its title and start time are fixed. You can still change the description and the duration.</p>
@@ -214,6 +218,6 @@ export function renderEventEditBody(opts: {
     </div>
     ${foot}
   </section>
-</form>
+</form>${full && !e.startLocked ? scriptTag(TIMEZONE_SELECT_SCRIPT) : ""}
 ${opts.cover ? renderCoverPanel(e.id, opts.cover, opts.csrfToken, opts.adminEventsHref ?? null) : ""}`;
 }

@@ -24,6 +24,7 @@ import { findUnknownShortcodes } from "../../../utils/emoji-shortcodes.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import {
   renderImportDiffPage,
+  readSettingField,
   settingValueFieldName,
   type ImportDiffRow,
 } from "../../admin-views.js";
@@ -69,7 +70,16 @@ export function createSettingsRouter(client: Client): Router {
       // action passes their own page so the operator returns there (#610).
       const redirectTo = safeAdminRedirect(getString(req, "redirect"));
 
-      const coerced = coerceConfigValue(key, raw);
+      const config = ConfigService.getInstance();
+      let before: unknown;
+      try {
+        before = await config.get(key);
+      } catch {
+        before = defaultConfig[key as keyof typeof defaultConfig];
+      }
+      // The stored value is passed so a legacy value a picker cannot produce
+      // still saves unchanged (#1426).
+      const coerced = coerceConfigValue(key, raw, before);
       if (!coerced.ok) {
         await recordAudit(session, {
           action: "setting.set",
@@ -90,13 +100,6 @@ export function createSettingsRouter(client: Client): Router {
         return;
       }
 
-      const config = ConfigService.getInstance();
-      let before: unknown;
-      try {
-        before = await config.get(key);
-      } catch {
-        before = defaultConfig[key as keyof typeof defaultConfig];
-      }
       const meta = settingsMetadata[key as keyof typeof settingsMetadata];
       // A role that backs a role group can't be picked for another feature
       // (#1023).
@@ -511,8 +514,11 @@ export function createSettingsRouter(client: Client): Router {
         if (seen.has(key)) continue;
         seen.add(key);
         if (masterOff && key !== masterKey) continue;
-        const raw = body[settingValueFieldName(key)];
-        const r = coerceConfigValue(key, raw);
+        const stored = await ConfigService.getInstance()
+          .get(key)
+          .catch(() => undefined);
+        const raw = readSettingField(body, key, stored);
+        const r = coerceConfigValue(key, raw, stored);
         if (r.ok) {
           coerced.push({ key, value: r.value });
         } else {

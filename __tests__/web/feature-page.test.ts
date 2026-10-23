@@ -2,7 +2,7 @@
  * @jest-environment <rootDir>/__tests__/jsdom-node-env.cjs
  */
 
-/* global document, window, Event, DOMParser, HTMLDetailsElement, HTMLElement, HTMLInputElement, Storage, localStorage, Document */
+/* global document, window, Event, DOMParser, HTMLDetailsElement, HTMLElement, HTMLInputElement, HTMLSelectElement, Storage, localStorage, Document */
 /**
  * Feature pages show the usable part first and fold their settings (#1301):
  * the status line, the folded settings card (when it opens, what its summary
@@ -669,10 +669,13 @@ describe("the Events page", () => {
     expect(time?.hasAttribute("step")).toBe(false);
     // The past date that used to be the placeholder is gone.
     expect(doc.body.innerHTML).not.toContain("2026-07-04");
-    // The timezone box and the number bounds stay as they were (#1304).
-    expect(
-      doc.querySelector<HTMLInputElement>('input[name="timezone"]')?.type,
-    ).toBe("text");
+    // The timezone is a select of zones with the default first (#1426); the
+    // number bounds stay as they were (#1304).
+    const zone = doc.querySelector<HTMLSelectElement>(
+      'select[name="timezone"]',
+    );
+    expect(zone?.options[0].value).toBe("");
+    expect(doc.querySelector('input[name="timezone"]')).toBeNull();
     expect(doc.querySelector("[data-event-form]")).not.toBeNull();
   });
 

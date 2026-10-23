@@ -12,6 +12,10 @@
 
 import { escapeHtml, scriptTag } from "./html.js";
 import { renderSegmented } from "./setting-controls.js";
+import {
+  TIMEZONE_SELECT_SCRIPT,
+  renderTimezoneSelect,
+} from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { EVENT_GROUPS_SCRIPT, renderGroupsSection } from "./admin-views.js";
 import {
@@ -56,23 +60,6 @@ function durationOptions(selected: number): string {
     .join("");
 }
 
-/** The server's zone first, then every zone the runtime knows. */
-function timezoneOptions(serverZone: string): string {
-  let zones: string[];
-  try {
-    zones = Intl.supportedValuesOf("timeZone");
-  } catch {
-    zones = [];
-  }
-  const rest = zones.filter((z) => z !== serverZone);
-  return [
-    `<option value="${escapeHtml(serverZone)}" selected>${escapeHtml(serverZone)} (server)</option>`,
-    ...rest.map(
-      (z) => `<option value="${escapeHtml(z)}">${escapeHtml(z)}</option>`,
-    ),
-  ].join("");
-}
-
 export function renderNewEventBody(props: NewEventViewProps): string {
   const when = renderSegmented(
     "when",
@@ -114,7 +101,7 @@ ${notice}
         </div>
         <div class="kb-field">
           <label class="kb-label" for="new-event-timezone">Timezone</label>
-          <select class="kb-select" id="new-event-timezone" name="timezone">${timezoneOptions(props.timezone)}</select>
+          ${renderTimezoneSelect("timezone", props.timezone, { id: "new-event-timezone", defaultZone: props.timezone })}
         </div>
       </div>
     </div>
@@ -145,6 +132,7 @@ ${notice}
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>
 </form>
 ${scriptTag(groupRowsScript())}
+${scriptTag(TIMEZONE_SELECT_SCRIPT)}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
 ${EVENT_WHEN_SCRIPT}`;
 }

@@ -13,6 +13,7 @@ import {
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
+import { fitsSettingFormat } from "../utils/setting-formats.js";
 import { ConfigService } from "./config-service.js";
 import { getEnvConfigValue } from "../config/env.js";
 import { defaultConfig } from "./config-schema.js";
@@ -455,6 +456,11 @@ export async function readEffectiveConfig(): Promise<
   return out;
 }
 
+/** `value` when it fits a channel name prefix or suffix setting, else null. */
+function fitting(value: string | null): string | null {
+  return value !== null && fitsSettingFormat("emoji", value) ? value : null;
+}
+
 /** Infer how the server names its channels (#1019 naming detection). */
 export function detectNamingConvention(
   channelNames: string[],
@@ -511,12 +517,16 @@ export function detectNamingConvention(
     confidence: Math.round(confidence * 100) / 100,
     samples: channelNames.slice(0, 5),
     categoryEmojiPrefix,
-    suggestedPrefix:
+    // Only a value the Settings page would accept is suggested (#1426): a
+    // longer prefix could not be copied into the setting.
+    suggestedPrefix: fitting(
       prefix && sep && prefix[1] >= Math.ceil(total / 2)
         ? `${prefix[0]} ${sep[0]} `
         : null,
-    suggestedSuffix:
+    ),
+    suggestedSuffix: fitting(
       suffix && suffix[1] >= Math.ceil(total / 2) ? suffix[0] : null,
+    ),
   };
 }
 

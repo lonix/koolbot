@@ -58,6 +58,7 @@ import {
   renderWizardPage,
   renderWizardStepPage,
   renderWizardConfirmPage,
+  readSettingField,
   settingValueFieldName,
 } from "../../admin-views.js";
 import {
@@ -602,15 +603,14 @@ export function createWizardRouter(client: Client): Router {
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) continue;
-        const raw = body?.[settingValueFieldName(k)];
-        const coerced = coerceConfigValue(k, raw);
+        const current = await ConfigService.getInstance()
+          .get(k)
+          .catch(() => undefined);
+        const raw = readSettingField(body, k, current);
+        const coerced = coerceConfigValue(k, raw, current);
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.
-        const stored = coerced.ok
-          ? await ConfigService.getInstance()
-              .get(k)
-              .catch(() => undefined)
-          : undefined;
+        const stored = coerced.ok ? current : undefined;
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse = coerced.ok

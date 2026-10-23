@@ -496,6 +496,17 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-groupopt { display: flex; flex-direction: column; gap: 0.2rem; }
 .kb-groupopt > .kb-help { padding-left: 2.25rem; }
 
+/* ---------- Setting pickers: timezone select, colour input, emoji field (#1426) ---------- */
+.kb-tz { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); max-width: 100%; }
+.kb-tz .kb-select { max-width: 100%; }
+.kb-colour { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); max-width: 100%; }
+.kb-colour__swatch { width: 2.75rem; height: var(--control-height); padding: 2px; background: var(--bg); border: 1px solid var(--control); border-radius: var(--radius-md); cursor: pointer; }
+.kb-colour__swatch:disabled { opacity: 0.5; cursor: default; }
+.kb-colour__default { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--type-description-size); color: var(--text); }
+.kb-emoji-field .kb-emoji-wrap { align-items: center; gap: var(--space-2); }
+/* `display` on the search box, the swatch row or the button would otherwise beat the browser's [hidden]. */
+.kb-tz [hidden], .kb-colour [hidden], .kb-emoji-field [hidden] { display: none; }
+
 /* ---------- Nested options: children sit under their parent ---------- */
 .kb-nested { margin: var(--space-2) 0 0 1.1rem; padding-left: var(--space-4); border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: var(--space-3); }
 

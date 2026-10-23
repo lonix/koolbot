@@ -30,6 +30,13 @@ import {
 import { icon } from "./icons.js";
 import { renderSaveBar } from "./savebar.js";
 import {
+  renderColourInput,
+  renderEmojiField,
+  renderTimezoneSelect,
+} from "./setting-pickers.js";
+import { getServerTimezone } from "../utils/timezone.js";
+import type { SettingFormat } from "../utils/setting-formats.js";
+import {
   CHEVRON_ICON,
   SETTINGS_FOLD_SCRIPT,
   renderStatusLine,
@@ -307,6 +314,12 @@ export interface SettingRow {
    * (#1304).
    */
   managed?: { channelKey: string };
+  /**
+   * The value set of a free-text key, rendered as a picker (#1426): a timezone
+   * select, a colour input or an emoji picker. Sourced from
+   * `SettingMetadata.format`.
+   */
+  format?: SettingFormat;
   /**
    * For a `managed` row, the Discord link to the message it points at, when
    * the message and its channel are both known.
@@ -754,6 +767,50 @@ export function settingValueFieldName(key: string): string {
 }
 
 /**
+ * Form-field name of a colour setting's "Use default" checkbox (#1426). A
+ * colour input cannot post an empty value, and `""` is how the key says
+ * "Discord's default", so the checkbox is a real control that the save
+ * handlers read through `readSettingField`.
+ */
+export function settingDefaultFieldName(key: string): string {
+  return `use_default_${key}`;
+}
+
+/** Form-field name of a colour setting's "Keep the stored value" checkbox (#1426). */
+export function settingKeepFieldName(key: string): string {
+  return `keep_${key}`;
+}
+
+/**
+ * The raw posted value of a setting: its `value_<key>` field, or `""` when the
+ * key is a colour and "Use default" is ticked. Every save path reads values
+ * through this so the checkbox means the same on the Settings page and the
+ * wizard.
+ */
+export function readSettingField(
+  body: Record<string, unknown> | undefined,
+  key: string,
+  current?: unknown,
+): unknown {
+  if (
+    settingsMetadata[key as keyof typeof settingsMetadata]?.format === "colour"
+  ) {
+    // Use default wins over Keep, which wins over the swatch (see
+    // `renderColourInput`). Keep means the stored value, whatever it is, so a
+    // crafted post can only ask for what is already there.
+    if (body?.[settingDefaultFieldName(key)] === "true") return "";
+    if (
+      body?.[settingKeepFieldName(key)] === "true" &&
+      current !== undefined &&
+      current !== null
+    ) {
+      return String(current);
+    }
+  }
+  return body?.[settingValueFieldName(key)];
+}
+
+/**
  * Pick the cascade "master" toggle for a settings section: the boolean
  * two-segment `<category>.enabled` key (the top-level feature switch).
  * Sub-feature toggles like `voicetracking.announcements.enabled` are
@@ -1086,6 +1143,44 @@ function renderControlInput(
       depLocked,
       a11y,
     );
+  }
+  // Free-text keys with a known value set get a picker (#1426); the server
+  // checks the value again, and a stored value the picker cannot produce is
+  // shown and posted unchanged.
+  if (r.format === "timezone") {
+    return renderTimezoneSelect(valueName, currentStr, {
+      id: a11y.id,
+      describedBy: a11y.describedBy,
+      invalid: a11y.invalid,
+      describedByBase: a11y.describedByBase,
+      disabled: depLocked,
+      defaultZone: getServerTimezone(),
+      blank: true,
+    });
+  }
+  if (r.format === "colour") {
+    return renderColourInput(
+      valueName,
+      escapeHtml(settingDefaultFieldName(r.key)),
+      currentStr,
+      {
+        id: a11y.id,
+        describedBy: a11y.describedBy,
+        invalid: a11y.invalid,
+        describedByBase: a11y.describedByBase,
+        disabled: depLocked,
+      },
+    );
+  }
+  if (r.format === "emoji") {
+    return renderEmojiField(valueName, currentStr, {
+      label: r.label,
+      id: a11y.id,
+      describedBy: a11y.describedBy,
+      invalid: a11y.invalid,
+      describedByBase: a11y.describedByBase,
+      disabled: depLocked,
+    });
   }
   // string or unknown type → plain text input. The maxlength mirrors the
   // server-side `TEXT_LIMITS.configValue` cap in
@@ -2031,6 +2126,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       min: meta?.min,
       max: meta?.max,
       managed: meta?.managed,
+      format: meta?.format,
       channelKind: meta?.channelKind,
     };
   });
@@ -3357,9 +3453,10 @@ ${permissionNote}
     <label>Duration (minutes, optional)
       <input type="number" name="duration" min="1" max="1440" placeholder="120">
     </label>
-    <label>Timezone (IANA, optional — defaults to <code>${escapeHtml(props.timezone)}</code>)
-      <input type="text" name="timezone" placeholder="Europe/London">
-    </label>
+    <div>
+      <label for="admin-event-timezone">Timezone (optional)</label>
+      ${renderTimezoneSelect("timezone", "", { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
+    </div>
     <label>Repeat
       <select name="recurrence">
         <option value="none" selected>Does not repeat</option>

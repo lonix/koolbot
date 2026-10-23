@@ -1632,6 +1632,14 @@ rather than clamping it:
   (keep forever) up to 36500 days, which is a hundred years and only exists
   to catch a mistyped value. A stored value that is already above a new
   maximum blocks the save of its section until you fix it.
+- Picker keys check their value set: `events.timezone` must be a timezone the
+  server knows (or empty for the server's), `reactionroles.group_role_colour`
+  must be `#RRGGBB` (or empty for Discord's default), and
+  `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and
+  `events.channel_prefix` take at most 4 characters, with no control characters
+  and no custom server emoji. A value that is already stored keeps saving
+  unchanged even if it fails the check, so it never blocks the rest of its
+  section; a YAML import is checked strictly.
 - Cron keys must parse as a valid cron expression.
 - Keys with a fixed set of choices (`leaderboard_roles.period`,
   `reactionroles.style`) only accept one of those values.
