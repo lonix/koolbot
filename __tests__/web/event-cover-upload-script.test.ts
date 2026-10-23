@@ -52,8 +52,11 @@ function mount(hasCover = true): {
       version: "v1",
       mode: "full",
     },
-  }).replace(/<script[\s\S]*?<\/script>/g, "");
+  });
   document.body.innerHTML = html;
+  // The markup carries the page script; it is run below with fake globals, so
+  // the parsed copy is dropped from the DOM (no text scraping of the HTML).
+  document.querySelectorAll("script").forEach((el) => el.remove());
   const upload = document.querySelector(
     "form[data-cover-upload]",
   ) as HTMLFormElement;
