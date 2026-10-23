@@ -508,14 +508,23 @@ describe("the reset admission ticket", () => {
     const tracking = TrackingOptOutService.getInstance();
     let release: (e: Json) => void = () => undefined;
     const held = new Promise<Json>((r) => (release = r));
+    // Resolves when the gate's event lookup is entered, i.e. the request has
+    // reached the route and (by this test's premise) already took its ticket.
+    // A fixed sleep was not enough on a loaded runner: the reset could run
+    // before the request arrived, giving the route a later ticket.
+    let entered: () => void = () => undefined;
+    const lookupEntered = new Promise<void>((r) => (entered = r));
     (EventService.getInstance as jest.Mock).mockReturnValue({
-      getEvent: async () => held,
+      getEvent: async () => {
+        entered();
+        return held;
+      },
       getGroupChannelReport: () => null,
       isEventBeingEnded: () => false,
     });
     const before = tracking.admission();
     const pending = post(action, body);
-    await new Promise((r) => setTimeout(r, 20));
+    await lookupEntered;
     // The member's reset runs to completion while the request waits in the gate.
     await tracking.withTrackingPaused(BEN, GUILD, async () => undefined);
     const after = tracking.admission();

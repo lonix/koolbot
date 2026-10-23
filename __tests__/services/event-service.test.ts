@@ -817,6 +817,79 @@ describe("claimEventChannel (start-now path)", () => {
     );
   });
 
+  it("syncs the native event right after the room is claimed (#1421), without waiting for the scan", async () => {
+    const { service, event } = buildService({
+      findOneAndUpdate: { _id: "evt-1", channelId: null },
+      createdChannelId: "chan-win",
+    });
+    const calls: Array<{ channelId: string | null; state: string }> = [];
+    (
+      service as unknown as { nativeSync: { syncEvent: jest.Mock } }
+    ).nativeSync.syncEvent = jest.fn(async (e: unknown) => {
+      const ev = e as { channelId: string | null; state: string };
+      calls.push({ channelId: ev.channelId, state: ev.state });
+    });
+
+    await service.startEventNow("evt-1");
+
+    // Once, with the room already on the copy, before startEventNow returns.
+    expect(calls).toEqual([{ channelId: "chan-win", state: "active" }]);
+    expect(event.channelId).toBe("chan-win");
+  });
+
+  it("does not sync when no room was created", async () => {
+    const { service } = buildService({
+      claimError: new Error("connection reset"),
+      createdChannelId: "chan-orphan",
+    });
+    const sync = jest.fn(async () => undefined);
+    (
+      service as unknown as { nativeSync: { syncEvent: jest.Mock } }
+    ).nativeSync.syncEvent = sync;
+    await service.startEventNow("evt-1");
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it("a failing immediate native sync is logged once and never breaks startEventNow", async () => {
+    const { service } = buildService({
+      findOneAndUpdate: { _id: "evt-1", channelId: null },
+      createdChannelId: "chan-win",
+    });
+    const sync = jest.fn(async () => {
+      throw new Error("discord down");
+    });
+    (
+      service as unknown as { nativeSync: { syncEvent: jest.Mock } }
+    ).nativeSync.syncEvent = sync;
+    const log = (await import("../../src/utils/logger.js"))
+      .default as unknown as { warn: jest.Mock };
+    log.warn.mockClear();
+
+    const first = await service.startEventNow("evt-1");
+    expect(first?.channelId).toBe("chan-win");
+    expect(sync).toHaveBeenCalledTimes(1);
+
+    // The same event again: a repeated failure is not logged again.
+    EventMock.findById = jest.fn().mockResolvedValue({
+      _id: "evt-1",
+      guildId: "guild-1",
+      state: "scheduled",
+      channelId: null,
+      categoryId: CATEGORY_ID,
+      title: "Game Night",
+      announcementChannelId: null,
+      announcementMessageId: null,
+      save: jest.fn(),
+    });
+    await service.startEventNow("evt-1");
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(
+      log.warn.mock.calls.filter((c) =>
+        String(c[0]).includes("native sync after room creation"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("loses the claim, deletes the redundant channel and adopts the winner's id", async () => {
     const deletableChannel = { delete: jest.fn(async () => undefined) };
     const { service, event, createChannel } = buildService({

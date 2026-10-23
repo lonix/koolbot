@@ -829,6 +829,7 @@ channel.
 | `events.channel_grace_minutes`    | `15`      | How long after an event actually ends (End now counts from the press) the bot waits before deleting its empty channel             |
 | `events.recurrence_enabled`       | `true`    | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
 | `events.native.location`          | see Notes | Location text shown on the native Discord event (max 100 characters)                                                              |
+| `events.native.link_room`         | `true`    | Point the native Discord event at the event's main voice room once it is created, instead of the location text                    |
 | `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |
 | `events.groups.max_count`         | `15`      | The most groups one event may have, at most 25 (a Discord category holds 50 channels)                                             |
 
@@ -869,7 +870,18 @@ channel.
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
   KoolBot has no Going / Maybe / Can't buttons and sends no start-time ping. The native event is an _external_ event
-  whose location is `events.native.location`, because the temporary voice channel only exists shortly before the start.
+  whose location is `events.native.location` until the event's main voice room is created (`events.create_lead_minutes` before the start). Then, with
+  `events.native.link_room` on, the native event is switched to a voice event in that room, so the card links to it. With event groups the
+  MAIN room is linked too, never a group room. **Risk, untested:** for a grouped event everyone moves to the team rooms, so the main room can empty while the
+  teams are still playing, and Discord may then mark the linked card finished early. KoolBot cannot undo that (it ignores a Completed native event).
+  `events.native.link_room` is the rollback switch. Turning the switch off stops new links and puts an existing link back to the text only while the
+  Discord event is still Scheduled and before its start time; once the start has passed the link stays (and a link still Scheduled then is still
+  started), so it is not a rollback for a running event.
+  The bot starts a linked event (status Active) when its start time is reached, retrying each scan; this also holds for an existing link after the
+  switch is turned off. Discord may complete a linked event on its own when its room empties for a while; the card then stays finished, and KoolBot
+  ignores a Completed native event as it does for any finished one. If the room never gets created, or Discord refuses the switch, the text stays (a
+  refusal is logged and retried on the next scan). A native event that an admin switched to another channel by hand is put back (to the room, or to
+  the text when there is no room). After the event ends nothing more is done: a finished Discord event drops off.
   KoolBot is the source of truth: edits to the title, description, start or duration are pushed to Discord, cancelling
   an event cancels the native one, and a finished event completes it. Recurring events stay KoolBot's own: the bot
   creates each occurrence and mirrors it as its own one-off native event. The bot needs **Create Events** (or **Manage
@@ -1963,6 +1975,7 @@ leave the graph in a broken state.
 - `events.channel_grace_minutes` (number, default: 15)
 - `events.recurrence_enabled` (bool, default: true)
 - `events.native.location` (string, default: "Voice channel in this server (see the event announcement)")
+- `events.native.link_room` (bool, default: true)
 - `events.groups.default_count` (number, default: 2)
 - `events.groups.max_count` (number, default: 15)
 

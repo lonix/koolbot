@@ -7,6 +7,7 @@ import {
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
+  Routes,
   type Snowflake,
 } from "discord.js";
 import { NATIVE_EVENTS_WARNING, PERM } from "./bot-permission-registry.js";
@@ -38,6 +39,16 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
  * Every entry point is best-effort and never throws: a Discord failure must not
  * break the event lifecycle. A missing permission is reported once per process
  * (not every scan tick) and clears itself when the permission comes back.
+ *
+ * Voice-room link (#1421): the native event is created external with a text
+ * location. Once the row's main room (`channelId`, never a group room) exists,
+ * the mirror switches it to a voice event in that room (`events.native.link_room`,
+ * default on). The link is KoolBot's own when the native channel equals the
+ * row's stored main-room id; any other voice/stage state is a hand-made change
+ * and is undone (moved onto the room, or back to the text when there is no
+ * room). Only while the native event is Scheduled; a rejection is logged once,
+ * retried each scan, and never breaks the lifecycle. Not verified against
+ * Discord itself.
  *
  * Discord facts relied on (see the PR for which are verified against
  * discord-api-types and which are not):
@@ -74,6 +85,12 @@ export interface NativeEventFields {
   start: Date;
   end: Date;
   location: string;
+  /**
+   * The event's main voice room (#1421), once it exists and linking is on.
+   * Set: the native event should point at this room instead of showing the
+   * location text. Unset: it stays external with the text.
+   */
+  voiceChannelId?: string | null;
 }
 
 /** Pure: the native-event fields derived from a KoolBot event. */
@@ -122,6 +139,8 @@ export function diffNativeFields(
   entityMetadata: { location: string };
   entityType: GuildScheduledEventEntityType;
   channel: null;
+  /** Switch (or switch back) to a voice event in this room (#1421). */
+  linkChannel: string;
 }> {
   const diff: ReturnType<typeof diffNativeFields> = {};
   if (native.name !== want.name) diff.name = want.name;
@@ -131,8 +150,31 @@ export function diffNativeFields(
   if (native.scheduledStartTimestamp !== want.start.getTime()) {
     diff.scheduledStartTime = want.start;
   }
-  if (native.entityType !== GuildScheduledEventEntityType.External) {
-    // An admin switched the mirror to a voice/stage event. Put it back: the
+  const room = want.voiceChannelId ?? null;
+  if (room) {
+    // The main room exists (#1421): the wanted state is a voice event in that
+    // room. A native event already voice-linked to it is KoolBot's own link
+    // (nothing to do). Anything else (still external, a stage event, or a voice
+    // event in some other channel) is brought to it. Comparing the native
+    // channel with the row's stored main-room id is what tells the link
+    // KoolBot set from a hand-made change: only the stored id is "ours".
+    const linked =
+      native.entityType === GuildScheduledEventEntityType.Voice &&
+      native.channelId === room;
+    if (!linked) diff.linkChannel = room;
+    if (native.entityType === GuildScheduledEventEntityType.External) {
+      // Still external (not converted, e.g. already started): keep its text.
+      if ((native.entityMetadata?.location ?? "") !== want.location) {
+        diff.entityMetadata = { location: want.location };
+      }
+    }
+    if (native.scheduledEndTimestamp !== want.end.getTime()) {
+      diff.scheduledEndTime = want.end;
+    }
+  } else if (native.entityType !== GuildScheduledEventEntityType.External) {
+    // No room (never created, or linking off, or the room is gone): a
+    // voice/stage native event is a hand-made change, or a link that is now
+    // stale. An admin switched the mirror to a voice/stage event. Put it back: the
     // typings allow `entityType: External` with `channel: null` plus a
     // location and an end time (all three sent together). Not verified
     // against Discord itself.
@@ -158,7 +200,23 @@ export type NativeCache = Collection<Snowflake, GuildScheduledEvent>;
 // allows `null` to clear it. Edits that clear a description are cast through this.
 type EditOptions = Parameters<Guild["scheduledEvents"]["edit"]>[1];
 
-type ApiCaller = <T>(call: () => Promise<T>, name: string) => Promise<T>;
+/** `quiet`: the caller reports failures itself, so the shared wrapper must not
+ * log each rejection as an error (timeouts and retries are unchanged). */
+type ApiCaller = <T>(
+  call: () => Promise<T>,
+  name: string,
+  opts?: { quiet?: boolean },
+) => Promise<T>;
+
+const DISCORD_UNKNOWN_CHANNEL = 10003;
+
+/*
+ * Events with group rooms link the MAIN room exactly like plain events (owner
+ * decision, #1421). Unverified risk: Discord may complete a voice-linked event
+ * shortly after its room empties, and with groups everyone moves to the group
+ * rooms while the session goes on. KoolBot cannot undo a Completed native
+ * event (it ignores it), so `events.native.link_room` is the rollback switch.
+ */
 
 export class NativeEventSync {
   private readonly warned = new Set<string>();
@@ -437,7 +495,74 @@ export class NativeEventSync {
       "events.native.location",
       DEFAULT_NATIVE_LOCATION,
     );
-    return buildNativeFields(event, location ?? "");
+    const want = buildNativeFields(event, location ?? "");
+    // Link the MAIN room only (#1421): `channelId` is the event's own room;
+    // group rooms live in `groups[].channelId` and are never linked. A row
+    // with no room yet (or none any more) keeps the text.
+    if (event.channelId && (await this.linkRoomEnabled())) {
+      want.voiceChannelId = event.channelId;
+    }
+    return want;
+  }
+
+  /**
+   * A stored `channelId` does not prove the room still exists: the channel
+   * delete handler only clears it for ended/cancelled events. Only a confirmed
+   * Unknown Channel counts as gone; any other failure is `unknown` and the
+   * caller keeps the current state and retries next scan.
+   */
+  private async roomState(
+    guild: Guild,
+    channelId: string,
+  ): Promise<"exists" | "gone" | "unknown"> {
+    if (guild.channels.cache.get(channelId)) return "exists";
+    try {
+      const found = await guild.channels.fetch(channelId);
+      return found ? "exists" : "gone";
+    } catch (error) {
+      if (
+        error instanceof DiscordAPIError &&
+        error.code === DISCORD_UNKNOWN_CHANNEL
+      ) {
+        return "gone";
+      }
+      return "unknown";
+    }
+  }
+
+  /** The wanted fields for an existing native event, with the room checked. */
+  private async wantedFieldsFor(
+    event: IEvent,
+    guild: Guild,
+    native: GuildScheduledEvent,
+  ): Promise<NativeEventFields> {
+    const want = await this.wantedFields(event);
+    if (!want.voiceChannelId) return want;
+    const state = await this.roomState(guild, want.voiceChannelId);
+    if (state === "gone") {
+      want.voiceChannelId = null;
+    } else if (state === "unknown") {
+      // Keep what is there: a voice event stays linked, an external one stays
+      // external. Nothing is converted on a transient failure.
+      want.voiceChannelId =
+        native.entityType === GuildScheduledEventEntityType.Voice
+          ? native.channelId
+          : null;
+    }
+    return want;
+  }
+
+  /** `events.native.link_room`: the switch: off = never link, and an existing
+   * link is put back to external by the normal diff. */
+  private async linkRoomEnabled(): Promise<boolean> {
+    try {
+      return await ConfigService.getInstance().getBoolean(
+        "events.native.link_room",
+        true,
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async createNative(
@@ -675,7 +800,11 @@ export class NativeEventSync {
       return;
     }
 
-    const want = await this.wantedFields(event);
+    const want = await this.wantedFieldsFor(event, guild, native);
+    // A voice event does not start by itself (an external one does), so the
+    // linked one is activated at the start time whether or not anything else
+    // differs.
+    await this.activateLinked(event, guild, native, want);
     const diff = diffNativeFields(native, want);
     if (Object.keys(diff).length === 0) {
       await this.syncCover(event, guild, native.id);
@@ -684,8 +813,17 @@ export class NativeEventSync {
 
     // The conversion back to an external event is its own patch, so a Discord
     // rejection of it can never block the name/description/time updates.
-    const converting = diff.entityType !== undefined;
+    const restoring = diff.entityType !== undefined;
     const startPast = active || want.start.getTime() <= Date.now();
+
+    // Linking the room is a type change too, but only for a native event that
+    // has not started: a running event keeps its type (and its end/text sync).
+    const linking = diff.linkChannel !== undefined && !startPast;
+    // Edits to the type the native event has now (name, description, start,
+    // end, location) never depend on a link/restore patch succeeding.
+    const external =
+      native.entityType === GuildScheduledEventEntityType.External;
+    const endDiffers = native.scheduledEndTimestamp !== want.end.getTime();
 
     // Safe patch. A start in the past cannot be moved, and location metadata
     // is only valid on a native event that is already external.
@@ -695,11 +833,13 @@ export class NativeEventSync {
     if (!startPast) {
       if (diff.scheduledStartTime)
         safe.scheduledStartTime = diff.scheduledStartTime;
-      if (diff.scheduledEndTime && !converting) {
+      // The restore patch carries its own end time.
+      if (diff.scheduledEndTime && endDiffers && !restoring) {
         safe.scheduledEndTime = diff.scheduledEndTime;
       }
     }
-    if (!converting && diff.entityMetadata) {
+    // Location is only valid on an event that is already external.
+    if (external && diff.entityMetadata) {
       safe.entityMetadata = diff.entityMetadata;
     }
     if (Object.keys(safe).length > 0) {
@@ -731,7 +871,7 @@ export class NativeEventSync {
     // is logged once per event and the next scan tries again.
     if (
       startPast &&
-      !converting &&
+      endDiffers &&
       diff.scheduledEndTime &&
       want.end.getTime() > Date.now()
     ) {
@@ -752,7 +892,15 @@ export class NativeEventSync {
       }
     }
 
-    if (converting && !startPast) {
+    if (linking) {
+      await this.linkRoom(
+        event,
+        guild,
+        native.id,
+        diff.linkChannel as string,
+        want,
+      );
+    } else if (restoring && !startPast) {
       // The complete conversion goes in one patch: type, no channel, location
       // and end time. Failure is logged and retried next scan, nothing more.
       try {
@@ -776,6 +924,108 @@ export class NativeEventSync {
     }
 
     await this.syncCover(event, guild, native.id);
+  }
+
+  /**
+   * Start a linked voice event at its start time (#1421). Claimed, unverified:
+   * a voice scheduled event stays Scheduled until it is set Active, unlike an
+   * external one that starts at its start time, so members would miss the
+   * native start notification. Only for a Scheduled native event that is a
+   * voice event in the row's STORED main room (`event.channelId`), and never
+   * before the start time. Deliberately not tied to the wanted room or to
+   * `events.native.link_room`: the wanted room is replaced by the native
+   * event's own channel when the room lookup fails transiently (that must not
+   * authorise starting an event an admin moved elsewhere), and the switch only
+   * controls creating NEW links, so an existing link that the switch left
+   * behind past its start (a started event is never converted back) must still
+   * be started or it would never start. Best-effort: never throws, warned once
+   * per event, retried each scan until the native event is Active.
+   */
+  private async activateLinked(
+    event: IEvent,
+    guild: Guild,
+    native: GuildScheduledEvent,
+    want: NativeEventFields,
+  ): Promise<void> {
+    if (native.status !== GuildScheduledEventStatus.Scheduled) return;
+    if (
+      !event.channelId ||
+      native.entityType !== GuildScheduledEventEntityType.Voice ||
+      native.channelId !== event.channelId
+    ) {
+      return;
+    }
+    if (want.start.getTime() > Date.now()) return;
+    const key = `activate:${String(event._id)}`;
+    try {
+      await this.callApi(
+        () =>
+          guild.scheduledEvents.edit(native.id, {
+            status: GuildScheduledEventStatus.Active,
+            reason: "KoolBot event mirror: start linked voice event",
+          }),
+        "start guild scheduled event",
+        { quiet: true },
+      );
+      this.warned.delete(key);
+      logger.info(
+        `Native events: started linked event ${sanitizeForLog(native.id)}`,
+      );
+    } catch (error) {
+      this.warnOnce(
+        key,
+        `Native events: could not start linked event ${sanitizeForLog(native.id)} (retried each scan): ${sanitizeForLog(String(error))}`,
+      );
+    }
+  }
+
+  /**
+   * Point the native event at the event's main voice room (#1421). Its own
+   * patch (like the restore), so a Discord rejection can never block the
+   * name/description/time updates, and never throws: it is logged (once per
+   * event and room, not every scan) and retried on the next scan.
+   *
+   * Sent as one PATCH: `entity_type` Voice, `channel_id`, `entity_metadata`
+   * null and the end time. discord.js's `edit()` drops a null `entityMetadata`
+   * (it only forwards a truthy one), so the REST route is called directly to
+   * send the null the typings give a voice event.
+   */
+  private async linkRoom(
+    event: IEvent,
+    guild: Guild,
+    nativeId: string,
+    channelId: string,
+    want: NativeEventFields,
+  ): Promise<void> {
+    const key = `link:${String(event._id)}:${channelId}`;
+    try {
+      await this.callApi(
+        () =>
+          guild.client.rest.patch(
+            Routes.guildScheduledEvent(guild.id, nativeId),
+            {
+              body: {
+                entity_type: GuildScheduledEventEntityType.Voice,
+                channel_id: channelId,
+                entity_metadata: null,
+                scheduled_end_time: want.end.toISOString(),
+              },
+              reason: "KoolBot event mirror: link voice room",
+            },
+          ),
+        "link guild scheduled event to voice room",
+        { quiet: true },
+      );
+      this.warned.delete(key);
+      logger.info(
+        `Native events: linked ${sanitizeForLog(nativeId)} to the voice room of event ${sanitizeForLog(String(event._id))}`,
+      );
+    } catch (error) {
+      this.warnOnce(
+        key,
+        `Native events: could not link ${sanitizeForLog(nativeId)} to its voice room (the text stays; retried each scan): ${sanitizeForLog(String(error))}`,
+      );
+    }
   }
 
   // ---------------------------------------------------------------
@@ -974,7 +1224,11 @@ function isUnknownNative(error: unknown): boolean {
 /** Route REST work through `CommandManager.makeDiscordApiCall` (timeout +
  * backoff). Imported lazily to keep this module cheap to load and to test. */
 function defaultApiCaller(client: Client): ApiCaller {
-  return async <T>(call: () => Promise<T>, name: string): Promise<T> => {
+  return async <T>(
+    call: () => Promise<T>,
+    name: string,
+    opts?: { quiet?: boolean },
+  ): Promise<T> => {
     const { CommandManager } = await import("./command-manager.js");
     // Creates are not safe to replay after a timeout; everything else is.
     const retryOnTimeout = !name.startsWith("create ");
@@ -984,6 +1238,7 @@ function defaultApiCaller(client: Client): ApiCaller {
       30000,
       3,
       retryOnTimeout,
+      !opts?.quiet,
     );
   };
 }

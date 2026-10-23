@@ -203,6 +203,9 @@ export class CommandManager {
     // cancel the original request, so retrying a timed-out call could run it
     // twice. Rate-limit retries are unaffected (a 429 means it did not run).
     retryOnTimeout: boolean = true,
+    // Pass false when the caller reports a failure itself (best-effort calls
+    // that would otherwise log the same error every scan).
+    logErrors: boolean = true,
   ): Promise<T> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       // Track the timeout handle so it can be cleared once the race settles —
@@ -276,7 +279,9 @@ export class CommandManager {
             await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
           }
         } else {
-          logger.error(`❌ Discord API error for ${operationName}:`, error);
+          if (logErrors) {
+            logger.error(`❌ Discord API error for ${operationName}:`, error);
+          }
           throw error;
         }
 
