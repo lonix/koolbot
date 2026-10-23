@@ -1850,8 +1850,8 @@ series keeps the setup (not members) for its next occurrences (see **Repeating e
 lists the presets that are switched on for the server (see the next section),
 plus Custom, which is always available.
 
-**Group presets** (`/admin/events/presets`, #1200; linked from the Groups section
-and the Events page) is the server-wide preset library. It lists the built-in
+**Group presets** (`/admin/events/presets`, #1200; linked from the Groups section,
+the Events page and the **Event presets** entry under Features in the sidebar) is the server-wide preset library. It lists the built-in
 presets and the server's own, each with an on/off switch: **any** preset,
 built-in or your own, can be switched off for the whole server, and the event
 form then no longer offers it. Built-ins stay in code and cannot be edited, but

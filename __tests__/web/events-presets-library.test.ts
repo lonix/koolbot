@@ -299,6 +299,14 @@ function adminPage(
 }
 
 describe("the presets admin page (#1200)", () => {
+  it("marks Event presets, not Events, as the current page in the sidebar (#1298)", () => {
+    const html = adminPage();
+    expect(html).toContain(
+      '<a href="/admin/events/presets" aria-current="page">Event presets</a>',
+    );
+    expect(html).not.toMatch(/<a href="\/admin\/events"[^>]*aria-current/);
+  });
+
   it("lists built-in and own presets, each with a switch that posts the wanted state", () => {
     const doc = new JSDOM(adminPage()).window.document;
     const forms = Array.from(

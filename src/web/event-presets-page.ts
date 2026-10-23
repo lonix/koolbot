@@ -504,7 +504,7 @@ ${scriptTag(EVENT_PRESETS_SCRIPT)}
 
   return renderAdminPage({
     title: "Group presets",
-    active: "/admin/events",
+    active: "/admin/events/presets",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
