@@ -1197,14 +1197,17 @@ number.
 - `stepper: true` (for ranges under about 30 values: `events.groups.default_count`, `events.groups.max_count`,
   `lfg.default_size`) renders minus and plus buttons around the same bounded box. The buttons are hidden until the script
   runs and are disabled at the bounds, so without JavaScript the box is all there is.
-- `presets: [...]` (`events.reminder_minutes`, `events.create_lead_minutes`, `events.channel_grace_minutes`,
-  `events.default_duration_minutes`, `lfg.expiry_minutes`) renders a radio group of the common values with a last
+- `presets: [...]` (the selected duration keys configured with presets; the retention keys and
+  `moderation.raid.join_threshold`, a count of 2 to 1000, stay the box) renders a radio group of the common values with a last
   _Custom…_ and the bounded box. `presetZeroLabel` names a `0` that is not a number (_Off_, _None_). The group posts
   `preset_<key>`, the box `value_<key>`; `readSettingField` takes a ticked numeric preset, and otherwise the box
   (Custom…, or no radio at all), so a browser without JavaScript posts what a script would, with the box shown next to
   _Custom…_. With the script the box is hidden unless _Custom…_ is ticked, and ticking a preset copies it into the box.
   Presets are a shortcut, not a whitelist: any number inside `min`..`max` still saves, so a stored `45` shows under
   _Custom…_ and posts unchanged. A drift test checks that every preset is in range and that the default is one.
+  Each preset is labelled in the largest unit that divides it evenly (`30 s`, `5 min`, `1 h`, `7 days`) and the key's own
+  unit (`seconds`, `minutes`, `hours`, `days`, from the end of its name) follows the box, so _Custom…_ reads "45 minutes".
+  No key needs a `step` field, so none was added.
 
 **Pickers for known value sets (#1426).** A free-text setting whose values are a known set declares a `format` in
 `settingsMetadata`, and the Settings page, the feature cards and the wizard render it as a picker
