@@ -9,7 +9,7 @@ import { JSDOM } from "jsdom";
 import {
   DEFAULT_COLOUR_SWATCH,
   validateSettingFormat,
-  EMOJI_FORMAT_MAX_CHARS,
+  CHANNEL_AFFIX_MAX_CHARS,
 } from "../../src/utils/setting-formats.js";
 import {
   settingsMetadata,
@@ -90,26 +90,44 @@ describe("validateSettingFormat", () => {
     }
   });
 
-  it("emoji: at most four code points, no control characters, no custom emoji markup", () => {
-    expect(EMOJI_FORMAT_MAX_CHARS).toBe(4);
-    for (const good of ["", "🎮", "🎮 | ", "🇳🇴", "⚔️", "[VC]"]) {
-      expect(validateSettingFormat("emoji", good).ok).toBe(true);
+  it("affix: free text up to 32 code points, no control characters, no custom emoji markup (#1435)", () => {
+    expect(CHANNEL_AFFIX_MAX_CHARS).toBe(32);
+    for (const good of [
+      "",
+      "🎮",
+      "🎮 | ",
+      "🇳🇴",
+      "⚔️",
+      "[VC]",
+      "Looking for group: ",
+      "This is ",
+      "'s last resort",
+      "👨‍👩‍👧‍👦",
+      "x".repeat(32),
+    ]) {
+      expect(validateSettingFormat("affix", good).ok).toBe(true);
     }
     for (const bad of [
-      "abcde",
-      "👨‍👩‍👧‍👦",
+      "x".repeat(33),
+      "🎮".repeat(33),
       "a\nb",
       "\u0007",
       "<:wave:123456789012345678>",
       "<a:x:1>",
     ]) {
-      expect(validateSettingFormat("emoji", bad).ok).toBe(false);
+      expect(validateSettingFormat("affix", bad).ok).toBe(false);
     }
+  });
+
+  it("the longest prefix, name and suffix still fit a Discord channel name", () => {
+    // `<prefix> <display name><suffix>`, display name at most 32.
+    const longest = CHANNEL_AFFIX_MAX_CHARS * 2 + 1 + 32;
+    expect(longest).toBeLessThanOrEqual(100);
   });
 
   it("every emoji the picker offers passes the server rule", () => {
     for (const { emoji } of pickableMarkers()) {
-      expect(validateSettingFormat("emoji", emoji).ok).toBe(true);
+      expect(validateSettingFormat("affix", emoji).ok).toBe(true);
     }
   });
 
@@ -129,10 +147,10 @@ describe("the picker keys", () => {
         .filter(([, m]) => m.format)
         .map(([k, m]) => [k, m.format, m.type]),
     ).toEqual([
-      ["voicechannels.channel.prefix", "emoji", "string"],
-      ["voicechannels.channel.suffix", "emoji", "string"],
+      ["voicechannels.channel.prefix", "affix", "string"],
+      ["voicechannels.channel.suffix", "affix", "string"],
       ["events.timezone", "timezone", "string"],
-      ["events.channel_prefix", "emoji", "string"],
+      ["events.channel_prefix", "affix", "string"],
       ["reactionroles.group_role_colour", "colour", "string"],
     ]);
   });
@@ -142,9 +160,27 @@ describe("the picker keys", () => {
     expect(coerceConfigValue("reactionroles.group_role_colour", "red").ok).toBe(
       false,
     );
-    expect(coerceConfigValue("voicechannels.channel.suffix", "abcde").ok).toBe(
-      false,
-    );
+    expect(
+      coerceConfigValue("voicechannels.channel.suffix", "x".repeat(33)).ok,
+    ).toBe(false);
+    // Shortcode resolution turns the `:wave:` of custom emoji markup into an
+    // emoji, so the markup is refused as submitted.
+    expect(
+      coerceConfigValue(
+        "voicechannels.channel.prefix",
+        "<:wave:123456789012345678>",
+      ).ok,
+    ).toBe(false);
+    expect(
+      coerceConfigValue("events.channel_prefix", "<a:wave:123456789012345678>")
+        .ok,
+    ).toBe(false);
+  });
+
+  it("accept long free text, as the owner decided (#1435)", () => {
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", "Looking for group: "),
+    ).toEqual({ ok: true, value: "Looking for group: " });
   });
 
   it("accept the stored value unchanged, and nothing else invalid", () => {
@@ -159,28 +195,41 @@ describe("the picker keys", () => {
     ).toBe(false);
   });
 
-  it("keeps an unchanged stored prefix that holds a shortcode, which resolves to a longer text", () => {
+  it("keeps a stored prefix over the cap unchanged, and refuses a different over-cap one (#1435)", () => {
+    const legacy = "x".repeat(40);
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", legacy, legacy),
+    ).toEqual({ ok: true, value: legacy });
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", "y".repeat(40), legacy)
+        .ok,
+    ).toBe(false);
+  });
+
+  it("keeps an affix posted exactly as stored, shortcode and all (#1438)", () => {
     const stored = "[VC] :sparkles:";
     expect(
       coerceConfigValue("voicechannels.channel.prefix", stored, stored),
     ).toEqual({ ok: true, value: stored });
+    // A changed value is resolved and checked after resolution.
+    expect(
+      coerceConfigValue("voicechannels.channel.prefix", stored, "other"),
+    ).toEqual({ ok: true, value: "[VC] ✨" });
   });
 
-  it("still checks a changed value that holds a shortcode after it is resolved", () => {
-    expect(
-      coerceConfigValue("voicechannels.channel.prefix", "[VC]:sparkles:", "x")
-        .ok,
-    ).toBe(false);
+  it("measures a value after its shortcodes are resolved", () => {
     expect(
       coerceConfigValue(
         "voicechannels.channel.prefix",
-        "[VC] :sparkles:!",
-        "[VC] :sparkles:",
+        `${"x".repeat(31)}:sparkles:`,
+      ),
+    ).toEqual({ ok: true, value: `${"x".repeat(31)}✨` });
+    expect(
+      coerceConfigValue(
+        "voicechannels.channel.prefix",
+        `${"x".repeat(32)}:sparkles:`,
       ).ok,
     ).toBe(false);
-    expect(
-      coerceConfigValue("voicechannels.channel.prefix", ":sparkles:", "x"),
-    ).toEqual({ ok: true, value: "✨" });
   });
 
   it("an import or adoption plan (no stored value) stays strict", () => {
@@ -767,7 +816,7 @@ describe("renderEmojiField and the shared emoji picker", () => {
   it("the picker's list only holds values the server accepts", () => {
     for (const { emoji } of pickableMarkers()) {
       expect(Array.from(emoji).length).toBeLessThanOrEqual(
-        EMOJI_FORMAT_MAX_CHARS,
+        CHANNEL_AFFIX_MAX_CHARS,
       );
     }
   });

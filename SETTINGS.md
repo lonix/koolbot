@@ -1637,8 +1637,10 @@ rather than clamping it:
   server knows (or empty for the server's), `reactionroles.group_role_colour`
   must be `#RRGGBB` (or empty for Discord's default), and
   `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and
-  `events.channel_prefix` take at most 4 characters, with no control characters
-  and no custom server emoji. A value that is already stored keeps saving
+  `events.channel_prefix` are free text (#1435: they are not emoji-only, so
+  `Looking for group:` or `'s last resort` are fine) of at most 32 characters, with no control characters and no custom server emoji.
+  32 is what lets the longest prefix, a 32-character display name and the longest suffix (32 + 1 + 32 + 32 = 97) still fit Discord's
+  100-character channel name. A value that is already stored keeps saving
   unchanged even if it fails the check, so it never blocks the rest of its
   section; a YAML import is checked strictly.
 - Cron keys must parse as a valid cron expression.

@@ -7,7 +7,7 @@
  * over real form inputs, so they work without JavaScript and the server checks
  * every value again (`utils/setting-formats.ts`). A stored value that the
  * picker cannot produce (an old custom timezone, a colour that is not
- * `#RRGGBB`, a prefix that is not an emoji) is shown as it is and posts
+ * `#RRGGBB`, a prefix that is now too long) is shown as it is and posts
  * unchanged, so opening and saving a page never rewrites it.
  */
 
@@ -218,8 +218,9 @@ export interface EmojiFieldOptions extends ControlAttrs {
 }
 
 /**
- * An emoji field for a channel-name prefix or suffix: the text box stays, so a
- * value such as `🎮 | ` can still be typed, and a button beside it opens the
+ * A free-text field for a channel-name prefix or suffix (#1435: not emoji-only,
+ * so `Looking for group: ` is fine) with an emoji grid as a convenience: the
+ * text box is the field, and a button beside it opens the
  * same grid the event group marker uses (`groupRowsScript` in
  * `event-group-form.ts`, which enhances every `[data-emoji-field]`). Picking an
  * emoji puts it in the box, replacing what was there; the server checks the box
@@ -236,7 +237,7 @@ export function renderEmojiField(
     `<span data-marker-wrap class="kb-emoji-wrap">` +
     `<input type="text" class="kb-input" data-marker-input${attr("id", o.id)}` +
     `${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} name="${escapeHtml(name)}" ` +
-    `value="${escapeHtml(value)}" autocomplete="off" style="width:8rem"${o.disabled ? LOCK : ""}>` +
+    `value="${escapeHtml(value)}" autocomplete="off" style="width:14rem"${o.disabled ? LOCK : ""}>` +
     `<button type="button" data-marker-btn class="kb-emoji-btn" aria-haspopup="true" aria-expanded="false" ` +
     `aria-label="Choose an emoji for ${escapeHtml(o.label)}" hidden${o.disabled ? LOCK : ""}>😀</button>` +
     `</span></span>`

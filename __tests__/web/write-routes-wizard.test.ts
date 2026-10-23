@@ -289,12 +289,12 @@ describe("POST /wizard/step/:n", () => {
     });
   });
 
-  it("refuses a timezone and a prefix a picker could not produce (#1426)", async () => {
+  it("refuses a timezone and an over-cap prefix (#1426, #1435)", async () => {
     mockGetSession.mockReturnValue(wizardState(["events"]));
     const res = await harness.post("/wizard/step/0", {
       "value_events.enabled": "true",
       "value_events.timezone": "Mars/Olympus",
-      "value_events.channel_prefix": "abcde",
+      "value_events.channel_prefix": "x".repeat(33),
     });
     const recorded = mockAddConfiguration.mock.calls.map((c) => c[2]);
     expect(recorded).toContain("events.enabled");
@@ -303,6 +303,32 @@ describe("POST /wizard/step/:n", () => {
     expect(parseFlashRedirect(res.headers.get("location") ?? "").type).not.toBe(
       "ok",
     );
+  });
+
+  it("keeps an unchanged stored prefix with a shortcode in a wizard step (#1438)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["events"]));
+    mockConfigGet.mockImplementation((async (key: string) =>
+      key === "events.channel_prefix" ? "[VC] :sparkles:" : null) as never);
+    await harness.post("/wizard/step/0", {
+      "value_events.enabled": "true",
+      "value_events.channel_prefix": "[VC] :sparkles:",
+    });
+    const recorded = Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+    );
+    expect(recorded["events.channel_prefix"]).toBe("[VC] :sparkles:");
+  });
+
+  it("accepts a long text prefix in a wizard step (#1435)", async () => {
+    mockGetSession.mockReturnValue(wizardState(["events"]));
+    await harness.post("/wizard/step/0", {
+      "value_events.enabled": "true",
+      "value_events.channel_prefix": "Looking for group: ",
+    });
+    const recorded = Object.fromEntries(
+      mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
+    );
+    expect(recorded["events.channel_prefix"]).toBe("Looking for group: ");
   });
 
   it("keeps a stored value a picker could not produce, and turns Use default into empty (#1426)", async () => {
