@@ -689,7 +689,9 @@ describe("Server scan tabs (#1323)", () => {
         },
       ]);
       expect(html).not.toContain("Removed bots with leftovers");
-      expect(html).not.toContain("/admin/adopt/cleanup");
+      expect(html).not.toContain("/admin/adopt/cleanup?bot=");
+      // Only the quiet entry point to the Discord-checked page remains.
+      expect(html).toContain("Check with Discord for leftovers");
     });
   });
   it("lists the integration role and overwrite channels on a bot card", () => {

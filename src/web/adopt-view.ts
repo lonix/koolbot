@@ -804,21 +804,25 @@ function renderCombined(report: BotReplacementReport): string {
 }
 
 function renderRemovedBots(scan: ServerScan, sampled: boolean): string {
-  const removed = findRemovedBotCandidates(scan);
-  if (removed.length === 0) return "";
   const q = sampled ? "&amp;sample=1" : "";
+  // Only what the scan itself settles. An account it cannot tell from a current
+  // member (a bare overwrite, a cached bot without a role) needs Discord to
+  // confirm that it is a bot that has left, which the cleanup page does.
+  const removed = findRemovedBotCandidates(scan).filter((c) => !c.needsCheck);
+  const check = `<p class="kb-muted">Removed a bot already? <a href="${CLEANUP_PAGE}${sampled ? "?sample=1" : ""}">Check with Discord for leftovers</a>.</p>`;
+  if (removed.length === 0) return check;
   const items = removed
     .map(
       (c) =>
         `<li><span class="kb-list__main"><strong>${escapeHtml(c.name)}</strong><span class="kb-muted">${escapeHtml(c.reason)} ${plural(c.overwriteChannels.length, "overwrite", "overwrites")} left.</span></span><a class="kb-btn kb-btn--sm" href="${CLEANUP_PAGE}?bot=${encodeURIComponent(c.userId)}${q}">Plan cleanup<span class="kb-visually-hidden"> for ${escapeHtml(c.name)}</span></a></li>`,
     )
     .join("");
-  return panel(
+  return `${panel(
     "Removed bots with leftovers",
     String(removed.length),
     `<p class="kb-muted">You removed these bots in Discord; KoolBot never does. A cleanup plan removes the permission overwrites they left behind. It is previewed, snapshotted and can be rolled back.</p><ul class="kb-list">${items}</ul>`,
     { id: "p-removed-bots" },
-  );
+  )}${check}`;
 }
 
 function renderBots(scan: ServerScan, sampled: boolean): string {

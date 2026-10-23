@@ -43,10 +43,12 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 const mockPlan = jest.fn<(...a: any[]) => any>();
 const mockRevalidator = jest.fn(() => async () => []);
 const mockFind = jest.fn<(...a: any[]) => any>();
+const mockConfirm = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/services/bot-removal-cleanup.js", () => ({
   planBotCleanup: mockPlan,
   cleanupRevalidator: mockRevalidator,
   findRemovedBotCandidates: mockFind,
+  confirmRemovedBots: mockConfirm,
   cleanupPlanIsApplicable: (p: {
     plan: { errors: unknown[]; operations: unknown[] };
     errors: unknown[];
@@ -85,6 +87,7 @@ const candidate = {
   userId: BOT,
   name: "Dyno <b>",
   evidence: "catalogue",
+  needsCheck: false,
   reason: "Its id is in the bot catalogue and it is no longer in the server.",
   overwriteChannels: [
     { id: CH, name: "general <i>" },
@@ -141,6 +144,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPlan.mockImplementation(async () => planned());
   mockFind.mockReturnValue([candidate]);
+  mockConfirm.mockImplementation(async (_g, list) => ({
+    candidates: list,
+    unchecked: 0,
+  }));
   mockScanGuild.mockResolvedValue({ channels: [] });
   mockStartApply.mockReturnValue({
     id: "11111111-1111-1111-1111-111111111111",
@@ -183,6 +190,15 @@ describe("GET /adopt/cleanup", () => {
     expect(html).toContain("Dyno &lt;b&gt;");
     expect(mockPlan).not.toHaveBeenCalled();
     expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("lists only what Discord confirmed and says when some could not be checked", async () => {
+    mockConfirm.mockResolvedValueOnce({ candidates: [], unchecked: 2 });
+    await mount();
+    const html = await (await harness.get("/adopt/cleanup")).text();
+    expect(mockConfirm).toHaveBeenCalled();
+    expect(html).not.toContain("Dyno &lt;b&gt;");
+    expect(html).toContain("2 account(s)");
   });
 
   it("shows the overwrites of the chosen bot, none ticked", async () => {

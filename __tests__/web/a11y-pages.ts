@@ -4478,6 +4478,7 @@ const REMOVED_BOT: RemovedBotCandidate = {
   userId: "155149108183695360",
   name: "Dyno",
   evidence: "catalogue",
+  needsCheck: false,
   reason: "Its id is in the bot catalogue and it is no longer in the server.",
   overwriteChannels: [
     { id: "11", name: "news" },

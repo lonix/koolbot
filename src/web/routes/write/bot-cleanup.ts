@@ -16,6 +16,7 @@ import logger from "../../../utils/logger.js";
 import {
   cleanupPlanIsApplicable,
   cleanupRevalidator,
+  confirmRemovedBots,
   findRemovedBotCandidates,
   planBotCleanup,
   type BotCleanupPlan,
@@ -112,6 +113,7 @@ export function createBotCleanupRouter(client: Client): Router {
       const selected = parseChannelIds(query);
       const guild = await fetchGuild(session.guildId);
       let candidates = null;
+      let unchecked = 0;
       let planned: BotCleanupPlan | null = null;
       let error: string | undefined;
       const approvedAt = new Date().toISOString();
@@ -128,13 +130,23 @@ export function createBotCleanupRouter(client: Client): Router {
               approvedAt,
               { sampleMessages: sampled },
             );
-            candidates = findRemovedBotCandidates(planned.scan);
+            const confirmed = await confirmRemovedBots(
+              guild,
+              findRemovedBotCandidates(planned.scan),
+            );
+            candidates = confirmed.candidates;
+            unchecked = confirmed.unchecked;
           } else {
             const scan = await ServerScanService.getInstance(client).scanGuild(
               guild,
               { adminUserId: session.discordUserId, sampleMessages: sampled },
             );
-            candidates = findRemovedBotCandidates(scan);
+            const confirmed = await confirmRemovedBots(
+              guild,
+              findRemovedBotCandidates(scan),
+            );
+            candidates = confirmed.candidates;
+            unchecked = confirmed.unchecked;
           }
         } catch (err) {
           logger.warn("bot cleanup: scan failed", err);
@@ -151,6 +163,7 @@ export function createBotCleanupRouter(client: Client): Router {
           navFeatureStatus: await navStatusForPage(),
           botId,
           candidates,
+          unchecked,
           planned,
           selectedChannelIds: planned ? planned.channelIds : selected,
           sampled,

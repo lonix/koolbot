@@ -38,6 +38,8 @@ export interface BotCleanupPageProps {
   botId: string | null;
   /** Candidates found in the scan; null when the server could not be read. */
   candidates: RemovedBotCandidate[] | null;
+  /** Accounts Discord could not be asked about, so they are not listed. */
+  unchecked?: number;
   /** The previewed plan, when the admin asked for one. */
   planned: BotCleanupPlan | null;
   /** The channels ticked for the preview (default: none). */
@@ -87,8 +89,14 @@ function claimHref(channelId: string, key: string): string {
 
 function renderPicker(p: BotCleanupPageProps): string {
   const list = p.candidates ?? [];
+  const note = p.unchecked
+    ? callout(
+        "warn",
+        `${p.unchecked} account(s) with a leftover overwrite could not be checked with Discord and are not listed. Reload to try again.`,
+      )
+    : "";
   if (list.length === 0) {
-    return `<div class="kb-empty"><p class="kb-empty__title">No removed bot found.</p><p class="kb-empty__text">Remove the bot in Discord first. Bots that were removed show up here when a permission overwrite, a catalogue id or a channel it wrote to still points at them. Turn on channel ownership hints on the <a href="/admin/adopt?sample=1&amp;tab=bots">Server scan</a> to also find channels a removed bot wrote to.</p></div>`;
+    return `${note}<div class="kb-empty"><p class="kb-empty__title">No removed bot found.</p><p class="kb-empty__text">Remove the bot in Discord first. Bots that were removed show up here when a permission overwrite, a catalogue id or a channel it wrote to still points at them. Turn on channel ownership hints on the <a href="/admin/adopt?sample=1&amp;tab=bots">Server scan</a> to also find channels a removed bot wrote to.</p></div>`;
   }
   const rows = list
     .map(
@@ -96,7 +104,7 @@ function renderPicker(p: BotCleanupPageProps): string {
         `<tr><th scope="row">${escapeHtml(c.name)}${c.name === c.userId ? "" : ` <span class="kb-muted kb-mono">${escapeHtml(c.userId)}</span>`}</th><td>${escapeHtml(c.reason)}</td><td>${c.overwriteChannels.length}</td><td><a class="kb-btn kb-btn--sm" href="${escapeHtml(cleanupHref(c.userId, p.sampled))}">Review cleanup<span class="kb-visually-hidden"> for ${escapeHtml(c.name)}</span></a></td></tr>`,
     )
     .join("");
-  return `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Removed bots with leftovers</caption><thead><tr><th scope="col">Bot</th><th scope="col">Why it is listed</th><th scope="col">Overwrites left</th><th scope="col"><span class="kb-visually-hidden">Action</span></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `${note}<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Removed bots with leftovers</caption><thead><tr><th scope="col">Bot</th><th scope="col">Why it is listed</th><th scope="col">Overwrites left</th><th scope="col"><span class="kb-visually-hidden">Action</span></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderChoice(c: RemovedBotCandidate, p: BotCleanupPageProps): string {

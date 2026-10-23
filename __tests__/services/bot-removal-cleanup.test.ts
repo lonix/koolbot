@@ -20,6 +20,7 @@ const fx = await import("../helpers/adoption-fixtures.js");
 const {
   cleanupPlanIsApplicable,
   cleanupRevalidator,
+  confirmRemovedBots,
   findRemovedBotCandidates,
   planBotCleanup,
   verifyBotRemoved,
@@ -63,6 +64,8 @@ function guildFor(
     bots?: ReadonlySet<string>;
     userFails?: boolean;
     memberFails?: boolean;
+    /** Cached as a member (no role), though Discord says it has left. */
+    goneButCached?: boolean;
   } = {},
 ) {
   h.useWorld(w);
@@ -71,6 +74,8 @@ function guildFor(
   guild.members.fetch = async (arg: string | { user: string }) => {
     const id = typeof arg === "string" ? arg : arg.user;
     // Only the cleanup's own membership check fails; the scan's reads work.
+    if (rest.goneButCached && id === REMOVED)
+      throw Object.assign(new Error("Unknown Member"), { code: 10007 });
     if (rest.memberFails && id === REMOVED) throw new Error("Discord is down");
     return fetchMember(id);
   };
@@ -130,31 +135,77 @@ describe("findRemovedBotCandidates", () => {
     expect(found.some((f) => f.userId === s.c.ids.jtcBot)).toBe(false);
   });
 
-  it("offers nothing when the bot is back in the server", async () => {
+  it("does not trust the member cache: a bot back in the server is only listed for a check", async () => {
     s.world.members.set(REMOVED, { bot: true, roleIds: [] });
     const found = findRemovedBotCandidates(await scanOf(s.world));
-    expect(found.some((f) => f.userId === REMOVED)).toBe(false);
+    const dyno = found.find((f) => f.userId === REMOVED)!;
+    expect(dyno.needsCheck).toBe(true);
+    const confirmed = await confirmRemovedBots(guildFor(s.world), found);
+    expect(confirmed.candidates.some((f) => f.userId === REMOVED)).toBe(false);
   });
 
-  it("finds a bot by the channel it wrote to when the ownership hint names it", async () => {
-    const scan = await scanOf(s.world);
-    const chan = scan.channels.find((c) => c.id === s.c.ids.vcChat)!;
-    chan.ownerHint = {
-      botId: "999999999999999999",
-      botTag: "Gone#0",
-      share: 0.9,
-    };
-    chan.usedBy = ["Quotes"];
-    const gone = findRemovedBotCandidates(scan).find(
-      (f) => f.userId === "999999999999999999",
-    )!;
-    expect(gone.evidence).toBe("owner-hint");
-    expect(gone.name).toBe("Gone#0");
-    expect(gone.overwriteChannels).toEqual([]);
-    expect(gone.ownedChannels.map((o) => o.id)).toEqual([s.c.ids.vcChat]);
-    expect(gone.boundFeatures).toEqual([
-      { channel: chan.name, features: ["Quotes"] },
-    ]);
+  it("still lists a removed bot whose cached member entry remains, once Discord confirms it left", async () => {
+    s.world.members.set(REMOVED, { bot: true, roleIds: [] });
+    const g = guildFor(s.world, { goneButCached: true });
+    const scan = await ServerScanService.getInstance(g.client).scanGuild(g, {
+      adminUserId: s.world.adminId,
+    });
+    expect(scan.bots.some((b) => b.userId === REMOVED)).toBe(true);
+    const found = findRemovedBotCandidates(scan);
+    expect(found.find((f) => f.userId === REMOVED)?.needsCheck).toBe(true);
+    const confirmed = await confirmRemovedBots(g, found);
+    const dyno = confirmed.candidates.find((f) => f.userId === REMOVED)!;
+    expect(dyno.needsCheck).toBe(false);
+    // And a direct preview reaches the forced lookup instead of "still present".
+    const planned = await planBotCleanup(
+      g,
+      s.world.adminId,
+      REMOVED,
+      [s.chA],
+      STAMP,
+    );
+    expect(planned.errors).toEqual([]);
+    expect(planned.plan.operations).toHaveLength(1);
+  });
+
+  it("does not list a current human member as a leftover, nor a person who left", async () => {
+    s.world.channels.get(s.chA)!.overwrites.push({
+      id: "h1",
+      type: "member",
+      allow: VIEW,
+      deny: "0",
+    });
+    const found = findRemovedBotCandidates(await scanOf(s.world));
+    // The scan alone cannot tell h1 (still here) from h-gone: both need a check.
+    expect(found.find((f) => f.userId === "h1")?.needsCheck).toBe(true);
+    const confirmed = await confirmRemovedBots(guildFor(s.world), found);
+    expect(confirmed.candidates.map((f) => f.userId)).toEqual([REMOVED]);
+    expect(confirmed.unchecked).toBe(0);
+  });
+
+  it("never offers an account whose check fails, and counts it", async () => {
+    for (const id of ["h2", "h3"]) {
+      s.world.channels.get(s.chB)!.overwrites.push({
+        id,
+        type: "member",
+        allow: VIEW,
+        deny: "0",
+      });
+    }
+    const found = findRemovedBotCandidates(await scanOf(s.world));
+    const unsure = found.filter((f) => f.needsCheck).length;
+    expect(unsure).toBe(3);
+    // The catalogue bot needs no check; every unsure account is dropped.
+    const down = await confirmRemovedBots(
+      guildFor(s.world, { userFails: true }),
+      found,
+    );
+    expect(down.candidates.map((f) => f.userId)).toEqual([REMOVED]);
+    expect(down.unchecked).toBe(unsure);
+    // Past the limit an account is not listed either.
+    const capped = await confirmRemovedBots(guildFor(s.world), found, 1);
+    expect(capped.candidates.map((f) => f.userId)).toEqual([REMOVED]);
+    expect(capped.unchecked).toBe(unsure - 1);
   });
 });
 

@@ -47,6 +47,12 @@ export interface RemovedBotCandidate {
   userId: string;
   name: string;
   evidence: CandidateEvidence;
+  /**
+   * The scan cannot tell whether the account is still in the server: it is
+   * only a cached member without an integration role, or a bare overwrite.
+   * `confirmRemovedBots` asks Discord before such a candidate is listed.
+   */
+  needsCheck: boolean;
   /** Why this id is offered, in plain words. */
   reason: string;
   /** Channels with a member overwrite for the removed bot (what the plan removes). */
@@ -68,16 +74,29 @@ const EVIDENCE_RANK: Record<CandidateEvidence, number> = {
  * member overwrite for an account that is not a current bot is only offered
  * when something says it was a bot: a catalogue id, or a channel it mostly
  * wrote to (ownership hints). A bare leftover overwrite could equally belong to
- * a person who left, so it is offered last and only when the member list is
- * readable; the plan still asks Discord whether the account is a bot.
- * Pure: reads nothing but the scan.
+ * a person who left or who is still here, so it is offered last.
+ *
+ * The scan is not proof of membership. Only the bot itself, the owner, the
+ * admin and a bot with an integration role (Discord removes that role when the
+ * bot leaves) count as present. A bot that is merely in the member cache may
+ * have left (the cache is not refreshed), and an account named by an
+ * overwrite may be a current member; both are `needsCheck` and are only listed
+ * after `confirmRemovedBots` has asked Discord. Pure: reads only the scan.
  */
 export function findRemovedBotCandidates(
   scan: ServerScan,
   catalog: readonly KnownBot[] = KNOWN_BOTS,
 ): RemovedBotCandidate[] {
+  const roleProven = scan.bots.filter(
+    (b) => b.isKoolBot || b.roleIds.length > 0,
+  );
+  const cachedOnly = new Set(
+    scan.bots
+      .filter((b) => !b.isKoolBot && b.roleIds.length === 0)
+      .map((b) => b.userId),
+  );
   const present = new Set<string>([
-    ...scan.bots.map((b) => b.userId),
+    ...roleProven.map((b) => b.userId),
     scan.scanned.botUserId,
     scan.scanned.ownerId,
     scan.scanned.adminUserId,
@@ -132,12 +151,13 @@ export function findRemovedBotCandidates(
       userId,
       name: known?.name ?? tag ?? userId,
       evidence,
+      needsCheck: evidence === "orphan-overwrite" || cachedOnly.has(userId),
       reason:
         evidence === "catalogue"
           ? "Its id is in the bot catalogue and it is no longer in the server."
           : evidence === "owner-hint"
             ? "It wrote most recent messages in a channel and is no longer in the server."
-            : "A permission overwrite names an account that is not in the server. It may be a bot or a person who left: the plan checks with Discord and refuses anything that is not a bot.",
+            : "A permission overwrite names an account Discord says is a bot that has left the server.",
       overwriteChannels,
       ownedChannels,
       boundFeatures,
@@ -225,6 +245,46 @@ export async function verifyBotRemoved(
   }
 }
 
+/** Most accounts one page asks Discord about; the rest are not listed. */
+export const CONFIRM_LIMIT = 25;
+
+/**
+ * Ask Discord about every candidate the scan could not settle (`needsCheck`).
+ * One that is still a member, or is not a bot, is dropped. One that is
+ * confirmed removed is kept. One whose read fails (or beyond the limit) is
+ * dropped and counted in `unchecked`: it is never offered on the strength of
+ * the cache.
+ */
+export async function confirmRemovedBots(
+  guild: Guild,
+  candidates: readonly RemovedBotCandidate[],
+  limit: number = CONFIRM_LIMIT,
+): Promise<{ candidates: RemovedBotCandidate[]; unchecked: number }> {
+  const out: RemovedBotCandidate[] = [];
+  let unchecked = 0;
+  let asked = 0;
+  for (const c of candidates) {
+    if (!c.needsCheck) {
+      out.push(c);
+      continue;
+    }
+    if (asked >= limit) {
+      unchecked += 1;
+      continue;
+    }
+    asked += 1;
+    const problem = await verifyBotRemoved(guild, c.userId);
+    if (problem === null) out.push({ ...c, needsCheck: false });
+    else if (
+      problem.code !== "bot-still-present" &&
+      problem.code !== "not-a-bot"
+    ) {
+      unchecked += 1;
+    }
+  }
+  return { candidates: out, unchecked };
+}
+
 export interface BotCleanupPlan {
   scan: ServerScan;
   candidate: RemovedBotCandidate | null;
@@ -264,7 +324,10 @@ export async function planBotCleanup(
   const candidate =
     findRemovedBotCandidates(scan).find((c) => c.userId === botId) ?? null;
   const selected: string[] = [];
-  if (!candidate && scan.bots.some((b) => b.userId === botId)) {
+  if (
+    !candidate &&
+    scan.bots.some((b) => b.userId === botId && b.roleIds.length > 0)
+  ) {
     errors.push({
       code: "bot-still-present",
       message:
@@ -310,7 +373,10 @@ export async function planBotCleanup(
             approvedAt,
           })),
         },
-    { approverId: adminUserId },
+    // A bot only the member cache still remembers counts as "another bot" to
+    // the planner. Every removal here targets the account verified gone above,
+    // so lifting that guard opens nothing else.
+    { approverId: adminUserId, allowOtherBotOverwrites: true },
   );
   if (candidate) {
     for (const b of candidate.boundFeatures) {
