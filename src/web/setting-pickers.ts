@@ -12,7 +12,9 @@
  * unchanged, so opening and saving a page never rewrites it.
  */
 
+import { channelKindIcons } from "./discord-labels.js";
 import { escapeHtml } from "./html.js";
+import { ICONS } from "./icons.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { renderSegmented, type ControlAttrs } from "./setting-controls.js";
 import { listSupportedTimezones } from "../utils/timezone.js";
@@ -125,6 +127,120 @@ export const TIMEZONE_SELECT_SCRIPT =
   "s.addEventListener('keydown',function(e){if(e.key!=='Enter')return;e.preventDefault();var f=run();" +
   "if(f&&s.value.trim()){sel.value=f.value;sel.dispatchEvent(new Event('change',{bubbles:true}));sel.focus()}})}" +
   "Array.prototype.forEach.call(document.querySelectorAll('[data-tz]'),init)" +
+  "})();";
+
+// ---------- Channel, category and role picker (#1394) ----------
+
+const PICKER_CHEVRON = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS["chevron-down"]}</svg>`;
+const PICKER_CHECK = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.check}</svg>`;
+
+/**
+ * Turns each `[data-picker]` (a `span.kb-picker` around a native `select`, see
+ * `renderSettingControl`) into the searchable combobox of the design manual
+ * (Picker): a trigger showing the current value as a mention, and a popover
+ * with a search box, a group header per `optgroup`, an icon in front of each
+ * row, the category muted on the right and a check on the selected row.
+ *
+ * The select stays the field. It keeps its name, its options and its value, so
+ * without JavaScript it is what posts, and with JavaScript choosing a row sets
+ * it and fires `input` and `change` (the save bar counts that like any select).
+ * It is moved out of sight with `kb-visually-hidden`, not `hidden`, because the
+ * save bar treats a `[hidden]` control as inactive; focusing it (a label click)
+ * moves focus to the trigger. Searching only hides rows in the popover: no
+ * option is ever disabled or removed, so a selected id that the search hides, or
+ * that is no longer in the list (a `missing` entry in `data-picker-meta`), still posts
+ * exactly as stored.
+ *
+ * Typing `#` lists text channels, `#!` voice channels and `@` roles, as in
+ * Discord's composer; the rest of the text filters by name and category.
+ * Keyboard: Enter or the arrow keys open the popover; arrows, Home and End move
+ * `aria-activedescendant` in the search box, Enter chooses, Escape closes and
+ * returns to the trigger, Tab leaves. Discard's `change` (and a cascade
+ * master's) re-reads the select, so the trigger never shows a stale value.
+ * Option text is only ever set as text, never as markup.
+ */
+export const CHANNEL_PICKER_SCRIPT =
+  "(function(){" +
+  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)};` +
+  "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0;" +
+  "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}" +
+  "function svg(h){var s=document.createElement('span');s.innerHTML=h;return s.firstChild}" +
+  "function read(sel,meta){var out=[],i,j,c,g;" +
+  "function one(o,group){var m=meta[out.length]||[];return{value:o.value,kind:m[0]||'',name:m[1]||o.textContent,cat:m[2]||'',group:group,text:o.textContent}}" +
+  "for(i=0;i<sel.children.length;i++){c=sel.children[i];" +
+  "if(c.tagName==='OPTGROUP'){g=c.getAttribute('label')||'';for(j=0;j<c.children.length;j++)out.push(one(c.children[j],g))}" +
+  "else out.push(one(c,''))}return out}" +
+  "function mention(it){var m=el('span','kb-mention'+(it.kind==='category'?' kb-mention--category':''));" +
+  "if(it.kind==='role')m.textContent='@'+it.name;" +
+  "else if(ICONS[it.kind]){m.appendChild(svg(ICONS[it.kind]));m.appendChild(document.createTextNode(it.name))}" +
+  "else m.textContent=it.kind==='missing'?it.text:it.name;return m}" +
+  "function parse(raw){var q=raw.trim(),k=null;" +
+  "if(q.indexOf('#!')===0){k='voice';q=q.slice(2)}else if(q.charAt(0)==='#'){k='text';q=q.slice(1)}else if(q.charAt(0)==='@'){k='role';q=q.slice(1)}" +
+  "return{k:k,q:q.trim().toLowerCase()}}" +
+  "function hit(it,p){if(p.k&&!KINDS[p.k][it.kind])return false;return !p.q||(it.name+' '+it.cat).toLowerCase().indexOf(p.q)!==-1}" +
+  "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
+  "var meta=[];try{meta=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[]}catch(err){}" +
+  "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
+  "var tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
+  "for(i=0;sel.labels&&i<sel.labels.length;i++){if(!sel.labels[i].id)sel.labels[i].id=tid+'-label'+i;labels.push(sel.labels[i].textContent.trim());ids.push(sel.labels[i].id)}" +
+  "var name=labels.join(' ')||sel.getAttribute('aria-label')||'Choose';" +
+  "var trig=el('button','kb-picker__trigger');trig.type='button';trig.id=tid;trig.setAttribute('aria-haspopup','listbox');trig.setAttribute('aria-expanded','false');" +
+  "trig.setAttribute('aria-controls',lid);" +
+  "if(ids.length){ids.push(tid);trig.setAttribute('aria-labelledby',ids.join(' '))}else trig.setAttribute('aria-label',name);" +
+  "var d=sel.getAttribute('aria-describedby');if(d)trig.setAttribute('aria-describedby',d);" +
+  "var pop=el('div','kb-picker__pop');pop.hidden=true;" +
+  "var lab=el('label','kb-picker__search'),inp=el('input');inp.type='search';inp.setAttribute('form','none');inp.autocomplete='off';inp.id=tid+'-search';" +
+  "inp.setAttribute('role','combobox');inp.setAttribute('aria-autocomplete','list');inp.setAttribute('aria-controls',lid);inp.setAttribute('aria-expanded','true');" +
+  "inp.setAttribute('aria-label','Search '+name);inp.placeholder='Search';lab.appendChild(inp);" +
+  "var ul=el('ul','kb-picker__list');ul.id=lid;ul.setAttribute('role','listbox');ul.setAttribute('aria-label',name);" +
+  "var st=el('p','kb-picker__hint');st.setAttribute('role','status');st.hidden=true;" +
+  "var hint=el('p','kb-picker__hint'),kinds={};for(i=0;i<items.length;i++)kinds[items[i].kind]=1;" +
+  "var parts=['Arrow keys move, Enter chooses, Esc closes.'];" +
+  "if(kinds.voice||kinds.stage)parts.unshift('#! voice channels');if(kinds.text||kinds.announcement||kinds.forum||kinds.thread)parts.unshift('# text channels');" +
+  "if(kinds.role)parts.unshift('@ roles');hint.textContent=(parts.length>1?'Type '+parts.slice(0,-1).join(', ')+'. ':'')+parts[parts.length-1];" +
+  "for(i=0;i<items.length;i++){var it=items[i],li;" +
+  "if(it.group&&it.group!==lastGroup){li=el('li','kb-picker__group',it.group);li.setAttribute('role','presentation');ul.appendChild(li);heads.push({el:li,group:it.group})}" +
+  "lastGroup=it.group;li=el('li','kb-picker__opt');li.id=lid+'-'+i;li.setAttribute('role','option');li.setAttribute('data-i',String(i));" +
+  "li.appendChild(mention(it));if(it.cat)li.appendChild(el('span','kb-picker__cat',it.cat));ul.appendChild(li);rows.push(li)}" +
+  "pop.appendChild(lab);pop.appendChild(ul);pop.appendChild(st);pop.appendChild(hint);" +
+  "sel.classList.add('kb-visually-hidden');sel.tabIndex=-1;sel.setAttribute('aria-hidden','true');" +
+  "sel.addEventListener('focus',function(){trig.focus()});" +
+  "box.classList.add('kb-picker--enhanced');box.appendChild(trig);box.appendChild(pop);" +
+  "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
+  "if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));trig.disabled=sel.disabled;" +
+  "if(sel.getAttribute('aria-invalid')==='true')trig.setAttribute('aria-invalid','true');else trig.removeAttribute('aria-invalid');" +
+  "for(var k=0;k<rows.length;k++){var on=k===sel.selectedIndex,c=rows[k].querySelector('svg[data-check]');" +
+  "rows[k].setAttribute('aria-selected',on?'true':'false');" +
+  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}}" +
+  "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
+  "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
+  "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);" +
+  "if(rows[k].scrollIntoView)rows[k].scrollIntoView({block:'nearest'})}" +
+  "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
+  "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
+  "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
+  "var on=vis.indexOf(sel.selectedIndex);setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
+  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):''}" +
+  "function close(back){if(!open)return;open=false;pop.hidden=true;trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
+  "function show(){if(open||sel.disabled)return;open=true;pop.hidden=false;trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
+  "function choose(k){if(k<0||!items[k])return;if(sel.selectedIndex!==k){sel.selectedIndex=k;" +
+  "sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}paint();close(true)}" +
+  "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
+  "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
+  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();show()}});" +
+  "inp.addEventListener('input',filter);" +
+  "inp.addEventListener('keydown',function(e){var m=e.key;" +
+  "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
+  "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
+  "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(false)});" +
+  "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
+  "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
+  "document.addEventListener('click',function(e){if(open&&!box.contains(e.target))close(false)});" +
+  "box.addEventListener('focusout',function(e){if(open&&e.relatedTarget&&!box.contains(e.relatedTarget))close(false)});" +
+  "sel.addEventListener('change',paint);" +
+  "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',paint)});" +
+  "paint()}" +
+  "Array.prototype.forEach.call(document.querySelectorAll('[data-picker]'),init)" +
   "})();";
 
 // ---------- Colour ----------

@@ -322,6 +322,12 @@ A searchable list for choosing channels, categories and roles, modelled on Disco
 - Multi-select (roles) shows each chosen role as a Mention in the trigger.
 - No JavaScript: a native `select` with `optgroup`s and the category in the option text.
 
+**Built on the select (#1394).** The Settings page renders `span.kb-picker[data-picker]` around the native single `select` and the page script adds
+`button.kb-picker__trigger` and the popover (`kb-picker--enhanced`). The select stays the field: it posts the stored id and is moved out of sight
+with `kb-visually-hidden` (never `hidden`, which the save bar treats as inactive). Searching only hides rows in the popover; no option is removed or
+disabled, and a stored id that is no longer listed stays selected and posts as stored. Keys: arrows, Home and End move `aria-activedescendant` in the
+search box, Enter chooses, Escape closes. Multi-select lists still use the native select.
+
 ### DiscordEmbed
 
 A sketch of how a KoolBot message reads in Discord, to design and review embeds with. It is drawn with this system's surfaces, not Discord's own interface.

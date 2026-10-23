@@ -12,6 +12,7 @@ import {
 } from "./event-when.js";
 import {
   channelGroupLabel,
+  channelKindOf,
   channelMention,
   channelText,
   missingText,
@@ -561,40 +562,61 @@ function buildOptionsHtml(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
   includeNoneRow: boolean,
+  meta?: PickerMeta[],
 ): string {
   const parts: string[] = [];
   if (includeNoneRow) {
     const noneSel = selected.size === 0 ? " selected" : "";
     parts.push(`<option value=""${noneSel}>(none)</option>`);
+    meta?.push(null);
   }
   const knownIds = new Set(options.map((o) => o.id));
   // Channels are grouped the way Discord's autocomplete groups them (#1303):
-  // one <optgroup> per kind, in the order the kinds first appear.
-  const groups = new Map<string, string[]>();
+  // one <optgroup> per kind, in the order the kinds first appear. `meta` is
+  // filled in the order the options end up in the markup.
+  const groups = new Map<string, Array<{ html: string; meta: PickerMeta }>>();
   for (const opt of options) {
     const sel = selected.has(opt.id) ? " selected" : "";
     const html = `<option value="${escapeHtml(opt.id)}"${sel}>${escapeHtml(optionText(opt))}</option>`;
     if (!isChannelOption(opt)) {
       parts.push(html);
+      meta?.push(["role", opt.name, ""]);
       continue;
     }
     const group = channelGroupLabel(opt.type);
+    const entry = { html, meta: pickerMetaOf(opt) };
     const members = groups.get(group);
-    if (members) members.push(html);
-    else groups.set(group, [html]);
+    if (members) members.push(entry);
+    else groups.set(group, [entry]);
   }
   for (const [label, members] of groups) {
     parts.push(
-      `<optgroup label="${escapeHtml(label)}">${members.join("")}</optgroup>`,
+      `<optgroup label="${escapeHtml(label)}">${members.map((m) => m.html).join("")}</optgroup>`,
     );
+    for (const m of members) meta?.push(m.meta);
   }
   for (const id of selected) {
     if (id === "" || knownIds.has(id)) continue;
     parts.push(
       `<option value="${escapeHtml(id)}" selected>${escapeHtml(missingText(id))}</option>`,
     );
+    meta?.push(["missing", id, ""]);
   }
   return parts.join("");
+}
+
+/**
+ * What the searchable picker script needs about one option (#1394): its kind
+ * (the icon and the `#` / `#!` / `@` filter), bare name and category, or null
+ * for the "(none)" row. It travels on the wrapper (`data-picker-meta`, one
+ * entry per option in markup order) so the options stay what a browser
+ * without JavaScript posts and shows.
+ */
+type PickerMeta = [kind: string, name: string, category: string] | null;
+
+function pickerMetaOf(o: ChannelOption): PickerMeta {
+  const kind = channelKindOf(o.type) ?? "missing";
+  return [kind, o.name, kind === "category" ? "" : (o.parentName ?? "")];
 }
 
 function isChannelOption(o: ChannelOption | RoleOption): o is ChannelOption {
@@ -1198,10 +1220,15 @@ function renderControlInput(
           ? pickers.categoryChannels
           : rolesFor(r, pickers);
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
+    // `span.kb-picker` is where `CHANNEL_PICKER_SCRIPT` puts its search box
+    // (#1394); without JavaScript this is just the select it wraps.
+    const meta: PickerMeta[] = [];
+    const optionsHtml = buildOptionsHtml(options, selected, true, meta);
     return (
+      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, true) +
-      `</select>`
+      optionsHtml +
+      `</select></span>`
     );
   }
   if (r.type === "channel_list" || r.type === "role_list") {

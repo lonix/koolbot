@@ -16,6 +16,7 @@ import {
   DURATION_PRESETS_SCRIPT,
   STEPPER_SCRIPT,
   TIMEZONE_SELECT_SCRIPT,
+  CHANNEL_PICKER_SCRIPT,
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
@@ -1036,6 +1037,9 @@ export function renderAdminPage(opts: AdminPageOptions): string {
       : []),
     ...(opts.body.includes("data-colour")
       ? [`${scriptTag(COLOUR_INPUT_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-picker")
+      ? [`${scriptTag(CHANNEL_PICKER_SCRIPT)}`]
       : []),
     ...(opts.body.includes("data-stepper")
       ? [`${scriptTag(STEPPER_SCRIPT)}`]

@@ -146,6 +146,19 @@ export function channelGroupLabel(type: ChannelType | number): string {
   return kind ? KINDS[kind].group : "Other";
 }
 
+/**
+ * The icon of every channel kind as `svg` markup (accessible name = the kind),
+ * for the searchable picker script, which builds its rows in the browser from
+ * the wrapper's `data-picker-meta` (#1394).
+ */
+export function channelKindIcons(): Record<ChannelKind, string> {
+  const out = {} as Record<ChannelKind, string>;
+  for (const kind of Object.keys(KINDS) as ChannelKind[]) {
+    out[kind] = svg(KINDS[kind].icon, KINDS[kind].label);
+  }
+  return out;
+}
+
 // ---- HTML ------------------------------------------------------------------
 
 /**
