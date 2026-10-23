@@ -4015,7 +4015,6 @@ export function userPages(): A11yPage[] {
         "/me/timezone",
         renderUserTimezoneBody({
           csrfToken: COMMON.csrfToken,
-          zones: ["Europe/Stockholm", "Europe/London", "UTC"],
           selected: "Europe/Stockholm",
           serverTimezone: "UTC",
         }),

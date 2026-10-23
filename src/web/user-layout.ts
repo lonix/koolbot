@@ -13,6 +13,10 @@ import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
+import {
+  TIMEZONE_SELECT_SCRIPT,
+  renderTimezoneSelect,
+} from "./setting-pickers.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import type { MeSurfaceFlags } from "./me-surfaces.js";
 import {
@@ -1131,44 +1135,10 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
 
 export interface TimezonePageBodyOptions {
   csrfToken: string;
-  /** Sorted IANA zone identifiers (from `Intl.supportedValuesOf`). */
-  zones: string[];
   /** Currently stored zone, or null when unset (server default). */
   selected: string | null;
   /** Host/server timezone shown as the fallback in the preview. */
   serverTimezone: string;
-}
-
-function renderTimezoneOptions(
-  zones: string[],
-  selected: string | null,
-): string {
-  // Group by the region prefix ("Europe/Berlin" → "Europe"); zones with
-  // no "/" (e.g. "UTC") land under "Other".
-  const groups = new Map<string, string[]>();
-  for (const zone of zones) {
-    const slash = zone.indexOf("/");
-    const region = slash === -1 ? "Other" : zone.slice(0, slash);
-    const list = groups.get(region) ?? [];
-    list.push(zone);
-    groups.set(region, list);
-  }
-  const regions = [...groups.keys()].sort();
-  const optgroups = regions
-    .map((region) => {
-      const opts = (groups.get(region) ?? [])
-        .map((zone) => {
-          const sel = zone === selected ? " selected" : "";
-          return `<option value="${escapeHtml(zone)}"${sel}>${escapeHtml(zone)}</option>`;
-        })
-        .join("");
-      return `<optgroup label="${escapeHtml(region)}">${opts}</optgroup>`;
-    })
-    .join("");
-  const serverSelected = selected === null ? " selected" : "";
-  return (
-    `<option value=""${serverSelected}>— Server default —</option>` + optgroups
-  );
 }
 
 // Live client-side preview: shows the current time in the selected zone
@@ -1184,7 +1154,7 @@ const TZ_PREVIEW_SCRIPT =
   "sel.addEventListener('change',render);render();setInterval(render,1000)})();";
 
 /**
- * Inner HTML for `GET /me/timezone` (#524). One `<select>`, one POST.
+ * Inner HTML for `GET /me/timezone` (#524). One searchable `<select>`, one POST.
  * Choosing "Server default" and saving clears the stored preference.
  */
 export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
@@ -1195,7 +1165,9 @@ export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
     '<label for="tz-select"><strong>Your timezone</strong></label>',
-    `<div style="margin-top:.5rem"><select id="tz-select" name="timezone" class="tz-select">${renderTimezoneOptions(opts.zones, opts.selected)}</select></div>`,
+    // The shared searchable select (#1436): "Server default" posts "" to clear,
+    // a stored zone the runtime no longer lists stays selected as "(custom)".
+    `<div style="margin-top:.5rem">${renderTimezoneSelect("timezone", opts.selected ?? "", { id: "tz-select", defaultZone: opts.serverTimezone, blank: true, firstLabel: "Server default" })}</div>`,
     `<div class="tz-preview">Current time: <span id="tz-now" class="now" data-server-tz="${escapeHtml(opts.serverTimezone)}">—</span></div>`,
     '<div class="form-actions">',
     '<button class="btn" type="submit">Save timezone</button>',
@@ -1203,6 +1175,7 @@ export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
     "</div>",
     "</div>",
     "</form>",
+    `${scriptTag(TIMEZONE_SELECT_SCRIPT)}`,
     `${scriptTag(TZ_PREVIEW_SCRIPT)}`,
   ].join("");
 }

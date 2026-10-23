@@ -250,7 +250,6 @@ describe("copy does not name a feature that is off (#1292)", () => {
     expect(overview({ rewindEnabled: false })).not.toMatch(/rewind/i);
     const page = renderUserTimezoneBody({
       csrfToken: "c",
-      zones: ["Europe/Oslo"],
       selected: null,
       serverTimezone: "UTC",
     });
