@@ -21,6 +21,7 @@ import {
   renderDurationPresets,
   renderStepper,
 } from "../../src/web/setting-pickers.js";
+import { renderNumberInput } from "../../src/web/setting-controls.js";
 import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
 import { NUMBER_INPUT_SCRIPT } from "../../src/web/number-input.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
@@ -897,6 +898,22 @@ describe("a stored out-of-range number in the browser (#1437)", () => {
   it("lets the unchanged stored value through on load", () => {
     expect(validityFor(stepper(999), null)).toBe(true);
     expect(validityFor(durationHtml(999999), null)).toBe(true);
+  });
+
+  it("lets an unchanged stored negative below the minimum through, script and native pattern", () => {
+    expect(validityFor(stepper(-1), null)).toBe(true);
+    expect(validityFor(durationHtml(-1), null)).toBe(true);
+    expect(
+      validityFor(
+        renderNumberInput(`value_${STEP_KEY}`, -1, STEP_BOUNDS, { id: "n" }),
+        null,
+      ),
+    ).toBe(true);
+    // Changed negatives are still refused, and a default-positive box keeps
+    // its digits-only pattern.
+    expect(validityFor(stepper(-1), "-2")).toBe(false);
+    expect(validityFor(stepper(5), "-1")).toBe(false);
+    expect(stepper(5)).toContain('pattern="[0-9]*"');
   });
 
   it("still rejects a changed out-of-range value, and accepts it again when restored", () => {
