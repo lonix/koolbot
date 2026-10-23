@@ -59,6 +59,8 @@ import {
   renderWizardStepPage,
   renderWizardConfirmPage,
   readSettingField,
+  wantsKeptColour,
+  KEEP_READ_FAILED_REASON,
   settingValueFieldName,
 } from "../../admin-views.js";
 import {
@@ -606,7 +608,18 @@ export function createWizardRouter(client: Client): Router {
         const current = await ConfigService.getInstance()
           .get(k)
           .catch(() => undefined);
-        const raw = readSettingField(body, k, current);
+        // Keep resolves against a strict read (see the Settings save): a
+        // failed read must not stage the swatch placeholder instead.
+        let kept = current;
+        if (wantsKeptColour(body, k)) {
+          try {
+            kept = await ConfigService.getInstance().getStringStrict(k);
+          } catch {
+            dropped.push({ key: k, reason: KEEP_READ_FAILED_REASON });
+            continue;
+          }
+        }
+        const raw = readSettingField(body, k, kept);
         const coerced = coerceConfigValue(k, raw, current);
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.

@@ -42,6 +42,14 @@ const mockConfigGetBooleanStrict = jest.fn(
     return v === true || v === "true";
   },
 );
+// Delegates to mockConfigGet like the strict boolean read; a test makes it
+// reject to simulate a failed database read while `get` still returns null.
+const mockConfigGetStringStrict = jest.fn(
+  async (key: string, defaultValue: string = ""): Promise<string> => {
+    const v = await mockConfigGet(key);
+    return typeof v === "string" ? v : defaultValue;
+  },
+);
 const mockConfigSet = jest.fn<() => Promise<void>>();
 const mockConfigDelete = jest.fn<() => Promise<void>>();
 const mockConfigGetAll =
@@ -97,6 +105,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
     getInstance: (): unknown => ({
       get: mockConfigGet,
       getBooleanStrict: mockConfigGetBooleanStrict,
+      getStringStrict: mockConfigGetStringStrict,
       set: mockConfigSet,
       delete: mockConfigDelete,
       getAll: mockConfigGetAll,
@@ -2456,6 +2465,68 @@ describe("picker settings (#1426)", () => {
     ]);
     await harness.post("/settings/save-section", body);
     expect(written().get("reactionroles.group_role_colour")).toBe("");
+  });
+
+  it("refuses a Keep colour save when the stored value cannot be read, writing nothing", async () => {
+    // `get()` swallows the failure and returns null; the strict read rejects.
+    mockConfigGet.mockResolvedValue(null);
+    mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+    const body = await postedBody([
+      pickerRow("reactionroles.group_role_colour", "red"),
+    ]);
+    expect(body["keep_reactionroles.group_role_colour"]).toEqual(["true"]);
+    const res = await harness.post("/settings/save-section", body);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("reactionroles.group_role_colour");
+    expect(flash.msg).toContain("could not be read");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("keeps a stored legacy colour when the strict read succeeds", async () => {
+    stored({ "reactionroles.group_role_colour": "red" });
+    const body = await postedBody([
+      pickerRow("reactionroles.group_role_colour", "red"),
+    ]);
+    const res = await harness.post("/settings/save-section", body);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(written().get("reactionroles.group_role_colour")).toBe("red");
+    expect(mockConfigGetStringStrict).toHaveBeenCalledWith(
+      "reactionroles.group_role_colour",
+    );
+  });
+
+  it("does not read strictly for Use default or a swatch pick", async () => {
+    mockConfigGetStringStrict.mockRejectedValue(new Error("db down"));
+    try {
+      stored({ "reactionroles.group_role_colour": "red" });
+      const useDefault = await postedBody(
+        [pickerRow("reactionroles.group_role_colour", "red")],
+        (form) => {
+          (
+            form.querySelector("[data-colour-default]") as HTMLInputElement
+          ).checked = true;
+        },
+      );
+      await harness.post("/settings/save-section", useDefault);
+      expect(written().get("reactionroles.group_role_colour")).toBe("");
+      mockConfigSet.mockClear();
+      const swatch = await harness.post("/settings/save-section", {
+        category: "reactionroles",
+        keys: ["reactionroles.group_role_colour"],
+        "value_reactionroles.group_role_colour": "#A95F55",
+      });
+      expect(parseFlashRedirect(swatch.headers.get("location")).type).toBe(
+        "ok",
+      );
+      expect(written().get("reactionroles.group_role_colour")).toBe("#a95f55");
+    } finally {
+      mockConfigGetStringStrict.mockReset();
+      mockConfigGetStringStrict.mockImplementation(async (key, d = "") => {
+        const v = await mockConfigGet(key);
+        return typeof v === "string" ? v : d;
+      });
+    }
   });
 
   it("keeps every legacy value unchanged when the section is saved", async () => {

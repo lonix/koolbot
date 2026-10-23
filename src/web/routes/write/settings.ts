@@ -25,6 +25,8 @@ import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import {
   renderImportDiffPage,
   readSettingField,
+  wantsKeptColour,
+  KEEP_READ_FAILED_REASON,
   settingValueFieldName,
   type ImportDiffRow,
 } from "../../admin-views.js";
@@ -517,7 +519,18 @@ export function createSettingsRouter(client: Client): Router {
         const stored = await ConfigService.getInstance()
           .get(key)
           .catch(() => undefined);
-        const raw = readSettingField(body, key, stored);
+        // Keep resolves against a strict read: `get()` returns null when the
+        // database read fails, which would fall through to the swatch.
+        let kept = stored;
+        if (wantsKeptColour(body, key)) {
+          try {
+            kept = await ConfigService.getInstance().getStringStrict(key);
+          } catch {
+            rejected.push({ key, reason: KEEP_READ_FAILED_REASON });
+            continue;
+          }
+        }
+        const raw = readSettingField(body, key, kept);
         const r = coerceConfigValue(key, raw, stored);
         if (r.ok) {
           coerced.push({ key, value: r.value });
