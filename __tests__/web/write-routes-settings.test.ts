@@ -2786,6 +2786,18 @@ describe("import keeps a stored value that fails its check (#1437)", () => {
     expect(mockConfigSet).not.toHaveBeenCalled();
   });
 
+  it("compares with the value read, not only Mongo rows, so an env-held legacy value is no change", async () => {
+    // The strict read sees the legacy value; getAll() has no row for it.
+    store({ [COLOUR]: "red" });
+    mockConfigGetAll.mockResolvedValue([]);
+    const res = await harness.post("/settings/import", {
+      yaml: `${COLOUR}: red`,
+    });
+    const html = await res.text();
+    expect(html).toContain("no change");
+    expect(html).not.toContain("tag tag-diff-change");
+  });
+
   it("previews a key whose stored value cannot be read as rejected", async () => {
     mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
     const res = await harness.post("/settings/import", {

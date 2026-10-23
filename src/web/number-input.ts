@@ -5,7 +5,9 @@
  * previous value stays. Whatever still gets in (autofill, a browser without
  * `beforeinput`) is kept as typed and flagged with a custom validity message,
  * as is a value outside `data-min`..`data-max`, so the form will not submit.
- * Rewriting input would turn `-1` into `1` or `1e3` into `13`, which the server
+ * A value still equal to the one the page rendered (`defaultValue`, the stored
+ * value) skips the range check, as the server keeps a stored number unchanged
+ * (#1437); a changed value is checked as before. Rewriting input would turn `-1` into `1` or `1e3` into `13`, which the server
  * could then no longer refuse. A leading minus is allowed only when
  * `data-min` is negative. Delegated, so rows added later behave the same.
  */
@@ -17,6 +19,7 @@ export const NUMBER_INPUT_SCRIPT =
   "var lo=bound(el,'data-min'),hi=bound(el,'data-max');" +
   "var range='Enter a whole number from '+(lo===null?'any':lo)+' to '+(hi===null?'any':hi)+'.';" +
   "if(!shape(el).test(v)){el.setCustomValidity('Digits only. '+range);return}" +
+  "if(v===el.defaultValue)return;" +
   "var n=Number(v);" +
   "if((lo!==null&&n<lo)||(hi!==null&&n>hi))el.setCustomValidity(range)}" +
   "function target(e){var el=e.target;" +

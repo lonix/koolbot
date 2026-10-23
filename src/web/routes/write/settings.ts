@@ -920,9 +920,15 @@ export function createSettingsRouter(client: Client): Router {
           });
           continue;
         }
-        const before = currentByKey.has(key)
-          ? currentByKey.get(key)
-          : defaultConfig[key as keyof typeof defaultConfig];
+        // The value read for the check is also what the row compares with, so
+        // a legacy value that comes from the environment (no Mongo row) shows
+        // as "no change" rather than a change from the schema default.
+        const before =
+          baseline.current !== undefined
+            ? baseline.current
+            : currentByKey.has(key)
+              ? currentByKey.get(key)
+              : defaultConfig[key as keyof typeof defaultConfig];
         rows.push({
           key,
           status: "pending",
