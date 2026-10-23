@@ -251,7 +251,7 @@ describe("GET /adopt/cleanup", () => {
     const form = /<form method="get"[^>]*>([^]*?)<\/form>/.exec(choice)![1]!;
     const fields = [...form.matchAll(/name="(\w+)" value="([^"]*)"/g)];
     // Hidden fields as posted; the admin ticks one channel box.
-    const q = new URLSearchParams(
+    const q = new globalThis.URLSearchParams(
       fields.filter((m) => m[1] !== "ch").map((m) => [m[1]!, m[2]!]),
     );
     q.append("ch", CH);
