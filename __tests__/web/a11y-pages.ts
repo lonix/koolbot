@@ -3721,6 +3721,47 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me edit event (cover: none yet)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          cover: { kind: "editable", hasCover: false, series: false },
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (cover set on a series, admin link)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          cover: { kind: "editable", hasCover: true, series: true },
+          adminEventsHref: "/admin/events",
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (cover unavailable)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          cover: {
+            kind: "unavailable",
+            reason:
+              "This event was adopted from an existing Discord event, so its cover is managed in Discord and KoolBot never changes it.",
+          },
+        }),
+      ),
+    },
+    {
       name: "/me birthday",
       html: shell(
         "Birthday",

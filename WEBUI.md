@@ -2932,6 +2932,17 @@ control: they keep the cover they have in Discord and KoolBot never changes it.
 A one-off event whose Discord event was deleted by someone is no longer mirrored,
 so it shows a note instead of a control; a recurring series stays editable for its
 future occurrences.
+A host who is not an administrator sets, replaces and removes the cover on the event's edit page
+(`/me/events/<id>/host/edit`, #1393), in a panel of its own below the details form (it is not part of
+"Save changes"). It posts to `/me/events/<id>/host/cover` and `/cover/remove`, behind the same gate as the
+other host routes (CSRF, the host scope, creator or administrator), and uses the same storage and checks
+(2 MB, PNG, JPEG or GIF by signature, the same refusal of adopted, no longer mirrored and finished events;
+refused too while Events is off). The cover is shared by the whole series, so choosing "this occurrence" in
+the details form does not limit it; the panel says so. Audited as `event.host.cover-set` and
+`event.host.cover-remove`. A saved or removed cover reloads the page, so if the details form has unsaved changes the page
+asks before uploading or removing; a rejected upload shows its message next to the control and never reloads.
+An administrator sees the same panel plus a link to Events in the admin area.
+No new stored field: the member data export and reset are unchanged (the image holds no member data).
 Events scheduled without a cover behave exactly as before.
 
 Its **Settings** card (#975) edits every `events.*` key in place: the enable
