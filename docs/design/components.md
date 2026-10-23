@@ -180,9 +180,10 @@ Numbers that cannot be wrong (#1304): a stepper for small ranges, preset duratio
   A stored value outside the range is shown as it is, never clamped on render.
 - Presets are `div.kb-duration[data-duration]` → a `kb-segmented` radiogroup (`name` `preset_<key>`, `Custom…` last, `aria-labelledby` the row
   name), `span[data-duration-custom]` with the box (`name` `value_<key>`; no `pattern` and not `required` in the markup, the script makes it
-  required while Custom… is ticked; `aria-label` "Custom <setting> in minutes") and
-  `span.kb-unit`. A numeric preset wins over the box; `custom` or no radio means the box. The script hides the wrapper unless Custom… is
-  ticked and copies a ticked preset into the box, so a hidden box never holds a number that blocks the submit. No JavaScript: the box stays
+  required while Custom… is ticked; `aria-label` "Custom <setting> in <unit>") and
+  `span.kb-unit` (inside the wrapper, so the unit shows only next to the box). Preset labels carry the unit in the largest whole
+  step: `30 s`, `5 min`, `1 h`, `1 day`, `7 days`. A numeric preset wins over the box; `custom` or no radio means the box. The script hides the wrapper unless
+  Custom… is ticked and copies a ticked preset into the box, so a hidden box never holds a number that blocks the submit. No JavaScript: the box stays
   visible next to Custom….
 - A stored number that is not a preset ticks Custom… and shows in the box; presets never act as a whitelist.
 

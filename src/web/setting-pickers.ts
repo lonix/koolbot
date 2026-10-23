@@ -307,6 +307,35 @@ export interface DurationPresetOptions extends ControlAttrs {
 
 const PRESET_VALUE = /^\d+$/;
 
+const UNIT_SECONDS: Record<string, number> = {
+  seconds: 1,
+  minutes: 60,
+  hours: 3600,
+  days: 86400,
+};
+const UNIT_STEPS: Array<[string, string, number]> = [
+  ["s", "s", 1],
+  ["min", "min", 60],
+  ["h", "h", 3600],
+  ["day", "days", 86400],
+];
+
+/**
+ * A preset as people read it: "30 s", "5 min", "1 h", "2 days". The number is in
+ * the key's unit (`seconds`, `minutes`, `hours`, `days`) and is shown in the
+ * largest unit that divides it evenly, so `3600` seconds reads "1 h" and `10080`
+ * minutes "7 days". An unknown unit shows the bare number.
+ */
+export function formatPresetLabel(n: number, unit: string): string {
+  const base = UNIT_SECONDS[unit];
+  if (!base || n === 0) return String(n);
+  const total = n * base;
+  let pick = UNIT_STEPS[0];
+  for (const step of UNIT_STEPS) if (total % step[2] === 0) pick = step;
+  const v = total / pick[2];
+  return `${v} ${v === 1 ? pick[0] : pick[1]}`;
+}
+
 /**
  * The posted preset radio value when it names one of `presets`, else null.
  * The save handlers use it: a numeric preset wins over the box, anything else
@@ -359,7 +388,8 @@ export function renderDurationPresets(
   const options = [
     ...presets.map((n) => ({
       value: String(n),
-      label: n === 0 && o.zeroLabel ? o.zeroLabel : String(n),
+      label:
+        n === 0 && o.zeroLabel ? o.zeroLabel : formatPresetLabel(n, o.unit),
     })),
     { value: "custom", label: "Custom…" },
   ];
@@ -377,7 +407,7 @@ export function renderDurationPresets(
     `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
     ` inputmode="numeric" autocomplete="off" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
     ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
-    `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
+    `<span class="kb-unit">${escapeHtml(o.unit)}</span></span>` +
     `</div>`
   );
 }
