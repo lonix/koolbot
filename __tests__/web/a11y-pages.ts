@@ -1146,7 +1146,7 @@ export function adminPages(): A11yPage[] {
                 description:
                   "Prefix prepended to the event title when naming the temporary voice channel.",
                 category: "events",
-                format: "emoji",
+                format: "affix",
               },
             ],
           },
@@ -1178,7 +1178,7 @@ export function adminPages(): A11yPage[] {
                 description:
                   "Prefix prepended to dynamically created voice channel names.",
                 category: "voicechannels",
-                format: "emoji",
+                format: "affix",
               },
               {
                 key: "voicechannels.channel.suffix",
@@ -1189,7 +1189,7 @@ export function adminPages(): A11yPage[] {
                 description:
                   "Suffix appended to dynamically created voice channel names.",
                 category: "voicechannels",
-                format: "emoji",
+                format: "affix",
               },
             ],
           },
@@ -1230,7 +1230,7 @@ export function adminPages(): A11yPage[] {
                 description:
                   "Prefix prepended to the event title when naming the temporary voice channel.",
                 category: "events",
-                format: "emoji",
+                format: "affix",
               },
             ],
           },
@@ -1262,7 +1262,7 @@ export function adminPages(): A11yPage[] {
                 description:
                   "Suffix appended to dynamically created voice channel names.",
                 category: "voicechannels",
-                format: "emoji",
+                format: "affix",
               },
             ],
           },
@@ -1675,7 +1675,7 @@ export function adminPages(): A11yPage[] {
             description:
               "Prefix prepended to the event title when naming the temporary voice channel.",
             category: "events",
-            format: "emoji",
+            format: "affix",
           },
           {
             key: "events.enabled",
@@ -2432,7 +2432,7 @@ export function adminPages(): A11yPage[] {
             description:
               "Prefix prepended to dynamically created voice channel names.",
             category: "voicechannels",
-            format: "emoji",
+            format: "affix",
           },
           {
             key: "voicechannels.channel.suffix",
@@ -2443,7 +2443,7 @@ export function adminPages(): A11yPage[] {
             description:
               "Suffix appended to dynamically created voice channel names.",
             category: "voicechannels",
-            format: "emoji",
+            format: "affix",
           },
         ],
         categoryChannels: CATEGORIES,

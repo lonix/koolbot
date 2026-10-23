@@ -1,6 +1,7 @@
 /**
  * Server-side rules for the settings that the Web UI renders as pickers
- * (#1426): a timezone select, a colour input and an emoji picker.
+ * (#1426): a timezone select, a colour input and an emoji grid beside the text
+ * box of a channel name prefix or suffix.
  *
  * The pickers are a convenience, never the check: every value is validated
  * here again, so a crafted post gets the same refusal as a typo. The rules are
@@ -9,10 +10,11 @@
  *
  * - `timezone`: empty (the server zone) or a zone `Intl.DateTimeFormat` knows;
  * - `colour`: empty (Discord's default) or `#RRGGBB`;
- * - `emoji`: at most `EMOJI_FORMAT_MAX_CHARS` code points of text that can go in
- *   a Discord channel name, so no control characters and no custom emoji markup.
- *   It is not required to be an emoji: the server scan suggests prefixes such as
- *   `🎮 | `, which the picker cannot produce but the bot has always accepted.
+ * - `affix`: free text for a channel name prefix or suffix (#1435: the owner
+ *   decided these are not emoji-only, so `Looking for group: ` is fine), at
+ *   most `CHANNEL_AFFIX_MAX_CHARS` code points, with no control characters and
+ *   no custom emoji markup, neither of which can go in a Discord channel name.
+ *   The emoji grid beside the box is only a convenience.
  *
  * A value a picker cannot produce but that is already stored must keep saving
  * unchanged (an old custom timezone, a prefix that is not an emoji); that
@@ -21,10 +23,20 @@
 
 import { isValidTimezone } from "./timezone.js";
 
-export type SettingFormat = "timezone" | "colour" | "emoji";
+export type SettingFormat = "timezone" | "colour" | "affix";
 
-/** Longest emoji-format value, in code points (the event group marker limit). */
-export const EMOJI_FORMAT_MAX_CHARS = 4;
+/**
+ * Longest channel name prefix or suffix, in code points.
+ *
+ * Why 32: the room name is `<prefix> <display name><suffix>` and Discord caps a
+ * channel name at 100 characters, while a member's display name (nickname,
+ * global name or username) is at most 32. 32 + 1 + 32 + 32 = 97, so even a full
+ * length prefix, a full length name and a full length suffix still fit, with
+ * 3 to spare. Voice room creation does not trim the name (only a reserved-name
+ * collision does), so anything longer could make the create call fail for a
+ * member with a long name. Event channel names are cut to 100 anyway.
+ */
+export const CHANNEL_AFFIX_MAX_CHARS = 32;
 
 /**
  * Discord's default role colour. A colour input cannot be empty, so the swatch
@@ -42,7 +54,7 @@ export type FormatResult =
 
 /**
  * Validate `value` for `format`. Returns the value to store: timezone and
- * colour are trimmed and a colour is normalised to `#rrggbb`; an emoji value
+ * colour are trimmed and a colour is normalised to `#rrggbb`; an affix
  * is kept exactly as given.
  */
 export function validateSettingFormat(
@@ -74,17 +86,17 @@ export function validateSettingFormat(
       }
       return { ok: true, value: `#${match[1].toLowerCase()}` };
     }
-    case "emoji": {
-      if (Array.from(value).length > EMOJI_FORMAT_MAX_CHARS) {
+    case "affix": {
+      if (Array.from(value).length > CHANNEL_AFFIX_MAX_CHARS) {
         return {
           ok: false,
-          reason: `at most ${EMOJI_FORMAT_MAX_CHARS} characters, for example one emoji`,
+          reason: `at most ${CHANNEL_AFFIX_MAX_CHARS} characters, so the whole channel name fits Discord's 100`,
         };
       }
       if (CONTROL_CHARS.test(value)) {
         return { ok: false, reason: "control characters are not allowed" };
       }
-      if (CUSTOM_EMOJI.test(value)) {
+      if (hasCustomEmojiMarkup(value)) {
         return {
           ok: false,
           reason:
@@ -94,6 +106,16 @@ export function validateSettingFormat(
       return { ok: true, value };
     }
   }
+}
+
+/**
+ * True when `value` holds custom Discord emoji markup (`<:name:id>`). Shortcode
+ * resolution turns the `:name:` inside it into a Unicode emoji, which would
+ * leave text that no longer matches, so the write boundary checks the value as
+ * submitted too.
+ */
+export function hasCustomEmojiMarkup(value: string): boolean {
+  return CUSTOM_EMOJI.test(value);
 }
 
 /** True when `value` is valid for `format`. */

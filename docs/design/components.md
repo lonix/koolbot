@@ -206,7 +206,7 @@ The marker for an event group: a small button showing the current emoji that ope
 - Unicode only: Discord custom emoji cannot go in a channel name, so they are never offered, and neither is any emoji over the 4-code-point limit.
 - No JavaScript: the text input it replaces.
 - **In a setting row** (#1426: the channel name prefix and suffix, the event channel prefix) the field is `span.kb-emoji-field[data-emoji-field]` and the
-  text box stays visible, so a value like a marker with a separator after it can still be typed; the button
+  text box is the field itself: those settings are free text (#1435), so `Looking for group:` is fine and the grid is only a convenience; the button
   (`aria-label` "Choose an emoji for <setting>") opens the same grid,
   with "No emoji" in place of "No marker", and a pick replaces the value. The grid also offers the emoji people put in front of a channel name
   (🎮 🎧 🎤 🔊 📅 ✨ and a few more), so the defaults of those settings are in it.

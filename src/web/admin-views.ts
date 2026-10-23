@@ -1172,7 +1172,7 @@ function renderControlInput(
       },
     );
   }
-  if (r.format === "emoji") {
+  if (r.format === "affix") {
     return renderEmojiField(valueName, currentStr, {
       label: r.label,
       id: a11y.id,

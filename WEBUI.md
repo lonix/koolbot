@@ -1204,14 +1204,15 @@ until it is fixed.
   without JavaScript posts what a script would. The colour field keeps no state of its own: the swatch and both boxes are
   ordinary controls, so the save bar's baseline, commit on a saved response and Discard apply to them as to any control,
   and the small script only keeps them exclusive and disables the swatch while the section's feature is off.
-- `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and `events.channel_prefix` keep their text box (so a prefix with a
-  separator after the emoji, which the server scan suggests, can still be typed) and gain the event group marker's emoji grid beside it. A
-  pick replaces the value.
+- `voicechannels.channel.prefix`, `voicechannels.channel.suffix` and `events.channel_prefix` are free text (#1435: not emoji-only, so
+  `Looking for group:` or `'s last resort` are fine). The text box is the field, and the event group marker's emoji grid beside it is only
+  a convenience. A pick replaces the value.
 
 The server checks every value again in `coerceConfigValue` (`src/utils/setting-formats.ts`): a timezone must be one
-`Intl.DateTimeFormat` knows, a colour `#RRGGBB` (stored as `#rrggbb`), and a prefix or suffix at most 4 characters with no
-control characters and no custom Discord emoji markup. A value that is **already stored** is exempt: the Settings page and
-the wizard pass the stored value, so an old custom timezone, a colour that is not `#RRGGBB` or a prefix such as `[VC]`
+`Intl.DateTimeFormat` knows, a colour `#RRGGBB` (stored as `#rrggbb`), and a prefix or suffix
+at most 32 characters (so a 32-character display name plus both still fit Discord's 100-character channel name) with no control characters
+and no custom Discord emoji markup. A value that is **already stored** is exempt: the Settings page and
+the wizard pass the stored value, so an old custom timezone, a colour that is not `#RRGGBB` or a prefix over the 32-character cap
 still shows, posts unchanged and never blocks saving the rest of its section (a stored custom zone is shown as a
 selected "(custom)" option, a stored non-colour is kept by the ticked Keep box and noted under the control). Anything else
 that is not what a picker could produce is refused with a message. YAML import and adoption plans have no stored value

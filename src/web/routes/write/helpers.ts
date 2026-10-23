@@ -17,7 +17,10 @@ import {
   sanitizeCronExpression,
 } from "../../../utils/cron.js";
 import logger from "../../../utils/logger.js";
-import { validateSettingFormat } from "../../../utils/setting-formats.js";
+import {
+  hasCustomEmojiMarkup,
+  validateSettingFormat,
+} from "../../../utils/setting-formats.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import { grantedRoleIds } from "../../../services/role-grants.js";
@@ -635,7 +638,12 @@ export function coerceConfigValue(
   // exempt, whatever it is: refusing it would block the whole section save.
   const format = settingsMetadata[key as keyof typeof settingsMetadata]?.format;
   if (format) {
-    const checked = validateSettingFormat(format, value);
+    // Shortcode resolution above would turn the `:name:` of `<:name:id>` into a
+    // Unicode emoji and hide the markup, so an affix is also checked as submitted.
+    const checked =
+      format === "affix" && hasCustomEmojiMarkup(submitted)
+        ? validateSettingFormat(format, submitted)
+        : validateSettingFormat(format, value);
     if (checked.ok) {
       value = checked.value;
     } else if (

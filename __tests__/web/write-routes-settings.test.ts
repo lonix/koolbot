@@ -2415,18 +2415,82 @@ describe("picker settings (#1426)", () => {
     expect(written().get("reactionroles.group_role_colour")).toBe("#a95f55");
   });
 
-  it("refuses a prefix over four characters and custom emoji markup", async () => {
-    for (const bad of ["abcde", "<:wave:123456789012345678>", "a\u0000b"]) {
+  it("accepts a long text prefix and refuses over-cap, control and custom emoji values (#1435)", async () => {
+    for (const bad of [
+      "x".repeat(33),
+      "<:wave:123456789012345678>",
+      "a\u0000b",
+    ]) {
       expect((await setOne("voicechannels.channel.prefix", bad)).type).toBe(
         "err",
       );
     }
-    expect((await setOne("events.channel_prefix", "👨‍👩‍👧‍👦")).type).toBe("err");
-    expect(mockConfigSet).not.toHaveBeenCalled();
-    expect((await setOne("voicechannels.channel.prefix", "🎮 | ")).type).toBe(
-      "ok",
+    expect((await setOne("events.channel_prefix", "x".repeat(33))).type).toBe(
+      "err",
     );
-    expect(written().get("voicechannels.channel.prefix")).toBe("🎮 | ");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(
+      (await setOne("voicechannels.channel.prefix", "Looking for group: "))
+        .type,
+    ).toBe("ok");
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "Looking for group: ",
+    );
+    expect(
+      (await setOne("voicechannels.channel.suffix", "'s last resort")).type,
+    ).toBe("ok");
+    expect(written().get("voicechannels.channel.suffix")).toBe(
+      "'s last resort",
+    );
+  });
+
+  it("accepts a long text prefix in a section save and refuses an over-cap one (#1435)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix"],
+      "value_voicechannels.channel.prefix": "Looking for group: ",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
+      "err",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "Looking for group: ",
+    );
+    mockConfigSet.mockClear();
+    const bad = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix"],
+      "value_voicechannels.channel.prefix": "x".repeat(33),
+    });
+    expect(parseFlashRedirect(bad.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("applies a long text prefix from a YAML import and skips an over-cap one (#1435)", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: [
+        'voicechannels.channel.prefix: "Looking for group: "',
+        `events.channel_prefix: "${"x".repeat(33)}"`,
+      ].join("\n"),
+    });
+    expect(written().get("voicechannels.channel.prefix")).toBe(
+      "Looking for group: ",
+    );
+    expect(written().has("events.channel_prefix")).toBe(false);
+  });
+
+  it("keeps a stored legacy prefix that is over the cap when the section is saved (#1435)", async () => {
+    const legacy = "x".repeat(40);
+    stored({ "voicechannels.channel.prefix": legacy });
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      keys: ["voicechannels.channel.prefix"],
+      "value_voicechannels.channel.prefix": legacy,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
+      "err",
+    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(legacy);
   });
 
   it("turns a Use default tick into an empty colour, whatever the swatch holds", async () => {
@@ -2491,20 +2555,19 @@ describe("picker settings (#1426)", () => {
     expect(written().get("events.channel_prefix")).toBe("🎉");
   });
 
-  it("saves an unchanged stored prefix that holds a shortcode beside a sibling edit", async () => {
-    stored({ "voicechannels.channel.prefix": "[VC] :sparkles:" });
+  it("saves a stored over-cap prefix unchanged beside a sibling edit (#1435)", async () => {
+    const legacy = "x".repeat(40);
+    stored({ "voicechannels.channel.prefix": legacy });
     const res = await harness.post("/settings/save-section", {
       category: "voicechannels",
       keys: ["voicechannels.channel.prefix", "voicechannels.channel.suffix"],
-      "value_voicechannels.channel.prefix": "[VC] :sparkles:",
+      "value_voicechannels.channel.prefix": legacy,
       "value_voicechannels.channel.suffix": "🎉",
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe(
       "err",
     );
-    expect(written().get("voicechannels.channel.prefix")).toBe(
-      "[VC] :sparkles:",
-    );
+    expect(written().get("voicechannels.channel.prefix")).toBe(legacy);
     expect(written().get("voicechannels.channel.suffix")).toBe("🎉");
   });
 

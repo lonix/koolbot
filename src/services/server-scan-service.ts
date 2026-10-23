@@ -458,7 +458,7 @@ export async function readEffectiveConfig(): Promise<
 
 /** `value` when it fits a channel name prefix or suffix setting, else null. */
 function fitting(value: string | null): string | null {
-  return value !== null && fitsSettingFormat("emoji", value) ? value : null;
+  return value !== null && fitsSettingFormat("affix", value) ? value : null;
 }
 
 /** Infer how the server names its channels (#1019 naming detection). */

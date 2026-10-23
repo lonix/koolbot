@@ -739,7 +739,7 @@ export interface SettingMetadata {
    * The value set of a free-text `string` key, so the Web UI can offer a picker
    * and the write boundary can refuse a value the picker could not have
    * produced (#1426): `timezone` (IANA zone select), `colour` (`#RRGGBB`
-   * colour input) or `emoji` (emoji picker, at most 4 characters). A stored
+   * colour input) or `affix` (free text for a channel name prefix or suffix, at most 32 characters, with an emoji grid beside the box). A stored
    * value that fails the rule still displays and saves unchanged.
    */
   format?: SettingFormat;
@@ -1280,18 +1280,18 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
     description:
-      "Prefix prepended to dynamically created voice channel names. Emoji shortcodes like :video_game: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
+      "Free text prepended to dynamically created voice channel names, for example an emoji, or 'Looking for group:' (up to 32 characters). Emoji shortcodes like :video_game: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
-    format: "emoji",
+    format: "affix",
   },
   "voicechannels.channel.suffix": {
     label: "Per-user channel name suffix",
     description:
-      "Suffix appended to dynamically created voice channel names. Emoji shortcodes like :sparkles: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
+      "Free text appended to dynamically created voice channel names, for example 's room (up to 32 characters). Emoji shortcodes like :sparkles: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
-    format: "emoji",
+    format: "affix",
   },
   "voicechannels.cleanup.managed_only": {
     label: "Only clean up channels KoolBot created",
@@ -1950,10 +1950,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.channel_prefix": {
     label: "Event channel name prefix",
     description:
-      "Prefix prepended to the event title when naming the temporary voice channel.",
+      "Free text prepended to the event title when naming the temporary voice channel (up to 32 characters; an emoji is fine but not required).",
     category: "events",
     type: "string",
-    format: "emoji",
+    format: "affix",
   },
   "events.reminder_minutes": {
     label: "Reminder lead time (minutes)",
