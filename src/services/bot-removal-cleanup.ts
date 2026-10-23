@@ -11,7 +11,14 @@ import {
   type PlanIssue,
   type PlanOperation,
 } from "./server-adoption-planner.js";
-import { ServerScanService, type ServerScan } from "./server-scan-service.js";
+import {
+  ServerScanService,
+  type ScanChannel,
+  type ServerScan,
+} from "./server-scan-service.js";
+import logger from "../utils/logger.js";
+import { restoreProblems } from "./adoption-rollback-check.js";
+import type { AdoptionSnapshotRecord } from "./server-adoption-service.js";
 
 /**
  * Cleanup plan for a bot the admin already removed by hand (#1179, part of the
@@ -109,45 +116,67 @@ export function findRemovedBotCandidates(
       ids.set(id, evidence);
     }
   };
+  // Index once: channels by the member their overwrite names, and by the bot
+  // an ownership hint names. Per-candidate lookups below are then O(1), not a
+  // pass over every channel's overwrites for each account.
+  const overwriteIndex = new Map<string, ScanChannel[]>();
+  const ownedIndex = new Map<string, ScanChannel[]>();
+  const push = (
+    map: Map<string, ScanChannel[]>,
+    id: string,
+    ch: ScanChannel,
+  ): void => {
+    const list = map.get(id);
+    if (!list) map.set(id, [ch]);
+    else if (list[list.length - 1] !== ch) list.push(ch);
+  };
+  const knownCache = new Map<string, boolean>();
+  const isKnown = (id: string): boolean => {
+    let known = knownCache.get(id);
+    if (known === undefined) {
+      known = !!findKnownBot(id, catalog);
+      knownCache.set(id, known);
+    }
+    return known;
+  };
   for (const ch of scan.channels) {
     for (const o of ch.overwrites) {
       if (o.type !== "member") continue;
-      if (findKnownBot(o.id, catalog)) note(o.id, "catalogue");
+      push(overwriteIndex, o.id, ch);
+      if (present.has(o.id)) continue;
       // The forced single-member lookup that confirms it needs no intent.
-      else note(o.id, "orphan-overwrite");
+      note(o.id, isKnown(o.id) ? "catalogue" : "orphan-overwrite");
     }
     if (ch.ownerHint) {
+      push(ownedIndex, ch.ownerHint.botId, ch);
       note(
         ch.ownerHint.botId,
-        findKnownBot(ch.ownerHint.botId, catalog) ? "catalogue" : "owner-hint",
+        isKnown(ch.ownerHint.botId) ? "catalogue" : "owner-hint",
       );
     }
   }
   const out: RemovedBotCandidate[] = [];
   for (const [userId, evidence] of ids) {
-    const overwriteChannels = scan.channels
-      .filter((c) =>
-        c.overwrites.some((o) => o.type === "member" && o.id === userId),
-      )
-      .map((c) => ({ id: c.id, name: c.name }));
-    const ownedChannels = scan.channels
-      .filter((c) => c.ownerHint?.botId === userId)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        usedBy: c.usedBy,
-        claimKey: claimKeyFor(c),
-      }));
-    const touched = new Set([
-      ...overwriteChannels.map((c) => c.id),
-      ...ownedChannels.map((c) => c.id),
-    ]);
-    const boundFeatures = scan.channels
-      .filter((c) => touched.has(c.id) && c.usedBy.length > 0)
+    const overwriteChannels = (overwriteIndex.get(userId) ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+    }));
+    const owned = ownedIndex.get(userId) ?? [];
+    const ownedChannels = owned.map((c) => ({
+      id: c.id,
+      name: c.name,
+      usedBy: c.usedBy,
+      claimKey: claimKeyFor(c),
+    }));
+    const touched = new Map<string, ScanChannel>();
+    for (const c of [...(overwriteIndex.get(userId) ?? []), ...owned]) {
+      touched.set(c.id, c);
+    }
+    const boundFeatures = [...touched.values()]
+      .filter((c) => c.usedBy.length > 0)
       .map((c) => ({ channel: c.name, features: c.usedBy }));
     const known = findKnownBot(userId, catalog);
-    const tag = scan.channels.find((c) => c.ownerHint?.botId === userId)
-      ?.ownerHint?.botTag;
+    const tag = owned[0]?.ownerHint?.botTag;
     out.push({
       userId,
       name: known?.name ?? tag ?? userId,
@@ -226,6 +255,10 @@ export async function verifyBotRemoved(
       "check removed bot membership",
       15000,
       2,
+      true,
+      // The expected Unknown Member of a confirmed absence is not an error;
+      // a genuine read failure is logged below, where it is told apart.
+      false,
     );
     return refuse(
       "bot-still-present",
@@ -239,6 +272,7 @@ export async function verifyBotRemoved(
     ) {
       return null;
     }
+    logger.warn("bot cleanup: membership check failed", error);
     return refuse(
       "membership-check-failed",
       `Discord could not confirm that the bot has left (${error instanceof Error ? error.message : "unknown error"}), so nothing was planned.`,
@@ -411,6 +445,25 @@ export async function planBotCleanup(
     // so lifting that guard opens nothing else.
     { approverId: adminUserId, allowOtherBotOverwrites: true },
   );
+  if (
+    errors.length === 0 &&
+    plan.errors.length === 0 &&
+    plan.operations.length > 0
+  ) {
+    for (const problem of undoProblems(
+      scan.scanned,
+      plan,
+      selected,
+      botId,
+      adminUserId,
+      approvedAt,
+    )) {
+      errors.push({
+        code: "undo-unsafe",
+        message: `This could not be restored from Adoption history right now: ${problem.replace(/[.\s]+$/, "")}. Fix that in Discord (for example give the bot's role the missing permission), then preview again.`,
+      });
+    }
+  }
   if (candidate) {
     for (const b of candidate.boundFeatures) {
       plan.warnings.push({
@@ -428,6 +481,64 @@ export async function planBotCleanup(
     }
   }
   return { scan, candidate, plan, channelIds: selected, errors };
+}
+
+/**
+ * Would Restore accept the snapshot this plan is about to create? Runs the very
+ * check Adoption history runs (`restoreProblems`) on the record the apply
+ * would leave, against the server as it will be after the apply, so a cleanup
+ * whose undo the bot's own permissions would refuse (for example an overwrite
+ * that allows a permission the bot lacks) is blocked before it runs. Fails
+ * closed: a check that throws is a problem.
+ */
+function undoProblems(
+  scanned: ServerScan["scanned"],
+  plan: AdoptionPlan,
+  channelIds: readonly string[],
+  botId: string,
+  adminUserId: string,
+  approvedAt: string,
+): string[] {
+  const record = {
+    id: "preflight",
+    planId: plan.id,
+    guildId: plan.guildId,
+    appliedBy: adminUserId,
+    status: "applied",
+    plan,
+    baseline: plan.baseline,
+    operations: plan.operations.map((o) => ({
+      opId: o.id,
+      status: "applied",
+    })),
+    createdRoles: [],
+    restoredChannels: [],
+    restoredRoles: [],
+    restoreIntents: [],
+    configOverrides: {},
+    rolledBackOps: [],
+    memberProgress: {},
+    rolledBackBy: null,
+  } as unknown as AdoptionSnapshotRecord;
+  const chosen = new Set(channelIds);
+  const after = {
+    ...scanned,
+    channels: scanned.channels.map((c) =>
+      chosen.has(c.id)
+        ? { ...c, overwrites: c.overwrites.filter((o) => o.id !== botId) }
+        : c,
+    ),
+  };
+  try {
+    return restoreProblems(record, after, {
+      actorId: adminUserId,
+      deleteCreatedRoles: false,
+      approvedAt,
+    });
+  } catch (error) {
+    logger.warn("bot cleanup: restore preflight failed", error);
+    return ["the restore check could not be run."];
+  }
 }
 
 /**

@@ -7,10 +7,18 @@
 
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 
+/** Every REST call the cleanup makes, with the arguments it passed. */
+const restCalls: unknown[][] = [];
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
   CommandManager: {
     getInstance: () => ({
-      makeDiscordApiCall: async (fn: () => Promise<unknown>) => fn(),
+      makeDiscordApiCall: async (
+        fn: () => Promise<unknown>,
+        ...rest: unknown[]
+      ) => {
+        restCalls.push(rest);
+        return fn();
+      },
     }),
   },
 }));
@@ -327,7 +335,57 @@ describe("findRemovedBotCandidates", () => {
   });
 });
 
+describe("findRemovedBotCandidates at scale", () => {
+  it("indexes the overwrites once instead of searching every channel per account", () => {
+    const channels = Array.from({ length: 300 }, (_, c) => ({
+      id: `c${c}`,
+      name: `channel-${c}`,
+      kind: "text",
+      usedBy: [],
+      ownerHint: null,
+      flags: {},
+      overwrites: Array.from({ length: 300 }, (_, m) => ({
+        id: `m${m}`,
+        type: "member",
+        label: `m${m}`,
+        allow: [],
+        deny: [],
+      })),
+    }));
+    const scan = {
+      bots: [],
+      channels,
+      readiness: { membersIntent: true },
+      scanned: { botUserId: "bot", ownerId: "owner", adminUserId: "admin" },
+    } as never;
+    const started = Date.now();
+    const found = findRemovedBotCandidates(scan);
+    const took = Date.now() - started;
+    expect(found).toHaveLength(300);
+    expect(found.every((f) => f.overwriteChannels.length === 300)).toBe(true);
+    // 300 accounts x 300 channels x 300 overwrites would be 27 million
+    // comparisons the old way; indexed it is one pass over 90 000 overwrites.
+    expect(took).toBeLessThan(1500);
+  });
+});
+
 describe("verifyBotRemoved", () => {
+  it("does not log the expected Unknown Member as an error, and still warns on a real failure", async () => {
+    restCalls.length = 0;
+    expect(await verifyBotRemoved(guildFor(s.world), REMOVED)).toBeNull();
+    const membership = restCalls.find(
+      (c) => c[0] === "check removed bot membership",
+    );
+    // (operation, timeout, retries, retryOnTimeout, logErrors)
+    expect(membership?.[4]).toBe(false);
+    // A genuine failure is reported to the caller as a refusal.
+    const p = await verifyBotRemoved(
+      guildFor(s.world, { memberFails: true }),
+      REMOVED,
+    );
+    expect(p?.code).toBe("membership-check-failed");
+  });
+
   it("accepts a bot Discord says is not a member", async () => {
     expect(await verifyBotRemoved(guildFor(s.world), REMOVED)).toBeNull();
   });
@@ -451,6 +509,66 @@ describe("planBotCleanup", () => {
       ),
     ).toBe(true);
     expect(p.plan.operations.some((o) => o.type === "config.set")).toBe(false);
+  });
+});
+
+describe("the undo preflight", () => {
+  const MANAGE_ROLES = h.F.ManageRoles;
+  const MANAGE_CHANNELS = h.F.ManageChannels;
+  const botRole = () => s.world.roles.get(h.sf("c2.role-koolbot"))!;
+
+  it("blocks a cleanup whose restore the bot's own permissions would refuse", async () => {
+    // The removed bot's overwrite allows Manage Channels, which the KoolBot
+    // role (Manage Roles only) could not put back from Adoption history.
+    botRole().permissions = String(MANAGE_ROLES | h.F.ViewChannel);
+    s.world.channels
+      .get(s.chA)!
+      .overwrites.find((o) => o.id === REMOVED)!.allow = String(
+      MANAGE_CHANNELS | h.F.ViewChannel,
+    );
+    const p = await plan(s, [s.chA]);
+    expect(p.plan.errors).toEqual([]);
+    expect(p.errors.map((e) => e.code)).toEqual(["undo-unsafe"]);
+    expect(p.errors[0]!.message).toMatch(/restored from Adoption history/);
+    expect(cleanupPlanIsApplicable(p)).toBe(false);
+  });
+
+  it("allows the same cleanup when the bot could restore it", async () => {
+    botRole().permissions = String(
+      MANAGE_ROLES | MANAGE_CHANNELS | h.F.ViewChannel,
+    );
+    s.world.channels
+      .get(s.chA)!
+      .overwrites.find((o) => o.id === REMOVED)!.allow = String(
+      MANAGE_CHANNELS | h.F.ViewChannel,
+    );
+    const p = await plan(s, [s.chA]);
+    expect(p.errors).toEqual([]);
+    expect(cleanupPlanIsApplicable(p)).toBe(true);
+  });
+
+  it("the live-state check refuses once the bot lost the permission", async () => {
+    botRole().permissions = String(
+      MANAGE_ROLES | MANAGE_CHANNELS | h.F.ViewChannel,
+    );
+    s.world.channels
+      .get(s.chA)!
+      .overwrites.find((o) => o.id === REMOVED)!.allow = String(
+      MANAGE_CHANNELS | h.F.ViewChannel,
+    );
+    const planned = (await plan(s, [s.chA])).plan;
+    const check = cleanupRevalidator(
+      guildFor(s.world),
+      s.world.adminId,
+      REMOVED,
+      [s.chA],
+      STAMP,
+    );
+    expect(await check(planned.operations)).toEqual([]);
+    botRole().permissions = String(MANAGE_ROLES | h.F.ViewChannel);
+    expect((await check(planned.operations)).join(" ")).toMatch(
+      /restored from Adoption history/,
+    );
   });
 });
 

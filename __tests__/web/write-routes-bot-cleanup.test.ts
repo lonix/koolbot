@@ -128,6 +128,34 @@ function makeClient(fetchFails = false): Client {
   } as unknown as Client;
 }
 
+const JOB_ID = "11111111-1111-1111-1111-111111111111";
+/** A job that has ended; `startApply` returns while the real one still runs. */
+const finishedJob = (over: Record<string, unknown> = {}) => ({
+  id: JOB_ID,
+  status: "done",
+  error: null,
+  result: {
+    snapshotId: "s",
+    status: "applied",
+    applied: ["op-1"],
+    failed: [],
+    skipped: [],
+  },
+  ...over,
+});
+/** Wait for the background outcome entry the route writes after the job ends. */
+async function outcomeAudit(): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 400; i += 1) {
+    const hit = mockRecordAudit.mock.calls.find(
+      (c) =>
+        (c as unknown[])[1] && (c as any)[1].action === "adopt.cleanup.apply",
+    );
+    if (hit) return (hit as any)[1];
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error("no adopt.cleanup.apply audit entry was written");
+}
+
 let harness: AdminHarness;
 async function mount(client: Client = makeClient()): Promise<void> {
   harness = await startAdminHarness([
@@ -150,9 +178,7 @@ beforeEach(() => {
     next: null,
   }));
   mockScanGuild.mockResolvedValue({ channels: [] });
-  mockStartApply.mockReturnValue({
-    id: "11111111-1111-1111-1111-111111111111",
-  });
+  mockStartApply.mockReturnValue(finishedJob());
 });
 afterEach(async () => {
   await harness?.close();
@@ -367,14 +393,79 @@ describe("POST /adopt/cleanup/apply", () => {
       revalidate: expect.any(Function),
     });
     expect(mockRevalidator).toHaveBeenCalledTimes(1);
+    // Accepted is recorded at once; success only once the job has ended well.
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        action: "adopt.cleanup.apply",
+        action: "adopt.cleanup.start",
         targetId: "plan-1",
         result: "success",
       }),
     );
+    expect(await outcomeAudit()).toMatchObject({
+      action: "adopt.cleanup.apply",
+      targetId: "plan-1",
+      result: "success",
+    });
+  });
+
+  it("writes no outcome entry while the job is still running", async () => {
+    const job = finishedJob({ status: "running", result: null });
+    mockStartApply.mockReturnValue(job);
+    await mount();
+    await harness.post("/adopt/cleanup/apply", form());
+    expect(
+      mockRecordAudit.mock.calls.some(
+        (c) => (c as any)[1].action === "adopt.cleanup.apply",
+      ),
+    ).toBe(false);
+    // The job ends well: only now is success recorded.
+    Object.assign(job, finishedJob());
+    expect(await outcomeAudit()).toMatchObject({ result: "success" });
+  });
+
+  it("does not record success when the engine's live-state check refuses the cleanup", async () => {
+    mockStartApply.mockReturnValue(
+      finishedJob({
+        status: "failed",
+        error: "That bot is still in the server.",
+        result: null,
+      }),
+    );
+    await mount();
+    const res = await harness.post("/adopt/cleanup/apply", form());
+    expect(res.status).toBe(303);
+    expect(await outcomeAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "That bot is still in the server.",
+    });
+    expect(
+      mockRecordAudit.mock.calls.some(
+        (c) =>
+          (c as any)[1].action === "adopt.cleanup.apply" &&
+          (c as any)[1].result === "success",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not record success when a Discord overwrite removal fails", async () => {
+    mockStartApply.mockReturnValue(
+      finishedJob({
+        result: {
+          snapshotId: "s",
+          status: "partial",
+          applied: [],
+          failed: [{ opId: "op-1", error: "Missing Permissions" }],
+          skipped: [],
+        },
+      }),
+    );
+    await mount();
+    await harness.post("/adopt/cleanup/apply", form());
+    expect(await outcomeAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "1 step(s) failed.",
+    });
   });
 
   it("re-plans the posted choice with the preview's own stamp", async () => {

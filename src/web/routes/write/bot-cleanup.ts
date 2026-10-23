@@ -22,7 +22,10 @@ import {
   type BotCleanupPlan,
 } from "../../../services/bot-removal-cleanup.js";
 import { ServerScanService } from "../../../services/server-scan-service.js";
-import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
+import {
+  ServerAdoptionService,
+  type AdoptionJob,
+} from "../../../services/server-adoption-service.js";
 import {
   DESTRUCTIVE_CONFIRM_FIELD,
   hasDestructiveSteps,
@@ -88,6 +91,50 @@ export function parsePreviewStamp(
     return null;
   }
   return new Date(t).toISOString() === raw ? raw : null;
+}
+
+/** How often a running cleanup job is checked for its outcome. */
+export const CLEANUP_AUDIT_POLL_MS = 1000;
+
+/**
+ * Write the outcome of a cleanup apply once its background job has ended:
+ * success only when the job finished and no step failed, otherwise a failure
+ * naming why (the engine's live-state check refusing, or failed steps). Never
+ * throws.
+ */
+async function auditWhenDone(
+  job: Pick<AdoptionJob, "status" | "result" | "error">,
+  session: Parameters<typeof recordAudit>[0],
+  planId: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  try {
+    while (job.status === "running") {
+      await new Promise((resolve) =>
+        setTimeout(resolve, CLEANUP_AUDIT_POLL_MS),
+      );
+    }
+    const failedSteps = job.result?.failed.length ?? 0;
+    const failure =
+      job.status === "failed"
+        ? (job.error ?? "The cleanup failed.")
+        : !job.result
+          ? "The cleanup produced no result."
+          : failedSteps > 0
+            ? `${failedSteps} step(s) failed.`
+            : job.result.status !== "applied"
+              ? `The cleanup ended as ${job.result.status}.`
+              : null;
+    await recordAudit(session, {
+      action: "adopt.cleanup.apply",
+      targetId: planId,
+      details: { ...details, failedSteps },
+      result: failure === null ? "success" : "failure",
+      errorMessage: failure,
+    });
+  } catch (error) {
+    logger.warn("bot cleanup: could not audit the outcome", error);
+  }
 }
 
 export function createBotCleanupRouter(client: Client): Router {
@@ -269,16 +316,21 @@ export function createBotCleanupRouter(client: Client): Router {
             { sampleMessages: sampled },
           ),
         });
+        const details = {
+          removedBotId: botId,
+          operations: built.plan.operations.length,
+          channels: built.channelIds.length,
+        };
+        // The apply runs in the background: its revalidation can still refuse
+        // and a step can still fail. Record that it was accepted now (a restart
+        // then leaves a trace) and the real outcome when the job ends.
         await recordAudit(session, {
-          action: "adopt.cleanup.apply",
+          action: "adopt.cleanup.start",
           targetId: built.plan.id,
-          details: {
-            removedBotId: botId,
-            operations: built.plan.operations.length,
-            channels: built.channelIds.length,
-          },
+          details,
           result: "success",
         });
+        void auditWhenDone(job, session, built.plan.id, details);
         res.redirect(
           303,
           `${BOT_CLEANUP_PATH}?job=${encodeURIComponent(job.id)}`,

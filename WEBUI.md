@@ -3167,11 +3167,15 @@ checked is not listed and is counted in a notice. Discord removes the bot's mana
 overwrites.
 **Review cleanup** lists, per channel, the overwrite that still names the removed bot. Nothing is ticked for you.
 **Preview changes** shows the plan, and **Apply plan** runs it through the adoption engine like any other plan: a
-snapshot is saved first, one `adopt.cleanup.apply` audit entry is written, and the result can be restored from **Adoption
-history**. The engine counts removing an overwrite as a destructive step, so the preview lists it in its own section and
-the apply form asks for the separate confirmation. Before it plans, and again right before the step runs, KoolBot asks
-Discord whether the account is a bot and no longer a member; if either read fails, or the bot is back, nothing is planned
-or applied. Settings still bound to a channel the bot touched are flagged as warnings and are not changed. Channels it
+snapshot is saved first, and the result can be restored from **Adoption history**. The engine counts removing an
+overwrite as a destructive step, so the preview lists it in its own section and the apply form asks for the separate
+confirmation. Before it plans, and again right before the step runs, KoolBot asks Discord whether the account is a bot and
+no longer a member; if either read fails, or the bot is back, nothing is planned or applied. It also runs the same safety
+check Restore runs on the snapshot the apply would leave, so a cleanup that could not be undone (for example the removed
+bot's overwrite allows a permission KoolBot's own role lacks) is refused with the reason before anything changes.
+The audit log gets `adopt.cleanup.start` when an apply is accepted and `adopt.cleanup.apply` when the background job ends,
+as a success only if it finished with no failed step (a refusal by the live check or a failed step is a failure).
+Settings still bound to a channel the bot touched are flagged as warnings and are not changed. Channels it
 mostly wrote to link to **Channel claims** (with the feature prefilled where one fits) for the actual claim, which has its
 own preview. A Restore puts the removed overwrite back with the same permissions; whether Discord accepts a member
 overwrite for an account that has left is not confirmed on a real server yet.
