@@ -867,6 +867,9 @@ describe("NativeEventSync.syncEvent", () => {
           voiceNative({
             name: "Old name",
             scheduledStartTimestamp: PAST.getTime(),
+            // End already matches: this test is about the name patch only
+            // (a stale end now goes out as its own end-only patch, #1421).
+            scheduledEndTimestamp: PAST.getTime() + 120 * 60 * 1000,
           }),
         ],
       });

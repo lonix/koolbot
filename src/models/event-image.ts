@@ -12,8 +12,9 @@ import mongoose, { Schema, Document } from "mongoose";
  * event, the event's own `_id` (as a string) for a one-off. The upload is
  * validated (real file signature, size cap) before it is stored, so a document
  * here is always a PNG, JPEG or GIF of at most `COVER_MAX_BYTES`
- * (`services/event-cover.ts`). It is admin-authored content: it holds no
- * member data and no user id.
+ * (`services/event-cover.ts`). It is uploaded by the event's host or an administrator: it holds no
+ * member data and no user id (who uploaded it is recorded only in the audit
+ * log), so the member data export and reset have nothing to add for it.
  */
 export interface IEventImage extends Document {
   guildId: string;

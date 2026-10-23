@@ -42,6 +42,20 @@ export interface SettingsGroupView {
   overSize: boolean;
 }
 
+export interface LeaderEditView {
+  /** ISO time of the edit. */
+  at: string;
+  who: string;
+  text: string;
+}
+
+/** The leader label rename and the last edits leaders made from Discord (#1195, #1196). */
+export interface LeaderExtrasView {
+  /** What leaders are called ("Leader", "Captain"). */
+  leaderLabel: string;
+  edits: LeaderEditView[];
+}
+
 export interface SettingsViewData {
   csrfToken: string;
   actionPath: (name: string) => string;
@@ -51,8 +65,6 @@ export interface SettingsViewData {
   leadMinutes: number | null;
   /** Reason the lead time is read-only, or null while it can be edited. */
   leadReadOnly: string | null;
-  /** Lock state, or null when the event has no groups. */
-  locked: boolean | null;
   groupLabel: string;
   groups: SettingsGroupView[];
   /** Names, sizes and the preset switch (#1241); absent = the read-only table. */
@@ -61,6 +73,8 @@ export interface SettingsViewData {
   leadersTags?: LeadersTagsView | null;
   /** The groups on/off forms (#1243); absent = none shown. */
   groupsSwitch?: GroupsSwitchView;
+  /** What the host can still do about leaders from here (#1424); absent = nothing shown. */
+  leaderExtras?: LeaderExtrasView;
   /** The event repeats: its forms carry the "also for the next occurrences" tick (#1266). */
   seriesTick?: boolean;
 }
@@ -86,17 +100,6 @@ ${hidden(baseField("channelLeadMinutes"), base)}
 <p class="muted">Leave empty to use the server default. It can only change before the event's channels exist.</p></div>`;
 }
 
-function renderLock(d: SettingsViewData): string {
-  if (d.locked === null) return "";
-  const base = d.locked ? "1" : "0";
-  return `<div class="field"><label for="host-settings-lock">Groups</label>
-<select id="host-settings-lock" name="${escapeHtml(valueField("groupsLocked"))}">
-<option value="0"${d.locked ? "" : " selected"}>Unlocked: joining a group's channel puts people in that group</option>
-<option value="1"${d.locked ? " selected" : ""}>Locked: joining a channel changes nobody's group</option>
-</select>
-${hidden(baseField("groupsLocked"), base)}</div>`;
-}
-
 function renderGroups(d: SettingsViewData): string {
   if (d.groups.length === 0) return "";
   const body = d.groups
@@ -110,20 +113,70 @@ function renderGroups(d: SettingsViewData): string {
   return `<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(d.groupLabel)}</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
-/** The "Live settings" section. */
-export function renderSettingsSection(d: SettingsViewData): string {
+function renderLeaderExtras(d: SettingsViewData): string {
+  const x = d.leaderExtras;
+  if (!x) return "";
+  const lead = x.leaderLabel.toLowerCase();
+  const rename = `<form method="POST" action="${escapeHtml(d.actionPath("leader-label"))}" class="kb-stack" id="host-leaders-label">${hidden("_csrf", d.csrfToken)}
+<div class="kb-field"><label class="kb-label" for="leader-label-input">Rename what a leader is called now (for example Captain or Squad Lead)</label>
+<input class="kb-input" id="leader-label-input" type="text" name="label" maxlength="20" value="${escapeHtml(x.leaderLabel)}"></div>
+<div class="kb-row"><button class="kb-btn" type="submit">Rename</button></div>
+</form>`;
+  const edits =
+    x.edits.length === 0
+      ? `<p class="kb-help">No ${escapeHtml(lead)} has changed a team yet.</p>`
+      : `<table class="kb-table"><caption class="kb-visually-hidden">Recent changes by ${escapeHtml(lead)}s</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Change</th></tr></thead><tbody>${x.edits
+          .map(
+            (e) =>
+              `<tr><td><span class="kb-mono">${escapeHtml(e.at)}</span></td><td>${escapeHtml(e.who)}</td><td>${escapeHtml(e.text)}</td></tr>`,
+          )
+          .join("")}</tbody></table>`;
+  return `<div class="kb-stack" id="host-leaders-extras">
+<h3 class="kb-label">Leaders</h3>
+${rename}
+<h4 class="kb-label">Recent changes by ${escapeHtml(lead)}s</h4>
+${edits}
+</div>`;
+}
+
+/**
+ * The "Event settings" fold (#1424): lead time, group leaders and clan tags
+ * (children nested), the leader label and what leaders changed. One form that
+ * posts to `settings`; it carries only these rows, and a row that is not posted
+ * is left alone by `parseSubmission`.
+ */
+export function renderEventSettings(d: SettingsViewData): string {
   if (d.blocker !== null) {
-    return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>${renderGroups(d)}`;
+    return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>`;
   }
   return `<p class="muted">Change a setting and save once. Only the fields you change are saved, from the event's current state; saving again with nothing changed does nothing.</p>
 <form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderLead(d)}
-${renderLock(d)}
-${d.groupEdit ? renderGroupEditor(d.groupEdit) : ""}
 ${renderLeadersTagsFields(d.leadersTags ?? null)}
 ${renderSeriesTick(d.seriesTick)}
 <button type="submit">Save settings</button>
 </form>
+${renderLeaderExtras(d)}`;
+}
+
+/**
+ * The "Change the groups" fold (#1424): names and sizes, switch preset, add and
+ * remove groups, and switch groups on or off. Each is a form of its own that
+ * posts to `settings`, so none of them shares a save with the rows of "Event
+ * settings". Emits the confirm script once for the whole page.
+ */
+export function renderGroupChanges(d: SettingsViewData): string {
+  if (d.blocker !== null) {
+    return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>${renderGroups(d)}`;
+  }
+  const names = d.groupEdit
+    ? `<form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
+${renderGroupEditor(d.groupEdit)}
+${renderSeriesTick(d.seriesTick)}
+<button type="submit">Save names and sizes</button>
+</form>`
+    : "";
+  return `${names}
 ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : renderGroups(d)}
 ${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
 ${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}

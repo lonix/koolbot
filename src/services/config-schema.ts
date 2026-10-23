@@ -137,6 +137,7 @@ export interface ConfigSchema {
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
   "events.recurrence_enabled": boolean; // Allow recurring events (weekly/biweekly/monthly series)
   "events.native.location": string; // Location text shown on the mirrored native event
+  "events.native.link_room": boolean; // Point the native event at the event's voice room once it exists
   "events.groups.default_count": number; // Group rows the event form offers up front
   "events.groups.max_count": number; // Most groups one event may have
 
@@ -467,6 +468,7 @@ export const defaultConfig: ConfigSchema = {
   "events.recurrence_enabled": true,
   "events.native.location":
     "Voice channel in this server (see the event announcement)",
+  "events.native.link_room": true,
   "events.groups.default_count": 2,
   "events.groups.max_count": 15,
 
@@ -1999,9 +2001,16 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.native.location": {
     label: "Native event location text",
     description:
-      "Location line shown on the mirrored Discord scheduled event (max 100 characters). The temporary voice channel only exists shortly before the start, so the native event is an external one with this text.",
+      "Location line shown on the mirrored Discord scheduled event (max 100 characters). The temporary voice channel only exists shortly before the start, so the native event is an external one with this text until the room is created (see the link switch below).",
     category: "events",
     type: "string",
+  },
+  "events.native.link_room": {
+    label: "Link the native event to the voice room",
+    description:
+      "When the event's main voice room is created (shortly before the start), point the Discord scheduled event at that room instead of the location text. With event groups the main room is linked too, never a group room. A linked event is started at its start time. Untested risk: Discord may mark the card finished early when the room empties, and with groups the main room can empty while the teams play in their own rooms; KoolBot cannot undo that, so this switch is the rollback. If Discord refuses the change the text stays and the bot tries again on the next scan. Turn this off to keep new events external with the text only. Turning the switch off stops new links and puts an existing link back to the text only while the Discord event is still Scheduled and before its start time; once the start has passed the link stays (and a link still Scheduled then is still started), so it is not a rollback for a running event.",
+    category: "events",
+    type: "boolean",
   },
   "events.groups.default_count": {
     label: "Event groups offered by default",

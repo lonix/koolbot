@@ -91,6 +91,7 @@ export default [
       '__tests__/web/confirm-script.test.ts',
       '__tests__/web/confirm-dialog.test.ts',
       '__tests__/web/confirm-fetch.test.ts',
+      '__tests__/web/host-board-view.test.ts',
       '__tests__/web/moderation-labels.test.ts'
     ],
     languageOptions: {
@@ -105,6 +106,8 @@ export default [
         'HTMLDialogElement': 'readonly',
         'HTMLFormElement': 'readonly',
         'HTMLInputElement': 'readonly',
+        'HTMLSelectElement': 'readonly',
+        'Element': 'readonly',
         'Document': 'readonly',
         'EventListener': 'readonly',
         'EventTarget': 'readonly',
