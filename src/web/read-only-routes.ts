@@ -122,6 +122,7 @@ import {
   TIERS_KEY,
   type LeaderboardTier,
 } from "./leaderboard-tiers.js";
+import { repostHrefFor } from "./managed-messages.js";
 import {
   VoiceChannelManager,
   resolveManagedCategory,
@@ -416,7 +417,8 @@ export const QUOTES_SETTING_KEYS = [
  * The `leaderboard_roles.*` keys edited in place on the Leaderboard Roles page
  * (#985). `leaderboard_roles.enabled` is the card's cascade master.
  * `leaderboard_roles.tiers` is left out: the page edits it through its own
- * tier editor, and Settings keeps the raw text field for it.
+ * tier editor. All settings leaves it out (`editedElsewhere`); it is still
+ * stored, exported and imported like any other key.
  */
 export const LEADERBOARD_ROLES_SETTING_KEYS = [
   "leaderboard_roles.enabled",
@@ -1182,8 +1184,15 @@ export function createReadOnlyRouter(
       // `type` comes from settingsMetadata when present (the typed config
       // schema is authoritative) and falls back to runtime-inferred type
       // for orphan DB rows that the schema doesn't know about.
-      const rows: SettingRow[] = Object.entries(defaultConfig).map(
-        ([key, defaultValue]) => {
+      const rows: SettingRow[] = Object.entries(defaultConfig)
+        // A key with its own editor (the leaderboard tiers) is not offered as
+        // a raw text field here (#1428).
+        .filter(
+          ([key]) =>
+            !settingsMetadata[key as keyof typeof settingsMetadata]
+              ?.editedElsewhere,
+        )
+        .map(([key, defaultValue]) => {
           const dbEntry = storedByKey.get(key);
           const meta = settingsMetadata[key as keyof typeof settingsMetadata];
           return {
@@ -1204,8 +1213,7 @@ export function createReadOnlyRouter(
             managed: meta?.managed,
             channelKind: meta?.channelKind,
           };
-        },
-      );
+        });
       // A bot-managed message id is shown read-only with a jump link to the
       // message, built from the channel setting it was posted in (#1304).
       const currentByKey = new Map(rows.map((r) => [r.key, r.current]));
@@ -1216,6 +1224,7 @@ export function createReadOnlyRouter(
           currentByKey.get(row.managed.channelKey),
           row.current,
         );
+        row.repostHref = repostHrefFor(row.key);
       }
       for (const entry of stored) {
         if (!(entry.key in defaultConfig)) {
@@ -1753,16 +1762,25 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
-      const [enabled, channelId, stored, notices, channelData] =
-        await Promise.all([
-          config.getBoolean("notices.enabled", false),
-          config.getString("notices.channel_id", ""),
-          // `null` (not `[]`) on failure: rendering schema defaults here would
-          // let a save overwrite the real values, so the card is withheld.
-          config.getAll().catch(() => null),
-          Notice.find({}).sort({ category: 1, order: 1 }).lean(),
-          fetchChannelData(client, common.guildId),
-        ]);
+      const [
+        enabled,
+        channelId,
+        headerMessageId,
+        headerEnabled,
+        stored,
+        notices,
+        channelData,
+      ] = await Promise.all([
+        config.getBoolean("notices.enabled", false),
+        config.getString("notices.channel_id", ""),
+        config.getString("notices.header_message_id", ""),
+        config.getBoolean("notices.header_enabled", true),
+        // `null` (not `[]`) on failure: rendering schema defaults here would
+        // let a save overwrite the real values, so the card is withheld.
+        config.getAll().catch(() => null),
+        Notice.find({}).sort({ category: 1, order: 1 }).lean(),
+        fetchChannelData(client, common.guildId),
+      ]);
       const channelNames = channelData.names;
       // Editable `notices.*` settings rendered in place on this page (#972).
       // The picker reuses the channel fetch above, and none of these keys has
@@ -1811,6 +1829,8 @@ export function createReadOnlyRouter(
               }
             : null,
           total: notices.length,
+          headerMessageId,
+          headerEnabled,
           settingRows,
           settingsUnavailable: stored === null,
           textChannels: channelData.textChannels,
@@ -1840,6 +1860,7 @@ export function createReadOnlyRouter(
         enabled,
         channelId,
         headerMessageId,
+        headerEnabled,
         maxLength,
         quoteSettings,
         firstPage,
@@ -1847,6 +1868,7 @@ export function createReadOnlyRouter(
         config.getBoolean("quotes.enabled", false),
         config.getString("quotes.channel_id", ""),
         config.getString("quotes.header_message_id", ""),
+        config.getBoolean("quotes.header_enabled", true),
         config.getNumber("quotes.max_length", 1000),
         loadFeatureSettings(client, common.guildId, QUOTES_SETTING_KEYS),
         quoteService.listQuotes(requestedPage, pageSize, search),
@@ -1917,6 +1939,7 @@ export function createReadOnlyRouter(
               }
             : null,
           headerMessageId,
+          headerEnabled,
           settingRows: quoteSettings.settingRows,
           settingsPickers: quoteSettings.pickers,
           dependencyState: quoteSettings.dependencyState,

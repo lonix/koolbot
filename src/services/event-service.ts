@@ -2405,6 +2405,7 @@ export class EventService extends ScheduledService {
   public async cancelEvent(
     eventId: string,
     guildId?: string,
+    opts: { refuseRunningAt?: Date } = {},
   ): Promise<IEvent | null> {
     const event = await this.getEvent(eventId);
     if (!event) return null;
@@ -2415,7 +2416,12 @@ export class EventService extends ScheduledService {
     // event ended, or was cancelled by someone else, since it was read) neither
     // spawns a successor nor reports success. The caller reads `state` of the
     // returned row: `cancelled` means cancelled, anything else means it was not.
-    const cancelled = await this.cancelOne(event);
+    const cancelled = await this.cancelOne(
+      event,
+      undefined,
+      false,
+      opts.refuseRunningAt,
+    );
     if (!cancelled) {
       return (await this.getEvent(eventId)) ?? event;
     }
@@ -2487,6 +2493,7 @@ export class EventService extends ScheduledService {
     event: IEvent,
     nativeCache?: NativeCache | null,
     skipNative = false,
+    refuseRunningAt?: Date,
   ): Promise<boolean> {
     // `new: false`: the document as it was AT the claim. The channel to delete
     // is read from it, not from the caller's copy, which may be older (a channel
@@ -2498,7 +2505,13 @@ export class EventService extends ScheduledService {
     const id = String(event._id);
     const hold = this.beginEnding(id);
     try {
-      return await this.cancelClaimed(event, hold, nativeCache, skipNative);
+      return await this.cancelClaimed(
+        event,
+        hold,
+        nativeCache,
+        skipNative,
+        refuseRunningAt,
+      );
     } finally {
       this.finishEnding(id, hold);
     }
@@ -2509,9 +2522,21 @@ export class EventService extends ScheduledService {
     hold: number,
     nativeCache?: NativeCache | null,
     skipNative = false,
+    refuseRunningAt?: Date,
   ): Promise<boolean> {
+    // A host's cancel (#1319) is refused inside the claim for an event that is
+    // running at `refuseRunningAt` (see `isEventRunning`), so an activation
+    // that lands after the caller's read cannot be cancelled by it.
     const claimed = (await Event.findOneAndUpdate(
-      { _id: event._id, state: { $in: ["scheduled", "active"] } },
+      {
+        _id: event._id,
+        state: { $in: ["scheduled", "active"] },
+        ...(refuseRunningAt
+          ? {
+              $nor: [{ state: "active", startTime: { $lte: refuseRunningAt } }],
+            }
+          : {}),
+      },
       { $set: { state: "cancelled" } },
       { new: false },
     )) as { channelId?: string | null } | null | undefined;

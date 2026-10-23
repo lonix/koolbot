@@ -19,7 +19,11 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
-import { renderFlash, type FlashMessage } from "./admin-views.js";
+import {
+  renderFlash,
+  renderRepostCard,
+  type FlashMessage,
+} from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 
 /**
@@ -51,6 +55,8 @@ export interface RulesPageData {
   channelId: string;
   roleId: string;
   messagePosted: boolean;
+  /** `rules.message_id`, sent back by Re-post so a double submit re-posts once. */
+  messageId: string;
   accepted: number;
   native: { screening: boolean; community: boolean };
   intentMissing: boolean;
@@ -87,7 +93,8 @@ export async function loadRulesPage(
     enabled: await config.getBoolean("rules.enabled", false),
     channelId: (await config.getString("rules.channel_id", "")).trim(),
     roleId: (await config.getString("rules.role_id", "")).trim(),
-    messagePosted: !!(await config.getString("rules.message_id", "")).trim(),
+    messagePosted: false,
+    messageId: "",
     accepted: await RulesAcceptance.countDocuments({ guildId }).catch(() => 0),
     native: { screening: false, community: false },
     intentMissing: !env.guildMembersIntent,
@@ -96,6 +103,8 @@ export async function loadRulesPage(
     roleName: null,
     unavailable: null,
   };
+  data.messageId = (await config.getString("rules.message_id", "")).trim();
+  data.messagePosted = data.messageId !== "";
   try {
     const guild = await client.guilds.fetch(guildId);
     data.native = RulesService.nativeGate(guild);
@@ -174,6 +183,30 @@ function renderStatus(p: RulesPageProps, csrf: string): string {
     <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="btn"${p.roleId ? "" : " disabled"}>Record current role holders as accepted</button></form>
   </div>
 </div>`;
+}
+
+function renderRepost(p: RulesPageProps, csrf: string): string {
+  return renderRepostCard({
+    id: "repost-message",
+    heading: "Re-post the rules message",
+    intro:
+      "Update edits the posted message in place. Re-post makes a brand new message and takes the old one down, for example if the old one looks broken or was buried.",
+    action: "/admin/rules/repost",
+    csrfInput: csrf,
+    messageId: p.messageId,
+    buttonLabel: "Re-post the rules message",
+    confirmText: "Re-post the rules message?",
+    consequences: [
+      "A new rules message with its Accept button is posted in the rules channel.",
+      "The old message is deleted if KoolBot can find it in this channel. Its Accept button stops working either way.",
+      "Members who already accepted keep their acceptance and role.",
+    ],
+    blockedReason: !p.enabled
+      ? "Turn on Rules acceptance in Settings first."
+      : !p.channelId
+        ? "Set the rules channel first."
+        : null,
+  });
 }
 
 function renderRollout(p: RulesPageProps, csrf: string): string {
@@ -255,6 +288,7 @@ ${renderFlash(props.flash)}
 ${job}
 ${renderNotices(props)}
 ${renderStatus(props, csrf)}
+${renderRepost(props, csrf)}
 ${renderRollout(props, csrf)}
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;

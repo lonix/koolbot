@@ -23,3 +23,25 @@ export function hostControlsAvailable(
 ): boolean {
   return event?.state === "scheduled" || event?.state === "active";
 }
+
+/**
+ * The one definition of a RUNNING event for the host's "Your events" page, its
+ * Cancel guard and the atomic cancel claim (#1319): the event is `active` AND
+ * its start has arrived. `active` alone is not enough, because the event's
+ * channel is prepared (and the state set) a lead time BEFORE the start (15
+ * minutes by default); until the start such an event is still upcoming and can
+ * still be edited and cancelled. Start now on an impromptu event stores the
+ * start 30 seconds ahead, so it counts as running within half a minute.
+ * Limit: the model does not record that a host started a planned event early,
+ * so one started before its start time stays upcoming until the start arrives.
+ */
+export function isEventRunning(
+  event: { state?: string | null; startTime?: Date | null },
+  now: Date,
+): boolean {
+  return (
+    event.state === "active" &&
+    event.startTime instanceof Date &&
+    event.startTime.getTime() <= now.getTime()
+  );
+}

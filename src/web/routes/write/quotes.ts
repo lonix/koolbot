@@ -16,6 +16,7 @@ import { QuoteChannelManager } from "../../../services/quote-channel-manager.js"
 import { isMissingPostError } from "../../../utils/discord.js";
 import { normalizeUserId } from "../../../utils/user-id.js";
 import { recordAudit } from "../../audit.js";
+import { finishRepost } from "./repost-response.js";
 import {
   flashRedirect,
   getString,
@@ -319,6 +320,25 @@ export function createQuotesRouter(client: Client): Router {
           text: `Failed to resync the quote channel: ${text}`,
         });
       }
+    }),
+  );
+
+  // Post the header again and take the old one down (#1428). `expectedId` is
+  // the header id the page showed, so a double submit re-posts once.
+  router.post(
+    "/quotes/header/repost",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const result = await QuoteChannelManager.getInstance(client).repostHeader(
+        getString(req, "expectedId"),
+      );
+      await finishRepost(res, session, result, {
+        page: QUOTES_PAGE,
+        action: "quote.header-repost",
+        what: "The quote channel header",
+        extra:
+          " It is at the bottom of the channel, and pinned if pinning is on.",
+      });
     }),
   );
 

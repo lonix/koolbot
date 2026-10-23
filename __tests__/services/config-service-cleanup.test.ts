@@ -24,6 +24,7 @@ jest.unstable_mockModule("../../src/models/config.js", () => ({
   },
   CONFIG_CATEGORIES: [
     "achievements",
+    "adoption",
     "amikool",
     "announcements",
     "birthdays",
@@ -35,18 +36,25 @@ jest.unstable_mockModule("../../src/models/config.js", () => ({
     "gamification",
     "help",
     "leaderboard_roles",
+    "lfg",
     "messagetracking",
     "moderation",
+    "namehistory",
     "notices",
     "ping",
     "polls",
+    "privacy",
     "quotes",
     "ratelimit",
     "reactionroles",
     "reactiontracking",
+    "reminders",
     "rewind",
+    "rules",
+    "tickets",
     "voicechannels",
     "voicetracking",
+    "welcome",
     "wizard",
   ],
 }));
@@ -312,6 +320,27 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
     // otherwise the startup sweep silently deletes it on the next boot. This
     // scans src/ so a newly introduced bookkeeping key cannot regress the way
     // voicetracking.cleanup.last_run did (#838).
+    // The mock above must list every category the real model lists. It had
+    // fallen behind (no `rules`, `welcome`, ...), which made the sweep test below
+    // report a key as deleted that production keeps.
+    it("mocks the same category list as the real Config model", async () => {
+      const testDir = path.dirname(fileURLToPath(import.meta.url));
+      const real = fs.readFileSync(
+        path.resolve(testDir, "../../src/models/config.ts"),
+        "utf-8",
+      );
+      const block = real.slice(
+        real.indexOf("export const CONFIG_CATEGORIES = ["),
+        real.indexOf("] as const"),
+      );
+      const realCategories = [...block.matchAll(/^\s+"([a-z_]+)"/gm)].map(
+        (m) => m[1],
+      );
+      expect(realCategories.length).toBeGreaterThan(20);
+      const mocked = await import("../../src/models/config.js");
+      expect([...mocked.CONFIG_CATEGORIES]).toEqual(realCategories);
+    });
+
     it("should keep every literal key written via ConfigService.set() in src/", async () => {
       const testDir = path.dirname(fileURLToPath(import.meta.url));
       const srcDir = path.resolve(testDir, "../../src");
