@@ -201,6 +201,76 @@ describe("the board", () => {
     expect(css).toMatch(/\.kb-board__foot \.kb-btn \{[^}]*white-space: normal/);
   });
 
+  it("lets every flex and grid item of the board shrink and wrap long text, and keeps selects and buttons inside their container", () => {
+    const css = readFileSync(
+      new URL("../../docs/design/kb.css", import.meta.url),
+      "utf8",
+    );
+    // Every rule is one line: collect the bodies of all lines naming the selector.
+    const rule = (selector: string): string => {
+      const bodies: string[] = [];
+      for (const line of css.split("\n")) {
+        const m = /^(.*?) \{(.*)\}\s*$/.exec(line);
+        if (m && m[1].split(", ").includes(selector)) bodies.push(m[2]);
+      }
+      expect(bodies.length).toBeGreaterThan(0);
+      return bodies.join(" ");
+    };
+    // The grid itself never forces a track wider than the container.
+    expect(rule(".kb-board")).toContain("minmax(min(11rem, 100%), 1fr)");
+    // Every item that can hold arbitrary text may shrink.
+    for (const sel of [
+      ".kb-board__col",
+      ".kb-board__head",
+      ".kb-board__list > li",
+      ".kb-board__who",
+      ".kb-board__where",
+      ".kb-board__menu",
+      ".kb-board__menu .kb-disclosure__body",
+      ".kb-board__foot",
+      ".kb-board__person .kb-badge",
+      ".kb-toolbar__panel",
+      ".kb-toolbar > *",
+    ]) {
+      expect(rule(sel)).toContain("min-width: 0");
+    }
+    // Long names wrap instead of widening or being cut off.
+    for (const sel of [
+      ".kb-board__head .kb-team__name",
+      ".kb-board__who",
+      ".kb-board__where",
+      ".kb-board__menu .kb-disclosure__body",
+      ".kb-board__menu .kb-label",
+      ".kb-board__foot",
+      ".kb-toolbar__panel",
+    ]) {
+      expect(rule(sel)).toMatch(/overflow-wrap: anywhere/);
+    }
+    expect(rule(".kb-board__head .kb-team__name")).toContain(
+      "white-space: normal",
+    );
+    // The menu stays inside its column; selects and buttons inside the menu, the panel and the dialog.
+    expect(rule(".kb-board__menu")).toContain("max-width: 100%");
+    for (const sel of [
+      ".kb-board__menu .kb-select",
+      ".kb-toolbar__panel .kb-select",
+      ".kb-dialog .kb-select",
+    ]) {
+      expect(rule(sel)).toContain("max-width: 100%");
+    }
+    for (const sel of [
+      ".kb-board__menu .kb-btn",
+      ".kb-board__foot .kb-btn",
+      ".kb-toolbar__end .kb-btn",
+    ]) {
+      expect(rule(sel)).toMatch(/max-width: 100%[^}]*white-space: normal/);
+    }
+    // Wrapping rows.
+    expect(rule(".kb-board__person")).toContain("flex-wrap: wrap");
+    expect(rule(".kb-board__foot")).toContain("flex-wrap: wrap");
+    expect(rule(".kb-toolbar")).toContain("flex-wrap: wrap");
+  });
+
   it("escapes every name, tag and token", () => {
     const html = renderHostBoard(data());
     expect(html).toContain("R Reds &lt;b&gt;");

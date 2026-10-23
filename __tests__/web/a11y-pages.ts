@@ -3422,6 +3422,31 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      // Long unbroken member, team and channel names. Axe cannot see overflow;
+      // the wrapping rules are asserted on kb.css in host-board-view.test.ts.
+      name: "/me host panel (board, long names)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        boardPage(
+          boardData({
+            teams: boardData().teams.map((t, i) => ({
+              ...t,
+              name:
+                i === 0 ? "TheVeryLongTeamNameWithoutAnySpacesAtAll" : t.name,
+              people: t.people.map((p) => ({
+                ...p,
+                name: "AVeryLongUnbrokenMemberNameFromDiscord0123456789",
+                where: p.connected
+                  ? "a-very-long-voice-channel-name-for-the-team"
+                  : null,
+              })),
+            })),
+          }),
+        ),
+      ),
+    },
+    {
       name: "/me host panel (board, no team groups, people and Move people kept)",
       html: shell(
         "Host panel: Quiz night",
