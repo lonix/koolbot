@@ -139,7 +139,7 @@ async function read<T>(work: () => Promise<T>, ms: number): Promise<Read<T>> {
 /** The features that have a page, from the sidebar's own list, switched-on ones first. */
 export function dashboardFeatures(status: NavFeatureStatus): FeatureEntry[] {
   const entries = NAV_ITEMS.flatMap((item) =>
-    item.group === "Features" && item.featureKey
+    item.group === "Features" && item.featureKey && !item.subpage
       ? [
           {
             key: item.featureKey as string,

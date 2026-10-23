@@ -110,6 +110,11 @@ interface NavItem {
    * compile time rather than silently never matching at runtime.
    */
   featureKey?: keyof ConfigSchema;
+  /**
+   * A second page of the feature above it (it shares that feature's key), so
+   * the dashboard's feature list names the feature once, not once per page.
+   */
+  subpage?: boolean;
 }
 
 // Labels are sentence case and say what the page does. The routes did not
@@ -138,6 +143,14 @@ export const NAV_ITEMS: NavItem[] = [
     group: "Features",
     scope: "admin",
     featureKey: "events.enabled",
+  },
+  {
+    href: "/admin/events/presets",
+    label: "Event presets",
+    group: "Features",
+    scope: "admin",
+    featureKey: "events.enabled",
+    subpage: true,
   },
   {
     href: "/admin/leaderboard-roles",

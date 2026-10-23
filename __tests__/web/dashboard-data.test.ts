@@ -312,6 +312,9 @@ describe("dashboardFeatures", () => {
       href: "/admin/analytics",
       on: false,
     });
+    // A feature's second page (Event presets) is not listed as a feature.
+    expect(f.filter((x) => x.key === "events.enabled")).toHaveLength(1);
+    expect(f.some((x) => x.label === "Event presets")).toBe(false);
     // A feature the nav status does not name reads as off, never as on.
     expect(dashboardFeatures({}).every((x) => !x.on)).toBe(true);
   });

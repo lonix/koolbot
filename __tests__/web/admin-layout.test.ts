@@ -505,6 +505,18 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
     ]);
   });
 
+  it("links Event presets next to Events and marks only the page it is on (#1298)", () => {
+    const on = navOf(render(status(), "/admin/events/presets"));
+    expect(on).toContain(
+      '<a href="/admin/events/presets" aria-current="page">Event presets</a>',
+    );
+    expect(on).toContain('<a href="/admin/events">Events</a>');
+    expect(on.match(/aria-current="page"/g)).toHaveLength(1);
+    // Gated on Events like the Events page: greyed in the fold while it is off.
+    const off = navOf(render(status(["events.enabled"])));
+    expect(off).toContain('<a href="/admin/events/presets" class="is-off"');
+  });
+
   it("labels the renamed pages and keeps their routes", () => {
     const nav = navOf(render());
     const labelled: Array<[string, string]> = [
@@ -553,7 +565,7 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
       const outside = labelsOf(
         nav.slice(nav.indexOf('">Features</p>'), nav.indexOf("<details")),
       );
-      expect(inFold).toEqual(["Events", "Polls", "Quotes"]);
+      expect(inFold).toEqual(["Event presets", "Events", "Polls", "Quotes"]);
       expect(outside.length).toBeGreaterThan(3);
       expect(outside).toEqual(
         [...outside].sort((a, b) => a.localeCompare(b, "en")),
@@ -672,9 +684,12 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
 
 describe("resolveNavFeatureStatus", () => {
   it("resolves the enabled-state of every feature-gated nav item", async () => {
-    const gatedKeys = NAV_ITEMS.flatMap((n) =>
-      n.featureKey ? [n.featureKey] : [],
-    );
+    // Two pages may share a key (Events and Event presets); it is read once.
+    const gatedKeys = [
+      ...new Set(
+        NAV_ITEMS.flatMap((n) => (n.featureKey ? [n.featureKey] : [])),
+      ),
+    ];
     const seen: string[] = [];
     const status = await resolveNavFeatureStatus(async (key) => {
       seen.push(key);
