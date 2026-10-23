@@ -370,7 +370,7 @@ export function renderDurationPresets(
     `<span class="kb-duration__custom" data-duration-custom>` +
     `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
     ` inputmode="numeric" autocomplete="off" pattern="[0-9]*" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
-    ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${isPreset ? "" : " required"}${lock}>` +
+    ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
     `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
     `</div>`
   );

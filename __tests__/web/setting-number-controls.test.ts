@@ -81,14 +81,16 @@ describe("renderDurationPresets", () => {
     ).toBe("45");
   });
 
-  it("does not treat a stored value with whitespace as a preset: Custom… is ticked, the box is visible and required", () => {
+  it("does not treat a stored value with whitespace as a preset: Custom… is ticked and the box is visible", () => {
     const d = doc(durationHtml("30 "));
     expect(
       (d.querySelector("input[type=radio]:checked") as HTMLInputElement).value,
     ).toBe("custom");
     const box = d.querySelector("[data-duration-input]") as HTMLInputElement;
     expect(box.value).toBe("30 ");
-    expect(box.required).toBe(true);
+    // The markup never carries `required` (see the no-JavaScript test below);
+    // the script adds it while Custom… is ticked.
+    expect(box.required).toBe(false);
     // No hidden invalid box: with the script run, the wrapper is still shown.
     const dom = new JSDOM(
       `<!doctype html><body><form>${durationHtml("30 ")}</form></body>`,
@@ -104,6 +106,13 @@ describe("renderDurationPresets", () => {
         ) as HTMLElement
       ).hidden,
     ).toBe(false);
+    expect(
+      (
+        dom.window.document.querySelector(
+          "[data-duration-input]",
+        ) as HTMLInputElement
+      ).required,
+    ).toBe(true);
   });
 
   it("shows a stored number outside the range as it is, under Custom…", () => {
@@ -185,6 +194,57 @@ describe("renderStepper", () => {
     expect(
       (doc(html(40)).querySelector("input") as HTMLInputElement).value,
     ).toBe("40");
+  });
+});
+
+describe("without JavaScript", () => {
+  it("never renders the box required, whatever is stored, so a ticked preset is never blocked by it", () => {
+    for (const stored of [30, 45, "30 ", 99999, ""]) {
+      const d = doc(durationHtml(stored));
+      expect(
+        (d.querySelector("[data-duration-input]") as HTMLInputElement).required,
+      ).toBe(false);
+    }
+  });
+
+  it("stored 45, box cleared, preset 15 ticked: the form is valid and the server reads 15; Custom… with an empty box is refused", () => {
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${durationHtml(45)}</form></body>`,
+    );
+    const form = dom.window.document.querySelector("form") as HTMLFormElement;
+    const box = form.querySelector("[data-duration-input]") as HTMLInputElement;
+    box.value = "";
+    (
+      form.querySelector('input[type=radio][value="15"]') as HTMLInputElement
+    ).checked = true;
+    expect(form.checkValidity()).toBe(true);
+    const body = Object.fromEntries(
+      [...new dom.window.FormData(form).entries()].map(([k, v]) => [
+        k,
+        String(v),
+      ]),
+    );
+    expect(readSettingField(body, REMINDER)).toBe("15");
+    expect(
+      coerceConfigValue(REMINDER, readSettingField(body, REMINDER), 45),
+    ).toEqual({
+      ok: true,
+      value: 15,
+    });
+    (
+      form.querySelector(
+        'input[type=radio][value="custom"]',
+      ) as HTMLInputElement
+    ).checked = true;
+    const custom = Object.fromEntries(
+      [...new dom.window.FormData(form).entries()].map(([k, v]) => [
+        k,
+        String(v),
+      ]),
+    );
+    const raw = readSettingField(custom, REMINDER);
+    expect(raw).toBe("");
+    expect(coerceConfigValue(REMINDER, raw, 45).ok).toBe(false);
   });
 });
 
