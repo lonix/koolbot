@@ -14,6 +14,8 @@ jest.mock("../../src/utils/logger.js", () => ({
   },
 }));
 
+const mockClassify = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+
 jest.mock("../../src/services/achievements-service.js", () => ({
   AchievementsService: {
     getInstance: jest.fn(() => ({
@@ -44,6 +46,9 @@ function createTracker(mockClient: Partial<Client>) {
   // Inject mock config service and stub the Mongo connection guard
   (tracker as never)["configService"] = mockConfigService;
   stubMongoGuard(tracker);
+  // The real classifier reads Mongo; default to "unknown" (#1420).
+  (tracker as never)["classifyRoom"] = (...args: unknown[]) =>
+    mockClassify(...args);
 
   return { tracker, mockConfigService };
 }
@@ -748,6 +753,190 @@ describe("VoiceChannelTracker", () => {
     });
   });
 
+  describe("room-kind lookup racing voice transitions (#1420)", () => {
+    function setup() {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation((key: string) =>
+        Promise.resolve(key === "voicetracking.enabled"),
+      );
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "u1", id: "u1" });
+      const room = (id: string) =>
+        ({ id, name: `Room ${id}`, members: new Map() }) as any;
+      const rooms = new Map([
+        ["A", room("A")],
+        ["B", room("B")],
+      ]);
+      const member = {
+        id: "u1",
+        displayName: "u1",
+        guild: { id: "guild-1", channels: { cache: rooms } },
+      } as unknown as GuildMember;
+      const state = (id: string | null) =>
+        ({
+          member,
+          channel: id ? rooms.get(id) : null,
+        }) as unknown as VoiceState;
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      return { tracker, state };
+    }
+
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    const flush = async (): Promise<void> => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    const savedSessions = (): any[] =>
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock.calls.map(
+        (c) => c[1].$push.sessions,
+      );
+
+    function companionSetup() {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation((key: string) =>
+        Promise.resolve(
+          key === "voicetracking.enabled" ||
+            key === "voicetracking.companions.enabled",
+        ),
+      );
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockImplementation((id: string) =>
+          Promise.resolve({ username: id, id }),
+        );
+      const rooms = new Map([
+        ["R", { id: "R", name: "Room R", members: new Map() } as any],
+      ]);
+      const memberFor = (id: string) =>
+        ({
+          id,
+          displayName: id,
+          guild: { id: "guild-1", channels: { cache: rooms } },
+        }) as unknown as GuildMember;
+      const state = (m: GuildMember, id: string | null) =>
+        ({
+          member: m,
+          channel: id ? rooms.get(id) : null,
+        }) as unknown as VoiceState;
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      return { tracker, memberFor, state };
+    }
+
+    it("does not open a companion interval for a member who left during the lookup", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const bob = memberFor("bob");
+      const alice = memberFor("alice");
+      mockClassify.mockResolvedValueOnce(undefined);
+      await tracker.handleVoiceStateUpdate(state(bob, null), state(bob, "R"));
+
+      const lookup = deferred<string | undefined>();
+      mockClassify.mockReturnValueOnce(lookup.promise);
+      const join = tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+      await flush();
+      await tracker.handleVoiceStateUpdate(
+        state(alice, "R"),
+        state(alice, null),
+      );
+      lookup.resolve("dynamic");
+      await join;
+      await flush();
+
+      // Bob stays in the room: no interval with Alice is left open for him,
+      // and Alice has no session or kind.
+      const since = (tracker as any).companionSince.get("bob");
+      expect(since.has("alice")).toBe(false);
+      expect((tracker as any).activeSessions.has("alice")).toBe(false);
+      expect(
+        (tracker as any).activeSessions.get("bob").roomKind,
+      ).toBeUndefined();
+    });
+
+    it("returns from the join without waiting for a lookup that never resolves", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const alice = memberFor("alice");
+      mockClassify.mockReturnValueOnce(
+        new Promise<string | undefined>(() => {}),
+      );
+
+      await tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+
+      const session = (tracker as any).activeSessions.get("alice");
+      expect(session.channelId).toBe("R");
+      expect(session.roomKind).toBeUndefined();
+    });
+
+    it("swallows a failing lookup and stamps nothing", async () => {
+      const { tracker, memberFor, state } = companionSetup();
+      const alice = memberFor("alice");
+      mockClassify.mockRejectedValueOnce(new Error("boom"));
+
+      await tracker.handleVoiceStateUpdate(
+        state(alice, null),
+        state(alice, "R"),
+      );
+      await flush();
+
+      expect(
+        (tracker as any).activeSessions.get("alice").roomKind,
+      ).toBeUndefined();
+    });
+
+    it("leaves no session behind when the member disconnects during the lookup", async () => {
+      const { tracker, state } = setup();
+      const lookup = deferred<string | undefined>();
+      mockClassify.mockReturnValueOnce(lookup.promise);
+
+      const join = tracker.handleVoiceStateUpdate(state(null), state("A"));
+      await flush();
+      expect(mockClassify).toHaveBeenCalled();
+
+      await tracker.handleVoiceStateUpdate(state("A"), state(null));
+      lookup.resolve("dynamic");
+      await join;
+
+      // The session was ended once, without the late kind, and not revived.
+      expect(savedSessions()).toHaveLength(1);
+      expect("roomKind" in savedSessions()[0]).toBe(false);
+      expect((tracker as any).activeSessions.has("u1")).toBe(false);
+    });
+
+    it("does not let a slow lookup for room A tag the session in room B", async () => {
+      const { tracker, state } = setup();
+      const slowA = deferred<string | undefined>();
+      mockClassify
+        .mockReturnValueOnce(slowA.promise)
+        .mockResolvedValueOnce("event");
+
+      const joinA = tracker.handleVoiceStateUpdate(state(null), state("A"));
+      await flush();
+      await tracker.handleVoiceStateUpdate(state("A"), state("B"));
+      slowA.resolve("dynamic");
+      await joinA;
+      await flush();
+
+      const active = (tracker as any).activeSessions.get("u1");
+      expect(active.channelId).toBe("B");
+      expect(active.roomKind).toBe("event");
+      expect(savedSessions()).toHaveLength(1);
+      expect(savedSessions()[0].channelId).toBe("A");
+      expect("roomKind" in savedSessions()[0]).toBe(false);
+    });
+  });
+
   describe("public-visibility marker (#1162)", () => {
     const everyone = { id: "everyone-role" };
     const roomWith = (canView: boolean) => ({
@@ -804,6 +993,20 @@ describe("VoiceChannelTracker", () => {
       return (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
         .calls[0][1].$push.sessions;
     }
+
+    it("stamps the room kind read at join, and omits it when unknown (#1420)", async () => {
+      mockClassify.mockResolvedValueOnce("event");
+      const room = roomWith(true);
+      const saved = await recordSession(room, room);
+      expect(mockClassify).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: "guild-1", channelId: "room-1" }),
+      );
+      expect(saved.roomKind).toBe("event");
+
+      mockClassify.mockResolvedValueOnce(undefined);
+      const unknown = await recordSession(room, room);
+      expect("roomKind" in unknown).toBe(false);
+    });
 
     it("marks a room public at join and still public at close", async () => {
       const room = roomWith(true);

@@ -1,4 +1,8 @@
 import mongoose, { Schema, Document } from "mongoose";
+import {
+  VOICE_ROOM_KINDS,
+  type VoiceRoomKind,
+} from "../utils/voice-room-kinds.js";
 
 export interface IVoiceChannelTracking extends Document {
   userId: string;
@@ -29,6 +33,8 @@ export interface IVoiceChannelTracking extends Document {
     // public. Absent on sessions recorded before this field existed, which
     // are treated as not public. (#1162)
     everyoneCanView?: boolean;
+    // Kind of room, stamped at join (#1420). Absent on older sessions.
+    roomKind?: VoiceRoomKind;
   }>;
   excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
   // Cleanup-related fields for future use
@@ -72,6 +78,8 @@ const VoiceChannelTrackingSchema = new Schema({
       joinedExisting: { type: [String], default: undefined },
       // No default: older sessions must stay unmarked so they fail closed.
       everyoneCanView: { type: Boolean },
+      // No default, for the same reason: older sessions stay "other" (#1420).
+      roomKind: { type: String, enum: VOICE_ROOM_KINDS },
     },
   ],
   excludedChannels: { type: [String], default: [] },

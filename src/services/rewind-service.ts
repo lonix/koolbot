@@ -1,5 +1,9 @@
 import { Client } from "discord.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
+import {
+  VOICE_ROOM_KINDS,
+  type VoiceRoomKind,
+} from "../utils/voice-room-kinds.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
@@ -64,6 +68,19 @@ export interface RewindTextChannel {
   count: number;
 }
 
+/**
+ * Kind of room for the voice-time breakdown (#1420). `other` collects sessions
+ * recorded before the kind was stamped (or whose lookup failed).
+ */
+export type RewindRoomKind = VoiceRoomKind | "other";
+
+/** Voice time spent in one kind of room (#1420). */
+export interface RewindVoiceKindTotal {
+  kind: RewindRoomKind;
+  totalSeconds: number;
+  sessionCount: number;
+}
+
 export interface RewindAchievement {
   type: string;
   emoji: string;
@@ -91,16 +108,23 @@ export interface RewindSummary {
   // per-session room names are noise; companions replace it.)
   topCompanions: RewindCompanion[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
+  // Voice time by KIND of room (#1420): dynamic rooms, event channels,
+  // permanent channels, lobby, and "other" for older sessions with no kind.
+  // Rooms are never listed by name here — a name is only a label and many
+  // rooms share one. Empty on snapshots frozen before #1420.
+  voiceByKind: RewindVoiceKindTotal[];
   // Single longest contiguous voice session of the year (#568). `date` is
   // the ISO day the session started, bucketed in the user's timezone like
   // `peakDay`. `channelName` is the session's stored room name (often
   // ephemeral under dynamic VCs), null when unknown. Null when the user had
-  // no qualifying session that year.
+  // no qualifying session that year. User-facing pages show `roomKind`
+  // (#1420), not the name; absent/"other" renders as a neutral voice channel.
   longestSession: {
     totalSeconds: number;
     date: string;
     channelId: string;
     channelName: string | null;
+    roomKind?: RewindRoomKind;
   } | null;
   // Text-message activity (#496). Mirrors the voice aggregates above and
   // reads as zero / empty when message tracking is disabled or absent.
@@ -162,7 +186,7 @@ export interface RewindSummary {
  * keep their stored version and are rendered tolerantly by
  * `normalizeSnapshotSummary`.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 4;
+export const SNAPSHOT_SCHEMA_VERSION = 5;
 
 /** How many voice companions the Rewind card renders (#567). */
 export const TOP_COMPANIONS_SHOWN = 5;
@@ -181,6 +205,8 @@ interface RawSession {
   duration?: number;
   channelId: string;
   channelName?: string;
+  // Kind of room stamped at join (#1420); absent on older sessions.
+  roomKind?: VoiceRoomKind;
   // Union of other user ids encountered during the session (#567).
   otherUsers?: string[];
 }
@@ -290,6 +316,34 @@ export function computePeakDay(
 }
 
 /**
+ * Voice time per kind of room (#1420), in a fixed display order with empty
+ * kinds omitted. A session with no (or an unrecognised) kind counts as
+ * `other`. Sessions with no positive duration are skipped.
+ */
+export function computeVoiceByKind(
+  sessions: RawSession[],
+): RewindVoiceKindTotal[] {
+  const totals = new Map<RewindRoomKind, RewindVoiceKindTotal>();
+  for (const s of sessions) {
+    const seconds = sessionSeconds(s);
+    if (seconds <= 0) continue;
+    const kind: RewindRoomKind =
+      s.roomKind && VOICE_ROOM_KINDS.includes(s.roomKind)
+        ? s.roomKind
+        : "other";
+    const row = totals.get(kind) ?? { kind, totalSeconds: 0, sessionCount: 0 };
+    row.totalSeconds += seconds;
+    row.sessionCount += 1;
+    totals.set(kind, row);
+  }
+  const order: RewindRoomKind[] = [...VOICE_ROOM_KINDS, "other"];
+  return order.flatMap((k) => {
+    const row = totals.get(k);
+    return row ? [row] : [];
+  });
+}
+
+/**
  * The single longest contiguous voice session of the set (#568). Returns
  * its duration, the ISO day it started on (bucketed in UTC by default, or
  * the supplied IANA `timeZone` like `computePeakDay`), and the session's
@@ -306,6 +360,7 @@ export function computeLongestSession(
   date: string;
   channelId: string;
   channelName: string | null;
+  roomKind?: RewindRoomKind;
 } | null {
   let best: RawSession | null = null;
   let bestSeconds = 0;
@@ -328,6 +383,7 @@ export function computeLongestSession(
     date: dayKey(best.startTime, timeZone),
     channelId: best.channelId,
     channelName: best.channelName ?? null,
+    roomKind: best.roomKind ?? "other",
   };
 }
 
@@ -673,6 +729,8 @@ export function normalizeSnapshotSummary(
       (c) => c.displayName !== "Unknown user",
     ),
     peakDay: s.peakDay ?? null,
+    // Snapshots frozen before #1420 carry no breakdown; empty hides the block.
+    voiceByKind: s.voiceByKind ?? [],
     // Older snapshots predate the longest-session card (#568).
     longestSession: s.longestSession ?? null,
     messagesSent: s.messagesSent ?? 0,
@@ -825,6 +883,7 @@ export class RewindService {
         TOP_COMPANIONS_SHOWN * COMPANION_CANDIDATE_MULTIPLIER,
       );
       const peakDay = computePeakDay(sessions, dayZone);
+      const voiceByKind = computeVoiceByKind(sessions);
       const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
       const heatmap = computeVoiceActivityHeatmap(sessions, dayZone);
@@ -934,6 +993,7 @@ export class RewindService {
         daysActive,
         topCompanions,
         peakDay,
+        voiceByKind,
         longestSession,
         messagesSent: text.messagesSent,
         topTextChannels: text.topTextChannels,

@@ -16,6 +16,8 @@ import { ConfigService } from "./config-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { AchievementsService } from "./achievements-service.js";
 import { isPublicToEveryone } from "../utils/channel-visibility.js";
+import { classifyVoiceRoom } from "./voice-room-kind.js";
+import type { VoiceRoomKind } from "../utils/voice-room-kinds.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -53,6 +55,8 @@ interface VoiceSession {
   channelName: string;
   /** `@everyone` could view the channel when the session began (#1162). */
   publicAtStart: boolean;
+  /** Kind of room at join, for the Rewind summary (#1420); undefined = unknown. */
+  roomKind?: VoiceRoomKind;
   /**
    * The guild the session is in, for the tracking opt-out checks at persist
    * time (#918). The tracking row itself is not guild-scoped.
@@ -166,6 +170,8 @@ export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
   private activeSessions: Map<string, VoiceSession> = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
+  /** Room-kind lookup (#1420); a field so tests can substitute it. */
+  private classifyRoom: typeof classifyVoiceRoom = classifyVoiceRoom;
   private encounteredUsers: Map<string, Set<string>> = new Map(); // Track all users encountered during each session
   // Precise per-companion co-presence accounting (#570). For each tracked
   // session: `companionSince` holds the epoch-ms start of the *current* open
@@ -773,13 +779,16 @@ export class VoiceChannelTracker {
         return;
       }
 
-      this.activeSessions.set(member.id, {
+      // Installed before the room-kind lookup below, so the session starts at
+      // the join and a disconnect or switch during the lookup finds it (#1420).
+      const session: VoiceSession = {
         startTime: new Date(),
         channelId,
         channelName,
         publicAtStart: isPublic,
         guildId,
-      });
+      };
+      this.activeSessions.set(member.id, session);
 
       // Initialize encountered users Set with current channel members
       const encounteredSet = new Set<string>();
@@ -826,6 +835,24 @@ export class VoiceChannelTracker {
           `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}, initial users: ${encounteredSet.size}`,
         );
       }
+
+      // Read while the room still exists; its records go with it (#1420).
+      // Deliberately NOT awaited: the join path (companion bookkeeping in the
+      // caller included) must not wait on a database lookup. The kind goes onto
+      // this very session object, and only while it is still the member's
+      // active session, so a disconnect or switch during the lookup neither
+      // gets a session back nor inherits this room's kind. A session that was
+      // saved before the lookup finished keeps no kind: the stored record is
+      // not amended afterwards. A failed lookup stamps nothing.
+      void this.classifyRoom({ guildId, guild, channelId, channelName })
+        .then((roomKind) => {
+          if (roomKind && this.activeSessions.get(member.id) === session) {
+            session.roomKind = roomKind;
+          }
+        })
+        .catch((error: unknown) => {
+          logger.warn("Could not record voice room kind:", error);
+        });
     } catch (error: unknown) {
       logger.error("Error starting voice tracking:", error);
     }
@@ -980,6 +1007,7 @@ export class VoiceChannelTracker {
         // cannot be re-checked, so the join-time state stands (the stored
         // name is the join-time name, which was public then). (#1162)
         everyoneCanView: this.publicThroughout(session),
+        ...(session.roomKind ? { roomKind: session.roomKind } : {}),
       };
       if (companionsEnabled) {
         // Close any still-open companion intervals so the final session
