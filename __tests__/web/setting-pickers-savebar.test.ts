@@ -1,4 +1,4 @@
-/* global HTMLElement, HTMLButtonElement, HTMLInputElement, HTMLFormElement */
+/* global HTMLSelectElement, HTMLElement, HTMLButtonElement, HTMLInputElement, HTMLFormElement */
 /**
  * The colour input, the save bar and the section cascade, all their scripts
  * loaded together in jsdom (#1426). The colour field keeps no state of its own:
@@ -12,6 +12,8 @@ import {
   COLOUR_INPUT_SCRIPT,
   renderColourInput,
   renderEmojiField,
+  renderTimezoneSelect,
+  TIMEZONE_SELECT_SCRIPT,
 } from "../../src/web/setting-pickers.js";
 import { DEFAULT_COLOUR_SWATCH } from "../../src/utils/setting-formats.js";
 import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
@@ -476,4 +478,82 @@ describe("every order of events (random walk)", () => {
       for (let seed = 1; seed <= 60; seed++) walk(seed, stored);
     });
   }
+});
+
+describe("the timezone search and the save bar", () => {
+  function tzMount(stored: string): JSDOM {
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${renderTimezoneSelect("tz", stored, { defaultZone: "Europe/Oslo", blank: true })}` +
+        `<input name="sibling" value="a">${renderSaveBar("Save")}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    dom.window.eval(TIMEZONE_SELECT_SCRIPT);
+    dom.window.eval(SAVEBAR_SCRIPT);
+    return dom;
+  }
+  const sel = (dom: JSDOM): HTMLSelectElement =>
+    q<HTMLSelectElement>(dom, "select");
+  const pickZone = (dom: JSDOM, v: string): void => {
+    sel(dom).value = v;
+    sel(dom).dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  };
+  const search = (dom: JSDOM, text: string): void => {
+    const s = q<HTMLInputElement>(dom, "[data-tz-search]");
+    s.value = text;
+    s.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  };
+  /**
+   * What a browser posts for the select: the selected option, unless it is
+   * disabled. jsdom's FormData does not apply that rule, so it is applied here.
+   */
+  const postedZone = (dom: JSDOM): string | null => {
+    const o = sel(dom).selectedOptions[0];
+    return o && !o.disabled ? o.value : null;
+  };
+
+  it("never disables an option, so a selected zone is always posted", () => {
+    const dom = tzMount("Asia/Tokyo");
+    search(dom, "new york");
+    expect([...sel(dom).options].filter((o) => o.disabled)).toEqual([]);
+    // Options are only hidden, and the selected one stays visible.
+    expect(sel(dom).selectedOptions[0].hidden).toBe(false);
+    expect(postedZone(dom)).toBe("Asia/Tokyo");
+  });
+
+  it("a stored zone that the search filters out is still shown and posted", () => {
+    const dom = tzMount("Europe/Berlin");
+    search(dom, "tokyo");
+    expect(sel(dom).value).toBe("Europe/Berlin");
+    expect(sel(dom).selectedOptions[0].hidden).toBe(false);
+    expect(postedZone(dom)).toBe("Europe/Berlin");
+  });
+
+  it("pick, then change the search: the posted value is the one shown", () => {
+    const dom = tzMount("Asia/Tokyo");
+    search(dom, "oslo");
+    pickZone(dom, "Europe/Oslo");
+    search(dom, "new york");
+    expect(sel(dom).value).toBe("Europe/Oslo");
+    expect(postedZone(dom)).toBe("Europe/Oslo");
+    search(dom, "");
+    expect([...sel(dom).options].filter((o) => o.hidden || o.disabled)).toEqual(
+      [],
+    );
+    expect(postedZone(dom)).toBe("Europe/Oslo");
+  });
+
+  it("save in flight, pick another zone, search, saved, Discard: the restored zone is posted", () => {
+    const dom = tzMount("Asia/Tokyo");
+    pickZone(dom, "Europe/Berlin");
+    submit(dom);
+    pickZone(dom, "Asia/Tokyo");
+    search(dom, "new york");
+    saved(dom);
+    expect(bar(dom).hidden).toBe(false);
+    discard(dom);
+    expect(sel(dom).value).toBe("Europe/Berlin");
+    expect([...sel(dom).options].filter((o) => o.disabled)).toEqual([]);
+    expect(postedZone(dom)).toBe("Europe/Berlin");
+    expect(bar(dom).hidden).toBe(true);
+  });
 });

@@ -95,8 +95,11 @@ export function renderTimezoneSelect(
 
 /**
  * Turns each `[data-tz]` search box on. Typing hides the zones that do not
- * match (`hidden` and `disabled`, so the option indexes the save bar compares
- * never change, and the selected and the original option always stay), and
+ * match and never disables one: a disabled option is skipped when the form is
+ * posted, so a selected option that was filtered out and then restored (a save
+ * committing it as the baseline, then Discard) would post nothing and clear the
+ * setting. Options are only hidden, so the option indexes the save bar compares
+ * never change, and the selected and the original option always stay visible.
  * Enter picks the first match. Underscores and slashes count as spaces, so
  * "new york" finds America/New_York.
  */
@@ -107,7 +110,7 @@ export const TIMEZONE_SELECT_SCRIPT =
   "if(!s||!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');s.hidden=false;" +
   "function run(){var q=norm(s.value.trim()),n=0,first=null,i,o,hit,keep;" +
   "for(i=0;i<sel.options.length;i++){o=sel.options[i];hit=!q||norm(o.value+' '+o.textContent).indexOf(q)!==-1;" +
-  "if(hit){n++;if(!first)first=o}keep=hit||o.selected||o.defaultSelected;o.hidden=!keep;o.disabled=!keep}" +
+  "if(hit){n++;if(!first)first=o}keep=hit||o.selected||o.defaultSelected;o.hidden=!keep}" +
   "if(st){st.hidden=!q;st.textContent=n?n+(n===1?' timezone matches':' timezones match'):'No timezones match'}" +
   "return first}" +
   "s.addEventListener('input',run);" +

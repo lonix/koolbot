@@ -221,8 +221,9 @@ An IANA zone for a setting or an event (#1426).
 - The first option is the default: *Default (Europe/Oslo)*, posting nothing where blank means "the server zone" (settings), or the zone itself on a
   form that must post one. A zone the runtime does not list but that is stored shows as a selected `Zone (custom)` option and posts unchanged.
 - UTC is always listed, once: the runtime's own list omits it.
-- Searching hides non-matching options (`hidden` and `disabled`, so option indexes never move) but never the selected one; `new york` finds
-  `America/New_York`; Enter picks the first match. Safari draws hidden options, greyed.
+- Searching only hides non-matching options (`hidden`, never `disabled`: a disabled option is not posted, so a selected one must never be disabled),
+  so option indexes never move; the selected and the original option always stay visible; `new york` finds `America/New_York`; Enter picks the first
+  match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
 - No JavaScript: the plain select.
 
 ### ColourField
