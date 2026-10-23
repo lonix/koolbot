@@ -2928,6 +2928,30 @@ describe("welcome roles message: only the bot's reaction-role messages (#1433)",
       expect(written().get(KEY)).toBe(MINE);
     });
 
+    it("previews an unchanged environment-backed value as no change, with Apply enabled", async () => {
+      // No Mongo row (getAll is empty), but the strict read resolves the
+      // legacy value; its mappings are archived, so it is not in the set.
+      mockConfigGetAll.mockResolvedValue([]);
+      stored({ [KEY]: STRAY });
+      const preview = await (
+        await harness.post("/settings/import", { yaml: `${KEY}: "${STRAY}"` })
+      ).text();
+      expect(preview).not.toContain("reaction-role messages");
+      expect(preview).toContain("1 key(s) will be written; 0 rejected");
+      expect(preview).not.toMatch(/disabled>Apply import/);
+    });
+
+    it("rejects the preview row when the stored value cannot be read", async () => {
+      mockConfigGetAll.mockResolvedValue([]);
+      stored({ [KEY]: STRAY });
+      mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+      const preview = await (
+        await harness.post("/settings/import", { yaml: `${KEY}: "${STRAY}"` })
+      ).text();
+      expect(preview).toContain("could not be read");
+      expect(preview).toMatch(/disabled>Apply import/);
+    });
+
     it("keeps an unchanged stored value, and refuses when it cannot be read", async () => {
       stored({ [KEY]: STRAY });
       await harness.post("/settings/import/apply", {

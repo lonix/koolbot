@@ -931,11 +931,26 @@ export function createSettingsRouter(client: Client): Router {
         // Surface type-mismatch in the preview so a silent drop at apply
         // isn't the first sign the user sees. A reaction-role message key
         // (#1433) is checked against the guild's messages, and its stored
-        // value stays importable (the snapshot above is a successful read).
+        // value stays importable. The stored value is the same strict read
+        // apply uses (it also resolves environment-backed settings, which the
+        // Mongo snapshot above does not), so preview and apply agree.
+        let stored: string | undefined;
+        if (isReactionRoleMessageKey(key)) {
+          const baseline = await readReactionRoleMessageBaseline(key);
+          if (!baseline.ok) {
+            rows.push({
+              key,
+              status: "rejected",
+              reason: `type mismatch (${baseline.reason})`,
+            });
+            continue;
+          }
+          stored = baseline.value;
+        }
         const coerced = await coerceConfigValueForGuild(
           key,
           value,
-          isReactionRoleMessageKey(key) ? currentByKey.get(key) : undefined,
+          stored,
           session.guildId,
         );
         if (!coerced.ok) {
@@ -946,9 +961,12 @@ export function createSettingsRouter(client: Client): Router {
           });
           continue;
         }
-        const before = currentByKey.has(key)
-          ? currentByKey.get(key)
-          : defaultConfig[key as keyof typeof defaultConfig];
+        const before =
+          stored !== undefined
+            ? stored
+            : currentByKey.has(key)
+              ? currentByKey.get(key)
+              : defaultConfig[key as keyof typeof defaultConfig];
         rows.push({
           key,
           status: "pending",

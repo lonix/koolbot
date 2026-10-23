@@ -132,6 +132,25 @@ export function buildReactionRoleMessageOptions(
   };
 }
 
+/** A message id as a number, or null when it is not a snowflake. */
+function snowflake(id: string): bigint | null {
+  try {
+    return /^\d+$/.test(id) ? BigInt(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Newest first by snowflake; a malformed id sorts last instead of failing the list. */
+export function compareSnowflakesDesc(a: string, b: string): number {
+  const x = snowflake(a);
+  const y = snowflake(b);
+  if (x === null || y === null) {
+    return x === y ? a.localeCompare(b) : x === null ? 1 : -1;
+  }
+  return x === y ? 0 : x > y ? -1 : 1;
+}
+
 /**
  * Fill in the channel of a message none of whose active mappings records one,
  * from a sibling mapping of the same message in this guild, archived ones
@@ -178,6 +197,7 @@ export async function loadReactionRoleMessageOptions(
   try {
     const rows = (await ReactionRoleConfig.aggregate([
       { $match: { guildId, isArchived: false } },
+      // Oldest mapping first, so `$max` below and the role order are stable.
       { $sort: { createdAt: 1 } },
       {
         $group: {
@@ -187,23 +207,29 @@ export async function loadReactionRoleMessageOptions(
           // missing values and ranks "" lowest, so a real id wins.
           messageChannelId: { $max: "$messageChannelId" },
           roles: { $push: { emoji: "$emoji", roleName: "$roleName" } },
-          newest: { $max: "$createdAt" },
         },
       },
-      { $sort: { newest: -1 } },
-      // One more than the cap says whether the list was cut.
-      { $limit: REACTION_ROLE_MESSAGE_LIST_CAP + 1 },
     ])) as Array<{
       _id: string;
       messageChannelId?: string | null;
       roles: Array<{ emoji: string; roleName: string }>;
     }>;
-    const groups: ReactionRoleMessageGroup[] = rows.map((r) => ({
-      messageId: r._id,
-      messageChannelId: r.messageChannelId || null,
-      roles: r.roles ?? [],
-    }));
-    await fillSiblingChannels(guildId, groups);
+    // Newest message first, by the message's own id. A mapping's `createdAt`
+    // is not the message's age: unarchiving posts a new message and updates the
+    // old mapping in place, and adding a mapping to an old message would move
+    // it ahead. So the whole list is sorted here, then cut at the cap.
+    const groups: ReactionRoleMessageGroup[] = rows
+      .map((r) => ({
+        messageId: r._id,
+        messageChannelId: r.messageChannelId || null,
+        roles: r.roles ?? [],
+      }))
+      .sort((a, b) => compareSnowflakesDesc(a.messageId, b.messageId));
+    // Only the messages that will be listed need a channel lookup.
+    await fillSiblingChannels(
+      guildId,
+      groups.slice(0, REACTION_ROLE_MESSAGE_LIST_CAP),
+    );
     return buildReactionRoleMessageOptions(groups, lookup);
   } catch {
     return null;

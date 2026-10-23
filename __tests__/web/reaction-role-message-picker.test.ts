@@ -313,7 +313,7 @@ describe("loading from the stored mappings", () => {
     await expect(loadReactionRoleMessageIds("guild-1")).rejects.toThrow("down");
   });
 
-  it("matches the guild, skips archived rows and asks for one more than the cap", async () => {
+  it("matches the guild and skips archived rows", async () => {
     mockAggregate.mockResolvedValue([
       {
         _id: A,
@@ -329,9 +329,51 @@ describe("loading from the stored mappings", () => {
     expect(pipeline[0]).toEqual({
       $match: { guildId: "guild-1", isArchived: false },
     });
-    expect(pipeline.at(-1)).toEqual({
-      $limit: REACTION_ROLE_MESSAGE_LIST_CAP + 1,
-    });
+    // The cut happens after sorting by message id, never in the pipeline.
+    expect(pipeline.some((st) => "$limit" in st)).toBe(false);
+  });
+
+  it("sorts by the message's own age, so a restored message with an old createdAt is inside the cap", async () => {
+    const restored = "900000000000000000";
+    const rows = Array.from(
+      { length: REACTION_ROLE_MESSAGE_LIST_CAP },
+      (_, i) => ({
+        _id: String(100000000000000100n + BigInt(i)),
+        messageChannelId: "c1",
+        roles: [{ emoji: "", roleName: `R${i}` }],
+      }),
+    );
+    // The aggregate hands the groups back in mapping order: the restored
+    // message's mapping is the oldest, so it comes first, not last.
+    mockAggregate.mockResolvedValue([
+      {
+        _id: restored,
+        messageChannelId: "c1",
+        roles: [{ emoji: "", roleName: "Restored" }],
+      },
+      ...rows,
+    ]);
+    const r = await loadReactionRoleMessageOptions("guild-1", LOOKUP);
+    expect(r?.options).toHaveLength(REACTION_ROLE_MESSAGE_LIST_CAP);
+    expect(r?.options[0].messageId).toBe(restored);
+    expect(r?.truncated).toBe(true);
+    expect(r?.options.map((o) => o.messageId)).not.toContain(rows[0]._id);
+  });
+
+  it("does not throw on a malformed message id, and lists it last", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "not-a-snowflake", messageChannelId: "c1", roles: [] },
+      { _id: "", messageChannelId: "c1", roles: [] },
+      { _id: A, messageChannelId: "c1", roles: [] },
+      { _id: B, messageChannelId: "c1", roles: [] },
+    ]);
+    const r = await loadReactionRoleMessageOptions("guild-1", LOOKUP);
+    expect(r?.options.map((o) => o.messageId)).toEqual([
+      B,
+      A,
+      "",
+      "not-a-snowflake",
+    ]);
   });
 
   it("takes the picker channel from any mapping, an archived sibling included, when no active one records it", async () => {
@@ -344,7 +386,9 @@ describe("loading from the stored mappings", () => {
       ...LOOKUP,
       configuredChannelId: "other",
     });
-    expect(r?.options[0].label).toBe("# roles · 🎮 G");
+    expect(r?.options.find((o) => o.messageId === A)?.label).toBe(
+      "# roles · 🎮 G",
+    );
     // One batched, guild-scoped query for the messages that lack a channel,
     // with no isArchived filter (the service's pickerChannelForMessage rule).
     expect(mockFind).toHaveBeenCalledTimes(1);
