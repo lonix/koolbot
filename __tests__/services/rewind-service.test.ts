@@ -120,6 +120,7 @@ const {
   normalizeSnapshotSummary,
   SNAPSHOT_SCHEMA_VERSION,
   computeLongestSession,
+  computeVoiceByKind,
   computeLongestStreak,
   computePeakDay,
   computeVoiceActivityHeatmap,
@@ -150,6 +151,46 @@ function makeClient(): unknown {
 }
 
 describe("RewindService pure helpers", () => {
+  describe("computeVoiceByKind (#1420)", () => {
+    const at = new Date("2026-02-01T10:00:00Z");
+
+    it("returns nothing for no sessions", () => {
+      expect(computeVoiceByKind([])).toEqual([]);
+    });
+
+    it("sums seconds and sessions per kind in a fixed order", () => {
+      const result = computeVoiceByKind([
+        { startTime: at, duration: 600, channelId: "e", roomKind: "event" },
+        { startTime: at, duration: 1200, channelId: "d1", roomKind: "dynamic" },
+        { startTime: at, duration: 300, channelId: "d2", roomKind: "dynamic" },
+        { startTime: at, duration: 60, channelId: "p", roomKind: "permanent" },
+        { startTime: at, duration: 30, channelId: "l", roomKind: "lobby" },
+      ]);
+      expect(result).toEqual([
+        { kind: "dynamic", totalSeconds: 1500, sessionCount: 2 },
+        { kind: "lobby", totalSeconds: 30, sessionCount: 1 },
+        { kind: "event", totalSeconds: 600, sessionCount: 1 },
+        { kind: "permanent", totalSeconds: 60, sessionCount: 1 },
+      ]);
+    });
+
+    it("puts sessions with no or an unknown kind in 'other' and skips zero-length ones", () => {
+      const result = computeVoiceByKind([
+        { startTime: at, duration: 100, channelId: "old" },
+        {
+          startTime: at,
+          duration: 50,
+          channelId: "x",
+          roomKind: "bogus" as never,
+        },
+        { startTime: at, duration: 0, channelId: "z", roomKind: "event" },
+      ]);
+      expect(result).toEqual([
+        { kind: "other", totalSeconds: 150, sessionCount: 2 },
+      ]);
+    });
+  });
+
   describe("yearBounds", () => {
     it("returns half-open UTC year bounds", () => {
       const { start, end } = yearBounds(2026);
@@ -347,6 +388,7 @@ describe("RewindService pure helpers", () => {
         date: "2026-03-14",
         channelId: "a",
         channelName: "General",
+        roomKind: "other",
       });
     });
 
@@ -376,6 +418,7 @@ describe("RewindService pure helpers", () => {
         date: "2026-03-14",
         channelId: "b",
         channelName: "beta",
+        roomKind: "other",
       });
     });
 
@@ -397,6 +440,7 @@ describe("RewindService pure helpers", () => {
         date: "2026-03-14",
         channelId: "b",
         channelName: null,
+        roomKind: "other",
       });
     });
 
@@ -812,6 +856,7 @@ describe("RewindService.getSummary", () => {
       date: "2026-01-15",
       channelId: "general",
       channelName: "general-vc",
+      roomKind: "other",
     });
     expect(summary!.longestStreakDays).toBe(2);
     expect(summary!.annualRank).toBe(2);

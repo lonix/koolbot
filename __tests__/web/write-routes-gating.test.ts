@@ -40,6 +40,9 @@ const WRITE_PATHS = [
   "/database/run-cleanup",
   "/bot-status/refresh",
   "/channels/create",
+  "/quotes/header/repost",
+  "/notices/header/repost",
+  "/rules/repost",
 ];
 
 async function harnessFor(

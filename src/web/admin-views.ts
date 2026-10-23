@@ -47,6 +47,8 @@ import { pickCascadeMasterKey } from "./cascade-master.js";
 import {
   buildSettingTree,
   renderChangedMark,
+  renderManagedValue,
+  renderNumberInput,
   renderResetControl,
   renderSegmented,
   renderSwitch,
@@ -294,6 +296,24 @@ export interface SettingRow {
    */
   min?: number;
   /**
+   * Inclusive upper bound for a `number` control, rendered as `data-max` and
+   * the digit cap of the input. Sourced from `SettingMetadata.max` (#1304).
+   */
+  max?: number;
+  /**
+   * Bot-managed state (the id of a message the bot posted): rendered
+   * read-only, with no field to submit. Sourced from `SettingMetadata.managed`
+   * (#1304).
+   */
+  managed?: { channelKey: string };
+  /**
+   * For a `managed` row, the Discord link to the message it points at, when
+   * the message and its channel are both known.
+   */
+  jumpUrl?: string;
+  /** For a `managed` row, the feature page where an admin re-posts the message (#1428). */
+  repostHref?: string;
+  /**
    * Which channel picker a `channel` / `channel_list` control draws from:
    * `"voice"` uses the voice (+ stage) list, anything else (the default) uses
    * the text-channel list. Sourced from `SettingMetadata.channelKind`.
@@ -411,6 +431,80 @@ export interface SettingsProps extends CommonProps {
  * (arrays, objects); they're rare for typed config keys but we coerce
  * defensively so the form never crashes on a stray value.
  */
+/**
+ * The Discord link to a posted message, or undefined when either id is not a
+ * snowflake (the key is unset, or holds something that is not an id). Both
+ * ids are checked so a stored value can never shape the URL (#1304).
+ */
+export function messageJumpUrl(
+  guildId: string,
+  channelId: unknown,
+  messageId: unknown,
+): string | undefined {
+  const snowflake = /^\d{17,20}$/;
+  if (
+    typeof channelId !== "string" ||
+    typeof messageId !== "string" ||
+    !snowflake.test(guildId) ||
+    !snowflake.test(channelId.trim()) ||
+    !snowflake.test(messageId.trim())
+  ) {
+    return undefined;
+  }
+  return `https://discord.com/channels/${guildId}/${channelId.trim()}/${messageId.trim()}`;
+}
+
+export interface RepostCardOptions {
+  /** Anchor id; All settings links here (see `managed-messages.ts`). */
+  id: string;
+  heading: string;
+  /** What the message is and when re-posting it helps. Plain text. */
+  intro: string;
+  /** POST target, e.g. "/admin/quotes/header/repost". */
+  action: string;
+  csrfInput: string;
+  /** The id the page shows now, sent back so a double submit re-posts once. */
+  messageId: string;
+  buttonLabel: string;
+  /** The confirm dialog's question. */
+  confirmText: string;
+  /** The confirm dialog's consequence list. */
+  consequences: readonly string[];
+  /** Why the button is off, or null when it can be used. */
+  blockedReason: string | null;
+}
+
+/**
+ * The Re-post card of a bot-managed message (#1428). The action deletes the old
+ * message and posts a new one in Discord, so it goes through the confirm dialog
+ * with its consequences listed (the confirm tone stays the red default: it
+ * deletes a message). It sits on the feature's own page; All settings only
+ * links here.
+ */
+export function renderRepostCard(o: RepostCardOptions): string {
+  const state = o.messageId
+    ? `Current message ID <code>${escapeHtml(o.messageId)}</code>.`
+    : "Not posted yet.";
+  const blocked = o.blockedReason
+    ? `<p class="kb-help" role="status">${escapeHtml(o.blockedReason)}</p>`
+    : "";
+  const titleId = `${o.id}-title`;
+  // Design-system Panel and Button (docs/design/patterns.md); the red button
+  // matches the red confirm, as the action deletes a message.
+  return `<section class="kb-panel" id="${escapeHtml(o.id)}" aria-labelledby="${escapeHtml(titleId)}">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${escapeHtml(titleId)}">${escapeHtml(o.heading)}</h2></header>
+  <div class="kb-panel__body">
+    <p class="kb-help">${escapeHtml(o.intro)} ${state}</p>
+    <form method="POST" action="${escapeHtml(o.action)}" data-confirm="${escapeHtml(o.confirmText)}"${confirmListAttr(o.consequences)}>
+      ${o.csrfInput}
+      <input type="hidden" name="expectedId" value="${escapeHtml(o.messageId)}">
+      <button type="submit" class="kb-btn kb-btn--danger"${o.blockedReason ? " disabled" : ""}>${escapeHtml(o.buttonLabel)}</button>
+    </form>
+    ${blocked}
+  </div>
+</section>`;
+}
+
 function coerceToDisplayValue(value: unknown): string | number | boolean {
   if (value === null || value === undefined) return "";
   if (
@@ -892,6 +986,10 @@ function renderControlInput(
   // disabled (and therefore unsubmitted) control can't be clobbered on Save.
   const lockAttr = depLocked ? " disabled data-dep-locked" : "";
 
+  // Bot-managed state is text with a link, never a field (#1304).
+  if (r.managed) {
+    return renderManagedValue(String(primitive), r.jumpUrl, r.repostHref);
+  }
   // A boolean is always a switch, even if a key ever carried options (#1318).
   if (r.type === "boolean") {
     return renderSwitch(
@@ -930,15 +1028,23 @@ function renderControlInput(
     );
   }
   if (r.type === "number") {
-    // `required` so a cleared field is caught by the browser rather than
-    // posted as "" (which the server now rejects, #835); `min` mirrors the
-    // schema bound the server enforces. A dep-locked / cascade-disabled
-    // control is `disabled`, which exempts it from both constraints.
-    const minAttr =
-      typeof r.min === "number" && Number.isFinite(r.min)
-        ? ` min="${r.min}"`
-        : "";
-    return `<input type="number" class="kb-input"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}"${minAttr} required style="width:8rem"${lockAttr}>`;
+    // A bounded whole-number box (#1304): `required` so a cleared field is
+    // caught by the browser rather than posted as "" (which the server rejects,
+    // #835), `data-min` / `data-max` mirroring the schema bounds the server
+    // enforces. A dep-locked / cascade-disabled control is `disabled`, which
+    // exempts it from both constraints.
+    return renderNumberInput(
+      valueName,
+      primitive as string | number,
+      { min: r.min, max: r.max },
+      {
+        id: a11y.id,
+        describedBy: a11y.describedBy,
+        invalid: a11y.invalid,
+        describedByBase: a11y.describedByBase,
+        disabled: depLocked,
+      },
+    );
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -1188,31 +1294,38 @@ function renderSettingRows(
       invalid,
       labelledBy: labelId,
     };
-    const changed = !offForm && differsFromDefault(r);
+    const managed = r.managed !== undefined;
+    const changed = !offForm && !managed && differsFromDefault(r);
     const label = escapeHtml(r.label || r.key);
     const mark = changed ? renderChangedMark() : "";
     const nameHtml =
-      offForm || isGroupControl(r)
+      offForm || managed || isGroupControl(r)
         ? `<p class="kb-setting__name" id="${labelId}">${label}${mark}</p>`
         : `<p class="kb-setting__name"><label id="${labelId}" for="${escapeHtml(controlId)}">${label}</label>${mark}</p>`;
-    const control = offForm
-      ? renderValueRoundTrip(r)
-      : renderSettingControl(
-          r,
-          ctx.pickers,
-          r.key === ctx.masterKey,
-          depLocked,
-          a11y,
-        ) +
-        (changed
-          ? renderResetControl(
-              r.key,
-              r.label,
-              describeSettingValue(r, r.defaultValue),
-              ctx.resetFormId,
-              describeSettingValue(r, r.defaultValue, Infinity),
-            )
-          : "");
+    const control = managed
+      ? renderManagedValue(
+          String(coerceToDisplayValue(r.current)),
+          r.jumpUrl,
+          r.repostHref,
+        )
+      : offForm
+        ? renderValueRoundTrip(r)
+        : renderSettingControl(
+            r,
+            ctx.pickers,
+            r.key === ctx.masterKey,
+            depLocked,
+            a11y,
+          ) +
+          (changed
+            ? renderResetControl(
+                r.key,
+                r.label,
+                describeSettingValue(r, r.defaultValue),
+                ctx.resetFormId,
+                describeSettingValue(r, r.defaultValue, Infinity),
+              )
+            : "");
     const nested =
       node.children.length > 0
         ? `<div class="kb-nested">${node.children.map((c) => renderNode(c, lockChildren)).join("")}</div>`
@@ -1222,7 +1335,9 @@ function renderSettingRows(
       `<div class="${cls}">` +
       `<div>${nameHtml}${short ? `<p class="kb-setting__desc" id="${helpId}">${escapeHtml(short)}</p>` : ""}</div>` +
       `<div class="kb-setting__control">${control}</div>` +
-      `<div class="kb-setting__extra"><input type="hidden" name="keys" value="${escapeHtml(r.key)}">` +
+      // A managed value has no field, so it must not be listed in `keys`: the
+      // save would read the missing value as "" and blank the stored id.
+      `<div class="kb-setting__extra">${managed ? "" : `<input type="hidden" name="keys" value="${escapeHtml(r.key)}">`}` +
       `${renderMoreDisclosure(r.key, rest)}${warnHtml}${depHtml}${errHtml}${nested}</div>` +
       `</div>`
     );
@@ -1913,6 +2028,8 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       options: meta?.options,
       warnBelow: meta?.warnBelow,
       min: meta?.min,
+      max: meta?.max,
+      managed: meta?.managed,
       channelKind: meta?.channelKind,
     };
   });
@@ -3895,6 +4012,10 @@ export interface NoticesProps extends CommonProps {
   enabled: boolean;
   channel: { name: string; id: string; type: ChannelType | null } | null;
   total: number;
+  /** The auto-managed `notices.header_message_id`, sent back by Re-post. */
+  headerMessageId?: string;
+  /** `notices.header_enabled`; the Re-post button is off when it is false. */
+  headerEnabled?: boolean;
   /**
    * The editable `notices.*` settings rendered in place on the page (#972),
    * built from the config schema the same way the Settings page builds its
@@ -3997,6 +4118,29 @@ ${renderStatusLine({
   </form>
 </div>
 ${groupSections}
+${renderRepostCard({
+  id: "repost-header",
+  heading: "Header post",
+  intro:
+    "KoolBot keeps one header post in the notices channel and edits it in place when its wording changes. Re-post it to get a fresh message, for example if the post looks broken.",
+  action: "/admin/notices/header/repost",
+  csrfInput,
+  messageId: props.headerMessageId ?? "",
+  buttonLabel: "Re-post the header",
+  confirmText: "Re-post the notices channel header?",
+  consequences: [
+    "A new header is posted at the bottom of the notices channel, below the notices, and pinned if pinning is on. Resync notices to channel puts the notices back below it.",
+    "The old header is deleted if KoolBot can find it in this channel. If it was already deleted, nothing else happens.",
+    "The notices themselves are not touched.",
+  ],
+  blockedReason: !props.enabled
+    ? "Turn on Notices first."
+    : props.headerEnabled === false
+      ? "The header post is switched off in the settings below."
+      : !props.channel
+        ? "Set the notices channel first."
+        : null,
+})}
 <div class="card">
   <h2>Resync to the channel</h2>
   <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
@@ -4055,6 +4199,8 @@ export interface QuotesProps extends CommonProps {
   channel: { name: string; id: string; type: ChannelType | null } | null;
   /** The auto-managed `quotes.header_message_id`, shown read-only. */
   headerMessageId: string;
+  /** `quotes.header_enabled`; the Re-post button is off when it is false. */
+  headerEnabled?: boolean;
   /**
    * The editable `quotes.*` settings rendered in place on the page (#984).
    * Excludes the auto-managed `quotes.header_message_id`.
@@ -4170,6 +4316,29 @@ ${renderStatusLine({
   ${tableHtml}
   <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
 </div>
+${renderRepostCard({
+  id: "repost-header",
+  heading: "Header post",
+  intro:
+    "KoolBot keeps one header post at the top of the quote channel and edits it in place when its wording changes. Re-post it to get a fresh message, for example if the post looks broken.",
+  action: "/admin/quotes/header/repost",
+  csrfInput,
+  messageId: props.headerMessageId,
+  buttonLabel: "Re-post the header",
+  confirmText: "Re-post the quote channel header?",
+  consequences: [
+    "A new header is posted at the bottom of the quote channel, and pinned if pinning is on.",
+    "The old header is deleted if KoolBot can find it in this channel. If it was already deleted, nothing else happens.",
+    "Quotes are not touched.",
+  ],
+  blockedReason: !props.enabled
+    ? "Turn on Quotes first."
+    : props.headerEnabled === false
+      ? "The header post is switched off in the settings below."
+      : !props.channel
+        ? "Set the quote channel first."
+        : null,
+})}
 <div class="card">
   <h2>Quote channel</h2>
   <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(

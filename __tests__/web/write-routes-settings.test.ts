@@ -595,6 +595,140 @@ describe("powerful roles can't be handed out automatically (#1145)", () => {
   );
 });
 
+describe("bounded numbers and managed keys on the write routes (#1304)", () => {
+  it("refuses a number above its max on settings/set and writes nothing", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "events.groups.max_count",
+      value: "99",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("must be at most 25");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses TEN on a section save and writes nothing from that section", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "quotes",
+      keys: ["quotes.enabled", "quotes.max_length"],
+      "value_quotes.enabled": "true",
+      "value_quotes.max_length": "TEN",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("quotes.max_length");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses to write a managed id from settings/set", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "quotes.header_message_id",
+      value: "123456789012345678",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses a managed id smuggled into a section save, writing nothing", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "quotes",
+      keys: ["quotes.enabled", "quotes.header_message_id"],
+      "value_quotes.enabled": "true",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses to reset a managed id", async () => {
+    const res = await harness.post("/settings/reset", {
+      key: "rules.message_id",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockConfigDelete).not.toHaveBeenCalled();
+  });
+
+  it("leaves managed ids out of the export, defaults and stored values alike", async () => {
+    mockConfigGetAll.mockResolvedValue([
+      { key: "quotes.header_message_id", value: "123456789012345678" },
+    ]);
+    const body = await (await harness.get("/settings/export")).text();
+    expect(body).not.toContain("header_message_id");
+    expect(body).not.toContain("rules.message_id");
+  });
+});
+
+// The tier string is hidden from the All settings table (it has its own
+// editor), but it is still an ordinary stored setting: exported, imported and
+// still accepted by the write routes (#1428).
+// The Re-post card on the Quotes and Notices pages renders from these four
+// values, so an in-place save has to reload the page (#1428).
+describe("saving a value the Re-post card depends on reloads the page (#1428)", () => {
+  it.each([
+    ["quotes", "quotes.header_enabled", "true"],
+    ["quotes", "quotes.channel_id", "123456789012345678"],
+    ["notices", "notices.header_enabled", "true"],
+    ["notices", "notices.channel_id", "123456789012345678"],
+  ])("%s: %s", async (category, key, value) => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category,
+        redirect: `/admin/${category}`,
+        keys: [key],
+        [`value_${key}`]: value,
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { reload?: string };
+    expect(body.reload).toContain(`/admin/${category}?`);
+  });
+
+  it("does not reload for a key the page does not render from", async () => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "quotes",
+        redirect: "/admin/quotes",
+        keys: ["quotes.cooldown"],
+        "value_quotes.cooldown": "30",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { reload?: string };
+    expect(body.reload).toBeUndefined();
+  });
+});
+
+describe("leaderboard tiers are hidden from All settings but not from export and import (#1428)", () => {
+  const FREE_ROLE = "888888888888888888";
+
+  it("still exports a stored tier string", async () => {
+    mockConfigGetAll.mockResolvedValue([
+      { key: "leaderboard_roles.tiers", value: `1:${FREE_ROLE}` },
+    ]);
+    const body = await (await harness.get("/settings/export")).text();
+    expect(body).toContain("leaderboard_roles.tiers");
+    expect(body).toContain(FREE_ROLE);
+  });
+
+  it("still imports a tier string, with the same role checks", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: `leaderboard_roles.tiers: "1:${FREE_ROLE}"`,
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0]).toContain("leaderboard_roles.tiers");
+    expect(mockConfigSet.mock.calls[0]).toContain(`1:${FREE_ROLE}`);
+  });
+
+  it("still saves a tier string through /settings/set (the tier editor's own route is separate)", async () => {
+    await harness.post("/settings/set", {
+      key: "leaderboard_roles.tiers",
+      value: `1:${FREE_ROLE}`,
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("POST /settings/reset", () => {
   it("does not re-arm when resetting a schedule that was never overridden (#976)", async () => {
     await harness.post("/settings/reset", { key: "digest.cron" });
@@ -1876,6 +2010,33 @@ describe("POST /settings/import (preview)", () => {
     expect(html).toContain("type mismatch");
     // Previewing must not write anything.
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("skips the bot's own message ids from an older export, saying why (#1304)", async () => {
+    const res = await harness.post("/settings/import", {
+      yaml: [
+        "quotes.max_length: 500",
+        "quotes.header_message_id: '123456789012345678'",
+      ].join("\n"),
+    });
+    const html = await res.text();
+    expect(html).toContain("managed by KoolBot, not imported");
+    expect(html).not.toContain("type mismatch (managed");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("applies the rest of an import and leaves a managed id alone (#1304)", async () => {
+    await harness.post("/settings/import/apply", {
+      yaml: [
+        "quotes.max_length: 500",
+        "quotes.header_message_id: '123456789012345678'",
+      ].join("\n"),
+    });
+    const written = mockConfigSet.mock.calls.map(
+      (c) => (c as unknown as [string])[0],
+    );
+    expect(written).toContain("quotes.max_length");
+    expect(written).not.toContain("quotes.header_message_id");
   });
 });
 

@@ -19,6 +19,13 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import {
+  notReady,
+  repostManagedMessage,
+  staleRepost,
+  unexpectedRepostFailure,
+  type RepostResult,
+} from "./managed-message-repost.js";
+import {
   DISCORD_MESSAGE_CONTENT_LIMIT,
   truncateText,
 } from "../utils/discord-limits.js";
@@ -141,6 +148,8 @@ export class RulesService {
   private static instance: RulesService | undefined;
 
   private readonly acceptLock = createKeyedLock();
+  /** Serialises posting, updating and re-posting the rules message. */
+  private readonly postLock = createKeyedLock();
 
   private constructor(private readonly client: Client) {}
 
@@ -183,6 +192,74 @@ export class RulesService {
    * posted (`rules.message_id`). Never throws.
    */
   public async postOrUpdateMessage(guild: Guild): Promise<RulesPostResult> {
+    // Queued with a re-post so the two never both decide the message is missing.
+    return this.postLock.run("message", () => this.runPostOrUpdate(guild));
+  }
+
+  /**
+   * Post the rules message again and take the old one down (#1428), for an
+   * admin who wants a fresh message while the old one still exists (the Update
+   * button edits it in place). Posts first, stores the new id, deletes the old
+   * message last, so a failure never leaves two live copies, and the old
+   * message's Accept button stops working as soon as the new id is stored.
+   * The old message is looked up in the current rules channel only: after a
+   * channel change it can't be found, and the result says so. `expectedId` is
+   * the id the admin's page showed; a second submit of the same form is then a
+   * no-op. Never throws.
+   */
+  public async repostMessage(
+    guild: Guild,
+    expectedId?: string,
+  ): Promise<RepostResult> {
+    return this.postLock.run("message", async () => {
+      try {
+        const config = ConfigService.getInstance();
+        if (!(await config.getBoolean("rules.enabled", false))) {
+          return notReady("Turn on Rules acceptance in Settings first.");
+        }
+        const channelId = (
+          await config.getString("rules.channel_id", "")
+        ).trim();
+        if (!channelId) return notReady("Set the rules channel first.");
+        const channel = await guild.channels.fetch(channelId).catch(() => null);
+        if (!channel || !channel.isTextBased() || !("send" in channel)) {
+          return notReady(
+            "The rules channel isn't a text channel the bot can see.",
+          );
+        }
+        const oldId = (await config.getString("rules.message_id", "")).trim();
+        if (expectedId !== undefined && expectedId.trim() !== oldId) {
+          return staleRepost();
+        }
+        const payload = await this.buildMessage();
+        return await repostManagedMessage({
+          channel,
+          botUserId: this.client.user?.id,
+          oldId,
+          send: () =>
+            channel.send({ ...payload, allowedMentions: { parse: [] } }),
+          store: (id) => this.storeMessageId(id),
+          label: "rules message",
+        });
+      } catch (error) {
+        logger.error(
+          `Re-posting the rules message failed: ${sanitizeForLog(getErrorMessage(error))}`,
+        );
+        return unexpectedRepostFailure();
+      }
+    });
+  }
+
+  private async storeMessageId(id: string): Promise<void> {
+    await ConfigService.getInstance().set(
+      "rules.message_id",
+      id,
+      "Managed by KoolBot: the ID of the posted rules message.",
+      "rules",
+    );
+  }
+
+  private async runPostOrUpdate(guild: Guild): Promise<RulesPostResult> {
     try {
       const config = ConfigService.getInstance();
       const channelId = (await config.getString("rules.channel_id", "")).trim();

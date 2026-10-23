@@ -1009,7 +1009,8 @@ normally shows the result inside the card without reloading. A save that turns
 a feature on or off reloads the page instead, so the disabled banner, the Status
 card, the sidebar badge and the page's action buttons all match the new state.
 Auto-managed keys (`notices.header_message_id`, `quotes.header_message_id`) are
-never editable here.
+never editable here. Both pages have a **Header post** card with a **Re-post the header** button (see
+_Re-posting a bot-managed message_ below).
 
 The **Announcements** page lists the scheduled announcements, each with a
 **Post now** button that sends it to its channel immediately, off schedule, plus
@@ -1124,7 +1125,7 @@ success.
 **Export quotes (JSON)** downloads the `/quote export` backup; restoring one is
 still done with `/quote import` in Discord. Every action is CSRF-protected and
 written to the Web UI audit log (`quote.edit`, `quote.delete`, `quote.sync`,
-`quote.export`).
+`quote.header-repost`, `quote.export`).
 
 Its **Settings** card edits every `quotes.*` key in place: the enable toggle
 (the cascade master, so switching quotes off keeps the rest), the quote
@@ -1177,6 +1178,55 @@ form control, so it works without JavaScript: an unchecked switch posts nothing
 and the save handlers read a listed-but-absent key as `false`. A reset button
 posts to a small sibling form (it is not a button of the save form, so pressing
 Enter in a text field saves rather than resets).
+
+**Numbers that cannot be wrong (#1304).** Every `number` setting declares a `min` and a `max` in `settingsMetadata`
+(a drift test fails on a key without both, or on a default outside its range). The control is a text box with
+`inputmode="numeric"` and `pattern="[0-9]*"`, not `type="number"`, because Safari and Firefox let letters into
+`type="number"` and ignore `pattern` on it. A small script (`src/web/number-input.ts`) drops anything but digits as
+they are typed or pasted and keeps the form from submitting outside `data-min`..`data-max`. The server checks again in
+`coerceConfigValue`, which every write path shares (single save, section save, YAML import, wizard, adoption plans): a
+word, a decimal, `1e3` or an out-of-range value is refused with a message such as "must be at most 25" and nothing is
+stored. A value already stored above a newly declared maximum shows as invalid and blocks the save of its section
+until it is fixed.
+
+**Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the
+id of a message the bot posted. The Settings page shows them as text with a _Jump to message_ link (built from the
+setting that names the channel), without a field and without an entry in the form's `keys`, so saving the section
+cannot blank them. The write routes refuse them, a YAML export leaves them out, and a per-key reset is refused. The
+feature pages already showed them read-only. `welcome.roles_message_id` is not one of them: an operator sets it, so it
+stays a text field.
+
+**Re-posting a bot-managed message (#1428).** Each managed id has a **Re-post** action on the page of the feature that
+owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
+_Re-post_ chip next to _Jump to message_, shown once a message exists), so the action has one home:
+
+| Message | Page and card | Audit action | What Update/refresh already does |
+| --- | --- | --- | --- |
+| Quote channel header | Quotes, **Header post** | `quote.header-repost` | The bot edits the header in place when its wording changes |
+| Notices channel header | Notices, **Header post** | `notice.header-repost` | The same, for the notices header |
+| Rules message | Rules, **Re-post the rules message** | `rules.repost` | **Update the rules message** edits it in place (a new one only if it was deleted) |
+
+Re-post is a form POST behind the confirm dialog (red, with the consequences listed: a new message at the bottom of the
+channel, the old one deleted if the bot can find it in this channel, nothing else touched), CSRF and the admin check,
+and it is audited with the old and new ids and what happened to the old message. The order is what keeps there from
+ever being two live copies:
+
+1. The new message is sent (and pinned, where pinning is on). If that fails, for example because the bot lacks View
+   Channel, Send Messages or Embed Links there, nothing has changed, the old message stays live and the flash names the
+   permissions.
+2. The new id is stored. If that fails, the new message is deleted again and the old one stays live.
+3. The old message is deleted last, and only if the bot wrote it. A message that is already gone counts as done. One
+   the bot can't find in the current channel (it was deleted, or it is still in the channel it was posted in before a
+   channel change; the old channel id is not stored) is reported as a warning so the admin can delete it by hand. A
+   delete that fails is a warning too, with the old message id. The old Accept button on the rules message stops
+   working as soon as step 2 is done, because the accept handler only honours the stored id.
+
+The form carries the id the page showed (`expectedId`). A second submit of the same form, or one from a stale tab, finds
+a different stored id and does nothing ("already re-posted"). The service also queues a re-post behind a channel rebuild
+(Resync quote channel, Resync notices to channel, `/quote reset`) and behind another re-post, so two clicks at once
+produce one new message and a resync can't delete the new header. The button is off, with the reason shown, when the
+feature or its header is switched off or no channel is set. `welcome.roles_message_id` is a different case (an operator
+points it at a reaction-role message) and is not re-posted.
 
 On the **Settings** page and the feature cards, a setting whose feature declares
 a hard dependency (`dependsOn` in `settingsMetadata`) **nests under its parent**
@@ -1407,8 +1457,10 @@ roster — not a live read of the role — is the source of truth), and flags ro
 are missing or above the bot's role. **Run now** recalculates immediately through
 `ScheduledService.runNow()`, the same run the cron triggers (including the
 announcement); concurrent runs coalesce, and the per-tier grant/revoke counts are
-reported in the flash message. Tier saves and runs are audited. **Settings** keeps the
-raw text field for `leaderboard_roles.tiers`.
+reported in the flash message. Tier saves and runs are audited. **All settings** leaves
+`leaderboard_roles.tiers` out (`editedElsewhere` in `settingsMetadata`, #1428): the raw `topN:roleId` string is easy
+to break, so the tier editor is the only place it is edited. The key is still stored, exported, imported and reset
+like any other, so a YAML backup carries the tiers.
 
 The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
 lets admins name the roles that matter on their server and rank them: as many or as few as
@@ -1565,6 +1617,10 @@ settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_la
   members in Discord. A press grants the acceptance role and records _accepted at_ for the member.
   Removing the role again, for example when the rules change and you want re-acceptance, is up
   to you; KoolBot never takes the role back on its own.
+- **Re-post the rules message (#1428).** **Update** edits the posted message in place. **Re-post the rules message**
+  makes a brand new one and deletes the old one (confirm dialog, audited as `rules.repost`); see _Re-posting a
+  bot-managed message_ under Settings for the order of steps and the double-submit guard. The old message's Accept
+  button stops working at once, so members must use the new one; those who already accepted keep their role.
 - **Use an existing role.** Pick any role as the acceptance role (for example a "verified" role
   you already use as a gate), or tick _Create a role_ in the rollout to have the engine make one.
   Members who already hold the role count as accepted: **Record current role holders as

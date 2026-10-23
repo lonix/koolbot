@@ -14,6 +14,7 @@ import { ConfigService } from "../../../services/config-service.js";
 import Notice from "../../../models/notice.js";
 import { NOTICE_CATEGORIES } from "../../../content/notice-categories.js";
 import { recordAudit } from "../../audit.js";
+import { finishRepost } from "./repost-response.js";
 import {
   flashRedirect,
   getString,
@@ -420,6 +421,25 @@ export function createNoticesRouter(client: Client): Router {
           text: `Failed to sync notices: ${text}`,
         });
       }
+    }),
+  );
+
+  // Post the header again and take the old one down (#1428). `expectedId` is
+  // the header id the page showed, so a double submit re-posts once.
+  router.post(
+    "/notices/header/repost",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const result = await NoticesChannelManager.getInstance(
+        client,
+      ).repostHeader(getString(req, "expectedId"));
+      await finishRepost(res, session, result, {
+        page: "/admin/notices",
+        action: "notice.header-repost",
+        what: "The notices channel header",
+        extra:
+          " It is at the bottom of the channel, and pinned if pinning is on. Use Resync notices to channel if you want the notices below it.",
+      });
     }),
   );
 

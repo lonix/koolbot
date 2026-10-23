@@ -858,27 +858,44 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Companion One");
     expect(out.body).not.toContain("Top channels"); // removed from Rewind
     expect(out.body).toContain("Longest session"); // #568 card
-    expect(out.body).toContain("on 2026-03-14 in "); // date + channel
-    expect(out.body).toContain('aria-label="Voice channel"'); // #1303
-    expect(out.body).toContain("General</span>");
+    // Neutral wording; the stored room name is never shown here (#1420).
+    expect(out.body).toContain("on 2026-03-14 in a voice channel");
+    expect(out.body).not.toContain("General");
   });
 
-  it("labels a longest session in a Stage channel as a stage channel (#1303)", async () => {
+  it("summarises voice time by kind of room, not by room name (#1420)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({
+        year: new Date().getUTCFullYear(),
+        voiceByKind: [
+          { kind: "dynamic", totalSeconds: 3600 * 8, sessionCount: 5 },
+          { kind: "event", totalSeconds: 3600 * 2, sessionCount: 1 },
+          { kind: "other", totalSeconds: 1800, sessionCount: 2 },
+        ],
+        longestSession: {
+          totalSeconds: 3600 * 6,
+          date: "2026-03-14",
+          channelId: "c1",
+          channelName: "Alice's room",
+          roomKind: "dynamic",
+        },
+      }),
+    });
+    expect(out.body).toContain("In dynamic voice channels");
+    expect(out.body).toContain("8 hr");
+    expect(out.body).toContain("In event channels");
+    expect(out.body).toContain("In other voice channels");
+    expect(out.body).toContain("on 2026-03-14 in a dynamic voice channel");
+    expect(out.body).not.toContain("Alice");
+  });
+
+  it("hides the kind card when the snapshot predates room kinds (#1420)", async () => {
     const out = await dispatchRewind({
       pathSuffix: "",
       summary: makeSummary({ year: new Date().getUTCFullYear() }),
-      channelTypes: { c1: ChannelType.GuildStageVoice },
     });
-    expect(out.body).toContain('aria-label="Stage channel"');
-    expect(out.body).not.toContain('aria-label="Voice channel"');
-  });
-
-  it("shows a longest-session channel that is gone as unavailable (#1303)", async () => {
-    const out = await dispatchRewind({
-      pathSuffix: "",
-      summary: makeSummary({ year: new Date().getUTCFullYear() }),
-    });
-    expect(out.body).toContain("General (unavailable)");
+    expect(out.body).not.toContain("Where you spent your voice time");
   });
 
   it("resolves the type of channels in a snapshot frozen before channel types were stored (#1303)", async () => {

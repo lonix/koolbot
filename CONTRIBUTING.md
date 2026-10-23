@@ -372,6 +372,15 @@ in the Web UI (`src/web/`), not in a new slash command.
 - Multi-setting features are also wired into the Setup Wizard (`WIZARD_FEATURE_SETTINGS` and
   `WIZARD_FEATURE_ORDER` in `src/web/routes/write/helpers.ts`)
 - Use `ConfigService` for all configuration access
+- **A free-text input is only for genuinely free text** (names, messages, descriptions). Anything with a known set
+  or range of values gets a control that cannot be wrong (#1304):
+  - a number key declares both `min` and `max` in `settingsMetadata` (a drift test fails without them). The
+    Settings page renders it as a digit-only box and the write routes refuse anything outside the range with a
+    message. Never clamp silently in the consumer instead of declaring the bound;
+  - a fixed set of values declares `options` (a switch, segmented control or select);
+  - a Discord channel, category or role uses its picker type;
+  - a value the bot writes itself (the id of a message it posted) declares `managed` and is shown read-only with
+    a link, never as an input.
 
 ### Error Handling
 
