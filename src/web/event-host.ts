@@ -34,7 +34,12 @@ export interface HostEventRef {
 }
 
 // Model-free helpers live in their own module so layouts can import them.
-export { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
+export {
+  hostControlsAvailable,
+  hostPanelPath,
+  isEventRunning,
+} from "./host-panel-shared.js";
+import { isEventRunning } from "./host-panel-shared.js";
 
 /**
  * Whether a row may be shown on the host panel at all. A discarded duplicate
@@ -137,4 +142,87 @@ export async function listHostedEvents(
     );
     return [];
   }
+}
+
+/** One row of the host's "Your events" page. */
+export interface HostEventRow {
+  id: string;
+  title: string;
+  startTime: Date;
+  timezone: string;
+  state: string;
+  durationMinutes: number;
+  /** `isEventRunning`: active and the start has arrived. */
+  running: boolean;
+  /** The row can still be edited (open, not adopted). */
+  editable: boolean;
+  /** Part of a recurring series: Cancel then only reaches this occurrence. */
+  recurring: boolean;
+}
+
+/** Most finished events the page lists. */
+export const HOST_PAST_EVENTS_LIMIT = 25;
+/** Most open events the page lists. */
+export const HOST_OPEN_EVENTS_LIMIT = 50;
+
+/**
+ * The events `userId` created in `guildId`, for the host's own page (#1319):
+ * running (`live`), planned (`upcoming`, soonest first) and finished (`past`,
+ * newest first). The filter is on `createdBy` and `guildId`, both from the
+ * session, so nobody else's event can appear. Adopted events are left out, as
+ * on the overview: the adopting admin did not create them. Unlike the overview
+ * card, a failed read throws, so the page can say so instead of showing "no
+ * events".
+ */
+export async function listHostEvents(
+  guildId: string,
+  userId: string,
+): Promise<{
+  live: HostEventRow[];
+  upcoming: HostEventRow[];
+  past: HostEventRow[];
+}> {
+  const empty = { live: [], upcoming: [], past: [] };
+  if (!guildId || !userId) return empty;
+  const base = {
+    guildId,
+    createdBy: userId,
+    nativeCleanupOnly: { $ne: true },
+    nativeAdopted: { $ne: true },
+  };
+  const now = new Date();
+  const toRows = (rows: unknown): HostEventRow[] =>
+    Array.isArray(rows)
+      ? rows.map((r) => ({
+          id: String(r._id),
+          title: String(r.title ?? ""),
+          startTime: r.startTime as Date,
+          timezone: String(r.timezone ?? ""),
+          state: String(r.state ?? ""),
+          durationMinutes: Number(r.durationMinutes ?? 0),
+          running: isEventRunning(r, now),
+          editable: r.state === "scheduled" || r.state === "active",
+          recurring: Boolean(
+            r.recurrence && r.recurrence !== "none" && r.seriesId,
+          ),
+        }))
+      : [];
+  const [open, past] = await Promise.all([
+    Event.find({ ...base, state: { $in: ["scheduled", "active"] } })
+      .sort({ startTime: 1 })
+      .limit(HOST_OPEN_EVENTS_LIMIT)
+      .lean() as unknown,
+    Event.find({ ...base, state: { $in: ["ended", "cancelled"] } })
+      .sort({ startTime: -1 })
+      .limit(HOST_PAST_EVENTS_LIMIT)
+      .lean() as unknown,
+  ]);
+  // Running is `isEventRunning`: an `active` event whose start is still ahead
+  // (its channel was prepared early) stays upcoming, with Edit and Cancel.
+  const openRows = toRows(open);
+  return {
+    live: openRows.filter((r) => r.running),
+    upcoming: openRows.filter((r) => !r.running),
+    past: toRows(past),
+  };
 }

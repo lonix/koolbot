@@ -100,6 +100,7 @@ import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { createHostEventsRouter } from "./routes/host-events.js";
 import { createMeNewEventRouter } from "./routes/me-new-event.js";
+import { createMeEventsRouter } from "./routes/me-events.js";
 import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
@@ -634,6 +635,9 @@ export function createUserRouter(
   router.use("/events/:id/host", createHostEventsRouter(client));
   // A host's own group presets (#1216): `/me/events/presets`.
   router.use("/events/presets", createMeEventPresetsRouter(client));
+  // "Your events" (#1319): `GET /me/events`. Last of the group, so the more
+  // specific paths above answer first; it only has the list route.
+  router.use("/events", createMeEventsRouter());
 
   // Moderation pages (#1320) need the `moderator` scope. The guard sits ahead
   // of the router, so every route added under `/me/moderation` is gated from

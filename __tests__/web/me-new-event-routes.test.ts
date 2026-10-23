@@ -172,6 +172,24 @@ describe("GET /me/events/new", () => {
     expect(html).toContain('action="/me/events/new"');
   });
 
+  it("preselects Now for Start now (?when=now) and ignores anything else (#1319)", async () => {
+    const now = await (await harness.get("?when=now")).text();
+    expect(now).toMatch(/name="when" value="now" checked/);
+    expect(now).not.toMatch(/name="when" value="pick" checked/);
+    for (const q of [
+      "?when=tomorrow",
+      "?when[]=now",
+      "?when=",
+      "?when=15",
+      "?when=30",
+      "?when=60",
+      "?when=now&when=now",
+    ]) {
+      const html = await (await harness.get(q)).text();
+      expect(html).toMatch(/name="when" value="pick" checked/);
+    }
+  });
+
   it("answers 404 while Events is switched off", async () => {
     eventsEnabled = false;
     expect((await harness.get("")).status).toBe(404);
