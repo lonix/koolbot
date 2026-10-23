@@ -110,6 +110,7 @@ jest.unstable_mockModule("../../src/web/read-only-routes.js", () => ({
   fetchChannelData: async () => ({
     names: new Map([["c-1", "general"]]),
     types: new Map([["c-1", 0]]), // ChannelType.GuildText
+    listed: !channelLookupFails,
   }),
 }));
 
@@ -138,6 +139,7 @@ const member = (
   communicationDisabledUntilTimestamp: until,
 });
 
+let channelLookupFails = false;
 let members = new Map<string, FakeMember>();
 let memberCount: number | null = null;
 const client = {
@@ -230,6 +232,7 @@ const logRow = (
 
 beforeEach(() => {
   jest.clearAllMocks();
+  channelLookupFails = false;
   for (const key of Object.keys(config)) delete config[key];
   config["moderation.enabled"] = true;
   members = new Map([
@@ -753,6 +756,36 @@ describe("a failed read is never shown as empty or zero", () => {
     expect(page).toContain('<span class="kb-muted">(deleted)</span>');
     expect(page).toContain("c-nameless (unavailable)");
     expect(page).not.toContain("c-gone (unavailable)");
+  });
+
+  it("does not call a live voice room deleted when the channel lookup failed (#1420)", async () => {
+    channelLookupFails = true;
+    auditFind.mockReturnValue({
+      sort: () => ({
+        skip: () => ({
+          limit: () => ({
+            lean: () =>
+              Promise.resolve([
+                {
+                  createdAt: new Date("2026-01-03T09:40:00Z"),
+                  discordUserId: MOD,
+                  commandName: "vc",
+                  subcommand: null,
+                  channelId: "c-live",
+                  channelName: "Mia's room",
+                  result: "success",
+                  errorMessage: null,
+                  durationMs: 8,
+                },
+              ]),
+          }),
+        }),
+      }),
+    });
+    const page = await html("/audit");
+    expect(page).toContain("c-live (unavailable)");
+    expect(page).not.toContain("(deleted)");
+    expect(page).not.toContain("Mia&#39;s room");
   });
 
   it("says the command audit is unavailable when its rows cannot be read", async () => {

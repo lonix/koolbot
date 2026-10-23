@@ -208,9 +208,22 @@ export async function loadCommandAuditPage(args: {
   channelNames: ReadonlyMap<string, string>;
   /** Discord type per channel id, so a row can show the channel by kind (#1303). */
   channelTypes: ReadonlyMap<string, ChannelType>;
+  /**
+   * Whether the channel list was read. A stored room name is shown as
+   * "(deleted)" only when it was and the channel is not in it; after a failed
+   * lookup a live room must not read as deleted (#1420).
+   */
+  channelsListed: boolean;
 }): Promise<CommandAuditPageData> {
-  const { client, guildId, filters, pageSize, channelNames, channelTypes } =
-    args;
+  const {
+    client,
+    guildId,
+    filters,
+    pageSize,
+    channelNames,
+    channelTypes,
+    channelsListed,
+  } = args;
   const query = buildCommandAuditQuery(guildId, filters);
   let unavailable = false;
   const total = await DiscordCommandAuditLog.countDocuments(query).catch(() => {
@@ -267,7 +280,11 @@ export async function loadCommandAuditPage(args: {
         : null,
       channelType: channelId ? (channelTypes.get(channelId) ?? null) : null,
       channelStoredName:
-        typeof d.channelName === "string" && d.channelName
+        channelsListed &&
+        channelId &&
+        !channelTypes.has(channelId) &&
+        typeof d.channelName === "string" &&
+        d.channelName
           ? d.channelName
           : null,
       result: (d.result as "success" | "error" | "denied") ?? "success",

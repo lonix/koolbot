@@ -1430,9 +1430,9 @@ scrape target (command counters since the last restart, process metrics)
 rather than a persisted per-day history.
 
 A command run in a voice room stores the room's name with its audit row, because
-most voice rooms are deleted when they empty. Once the room is gone, the page
-shows it by that name with a muted `(deleted)` instead of `(unavailable)`;
-rows from before this, and rows from other channel types, read as before.
+most voice rooms are deleted when they empty. Once the room is gone (Discord's channel list was read and no longer has it), the
+page shows it by that name with a muted `(deleted)` instead of `(unavailable)`. If the channel list could not be read, rooms stay
+`(unavailable)`; rows from before this, and rows from other channel types, read as before.
 
 The **Weekly Digest** page (`/admin/digest`) lets an admin **preview** the
 weekly voice digest before it sends (#539). **Preview** is a read-only dry run:
