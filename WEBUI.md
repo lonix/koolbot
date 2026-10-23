@@ -1333,8 +1333,8 @@ the right and a check on the chosen row. Typing `#` lists text channels, `#!` vo
 composer; the rest filters by name and category. The arrow keys, Home, End, Enter and Escape work from the search box. The
 native select underneath stays the field, so it posts the same stored id, a save that did not touch it changes nothing, an
 id that is no longer listed stays selected as `⚠ 1234 (unavailable)`, and without JavaScript the select is all there is.
-Lists that take several values (`channel_list`, `role_list`) are still native multi-selects. Voice stats on the member
-pages and the searchable multi-select are not done yet (#1394).
+Lists that take several values (`channel_list`, `role_list`) are still native multi-selects. The rest of #1394 (the searchable multi-select, and labels
+on voice stats, the bot permissions page, the events and host pages, the server scan pages and the Voice Channels status line) is not done yet.
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction

@@ -299,10 +299,10 @@ describe("settings pickers", () => {
     expect(html).toContain('<option value="2">📢 news</option>');
   });
 
-  it("keeps roles as @Name", () => {
+  it("keeps roles as @Name, under a Roles group (#1394)", () => {
     const html = control("role", "9");
     expect(html).toContain('<option value="9" selected>@Moderators</option>');
-    expect(html).not.toContain("optgroup");
+    expect(html).toContain(`<optgroup label="Roles">`);
   });
 
   it("keeps a stored id that is no longer in the list, selected and unavailable", () => {

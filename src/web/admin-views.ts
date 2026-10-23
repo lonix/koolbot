@@ -575,12 +575,18 @@ function buildOptionsHtml(
   // one <optgroup> per kind, in the order the kinds first appear. `meta` is
   // filled in the order the options end up in the markup.
   const groups = new Map<string, Array<{ html: string; meta: PickerMeta }>>();
+  const roleGroupEntries: Array<{ html: string; meta: PickerMeta }> = [];
+  const roleEntries: Array<{ html: string; meta: PickerMeta }> = [];
   for (const opt of options) {
     const sel = selected.has(opt.id) ? " selected" : "";
     const html = `<option value="${escapeHtml(opt.id)}"${sel}>${escapeHtml(optionText(opt))}</option>`;
     if (!isChannelOption(opt)) {
-      parts.push(html);
-      meta?.push(["role", opt.name, ""]);
+      // Roles are headed like the channels (#1394): references to role groups
+      // (#1023) under "Role groups", real roles under "Roles".
+      const entry = { html, meta: ["role", opt.name, ""] as PickerMeta };
+      (opt.id.startsWith("group:") ? roleGroupEntries : roleEntries).push(
+        entry,
+      );
       continue;
     }
     const group = channelGroupLabel(opt.type);
@@ -589,7 +595,13 @@ function buildOptionsHtml(
     if (members) members.push(entry);
     else groups.set(group, [entry]);
   }
-  for (const [label, members] of groups) {
+  for (const [label, members] of [
+    ...(roleGroupEntries.length
+      ? [["Role groups", roleGroupEntries] as const]
+      : []),
+    ...(roleEntries.length ? [["Roles", roleEntries] as const] : []),
+    ...groups,
+  ]) {
     parts.push(
       `<optgroup label="${escapeHtml(label)}">${members.map((m) => m.html).join("")}</optgroup>`,
     );
