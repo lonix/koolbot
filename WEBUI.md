@@ -1738,6 +1738,13 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
+**Limit on open events** (#1408). `events.max_active_per_host` (Settings, Events) is the most events a host who is not an administrator may
+have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
+and Upcoming; ended and cancelled events do not count, nor do events an admin adopted. A host at the limit who tries **New event** or
+**Start now** (a Now event) gets a plain message naming the limit, nothing is created, and the refusal is audited as `event.host.limit`.
+Administrators are never limited. The setting is read at each attempt, so a change applies at once with no restart. A host cannot make a
+repeating series, so the limit never meets one.
+
 **Your events** (#1319) is the home of the Hosting section, at `/me/events`. It lists the events the signed-in person created, never anyone
 else's (the query is filtered on the session's server and user, an admin session included): **Live now**, **Upcoming** with **Edit** and
 **Cancel** per row, and **Past events** folded. The header has **Start now**, which opens the New event form with **When: Now** already chosen

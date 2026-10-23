@@ -36,6 +36,7 @@ import { validateEventForm } from "./event-form.js";
 import { parseEventWhen, plannedStartFor } from "./event-when.js";
 import { recordAudit, type AuditEntry } from "./audit.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import { countOpenHostEvents } from "./event-host.js";
 import { signFlash, truncateFlash } from "./http-flash.js";
 import type { WebSessionContext } from "./session.js";
 
@@ -86,6 +87,50 @@ export async function createEventFromForm(
 
   const when = parseEventWhen(field(body, "when"));
   if (!when) return { ok: false, error: "Invalid choice for when." };
+
+  // The per-host cap (#1408). Read now, not at startup, so a settings change
+  // applies to the next attempt. Administrators are never limited, and 0 means
+  // no limit. Checked before anything is created, so a refusal leaves nothing.
+  if (session.role !== "admin") {
+    const limit = await ConfigService.getInstance().getNumber(
+      "events.max_active_per_host",
+      0,
+    );
+    if (Number.isFinite(limit) && limit > 0) {
+      let open: number;
+      try {
+        open = await countOpenHostEvents(
+          session.guildId,
+          session.discordUserId,
+        );
+      } catch (err) {
+        logger.error("Could not count a host's open events", err);
+        await audit({
+          action: "event.create",
+          details: { via: opts.via, when, limit },
+          result: "failure",
+          errorMessage: "could not check the open event limit",
+        });
+        return {
+          ok: false,
+          error:
+            "Could not check how many events you have open, so nothing was created. Try again in a moment.",
+        };
+      }
+      if (open >= limit) {
+        await audit({
+          action: "event.host.limit",
+          details: { via: opts.via, when, limit, open },
+          result: "failure",
+          errorMessage: "open event limit reached",
+        });
+        return {
+          ok: false,
+          error: `You already have ${open} open ${open === 1 ? "event" : "events"}, and the limit is ${limit}. End or cancel one before creating another.`,
+        };
+      }
+    }
+  }
 
   const recurrenceRaw = opts.allowRecurrence
     ? field(body, "recurrence") || "none"

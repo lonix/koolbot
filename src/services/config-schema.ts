@@ -140,6 +140,7 @@ export interface ConfigSchema {
   "events.native.link_room": boolean; // Point the native event at the event's voice room once it exists
   "events.groups.default_count": number; // Group rows the event form offers up front
   "events.groups.max_count": number; // Most groups one event may have
+  "events.max_active_per_host": number; // Most open events one non-admin host may have at once (0 = no limit)
 
   // LFG — ad-hoc "looking for group" posts (#957)
   "lfg.enabled": boolean;
@@ -471,6 +472,7 @@ export const defaultConfig: ConfigSchema = {
   "events.native.link_room": true,
   "events.groups.default_count": 2,
   "events.groups.max_count": 15,
+  "events.max_active_per_host": 0, // 0 = no limit
 
   // LFG (#957) — feature gate off by default (rule 1)
   "lfg.enabled": false,
@@ -2031,6 +2033,15 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     min: 1,
     max: 25,
     reloadOnSave: true,
+  },
+  "events.max_active_per_host": {
+    label: "Most open events per host",
+    description:
+      "The most events a member who is not an administrator may have open at once, counting the ones scheduled and the ones running (finished and cancelled events do not count). Someone at the limit cannot create or start another until one ends or is cancelled. Administrators are never limited. Set to 0 for no limit.",
+    category: "events",
+    type: "number",
+    min: 0,
+    max: 100,
   },
   "lfg.enabled": {
     label: "LFG enabled",

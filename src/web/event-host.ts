@@ -92,6 +92,26 @@ export function isEventHost(
   );
 }
 
+/**
+ * How many open events `userId` has in `guildId`: scheduled or active, the same
+ * set the "Events you host" card lists (a discarded duplicate kept for native
+ * cleanup, and an event an admin adopted, are not the host's). Finished and
+ * cancelled events do not count. Throws when the read fails, so the caller can
+ * refuse instead of letting the limit be skipped.
+ */
+export async function countOpenHostEvents(
+  guildId: string,
+  userId: string,
+): Promise<number> {
+  return Event.countDocuments({
+    guildId,
+    createdBy: userId,
+    state: { $in: ["scheduled", "active"] },
+    nativeCleanupOnly: { $ne: true },
+    nativeAdopted: { $ne: true },
+  });
+}
+
 /** Row shown in the "Events you host" card on the member overview. */
 export interface HostedEventSummary {
   id: string;
