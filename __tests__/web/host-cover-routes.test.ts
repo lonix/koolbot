@@ -465,7 +465,7 @@ describe("the edit page", () => {
     // The page script rides in a nonce-carrying tag (the security-headers
     // middleware fills the nonce in; this harness has none).
     expect(r.text).toMatch(
-      /<script nonce="[^"]+">\(function\(\)\{var forms=document\.querySelectorAll\('form\[data-cover-upload\]'\)/,
+      /<script nonce="[^"]+">\(function\(\)\{var edit=document\.querySelector\('\[data-event-edit-form\]'\);[\s\S]*?form\[data-cover-upload\]/,
     );
     expect(r.text).not.toContain("/cover/remove");
     expect(r.text).not.toContain('href="/admin/events"');

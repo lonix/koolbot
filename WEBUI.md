@@ -2914,7 +2914,9 @@ other host routes (CSRF, the host scope, creator or administrator), and uses the
 (2 MB, PNG, JPEG or GIF by signature, the same refusal of adopted, no longer mirrored and finished events;
 refused too while Events is off). The cover is shared by the whole series, so choosing "this occurrence" in
 the details form does not limit it; the panel says so. Audited as `event.host.cover-set` and
-`event.host.cover-remove`. An administrator sees the same panel plus a link to Events in the admin area.
+`event.host.cover-remove`. A saved or removed cover reloads the page, so if the details form has unsaved changes the page
+asks before uploading or removing; a rejected upload shows its message next to the control and never reloads.
+An administrator sees the same panel plus a link to Events in the admin area.
 No new stored field: the member data export and reset are unchanged (the image holds no member data).
 Events scheduled without a cover behave exactly as before.
 

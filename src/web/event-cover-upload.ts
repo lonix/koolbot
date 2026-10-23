@@ -48,11 +48,23 @@ export const COVER_TOO_LARGE_TEXT = `The image is too large. The maximum is ${CO
 // parser stops at 256 KB), so the chosen file's raw bytes are POSTed with fetch
 // to the event's cover route (the admin Events page and the host's edit page, #1393), with the CSRF token in a header. The server
 // answers with the usual JSON flash plus a `reload` URL, which is followed so
-// the result shows as a flash; a failure before that (CSRF, network) is shown
+// the result shows as a flash (only for a saved cover: a rejected one is shown
+// next to the control, so a half-edited form on the page is not thrown away);
+// before the upload, a changed event-edit form asks first; a failure before that (CSRF, network) is shown
 // next to the control. The size is checked here first only to spare the upload;
 // the server checks size and the real file signature again.
 export const EVENT_COVER_UPLOAD_SCRIPT =
   "(function(){" +
+  "var edit=document.querySelector('[data-event-edit-form]');" +
+  "function dirty(){if(!edit)return false;var els=edit.elements;" +
+  "for(var i=0;i<els.length;i++){var el=els[i],t=(el.type||'').toLowerCase();" +
+  "if(t==='hidden'||t==='submit'||t==='button'||t==='file')continue;" +
+  "if(t==='checkbox'||t==='radio'){if(el.checked!==el.defaultChecked)return true;continue}" +
+  "if(el.tagName==='SELECT'){for(var j=0;j<el.options.length;j++){if(el.options[j].selected!==el.options[j].defaultSelected)return true}continue}" +
+  "if(el.value!==el.defaultValue)return true}return false}" +
+  "function leave(){return !dirty()||window.confirm('You have unsaved changes to the event details. Changing the cover reloads this page and discards them. Continue?')}" +
+  "var removes=document.querySelectorAll('form[data-cover-remove]');" +
+  "Array.prototype.forEach.call(removes,function(f){f.addEventListener('submit',function(e){if(!leave()){e.preventDefault();e.stopImmediatePropagation()}})});" +
   "var forms=document.querySelectorAll('form[data-cover-upload]');" +
   "Array.prototype.forEach.call(forms,function(form){" +
   "var file=form.querySelector('input[type=file]');" +
@@ -67,6 +79,7 @@ export const EVENT_COVER_UPLOAD_SCRIPT =
   "if(!f){note('Choose an image first.');return}" +
   "if(max&&f.size>max){note('That file is too large (max '+Math.floor(max/1048576)+' MB).');return}" +
   "if(typeof fetch!=='function'){note('This browser cannot upload the image.');return}" +
+  "if(!leave())return;" +
   "if(btn)btn.disabled=true;note('Uploading\\u2026');" +
   "fetch(form.getAttribute('action'),{method:'POST',credentials:'same-origin',cache:'no-store'," +
   "headers:{'Content-Type':'application/octet-stream','Accept':'application/json'," +
@@ -74,7 +87,7 @@ export const EVENT_COVER_UPLOAD_SCRIPT =
   ".then(function(res){var status=res.status;return res.text().then(function(t){" +
   "var d=null;try{d=JSON.parse(t)}catch(x){}return{status:status,json:d}})})" +
   ".then(function(r){if(btn)btn.disabled=false;var d=r.json;" +
-  "if(d&&typeof d.reload==='string'&&(d.reload.indexOf('/admin/')===0||d.reload.indexOf('/me/')===0)&&d.reload.indexOf('//')<0){window.location.assign(d.reload);return}" +
+  "if(d&&d.type==='ok'&&typeof d.reload==='string'&&(d.reload.indexOf('/admin/')===0||d.reload.indexOf('/me/')===0)&&d.reload.indexOf('//')<0){window.location.assign(d.reload);return}" +
   "note(d&&typeof d.text==='string'&&d.text?d.text:'Upload failed ('+r.status+').')})" +
   ".catch(function(){if(btn)btn.disabled=false;note('Upload failed. Check your connection and try again.')})" +
   "})})})();";

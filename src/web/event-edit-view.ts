@@ -86,7 +86,7 @@ function renderCoverPanel(
     ? `<p class="kb-help">This event repeats. The cover belongs to the whole series: it is shown on every occurrence, whether you edit this occurrence or this and following above.</p>`
     : "";
   const remove = cover.hasCover
-    ? `<form method="POST" action="${escapeHtml(panel)}/cover/remove" data-confirm="Remove the cover image${cover.series ? " from the whole series" : ""}?">
+    ? `<form method="POST" action="${escapeHtml(panel)}/cover/remove" data-cover-remove data-confirm="Remove the cover image${cover.series ? " from the whole series" : ""}?">
         <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
         <button type="submit" class="kb-btn kb-btn--danger">Remove cover</button>
       </form>`
