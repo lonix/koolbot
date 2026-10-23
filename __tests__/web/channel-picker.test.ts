@@ -1,4 +1,4 @@
-/* global HTMLSelectElement, HTMLElement, HTMLInputElement, HTMLButtonElement, HTMLFormElement, KeyboardEventInit, DOMRect */
+/* global HTMLSelectElement, HTMLElement, HTMLInputElement, HTMLButtonElement, HTMLFormElement, KeyboardEventInit, DOMRect, Element */
 /**
  * The searchable channel, category and role picker (#1394): the server markup
  * (a plain select that works without JavaScript) and `CHANNEL_PICKER_SCRIPT`
@@ -416,6 +416,134 @@ describe("script", () => {
       dom.window.dispatchEvent(new dom.window.Event("resize"));
       expect(vars(dom).x).toBe("450px");
     });
+
+    /** A crude layout: 30px per visible row (capped by the list's max height) plus 100px of search box, status and hint. */
+    function layout(dom: JSDOM, viewport: number): void {
+      const pop = $(dom, ".kb-picker__pop");
+      const ul = $(dom, ".kb-picker__list");
+      Object.defineProperty(dom.window, "innerHeight", {
+        value: viewport,
+        configurable: true,
+      });
+      Object.defineProperty(dom.window, "innerWidth", {
+        value: 800,
+        configurable: true,
+      });
+      Object.defineProperty(ul, "offsetHeight", {
+        configurable: true,
+        get: () => {
+          const rows = [
+            ...ul.querySelectorAll<HTMLElement>(".kb-picker__opt"),
+          ].filter((r) => !r.hidden).length;
+          const cap =
+            parseFloat(pop.style.getPropertyValue("--kb-picker-list-h")) || 256;
+          return Math.min(rows * 30, cap);
+        },
+      });
+      Object.defineProperty(pop, "offsetHeight", {
+        configurable: true,
+        get: () => ul.offsetHeight + 100,
+      });
+      Object.defineProperty(pop, "offsetWidth", {
+        value: 350,
+        configurable: true,
+      });
+    }
+
+    it("places the menu again after the rows change: filter, close, reopen, and clearing a search", () => {
+      const dom = mount(MIXED);
+      const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+      layout(dom, 400);
+      rect(dom, trig, { left: 10, top: 330, bottom: 366 });
+      trig.click();
+      // Full list (7 rows, 310px) fits above only.
+      expect(vars(dom).y).toBe("16px");
+      type(dom, "zzz");
+      // No matches: a 100px menu, placed again while open.
+      expect(vars(dom).y).toBe("226px");
+      type(dom, "");
+      expect(vars(dom).y).toBe("16px");
+      type(dom, "zzz");
+      key(dom, $(dom, ".kb-picker__search input"), "Escape");
+      trig.click();
+      // The reset search restores the full list, and the menu is placed for it.
+      expect($<HTMLInputElement>(dom, ".kb-picker__search input").value).toBe(
+        "",
+      );
+      expect(vars(dom).y).toBe("16px");
+    });
+
+    it("when neither side fits the whole menu it takes the roomier side and cuts the list to it", () => {
+      const dom = mount(MIXED);
+      const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+      const pop = $(dom, ".kb-picker__pop");
+      layout(dom, 400);
+      rect(dom, trig, { left: 10, top: 190, bottom: 226 });
+      trig.click();
+      // Below: 162px, above: 178px, menu 310px. Above wins; list = 178 - 100.
+      expect(pop.style.getPropertyValue("--kb-picker-list-h")).toBe("78px");
+      expect(vars(dom).y).toBe("8px");
+      // The menu (100 + 78) ends at the trigger's top minus the gap.
+      expect(8 + 178).toBe(190 - 4);
+      // Plenty of room: the cap is dropped again.
+      rect(dom, trig, { left: 10, top: 20, bottom: 56 });
+      dom.window.dispatchEvent(new dom.window.Event("resize"));
+      expect(pop.style.getPropertyValue("--kb-picker-list-h")).toBe("");
+      expect(vars(dom).y).toBe("60px");
+    });
+
+    it("scrolling the list itself does not move the menu or reset the list", () => {
+      const dom = mount(MIXED);
+      const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+      layout(dom, 400);
+      rect(dom, trig, { left: 10, top: 100, bottom: 136 });
+      trig.click();
+      const ul = $(dom, ".kb-picker__list");
+      rect(dom, trig, { left: 10, top: 300, bottom: 336 });
+      ul.dispatchEvent(new dom.window.Event("scroll"));
+      expect(vars(dom).y).toBe("140px");
+    });
+
+    for (const shiftKey of [false, true]) {
+      it(`Tab${shiftKey ? " with Shift" : ""} puts focus back on the trigger before its default runs, popover back in the picker`, () => {
+        const dom = mount(MIXED);
+        const form = $(dom, "form");
+        form.insertAdjacentHTML(
+          "afterbegin",
+          '<button type="button" id="before">b</button>',
+        );
+        form.insertAdjacentHTML(
+          "beforeend",
+          '<button type="button" id="after">a</button>',
+        );
+        const trig = $<HTMLButtonElement>(dom, ".kb-picker__trigger");
+        trig.click();
+        const pop = $(dom, ".kb-picker__pop");
+        expect(pop.parentElement).toBe(dom.window.document.body);
+        const inp = $<HTMLInputElement>(dom, ".kb-picker__search input");
+        expect(dom.window.document.activeElement).toBe(inp);
+        const seen: Array<[Element | null, Element | null, boolean]> = [];
+        // Runs after the picker's handler, at the point the browser would apply the default.
+        dom.window.document.addEventListener("keydown", (e) => {
+          seen.push([
+            dom.window.document.activeElement,
+            pop.parentElement,
+            e.defaultPrevented,
+          ]);
+        });
+        inp.dispatchEvent(
+          new dom.window.KeyboardEvent("keydown", {
+            key: "Tab",
+            shiftKey,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        expect(seen).toEqual([[trig, $(dom, "[data-picker]"), false]]);
+        expect(pop.hidden).toBe(true);
+        expect(trig.getAttribute("aria-expanded")).toBe("false");
+      });
+    }
 
     it("a click inside the popover keeps it open, one outside closes it", () => {
       const dom = mount(MIXED);

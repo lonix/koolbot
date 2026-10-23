@@ -227,22 +227,32 @@ export const CHANNEL_PICKER_SCRIPT =
   "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
   "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
   "var on=vis.indexOf(sel.selectedIndex);setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
-  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):''}" +
+  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):'';" +
+  // The menu's height follows the rows and the status line, so its place does too.
+  "if(open)place()}" +
   // The popover is moved to the end of <body> while open and positioned with
   // `position: fixed` from the trigger's rectangle (custom properties, see
   // kb.css), because the settings rows and cards scroll (`overflow-x: auto`),
   // which also clips vertically and would turn a menu near the bottom into an
   // inner scroll area. It flips above the trigger when there is no room below,
   // and follows the trigger on scroll (any ancestor) and resize.
-  "function place(){var r=trig.getBoundingClientRect(),h=pop.offsetHeight,w=pop.offsetWidth,y=r.bottom+4;" +
-  "if(y+h>window.innerHeight&&r.top-4-h>=0)y=r.top-4-h;" +
+  // Below the trigger when the menu fits there or there is more room below than
+  // above, otherwise above. When neither side fits it, the list's height is cut
+  // to the room on the chosen side (the search box, status and hint rows
+  // stay), so the whole menu is on screen and the list scrolls inside it.
+  "function place(){var top0=ul.scrollTop;pop.style.removeProperty('--kb-picker-list-h');" +
+  "var r=trig.getBoundingClientRect(),h=pop.offsetHeight,w=pop.offsetWidth,over=h-ul.offsetHeight," +
+  "below=window.innerHeight-r.bottom-12,above=r.top-12,down=h<=below||below>=above,room=down?below:above;" +
+  "if(h>room){var cap=Math.max(64,room-over);pop.style.setProperty('--kb-picker-list-h',cap+'px');h=over+cap}" +
+  "var y=down?r.bottom+4:r.top-4-h;" +
   "pop.style.setProperty('--kb-picker-x',Math.max(0,Math.min(r.left,window.innerWidth-w))+'px');" +
-  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px')}" +
+  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px');ul.scrollTop=top0}" +
+  "function onScroll(e){var t=e.target;if(!(t&&t.nodeType&&pop.contains(t)))place()}" +
   "function close(back){if(!open)return;open=false;pop.hidden=true;box.appendChild(pop);" +
-  "window.removeEventListener('scroll',place,true);window.removeEventListener('resize',place);" +
+  "window.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',place);" +
   "trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
-  "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;place();" +
-  "window.addEventListener('scroll',place,true);window.addEventListener('resize',place);" +
+  "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;" +
+  "window.addEventListener('scroll',onScroll,true);window.addEventListener('resize',place);" +
   "trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
   "function choose(k){if(k<0||!items[k])return;if(sel.selectedIndex!==k){sel.selectedIndex=k;" +
   "sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}paint();close(true)}" +
@@ -253,7 +263,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "inp.addEventListener('keydown',function(e){var m=e.key;" +
   "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
   "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
-  "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(false)});" +
+  "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(true)});" +
   "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
   "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
   "function inside(t){return box.contains(t)||pop.contains(t)}" +
