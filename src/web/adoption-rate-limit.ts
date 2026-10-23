@@ -19,7 +19,11 @@ import { createRateLimiter } from "./rate-limit.js";
 const WRITE_PREFIXES = ["/adopt", "/role-groups", "/rules"];
 
 /** Pages that scan the guild on every load, served by the write router. */
-const WRITE_ROUTER_SCAN_PAGES = new Set(["/adopt/claims", "/adopt/events"]);
+const WRITE_ROUTER_SCAN_PAGES = new Set([
+  "/adopt/claims",
+  "/adopt/events",
+  "/adopt/cleanup",
+]);
 
 /** The scan page served by the read-only router. */
 export const ADOPTION_SCAN_PAGE = "/adopt";

@@ -1,0 +1,362 @@
+import type { Guild } from "discord.js";
+import {
+  findKnownBot,
+  KNOWN_BOTS,
+  type KnownBot,
+} from "../content/known-bots.js";
+import { claimKeyFor, staleDestructiveSteps } from "./channel-claims.js";
+import {
+  planAdoption,
+  type AdoptionPlan,
+  type PlanIssue,
+  type PlanOperation,
+} from "./server-adoption-planner.js";
+import { ServerScanService, type ServerScan } from "./server-scan-service.js";
+
+/**
+ * Cleanup plan for a bot the admin already removed by hand (#1179, part of the
+ * server-adoption work #1017). KoolBot never removes another bot: this only
+ * offers to tidy what a removed bot left behind, through the adoption engine
+ * (preview first, snapshot before apply, rollback from the adoption history).
+ *
+ * This slice covers detection, removing the member-specific permission
+ * overwrites that still point at the removed bot, and flagging the settings
+ * bound to its channels. Discord removes a bot's managed role itself but not
+ * those overwrites. Claiming its channels stays on Channel Claims (this page
+ * links there) and archiving or deleting its channels is not offered.
+ *
+ * The engine classes an overwrite removal as destructive, so each removal needs
+ * a per-channel approval (the admin's tick) and the apply form's separate
+ * destructive confirmation. Nothing here is on by default.
+ */
+
+export type CandidateEvidence = "catalogue" | "owner-hint" | "orphan-overwrite";
+
+export interface CandidateChannel {
+  id: string;
+  name: string;
+}
+
+export interface CandidateOwnedChannel extends CandidateChannel {
+  usedBy: string[];
+  /** The feature the Server scan's Claim link would prefill, or null. */
+  claimKey: string | null;
+}
+
+export interface RemovedBotCandidate {
+  userId: string;
+  name: string;
+  evidence: CandidateEvidence;
+  /** Why this id is offered, in plain words. */
+  reason: string;
+  /** Channels with a member overwrite for the removed bot (what the plan removes). */
+  overwriteChannels: CandidateChannel[];
+  /** Channels it mostly wrote to (needs channel ownership hints). */
+  ownedChannels: CandidateOwnedChannel[];
+  /** KoolBot features bound to a channel the bot touched. */
+  boundFeatures: Array<{ channel: string; features: string[] }>;
+}
+
+const EVIDENCE_RANK: Record<CandidateEvidence, number> = {
+  catalogue: 0,
+  "owner-hint": 1,
+  "orphan-overwrite": 2,
+};
+
+/**
+ * Bots that were in the server and are not now, found from what they left. A
+ * member overwrite for an account that is not a current bot is only offered
+ * when something says it was a bot: a catalogue id, or a channel it mostly
+ * wrote to (ownership hints). A bare leftover overwrite could equally belong to
+ * a person who left, so it is offered last and only when the member list is
+ * readable; the plan still asks Discord whether the account is a bot.
+ * Pure: reads nothing but the scan.
+ */
+export function findRemovedBotCandidates(
+  scan: ServerScan,
+  catalog: readonly KnownBot[] = KNOWN_BOTS,
+): RemovedBotCandidate[] {
+  const present = new Set<string>([
+    ...scan.bots.map((b) => b.userId),
+    scan.scanned.botUserId,
+    scan.scanned.ownerId,
+    scan.scanned.adminUserId,
+  ]);
+  const ids = new Map<string, CandidateEvidence>();
+  const note = (id: string, evidence: CandidateEvidence): void => {
+    if (present.has(id)) return;
+    const cur = ids.get(id);
+    if (cur === undefined || EVIDENCE_RANK[evidence] < EVIDENCE_RANK[cur]) {
+      ids.set(id, evidence);
+    }
+  };
+  for (const ch of scan.channels) {
+    for (const o of ch.overwrites) {
+      if (o.type !== "member") continue;
+      if (findKnownBot(o.id, catalog)) note(o.id, "catalogue");
+      else if (scan.readiness.membersIntent) note(o.id, "orphan-overwrite");
+    }
+    if (ch.ownerHint) {
+      note(
+        ch.ownerHint.botId,
+        findKnownBot(ch.ownerHint.botId, catalog) ? "catalogue" : "owner-hint",
+      );
+    }
+  }
+  const out: RemovedBotCandidate[] = [];
+  for (const [userId, evidence] of ids) {
+    const overwriteChannels = scan.channels
+      .filter((c) =>
+        c.overwrites.some((o) => o.type === "member" && o.id === userId),
+      )
+      .map((c) => ({ id: c.id, name: c.name }));
+    const ownedChannels = scan.channels
+      .filter((c) => c.ownerHint?.botId === userId)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        usedBy: c.usedBy,
+        claimKey: claimKeyFor(c),
+      }));
+    const touched = new Set([
+      ...overwriteChannels.map((c) => c.id),
+      ...ownedChannels.map((c) => c.id),
+    ]);
+    const boundFeatures = scan.channels
+      .filter((c) => touched.has(c.id) && c.usedBy.length > 0)
+      .map((c) => ({ channel: c.name, features: c.usedBy }));
+    const known = findKnownBot(userId, catalog);
+    const tag = scan.channels.find((c) => c.ownerHint?.botId === userId)
+      ?.ownerHint?.botTag;
+    out.push({
+      userId,
+      name: known?.name ?? tag ?? userId,
+      evidence,
+      reason:
+        evidence === "catalogue"
+          ? "Its id is in the bot catalogue and it is no longer in the server."
+          : evidence === "owner-hint"
+            ? "It wrote most recent messages in a channel and is no longer in the server."
+            : "A permission overwrite names an account that is not in the server. It may be a bot or a person who left: the plan checks with Discord and refuses anything that is not a bot.",
+      overwriteChannels,
+      ownedChannels,
+      boundFeatures,
+    });
+  }
+  return out.sort(
+    (a, b) =>
+      EVIDENCE_RANK[a.evidence] - EVIDENCE_RANK[b.evidence] ||
+      a.name.localeCompare(b.name) ||
+      a.userId.localeCompare(b.userId),
+  );
+}
+
+const DISCORD_UNKNOWN_MEMBER = 10007;
+
+function discordCode(error: unknown): number | null {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "number" ? code : null;
+  }
+  return null;
+}
+
+/**
+ * Ask Discord, not the cache, whether the account is a bot and no longer a
+ * member. Only "Unknown Member" counts as gone: a member that is still there,
+ * an account that is not a bot, or any read that fails refuses the plan.
+ * Returns the problem, or null when the bot is confirmed removed.
+ */
+export async function verifyBotRemoved(
+  guild: Guild,
+  userId: string,
+): Promise<PlanIssue | null> {
+  const { CommandManager } = await import("./command-manager.js");
+  const manager = CommandManager.getInstance(guild.client);
+  const refuse = (code: string, message: string): PlanIssue => ({
+    code,
+    message,
+    targetId: userId,
+  });
+  let isBot: boolean;
+  try {
+    const user = await manager.makeDiscordApiCall(
+      () => guild.client.users.fetch(userId),
+      "fetch removed bot user",
+      15000,
+      2,
+    );
+    isBot = user.bot;
+  } catch (error) {
+    return refuse(
+      "bot-check-failed",
+      `Discord could not confirm that ${userId} is a bot (${error instanceof Error ? error.message : "unknown error"}), so nothing was planned.`,
+    );
+  }
+  if (!isBot) {
+    return refuse(
+      "not-a-bot",
+      `${userId} is not a bot account. This cleanup only handles bots you removed.`,
+    );
+  }
+  try {
+    await manager.makeDiscordApiCall(
+      () => guild.members.fetch({ user: userId, force: true }),
+      "check removed bot membership",
+      15000,
+      2,
+    );
+    return refuse(
+      "bot-still-present",
+      "That bot is still in the server. Remove it in Discord first: KoolBot never removes other bots.",
+    );
+  } catch (error) {
+    const cause = (error as { cause?: unknown } | null)?.cause;
+    if (
+      discordCode(error) === DISCORD_UNKNOWN_MEMBER ||
+      discordCode(cause) === DISCORD_UNKNOWN_MEMBER
+    ) {
+      return null;
+    }
+    return refuse(
+      "membership-check-failed",
+      `Discord could not confirm that the bot has left (${error instanceof Error ? error.message : "unknown error"}), so nothing was planned.`,
+    );
+  }
+}
+
+export interface BotCleanupPlan {
+  scan: ServerScan;
+  candidate: RemovedBotCandidate | null;
+  plan: AdoptionPlan;
+  /** The channels whose overwrite the plan removes (validated selection). */
+  channelIds: string[];
+  /** Blocking problems found before the engine planned anything. */
+  errors: PlanIssue[];
+}
+
+export function cleanupPlanIsApplicable(p: BotCleanupPlan): boolean {
+  return (
+    p.errors.length === 0 &&
+    p.plan.errors.length === 0 &&
+    p.plan.operations.length > 0
+  );
+}
+
+/**
+ * Plan the cleanup of one removed bot against the live server. Read-only. Only
+ * the chosen channels' overwrite for that bot is removed; the approval for each
+ * is the admin's tick, stamped `approvedAt` so the plan id reproduces.
+ */
+export async function planBotCleanup(
+  guild: Guild,
+  adminUserId: string,
+  botId: string,
+  channelIds: readonly string[],
+  approvedAt: string,
+  options: { sampleMessages?: boolean } = {},
+): Promise<BotCleanupPlan> {
+  const scan = await ServerScanService.getInstance(guild.client).scanGuild(
+    guild,
+    { adminUserId, sampleMessages: options.sampleMessages },
+  );
+  const errors: PlanIssue[] = [];
+  const candidate =
+    findRemovedBotCandidates(scan).find((c) => c.userId === botId) ?? null;
+  const selected: string[] = [];
+  if (!candidate && scan.bots.some((b) => b.userId === botId)) {
+    errors.push({
+      code: "bot-still-present",
+      message:
+        "That bot is still in the server. Remove it in Discord first: KoolBot never removes other bots.",
+      targetId: botId,
+    });
+  } else if (!candidate) {
+    errors.push({
+      code: "not-a-removed-bot",
+      message:
+        "That account is not a removed bot this server knows about. Open the report again and pick one from the list.",
+      targetId: botId,
+    });
+  } else {
+    const problem = await verifyBotRemoved(guild, botId);
+    if (problem) errors.push(problem);
+    const allowed = new Set(candidate.overwriteChannels.map((c) => c.id));
+    for (const id of new Set(channelIds)) {
+      if (allowed.has(id)) selected.push(id);
+      else {
+        errors.push({
+          code: "channel-not-eligible",
+          message:
+            "A chosen channel has no overwrite for this bot any more. Preview again.",
+          targetId: id,
+        });
+      }
+    }
+  }
+  const plan = planAdoption(
+    scan.scanned,
+    errors.length > 0
+      ? {}
+      : {
+          overwriteRemovals: selected.map((channelId) => ({
+            channelId,
+            targetId: botId,
+          })),
+          approvals: selected.map((channelId) => ({
+            kind: "overwrite.remove" as const,
+            targetId: `${channelId}:${botId}`,
+            approvedBy: adminUserId,
+            approvedAt,
+          })),
+        },
+    { approverId: adminUserId },
+  );
+  if (candidate) {
+    for (const b of candidate.boundFeatures) {
+      plan.warnings.push({
+        code: "feature-bound",
+        message: `"${b.channel}" is bound to ${b.features.join(", ")} and stays so. Check that it still works without the removed bot, or rebind it on Channel claims.`,
+      });
+    }
+    for (const c of candidate.ownedChannels) {
+      if (c.usedBy.length === 0) continue;
+      plan.warnings.push({
+        code: "owned-channel-bound",
+        message: `"${c.name}" was mostly written by the removed bot and is bound to ${c.usedBy.join(", ")}.`,
+        targetId: c.id,
+      });
+    }
+  }
+  return { scan, candidate, plan, channelIds: selected, errors };
+}
+
+/**
+ * The live-state check the engine requires before it runs destructive steps:
+ * plans the same cleanup again (which asks Discord whether the bot is still
+ * gone) and refuses on any blocking problem or a step that no longer matches.
+ */
+export function cleanupRevalidator(
+  guild: Guild,
+  adminUserId: string,
+  botId: string,
+  channelIds: readonly string[],
+  approvedAt: string,
+  options: { sampleMessages?: boolean } = {},
+): (pending: PlanOperation[]) => Promise<string[]> {
+  return async (pending) => {
+    const fresh = await planBotCleanup(
+      guild,
+      adminUserId,
+      botId,
+      channelIds,
+      approvedAt,
+      options,
+    );
+    const problems = [...fresh.errors, ...fresh.plan.errors].map(
+      (e) => e.message,
+    );
+    problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
+    return problems;
+  };
+}
