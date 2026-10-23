@@ -286,7 +286,7 @@ function renderRandomisePanel(d: HostBoardData): string {
     "randomise",
     `<p>Deal the people connected right now into the ${escapeHtml(label)}s at random. The split is even (the ${escapeHtml(label)}s differ by at most one person). A size is a hard limit: a full ${escapeHtml(label)} is skipped, and people who do not fit stay out of a ${escapeHtml(label)} and are listed.</p>` +
       `<fieldset class="kb-field"><legend class="kb-label">Who is dealt</legend>` +
-      `<div class="kb-segmented" role="presentation">` +
+      `<div class="kb-segmented kb-segmented--wrap" role="presentation">` +
       `<label><input type="radio" name="mode" value="unassigned" checked><span>Only people not in a ${escapeHtml(label)}</span></label>` +
       `<label><input type="radio" name="mode" value="everyone"><span>Everyone connected</span></label>` +
       `</div><p class="kb-help">Everyone connected deals people who are already placed again.</p></fieldset>` +

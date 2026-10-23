@@ -206,6 +206,9 @@ a.kb-tile:hover, a.kb-tile:focus-visible { background: var(--surface-alt); borde
 .kb-segmented label:hover span { color: var(--text); }
 .kb-segmented input:checked + span { background: var(--fill); color: var(--on-primary); font-weight: 600; }
 .kb-segmented input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Options whose text is user data (the host panel's Randomise names the group label) wrap and grow instead of overflowing a narrow container. */
+.kb-segmented--wrap label { min-width: 0; max-width: 100%; }
+.kb-segmented--wrap span { min-width: 0; height: auto; min-height: 1.75rem; padding-top: var(--space-1); padding-bottom: var(--space-1); white-space: normal; overflow-wrap: anywhere; }
 
 /* Setting rows: name and one-line description left, control right; the long explanation sits behind "More". */
 .kb-settings { display: flex; flex-direction: column; }
@@ -376,7 +379,7 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 /* A column can be as narrow as 11rem: the foot wraps, its form takes the full row when it must, and a long button label wraps inside the column. */
 .kb-board__foot { flex-wrap: wrap; }
 .kb-board__foot form { max-width: 100%; }
-.kb-board__foot .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.kb-board__foot .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: var(--space-1); padding-bottom: var(--space-1); }
 .kb-board__where { min-width: 0; overflow-wrap: anywhere; }
 .kb-board__col.is-over { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 /* Long text cannot widen a column. Member names are arbitrary user text and team and channel names can be long, so every flex or grid item of the board may
@@ -395,7 +398,7 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 .kb-board__menu .kb-stack > *, .kb-board__menu .kb-field, .kb-board__menu .kb-row { min-width: 0; max-width: 100%; }
 .kb-board__menu .kb-label { overflow-wrap: anywhere; }
 .kb-board__menu .kb-select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
-.kb-board__menu .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.kb-board__menu .kb-btn { max-width: 100%; height: auto; min-height: 1.75rem; white-space: normal; text-align: center; padding-top: var(--space-1); padding-bottom: var(--space-1); }
 .kb-board__foot { min-width: 0; overflow-wrap: anywhere; }
 .kb-toolbar > * { min-width: 0; max-width: 100%; }
 .kb-toolbar__end .kb-btn, .kb-toolbar__action > summary.kb-btn, .kb-toolbar__panel .kb-btn { max-width: 100%; height: auto; min-height: var(--button-height); white-space: normal; text-align: center; }
