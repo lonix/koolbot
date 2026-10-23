@@ -22,6 +22,7 @@ import {
   renderStepper,
   formatPresetLabel,
 } from "../../src/web/setting-pickers.js";
+import { renderNumberInput } from "../../src/web/setting-controls.js";
 import { CASCADE_DISABLE_SCRIPT } from "../../src/web/admin-layout.js";
 import { NUMBER_INPUT_SCRIPT } from "../../src/web/number-input.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
@@ -624,16 +625,18 @@ describe("preset durations in the page", () => {
     expect(q<HTMLFormElement>(dom, "form").checkValidity()).toBe(true);
   });
 
-  it("a stored custom value posts unchanged, and a stored out-of-range one is flagged for the browser", () => {
+  it("a stored custom value posts unchanged, and a stored out-of-range one passes unchanged but is flagged once changed (#1437)", () => {
     const dom = mount(45);
     expect(duration(dom)).toBe("45");
     expect(coerceConfigValue(REMINDER, duration(dom), 45).ok).toBe(true);
     expect(bar(dom).hidden).toBe(true);
     const over = mount(99999);
     expect(duration(over)).toBe("99999");
-    expect(
-      q<HTMLInputElement>(over, "[data-duration-input]").validity.valid,
-    ).toBe(false);
+    const box = q<HTMLInputElement>(over, "[data-duration-input]");
+    expect(box.validity.valid).toBe(true);
+    box.value = "99998";
+    box.dispatchEvent(new over.window.Event("input", { bubbles: true }));
+    expect(box.validity.valid).toBe(false);
   });
 
   it("in flight: pick, submit, pick back before the response; Discard returns to what was saved", () => {
@@ -897,6 +900,59 @@ describe("every order of events (random walk)", () => {
     for (let seed = 1; seed <= 300; seed++) {
       walk(seed, [30, 45, 0, 99999][seed % 4]);
     }
+  });
+});
+
+// A stored number outside its range is kept by the server when posted unchanged
+// (#1437), so the browser must not block the section on it either.
+describe("a stored out-of-range number in the browser (#1437)", () => {
+  function validityFor(rendered: string, typed: string | null): boolean {
+    const dom = new JSDOM(
+      `<!doctype html><body><form>${rendered}</form></body>`,
+      { runScripts: "outside-only" },
+    );
+    dom.window.eval(NUMBER_INPUT_SCRIPT);
+    const box = dom.window.document.querySelector(
+      "input[data-number]",
+    ) as HTMLInputElement;
+    if (typed !== null) {
+      box.value = typed;
+      box.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    }
+    return box.validity.valid;
+  }
+
+  const stepper = (value: number): string =>
+    renderStepper(`value_${STEP_KEY}`, value, STEP_BOUNDS, "Groups", {
+      id: "s",
+    });
+
+  it("lets the unchanged stored value through on load", () => {
+    expect(validityFor(stepper(999), null)).toBe(true);
+    expect(validityFor(durationHtml(999999), null)).toBe(true);
+  });
+
+  it("lets an unchanged stored negative below the minimum through, script and native pattern", () => {
+    expect(validityFor(stepper(-1), null)).toBe(true);
+    expect(validityFor(durationHtml(-1), null)).toBe(true);
+    expect(
+      validityFor(
+        renderNumberInput(`value_${STEP_KEY}`, -1, STEP_BOUNDS, { id: "n" }),
+        null,
+      ),
+    ).toBe(true);
+    // Changed negatives are still refused, and a default-positive box keeps
+    // its digits-only pattern.
+    expect(validityFor(stepper(-1), "-2")).toBe(false);
+    expect(validityFor(stepper(5), "-1")).toBe(false);
+    expect(stepper(5)).toContain('pattern="[0-9]*"');
+  });
+
+  it("still rejects a changed out-of-range value, and accepts it again when restored", () => {
+    expect(validityFor(stepper(999), "998")).toBe(false);
+    expect(validityFor(stepper(999), "26")).toBe(false);
+    expect(validityFor(stepper(5), "26")).toBe(false);
+    expect(validityFor(stepper(999), "999")).toBe(true);
   });
 });
 

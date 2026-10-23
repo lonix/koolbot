@@ -50,6 +50,13 @@ const mockConfigGetStringStrict = jest.fn(
     return typeof v === "string" ? v : defaultValue;
   },
 );
+// Same delegation for the strict number read.
+const mockConfigGetNumberStrict = jest.fn(
+  async (key: string, defaultValue: number = 0): Promise<number> => {
+    const v = await mockConfigGet(key);
+    return typeof v === "number" ? v : defaultValue;
+  },
+);
 const mockConfigSet = jest.fn<() => Promise<void>>();
 const mockConfigDelete = jest.fn<() => Promise<void>>();
 const mockConfigGetAll =
@@ -106,6 +113,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       get: mockConfigGet,
       getBooleanStrict: mockConfigGetBooleanStrict,
       getStringStrict: mockConfigGetStringStrict,
+      getNumberStrict: mockConfigGetNumberStrict,
       set: mockConfigSet,
       delete: mockConfigDelete,
       getAll: mockConfigGetAll,
@@ -2697,6 +2705,109 @@ describe("picker settings (#1426)", () => {
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
     expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+// An export holds whatever was stored, including a value the picker or a
+// bound would now refuse. Re-importing it unchanged must keep that value; a
+// changed value is still checked (#1437).
+describe("import keeps a stored value that fails its check (#1437)", () => {
+  const COLOUR = "reactionroles.group_role_colour";
+  const PREFIX = "voicechannels.channel.prefix";
+  const LIMIT = "voicechannels.lobby.room_window_seconds";
+  const LONG_PREFIX = "x".repeat(40);
+
+  function store(values: Record<string, unknown>): void {
+    mockConfigGet.mockImplementation(async (key) => values[key] ?? null);
+  }
+
+  function writtenKeys(): string[] {
+    return mockConfigSet.mock.calls.map((c) => (c as unknown as [string])[0]);
+  }
+
+  it("applies unchanged legacy colour, affix and number as stored", async () => {
+    store({ [COLOUR]: "red", [PREFIX]: LONG_PREFIX, [LIMIT]: 999999 });
+    const res = await harness.post("/settings/import/apply", {
+      yaml: `${COLOUR}: red\n${PREFIX}: ${LONG_PREFIX}\n${LIMIT}: 999999`,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(writtenKeys().sort()).toEqual([COLOUR, LIMIT, PREFIX].sort());
+    const calls = mockConfigSet.mock.calls as unknown as Array<
+      [string, unknown]
+    >;
+    expect(calls.find((c) => c[0] === COLOUR)?.[1]).toBe("red");
+    expect(calls.find((c) => c[0] === PREFIX)?.[1]).toBe(LONG_PREFIX);
+    expect(calls.find((c) => c[0] === LIMIT)?.[1]).toBe(999999);
+  });
+
+  it("keeps an affix with a shortcode exactly as stored", async () => {
+    store({ [PREFIX]: "[VC] :sparkles:" });
+    await harness.post("/settings/import/apply", {
+      yaml: `${PREFIX}: "[VC] :sparkles:"`,
+    });
+    const calls = mockConfigSet.mock.calls as unknown as Array<
+      [string, unknown]
+    >;
+    expect(calls[0]?.[1]).toBe("[VC] :sparkles:");
+  });
+
+  it("still refuses a changed invalid value", async () => {
+    store({ [COLOUR]: "red", [PREFIX]: LONG_PREFIX, [LIMIT]: 999999 });
+    const res = await harness.post("/settings/import/apply", {
+      yaml: `${COLOUR}: blue\n${PREFIX}: ${"y".repeat(41)}\n${LIMIT}: 999998`,
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).not.toBe("ok");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses the key, writing nothing, when the stored value cannot be read", async () => {
+    mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+    store({ [COLOUR]: "red" });
+    const res = await harness.post("/settings/import/apply", {
+      yaml: `${COLOUR}: red`,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).not.toBe("ok");
+    expect(flash.msg).toContain("could not be read");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("previews an unchanged legacy value as no change, matching apply", async () => {
+    store({ [COLOUR]: "red", [LIMIT]: 999999 });
+    mockConfigGetAll.mockResolvedValue([
+      { key: COLOUR, value: "red" },
+      { key: LIMIT, value: 999999 },
+    ]);
+    const res = await harness.post("/settings/import", {
+      yaml: `${COLOUR}: red\n${LIMIT}: 999999\n${PREFIX}: ${LONG_PREFIX}`,
+    });
+    const html = await res.text();
+    expect(html).toContain("no change");
+    expect(html).toContain("2 key(s) will be written; 1 rejected");
+    expect(html).toContain("at most 32 characters");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("compares with the value read, not only Mongo rows, so an env-held legacy value is no change", async () => {
+    // The strict read sees the legacy value; getAll() has no row for it.
+    store({ [COLOUR]: "red" });
+    mockConfigGetAll.mockResolvedValue([]);
+    const res = await harness.post("/settings/import", {
+      yaml: `${COLOUR}: red`,
+    });
+    const html = await res.text();
+    expect(html).toContain("no change");
+    expect(html).not.toContain("tag tag-diff-change");
+  });
+
+  it("previews a key whose stored value cannot be read as rejected", async () => {
+    mockConfigGetStringStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post("/settings/import", {
+      yaml: `${COLOUR}: red`,
+    });
+    const html = await res.text();
+    expect(html).toContain("could not be read");
+    expect(html).toContain("0 key(s) will be written; 1 rejected");
   });
 });
 

@@ -605,8 +605,10 @@ export async function coerceConfigValueForGuild(
  * `defaultConfig`. Returns the coerced value on success, or a typed
  * failure describing why coercion was refused.
  *
- * `current` is the stored value, when the caller has it (the Settings page and
- * the wizard do; an import or an adoption plan does not and stays strict). A
+ * `current` is the stored value, when the caller has it (the Settings page,
+ * the wizard, the YAML import and the adoption planner all pass it; see
+ * `readStoredBaseline`). A number outside its bounds is also accepted when it
+ * equals the stored one (#1437). A
  * picker-format key (#1426) accepts its stored value unchanged even when the
  * picker could not produce it, so an old custom timezone or a prefix that is
  * not an emoji never blocks saving the rest of its section.
@@ -690,6 +692,16 @@ export function coerceConfigValue(
     const numberMeta = settingsMetadata[key as keyof typeof settingsMetadata];
     const min = numberMeta?.min;
     const max = numberMeta?.max;
+    // A stored number outside its bounds (a limit saved before the bound
+    // existed, #1429) is kept as stored when it is posted unchanged; only a
+    // changed value is checked (#1437).
+    const unchangedStored =
+      current !== undefined &&
+      current !== null &&
+      typeof current !== "boolean" &&
+      String(current).trim() !== "" &&
+      Number(current) === n;
+    if (unchangedStored) return { ok: true, value: n };
     if (min !== undefined && n < min) {
       return { ok: false, reason: `must be at least ${min}` };
     }
@@ -799,6 +811,50 @@ export function coerceConfigValue(
     };
   }
   return { ok: true, value };
+}
+
+/** Why an import refuses a key whose stored value cannot be read. */
+export const IMPORT_BASELINE_FAILED_REASON =
+  "the stored value could not be read, so this key was not imported; try again";
+
+/**
+ * Whether `coerceConfigValue` has a stored-value exemption for `key`: a
+ * picker-format string or a bounded number. Only those need a baseline.
+ */
+export function needsStoredBaseline(key: string): boolean {
+  if (!(key in defaultConfig)) return false;
+  const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+  const expected = typeof defaultConfig[key as keyof typeof defaultConfig];
+  if (expected === "string") return Boolean(meta?.format);
+  if (expected === "number") {
+    return meta?.min !== undefined || meta?.max !== undefined;
+  }
+  return false;
+}
+
+/**
+ * The stored value of `key` for `coerceConfigValue`'s `current`, read strictly
+ * so a failed database read is reported instead of falling back to a default
+ * (which would make an unchanged legacy value look changed, or the reverse).
+ * Keys without a stored-value exemption yield `current: undefined`, no read.
+ */
+export async function readStoredBaseline(
+  key: string,
+): Promise<{ ok: true; current: unknown } | { ok: false }> {
+  if (!needsStoredBaseline(key)) return { ok: true, current: undefined };
+  const fallback = defaultConfig[key as keyof typeof defaultConfig];
+  try {
+    const config = ConfigService.getInstance();
+    return {
+      ok: true,
+      current:
+        typeof fallback === "number"
+          ? await config.getNumberStrict(key, fallback)
+          : await config.getStringStrict(key, String(fallback)),
+    };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**

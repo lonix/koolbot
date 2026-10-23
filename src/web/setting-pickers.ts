@@ -328,6 +328,11 @@ export interface NumberControlBounds {
   max?: number;
 }
 
+/** A stored negative whole number: its native `pattern` must let the minus through (#1437). */
+function isStoredNegative(value: string | number): boolean {
+  return /^-[0-9]+$/.test(String(value));
+}
+
 function boundAttrs(b: NumberControlBounds): string {
   return (
     (b.min !== undefined ? ` data-min="${b.min}"` : "") +
@@ -366,7 +371,7 @@ export function renderStepper(
     button(-1, "−", "Decrease") +
     `<input type="text"${attr("id", a.id)}${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
     ` name="${escapeHtml(name)}" value="${escapeHtml(value)}" inputmode="numeric" autocomplete="off"` +
-    ` pattern="[0-9]*" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)} required${lock}>` +
+    ` pattern="${isStoredNegative(value) ? "-?[0-9]*" : "[0-9]*"}" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)} required${lock}>` +
     button(1, "+", "Increase") +
     `</span>`
   );

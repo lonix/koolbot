@@ -42,6 +42,8 @@ import {
   safeAdminRedirect,
   EMOJI_NAME_KEYS,
   coerceConfigValue,
+  readStoredBaseline,
+  IMPORT_BASELINE_FAILED_REASON,
   coerceConfigValueForGuild,
   isReactionRoleMessageKey,
   readReactionRoleMessageBaseline,
@@ -931,10 +933,12 @@ export function createSettingsRouter(client: Client): Router {
         // Surface type-mismatch in the preview so a silent drop at apply
         // isn't the first sign the user sees. A reaction-role message key
         // (#1433) is checked against the guild's messages, and its stored
-        // value stays importable. The stored value is the same strict read
-        // apply uses (it also resolves environment-backed settings, which the
-        // Mongo snapshot above does not), so preview and apply agree.
-        let stored: string | undefined;
+        // value stays importable. A picker-format or bounded-number key
+        // (#1437) is checked against its stored value too. The stored value is
+        // the same strict read apply uses (it also resolves environment-backed
+        // settings, which the Mongo snapshot above does not), so preview and
+        // apply agree.
+        let stored: unknown;
         if (isReactionRoleMessageKey(key)) {
           const baseline = await readReactionRoleMessageBaseline(key);
           if (!baseline.ok) {
@@ -946,6 +950,17 @@ export function createSettingsRouter(client: Client): Router {
             continue;
           }
           stored = baseline.value;
+        } else {
+          const baseline = await readStoredBaseline(key);
+          if (!baseline.ok) {
+            rows.push({
+              key,
+              status: "rejected",
+              reason: IMPORT_BASELINE_FAILED_REASON,
+            });
+            continue;
+          }
+          stored = baseline.current;
         }
         const coerced = await coerceConfigValueForGuild(
           key,
@@ -1046,7 +1061,7 @@ export function createSettingsRouter(client: Client): Router {
           failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
-        let stored: string | undefined;
+        let stored: unknown;
         if (isReactionRoleMessageKey(key)) {
           // Strict read, as on the other save paths (#1433).
           const baseline = await readReactionRoleMessageBaseline(key);
@@ -1055,6 +1070,15 @@ export function createSettingsRouter(client: Client): Router {
             continue;
           }
           stored = baseline.value;
+        } else {
+          // Strict read of the stored value for a picker-format or bounded
+          // number key, so an unchanged legacy value is kept (#1437).
+          const baseline = await readStoredBaseline(key);
+          if (!baseline.ok) {
+            failed.push({ key, reason: IMPORT_BASELINE_FAILED_REASON });
+            continue;
+          }
+          stored = baseline.current;
         }
         const coerced = await coerceConfigValueForGuild(
           key,

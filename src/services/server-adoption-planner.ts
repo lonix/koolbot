@@ -447,6 +447,7 @@ function isValidBitfield(value: unknown): boolean {
 function checkConfigValue(
   key: string,
   value: unknown,
+  stored?: ConfigValue,
 ): { ok: true; value: ConfigValue } | { ok: false; reason: string } {
   const expected = typeof (defaultConfig as unknown as Record<string, unknown>)[
     key
@@ -456,7 +457,8 @@ function checkConfigValue(
   if (typeof value !== expected) {
     return { ok: false, reason: `expects a ${expected}, got ${typeof value}` };
   }
-  return coerceConfigValue(key, value);
+  // The scanned (strictly read) value lets an unchanged legacy value pass (#1437).
+  return coerceConfigValue(key, value, stored);
 }
 
 function big(value: string | undefined): bigint {
@@ -1045,7 +1047,7 @@ export function planAdoption(
       err("unknown-config-key", `"${key}" is not a KoolBot setting.`, key);
       continue;
     }
-    const checked = checkConfigValue(key, value);
+    const checked = checkConfigValue(key, value, scanned.config[key]);
     if (!checked.ok) {
       err("invalid-config-value", `"${key}" ${checked.reason}.`, key);
       continue;

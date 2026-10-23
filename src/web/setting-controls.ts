@@ -141,7 +141,8 @@ export function renderNumberInput(
   a: ControlAttrs = {},
 ): string {
   const { min, max } = bounds;
-  const signed = min !== undefined && min < 0;
+  const signed =
+    (min !== undefined && min < 0) || /^-[0-9]+$/.test(String(value));
   const range =
     min !== undefined && max !== undefined
       ? `Whole number from ${min} to ${max}`
