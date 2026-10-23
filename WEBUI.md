@@ -1232,8 +1232,11 @@ and no custom Discord emoji markup. A value that is **already stored** is exempt
 the wizard pass the stored value, so an old custom timezone, a colour that is not `#RRGGBB` or a prefix over the 32-character cap
 still shows, posts unchanged and never blocks saving the rest of its section (a stored custom zone is shown as a
 selected "(custom)" option, a stored non-colour is kept by the ticked Keep box and noted under the control). Anything else
-that is not what a picker could produce is refused with a message. YAML import and adoption plans have no stored value
-to compare with and stay strict.
+that is not what a picker could produce is refused with a message. YAML import, the import preview and adoption plans
+read the stored value of each such key (and of each number with a minimum or maximum) strictly and compare with it, so
+re-importing an export of the same server keeps a legacy value that is posted unchanged and the preview shows it as
+"no change"; a changed value is still checked. If the stored value cannot be read, that key is refused for that import
+with a message and nothing is written for it.
 
 **Bot-managed values (#1304).** `quotes.header_message_id`, `notices.header_message_id` and `rules.message_id` hold the
 id of a message the bot posted. The Settings page shows them as text with a _Jump to message_ link (built from the

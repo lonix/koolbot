@@ -42,6 +42,8 @@ import {
   safeAdminRedirect,
   EMOJI_NAME_KEYS,
   coerceConfigValue,
+  readStoredBaseline,
+  IMPORT_BASELINE_FAILED_REASON,
   findSectionMasterKey,
   resetConfigToDefaults,
   findGroupRoleReuseForSetting,
@@ -898,8 +900,18 @@ export function createSettingsRouter(client: Client): Router {
           continue;
         }
         // Surface type-mismatch in the preview so a silent drop at apply
-        // isn't the first sign the user sees.
-        const coerced = coerceConfigValue(key, value);
+        // isn't the first sign the user sees. The stored value is passed so a
+        // legacy value re-imported unchanged is accepted, as at apply (#1437).
+        const baseline = await readStoredBaseline(key);
+        if (!baseline.ok) {
+          rows.push({
+            key,
+            status: "rejected",
+            reason: IMPORT_BASELINE_FAILED_REASON,
+          });
+          continue;
+        }
+        const coerced = coerceConfigValue(key, value, baseline.current);
         if (!coerced.ok) {
           rows.push({
             key,
@@ -990,7 +1002,12 @@ export function createSettingsRouter(client: Client): Router {
           failed.push({ key, reason: "managed by KoolBot, not imported" });
           continue;
         }
-        const coerced = coerceConfigValue(key, value);
+        const baseline = await readStoredBaseline(key);
+        if (!baseline.ok) {
+          failed.push({ key, reason: IMPORT_BASELINE_FAILED_REASON });
+          continue;
+        }
+        const coerced = coerceConfigValue(key, value, baseline.current);
         if (!coerced.ok) {
           failed.push({ key, reason: coerced.reason });
           continue;

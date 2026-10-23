@@ -800,6 +800,37 @@ describe("planAdoption: review hardening, round five", () => {
     ]);
   });
 
+  it("accepts a desired config value equal to the stored legacy one, refuses a changed one (#1437)", () => {
+    const legacy = "x".repeat(40);
+    const stored = scan({
+      config: {
+        "voicechannels.channel.prefix": legacy,
+        "reactionroles.group_role_colour": "red",
+        "voicechannels.lobby.room_window_seconds": 999999,
+      },
+    });
+    const same = planAdoption(stored, {
+      config: {
+        "voicechannels.channel.prefix": legacy,
+        "reactionroles.group_role_colour": "red",
+        "voicechannels.lobby.room_window_seconds": 999999,
+      },
+    });
+    expect(codes(same)).toEqual([]);
+    const changed = planAdoption(stored, {
+      config: {
+        "voicechannels.channel.prefix": "y".repeat(41),
+        "reactionroles.group_role_colour": "blue",
+        "voicechannels.lobby.room_window_seconds": 999998,
+      },
+    });
+    expect(codes(changed)).toEqual([
+      "invalid-config-value",
+      "invalid-config-value",
+      "invalid-config-value",
+    ]);
+  });
+
   it("applies the settings write rules: cron syntax, length, exact type", () => {
     const plan = planAdoption(scan(), {
       config: {
