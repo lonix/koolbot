@@ -270,7 +270,8 @@ name in the UI: options, tables, definition lists, sentences.
 | Forum | `messages-square` icon + name |
 | Category | `folder` icon + NAME in uppercase (`kb-mention--category`), never a `#` |
 | Role | `@Name`, no icon |
-| Deleted or unknown id | `kb-mention--missing`: an alert icon and "(unavailable)" |
+| Deleted voice room with a stored name | `kb-mention` with the `volume-2` icon and the stored name, then a muted `(deleted)` (`kb-muted`) |
+| Deleted or unknown id, no stored name | `kb-mention--missing`: an alert icon and "(unavailable)" |
 
 Inside a native `<option>`, where SVG cannot go, use the Unicode fallback from #1303 (`🔊 Lobby · VOICE`).
 

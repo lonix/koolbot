@@ -15,6 +15,8 @@ export interface CommandAuditEntry {
   commandName: string;
   subcommand?: string | null;
   channelId?: string | null;
+  /** Name of a voice room, see `voiceRoomNameOf` in `voice-room-name.ts` (#1420). */
+  channelName?: string | null;
   result: "success" | "error" | "denied";
   errorMessage?: string | null;
   durationMs: number;
@@ -30,6 +32,7 @@ export async function recordCommandAudit(
       commandName: entry.commandName,
       subcommand: entry.subcommand ?? null,
       channelId: entry.channelId ?? null,
+      channelName: entry.channelName ?? null,
       result: entry.result,
       errorMessage: entry.errorMessage ?? null,
       durationMs: entry.durationMs,

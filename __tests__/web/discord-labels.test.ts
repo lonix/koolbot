@@ -17,6 +17,7 @@ import {
   channelKindOf,
   channelMention,
   channelText,
+  deletedVoiceMention,
   missingMention,
   missingText,
   roleMention,
@@ -131,6 +132,48 @@ describe("channelMention (HTML, for tables and sentences)", () => {
     expect(html).toContain('aria-label="Unavailable"');
     expect(html).toContain("999 (unavailable)");
     expect(html).toBe(missingMention("999"));
+  });
+
+  it("shows a deleted voice room by its stored name with a muted (deleted)", () => {
+    const html = channelMention({
+      name: "999",
+      type: null,
+      storedName: "Alice's room",
+    });
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).toContain("Alice&#39;s room</span>");
+    expect(html).toContain('<span class="kb-muted">(deleted)</span>');
+    expect(html).not.toContain("unavailable");
+    expect(html).not.toContain("kb-mention--missing");
+    expect(html).toBe(deletedVoiceMention("Alice's room"));
+  });
+
+  it("keeps a live channel's own label even when a stored name exists", () => {
+    const html = channelMention({
+      name: "Lobby",
+      type: ChannelType.GuildVoice,
+      storedName: "Old name",
+    });
+    expect(html).toContain("Lobby</span>");
+    expect(html).not.toContain("Old name");
+    expect(html).not.toContain("(deleted)");
+  });
+
+  it("treats an empty stored name as no name", () => {
+    expect(channelMention({ name: "999", type: null, storedName: "" })).toBe(
+      missingMention("999"),
+    );
+    expect(channelMention({ name: "999", type: null, storedName: null })).toBe(
+      missingMention("999"),
+    );
+  });
+
+  it("escapes a stored name and has a plain-text form", () => {
+    expect(deletedVoiceMention("<b>x</b>")).not.toContain("<b>");
+    expect(
+      channelText({ name: "999", type: null, storedName: "Alice's room" }),
+    ).toBe("🔊 Alice's room (deleted)");
+    expect(channelText({ name: "999", type: null })).toBe(missingText("999"));
   });
 
   it("escapes the name", () => {

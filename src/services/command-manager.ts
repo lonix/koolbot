@@ -14,6 +14,7 @@ import { getErrorMessage } from "../utils/error-guards.js";
 import { getSharedRest } from "../utils/discord-rest.js";
 import { commandListsMatch } from "../utils/command-diff.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
+import { voiceRoomNameOf } from "../utils/voice-room-name.js";
 import { ConfigService } from "./config-service.js";
 import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
 import { MonitoringService } from "./monitoring-service.js";
@@ -545,6 +546,7 @@ export class CommandManager {
       commandName,
       subcommand,
       channelId: interaction.channelId ?? null,
+      channelName: voiceRoomNameOf(interaction.channel),
       discordUserId: interaction.user.id,
     };
     const recordAudit = async (

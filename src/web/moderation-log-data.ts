@@ -266,6 +266,10 @@ export async function loadCommandAuditPage(args: {
         ? (channelNames.get(channelId) ?? channelId)
         : null,
       channelType: channelId ? (channelTypes.get(channelId) ?? null) : null,
+      channelStoredName:
+        typeof d.channelName === "string" && d.channelName
+          ? d.channelName
+          : null,
       result: (d.result as "success" | "error" | "denied") ?? "success",
       errorMessage: typeof d.errorMessage === "string" ? d.errorMessage : null,
       durationMs: typeof d.durationMs === "number" ? d.durationMs : 0,

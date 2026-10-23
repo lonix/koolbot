@@ -17,6 +17,12 @@ export interface IDiscordCommandAuditLog extends Document {
   commandName: string;
   subcommand: string | null;
   channelId: string | null;
+  /**
+   * Name of the channel when it was a voice room, stored at write time because
+   * most voice rooms are deleted when they empty (#1420). Null for other
+   * channels and for rows written before this field existed.
+   */
+  channelName: string | null;
   result: "success" | "error" | "denied";
   errorMessage: string | null;
   durationMs: number;
@@ -30,6 +36,7 @@ const DiscordCommandAuditLogSchema = new Schema<IDiscordCommandAuditLog>(
     commandName: { type: String, required: true, index: true },
     subcommand: { type: String, default: null },
     channelId: { type: String, default: null },
+    channelName: { type: String, default: null },
     result: {
       type: String,
       enum: ["success", "error", "denied"],

@@ -726,6 +726,35 @@ describe("a failed read is never shown as empty or zero", () => {
     expect(page.includes("0 rows")).toBe(false);
   });
 
+  it("shows a deleted voice room by its stored name, and others as unavailable (#1420)", async () => {
+    const doc = (channelId: string, channelName?: string) => ({
+      createdAt: new Date("2026-01-03T09:40:00Z"),
+      discordUserId: MOD,
+      commandName: "vc",
+      subcommand: null,
+      channelId,
+      channelName,
+      result: "success",
+      errorMessage: null,
+      durationMs: 8,
+    });
+    auditFind.mockReturnValue({
+      sort: () => ({
+        skip: () => ({
+          limit: () => ({
+            lean: () =>
+              Promise.resolve([doc("c-gone", "Mia's room"), doc("c-nameless")]),
+          }),
+        }),
+      }),
+    });
+    const page = await html("/audit");
+    expect(page).toContain("Mia&#39;s room</span>");
+    expect(page).toContain('<span class="kb-muted">(deleted)</span>');
+    expect(page).toContain("c-nameless (unavailable)");
+    expect(page).not.toContain("c-gone (unavailable)");
+  });
+
   it("says the command audit is unavailable when its rows cannot be read", async () => {
     auditFind.mockReturnValue({
       sort: () => ({
