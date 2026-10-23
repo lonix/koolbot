@@ -206,6 +206,9 @@ a.kb-tile:hover, a.kb-tile:focus-visible { background: var(--surface-alt); borde
 .kb-segmented label:hover span { color: var(--text); }
 .kb-segmented input:checked + span { background: var(--fill); color: var(--on-primary); font-weight: 600; }
 .kb-segmented input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Options whose text is user data (the host panel's Randomise names the group label) wrap and grow instead of overflowing a narrow container. */
+.kb-segmented--wrap label { min-width: 0; max-width: 100%; }
+.kb-segmented--wrap span { min-width: 0; height: auto; min-height: 1.75rem; padding-top: 0.25rem; padding-bottom: 0.25rem; white-space: normal; overflow-wrap: anywhere; }
 
 /* Setting rows: name and one-line description left, control right; the long explanation sits behind "More". */
 .kb-settings { display: flex; flex-direction: column; }

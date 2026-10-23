@@ -271,6 +271,12 @@ describe("the board", () => {
     ]) {
       expect(rule(sel)).toMatch(/max-width: 100%[^}]*white-space: normal/);
     }
+    // The Randomise options carry the group label (user data): they wrap and grow.
+    expect(rule(".kb-segmented span")).toContain("white-space: nowrap");
+    expect(rule(".kb-segmented--wrap label")).toContain("min-width: 0");
+    expect(rule(".kb-segmented--wrap span")).toMatch(
+      /min-width: 0;[^}]*height: auto;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere/,
+    );
     // Wrapping rows.
     expect(rule(".kb-board__person")).toContain("flex-wrap: wrap");
     expect(rule(".kb-board__foot")).toContain("flex-wrap: wrap");
@@ -369,6 +375,19 @@ describe("the board", () => {
     const html = renderHostBoard(data());
     expect(html.match(/\/reset-team"/g)).toHaveLength(1);
     expect(html).toContain('name="group" value="g_b"');
+  });
+
+  it("scopes the wrapping Randomise options to that control and names a long group label in them", () => {
+    const html = renderHostBoard(
+      data({ groupLabel: "AVeryLongUnbrokenGroupLabelNameWithoutSpaces" }),
+    );
+    const seg = html.slice(html.indexOf('class="kb-segmented'));
+    expect(seg.slice(0, seg.indexOf("</div>"))).toContain(
+      "kb-segmented kb-segmented--wrap",
+    );
+    expect(html).toContain(
+      "Only people not in a averylongunbrokengrouplabelnamewithoutspaces",
+    );
   });
 
   it("with no team, keeps the people and Move people, and switches off only what needs a team", () => {
