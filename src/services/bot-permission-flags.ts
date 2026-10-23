@@ -5,8 +5,8 @@
  * Three kinds of flag:
  * - `checked`: in `bot-permission-registry.ts`, so the page checks it per
  *   feature (names and bits come from `PERM`, not from here);
- * - `used`: the bot's code needs it but the page does not check it yet (posting,
- *   moderation, ...; the posting features are #1254). Each entry says what for;
+ * - `used`: the bot's code needs it but the page does not check it yet (moderation,
+ *   the posting channels that are not covered yet, ...). Each entry says what for;
  * - `grant-only`: KoolBot's code does not use it itself. It may still be needed:
  *   Role groups can grant any Discord permission to a role, and the bot can only
  *   hand out permissions it holds (server-adoption-planner.ts, "bot-lacks-permission").
@@ -33,17 +33,7 @@ const CHANNEL_OVERWRITES =
 
 /** Classification by discord.js flag name (deprecated aliases of one bit are classified together). */
 export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
-  SendMessages: used("Posting in channels. " + CHANNEL_OVERWRITES),
-  EmbedLinks: used("Embeds in posts (quotes, notices, digests, logs)."),
-  ReadMessageHistory: used(
-    "Reading earlier messages (quotes, ticket transcripts, reaction roles).",
-  ),
   AttachFiles: used("Ticket transcripts and quote exports."),
-  AddReactions: used("Poll and reaction-role reactions."),
-  ManageMessages: used(
-    "Clearing a channel and removing reactions. " + CHANNEL_OVERWRITES,
-  ),
-  PinMessages: used("Pinning the header post of a managed channel."),
   ModerateMembers: used("Timeouts (/timeout and raid mode)."),
   KickMembers: used("Raid mode kicks."),
   BanMembers: used("/ban."),

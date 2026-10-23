@@ -318,7 +318,7 @@ export function configuredRoleIds(
  */
 async function readFeatureState(
   config: ConfigService,
-  r: Pick<FeatureRequirement, "enabledKey" | "alsoKey" | "usedWhen">,
+  r: Pick<FeatureRequirement, "enabledKey" | "alsoKeys" | "usedWhen">,
   roleGroupsConfigured: () => Promise<boolean>,
 ): Promise<boolean> {
   if (r.usedWhen === "role-groups") return roleGroupsConfigured();
@@ -327,7 +327,9 @@ async function readFeatureState(
   const on = (key: keyof typeof defaultConfig): Promise<boolean> =>
     config.getBooleanStrict(key, defaultConfig[key] === true);
   if (r.enabledKey && !(await on(r.enabledKey))) return false;
-  if (r.alsoKey && !(await on(r.alsoKey))) return false;
+  for (const key of r.alsoKeys ?? []) {
+    if (!(await on(key))) return false;
+  }
   return true;
 }
 
@@ -373,6 +375,15 @@ async function resolveVoiceLobby(
     }
   }
   return { categorySet: true, id: "" };
+}
+
+/** Whether a channel is of the kind a posting service accepts (see `FeatureRequirement.targetType`). */
+function isPostingChannel(
+  type: ChannelType | undefined,
+  want: NonNullable<FeatureRequirement["targetType"]>,
+): boolean {
+  if (type === ChannelType.GuildText) return true;
+  return want === "text" && type === ChannelType.GuildAnnouncement;
 }
 
 async function defaultRoleGroupCount(guildId: string): Promise<number> {
@@ -503,6 +514,13 @@ export async function checkBotPermissions(
         // The services only accept a real category here (a text or voice
         // channel id is ignored), so it cannot be reported as in place.
         why = "The configured channel is not a category.";
+      } else if (
+        r.targetType &&
+        !isPostingChannel(channel?.type, r.targetType)
+      ) {
+        // The services only post to a text channel, so another kind of channel
+        // (a category, a voice channel) cannot be reported as in place.
+        why = "The configured channel is not a text channel.";
       } else {
         try {
           const perms =

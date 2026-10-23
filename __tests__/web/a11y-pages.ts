@@ -201,6 +201,11 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
     id: "c1",
     name: "Events",
   };
+  const quotes: PermissionTarget = {
+    kind: "channel",
+    id: "c3",
+    name: "quotes",
+  };
   const check = (
     id: string,
     outcome: FeatureCheck["outcome"],
@@ -231,6 +236,7 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
       checks: [
         check("event-tags", "ok", server),
         check("event-channels", "ok", events),
+        check("quotes-post", "ok", quotes),
         check("reaction-roles", "ok", server, false),
       ],
     };
@@ -242,6 +248,11 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
         permission: "Manage Nicknames",
         target: server,
         features: [ref("event-tags")],
+      },
+      {
+        permission: "Send Messages",
+        target: quotes,
+        features: [ref("quotes-post"), ref("log-moderation")],
       },
     ],
     unknown: [
@@ -255,6 +266,14 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
     checks: [
       check("event-tags", "missing", server, true, ["Manage Nicknames"]),
       check("event-channels", "ok", events),
+      check("quotes-post", "missing", quotes, true, ["Send Messages"]),
+      check("log-moderation", "missing", quotes, true, ["Send Messages"]),
+      check("raid-alerts", "unknown", {
+        kind: "channel",
+        id: "c4",
+        name: "raid-alerts",
+      }),
+      check("notices-pin", "ok", quotes, false),
       check("event-moves", "unchecked", null),
       check("voice-rooms", "unknown", {
         kind: "category",

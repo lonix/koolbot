@@ -16,8 +16,7 @@
  * does not make every row read "Has".
  *
  * Not built here: a "Re-authorise" invite link (whether Discord applies new
- * permission bits to the bot's existing role is not verified, and the posting
- * permissions are #1254). Places use plain names; the Discord-style
+ * permission bits to the bot's existing role is not verified). Places use plain names; the Discord-style
  * channel-type labels are #1303.
  */
 

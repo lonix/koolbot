@@ -6,20 +6,27 @@
  * (`bot-permission-check.ts`) reads the same table, so the "Bot permissions"
  * page and the behaviour cannot drift apart.
  *
- * Only requirements that code already checks or warns about are listed. The
- * channel-posting features (View Channel, Send Messages, Embed Links) are a
- * separate step (#1254).
+ * A permission is listed only where the code really needs it: it checks it, warns
+ * about it, or calls a Discord API that Discord refuses without it. The channel-
+ * posting features (#1254) are audited feature by feature: what each one sends,
+ * reads, deletes or pins in its channel. A posting feature's bit set is not the
+ * overwrite set the channel claims grant (`NOTICES_BOT`, `BOT_POSTS`): those say
+ * what to leave the bot in a channel it owns, these say what the code calls.
  *
  * `scope` says where the permission is evaluated:
  * - `guild`: server-wide only. A channel overwrite cannot grant it (Manage
- *   Roles, Manage Nicknames, Create Events), so the UI says "server-wide".
+ *   Nicknames, Create Events), so the UI says "server-wide".
  * - `category` / `channel`: in the configured category or channel (`targetKey`),
  *   so a channel overwrite that denies a permission the role has counts as
  *   missing.
  *
+ * Manage Roles is evaluated where the code uses it: server-wide to hand out a
+ * role, and in a channel to change that channel's overwrites (Discord treats
+ * editing channel permissions as Manage Roles, as the adoption planner notes).
+ *
  * A feature counts as in use only while its `enabledKey` setting (or its
- * `usedWhen` condition, for a feature without a switch) and
- * `alsoKey`, when set) is on and, for a category or channel scope, its
+ * `usedWhen` condition, for a feature without a switch) and every
+ * `alsoKeys` setting is on and, for a category or channel scope, its
  * `targetKey` is configured.
  */
 
@@ -51,10 +58,17 @@ export interface FeatureRequirement {
    * `role-groups`: the server has at least one role group.
    */
   usedWhen?: "role-groups";
-  /** A second boolean setting that must also be on (an optional sub-feature). */
-  alsoKey?: keyof ConfigSchema;
+  /** More boolean settings that must also be on (an optional sub-feature, such as a pinned header). */
+  alsoKeys?: readonly (keyof ConfigSchema)[];
   /** The setting holding the category or channel id, for those scopes. */
   targetKey?: keyof ConfigSchema;
+  /**
+   * The kind of channel the service accepts there, for a channel scope that
+   * posts. `text`: a text or announcement channel; `guild-text`: a plain text
+   * channel only (the weekly announcer refuses an announcement channel). A
+   * channel of another kind is reported as "could not check", never "ok".
+   */
+  targetType?: "text" | "guild-text";
   /**
    * A channel that is not a plain setting. `voice-lobby`: the lobby by id, or
    * by name in the managed category, as the voice service finds it.
@@ -68,6 +82,27 @@ export interface FeatureRequirement {
 
 export const PERM = {
   viewChannel: { bit: PermissionFlagsBits.ViewChannel, name: "View Channel" },
+  sendMessages: {
+    bit: PermissionFlagsBits.SendMessages,
+    name: "Send Messages",
+  },
+  embedLinks: { bit: PermissionFlagsBits.EmbedLinks, name: "Embed Links" },
+  addReactions: {
+    bit: PermissionFlagsBits.AddReactions,
+    name: "Add Reactions",
+  },
+  manageMessages: {
+    bit: PermissionFlagsBits.ManageMessages,
+    name: "Manage Messages",
+  },
+  pinMessages: {
+    bit: PermissionFlagsBits.PinMessages,
+    name: "Pin Messages",
+  },
+  readHistory: {
+    bit: PermissionFlagsBits.ReadMessageHistory,
+    name: "Read Message History",
+  },
   connect: { bit: PermissionFlagsBits.Connect, name: "Connect" },
   speak: { bit: PermissionFlagsBits.Speak, name: "Speak" },
   moveMembers: { bit: PermissionFlagsBits.MoveMembers, name: "Move Members" },
@@ -96,7 +131,7 @@ export const PERM = {
 
 /**
  * The order Discord's role editor lists these permissions in (General, then
- * Membership, then Voice, then Events), as keys of `PERM`. The permission
+ * Membership, then Text, then Voice, then Events), as keys of `PERM`. The permission
  * matrix sorts by it; a test keeps it covering every `PERM` entry exactly once.
  */
 export const PERMISSION_ORDER: readonly (keyof typeof PERM)[] = [
@@ -104,6 +139,12 @@ export const PERMISSION_ORDER: readonly (keyof typeof PERM)[] = [
   "manageChannels",
   "manageRoles",
   "manageNicknames",
+  "sendMessages",
+  "embedLinks",
+  "addReactions",
+  "manageMessages",
+  "pinMessages",
+  "readHistory",
   "connect",
   "speak",
   "moveMembers",
@@ -140,6 +181,174 @@ export const NATIVE_EVENTS_WARNING =
 const ROLE_HIERARCHY_FIX =
   "Move the bot's role above the roles it hands out in Server Settings, Roles.";
 
+/**
+ * The Discord log categories (`DiscordLogger`, `core.<type>.enabled` +
+ * `core.<type>.channel_id`), with the name the admin knows each by. A test keeps
+ * this equal to `DISCORD_LOG_TYPES`; it is a literal here because the logger
+ * imports the config service, which this table must not.
+ */
+export const LOG_CHANNEL_TYPES = [
+  { type: "startup", label: "Startup" },
+  { type: "errors", label: "Errors" },
+  { type: "cleanup", label: "Cleanup" },
+  { type: "config", label: "Config changes" },
+  { type: "cron", label: "Scheduled jobs" },
+  { type: "moderation", label: "Moderation" },
+  { type: "moderation_review", label: "Moderation case review" },
+  { type: "updates", label: "Update available" },
+  { type: "role_groups", label: "Role groups" },
+] as const;
+
+/** `DiscordLogger.logToChannel` sends one embed with mentions suppressed: View Channel, Send Messages, Embed Links. */
+const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
+  ({ type, label }) => ({
+    id: `log-${type.replace(/_/g, "-")}`,
+    area: "Discord logging",
+    feature: `${label} log channel`,
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.embedLinks],
+    enabledKey: `core.${type}.enabled` as keyof ConfigSchema,
+    targetKey: `core.${type}.channel_id` as keyof ConfigSchema,
+    effect: `${label} log messages are not posted. The send fails with a line in the bot's log only; nothing appears in Discord.`,
+    fix: "Give the bot's role View Channel, Send Messages and Embed Links, and make sure the log channel does not deny them.",
+  }),
+);
+
+/**
+ * A read-only channel the bot keeps by itself (quotes, notices): what its
+ * manager actually calls there. Reading history is how it finds its header and
+ * the messages it edits or deletes; Manage Messages only for deleting what
+ * others posted (the cleanup job runs every few minutes) and for clearing the
+ * channel on a quote sync; Manage Roles in the channel for the lock-down it
+ * applies to the channel at startup (`permissionOverwrites.edit`).
+ */
+function managedChannelRequirements(o: {
+  id: string;
+  area: string;
+  feature: string;
+  enabledKey: keyof ConfigSchema;
+  headerKey: keyof ConfigSchema;
+  headerPinKey: keyof ConfigSchema;
+  targetKey: keyof ConfigSchema;
+  votes: boolean;
+}): FeatureRequirement[] {
+  const base = {
+    area: o.area,
+    scope: "channel",
+    targetType: "text",
+    enabledKey: o.enabledKey,
+    targetKey: o.targetKey,
+  } as const;
+  const name = o.feature.toLowerCase();
+  const list: FeatureRequirement[] = [
+    {
+      ...base,
+      id: `${o.id}-post`,
+      feature: `Posting to the ${name} channel`,
+      needs: [
+        PERM.viewChannel,
+        PERM.sendMessages,
+        PERM.embedLinks,
+        PERM.readHistory,
+      ],
+      effect: `New ${name} entries and the channel header are not posted, and existing ones cannot be found to edit or delete. Failures are logged in the bot's log only.`,
+      fix: `Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the ${name} channel does not deny them.`,
+    },
+  ];
+  if (o.votes) {
+    list.push({
+      ...base,
+      id: `${o.id}-votes`,
+      feature: `Vote reactions on ${name}`,
+      needs: [PERM.addReactions],
+      effect: `The thumbs up and down are not added to new ${name}, so members cannot vote (logged in the bot's log only).`,
+      fix: `Give the bot's role Add Reactions, and make sure the ${name} channel does not deny it.`,
+    });
+  }
+  list.push(
+    {
+      ...base,
+      id: `${o.id}-cleanup`,
+      feature: `Keeping the ${name} channel clean`,
+      needs: [PERM.manageMessages],
+      effect: `Messages that members post in the channel are not removed (each failed delete is logged in the bot's log only).`,
+      fix: `Give the bot's role Manage Messages, and make sure the ${name} channel does not deny it.`,
+    },
+    {
+      ...base,
+      id: `${o.id}-lock`,
+      feature: `Making the ${name} channel read-only`,
+      needs: [PERM.manageRoles],
+      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). It still works if you locked the channel by hand.`,
+      fix: `Give the bot's role Manage Roles, and make sure the ${name} channel does not deny it, or lock the channel yourself.`,
+    },
+    {
+      ...base,
+      id: `${o.id}-pin`,
+      feature: `Pinning the ${name} header`,
+      needs: [PERM.pinMessages],
+      alsoKeys: [o.headerKey, o.headerPinKey],
+      effect: `The header post is not pinned (logged in the bot's log only).`,
+      fix: `Give the bot's role Pin Messages, and make sure the ${name} channel does not deny it.`,
+    },
+  );
+  return list;
+}
+
+const quotesRequirements = managedChannelRequirements({
+  id: "quotes",
+  area: "Quotes",
+  feature: "Quotes",
+  enabledKey: "quotes.enabled",
+  headerKey: "quotes.header_enabled",
+  headerPinKey: "quotes.header_pin_enabled",
+  targetKey: "quotes.channel_id",
+  votes: true,
+});
+
+const noticesRequirements = managedChannelRequirements({
+  id: "notices",
+  area: "Notices",
+  feature: "Notices",
+  enabledKey: "notices.enabled",
+  headerKey: "notices.header_enabled",
+  headerPinKey: "notices.header_pin_enabled",
+  targetKey: "notices.channel_id",
+  votes: false,
+});
+
+/** Posting features that are not a managed channel (#1254): each sends plain messages to one configured channel. */
+const postingRequirements: FeatureRequirement[] = [
+  {
+    id: "voice-weekly-announcements",
+    area: "Voice stats",
+    feature: "Weekly voice-activity announcement",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "voicetracking.announcements.enabled",
+    alsoKeys: ["voicetracking.enabled"],
+    targetKey: "voicetracking.announcements.channel_id",
+    effect:
+      "The weekly stats, accolades, quote and poll posts are not sent. Each part logs an error in the bot's log only.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the announcement channel does not deny them.",
+  },
+  {
+    id: "raid-alerts",
+    area: "Moderation",
+    feature: "Anti-raid alerts",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "moderation.raid.enabled",
+    targetKey: "moderation.raid.alert_channel_id",
+    effect:
+      "Raid alerts are not posted. A failed send is logged in the bot's log; a channel that is not a text channel is skipped with no message at all.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the alert channel does not deny them.",
+  },
+];
+
 export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   // ---- Voice channels ----
   {
@@ -172,7 +381,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
     scope: "category",
     needs: [PERM.setVoiceStatus],
     enabledKey: "voicechannels.enabled",
-    alsoKey: "voicechannels.owner.grant_status",
+    alsoKeys: ["voicechannels.owner.grant_status"],
     targetKey: "voicechannels.category_id",
     effect:
       "Room owners are not given the permission to set their room's status.",
@@ -291,6 +500,11 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
     effect: "Members who accept the rules do not get the acceptance role.",
     fix: `Give the bot's role Manage Roles. ${ROLE_HIERARCHY_FIX}`,
   },
+  // ---- Channel-posting features (#1254) ----
+  ...logChannelRequirements,
+  ...quotesRequirements,
+  ...noticesRequirements,
+  ...postingRequirements,
 ];
 
 /**
