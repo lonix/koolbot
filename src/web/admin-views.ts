@@ -34,9 +34,11 @@ import {
   renderColourInput,
   renderDurationPresets,
   renderEmojiField,
+  renderReactionRoleMessageSelect,
   renderStepper,
   renderTimezoneSelect,
 } from "./setting-pickers.js";
+import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
 import type { SettingFormat } from "../utils/setting-formats.js";
 import {
@@ -427,6 +429,8 @@ export interface SettingsProps extends CommonProps {
   roles: RoleOption[];
   /** Roles with role groups ahead of them, for keys that take groups (#1023). */
   groupRoles?: RoleOption[];
+  /** The bot's reaction-role messages, for a key that picks one (#1433). */
+  reactionRoleMessages?: ReactionRoleMessageOptions | null;
   /** Guild id of the session, used as the reset-confirmation fallback. */
   guildId: string;
   /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
@@ -1028,6 +1032,7 @@ function renderSettingControl(
     roles: RoleOption[];
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
+    reactionRoleMessages?: ReactionRoleMessageOptions | null;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1061,6 +1066,7 @@ function renderControlInput(
     roles: RoleOption[];
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
+    reactionRoleMessages?: ReactionRoleMessageOptions | null;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1252,6 +1258,16 @@ function renderControlInput(
       },
     );
   }
+  if (r.format === "reaction_role_message") {
+    return renderReactionRoleMessageSelect(valueName, currentStr, {
+      id: a11y.id,
+      describedBy: a11y.describedBy,
+      invalid: a11y.invalid,
+      describedByBase: a11y.describedByBase,
+      disabled: depLocked,
+      messages: pickers.reactionRoleMessages ?? null,
+    });
+  }
   if (r.format === "affix") {
     return renderEmojiField(valueName, currentStr, {
       label: r.label,
@@ -1370,6 +1386,7 @@ interface SettingRowsContext {
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
     groupRoles?: RoleOption[];
+    reactionRoleMessages?: ReactionRoleMessageOptions | null;
   };
   /** The form's master toggle: every other row nests under it. */
   masterKey: string | null;
@@ -1584,6 +1601,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     categoryChannels: props.categoryChannels,
     roles: props.roles,
     groupRoles: props.groupRoles,
+    reactionRoleMessages: props.reactionRoleMessages,
   };
   // Page-wide enabled-state of every rendered key, derived from the same
   // `current` values shown in the controls. Dependency hints (#666) read from
@@ -2152,6 +2170,8 @@ export interface WizardStepPageProps extends CommonProps {
   roles: RoleOption[];
   /** Roles with role groups ahead of them, for keys that take groups (#1023). */
   groupRoles?: RoleOption[];
+  /** The bot's reaction-role messages, for a key that picks one (#1433). */
+  reactionRoleMessages?: ReactionRoleMessageOptions | null;
   /**
    * Enabled-state of every key on this step *plus* the cross-feature
    * dependency targets those keys reference (e.g. `achievements.enabled`
@@ -2182,6 +2202,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     categoryChannels: props.categoryChannels,
     roles: props.roles,
     groupRoles: props.groupRoles,
+    reactionRoleMessages: props.reactionRoleMessages,
   };
 
   // Build the same `SettingRow` shape the Settings page feeds to
@@ -2288,6 +2309,12 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     })
     .join("");
 
+  // The tiers are not a wizard field (#1433): nobody should type `topN:roleId`.
+  // They are chosen in the tier editor, which needs the feature to exist first.
+  const stepNote =
+    props.featureKey === "leaderboard_roles"
+      ? `\n  <p class="muted">Which roles each rank earns is set in the tier editor on the <a href="/admin/leaderboard-roles">Leaderboard Roles</a> page, once you have applied the wizard.</p>`
+      : "";
   const stepLabel = `Step ${props.stepIndex + 1} of ${props.totalSteps}`;
   const nextLabel =
     props.stepIndex + 1 < props.totalSteps ? "Next →" : "Review →";
@@ -2315,7 +2342,7 @@ ${
 </div>`
     : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
   <input type="hidden" name="_csrf" value="${csrf}">
-  <div class="card">${fields}</div>
+  <div class="card">${fields}</div>${stepNote}
   <div class="actions">
     <button type="submit" class="btn btn-primary">${nextLabel}</button>
     ${previousButton}
@@ -5116,6 +5143,8 @@ export interface FeatureSettingsPickers {
   roles?: RoleOption[];
   /** Roles with role groups ahead of them, for keys that take groups (#1023). */
   groupRoles?: RoleOption[];
+  /** The bot's reaction-role messages, for a key that picks one (#1433). */
+  reactionRoleMessages?: ReactionRoleMessageOptions | null;
 }
 
 export interface FeatureSettingsCardProps {
@@ -5228,6 +5257,7 @@ export function renderFeatureSettingsCard(
     categoryChannels: props.pickers?.categoryChannels ?? [],
     roles: props.pickers?.roles ?? [],
     groupRoles: props.pickers?.groupRoles,
+    reactionRoleMessages: props.pickers?.reactionRoleMessages,
   };
   const masterKey = findFeatureMasterKey(props.settingRows);
   const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);

@@ -97,6 +97,10 @@ import { PollSchedule } from "../models/poll-schedule.js";
 import { PollItem } from "../models/poll-item.js";
 import { ReactionRoleService } from "../services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
+import {
+  loadReactionRoleMessageOptions,
+  type ReactionRoleMessageOptions,
+} from "./reaction-role-messages.js";
 import Notice from "../models/notice.js";
 import { quoteService } from "../services/quote-service.js";
 import {
@@ -626,11 +630,20 @@ export async function loadFeatureSettings(
   const needsRoles = settingRows.some(
     (r) => r.type === "role" || r.type === "role_list",
   );
+  const needsMessages = settingRows.some(
+    (r) => r.format === "reaction_role_message",
+  );
   const [channelData, roleData] = await Promise.all([
-    needsChannels ? fetchChannelData(client, guildId) : null,
+    needsChannels || needsMessages ? fetchChannelData(client, guildId) : null,
     needsRoles ? fetchRoleData(client, guildId) : null,
   ]);
   const pickers: FeatureSettingsPickers = {};
+  if (channelData && needsMessages) {
+    pickers.reactionRoleMessages = await fetchReactionRoleMessages(
+      guildId,
+      channelData,
+    );
+  }
   if (channelData) {
     pickers.textChannels = channelData.textChannels;
     pickers.voiceChannels = channelData.voiceChannels;
@@ -700,6 +713,29 @@ interface ChannelData {
    * deleted (#1420).
    */
   listed: boolean;
+}
+
+/**
+ * The bot's reaction-role messages for a picker (#1433), labelled with the
+ * channel names `channelData` already holds. Stored data only: no Discord call
+ * per message. `null` when the list cannot be read, which the picker shows as
+ * such while keeping the stored value.
+ */
+export async function fetchReactionRoleMessages(
+  guildId: string,
+  channelData: ChannelData,
+): Promise<ReactionRoleMessageOptions | null> {
+  const configuredChannelId = (
+    await ConfigService.getInstance()
+      .getString("reactionroles.message_channel_id", "")
+      .catch(() => "")
+  ).trim();
+  return loadReactionRoleMessageOptions(guildId, {
+    names: channelData.names,
+    types: channelData.types,
+    known: channelData.listed,
+    configuredChannelId,
+  });
 }
 
 interface RoleData {
@@ -1281,7 +1317,7 @@ export function createReadOnlyRouter(
       }));
 
       // Guild cache for the dropdown selectors. One fetch, four lists.
-      const { textChannels, voiceChannels, categoryChannels, roles } =
+      const { textChannels, voiceChannels, categoryChannels, roles, chData } =
         await Promise.all([
           fetchChannelData(client, common.guildId),
           fetchRoleData(client, common.guildId),
@@ -1290,7 +1326,15 @@ export function createReadOnlyRouter(
           voiceChannels: chData.voiceChannels,
           categoryChannels: chData.categoryChannels,
           roles: roleData.roles,
+          chData,
         }));
+      // The welcome roles message is picked from the bot's own reaction-role
+      // messages (#1433): stored rows and the channel names fetched above.
+      const reactionRoleMessages = rows.some(
+        (r) => r.format === "reaction_role_message",
+      )
+        ? await fetchReactionRoleMessages(common.guildId, chData)
+        : undefined;
       const groupRoles = takesRoleGroups(rows)
         ? await withRoleGroupOptions(common.guildId, roles)
         : undefined;
@@ -1316,6 +1360,7 @@ export function createReadOnlyRouter(
           categoryChannels,
           roles,
           groupRoles,
+          reactionRoleMessages,
           guildId: common.guildId,
           guildName,
           // The Settings page had no flash wiring at all, so a rejected save
