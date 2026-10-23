@@ -67,7 +67,6 @@ interface Priv {
   endEventNow: (
     id: string,
     guildId: string,
-    o: { pullBack: boolean },
   ) => Promise<{ status: string } & Record<string, unknown>>;
   nativeSync: Record<string, jest.Mock>;
   updateAnnouncement: jest.Mock;
@@ -256,7 +255,6 @@ describe("the scheduled end runs the shared teardown", () => {
       eventId: ID,
       guildId: "guild-1",
       trigger: "scheduled",
-      pullBack: false,
       fromStates: ["scheduled", "active"],
       expectTimes: { startTime: START, durationMinutes: 120 },
       syncNative: false,
@@ -408,9 +406,7 @@ describe("the scheduled end runs the shared teardown", () => {
     it("End event now works", async () => {
       const { service } = setup();
       store.set(ID, stored({ groupsEnabled: false, groups: kept }));
-      const outcome = await service.endEventNow(ID, "guild-1", {
-        pullBack: true,
-      });
+      const outcome = await service.endEventNow(ID, "guild-1");
       expect(outcome.status).toBe("ended");
       expect(store.get(ID)?.state).toBe("ended");
     });
@@ -456,16 +452,13 @@ describe("End event now", () => {
   it("runs the same teardown, as a manual end, claiming only an active event", async () => {
     const { service } = setup();
     const run = jest.spyOn(service.teardown, "run");
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: true,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("ended");
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0]?.[0]).toMatchObject({
       eventId: ID,
       guildId: "guild-1",
       trigger: "manual",
-      pullBack: true,
       fromStates: ["active"],
       syncNative: true,
     });
@@ -479,16 +472,14 @@ describe("End event now", () => {
     service.nativeSync.syncEvent = jest.fn(async (e: unknown, g: unknown) => {
       seen.push([(e as Row).state, g]);
     });
-    await service.endEventNow(ID, "guild-1", { pullBack: false });
+    await service.endEventNow(ID, "guild-1");
     expect(seen).toEqual([["ended", guild]]);
   });
 
   it("is refused while events are off, and changes nothing", async () => {
     const { service } = setup();
     eventsEnabled = false;
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("refused");
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
     expect(store.get(ID)?.state).toBe("active");
@@ -497,37 +488,29 @@ describe("End event now", () => {
   it("an unreadable switch counts as off", async () => {
     const { service } = setup();
     configMock.getBoolean.mockRejectedValueOnce(new Error("db"));
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("refused");
     expect(store.get(ID)?.state).toBe("active");
   });
 
   it("a malformed id is not found, without touching the database", async () => {
     const { service } = setup();
-    const outcome = await service.endEventNow("not-an-id", "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow("not-an-id", "guild-1", {});
     expect(outcome.status).toBe("not-found");
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("another server's event is not found and not ended", async () => {
     const { service } = setup();
-    const outcome = await service.endEventNow(ID, "guild-2", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-2", {});
     expect(outcome.status).toBe("not-found");
     expect(store.get(ID)?.state).toBe("active");
   });
 
   it("pressed twice, it is a no-op the second time", async () => {
     const { service } = setup();
-    const first = await service.endEventNow(ID, "guild-1", { pullBack: false });
-    const second = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const first = await service.endEventNow(ID, "guild-1");
+    const second = await service.endEventNow(ID, "guild-1");
     expect([first.status, second.status]).toEqual(["ended", "already-ended"]);
     expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
     expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
@@ -535,7 +518,7 @@ describe("End event now", () => {
 
   it("does not delete the main channel: it stays for the grace period", async () => {
     const { service } = setup();
-    await service.endEventNow(ID, "guild-1", { pullBack: false });
+    await service.endEventNow(ID, "guild-1");
     expect(service.deleteEventChannel).not.toHaveBeenCalled();
     expect(store.get(ID)?.channelId).toBe("main-1");
   });
@@ -564,9 +547,7 @@ describe("a scan that loaded the event before a manual end", () => {
     expect(service.postReminder).toHaveBeenCalledTimes(1);
 
     // The manual end lands while the scan is stalled.
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("ended");
     expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
     expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
@@ -588,7 +569,7 @@ describe("a scan that loaded the event before a manual end", () => {
     claimDelay = new Promise((resolve) => {
       release = resolve;
     });
-    const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+    const ending = service.endEventNow(ID, "guild-1");
     // The end has begun (its claim is pending); a scan now leaves the event be.
     await new Promise((r) => setTimeout(r, 10));
     await service.processEvent(
@@ -645,14 +626,12 @@ describe("a scan that loaded the event before a manual end", () => {
           releaseCleanup = () => resolve(emptyReport());
         }),
     );
-    const first = service.endEventNow(ID, "guild-1", { pullBack: false });
+    const first = service.endEventNow(ID, "guild-1");
     await new Promise((r) => setTimeout(r, 10));
     expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
 
     // Press 2 (a double click, or an admin at the same moment) loses.
-    const second = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const second = await service.endEventNow(ID, "guild-1");
     expect(second.status).toBe("already-ended");
 
     // The scan wakes up with its older, still-open copy while press 1 works.
@@ -700,7 +679,7 @@ describe("a scan that loaded the event before a manual end", () => {
           releaseCleanup = () => resolve(emptyReport());
         }),
     );
-    const manual = service.endEventNow(ID, "guild-1", { pullBack: false });
+    const manual = service.endEventNow(ID, "guild-1");
     await new Promise((r) => setTimeout(r, 10));
     expect(service.groupChannels.cleanup).toHaveBeenCalledTimes(1);
 
@@ -730,9 +709,7 @@ describe("a scan that loaded the event before a manual end", () => {
   it("is not skipped for good: an end that was refused lets the scan carry on", async () => {
     const { service, guild } = setup();
     store.set(ID, stored({ state: "scheduled" }));
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("not-running");
     // The hold was undone: the scan still handles the (scheduled) event.
     await service.processEvent(
@@ -814,7 +791,7 @@ describe("a scan that overlaps an end in progress", () => {
           releaseAnnouncement = () => resolve(true);
         }),
     );
-    const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+    const ending = service.endEventNow(ID, "guild-1");
     await nap();
     expect(store.get(ID)?.state).toBe("ended");
 
@@ -866,9 +843,7 @@ describe("a scan that overlaps an end in progress", () => {
     );
     await nap();
     expect(service.nativeSync.pullAdopted).toHaveBeenCalledTimes(1);
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("ended");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("ended");
     releaseRead();
     await scan;
     expect(service.postReminder).not.toHaveBeenCalled();
@@ -896,9 +871,7 @@ describe("a scan that overlaps an end in progress", () => {
     await nap();
     expect(service.nativeSync.syncEvent).toHaveBeenCalledTimes(1);
 
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("ended");
     expect(service.updateAnnouncement).toHaveBeenCalledTimes(1);
 
@@ -945,9 +918,7 @@ describe("a scan that overlaps an end in progress", () => {
     expect(channel.messages.fetch).toHaveBeenCalledTimes(1);
 
     // The manual end edits the post (as ended) while the scan waits.
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("ended");
     expect(edit).toHaveBeenCalledTimes(1);
 
@@ -1001,9 +972,7 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
       WINDOWS,
     );
     await nap();
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("ended");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("ended");
     release();
     await scan;
     expect(store.get(ID)?.state).toBe("ended");
@@ -1033,9 +1002,7 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
     await nap();
     expect(guild.channels.fetch).toHaveBeenCalledTimes(1);
     guild.channels.fetch = jest.fn(async () => null);
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("ended");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("ended");
     release();
     await scan;
     expect(store.get(ID)?.state).toBe("ended");
@@ -1080,7 +1047,7 @@ describe("a cancel that decided on an older copy (an adopted event gone in Disco
           releaseAnnouncement = () => resolve(true);
         }),
     );
-    const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+    const ending = service.endEventNow(ID, "guild-1");
     await nap();
     expect(store.get(ID)?.state).toBe("ended");
     const svc = service as unknown as {
@@ -1371,9 +1338,7 @@ describe("the start reminder after an end began", () => {
     await nap();
     expect(guild.channels.fetch).toHaveBeenCalledTimes(1);
     guild.channels.fetch = jest.fn(async () => null);
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("ended");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("ended");
     release();
     await scan;
     expect(send).not.toHaveBeenCalled();
@@ -1553,9 +1518,7 @@ describe("a scheduled end with people in a voice channel of the event", () => {
     const scan = service.processEvent(groupRow(), guild, AFTER_END, WINDOWS);
     await nap();
     // The host ends it by hand meanwhile.
-    const manual = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const manual = await service.endEventNow(ID, "guild-1");
     expect(manual.status).toBe("ended");
     release();
     await scan;
@@ -1567,9 +1530,7 @@ describe("a scheduled end with people in a voice channel of the event", () => {
     const { service, guild } = setup();
     store.set(ID, stored({ groupsEnabled: true, groups }));
     channels(guild, { c1: voice(3), c2: voice(3) });
-    const outcome = await service.endEventNow(ID, "guild-1", {
-      pullBack: false,
-    });
+    const outcome = await service.endEventNow(ID, "guild-1");
     expect(outcome.status).toBe("ended");
     expect(store.get(ID)?.state).toBe("ended");
   });
@@ -1733,9 +1694,7 @@ describe("the hold does not depend on a timeout while an older scan runs", () =>
 
       // The host ends it by hand; much later than the hold's time the old scan
       // resumes.
-      expect(
-        (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-      ).toBe("ended");
+      expect((await service.endEventNow(ID, "guild-1")).status).toBe("ended");
       const realNow = Date.now;
       jest.spyOn(Date, "now").mockImplementation(() => realNow() + 60 * MIN);
       try {
@@ -1835,7 +1794,7 @@ describe("a scan that started while the end's claim was still pending", () => {
       claimDelay = new Promise((resolve) => {
         releaseClaim = resolve;
       });
-      const ending = service.endEventNow(ID, "guild-1", { pullBack: false });
+      const ending = service.endEventNow(ID, "guild-1");
       await nap();
 
       // The scan starts NOW, inside the pending-claim window, and reads B open.
@@ -1887,7 +1846,7 @@ describe("a valid event id posted in upper case", () => {
           release = () => resolve(true);
         }),
     );
-    const ending = service.endEventNow(UPPER, "guild-1", { pullBack: false });
+    const ending = service.endEventNow(UPPER, "guild-1");
     await nap();
     // The holds a scan looks up (by String(doc._id)) are there.
     expect(svc.isBeingEnded(ID)).toBe(true);
@@ -1908,7 +1867,7 @@ describe("a valid event id posted in upper case", () => {
           release = () => resolve(true);
         }),
     );
-    const ending = service.endEventNow(UPPER, "guild-1", { pullBack: false });
+    const ending = service.endEventNow(UPPER, "guild-1");
     await nap();
     const del = jest.fn(async () => undefined);
     guild.channels.cache.set("main-1", { delete: del });
@@ -1926,9 +1885,9 @@ describe("a valid event id posted in upper case", () => {
   it("anything that is not 24 hex digits is not found", async () => {
     const { service } = setup();
     for (const bad of ["", "12", "zzzzzzzzzzzzzzzzzzzzzzzz", "abcdefghijkl"]) {
-      expect(
-        (await service.endEventNow(bad, "guild-1", { pullBack: false })).status,
-      ).toBe("not-found");
+      expect((await service.endEventNow(bad, "guild-1")).status).toBe(
+        "not-found",
+      );
     }
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -2016,9 +1975,7 @@ describe("a claim that fails leaves no hold that never expires", () => {
   it("End event now", async () => {
     const { service, guild } = setup();
     EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("failed");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("failed");
     expect(store.get(ID)?.state).toBe("active");
     await expectSettled(service, guild);
   });
@@ -2270,9 +2227,7 @@ describe("a skipped announcement edit is not a refresh (member reset)", () => {
     EventMock.find = jest.fn(async () => [match()]);
     // A failed claim: its hold is settled into a finite one.
     EventMock.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
-    expect(
-      (await service.endEventNow(ID, "guild-1", { pullBack: false })).status,
-    ).toBe("failed");
+    expect((await service.endEventNow(ID, "guild-1")).status).toBe("failed");
 
     const first = await service.removeRsvp("guild-1", "u1");
     expect(first).toEqual({ matched: 1, removed: 0, rendersFailed: 1 });

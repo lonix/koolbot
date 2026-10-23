@@ -404,7 +404,7 @@ afterEach(() => {
 });
 
 describe("the end section", () => {
-  it("is a form with CSRF, a required confirmation and the pull-back box ticked, for a running group event", async () => {
+  it("is a form with CSRF, a required confirmation for a running group event, with no pull-back option", async () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
     expect(r.text).toContain('id="host-end"');
@@ -419,9 +419,8 @@ describe("the end section", () => {
     expect(form).toMatch(
       /<input type="checkbox" name="confirm" value="1" required>/,
     );
-    expect(form).toMatch(
-      /<input type="checkbox" name="pullBack" value="1" checked>/,
-    );
+    expect(form).not.toContain('name="pullBack"');
+    expect(form).toContain("moved back to the main channel first");
     expect(form).toContain("This cannot be undone");
   });
 
@@ -436,18 +435,18 @@ describe("the end section", () => {
     expect(adopted.text).not.toContain("the Discord event is closed");
   });
 
-  it("offers no pull-back for an event without group channels", async () => {
+  it("does not mention a pull-back for an event without group channels", async () => {
     events[EVENT_ID] = makeEvent({ groupsEnabled: false, groups: [] });
     const r = await call(PANEL);
     expect(r.text).toContain('id="host-end"');
-    expect(r.text).not.toContain('name="pullBack"');
+    expect(r.text).not.toContain("moved back to the main channel first");
     expect(r.text).toContain('name="confirm"');
 
     events[EVENT_ID] = makeEvent({
       groups: [team("g", "G", { channelId: null })],
     });
     const again = await call(PANEL);
-    expect(again.text).not.toContain('name="pullBack"');
+    expect(again.text).not.toContain("moved back to the main channel first");
   });
 
   it("explains that a scheduled event cannot be ended yet, with no form", async () => {
@@ -482,7 +481,7 @@ describe("End event now", () => {
   });
 
   it("ends the event in the order of the teardown: claim, pull-back, group channels, leaders, native", async () => {
-    const r = await end({ confirm: "1", pullBack: "1" });
+    const r = await end({ confirm: "1" });
     expect(r.status).toBe(303);
     const flash = flashOf(r.location);
     expect(flash.type).toBe("ok");
@@ -511,23 +510,37 @@ describe("End event now", () => {
     expect(voice.get(BEN)).toBe(MAIN);
   });
 
-  it("without the pull-back box nobody is moved, and occupied channels are left to the scan", async () => {
-    const r = await end({ confirm: "1" });
-    expect(flashOf(r.location).type).toBe("ok");
-    expect(patch).not.toHaveBeenCalled();
-    expect(order).toEqual(["claim", "cleanup", "captains", "native"]);
-    expect(events[EVENT_ID]?.state).toBe("ended");
-  });
+  it.each([
+    ["without the field", { confirm: "1" }],
+    ["with pullBack=0", { confirm: "1", pullBack: "0" }],
+  ])(
+    "a crafted post %s still pulls everyone back (#1441)",
+    async (_name, body) => {
+      const r = await end(body);
+      expect(flashOf(r.location).type).toBe("ok");
+      expect(order).toEqual([
+        "claim",
+        "move",
+        "move",
+        "move",
+        "cleanup",
+        "captains",
+        "native",
+      ]);
+      expect(patch).toHaveBeenCalledTimes(3);
+      expect(patched().every((p) => p.to === MAIN)).toBe(true);
+      expect(events[EVENT_ID]?.state).toBe("ended");
+    },
+  );
 
   it("audits one row with counts, never names", async () => {
-    await end({ confirm: "1", pullBack: "1" });
+    await end({ confirm: "1" });
     const row = auditRows.at(-1) as Json;
     expect(row.action).toBe("event.host.end");
     expect(row.result).toBe("success");
     expect(row.targetId).toBe(EVENT_ID);
     const details = JSON.stringify(row.details);
     expect(details).toContain('"outcome":"ended"');
-    expect(details).toContain('"pullBack":true');
     expect(details).toContain('"moved":3');
     expect(details).not.toContain(ANA);
     expect(details).not.toContain("Name ");
@@ -538,7 +551,7 @@ describe("End event now", () => {
 
   it("a pull-back the bot may not do is reported, and the rest of the teardown still runs", async () => {
     botMayMove = false;
-    const r = await end({ confirm: "1", pullBack: "1" });
+    const r = await end({ confirm: "1" });
     const flash = flashOf(r.location);
     // The event is ended (the claim came first); the move step needs attention.
     expect(events[EVENT_ID]?.state).toBe("ended");
@@ -550,10 +563,10 @@ describe("End event now", () => {
   });
 
   it("pressed again it is a no-op with a clear message, and runs nothing twice", async () => {
-    await end({ confirm: "1", pullBack: "1" });
+    await end({ confirm: "1" });
     order.length = 0;
     patch.mockClear();
-    const r = await end({ confirm: "1", pullBack: "1" });
+    const r = await end({ confirm: "1" });
     expect(r.status).toBe(303);
     const flash = flashOf(r.location);
     expect(flash.type).toBe("ok");

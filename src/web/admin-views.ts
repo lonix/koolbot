@@ -3294,7 +3294,7 @@ export function renderEventsPage(props: EventsProps): string {
               actionPath: `/admin/events/${encodeURIComponent(e.id)}/end-now`,
               csrfToken: props.csrfToken,
               idSuffix: e.id,
-              offerPullBack: e.hasGroupChannels === true,
+              hasGroupChannels: e.hasGroupChannels === true,
               adopted: e.nativeAdopted === true,
             },
           )}</details>`

@@ -4,15 +4,15 @@
  *
  * The confirmation is a required checkbox that the server checks again
  * (`confirm` must be `"1"`), so it holds without JavaScript and cannot be
- * skipped by posting the form directly. The pull-back checkbox is on by
- * default and only offered when the event has group channels.
+ * skipped by posting the form directly. Everyone in a group channel is always
+ * moved back to the main channel first (#1441), so there is no option for it;
+ * the form only says so when the event has group channels.
  */
 
 import { escapeHtml } from "./html.js";
 
 /** Form field names, shared with the two routes that read them. */
 export const END_CONFIRM_FIELD = "confirm";
-export const END_PULL_BACK_FIELD = "pullBack";
 
 export interface EndFormOptions {
   /** URL the form posts to. */
@@ -20,8 +20,8 @@ export interface EndFormOptions {
   csrfToken: string;
   /** Distinguishes the ids of several forms on one page. */
   idSuffix: string;
-  /** Offer "move everyone back to the main channel first". */
-  offerPullBack: boolean;
+  /** The event has group channels: the text says they are emptied and removed. */
+  hasGroupChannels: boolean;
   /**
    * An adopted Discord event (#1177) is one KoolBot never wrote: ending only
    * releases KoolBot's link to it, the Discord event is left as it is.
@@ -31,21 +31,18 @@ export interface EndFormOptions {
 
 export function renderEndEventForm(opts: EndFormOptions): string {
   const id = `end-${escapeHtml(opts.idSuffix)}`;
-  const pull = opts.offerPullBack
-    ? `<p><label><input type="checkbox" name="${END_PULL_BACK_FIELD}" value="1" checked> Move everyone in the group channels back to the main channel first</label></p>`
-    : "";
   return `<form method="POST" action="${escapeHtml(opts.actionPath)}" class="end-event-form" aria-describedby="${id}-what">
 <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
 <p id="${id}-what">Ending the event now stops its reminders and host actions. ${
-    opts.offerPullBack
-      ? "Group channels are removed as soon as they are empty, and any group leaders are cleared. "
+    opts.hasGroupChannels
+      ? "Everyone in a group channel is moved back to the main channel first, the group channels are then removed, and any group leaders are cleared. "
       : ""
   }The main channel is removed after the usual grace period, once it is empty, and ${
     opts.adopted === true
       ? "KoolBot stops tracking the Discord event; the Discord event is left as it is"
       : "the Discord event is closed"
   }. This cannot be undone.</p>
-${pull}<p><label><input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required> I want to end this event now</label></p>
+<p><label><input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required> I want to end this event now</label></p>
 <button type="submit" class="btn btn-danger">End event now</button>
 </form>`;
 }
@@ -55,7 +52,7 @@ export function renderEndSection(opts: {
   state: string;
   actionPath: string;
   csrfToken: string;
-  offerPullBack: boolean;
+  hasGroupChannels: boolean;
   adopted?: boolean;
 }): string {
   if (opts.state !== "active") {
@@ -65,7 +62,7 @@ export function renderEndSection(opts: {
     actionPath: opts.actionPath,
     csrfToken: opts.csrfToken,
     idSuffix: "host",
-    offerPullBack: opts.offerPullBack,
+    hasGroupChannels: opts.hasGroupChannels,
     adopted: opts.adopted,
   });
 }

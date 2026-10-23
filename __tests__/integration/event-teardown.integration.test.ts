@@ -93,7 +93,6 @@ describeWithMongo("event teardown against a real MongoDB (#1193)", () => {
       eventId: id,
       guildId: GUILD,
       trigger: "manual",
-      pullBack: false,
       now: new Date(),
       endedAt: new Date("2030-01-01T20:00:00.000Z"),
       fromStates: ["active"],

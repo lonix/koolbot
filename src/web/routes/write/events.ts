@@ -23,10 +23,7 @@ import {
   coverUploadBody,
 } from "../../event-cover-upload.js";
 import { summariseEnd } from "../../../services/event-teardown.js";
-import {
-  END_CONFIRM_FIELD,
-  END_PULL_BACK_FIELD,
-} from "../../event-end-view.js";
+import { END_CONFIRM_FIELD } from "../../event-end-view.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -220,12 +217,11 @@ export function createEventsRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const confirmed = getString(req, END_CONFIRM_FIELD) === "1";
-      const pullBack = getString(req, END_PULL_BACK_FIELD) === "1";
       if (!confirmed) {
         await recordAudit(session, {
           action: "event.end-now",
           targetId: id,
-          details: { outcome: "not-confirmed", pullBack },
+          details: { outcome: "not-confirmed" },
           result: "failure",
           errorMessage: "not confirmed",
         });
@@ -238,13 +234,12 @@ export function createEventsRouter(client: Client): Router {
       const outcome = await EventService.getInstance(client).endEventNow(
         id,
         session.guildId,
-        { pullBack },
       );
       const summary = summariseEnd(outcome);
       await recordAudit(session, {
         action: "event.end-now",
         targetId: id,
-        details: { ...summary.details, pullBack },
+        details: summary.details,
         result: summary.ok ? "success" : "failure",
         errorMessage: summary.ok
           ? null
