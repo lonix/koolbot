@@ -934,14 +934,13 @@ export class EventService extends ScheduledService {
    * state is decided from the atomic claim inside the teardown, never from a
    * copy the caller read earlier. Only an `active` event can be ended; an
    * ended one answers "already ended" and changes nothing. Gated on
-   * `events.enabled` (fails closed). `pullBack` moves everyone from the group
-   * channels to the main channel first. A recurring occurrence's successor is
+   * `events.enabled` (fails closed). The teardown always moves everyone from
+   * the group channels to the main channel first (#1441). A recurring occurrence's successor is
    * created by the next scan, as after a scheduled end.
    */
   public async endEventNow(
     eventId: string,
     guildId: string,
-    options: { pullBack: boolean },
   ): Promise<EndEventOutcome> {
     // One canonical id for the claim, the holds and every id-keyed map: a valid
     // id posted in upper case reaches the same row, so it must not key a
@@ -968,7 +967,6 @@ export class EventService extends ScheduledService {
       eventId,
       guildId,
       trigger: "manual",
-      pullBack: options.pullBack,
       now,
       endedAt: now,
       fromStates: ["active"],
@@ -1438,7 +1436,6 @@ export class EventService extends ScheduledService {
         eventId: String(event._id),
         guildId: event.guildId,
         trigger: "scheduled",
-        pullBack: false,
         now,
         endedAt: computeEndTime(event.startTime, event.durationMinutes),
         fromStates: ["scheduled", "active"],

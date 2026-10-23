@@ -125,11 +125,7 @@ import {
   type BoardPersonView,
   type BoardTeamView,
 } from "../host-board-view.js";
-import {
-  END_CONFIRM_FIELD,
-  END_PULL_BACK_FIELD,
-  renderEndSection,
-} from "../event-end-view.js";
+import { END_CONFIRM_FIELD, renderEndSection } from "../event-end-view.js";
 import { summariseEnd } from "../../services/event-teardown.js";
 import {
   effectiveLeaders,
@@ -899,7 +895,7 @@ function createEndSection(): HostSectionRenderer {
       actionPath: ctx.actionPath("end"),
       csrfToken: ctx.csrfToken,
       // Only an event with group channels has anyone to move back.
-      offerPullBack:
+      hasGroupChannels:
         ctx.event.groupsEnabled === true &&
         (ctx.event.groups ?? []).some((g) => !!g.channelId),
       adopted: ctx.event.nativeAdopted === true,
@@ -920,7 +916,6 @@ function registerEndAction(router: Router, client: Client): void {
     async ({ req, event }) => {
       // The body is read here, before the first await.
       const confirmed = bodyString(req, END_CONFIRM_FIELD) === "1";
-      const pullBack = bodyString(req, END_PULL_BACK_FIELD) === "1";
       if (!confirmed) {
         return {
           ok: false,
@@ -933,13 +928,12 @@ function registerEndAction(router: Router, client: Client): void {
       const outcome = await EventService.getInstance(client).endEventNow(
         String(event._id),
         event.guildId,
-        { pullBack },
       );
       const summary = summariseEnd(outcome);
       return {
         ok: summary.ok,
         message: summary.message,
-        details: { ...summary.details, pullBack },
+        details: summary.details,
         errorMessage: summary.errorMessage,
       };
     },

@@ -236,7 +236,6 @@ function manual(over: Record<string, unknown> = {}): never {
     eventId: ID,
     guildId: GUILD,
     trigger: "manual",
-    pullBack: true,
     now: NOW,
     endedAt: NOW,
     fromStates: ["active"],
@@ -251,7 +250,6 @@ function scheduled(over: Record<string, unknown> = {}): never {
     eventId: ID,
     guildId: GUILD,
     trigger: "scheduled",
-    pullBack: false,
     now: NOW,
     endedAt: new Date(START.getTime() + 120 * 60_000),
     fromStates: ["scheduled", "active"],
@@ -688,14 +686,20 @@ describe("what runs for which event", () => {
     expect(calls).toContain("captains");
   });
 
-  it("the pull-back is only for a manual end that asked for it, and an event with group channels", async () => {
+  it("a manual end always pulls back, an old posted pullBack=false changes nothing, and a scheduled end never does (#1441)", async () => {
     const a = make().teardown;
-    await a.run(manual({ pullBack: false }));
-    expect(moveEventMembers).not.toHaveBeenCalled();
+    await a.run(manual());
+    expect(moveEventMembers).toHaveBeenCalledTimes(1);
 
+    moveEventMembers.mockClear();
+    rows.set(ID, row());
+    await a.run(manual({ pullBack: false }));
+    expect(moveEventMembers).toHaveBeenCalledTimes(1);
+
+    moveEventMembers.mockClear();
     rows.set(ID, row());
     await a.run(scheduled({ pullBack: true }));
-    // A scheduled end never pulls people back, whatever the flag says.
+    // A scheduled end never pulls people back, whatever a stray field says.
     expect(moveEventMembers).not.toHaveBeenCalled();
 
     rows.set(
@@ -1045,7 +1049,7 @@ describe("leaders are cleared under the group lock, only on an ended row", () =>
         }),
     );
     const { teardown } = make();
-    const run = teardown.run(manual({ pullBack: false }));
+    const run = teardown.run(manual());
     await new Promise((r) => setTimeout(r, 30));
     expect(calls).not.toContain("captains");
     release();

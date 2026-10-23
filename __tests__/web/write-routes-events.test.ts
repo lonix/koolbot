@@ -34,9 +34,7 @@ const mockCancelEvent = jest.fn<() => Promise<unknown>>();
 const mockStartEventNow = jest.fn<() => Promise<unknown>>();
 const mockCancelSeries = jest.fn<() => Promise<unknown>>();
 const mockEndEventNow =
-  jest.fn<
-    (id: string, guildId: string, o: { pullBack: boolean }) => Promise<unknown>
-  >();
+  jest.fn<(id: string, guildId: string) => Promise<unknown>>();
 const mockConfigGetString = jest.fn<() => Promise<string>>();
 const mockConfigGetNumber = jest.fn<() => Promise<number>>();
 
@@ -522,28 +520,31 @@ describe("POST /events/:id/end-now (#1193)", () => {
     mockEndEventNow.mockResolvedValue(ended);
     const res = await harness.post("/events/event-1/end-now", {
       confirm: "1",
-      pullBack: "1",
     });
     const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(mockEndEventNow).toHaveBeenCalledWith("event-1", session.guildId, {
-      pullBack: true,
-    });
+    expect(mockEndEventNow).toHaveBeenCalledWith("event-1", session.guildId);
     expect(flash.type).toBe("ok");
     expect(flash.msg).toContain("The event has ended.");
     expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
       action: "event.end-now",
       targetId: "event-1",
       result: "success",
-      details: { outcome: "ended", pullBack: true, removed: 2 },
+      details: { outcome: "ended", removed: 2 },
     });
   });
 
-  it("the pull-back is off unless the box was ticked", async () => {
+  it("an old posted pullBack field is ignored: the service gets no option either way (#1441)", async () => {
     mockEndEventNow.mockResolvedValue(ended);
-    await harness.post("/events/event-1/end-now", { confirm: "1" });
-    expect(mockEndEventNow).toHaveBeenCalledWith("event-1", session.guildId, {
-      pullBack: false,
-    });
+    for (const pullBack of ["0", "1", ""]) {
+      mockEndEventNow.mockClear();
+      await harness.post("/events/event-1/end-now", {
+        confirm: "1",
+        pullBack,
+      });
+      expect(mockEndEventNow.mock.calls).toEqual([
+        ["event-1", session.guildId],
+      ]);
+    }
   });
 
   it("an already ended event is a success with a clear message", async () => {

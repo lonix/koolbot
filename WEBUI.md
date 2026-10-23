@@ -1228,11 +1228,11 @@ stays a text field.
 owns the message, where the old message can be seen and judged. A managed row on All settings only links there (a
 _Re-post_ chip next to _Jump to message_, shown once a message exists), so the action has one home:
 
-| Message | Page and card | Audit action | What Update/refresh already does |
-| --- | --- | --- | --- |
-| Quote channel header | Quotes, **Header post** | `quote.header-repost` | The bot edits the header in place when its wording changes |
-| Notices channel header | Notices, **Header post** | `notice.header-repost` | The same, for the notices header |
-| Rules message | Rules, **Re-post the rules message** | `rules.repost` | **Update the rules message** edits it in place (a new one only if it was deleted) |
+| Message                | Page and card                        | Audit action           | What Update/refresh already does                                                  |
+| ---------------------- | ------------------------------------ | ---------------------- | --------------------------------------------------------------------------------- |
+| Quote channel header   | Quotes, **Header post**              | `quote.header-repost`  | The bot edits the header in place when its wording changes                        |
+| Notices channel header | Notices, **Header post**             | `notice.header-repost` | The same, for the notices header                                                  |
+| Rules message          | Rules, **Re-post the rules message** | `rules.repost`         | **Update the rules message** edits it in place (a new one only if it was deleted) |
 
 Re-post is a form POST behind the confirm dialog (red, with the consequences listed: a new message at the bottom of the
 channel, the old one deleted if the bot can find it in this channel, nothing else touched), CSRF and the admin check,
@@ -2844,7 +2844,8 @@ Manual and scheduled ends run the **same teardown** (`event-teardown.ts`), in th
    people while the later steps run), and because the group channel cleanup and the mover are
    written for an event that is already ended.
 2. The announcement post is refreshed (it no longer shows a running event).
-3. **Pull back** (manual end, when ticked, only for an event with group channels): everyone
+3. **Pull back** (manual end, always, only for an event with group channels; there is no option
+   to skip it, and a posted `pullBack` field from an older form is ignored): everyone
    connected to a group, open or leader-only channel goes to the main channel with the
    **Move people** helper, the host included (someone left in a channel that is about to go
    would be stranded as much as anyone). At most 60 people per run, 500 ms apart, only people
@@ -3104,7 +3105,7 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
   legacy-setting handling as the voice feature), active temporary voice channels and waiting rooms (including ones the voice feature
   holds only in memory while a database write is pending), the legacy "New Channel" join-to-create trigger, ticket channels, channels of events that
-have not ended,
+  have not ended,
   open looking-for-group channels, the private channels and categories of active reaction roles, poll schedule
   destinations, scheduled announcement channels, and the server's rules, updates and system channels. A category must be empty
   before it can be deleted, because Discord would otherwise drop its channels to the top level and break
