@@ -351,11 +351,10 @@ describe("POST /wizard/step/:n", () => {
     );
   });
 
-  it("stages the stored colour for Keep when the strict read succeeds", async () => {
+  it("stages the recovered legacy colour for Keep when get() failed but the strict read succeeds", async () => {
     mockGetSession.mockReturnValue(wizardState(["reactionroles"]));
-    // A legacy colour is only accepted unchanged, so `get` reports it too.
-    mockConfigGet.mockImplementation((async (key: string) =>
-      key === "reactionroles.group_role_colour" ? "red" : null) as never);
+    // `get()` failed (null) but the strict read recovered the legacy colour:
+    // the recovered value is also the coercion baseline, so `red` is accepted.
     mockConfigGetStringStrict.mockResolvedValueOnce("red");
     await harness.post("/wizard/step/0", {
       "value_reactionroles.enabled": "true",
@@ -367,7 +366,6 @@ describe("POST /wizard/step/:n", () => {
         mockAddConfiguration.mock.calls.map((c) => [c[2], c[3]]),
       ),
     ).toMatchObject({ "reactionroles.group_role_colour": "red" });
-    mockConfigGet.mockImplementation((async () => null) as never);
   });
 
   it("advances to the next step when more features remain", async () => {

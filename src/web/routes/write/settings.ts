@@ -531,7 +531,7 @@ export function createSettingsRouter(client: Client): Router {
           }
         }
         const raw = readSettingField(body, key, kept);
-        const r = coerceConfigValue(key, raw, stored);
+        const r = coerceConfigValue(key, raw, kept);
         if (r.ok) {
           coerced.push({ key, value: r.value });
         } else {

@@ -2496,6 +2496,17 @@ describe("picker settings (#1426)", () => {
     );
   });
 
+  it("keeps a legacy colour recovered by the strict read when get() returned null", async () => {
+    mockConfigGet.mockResolvedValue(null);
+    mockConfigGetStringStrict.mockResolvedValueOnce("red");
+    const body = await postedBody([
+      pickerRow("reactionroles.group_role_colour", "red"),
+    ]);
+    const res = await harness.post("/settings/save-section", body);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(written().get("reactionroles.group_role_colour")).toBe("red");
+  });
+
   it("does not read strictly for Use default or a swatch pick", async () => {
     mockConfigGetStringStrict.mockRejectedValue(new Error("db down"));
     try {

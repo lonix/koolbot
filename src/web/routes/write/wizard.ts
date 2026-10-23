@@ -620,10 +620,10 @@ export function createWizardRouter(client: Client): Router {
           }
         }
         const raw = readSettingField(body, k, kept);
-        const coerced = coerceConfigValue(k, raw, current);
+        const coerced = coerceConfigValue(k, raw, kept);
         // A role that backs a role group can't be picked for another
         // feature (#1023); the same guard as the Settings page.
-        const stored = coerced.ok ? current : undefined;
+        const stored = coerced.ok ? kept : undefined;
         // Also refuse a role with Administrator or other powerful
         // permissions (#1145).
         const reuse = coerced.ok
