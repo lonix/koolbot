@@ -59,6 +59,8 @@ jest.unstable_mockModule(
   "../../src/services/adoption-rollback-check.js",
   () => ({
     rollbackRevalidator: mockRevalidatorFactory,
+    // Imported by the removed-bot cleanup, which this route test does not run.
+    restoreProblems: () => [],
   }),
 );
 const mockStartRollback = jest.fn<(...a: any[]) => any>();
