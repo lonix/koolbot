@@ -225,6 +225,7 @@ An IANA zone for a setting or an event (#1426).
   so option indexes never move; the selected and the original option always stay visible; `new york` finds `America/New_York`; Enter picks the first
   match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
 - No JavaScript: the plain select.
+- Also used on `/me/timezone` (#1436): *Server default* is the blank first option, and the live "Current time" preview listens to the same select.
 
 ### ColourField
 

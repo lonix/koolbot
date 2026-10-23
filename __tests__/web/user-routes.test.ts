@@ -1662,12 +1662,39 @@ describe("/me/timezone (#524)", () => {
     );
   });
 
+  it("uses the shared searchable timezone select (#1436)", async () => {
+    const out = await dispatch({ method: "GET" });
+    expect(out.body).toContain('class="kb-tz" data-tz');
+    expect(out.body).toContain("data-tz-search");
+    expect(out.body).toContain('<select class="kb-select" id="tz-select"');
+    expect(out.body).toContain('<option value="" selected>Server default (');
+    // The shared script, not a copy.
+    expect(out.body).toContain("[data-tz-search]");
+  });
+
+  it("keeps a stored zone the runtime no longer lists as the selected custom option (#1436)", async () => {
+    const out = await dispatch({ method: "GET", stored: "Mars/Phobos" });
+    expect(out.body).toContain(
+      '<option value="Mars/Phobos" selected>Mars/Phobos (custom)</option>',
+    );
+    expect(out.body).not.toContain('<option value="" selected>');
+  });
+
   it("saves a chosen timezone and redirects with a success flash", async () => {
+    const setTimezone = jest
+      .fn<(u: string, g: string, tz: string | null) => Promise<string | null>>()
+      .mockImplementation(async (_u, _g, tz) => tz);
     const out = await dispatch({
       method: "POST",
       body: { _csrf: csrf(), timezone: "America/New_York" },
       csrfHeader: csrf(),
+      setTimezoneImpl: setTimezone,
     });
+    expect(setTimezone).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "America/New_York",
+    );
     expect(out.statusCode).toBe(303);
     expect(out.redirectedTo).toMatch(/^\/me\/timezone\?/);
     expect(out.audit).toMatchObject({
@@ -1710,6 +1737,9 @@ describe("/me/timezone (#524)", () => {
     });
     expect(out.statusCode).toBe(303);
     expect(out.redirectedTo).toContain("flash=err");
+    expect(
+      new URLSearchParams((out.redirectedTo ?? "").split("?")[1]).get("msg"),
+    ).toContain("not a recognized IANA timezone identifier");
     expect(out.audit).toMatchObject({
       action: "user.timezone.set",
       result: "failure",
