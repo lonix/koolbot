@@ -518,6 +518,9 @@ export function buildSettingRows(
       max: meta?.max,
       managed: meta?.managed,
       format: meta?.format,
+      stepper: meta?.stepper,
+      presets: meta?.presets,
+      presetZeroLabel: meta?.presetZeroLabel,
       channelKind: meta?.channelKind,
     };
   });
@@ -1229,6 +1232,9 @@ export function createReadOnlyRouter(
             max: meta?.max,
             managed: meta?.managed,
             format: meta?.format,
+            stepper: meta?.stepper,
+            presets: meta?.presets,
+            presetZeroLabel: meta?.presetZeroLabel,
             channelKind: meta?.channelKind,
           };
         });

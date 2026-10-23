@@ -30,8 +30,11 @@ import {
 import { icon } from "./icons.js";
 import { renderSaveBar } from "./savebar.js";
 import {
+  pickPreset,
   renderColourInput,
+  renderDurationPresets,
   renderEmojiField,
+  renderStepper,
   renderTimezoneSelect,
 } from "./setting-pickers.js";
 import { getServerTimezone } from "../utils/timezone.js";
@@ -320,6 +323,12 @@ export interface SettingRow {
    * `SettingMetadata.format`.
    */
   format?: SettingFormat;
+  /** Render the number as a stepper (#1427). Sourced from `SettingMetadata.stepper`. */
+  stepper?: boolean;
+  /** Preset durations of a number (#1427). Sourced from `SettingMetadata.presets`. */
+  presets?: number[];
+  /** What the preset `0` is called. Sourced from `SettingMetadata.presetZeroLabel`. */
+  presetZeroLabel?: string;
   /**
    * For a `managed` row, the Discord link to the message it points at, when
    * the message and its channel are both known.
@@ -782,6 +791,15 @@ export function settingKeepFieldName(key: string): string {
 }
 
 /**
+ * Form-field name of the preset radio group of a duration setting (#1427). The
+ * box keeps `value_<key>`, so the invalid marker, the id and a single-key post
+ * still address the same field.
+ */
+export function settingPresetFieldName(key: string): string {
+  return `preset_${key}`;
+}
+
+/**
  * True when a colour setting's "Keep the stored value" box is ticked (and Use
  * default, which wins, is not). The save handlers then resolve the stored value
  * with `ConfigService.getStringStrict()` and pass it to `readSettingField`: a
@@ -805,7 +823,8 @@ export const KEEP_READ_FAILED_REASON =
 
 /**
  * The raw posted value of a setting: its `value_<key>` field, or `""` when the
- * key is a colour and "Use default" is ticked. Every save path reads values
+ * key is a colour and "Use default" is ticked, or a preset when a duration's
+ * preset radio is ticked (Custom… and no radio both mean the box). Every save path reads values
  * through this so the checkbox means the same on the Settings page and the
  * wizard.
  */
@@ -828,6 +847,12 @@ export function readSettingField(
     ) {
       return String(current);
     }
+  }
+  const presets =
+    settingsMetadata[key as keyof typeof settingsMetadata]?.presets;
+  if (presets) {
+    const preset = pickPreset(body?.[settingPresetFieldName(key)], presets);
+    if (preset !== null) return preset;
   }
   return body?.[settingValueFieldName(key)];
 }
@@ -1107,6 +1132,39 @@ function renderControlInput(
       lockAttr + a11yAttr,
     );
   }
+  if (r.type === "number" && (r.stepper || r.presets)) {
+    const controlAttrs = {
+      id: a11y.id,
+      describedBy: a11y.describedBy,
+      labelledBy: a11y.labelledBy,
+      invalid: a11y.invalid,
+      describedByBase: a11y.describedByBase,
+      disabled: depLocked,
+    };
+    const shown = primitive as string | number;
+    if (r.presets) {
+      return renderDurationPresets(
+        settingPresetFieldName(r.key),
+        valueName,
+        shown,
+        r.presets,
+        { min: r.min, max: r.max },
+        {
+          ...controlAttrs,
+          label: r.label,
+          unit: durationUnit(r.key),
+          zeroLabel: r.presetZeroLabel,
+        },
+      );
+    }
+    return renderStepper(
+      valueName,
+      shown,
+      { min: r.min, max: r.max },
+      r.label,
+      controlAttrs,
+    );
+  }
   if (r.type === "number") {
     // A bounded whole-number box (#1304): `required` so a cleared field is
     // caught by the browser rather than posted as "" (which the server rejects,
@@ -1265,8 +1323,14 @@ function renderInvalidNote(id: string): string {
  */
 function isGroupControl(r: SettingRow): boolean {
   if (r.type === "cron") return true;
+  if (r.type === "number" && r.presets) return true;
   if (r.type === "boolean") return false;
   return segmentedFits(r.options, currentStringOf(r));
+}
+
+/** "minutes" for `events.reminder_minutes`: the unit a duration key's name ends in. */
+function durationUnit(key: string): string {
+  return /_(seconds|minutes|hours|days)$/.exec(key)?.[1] ?? "";
 }
 
 function currentStringOf(r: SettingRow): string {
@@ -2149,6 +2213,9 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       max: meta?.max,
       managed: meta?.managed,
       format: meta?.format,
+      stepper: meta?.stepper,
+      presets: meta?.presets,
+      presetZeroLabel: meta?.presetZeroLabel,
       channelKind: meta?.channelKind,
     };
   });

@@ -1189,6 +1189,23 @@ word, a decimal, `1e3` or an out-of-range value is refused with a message such a
 stored. A value already stored above a newly declared maximum shows as invalid and blocks the save of its section
 until it is fixed.
 
+**Steppers and preset durations (#1427).** Two optional `settingsMetadata` fields on a `number` key choose a control that
+cannot be wrong for common values; both are rendered by `src/web/setting-pickers.ts` on the Settings page, the feature
+cards and the wizard, and neither adds a server rule: `min` and `max` stay the rule, and the stored value stays a plain
+number.
+
+- `stepper: true` (for ranges under about 30 values: `events.groups.default_count`, `events.groups.max_count`,
+  `lfg.default_size`) renders minus and plus buttons around the same bounded box. The buttons are hidden until the script
+  runs and are disabled at the bounds, so without JavaScript the box is all there is.
+- `presets: [...]` (`events.reminder_minutes`, `events.create_lead_minutes`, `events.channel_grace_minutes`,
+  `events.default_duration_minutes`, `lfg.expiry_minutes`) renders a radio group of the common values with a last
+  _Custom…_ and the bounded box. `presetZeroLabel` names a `0` that is not a number (_Off_, _None_). The group posts
+  `preset_<key>`, the box `value_<key>`; `readSettingField` takes a ticked numeric preset, and otherwise the box
+  (Custom…, or no radio at all), so a browser without JavaScript posts what a script would, with the box shown next to
+  _Custom…_. With the script the box is hidden unless _Custom…_ is ticked, and ticking a preset copies it into the box.
+  Presets are a shortcut, not a whitelist: any number inside `min`..`max` still saves, so a stored `45` shows under
+  _Custom…_ and posts unchanged. A drift test checks that every preset is in range and that the default is one.
+
 **Pickers for known value sets (#1426).** A free-text setting whose values are a known set declares a `format` in
 `settingsMetadata`, and the Settings page, the feature cards and the wizard render it as a picker
 (`src/web/setting-pickers.ts`):

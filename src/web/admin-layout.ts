@@ -13,6 +13,8 @@ import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
 import {
   COLOUR_INPUT_SCRIPT,
+  DURATION_PRESETS_SCRIPT,
+  STEPPER_SCRIPT,
   TIMEZONE_SELECT_SCRIPT,
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
@@ -1021,6 +1023,12 @@ export function renderAdminPage(opts: AdminPageOptions): string {
       : []),
     ...(opts.body.includes("data-colour")
       ? [`${scriptTag(COLOUR_INPUT_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-stepper")
+      ? [`${scriptTag(STEPPER_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-duration")
+      ? [`${scriptTag(DURATION_PRESETS_SCRIPT)}`]
       : []),
     ...(opts.body.includes("data-emoji-field")
       ? [`${scriptTag(groupRowsScript())}`]

@@ -1116,6 +1116,61 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The number controls of #1427: a stepper, preset durations (one on a
+      // preset, one on a custom value, one with its Off label) and a locked one.
+      name: "Settings (stepper, duration presets)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "events",
+            rows: [
+              {
+                key: "events.groups.default_count",
+                label: "Event groups offered by default",
+                current: 2,
+                defaultValue: 2,
+                type: "number",
+                description: "How many empty group rows the event form shows.",
+                category: "events",
+                min: 1,
+                max: 25,
+                stepper: true,
+              },
+              {
+                key: "events.reminder_minutes",
+                label: "Reminder lead time (minutes)",
+                current: 30,
+                defaultValue: 30,
+                type: "number",
+                description: "Minutes before an event starts.",
+                category: "events",
+                min: 0,
+                max: 10080,
+                presets: [0, 5, 10, 15, 30, 60],
+                presetZeroLabel: "Off",
+              },
+              {
+                key: "events.default_duration_minutes",
+                label: "Default event duration (minutes)",
+                current: 45,
+                defaultValue: 120,
+                type: "number",
+                description: "Duration applied when none is given.",
+                category: "events",
+                min: 1,
+                max: 1440,
+                presets: [30, 60, 90, 120, 180],
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       // The pickers of #1426 in their normal states: a listed zone, a colour
       // and emoji prefixes, one of them empty.
       name: "Settings (timezone select, colour input, emoji fields)",

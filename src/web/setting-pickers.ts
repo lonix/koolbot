@@ -1,7 +1,8 @@
 /**
  * Pickers for settings (and event forms) whose value has a known set (#1426):
  * a searchable timezone select, a colour input with a "Use default" box, and
- * the emoji picker the event group marker uses.
+ * the emoji picker the event group marker uses. Number settings with a small
+ * range or common durations get a stepper or preset buttons (#1427).
  *
  * Like the other controls in `setting-controls.ts` these are string renderers
  * over real form inputs, so they work without JavaScript and the server checks
@@ -12,7 +13,7 @@
  */
 
 import { escapeHtml } from "./html.js";
-import type { ControlAttrs } from "./setting-controls.js";
+import { renderSegmented, type ControlAttrs } from "./setting-controls.js";
 import { listSupportedTimezones } from "../utils/timezone.js";
 import {
   DEFAULT_COLOUR_SWATCH,
@@ -243,3 +244,202 @@ export function renderEmojiField(
     `</span></span>`
   );
 }
+
+// ---------- Numbers: stepper and duration presets (#1427) ----------
+
+export interface NumberControlBounds {
+  min?: number;
+  max?: number;
+}
+
+function boundAttrs(b: NumberControlBounds): string {
+  return (
+    (b.min !== undefined ? ` data-min="${b.min}"` : "") +
+    (b.max !== undefined ? ` data-max="${b.max}"` : "")
+  );
+}
+
+function rangeTitle(b: NumberControlBounds): string {
+  return b.min !== undefined && b.max !== undefined
+    ? `Whole number from ${b.min} to ${b.max}`
+    : "Whole number";
+}
+
+/**
+ * A stepper for a small range: `span.kb-stepper` around minus and plus buttons
+ * and the digit box, which is the field that posts (`name`), so a browser
+ * without JavaScript has the bounded box and the server checks the same range.
+ * The buttons are `hidden` until `STEPPER_SCRIPT` runs, since without it they
+ * do nothing. A stored value outside the range is shown as it is and never
+ * clamped on render. A locked control (dependency lock) has its buttons locked
+ * too, which the cascade script never touches.
+ */
+export function renderStepper(
+  name: string,
+  value: string | number,
+  b: NumberControlBounds,
+  label: string,
+  a: ControlAttrs = {},
+): string {
+  const lock = a.disabled ? LOCK : "";
+  const button = (step: -1 | 1, glyph: string, verb: string): string =>
+    `<button type="button" data-step="${step}" aria-label="${verb} ${escapeHtml(label)}" hidden${lock}>` +
+    `<span aria-hidden="true">${glyph}</span></button>`;
+  return (
+    `<span class="kb-stepper" data-stepper>` +
+    button(-1, "−", "Decrease") +
+    `<input type="text"${attr("id", a.id)}${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
+    ` name="${escapeHtml(name)}" value="${escapeHtml(value)}" inputmode="numeric" autocomplete="off"` +
+    ` pattern="[0-9]*" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)} required${lock}>` +
+    button(1, "+", "Increase") +
+    `</span>`
+  );
+}
+
+export interface DurationPresetOptions extends ControlAttrs {
+  /** Names the box, e.g. the setting's label. */
+  label: string;
+  /** "minutes", shown after the control. */
+  unit: string;
+  /** What `0` is called, when it is not a number ("Off"). */
+  zeroLabel?: string;
+}
+
+const PRESET_VALUE = /^\d+$/;
+
+/**
+ * The posted preset radio value when it names one of `presets`, else null.
+ * The save handlers use it: a numeric preset wins over the box, anything else
+ * ("custom", nothing, a value that is not a preset) means the box, whose value
+ * goes through `coerceConfigValue` like any number.
+ */
+export function pickPreset(
+  posted: unknown,
+  presets: readonly number[],
+): string | null {
+  return typeof posted === "string" &&
+    PRESET_VALUE.test(posted) &&
+    presets.includes(Number(posted))
+    ? posted
+    : null;
+}
+
+/**
+ * Preset durations: a radio group of the common values and a last "Custom…",
+ * then the bounded box (`boxName`), then the unit.
+ *
+ * - The box always holds the effective number and `presetName` is the radio
+ *   group. A numeric preset wins; "custom", or no radio at all (a locked
+ *   control, a crafted post), means the box. So without JavaScript the box is
+ *   simply there next to Custom…, and the number posted is the one a script
+ *   would produce (`readSettingField`).
+ * - A stored value that is not a preset (an old 45, or one outside the range)
+ *   ticks Custom… and shows in the box, posting unchanged.
+ * - The box has no `pattern`: a pattern is native validation that applies
+ *   whether or not a preset is ticked, so without JavaScript a stray `1e3` in
+ *   the box would block a form that posts the ticked preset. `NUMBER_INPUT_SCRIPT`
+ *   checks the digit shape itself and the server refuses a malformed Custom
+ *   value (`coerceConfigValue`).
+ * - The script hides the box's wrapper unless Custom… is ticked; the save bar
+ *   treats a hidden control as inactive.
+ */
+export function renderDurationPresets(
+  presetName: string,
+  boxName: string,
+  current: string | number,
+  presets: readonly number[],
+  b: NumberControlBounds,
+  o: DurationPresetOptions,
+): string {
+  // Matched as stored, untrimmed: a value such as "30 " is not a preset, so it
+  // stays visible under Custom… where it can be corrected. Hiding a box that
+  // holds it would leave a pattern mismatch that blocks the submit unseen.
+  const text = String(current);
+  const isPreset = PRESET_VALUE.test(text) && presets.includes(Number(text));
+  const options = [
+    ...presets.map((n) => ({
+      value: String(n),
+      label: n === 0 && o.zeroLabel ? o.zeroLabel : String(n),
+    })),
+    { value: "custom", label: "Custom…" },
+  ];
+  const group = renderSegmented(
+    presetName,
+    options,
+    isPreset ? String(Number(text)) : "custom",
+    o,
+  );
+  const lock = o.disabled ? LOCK : "";
+  return (
+    `<div class="kb-duration" data-duration>` +
+    group +
+    `<span class="kb-duration__custom" data-duration-custom>` +
+    `<input type="text" class="kb-input" data-duration-input name="${escapeHtml(boxName)}" value="${escapeHtml(current)}"` +
+    ` inputmode="numeric" autocomplete="off" title="${escapeHtml(rangeTitle(b))}" data-number${boundAttrs(b)}` +
+    ` aria-label="Custom ${escapeHtml(o.label)} in ${escapeHtml(o.unit)}" style="width:6rem"${lock}>` +
+    `</span><span class="kb-unit">${escapeHtml(o.unit)}</span>` +
+    `</div>`
+  );
+}
+
+/**
+ * Turns the stepper buttons on. A click moves the box by one inside
+ * `data-min`..`data-max` and fires `input` and `change`, so the save bar counts
+ * it like a keystroke. Each button is disabled at its bound, worked out again
+ * on every `input` and `change` (typing, a click, Discard's restore) and after
+ * the section's master changes: the cascade script re-enables only inputs and
+ * selects, not buttons, so a button that should stay off at the bound would
+ * otherwise be left as it was. A dependency-locked control keeps its locked
+ * buttons as rendered. A value that is not a number leaves both buttons on,
+ * and a click sets the minimum.
+ */
+export const STEPPER_SCRIPT =
+  "(function(){" +
+  "function bound(el,n){var v=el.getAttribute(n);return v===null?null:Number(v)}" +
+  "function sync(box){var i=box.querySelector('input');if(!i)return;" +
+  "var v=i.value.trim(),n=/^[0-9]+$/.test(v)?Number(v):null,lo=bound(i,'data-min'),hi=bound(i,'data-max');" +
+  "Array.prototype.forEach.call(box.querySelectorAll('[data-step]'),function(b){b.hidden=false;" +
+  "if(b.hasAttribute('data-dep-locked'))return;var d=Number(b.getAttribute('data-step'));" +
+  "b.disabled=i.disabled||(n!==null&&((d<0&&lo!==null&&n<=lo)||(d>0&&hi!==null&&n>=hi)))})}" +
+  "function boxOf(el){return el&&el.closest?el.closest('[data-stepper]'):null}" +
+  "document.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('[data-step]'):null;" +
+  "var box=boxOf(b);if(!box||b.disabled)return;var i=box.querySelector('input');if(!i||i.disabled)return;" +
+  "var d=Number(b.getAttribute('data-step')),lo=bound(i,'data-min'),hi=bound(i,'data-max'),v=i.value.trim();" +
+  "var n=/^[0-9]+$/.test(v)?Number(v)+d:(lo===null?0:lo);" +
+  "if(lo!==null&&n<lo)n=lo;if(hi!==null&&n>hi)n=hi;" +
+  "if(String(n)!==i.value){i.value=String(n);i.dispatchEvent(new Event('input',{bubbles:true}));" +
+  "i.dispatchEvent(new Event('change',{bubbles:true}))}" +
+  "sync(box);try{i.focus()}catch(err){}});" +
+  "function onEdit(e){var box=boxOf(e.target);if(box&&e.target.tagName==='INPUT')sync(box)}" +
+  "document.addEventListener('input',onEdit,true);document.addEventListener('change',onEdit,true);" +
+  "function all(){Array.prototype.forEach.call(document.querySelectorAll('[data-stepper]'),sync)}" +
+  "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',all)});" +
+  "all()" +
+  "})();";
+
+/**
+ * Keeps a preset group and its box in step. Ticking a number copies it into the
+ * box, so the box always holds what the form means (and a hidden box never
+ * keeps an out-of-range number that the browser would refuse to submit);
+ * ticking Custom… keeps the number that was there. The box's wrapper is hidden
+ * unless Custom… is ticked. Discard's restoring events (`kbRestore`) put the
+ * radios and the box back themselves, so they only re-sync the wrapper.
+ * Capture phase, so the save bar finds the final state.
+ */
+export const DURATION_PRESETS_SCRIPT =
+  "(function(){" +
+  "function sync(box,user){var radios=box.querySelectorAll('input[type=radio]'),cur=null,i;" +
+  "for(i=0;i<radios.length;i++)if(radios[i].checked)cur=radios[i];" +
+  "var input=box.querySelector('[data-duration-input]'),wrap=box.querySelector('[data-duration-custom]');" +
+  "var custom=!cur||cur.value==='custom';" +
+  "if(input&&user&&cur&&!custom)input.value=cur.value;" +
+  "if(input&&!custom)input.setCustomValidity('');" +
+  // Only Custom… needs a number in the box: required then, so the browser
+  // flags an empty box, and not otherwise, so a preset never depends on it.
+  "if(input)input.required=custom;" +
+  "if(wrap)wrap.hidden=!custom}" +
+  "document.addEventListener('change',function(e){var el=e.target;" +
+  "if(!el||!el.matches||!el.matches('[data-duration] input[type=radio]'))return;" +
+  "sync(el.closest('[data-duration]'),!e.kbRestore)},true);" +
+  "Array.prototype.forEach.call(document.querySelectorAll('[data-duration]'),function(b){sync(b,false)})" +
+  "})();";
