@@ -767,6 +767,23 @@ export interface SettingMetadata {
    */
   max?: number;
   /**
+   * Render a `number` key as a stepper (minus, the digit box, plus) instead of
+   * the bare box (#1427). For ranges under about 30 values. No server rule
+   * comes with it: `min` and `max` are the rule, the stepper only makes the
+   * browser unable to leave them.
+   */
+  stepper?: boolean;
+  /**
+   * Common values of a duration `number` key (#1427), rendered as a radio group
+   * with a final "Custom…" that reveals the bounded box. Each preset lies
+   * inside `min`..`max` and the default is one of them (a drift test checks
+   * both). Presets are a shortcut, never a whitelist: any number in range is
+   * still accepted, so a stored `45` keeps saving.
+   */
+  presets?: number[];
+  /** What the preset `0` is called when it means something other than a number ("Off", "None"). */
+  presetZeroLabel?: string;
+  /**
    * Set on values the bot writes and reads itself (the id of a message it
    * posted), which an admin must never type (#1304). The Settings page shows
    * them read-only with a link to the message instead of an input, and the
@@ -1963,6 +1980,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 10080,
+    presets: [0, 5, 10, 15, 30, 60],
+    presetZeroLabel: "Off",
   },
   "events.create_lead_minutes": {
     label: "Channel creation lead time (minutes)",
@@ -1972,6 +1991,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 1440,
+    presets: [5, 10, 15, 30, 60],
   },
   "events.default_duration_minutes": {
     label: "Default event duration (minutes)",
@@ -1981,6 +2001,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 1440,
+    presets: [30, 60, 90, 120, 180],
   },
   "events.channel_grace_minutes": {
     label: "Channel cleanup grace (minutes)",
@@ -1990,6 +2011,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 0,
     max: 1440,
+    presets: [0, 5, 10, 15, 30, 60],
+    presetZeroLabel: "None",
   },
   "events.recurrence_enabled": {
     label: "Recurring events enabled",
@@ -2020,6 +2043,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 25,
+    stepper: true,
     reloadOnSave: true,
   },
   "events.groups.max_count": {
@@ -2030,6 +2054,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 25,
+    stepper: true,
     reloadOnSave: true,
   },
   "lfg.enabled": {
@@ -2054,6 +2079,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 1,
     max: 10080,
+    presets: [15, 30, 60, 120, 240],
   },
   "lfg.default_size": {
     label: "Default party size",
@@ -2063,6 +2089,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "number",
     min: 2,
     max: 25,
+    stepper: true,
   },
   "lfg.max_active_per_user": {
     label: "Open posts per member",
