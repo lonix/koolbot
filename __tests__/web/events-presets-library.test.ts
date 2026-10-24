@@ -1268,3 +1268,44 @@ describe("a refused submit at the full cap, with a remembered captains lobby (#1
     expect(field(dom, "group_0_name").value).toBe("Red");
   });
 });
+
+describe("a refused submit at the full cap, leaders switched off with a ticked lobby (#1406)", () => {
+  it("restores the draft's third team when the lobby is ticked but disabled", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+          ],
+          captainsEnabled: true,
+          captainCustomisationEnabled: false,
+          captainsLobby: false,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The host ticked the lobby, turned leaders off (the lobby is then disabled
+    // and not posted, but stays ticked), added a third team and was refused.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      groups_captains: false,
+      groups_captains_lobby: true,
+      group_0_name: "Red",
+      group_1_name: "Blue",
+      group_2_name: "Green",
+    });
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "groups_captains").checked).toBe(false);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+  });
+});

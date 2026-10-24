@@ -3428,10 +3428,12 @@ function eventGroupsScript(): string {
     // and is not restored as a team. The other rows are left as they are.
     "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
     "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(x){delete d['group_'+m[1]+'_'+x]});d['groups_captains_lobby']=true}});" +
-    // The lobby counts toward the cap, so the draft's own lobby state is put back
-    // before rows are allocated: a remembered lobby (#1406) must not block a row
-    // the host had room for once they unticked it.
-    "var lbd=form.elements['groups_captains_lobby'];if(lbd)lbd.checked=d['groups_captains_lobby']===true;" +
+    // Switches first, rows second. The captains lobby counts toward the cap, and
+    // only while it is ticked and not disabled with its parent (the leaders
+    // switch), so every switch of the draft is put back and the dependent state
+    // reapplied before any row is allocated. Otherwise a remembered switch (#1406)
+    // would use up room the host had when they submitted.
+    "Object.keys(d).forEach(function(k){var el=form.elements[k];if(el&&el.type==='checkbox')el.checked=d[k]===true});lobby();" +
     "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
     "Object.keys(d).forEach(function(k){" +
     // A saved preset that is no longer offered (e.g. now over the cap, so its card is disabled) is not put back.
