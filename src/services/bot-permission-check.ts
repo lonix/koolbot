@@ -23,7 +23,6 @@
 
 import {
   ChannelType,
-  PermissionFlagsBits,
   type Client,
   type Guild,
   type GuildBasedChannel,
@@ -36,7 +35,6 @@ import { parseLeaderboardTiers } from "./leaderboard-tier-parse.js";
 import {
   FEATURE_REQUIREMENTS,
   missingNeeds,
-  missingOverwriteGrant,
   ROLE_HIERARCHY_REQUIREMENTS,
   type FeatureRequirement,
   type RoleHierarchyRequirement,
@@ -102,13 +100,6 @@ export interface FeatureCheck {
   target: PermissionTarget | null;
   /** The permission names (or `ROLE_ABOVE_BOT`) that are missing there. */
   missing: string[];
-  /**
-   * The permission names this check actually evaluated, when it did not
-   * evaluate all of the entry's needs (a lock-down whose grants are waived by an
-   * overwrite exemption, or not reached because Manage Roles is missing). The
-   * matrix shows only these; absent means every need was evaluated.
-   */
-  assessed?: string[];
 }
 
 export interface BotPermissionReport {
@@ -386,27 +377,6 @@ async function resolveVoiceLobby(
   return { categorySet: true, id: "" };
 }
 
-/**
- * Whether the bot, or one of its roles, has a channel overwrite that allows
- * Manage Roles in this channel: Discord's exemption from "only bits you hold".
- */
-function hasManageRolesOverwrite(
-  me: GuildMember,
-  channel: GuildBasedChannel,
-): boolean {
-  const overwrites = (
-    channel as { permissionOverwrites?: { cache?: Map<string, unknown> } }
-  ).permissionOverwrites?.cache;
-  for (const o of (overwrites?.values() ?? []) as Iterable<{
-    id: string;
-    allow?: { has: (bit: bigint) => boolean };
-  }>) {
-    const mine = o.id === me.id || Boolean(me.roles?.cache?.has(o.id));
-    if (mine && o.allow?.has(PermissionFlagsBits.ManageRoles)) return true;
-  }
-  return false;
-}
-
 /** Whether a channel is of the kind a posting service accepts (see `FeatureRequirement.targetType`). */
 function isPostingChannel(
   type: ChannelType | undefined,
@@ -542,7 +512,6 @@ export async function checkBotPermissions(
       }
       const feature = ref(r);
       let missing: string[] | null = null;
-      let assessed: string[] | undefined;
       let why = "";
       if (!me) {
         why = "The bot's own membership could not be read.";
@@ -573,25 +542,7 @@ export async function checkBotPermissions(
             r.scope === "guild" || !channel
               ? me.permissions
               : me.permissionsIn(channel);
-          const grant =
-            r.overwriteGrant && channel
-              ? missingOverwriteGrant(r.needs, {
-                  inChannel: (bit) => perms.has(bit),
-                  inGuild: (bit) => me.permissions.has(bit),
-                  inParent: (bit) => {
-                    const parentId = channel?.parentId;
-                    const parent = parentId
-                      ? snapshot.channels?.get(parentId)
-                      : null;
-                    return parent ? me.permissionsIn(parent).has(bit) : false;
-                  },
-                  exempt: hasManageRolesOverwrite(me, channel),
-                })
-              : null;
-          missing = grant
-            ? grant.missing
-            : missingNeeds(r, (bit) => perms.has(bit));
-          assessed = grant?.assessed;
+          missing = missingNeeds(r, (bit) => perms.has(bit));
         } catch (err) {
           logger.warn("Bot permission check: permissions unreadable:", err);
           why = "The bot's permissions could not be read.";
@@ -609,7 +560,6 @@ export async function checkBotPermissions(
               : "missing",
         target,
         missing: missing ?? [],
-        ...(assessed ? { assessed } : {}),
       });
       if (missing === null) {
         if (inUse) unknown.push({ feature, target, note: why });

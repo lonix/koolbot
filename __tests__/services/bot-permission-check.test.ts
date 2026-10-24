@@ -69,8 +69,6 @@ interface FakeChannel {
   bits: bigint;
   type?: number;
   parentId?: string;
-  /** Channel overwrites for the bot or its roles that allow these bits. */
-  overwrites?: Array<{ id: string; allow: bigint }>;
 }
 
 function bits(...p: bigint[]): bigint {
@@ -96,26 +94,12 @@ function makeClient(opts: {
   client: never;
   me: { permissionsIn: jest.Mock };
 } {
-  const withOverwrites = (c: FakeChannel): FakeChannel =>
-    ({
-      ...c,
-      permissionOverwrites: {
-        cache: new Map(
-          (c.overwrites ?? []).map((o) => [
-            o.id,
-            { id: o.id, allow: new PermissionsBitField(o.allow) },
-          ]),
-        ),
-      },
-    }) as FakeChannel;
   const channels = new Map(
-    (opts.channels ?? []).map((c) => [c.id, withOverwrites(c)] as const),
+    (opts.channels ?? []).map((c) => [c.id, c] as const),
   );
   const roles = new Map((opts.roles ?? []).map((r) => [r.id, r] as const));
   const fetchedChannels = opts.fetchedChannels
-    ? new Map(
-        opts.fetchedChannels.map((c) => [c.id, withOverwrites(c)] as const),
-      )
+    ? new Map(opts.fetchedChannels.map((c) => [c.id, c] as const))
     : channels;
   const fetchedRoles = opts.fetchedRoles
     ? new Map(opts.fetchedRoles.map((r) => [r.id, r] as const))
@@ -1025,19 +1009,10 @@ describe("channel-posting features (#1254)", () => {
     P.AddReactions,
     P.ManageMessages,
     P.PinMessages,
-    P.ManageRoles,
-    P.ManageChannels,
-  );
-  // What the lock-down sets, allowed or denied: the bot holds them server-wide.
-  const GRANTS = bits(
-    TEXT,
-    P.SendMessagesInThreads,
-    P.CreatePublicThreads,
-    P.CreatePrivateThreads,
   );
   const runPost = (
     opts: Parameters<typeof makeClient>[0],
-  ): ReturnType<typeof run> => run({ serverBits: ALL | GRANTS, ...opts });
+  ): ReturnType<typeof run> => run({ serverBits: ALL, ...opts });
   const text = (
     id: string,
     channelBits: bigint = TEXT,
@@ -1060,11 +1035,9 @@ describe("channel-posting features (#1254)", () => {
     expect(report.unknown).toEqual([]);
     expect(ids(report.okFeatures)).toEqual([
       "notices-cleanup",
-      "notices-lock",
       "notices-pin",
       "notices-post",
       "quotes-cleanup",
-      "quotes-lock",
       "quotes-pin",
       "quotes-post",
       "quotes-votes",
@@ -1081,7 +1054,7 @@ describe("channel-posting features (#1254)", () => {
     };
     // The role has Send Messages server-wide; the channel's overwrite removes it.
     const report = await runPost({
-      serverBits: ALL | GRANTS,
+      serverBits: ALL,
       channels: [text("q", without(TEXT, P.SendMessages))],
     });
     expect(report.problems).toHaveLength(1);
@@ -1283,118 +1256,6 @@ describe("channel-posting features (#1254)", () => {
     settings["moderation.enabled"] = true;
     report = await runPost({ channels });
     expect(report.problems.map((p) => p.permission)).toEqual(["Send Messages"]);
-  });
-
-  describe("the quotes and notices lock-down follows Discord's overwrite rule", () => {
-    const lockOf = (
-      report: Awaited<ReturnType<typeof run>>,
-    ): { outcome: string; missing: string[] } => {
-      const c = report.checks.find((x) => x.feature.id === "notices-lock");
-      return { outcome: c?.outcome ?? "", missing: [...(c?.missing ?? [])] };
-    };
-    beforeEach(() => {
-      settings = { "notices.enabled": true, "notices.channel_id": "n" };
-    });
-
-    it("is in place when the bot holds Manage Roles there and everything it allows and denies server-wide", async () => {
-      const report = await runPost({ channels: [text("n")] });
-      expect(lockOf(report).outcome).toBe("ok");
-    });
-
-    it("needs the denied bits too: Send Messages in Threads and the thread-creation bits", async () => {
-      const report = await runPost({
-        serverBits: without(
-          ALL | GRANTS,
-          P.SendMessagesInThreads,
-          P.CreatePublicThreads,
-          P.CreatePrivateThreads,
-        ),
-        channels: [text("n")],
-      });
-      const lock = lockOf(report);
-      expect(lock.outcome).toBe("missing");
-      expect(lock.missing.sort()).toEqual([
-        "Create Private Threads",
-        "Create Public Threads",
-        "Send Messages in Threads",
-      ]);
-    });
-
-    it("is missing when Manage Roles alone is held and the rest is not (server-wide or in the category)", async () => {
-      const report = await runPost({
-        serverBits: ALL,
-        channels: [text("n")],
-      });
-      const lock = lockOf(report);
-      expect(lock.outcome).toBe("missing");
-      expect(lock.missing).toEqual(
-        expect.arrayContaining(["Add Reactions", "Send Messages in Threads"]),
-      );
-    });
-
-    it("accepts bits held in the channel's parent category instead of server-wide", async () => {
-      const report = await runPost({
-        serverBits: ALL,
-        channels: [
-          { ...text("n"), parentId: "cat" },
-          text("cat", GRANTS, ChannelType.GuildCategory),
-        ],
-      });
-      expect(lockOf(report).outcome).toBe("ok");
-    });
-
-    it("needs nothing more than Manage Roles when the bot has a Manage Roles overwrite on the channel", async () => {
-      for (const id of ["bot-1", "bot-role"]) {
-        const report = await runPost({
-          serverBits: ALL,
-          channels: [
-            { ...text("n"), overwrites: [{ id, allow: P.ManageRoles }] },
-          ],
-        });
-        expect(lockOf(report)).toEqual({ outcome: "ok", missing: [] });
-      }
-      // An overwrite for someone else is no exemption.
-      const other = await runPost({
-        serverBits: ALL,
-        channels: [
-          {
-            ...text("n"),
-            overwrites: [{ id: "someone", allow: P.ManageRoles }],
-          },
-        ],
-      });
-      expect(lockOf(other).outcome).toBe("missing");
-    });
-
-    it("names only Manage Roles when the bot lacks it in the channel, exemption or not", async () => {
-      const report = await runPost({
-        channels: [text("n", without(TEXT, P.ManageRoles))],
-      });
-      expect(lockOf(report)).toEqual({
-        outcome: "missing",
-        missing: ["Manage Roles"],
-      });
-      // The grants were not reached, so the check says it assessed only Manage Roles.
-      expect(
-        report.checks.find((x) => x.feature.id === "notices-lock")?.assessed,
-      ).toEqual(["Manage Roles"]);
-    });
-
-    it("records which needs it assessed: all, or only Manage Roles when the exemption waives the rest", async () => {
-      const assessedOf = (
-        r: Awaited<ReturnType<typeof run>>,
-      ): string[] | undefined =>
-        r.checks.find((x) => x.feature.id === "notices-lock")?.assessed;
-      const full = await runPost({ channels: [text("n")] });
-      expect(assessedOf(full)).toContain("Create Public Threads");
-      const waived = await runPost({
-        serverBits: ALL,
-        channels: [
-          { ...text("n"), overwrites: [{ id: "bot-1", allow: P.ManageRoles }] },
-        ],
-      });
-      expect(assessedOf(waived)).toEqual(["Manage Roles"]);
-    });
   });
 
   it("accepts an announcement channel for the log, but not for the weekly announcer, which needs a plain text channel", async () => {

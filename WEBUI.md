@@ -1412,13 +1412,8 @@ What each needs is what the code calls there: View Channel, Send Messages and Em
 to post (the weekly announcement is plain text, so no Embed Links), Read Message History to
 find its header and the messages it edits or deletes, Add Reactions for the quote votes,
 Manage Messages to delete what members post in the quotes and notices channels, Pin
-Messages for the header while it is pinned, and for the lock-down the bot applies to those
-two channels at startup. The lock-down follows Discord's rule for channel overwrites: the bot needs
-Manage Roles _in the channel_, and every permission it allows or denies there (including Send
-Messages in Threads and the thread-creation permissions) must be held server-wide or on the channel's
-category, unless the bot has a Manage Roles override on the channel itself, which waives that second
-part (when Manage Roles is missing, or the override waives the rest, the matrix lists only Manage Roles for it,
-never the unevaluated permissions as "Has"). The weekly announcement is checked per section (stats, accolades, quote of the week,
+Messages for the header while it is pinned. The page does not check the permissions the
+bot needs to lock the quotes and notices channels read-only at startup. The weekly announcement is checked per section (stats, accolades, quote of the week,
 poll turnout), each only while its own switches are on. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
 moderation, moderation cases, the update check), and anti-raid alerts only while the moderation log
 is on. A configured channel that is a category, a forum or a thread (or not found) is shown as
