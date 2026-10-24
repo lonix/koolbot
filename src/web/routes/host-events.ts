@@ -80,10 +80,17 @@ import {
   isEventRunning,
 } from "../host-panel-shared.js";
 import {
+  hostPanelPermissionFeatures,
+  hostPanelShownWarnings,
   renderHostPanelBody,
   type HostPanelEvent,
   type HostSectionId,
 } from "../host-panel-view.js";
+import {
+  inFeatures,
+  loadPermissionNotice,
+  type PermissionNotice,
+} from "../permission-notice.js";
 import {
   FLASH_MAX,
   readSignedFlash,
@@ -1533,8 +1540,63 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
     ...tagStatusFor(client, event, groupsEnabled),
     adopted: event.nativeAdopted === true,
+    nativeDetached: event.nativeDetached === true,
+    recordedChannels: {
+      main: channelId,
+      groups: groupsEnabled
+        ? (event.groups ?? [])
+            .filter((g) => g.kind !== "leads")
+            .map((g) => g.channelId ?? null)
+        : [],
+      lobby:
+        groupsEnabled && hasCaptainsLobby(event.groups)
+          ? (event.groups ?? [])
+              .filter((g) => g.kind === "leads")
+              .map((g) => g.channelId ?? null)
+          : null,
+    },
     editable: editModeOf(event, new Date()).mode !== "refused",
   };
+}
+
+/**
+ * What the bot lacks for this event (#1253), from the registry's check. Only
+ * while events are on; never throws and never holds the page for long.
+ */
+async function hostPermissionNotice(
+  client: Client,
+  guildId: string,
+  panelEvent: HostPanelEvent,
+  event: Pick<IEvent, "categoryId">,
+): Promise<PermissionNotice | null> {
+  // Nothing to say for a finished event; the full choice needs the check.
+  if (hostPanelPermissionFeatures(panelEvent).length === 0) return null;
+  const enabled = await ConfigService.getInstance()
+    .getBoolean("events.enabled", false)
+    .catch(() => false);
+  const recorded = panelEvent.recordedChannels;
+  return loadPermissionNotice({
+    client,
+    guildId,
+    enabled,
+    // Which channels exist, and the category they sit in, are read by the check
+    // from its own snapshot, so the features chosen here and the category
+    // checked never come from a staler view than the permissions do.
+    eventPlacement: {
+      mainChannelId: recorded?.main ?? null,
+      categoryId: event.categoryId,
+      channelIds: [
+        ...(recorded?.groups ?? []),
+        ...(recorded?.lobby ?? []),
+      ].filter((id): id is string => !!id),
+    },
+    filter: inFeatures(...hostPanelPermissionFeatures(panelEvent)),
+    filterFromReport: (report) =>
+      inFeatures(
+        ...hostPanelPermissionFeatures(panelEvent, report.placement?.present),
+      ),
+    shownWarnings: hostPanelShownWarnings(panelEvent),
+  });
 }
 
 /** The clan tags (#1194) as the panel shows them; nothing while they are off. */
@@ -2147,12 +2209,21 @@ export function createHostEventsRouter(client: Client): Router {
           if (html !== undefined) controls[id] = html;
         }
       }
+      const panelEvent = toPanelEvent(client, event);
+      const permissionNotice = await hostPermissionNotice(
+        client,
+        event.guildId,
+        panelEvent,
+        event,
+      );
       res.type("text/html").send(
         renderUserPage({
           title: `Host panel: ${event.title}`,
           active: "/me/events",
           body: renderHostPanelBody({
-            event: toPanelEvent(client, event),
+            event: panelEvent,
+            permissionNotice,
+            canLinkToPermissions: session.role === "admin",
             controls,
             settingsOpen:
               flash !== null &&

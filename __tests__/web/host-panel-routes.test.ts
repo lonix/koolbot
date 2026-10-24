@@ -331,6 +331,27 @@ describe("host panel page", () => {
     expect(clean.text).not.toContain("could not be set up");
   });
 
+  it("says the permission check could not run while events are on, with no admin link for a host (#1253)", async () => {
+    // The stub Discord client has no server to read, so the check is blind.
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getBoolean: async (key: string) => key === "events.enabled",
+      getBooleanStrict: async () => false,
+      getNumber: async (_k: string, f: number) => f,
+      getString: async (_k: string, f: string) => f,
+    } as never);
+    const host = await call(url(PANEL));
+    expect(host.text).toContain("Bot permissions could not be checked");
+    expect(host.text).not.toContain("/admin/bot-permissions");
+    const admin = await call(url(PANEL), { user: ADMIN, role: "admin" });
+    expect(admin.text).toContain("Bot permissions could not be checked");
+    expect(admin.text).toContain('href="/admin/bot-permissions"');
+  });
+
+  it("shows no permission notice while events are off", async () => {
+    const r = await call(url(PANEL));
+    expect(r.text).not.toContain("data-permission-notice");
+  });
+
   it("shows groups and the control sections of a scheduled event", async () => {
     events[EVENT_ID] = makeEvent({
       groupsEnabled: true,

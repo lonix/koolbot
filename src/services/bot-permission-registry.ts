@@ -189,6 +189,33 @@ export const MANAGE_NICKNAMES_WARNING =
 export const NATIVE_EVENTS_WARNING =
   "Events are not being created in Discord's Events list because the bot lacks the Create Events / Manage Events permission, so announcements have no event card and members cannot mark Interested. Grant it to the bot's role.";
 
+/**
+ * The recorded warnings (above) the event host panel already shows for a
+ * registry entry, and the permissions each one covers. The per-feature notice
+ * (#1253) leaves a missing permission out when its recorded warning is on the
+ * same page and names all of what is missing, so the host reads it once.
+ */
+export const RECORDED_WARNINGS: Readonly<
+  Record<string, { texts: readonly string[]; covers: readonly string[] }>
+> = {
+  "event-channels": {
+    texts: [MANAGE_CHANNELS_CREATE_WARNING, MANAGE_CHANNELS_ORDER_WARNING],
+    covers: [PERM.manageChannels.name],
+  },
+  "event-host-access": {
+    texts: [HOST_ACCESS_WARNING],
+    covers: [PERM.manageRoles.name, PERM.moveMembers.name],
+  },
+  "event-leads-channel": {
+    texts: [LEADS_MANAGE_ROLES_WARNING],
+    covers: [PERM.manageRoles.name],
+  },
+  "event-tags": {
+    texts: [MANAGE_NICKNAMES_WARNING, RESTORE_PERMISSION_WARNING],
+    covers: [PERM.manageNicknames.name],
+  },
+};
+
 const ROLE_HIERARCHY_FIX =
   "Move the bot's role above the roles it hands out in Server Settings, Roles.";
 
