@@ -13,7 +13,14 @@ import {
 } from "./admin-views.js";
 import { ConfigService } from "../services/config-service.js";
 import { EventService } from "../services/event-service.js";
-import { deriveTagScript, groupRowsScript } from "./event-group-form.js";
+import {
+  deriveTagScript,
+  groupBuilderScript,
+  groupRowsScript,
+  groupSetRowScript,
+  markerColoursScript,
+  renderGroupBuilder,
+} from "./event-group-form.js";
 import {
   catalogNotice,
   eventSetupToFormValues,
@@ -40,6 +47,8 @@ import {
   GROUP_FORM_FIELDS,
   GROUP_LABEL_MAX,
   GROUP_NAME_MAX,
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
   GROUP_TAG_MAX,
   resolveGroupCountLimits,
 } from "../services/event-groups.js";
@@ -279,6 +288,18 @@ export const EVENT_PRESETS_SCRIPT =
   "var n=r.querySelector('input[name$=\"_name\"]'),t=r.querySelector('input[name$=\"_tag\"]');if(!n||!t)return;" +
   "if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
   "var v=n.value.trim();if(v){if(on){t.value=derive(v);t.setAttribute('data-auto','1')}}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
+  // The Generate builder is the event form's own script (one copy in
+  // event-group-form.ts): N groups of S, clamped to the cap, surplus rows
+  // emptied, the tags derived by deriveTags above while Clan tags is ticked.
+  `var MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX},COLOURS=${markerColoursScript()};` +
+  "function f(i,k){return form.elements['group_'+i+'_'+k]}" +
+  "function val(n){var e=form.elements[n];return e?String(e.value||'').trim():''}" +
+  "var builder=form.querySelector('[data-group-builder]');if(builder)builder.hidden=false;" +
+  groupSetRowScript() +
+  groupBuilderScript(
+    "deriveTags();if(window.koolGroupRows)window.koolGroupRows.syncAll();recompute()",
+  ) +
+  ";" +
   "box.addEventListener('input',function(e){var t=e.target;if(!t||!t.name)return;" +
   "if(/_tag$/.test(t.name)){t.removeAttribute('data-auto');t.setAttribute('data-manual','1')}" +
   "else if(/_name$/.test(t.name))deriveTags()});" +
@@ -402,6 +423,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
     <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"${lobbyOn ? " checked" : ""}> Captains lobby: a separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.</label>
     ${lobbyFields}
+    ${renderGroupBuilder(props.maxCount)}
     ${GROUP_ROWS_HEAD}
     <div data-group-rows data-max="${props.maxCount}" class="stack">
       ${rows}
