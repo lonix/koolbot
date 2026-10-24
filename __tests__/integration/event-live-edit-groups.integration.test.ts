@@ -30,6 +30,7 @@ import {
   type CustomiseDeps,
 } from "../../src/services/event-leader-customise.js";
 import { EventGroupChannels } from "../../src/services/event-group-channels.js";
+import { getRenameQueue } from "../../src/services/event-rename-queue.js";
 
 /**
  * The live edit of group names, sizes and preset (#1241) writes with shapes the
@@ -688,6 +689,12 @@ describeWithMongo(
     });
 
     describe("the name pass and a marker set while it renames (#1406)", () => {
+      // The shared rename budget (2 per channel per 10 minutes) is process
+      // state: the cases below rename the same channel id several times, so each
+      // starts with a fresh budget, as the unit suites do.
+      beforeEach(() => {
+        getRenameQueue().forget(A_CH);
+      });
       function channelsWith(
         names: Map<string, string>,
         onPatch: () => Promise<void>,
@@ -784,11 +791,13 @@ describeWithMongo(
           { arrayFilters: [{ "g.key": A }] },
         );
         const names = new Map([[A_CH, "old"]]);
-        await channelsWith(names, async () => undefined).syncNames(
+        const out = await channelsWith(names, async () => undefined).syncNames(
           id,
           guildWith(names),
           A,
         );
+        expect(out).toEqual([{ groupKey: A, status: "applied" }]);
+        expect(names.get(A_CH)).toBe("Alpha");
         expect("marker" in (await rawGroup(id))).toBe(false);
         expect((await rawGroup(id)).nameSyncPending).toBe(false);
       });
