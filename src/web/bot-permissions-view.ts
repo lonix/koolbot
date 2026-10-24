@@ -16,11 +16,16 @@
  * does not make every row read "Has".
  *
  * Not built here: a "Re-authorise" invite link (whether Discord applies new
- * permission bits to the bot's existing role is not verified). Places use plain names; the Discord-style
- * channel-type labels are #1303.
+ * permission bits to the bot's existing role is not verified). Places are
+ * labelled the way Discord does (`discord-labels.ts`, #1394).
  */
 
-import { PermissionFlagsBits } from "discord.js";
+import { ChannelType, PermissionFlagsBits } from "discord.js";
+import {
+  channelMention,
+  missingMention,
+  roleMention,
+} from "./discord-labels.js";
 import { icon as sharedIcon, toneIcon } from "./icons.js";
 import {
   escapeHtml,
@@ -219,19 +224,30 @@ function uniqueFeatures(list: FeatureRef[]): FeatureRef[] {
   return list.filter((f) => !seen.has(f.id) && seen.add(f.id));
 }
 
-/** Escaped "where" markup: plain names (the channel-type labels of #1303 are not used yet). */
+/**
+ * Escaped "where" markup through the shared labels (#1394). A channel or
+ * category the snapshot could not find is shown by its id as unavailable (the
+ * check stores the id as the name then). A role keeps a visually hidden
+ * "Role " in front: `@` alone is read as "at".
+ */
 function placeHtml(target: PermissionTarget | null): string {
   if (!target) return '<span class="kb-muted">No channel set</span>';
-  const name = escapeHtml(target.name);
   switch (target.kind) {
     case "server":
       return '<span class="kb-pill">Server-wide</span>';
     case "category":
-      return `<span class="kb-mention kb-mention--category"><span class="kb-visually-hidden">Category </span>${name}</span>`;
+      return channelMention({
+        name: target.name,
+        type:
+          target.channelType ??
+          (target.name === target.id ? undefined : ChannelType.GuildCategory),
+      });
     case "channel":
-      return `<span class="kb-mention"><span class="kb-visually-hidden">Channel </span>${name}</span>`;
+      return channelMention({ name: target.name, type: target.channelType });
     default:
-      return `<span class="kb-mention"><span class="kb-visually-hidden">Role </span>${name}</span>`;
+      return target.id !== null && target.name === target.id
+        ? missingMention(target.name)
+        : `<span class="kb-visually-hidden">Role </span>${roleMention(target.name)}`;
   }
 }
 

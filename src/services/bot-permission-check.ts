@@ -51,6 +51,12 @@ export interface PermissionTarget {
   kind: "server" | "category" | "channel" | "role";
   id: string | null;
   name: string;
+  /**
+   * Discord's channel type, set when the channel was found in the snapshot
+   * (absent when it was not, and for roles and the server). The Web UI picks
+   * the icon from it (#1394).
+   */
+  channelType?: number;
 }
 
 export interface FeatureRef {
@@ -508,6 +514,7 @@ export async function checkBotPermissions(
           kind: r.scope,
           id: targetId,
           name: channel?.name ?? targetId,
+          ...(channel ? { channelType: channel.type } : {}),
         };
       }
       const feature = ref(r);

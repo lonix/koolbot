@@ -14,7 +14,14 @@ import type {
   ServerScan,
 } from "../services/server-scan-service.js";
 import { claimKeyFor, featureTarget } from "../services/channel-claims.js";
-import { channelMention } from "./discord-labels.js";
+import {
+  channelMention,
+  missingMention,
+  missingText,
+  namedChannelMention,
+  roleMention,
+  roleText,
+} from "./discord-labels.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import { findRemovedBotCandidates } from "../services/bot-removal-cleanup.js";
 import {
@@ -468,7 +475,7 @@ function renderRoles(scan: ServerScan): string {
           ? badge("Yes", "on")
           : badge("No", "warn");
       const count = `${r.memberCount}${r.memberCountApproximate ? "+" : ""}`;
-      return `<tr><th scope="row">${escapeHtml(r.name)}</th><td class="kb-num">${r.position}</td><td>${colorSwatch(r.color)}</td><td class="kb-num">${escapeHtml(count)}</td><td>${badges(flags)}</td><td>${manage}</td><td>${chips(r.usedBy)}</td></tr>`;
+      return `<tr><th scope="row">${r.isEveryone ? escapeHtml(r.name) : roleMention(r.name)}</th><td class="kb-num">${r.position}</td><td>${colorSwatch(r.color)}</td><td class="kb-num">${escapeHtml(count)}</td><td>${badges(flags)}</td><td>${manage}</td><td>${chips(r.usedBy)}</td></tr>`;
     })
     .join("");
   const note = `<p class="kb-muted">Member counts come from the cache and may be low (marked <code>+</code>)${
@@ -502,7 +509,7 @@ function renderOverwrites(c: ScanChannel): string {
   return c.overwrites
     .map(
       (o) =>
-        `<div><strong>${escapeHtml(o.label)}</strong> <span class="kb-muted">(${o.type})</span>${
+        `<div>${o.type === "role" && !o.label.startsWith("@") ? roleMention(o.label) : `<strong>${escapeHtml(o.label)}</strong>`} <span class="kb-muted">(${o.type})</span>${
           o.allow.length
             ? ` ${badge("allow", "on")} ${escapeHtml(o.allow.join(", "))}`
             : ""
@@ -602,6 +609,12 @@ function treeRows(scan: ServerScan, filter: ChannelFilter): TreeRow[] {
   return rows;
 }
 
+/** A role id as plain text: `@Name`, or the id as unavailable when the scan has no such role. */
+function roleLabel(names: ReadonlyMap<string, string>, id: string): string {
+  const name = names.get(id);
+  return name === undefined ? missingText(id) : roleText(name);
+}
+
 function renderChannelRow(row: TreeRow, roleName: Map<string, string>): string {
   const c = row.channel;
   const claimKey = claimKeyFor(c);
@@ -625,7 +638,7 @@ function renderChannelRow(row: TreeRow, roleName: Map<string, string>): string {
   const notes: string[] = [];
   if (c.gatedByRoleIds.length)
     notes.push(
-      `gated by: ${c.gatedByRoleIds.map((id) => roleName.get(id) ?? id).join(", ")}`,
+      `gated by: ${c.gatedByRoleIds.map((id) => roleLabel(roleName, id)).join(", ")}`,
     );
   if (c.ownerHint)
     notes.push(
@@ -726,22 +739,22 @@ function renderLeftovers(card: BotCard): string {
   const items: string[] = [];
   if (card.roleNames.length) {
     items.push(
-      `Integration role ${card.roleNames.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(", ")} ${badge("locked", "warn")}: Discord removes it with the bot.`,
+      `Integration role ${card.roleNames.map((n) => roleMention(n)).join(", ")} ${badge("locked", "warn")}: Discord removes it with the bot.`,
     );
   }
   for (const c of l.ownedChannels) {
     items.push(
-      `<strong>${escapeHtml(c.name)}</strong> is mostly written by this bot.${c.usedBy.length ? ` ${escapeHtml(c.usedBy.join(", "))} already use it; bind it before removing the bot.` : ""}`,
+      `${namedChannelMention(c.name, c.typeName)} is mostly written by this bot.${c.usedBy.length ? ` ${escapeHtml(c.usedBy.join(", "))} already use it; bind it before removing the bot.` : ""}`,
     );
   }
   for (const c of l.memberOverwriteChannels) {
     items.push(
-      `<strong>${escapeHtml(c.name)}</strong> keeps a permission overwrite for the bot's member. Discord does not remove it.`,
+      `${namedChannelMention(c.name, c.typeName)} keeps a permission overwrite for the bot's member. Discord does not remove it.`,
     );
   }
   for (const b of l.boundFeatures) {
     items.push(
-      `<strong>${escapeHtml(b.channel)}</strong> is bound to ${escapeHtml(b.features.join(", "))}.`,
+      `${namedChannelMention(b.channel, b.typeName)} is bound to ${escapeHtml(b.features.join(", "))}.`,
     );
   }
   return items.length
@@ -750,10 +763,17 @@ function renderLeftovers(card: BotCard): string {
 }
 
 function renderBotCard(card: BotCard, scan: ServerScan): string {
-  const chName = new Map(scan.channels.map((c) => [c.id, c.name]));
+  const chById = new Map(scan.channels.map((c) => [c.id, c]));
   const bot = scan.bots.find((b) => b.userId === card.userId);
   const overwrites = bot?.overwriteChannelIds.length
-    ? bot.overwriteChannelIds.map((id) => chName.get(id) ?? id).join(", ")
+    ? bot.overwriteChannelIds
+        .map((id) => {
+          const ch = chById.get(id);
+          return ch
+            ? namedChannelMention(ch.name, ch.typeName)
+            : missingMention(id);
+        })
+        .join(" ")
     : "—";
   const kindBadge =
     card.kind === "catalogued"
@@ -777,7 +797,7 @@ function renderBotCard(card: BotCard, scan: ServerScan): string {
   <header class="kb-panel__head"><h3 class="kb-panel__title" id="bot-${escapeHtml(card.userId)}">${escapeHtml(card.name)} ${kindBadge}</h3></header>
   <div class="kb-panel__body kb-stack">
   <p><strong>${escapeHtml(card.summary)}</strong></p>
-  <dl class="kb-kv"><dt>Integration role</dt><dd>${escapeHtml(card.roleNames.join(", ") || "—")}</dd><dt>Channels with overwrites</dt><dd>${escapeHtml(overwrites)}</dd></dl>
+  <dl class="kb-kv"><dt>Integration role</dt><dd>${card.roleNames.map((n) => roleMention(n)).join(" ") || "—"}</dd><dt>Channels with overwrites</dt><dd>${overwrites}</dd></dl>
   ${body}
   ${disclosure("Left over when it is removed", "", renderLeftovers(card))}
   </div>
@@ -843,8 +863,11 @@ ${removed}`;
 
 function renderDiscord(scan: ServerScan): string {
   const c = scan.community;
-  const nameOf = (id: string | null): string =>
-    id ? (scan.channels.find((ch) => ch.id === id)?.name ?? id) : "—";
+  const nameOf = (id: string | null): string => {
+    if (!id) return "—";
+    const ch = scan.channels.find((x) => x.id === id);
+    return ch ? namedChannelMention(ch.name, ch.typeName) : missingMention(id);
+  };
   const onboarding =
     c.onboardingEnabled === null
       ? "unknown"
@@ -855,12 +878,12 @@ function renderDiscord(scan: ServerScan): string {
   const prompts = c.onboardingPrompts
     .map(
       (p) =>
-        `<li>${escapeHtml(p.title)}: <span class="kb-muted">${escapeHtml(p.roleIds.map((id) => roleName.get(id) ?? id).join(", ") || "no roles")}</span></li>`,
+        `<li>${escapeHtml(p.title)}: <span class="kb-muted">${escapeHtml(p.roleIds.map((id) => roleLabel(roleName, id)).join(", ") || "no roles")}</span></li>`,
     )
     .join("");
   const n = scan.naming;
   const native = c.community
-    ? `<p>Community is on. Rules: <strong>${escapeHtml(nameOf(c.rulesChannelId))}</strong>, system: <strong>${escapeHtml(nameOf(c.systemChannelId))}</strong>, public updates: <strong>${escapeHtml(nameOf(c.publicUpdatesChannelId))}</strong>. Onboarding is ${onboarding}.</p>${prompts ? `<ul>${prompts}</ul>` : ""}`
+    ? `<p>Community is on. Rules: ${nameOf(c.rulesChannelId)}, system: ${nameOf(c.systemChannelId)}, public updates: ${nameOf(c.publicUpdatesChannelId)}. Onboarding is ${onboarding}.</p>${prompts ? `<ul>${prompts}</ul>` : ""}`
     : `<p class="kb-muted">Community features are off.</p>`;
   const naming = `<p>${
     n.pattern

@@ -42,6 +42,8 @@ export type CandidateEvidence = "catalogue" | "owner-hint" | "orphan-overwrite";
 export interface CandidateChannel {
   id: string;
   name: string;
+  /** Discord channel type name (`GuildVoice`), so the page can label it. */
+  typeName?: string;
 }
 
 export interface CandidateOwnedChannel extends CandidateChannel {
@@ -67,7 +69,11 @@ export interface RemovedBotCandidate {
   /** Channels it mostly wrote to (needs channel ownership hints). */
   ownedChannels: CandidateOwnedChannel[];
   /** KoolBot features bound to a channel the bot touched. */
-  boundFeatures: Array<{ channel: string; features: string[] }>;
+  boundFeatures: Array<{
+    channel: string;
+    typeName?: string;
+    features: string[];
+  }>;
 }
 
 const EVIDENCE_RANK: Record<CandidateEvidence, number> = {
@@ -160,11 +166,13 @@ export function findRemovedBotCandidates(
     const overwriteChannels = (overwriteIndex.get(userId) ?? []).map((c) => ({
       id: c.id,
       name: c.name,
+      typeName: c.typeName,
     }));
     const owned = ownedIndex.get(userId) ?? [];
     const ownedChannels = owned.map((c) => ({
       id: c.id,
       name: c.name,
+      typeName: c.typeName,
       usedBy: c.usedBy,
       claimKey: claimKeyFor(c),
     }));
@@ -174,7 +182,11 @@ export function findRemovedBotCandidates(
     }
     const boundFeatures = [...touched.values()]
       .filter((c) => c.usedBy.length > 0)
-      .map((c) => ({ channel: c.name, features: c.usedBy }));
+      .map((c) => ({
+        channel: c.name,
+        typeName: c.typeName,
+        features: c.usedBy,
+      }));
     const known = findKnownBot(userId, catalog);
     const tag = owned[0]?.ownerHint?.botTag;
     out.push({

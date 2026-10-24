@@ -1542,6 +1542,20 @@ export function createReadOnlyRouter(
           (bit) => me.permissions.has(bit),
         ).length > 0;
 
+      // The event's channel by name and type, from the guild cache: no Discord
+      // call. Gone (or not cached) is null, which the row shows as unavailable.
+      const guildChannels = client.guilds.cache.get(common.guildId)?.channels
+        .cache;
+      const channelLabelOf = (
+        id: string | null | undefined,
+      ): { channelName?: string | null; channelType?: ChannelType | null } => {
+        if (!id) return {};
+        const ch = guildChannels?.get(id);
+        return ch
+          ? { channelName: ch.name, channelType: ch.type }
+          : { channelName: null, channelType: null };
+      };
+
       const rows = events.map((e) => {
         const counts = countRsvps(e.rsvps);
         const finished = e.state === "ended" || e.state === "cancelled";
@@ -1558,6 +1572,7 @@ export function createReadOnlyRouter(
               : null,
           expected: expectedById.get(String(e._id)) ?? null,
           channelId: e.channelId,
+          ...channelLabelOf(e.channelId),
           recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
           occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
           awaitingSuccessor:

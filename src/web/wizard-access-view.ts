@@ -1,4 +1,5 @@
 import { icon, toneIcon } from "./icons.js";
+import { roleMention } from "./discord-labels.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -310,7 +311,7 @@ export function renderAccessReview(
   const rows = changes
     .map(
       (c) =>
-        `<tr><td>@${escapeHtml(c.roleName)}</td><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="muted">${
+        `<tr><td>${roleMention(c.roleName)}</td><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="muted">${
           c.kind === "create"
             ? `Creates the role group "${escapeHtml(c.groupName)}"`
             : `Updates the role group "${escapeHtml(c.groupName)}"`

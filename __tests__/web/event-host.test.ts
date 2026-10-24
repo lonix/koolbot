@@ -378,4 +378,38 @@ describe("renderHostPanelBody", () => {
     });
     expect(html).not.toMatch(/<script>1|<img src=x|<c>|<r>|<n>|<m>|<t>/);
   });
+
+  it("labels the main voice channel with the speaker icon when it resolved (#1394)", () => {
+    const html = renderHostPanelBody({
+      event: { ...base, channel: "Quiz night", channelType: 2 },
+    });
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).toContain("Quiz night</span>");
+    expect(html).not.toContain("kb-mention--missing");
+  });
+
+  it("shows a main channel that is gone by its id as unavailable, never as a name", () => {
+    const html = renderHostPanelBody({
+      event: { ...base, channel: "123456", channelType: null },
+    });
+    expect(html).toContain("kb-mention--missing");
+    expect(html).toContain("123456 (unavailable)");
+    // A row built without a type is treated the same way.
+    const unknown = renderHostPanelBody({
+      event: { ...base, channel: "123456" },
+    });
+    expect(unknown).toContain("123456 (unavailable)");
+  });
+
+  it("still says Not created yet when there is no channel", () => {
+    expect(renderHostPanelBody({ event: base })).toContain("Not created yet");
+  });
+
+  it("escapes the main channel's name", () => {
+    const html = renderHostPanelBody({
+      event: { ...base, channel: "<i>x</i>", channelType: 2 },
+    });
+    expect(html).not.toContain("<i>x");
+    expect(html).toContain("&lt;i&gt;x");
+  });
 });

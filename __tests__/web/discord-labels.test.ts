@@ -17,9 +17,11 @@ import {
   channelKindOf,
   channelMention,
   channelText,
+  channelTypeByName,
   deletedVoiceMention,
   missingMention,
   missingText,
+  namedChannelMention,
   roleMention,
   roleText,
 } from "../../src/web/discord-labels.js";
@@ -207,6 +209,34 @@ describe("kinds", () => {
     expect(channelKindOf(ChannelType.DM)).toBeNull();
     expect(channelKindOf(null)).toBeNull();
     expect(channelKindOf(undefined)).toBeNull();
+  });
+});
+
+describe("channels known by their type name (#1394)", () => {
+  it("maps ChannelType names to types, and nothing else", () => {
+    expect(channelTypeByName("GuildVoice")).toBe(ChannelType.GuildVoice);
+    expect(channelTypeByName("GuildCategory")).toBe(ChannelType.GuildCategory);
+    expect(channelTypeByName("GuildDirectory")).toBe(
+      ChannelType.GuildDirectory,
+    );
+    // Reverse-mapped numeric keys and prototype names are not channel types.
+    expect(channelTypeByName("2")).toBeNull();
+    expect(channelTypeByName("toString")).toBeNull();
+    expect(channelTypeByName("nope")).toBeNull();
+    expect(channelTypeByName("")).toBeNull();
+    expect(channelTypeByName(null)).toBeNull();
+    expect(channelTypeByName(undefined)).toBeNull();
+  });
+
+  it("labels a channel by kind, and shows a type with no label by its plain, escaped name", () => {
+    expect(namedChannelMention("Lobby", "GuildVoice")).toBe(
+      channelMention({ name: "Lobby", type: ChannelType.GuildVoice }),
+    );
+    expect(namedChannelMention("<b>x</b>", "GuildDirectory")).toBe(
+      "&lt;b&gt;x&lt;/b&gt;",
+    );
+    expect(namedChannelMention("x", undefined)).toBe("x");
+    expect(namedChannelMention("x", "nope")).not.toContain("unavailable");
   });
 });
 

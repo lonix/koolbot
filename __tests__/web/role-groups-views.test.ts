@@ -93,6 +93,7 @@ describe("renderRoleGroupsPage", () => {
     const html = renderRoleGroupsPage(props());
     expect(html).toContain("Mods");
     expect(html).toContain("@Moderator");
+    expect(html).toContain('<span class="kb-mention">@Moderator</span>');
     expect(html).toContain(">3<");
     expect(html).toContain("staff");
     const forms = html.match(/<form /g)?.length ?? 0;

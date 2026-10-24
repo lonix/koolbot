@@ -1327,6 +1327,14 @@ tables and sentences use an icon with the kind as its accessible name. One modul
 decides all of this, and `__tests__/web/discord-labels.test.ts` fails when a page writes its own `#` in front of a name.
 The Rewind page (`/me/rewind`) uses the same labels.
 
+The same labels are on the places that still showed plain names or raw ids (#1394): the Bot permissions "Where" column, the
+Events table's channel column and the host panel's main voice channel, the Server scan, bot cleanup and channel claims
+pages, the Voice Channels status line and the Channel Manager tables, and a role in a table cell (`@Moderators`, the
+"you see this because" line on the member pages, ping roles, tier roles, role groups). A channel or role that no longer
+exists shows its id as `⚠ 1234 (unavailable)`. The names and types come from the guild cache the page already read, so no page
+makes an extra Discord call for them. Where a page holds a channel type only as a word, a type with no label (a
+directory) is shown by its plain name.
+
 With JavaScript, the single-value channel, category and role settings become a searchable picker (#1394): a button showing
 the current value, and a popover with a search box, a header per kind, an icon in front of each row, the category muted on
 the right and a check on the chosen row. Typing `#` lists text channels, `#!` voice channels and `@` roles, as in Discord's

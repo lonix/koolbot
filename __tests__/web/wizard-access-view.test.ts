@@ -116,6 +116,10 @@ describe("renderAccessReview", () => {
     );
     expect(html).not.toContain("<img");
     expect(html).toContain("Event host");
+    // The role cell is a mention, escaped (#1394).
+    expect(html).toContain(
+      '<td><span class="kb-mention">@&lt;img src=x onerror=alert(1)&gt;</span></td>',
+    );
   });
 
   it("says nothing changes when the mapping already matches", () => {

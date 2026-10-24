@@ -7,6 +7,7 @@ import {
 } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
+import { roleMention } from "./discord-labels.js";
 import {
   formatColour,
   PERMISSION_PRESETS,
@@ -176,7 +177,7 @@ function roleCell(g: RoleGroupRow): string {
   if (g.roleId === null) {
     return `<span class="tag tag-info">new role — created on apply</span>`;
   }
-  const name = g.roleName ? `@${escapeHtml(g.roleName)}` : "";
+  const name = g.roleName ? roleMention(g.roleName) : "";
   const badges = [
     g.roleMissing ? `<span class="tag tag-warn">role not found</span>` : "",
     g.gateOnly ? `<span class="tag tag-info">gate-only</span>` : "",
