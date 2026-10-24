@@ -88,6 +88,7 @@ import {
   DEFAULT_GROUP_LABEL,
   DEFAULT_LEADER_LABEL,
   GROUP_FORM_FIELDS,
+  GROUP_FORM_MAX_ROWS,
   GROUP_LABEL_MAX,
   GROUP_MARKER_MAX_CHARS,
   GROUP_NAME_MAX,
@@ -3264,7 +3265,7 @@ function eventGroupsScript(): string {
     "var adv=form.querySelector('[data-groups-advanced]');" +
     "var enabled=form.elements['groups_enabled'];" +
     "var KEY='koolbot-event-form-draft';" +
-    `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX};` +
+    `var MAXNAME=${GROUP_NAME_MAX},MAXTAG=${GROUP_TAG_MAX},MINSIZE=${GROUP_SIZE_MIN},MAXSIZE=${GROUP_SIZE_MAX},HARDROWS=${GROUP_FORM_MAX_ROWS};` +
     `var COLOURS=${colours};` +
     "var max=parseInt(box.getAttribute('data-max'),10)||15;" +
     "function rows(){return box.querySelectorAll('[data-group-row]')}" +
@@ -3276,7 +3277,9 @@ function eventGroupsScript(): string {
     // The captains lobby is a channel and counts toward the cap while it will be
     // posted (ticked and not disabled), exactly as the server counts it.
     "function used(){var l=form.elements['groups_captains_lobby'];return rows().length+(l&&l.checked&&!l.disabled?1:0)}" +
-    "function addRow(){var n=rows().length;if(used()>=max)return false;" +
+    // `force` is for restoring a refused draft only: it bypasses the interactive cap
+    // so every row the host had typed is shown again next to the server's error.
+    "function addRow(force){var n=rows().length;if(!force&&used()>=max)return false;" +
     "var d=document.createElement('div');" +
     "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
     "var r=d.firstElementChild;box.appendChild(r);if(kr())kr().enhance(r);sync();validity();return true}" +
@@ -3375,7 +3378,9 @@ function eventGroupsScript(): string {
     // The preset's clan tags default (#1194); the host can still change the box.
     "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
     "var n=Math.max(rows().length,g.length);" +
-    "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
+    // Every existing row past the preset's own is emptied, however many an over-cap
+    // restore left; setRow only allocates a new row while the cap has room.
+    "for(var i=0;i<n;i++)setRow(i,i<g.length?g[i]:{});" +
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();lobby();validity();summarise();compact(true)}" +
     "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',onPreset)});" +
     // The quick builder: N groups of S, named by colour or number, one marker each.
@@ -3387,7 +3392,7 @@ function eventGroupsScript(): string {
     "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
     "var word=val('groups_label')||'Team';" +
     "var total=Math.max(rows().length,n);" +
-    "for(var i=0;i<total&&i<max;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
+    "for(var i=0;i<total;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
     "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
     "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
@@ -3428,7 +3433,13 @@ function eventGroupsScript(): string {
     // and is not restored as a team. The other rows are left as they are.
     "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_kind$/.exec(k);" +
     "if(m&&d[k]==='leads'){['name','kind','size','tag','marker'].forEach(function(x){delete d['group_'+m[1]+'_'+x]});d['groups_captains_lobby']=true}});" +
-    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i){if(!addRow())return}}});" +
+    // Switches first, rows second. The captains lobby counts toward the cap, and
+    // only while it is ticked and not disabled with its parent (the leaders
+    // switch), so every switch of the draft is put back and the dependent state
+    // reapplied before any row is allocated. Otherwise a remembered switch (#1406)
+    // would use up room the host had when they submitted.
+    "Object.keys(d).forEach(function(k){var el=form.elements[k];if(el&&el.type==='checkbox')el.checked=d[k]===true});lobby();" +
+    "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&rows().length<HARDROWS)addRow(true)}});" +
     "Object.keys(d).forEach(function(k){" +
     // A saved preset that is no longer offered (e.g. now over the cap, so its card is disabled) is not put back.
     "if(k==='groups_preset'){Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){if(r.value===d[k]&&!r.disabled)r.checked=true});return}" +

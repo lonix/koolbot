@@ -1228,3 +1228,245 @@ describe("a refused submit after the reset link, with a remembered setup (#1406)
     expect(field(dom, "group_2_marker").value).toBe("");
   });
 });
+
+describe("a refused submit at the full cap, with a remembered captains lobby (#1406)", () => {
+  it("restores the draft's third team when the lobby was unticked before submitting", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+          ],
+          captainsEnabled: true,
+          captainCustomisationEnabled: false,
+          captainsLobby: true,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The host unticked the lobby, added a third team and was refused.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      groups_captains: true,
+      groups_captains_lobby: false,
+      group_0_name: "Red",
+      group_1_name: "Blue",
+      group_2_name: "Green",
+    });
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+    expect(field(dom, "group_0_name").value).toBe("Red");
+  });
+});
+
+describe("a refused submit at the full cap, leaders switched off with a ticked lobby (#1406)", () => {
+  it("restores the draft's third team when the lobby is ticked but disabled", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+          ],
+          captainsEnabled: true,
+          captainCustomisationEnabled: false,
+          captainsLobby: false,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The host ticked the lobby, turned leaders off (the lobby is then disabled
+    // and not posted, but stays ticked), added a third team and was refused.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      groups_captains: false,
+      groups_captains_lobby: true,
+      group_0_name: "Red",
+      group_1_name: "Blue",
+      group_2_name: "Green",
+    });
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "groups_captains").checked).toBe(false);
+    expect(field(dom, "groups_captains_lobby").disabled).toBe(true);
+  });
+});
+
+describe("restoring a refused draft: the whole grid of switches and row counts (#1406)", () => {
+  // Remembered setup (leaders, lobby): a lobby is only remembered with leaders.
+  const remembered: Array<[boolean, boolean]> = [
+    [false, false],
+    [true, false],
+    [true, true],
+  ];
+  // The draft's switches, in every combination (a ticked lobby with leaders off
+  // is a disabled but still ticked box).
+  const drafts: Array<[boolean, boolean]> = [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ];
+  const CAP = 3;
+  const cases: Array<[boolean, boolean, boolean, boolean, number]> = [];
+  for (const [rc, rl] of remembered) {
+    for (const [dc, dl] of drafts) {
+      for (const n of [1, 2, 3, 4]) cases.push([rc, rl, dc, dl, n]);
+    }
+  }
+
+  it.each(cases)(
+    "remembered leaders=%s lobby=%s, draft leaders=%s lobby=%s, %i rows",
+    (rc, rl, dc, dl, n) => {
+      const html = renderEventsPage({
+        ...COMMON,
+        groupLimits: { defaultCount: 2, maxCount: CAP },
+        groupRemembered: {
+          resetHref: "/admin/events?defaults=1#schedule-event",
+          prefill: {
+            presetId: "",
+            groupLabel: "",
+            leaderLabel: "",
+            channelLeadMinutes: "",
+            rows: [
+              { name: "Red", kind: "team", size: "9", tag: "RD", marker: "🔴" },
+              {
+                name: "Blue",
+                kind: "team",
+                size: "8",
+                tag: "BL",
+                marker: "🔵",
+              },
+            ],
+            captainsEnabled: rc,
+            captainCustomisationEnabled: false,
+            captainsLobby: rl,
+            tagsEnabled: false,
+            tagsSuffix: false,
+          },
+        },
+      } as never);
+      const draft: Record<string, unknown> = {
+        groups_enabled: true,
+        groups_preset: "",
+        groups_captains: dc,
+        groups_captains_lobby: dl,
+      };
+      const marks = ["🟢", "🟡", "🟠", "🟣"];
+      for (let i = 0; i < n; i++) {
+        draft[`group_${i}_name`] = `Draft${i}`;
+        draft[`group_${i}_size`] = String(i + 1);
+        draft[`group_${i}_tag`] = `D${i}`;
+        draft[`group_${i}_marker`] = marks[i];
+        draft[`group_${i}_kind`] = "team";
+      }
+      const dom = boot(html, draft);
+      // Every row of the draft is back, even past the cap: the server's error
+      // is what tells the host to fix it.
+      for (let i = 0; i < n; i++) {
+        expect(field(dom, `group_${i}_name`).value).toBe(`Draft${i}`);
+        expect(field(dom, `group_${i}_size`).value).toBe(String(i + 1));
+        expect(field(dom, `group_${i}_tag`).value).toBe(`D${i}`);
+        expect(field(dom, `group_${i}_marker`).value).toBe(marks[i]);
+      }
+      // No remembered row the draft did not hold comes back.
+      for (let i = n; i < 2; i++) {
+        expect(field(dom, `group_${i}_name`).value).toBe("");
+        expect(field(dom, `group_${i}_size`).value).toBe("");
+      }
+      // The switches are the draft's.
+      expect(field(dom, "groups_captains").checked).toBe(dc);
+      expect(field(dom, "groups_captains_lobby").checked).toBe(dl);
+    },
+  );
+});
+
+describe("replacing the rows after an over-cap restore (#1406)", () => {
+  const twoTeams: EventGroupPreset = {
+    id: "lib:0123456789abcdef01234999",
+    label: "Two teams",
+    description: "",
+    groupLabel: "Team",
+    groups: [
+      { name: "Alpha", kind: "team", size: null, tag: "", marker: "" },
+      { name: "Beta", kind: "team", size: null, tag: "", marker: "" },
+    ],
+  };
+  // Four rows restored at a cap of 3: the server refused them.
+  function overCap(): JSDOM {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupPresets: [twoTeams],
+    } as never);
+    const draft: Record<string, unknown> = {
+      groups_enabled: true,
+      groups_preset: "",
+    };
+    for (let i = 0; i < 4; i++) {
+      draft[`group_${i}_name`] = `Old${i}`;
+      draft[`group_${i}_size`] = "7";
+      draft[`group_${i}_tag`] = `O${i}`;
+      draft[`group_${i}_marker`] = "🟢";
+    }
+    return boot(html, draft);
+  }
+  function surplusIsEmpty(dom: JSDOM): void {
+    for (const i of [2, 3]) {
+      for (const k of ["name", "size", "tag", "marker"]) {
+        expect(field(dom, `group_${i}_${k}`).value).toBe("");
+      }
+    }
+  }
+
+  it("a preset with fewer teams empties every surplus row", () => {
+    const dom = overCap();
+    expect(field(dom, "group_3_name").value).toBe("Old3");
+    choose(dom, twoTeams.id);
+    expect(field(dom, "group_0_name").value).toBe("Alpha");
+    expect(field(dom, "group_1_name").value).toBe("Beta");
+    surplusIsEmpty(dom);
+  });
+
+  it("the quick builder with fewer teams empties every surplus row", () => {
+    const dom = overCap();
+    const count = dom.window.document.querySelector(
+      "[data-build-count]",
+    ) as HTMLInputElement;
+    count.value = "2";
+    (dom.window.document.querySelector("[data-build]") as HTMLElement).click();
+    expect(field(dom, "group_0_name").value).toBe("Red");
+    expect(field(dom, "group_1_name").value).toBe("Blue");
+    surplusIsEmpty(dom);
+  });
+
+  it("the interactive cap still holds for a new allocation", () => {
+    const dom = overCap();
+    const count = dom.window.document.querySelector(
+      "[data-build-count]",
+    ) as HTMLInputElement;
+    count.value = "9";
+    (dom.window.document.querySelector("[data-build]") as HTMLElement).click();
+    // Three teams at most are built; the restored fourth row is emptied.
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "group_3_name").value).toBe("");
+  });
+});
