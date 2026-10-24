@@ -3942,6 +3942,32 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      // Groups off, nothing kept (#1469): the own-groups rows are the event
+      // form's rows, with the marker picker.
+      name: "/me host panel settings (groups off: switch on with own groups)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderGroupChanges(
+          settingsData({
+            groupEdit: undefined,
+            groups: [],
+            groupsSwitch: {
+              on: false,
+              groupLabel: "Team",
+              channelOwed: false,
+              blocked: null,
+              kept: [],
+              presets: [{ id: "builtin:duel", label: "Duel", count: 2 }],
+              presetNotice: null,
+              groupCount: 0,
+              channelCount: 0,
+            },
+          }),
+        ),
+      ),
+    },
+    {
       // The "Event settings" fold: lead time, group leaders and clan tags
       // (children nested), the leader label and what leaders changed.
       name: "/me host panel (event settings, leaders and tags on)",

@@ -428,6 +428,28 @@ describe("adding a group: one result, one audit row", () => {
     );
   });
 
+  it("adds the group with the marker the host picked, and says so in the audit row (#1469)", async () => {
+    const r = await post(
+      "settings",
+      addForm({ s_groupAdd_marker: "\u{1F7E5}" }),
+    );
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(
+      (store.get(EVENT_ID)?.groups as Json[]).find((g) => g.key === NEW)
+        ?.marker,
+    ).toBe("\u{1F7E5}");
+    expect(JSON.stringify(auditRows[0].details)).toContain("marker \u{1F7E5}");
+  });
+
+  it("a marker that is too long is refused, naming the field, and nothing is written (#1469)", async () => {
+    const r = await post(
+      "settings",
+      addForm({ s_groupAdd_marker: "\u{1F7E5}".repeat(5) }),
+    );
+    expect(flashOf(r.location).msg).toContain("New group marker");
+    expect(writes).toEqual([]);
+  });
+
   it("an empty name is no change: nothing is written and the result says so", async () => {
     const r = await post("settings", addForm({ s_groupAdd_name: "  " }));
     expect(flashOf(r.location).msg).toBe(

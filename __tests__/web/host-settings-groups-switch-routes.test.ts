@@ -412,6 +412,21 @@ describe("the switch on the page", () => {
     expect(r.text).toContain('name="custom_tag_1"');
   });
 
+  it("the own-groups rows are the event form's rows: a marker box with the picker, and the picker script is on the page (#1469)", async () => {
+    const r = await call(panel());
+    expect(r.text).toContain('name="custom_marker_1"');
+    expect(r.text).toContain('name="custom_marker_6"');
+    expect(r.text).not.toContain('name="custom_marker_7"');
+    expect(
+      r.text.split('<button type="button" data-marker-btn').length - 1,
+    ).toBe(6);
+    expect(r.text).toContain("data-group-rows");
+    expect(r.text).toContain("data-marker-wrap");
+    // The script that turns the box into the picker (the same one the group editor loads).
+    expect(r.text).toContain("data-marker-input");
+    expect(r.text).toContain("data-emoji-search");
+  });
+
   it("an event with kept groups lists them and offers to bring them back", async () => {
     store.set(EVENT_ID, kept());
     const r = await call(panel());
@@ -423,6 +438,8 @@ describe("the switch on the page", () => {
       'name="s_groupsEnabled" value="{&quot;on&quot;:true}"',
     );
     expect(r.text).not.toContain('name="groups_pick"');
+    // No own-groups rows here, so the picker script is not loaded for the switch (#1469).
+    expect(r.text).not.toContain("data-emoji-search");
   });
 
   it("an event with groups on offers the switch-off, and the retry of a missing channel", async () => {
@@ -588,6 +605,32 @@ describe("switching on", () => {
     expect(groups().every((g) => !!g.channelId)).toBe(true);
     expect(passes).toEqual(["create", "leads", "controls"]);
     expect(auditRows).toHaveLength(1);
+  });
+
+  it("switches on with the markers of the own-groups rows (#1469)", async () => {
+    const r = await post("settings", {
+      b_groupsEnabled: '{"on":false}',
+      groups_pick: "",
+      custom_name_1: "Alpha",
+      custom_marker_1: " \u{1F7E5} ",
+      custom_name_2: "Beta",
+    });
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(groups().map((g) => [g.name, g.marker])).toEqual([
+      ["Alpha", "\u{1F7E5}"],
+      ["Beta", ""],
+    ]);
+  });
+
+  it("a bad marker names its row and nothing is saved (#1469)", async () => {
+    const r = await post("settings", {
+      b_groupsEnabled: '{"on":false}',
+      custom_name_1: "Alpha",
+      custom_marker_1: "\u{1F7E5}".repeat(5),
+    });
+    expect(flashOf(r.location).msg).toContain("Group 1 marker:");
+    expect(doc().groupsEnabled).toBe(false);
+    expect(writes).toEqual([]);
   });
 
   it("own groups are checked with the event form's rules, naming the row and field, and nothing is saved", async () => {
