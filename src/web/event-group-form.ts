@@ -196,7 +196,11 @@ export function markerColoursScript(): string {
  */
 export function renderGroupBuilder(maxCount: number): string {
   const detached = ' form="none"';
-  return `<div class="kb-field" data-group-builder hidden>
+  // `hidden` sits on a wrapper with no styles of its own: `.kb-field` sets
+  // `display`, which would beat the browser's [hidden] and show the builder (and
+  // a Generate button that does nothing) to a visitor without scripts.
+  return `<div data-group-builder hidden>
+      <div class="kb-field">
         <p class="kb-label" id="groups-build-label">Build groups</p>
         <div class="kb-row" role="group" aria-labelledby="groups-build-label">
           <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-count${detached} min="1" max="${maxCount}" value="${Math.min(4, maxCount)}" aria-label="Number of groups">
@@ -207,7 +211,8 @@ export function renderGroupBuilder(maxCount: number): string {
         </div>
         <p class="kb-help" role="status" data-build-note hidden></p>
         <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
-      </div>`;
+      </div>
+    </div>`;
 }
 
 /**

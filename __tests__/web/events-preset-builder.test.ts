@@ -157,6 +157,10 @@ describe.each<Surface>(["admin", "me"])(
       expect(form.contains(doc.querySelector("[data-group-builder]"))).toBe(
         true,
       );
+      // `hidden` is on an unstyled wrapper: `.kb-field` sets display and would show it.
+      const wrap = doc.querySelector("[data-group-builder]") as HTMLElement;
+      expect(wrap.hasAttribute("class")).toBe(false);
+      expect(wrap.firstElementChild?.classList.contains("kb-field")).toBe(true);
       const fields = Array.from(
         form.querySelectorAll("[data-group-builder] input"),
       );
