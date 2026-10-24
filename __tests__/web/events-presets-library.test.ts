@@ -8,6 +8,7 @@ import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import { renderEventsPage } from "../../src/web/admin-views.js";
 import {
+  EVENT_PRESETS_SCRIPT,
   renderEventPresetsPage,
   renderPresetEditorForm,
 } from "../../src/web/event-presets-page.js";
@@ -1117,6 +1118,152 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
     box.checked = false;
     box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(add.hidden).toBe(false);
+  });
+});
+
+describe("the preset editors' header row and derived tags (#1406)", () => {
+  const editor = (values: Record<string, string> = {}): string =>
+    renderPresetEditorForm({
+      csrfInput: '<input type="hidden" name="_csrf" value="t">',
+      action: "/x",
+      editing: null,
+      values,
+      maxCount: 15,
+      defaultCount: 2,
+      cancelHref: "/x",
+    });
+
+  it("shows the column labels once, above the rows, hidden from assistive tech", () => {
+    const html = editor();
+    expect(html.match(/kb-grouprows__head/g)).toHaveLength(1);
+    expect(html.indexOf("kb-grouprows__head")).toBeLessThan(
+      html.indexOf("data-group-rows"),
+    );
+    expect(html).toContain('class="kb-grouprows__head" aria-hidden="true"');
+    expect(html).toContain("<span>Marker</span><span>Name</span>");
+  });
+
+  it("the member page's editor carries the same header row", () => {
+    const body = renderMyEventPresetsBody({
+      csrfToken: "t",
+      presets: [],
+      editing: null,
+      editUnavailable: false,
+      values: {},
+      prefillNote: null,
+      maxCount: 15,
+      defaultCount: 2,
+    });
+    expect(body).toContain("kb-grouprows__head");
+  });
+
+  const run = (): Document => {
+    const dom = new JSDOM(`<body>${editor()}</body>`, {
+      runScripts: "outside-only",
+    });
+    dom.window.eval(EVENT_PRESETS_SCRIPT);
+    return dom.window.document;
+  };
+  const type = (doc: Document, name: string, value: string): void => {
+    const el = doc.querySelector(`[name="${name}"]`) as HTMLInputElement;
+    el.value = value;
+    el.dispatchEvent(new doc.defaultView!.Event("input", { bubbles: true }));
+  };
+  const tagOf = (doc: Document, i: number): HTMLInputElement =>
+    doc.querySelector(`[name="group_${i}_tag"]`) as HTMLInputElement;
+
+  it("derives the tag from the name while Clan tags is ticked, like the event form", () => {
+    const doc = run();
+    (doc.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+      true;
+    type(doc, "group_0_name", "Red");
+    type(doc, "group_1_name", "Alpha Bravo");
+    expect(tagOf(doc, 0).value).toBe("RED");
+    expect(tagOf(doc, 1).value).toBe("AB");
+    type(doc, "group_0_name", "Blue");
+    expect(tagOf(doc, 0).value).toBe("BLUE");
+    type(doc, "group_0_name", "");
+    expect(tagOf(doc, 0).value).toBe("");
+  });
+
+  it("leaves the tag alone when Clan tags is off or the tag was typed by hand", () => {
+    const doc = run();
+    type(doc, "group_0_name", "Red");
+    expect(tagOf(doc, 0).value).toBe("");
+    (doc.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+      true;
+    type(doc, "group_1_tag", "ZZ");
+    type(doc, "group_1_name", "Green");
+    expect(tagOf(doc, 1).value).toBe("ZZ");
+  });
+
+  it("clears an automatic tag when the name is emptied, even after Clan tags was switched off", () => {
+    const doc = run();
+    const box = doc.querySelector('[name="groups_tags"]') as HTMLInputElement;
+    box.checked = true;
+    type(doc, "group_0_name", "Red");
+    expect(tagOf(doc, 0).value).toBe("RED");
+    box.checked = false;
+    box.dispatchEvent(new doc.defaultView!.Event("change", { bubbles: true }));
+    type(doc, "group_0_name", "");
+    expect(tagOf(doc, 0).value).toBe("");
+    // Switched off, a name alone still generates nothing.
+    type(doc, "group_0_name", "Blue");
+    expect(tagOf(doc, 0).value).toBe("");
+  });
+
+  describe("after a refused save", () => {
+    const refuse = (steps: (doc: Document) => void): Document => {
+      const first = new JSDOM(`<body>${editor()}</body>`, {
+        url: "http://localhost/admin/events/presets",
+        runScripts: "outside-only",
+      });
+      first.window.eval(EVENT_PRESETS_SCRIPT);
+      steps(first.window.document);
+      first.window.document
+        .querySelector("form[data-preset-form]")!
+        .dispatchEvent(
+          new first.window.Event("submit", { bubbles: true, cancelable: true }),
+        );
+      const draft = first.window.sessionStorage.getItem(
+        "koolbot-event-preset-draft",
+      ) as string;
+      const second = new JSDOM(
+        `<body><div class="notice err" data-flash>nope</div>${editor()}</body>`,
+        {
+          url: "http://localhost/admin/events/presets",
+          runScripts: "outside-only",
+        },
+      );
+      second.window.sessionStorage.setItem("koolbot-event-preset-draft", draft);
+      second.window.eval(EVENT_PRESETS_SCRIPT);
+      return second.window.document;
+    };
+
+    it("a restored automatic tag keeps following the name", () => {
+      const doc = refuse((d) => {
+        (d.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+          true;
+        type(d, "group_0_name", "Red");
+      });
+      expect(tagOf(doc, 0).value).toBe("RED");
+      type(doc, "group_0_name", "Blue");
+      expect(tagOf(doc, 0).value).toBe("BLUE");
+      type(doc, "group_0_name", "");
+      expect(tagOf(doc, 0).value).toBe("");
+    });
+
+    it("a tag cleared by hand stays empty and is not regenerated", () => {
+      const doc = refuse((d) => {
+        (d.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+          true;
+        type(d, "group_0_name", "Red");
+        type(d, "group_0_tag", "");
+      });
+      expect(tagOf(doc, 0).value).toBe("");
+      type(doc, "group_0_name", "Green");
+      expect(tagOf(doc, 0).value).toBe("");
+    });
   });
 });
 
