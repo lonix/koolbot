@@ -232,9 +232,15 @@ const done = (o: LiveEditOutcome): Done => {
 const text = (o: LiveEditOutcome): string => describeLiveEditOutcome(o).message;
 
 describe("the rows are part of the core's registry", () => {
-  it("lists one name row and one size row per position, then the preset, with letters-only ids", () => {
+  it("lists one name row and one size row per position, the one marker row (by group key, #1406), then the preset, with letters-only ids", () => {
     expect(GROUP_EDIT_POSITIONS).toBe(25);
-    expect(GROUP_EDIT_ROWS).toHaveLength(25 + 25 + 1);
+    expect(GROUP_EDIT_ROWS).toHaveLength(25 + 1 + 25 + 1);
+    expect(GROUP_EDIT_ROWS.map((r) => r.id).slice(24, 28)).toEqual([
+      "groupNameY",
+      "groupMarkers",
+      "groupSizeA",
+      "groupSizeB",
+    ]);
     expect(NAME_A).toBe("groupNameA");
     expect(groupNameRowId(24)).toBe("groupNameY");
     expect(SIZE_B).toBe("groupSizeB");

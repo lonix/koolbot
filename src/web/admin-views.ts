@@ -2976,6 +2976,21 @@ const LEADS_KIND_OPTION: [string, string] = [
 ];
 
 /**
+ * Changes for a place that renders the rows but posts other field names (the
+ * host panel's live edit, whose rows are named `s_<row>`).
+ */
+export interface GroupRowOptions {
+  /** Field names, by column; a column left out keeps `group_<index>_<field>`. */
+  names?: Partial<Record<"marker" | "name" | "size" | "tag", string>>;
+  /** The group's kind cannot change here: no kind select and no "More" button. */
+  fixedKind?: boolean;
+  /** This group carries no tag (an open group): the tag box is shown disabled and posts nothing. */
+  noTag?: boolean;
+  /** Markup inside the row, after the grid: hidden shown-value fields, a note. Built by the caller (escaped there). */
+  extra?: string;
+}
+
+/**
  * One group row, on one line: marker, name, size, tag, and a "More" button for
  * the kind (Team is right for almost everything). `index` and `position` are
  * numbers for a rendered row and the `__N__` / `__P__` placeholders for the
@@ -2995,8 +3010,10 @@ export function renderGroupRow(
     tag?: string;
     marker?: string;
   },
+  options?: GroupRowOptions,
 ): string {
-  const field = (f: string): string => `group_${index}_${f}`;
+  const field = (f: "marker" | "name" | "size" | "tag" | "kind"): string =>
+    (f === "kind" ? undefined : options?.names?.[f]) ?? `group_${index}_${f}`;
   const kinds = (
     group?.kind === "leads"
       ? [...GROUP_KIND_OPTIONS, LEADS_KIND_OPTION]
@@ -3015,19 +3032,31 @@ export function renderGroupRow(
           </div>
           <input type="text" class="kb-input kb-input--sm" name="${field("name")}" aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
           <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
-          <input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">
-          <button type="button" data-kind-toggle class="kb-btn kb-btn--ghost kb-btn--sm" aria-expanded="true" aria-label="Group ${position}: more options" hidden>More</button>
-        </div>
+          ${
+            options?.noTag
+              ? `<input type="text" class="kb-input kb-input--sm" aria-label="Group ${position} tag (only a team carries a tag)" title="Only a team carries a tag" disabled>`
+              : `<input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">`
+          }${
+            options?.fixedKind
+              ? ""
+              : `
+          <button type="button" data-kind-toggle class="kb-btn kb-btn--ghost kb-btn--sm" aria-expanded="true" aria-label="Group ${position}: more options" hidden>More</button>`
+          }
+        </div>${
+          options?.fixedKind
+            ? ""
+            : `
         <div data-kind-panel class="kb-grouprows__more">
           <label class="kb-label">Group ${position} kind
             <select class="kb-select kb-input--sm" name="${field("kind")}">${kinds}</select>
           </label>
-        </div>
+        </div>`
+        }${options?.extra ?? ""}
       </div>`;
 }
 
 /** The labels over the group rows' columns, matching `.kb-grouprow`. */
-const GROUP_ROWS_HEAD =
+export const GROUP_ROWS_HEAD =
   '<div class="kb-grouprows__head" aria-hidden="true"><span>Marker</span><span>Name</span><span>Max size</span><span>Tag</span><span></span></div>';
 
 const CHECK_ICON = icon("check", { className: "kb-choice__check" });

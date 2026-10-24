@@ -3,22 +3,14 @@
  * A separate module so the form in `host-settings-view.ts` only has to call
  * `renderLeadersTagsFields`. Every field posts its new value (`s_<row>`) with the
  * value it showed (`b_<row>`), exactly like the other rows (see
- * `services/event-live-edit.ts`, rule 3); a team's tag is one input per team
- * (`s_groupTags_<key>` and `b_groupTags_<key>`, read by the row's `collect`).
+ * `services/event-live-edit.ts`, rule 3); a team's tag is not here any more: its input
+ * is in the group rows (`host-settings-groups.ts`).
  * Everything dynamic goes through `escapeHtml`.
  */
 
 import { escapeHtml } from "./html.js";
-import {
-  GROUP_LABEL_MAX,
-  GROUP_TAG_MAX,
-  hasCaptainsLobby,
-} from "../services/event-groups.js";
+import { GROUP_LABEL_MAX, hasCaptainsLobby } from "../services/event-groups.js";
 import { baseField, valueField } from "../services/event-live-edit.js";
-import {
-  groupTagBaseField,
-  groupTagField,
-} from "../services/event-live-edit-leaders-tags.js";
 
 export interface LeadersTagsTeamView {
   key: string;
@@ -122,19 +114,14 @@ ${hidden(baseField("captainsLobby"), d.lobby ? "1" : "0")}
 <p class="muted">${escapeHtml(hint)}</p></div>`;
 }
 
+/**
+ * A team's tag is edited in its group row under "Change the groups" (#1406), next
+ * to its marker, name and size, so the tag has one place on the panel. The row
+ * is still the `groupTags` row of the live edit; only the input moved.
+ */
 function renderTeamTags(d: LeadersTagsView): string {
   if (d.teams.length === 0) return "";
-  const items = d.teams
-    .map((t, i) => {
-      const id = `host-settings-tag-${i}`;
-      const name = `${t.marker ? `${t.marker} ` : ""}${t.name}`;
-      return `<div class="field"><label for="${id}">Tag of ${escapeHtml(name)}</label>
-<input id="${id}" type="text" maxlength="${GROUP_TAG_MAX}" name="${escapeHtml(groupTagField(t.key))}" value="${escapeHtml(t.tag)}" placeholder="no tag">
-${hidden(groupTagBaseField(t.key), t.tag)}</div>`;
-    })
-    .join("\n");
-  return `${items}
-<p class="muted">An empty tag means that team carries no tag. A changed tag is put on the members' nicknames from their original nickname, never on top of the old tag.</p>`;
+  return `<p class="muted">Each team's tag is set in its row under "Change the groups", next to its marker, name and size. A changed tag is put on the members' nicknames from their original nickname, never on top of the old tag.</p>`;
 }
 
 /** The leaders and tags part of the form. Empty when the event has no groups. */

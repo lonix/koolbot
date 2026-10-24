@@ -323,6 +323,27 @@ export function checkGroupTag(raw: string): GroupTextCheck {
 }
 
 /**
+ * The one rule for a group's marker (the event form, the host panel's live
+ * edit): whitespace collapsed, empty (no marker) up to `GROUP_MARKER_MAX_CHARS`
+ * characters counted as code points, no control characters. `error` reads after
+ * "Group 3 marker: ".
+ */
+export function checkGroupMarker(raw: string): GroupTextCheck {
+  const value = normalizeGroupText(raw);
+  if (Array.from(value).length > GROUP_MARKER_MAX_CHARS) {
+    return {
+      ok: false,
+      value,
+      error: `at most ${GROUP_MARKER_MAX_CHARS} characters, for example one coloured circle emoji.`,
+    };
+  }
+  if (CONTROL_CHARS.test(value)) {
+    return { ok: false, value, error: "control characters are not allowed." };
+  }
+  return { ok: true, value };
+}
+
+/**
  * The one rule for a group's size (the event form, the host panel's live edit
  * #1241): empty is no limit (null), else a whole number from `GROUP_SIZE_MIN`
  * to `GROUP_SIZE_MAX`. `error` reads after "Group 3 size: ".
@@ -615,14 +636,9 @@ export function validateGroupSetup(
     const tag = tagCheck.value;
     if (!tagCheck.ok) errors.push(`${where} tag: ${tagCheck.error}`);
 
-    const marker = normalizeGroupText(row.marker);
-    if (Array.from(marker).length > GROUP_MARKER_MAX_CHARS) {
-      errors.push(
-        `${where} marker: at most ${GROUP_MARKER_MAX_CHARS} characters, for example one coloured circle emoji.`,
-      );
-    } else if (CONTROL_CHARS.test(marker)) {
-      errors.push(`${where} marker: control characters are not allowed.`);
-    }
+    const markerCheck = checkGroupMarker(row.marker);
+    const marker = markerCheck.value;
+    if (!markerCheck.ok) errors.push(`${where} marker: ${markerCheck.error}`);
 
     let key = row.key ?? "";
     if (!GROUP_KEY_PATTERN.test(key) || usedKeys.has(key)) {

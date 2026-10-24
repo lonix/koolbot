@@ -2226,12 +2226,18 @@ export class EventGroupChannels {
     }
   }
 
-  /** Clear `nameSyncPending` of a group that still has this name and channel. */
+  /**
+   * Clear `nameSyncPending` of a group that still has this name, marker and
+   * channel. The channel name is built from the name AND the marker, so a flag
+   * set by a marker edit while this rename was in flight (#1406) must survive:
+   * an empty marker matches a stored empty string, null or a missing field.
+   */
   private async clearNamePending(
     eventId: string,
     group: GroupRow,
     channelId: string,
   ): Promise<void> {
+    const marker = group.marker ?? "";
     try {
       await Event.updateOne(
         {
@@ -2240,6 +2246,7 @@ export class EventGroupChannels {
             $elemMatch: {
               key: group.key,
               name: group.name,
+              marker: marker === "" ? { $in: ["", null] } : marker,
               channelId,
               nameSyncPending: true,
             },

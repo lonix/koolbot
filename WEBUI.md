@@ -2198,7 +2198,8 @@ rights can assign, randomise, move and send people from it, and gets a 403 on an
   (`leader-label`) and the last edits leaders made are under **Event settings**. A team a leader renamed shows **Reset name and tag**
   (`reset-team`) in its column.
 - **Event settings** (fold) holds the channel lead time, **Group leaders** and **Clan tags** (children nested) and the leader label; **Change the
-  groups** (fold) holds names and sizes, **Switch preset**, add and remove groups, and switching groups on or off. They are separate forms that
+  groups** (fold) holds the group rows (marker, name, size and, for a team, tag), **Switch preset**, add and remove groups, and switching groups
+  on or off. They are separate forms that
   post to `settings`, so saving one never touches the other's rows. The lock row of the settings form moved to the toolbar.
 
 The sections below describe what each action does. Since #1424 the cards **Assign people**, **Move people**, **Leaders** and **Team names and tags**
@@ -2546,7 +2547,8 @@ switched back).
   order, and one that turns leaders off ends customisation too without changing its stored
   value).
 - **Clan tags on server nicknames** on or off, **where the tag goes** (before or after the name)
-  and **the tag of each team** (empty means none). Turning tags on backs up each member's original
+  and **the tag of each team** (empty means none; it is edited in the team's row under **Change the groups**, next to its marker, name and
+  size, and saved by that fold's form). Turning tags on backs up each member's original
   nickname and then tags them; turning them off restores the originals now; changing a tag or the
   position re-tags from the stored original, so a name is `[SKY] Alice` and never
   `[SKY] [RED] Alice`. This is the one nickname logic of **Clan tags** (it never builds a name
@@ -2576,9 +2578,25 @@ switched back).
   member data (nicknames are backed up in the existing nickname backup, which the data export and
   reset already cover).
 
-**Group names, sizes and presets** (#1241) are rows of the Live settings form. The form shows one
-name field and one size field per group, with the people count next to them, and a separate **Switch
-preset** form under it.
+**Group names, sizes and presets** (#1241) are rows of the Live settings form. Since #1406 the form shows the
+event form's own group rows: for each group a marker (with the emoji picker), a name, a size and, for a
+team, a tag, with the people count under the row, and a separate **Switch preset** form under it. The kind
+of a group cannot be changed in a running event, so the kind is not on these rows, and an open group has
+a disabled tag box (only a team carries a tag).
+
+- **Change a marker.** The marker is the emoji in front of the group's channel name, so a change is a
+  rename of the channel and is saved and finished exactly like a name change (the value and a pending
+  mark in one conditional write, then the channel; if Discord's rename budget is used up the marker is
+  saved, the result says when the channel follows, and the scan finishes it). The marker rules are
+  the event form's (up to 4 characters, no control characters, empty for none). Markers and tags are
+  addressed by the group's key, not by its position, so a form that was open while a group was added,
+  removed or moved cannot put a marker or tag on another group; if the set of groups changed, the
+  marker row is refused ("reload") instead of saving a part of it. A marker changed by someone else
+  while the form was open is reported as a conflict and not overwritten. The marker of the hidden
+  captains lobby is not editable. A name and a marker changed in the same save are two renames of the
+  same channel; the second can be held back by Discord's rename budget and is then finished by the scan.
+- **Change a tag.** Same row, same rules and same nickname follow-up as before (see **Clan tags** above);
+  only the input moved from the Event settings fold into the group rows.
 
 - **Rename a group.** The group keeps its members, its leader and its channel; the channel is renamed
   in place. Discord allows about 2 renames of one channel per 10 minutes, and KoolBot never waits for

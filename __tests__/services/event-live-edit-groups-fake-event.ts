@@ -118,6 +118,7 @@ export const GROUP_FIELDS = new Set([
   "name",
   "size",
   "tag",
+  "marker",
   "kind",
   "captainId",
   "originalName",

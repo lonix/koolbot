@@ -1,6 +1,7 @@
 /**
  * The group editor of the host panel's "Live settings" section (#1241): the
- * names and sizes of the groups, and the preset switch. Kept apart from
+ * markers, names, sizes and tags of the groups (the event form's rows,
+ * `renderGroupRow`, #1406), and the preset switch. Kept apart from
  * `host-settings-view.ts` (which only calls `renderGroupEditor` and
  * `renderPresetForm`) so another step's controls do not collide with these.
  *
@@ -17,7 +18,11 @@
 
 import { escapeHtml } from "./html.js";
 import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
-import { GROUP_KIND_OPTIONS } from "./admin-views.js";
+import {
+  GROUP_KIND_OPTIONS,
+  GROUP_ROWS_HEAD,
+  renderGroupRow,
+} from "./admin-views.js";
 import { renderSeriesTick } from "./host-settings-series.js";
 import {
   GROUP_NAME_MAX,
@@ -34,6 +39,8 @@ import {
 import {
   GROUP_PRESET_ROW_ID,
   groupNameRowId,
+  groupMarkerBaseField,
+  groupMarkerField,
   groupNameKeyField,
   groupSizeKeyField,
   groupSizeRowId,
@@ -46,6 +53,10 @@ import {
   isGroupOverSize,
   valueField,
 } from "../services/event-live-edit.js";
+import {
+  groupTagBaseField,
+  groupTagField,
+} from "../services/event-live-edit-leaders-tags.js";
 import {
   enabledPresets,
   loadPresetCatalog,
@@ -68,6 +79,8 @@ export interface GroupEditGroupView {
   kind: string;
   name: string;
   marker: string;
+  /** Stored tag, empty = none (only a team carries one). */
+  tag: string;
   /** Stored size, null = no limit. */
   size: number | null;
   memberCount: number;
@@ -107,7 +120,12 @@ function hidden(name: string, value: string): string {
   return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
 }
 
-/** Names and sizes, one row per group; goes INSIDE the settings form. */
+/**
+ * Marker, name, size and tag, one row per group; goes INSIDE the settings form.
+ * The rows are the event form's (`renderGroupRow` and the group rows script), so
+ * the places that edit groups look and work the same; only the field names are
+ * the live edit's (see the options passed below).
+ */
 export function renderGroupEditor(d: GroupEditViewData): string {
   if (d.groups.length === 0) return "";
   // The hidden captains lobby (#1251) has no row here. The row ids are the
@@ -129,18 +147,50 @@ export function renderGroupEditor(d: GroupEditViewData): string {
       if (g.sizePending) {
         notes.push('<span class="muted">channel limit pending</span>');
       }
-      return (
-        `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(n)}</td>` +
-        `<td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(valueField(nameId))}" value="${escapeHtml(g.name)}" aria-label="Name of group ${n}">${hidden(baseField(nameId), g.name)}${hidden(groupNameKeyField(i), g.key)}</td>` +
-        `<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(valueField(sizeId))}" value="${escapeHtml(sizeText)}" placeholder="No limit" aria-label="Size of group ${n}">${hidden(baseField(sizeId), sizeText)}${hidden(groupSizeKeyField(i), g.key)}</td>` +
-        `<td><span class="mono">${escapeHtml(g.memberCount)}</span> ${notes.join(" ")}</td></tr>`
+      const isTeam = g.kind === "team";
+      // The shown values (`b_`) and the key each positional row was shown for
+      // (`k_`, the guard of the name and size rows). The marker and the tag are
+      // addressed by key and carry no guard.
+      const extra =
+        hidden(baseField(nameId), g.name) +
+        hidden(groupNameKeyField(i), g.key) +
+        hidden(baseField(sizeId), sizeText) +
+        hidden(groupSizeKeyField(i), g.key) +
+        hidden(groupMarkerBaseField(g.key), g.marker) +
+        (isTeam ? hidden(groupTagBaseField(g.key), g.tag) : "") +
+        `<p class="muted"><span class="mono">${escapeHtml(g.memberCount)}</span> ${g.memberCount === 1 ? "person" : "people"} ${notes.join(" ")}</p>`;
+      return renderGroupRow(
+        String(i),
+        String(n),
+        {
+          marker: g.marker,
+          name: g.name,
+          size: sizeText,
+          tag: g.tag,
+          kind: g.kind,
+        },
+        {
+          names: {
+            marker: groupMarkerField(g.key),
+            name: valueField(nameId),
+            size: valueField(sizeId),
+            tag: groupTagField(g.key),
+          },
+          fixedKind: true,
+          noTag: !isTeam,
+          extra,
+        },
       );
     })
-    .join("");
+    .join("\n");
   // Only the hidden lobby: nothing to edit here.
   if (shown === 0) return "";
-  return `<div class="field"><table class="prefs-table"><thead><tr><th scope="col">#</th><th scope="col">${escapeHtml(d.groupLabel)} name</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${rows}</tbody></table>
-<p class="muted">A name another ${escapeHtml(d.groupLabel.toLowerCase())} has, or goes back to when a leader's rename is reset, is refused. A rename changes the channel in place (Discord allows about 2 renames per channel every 10 minutes: if it is used up, the name is saved and the channel follows by itself). A size is the most people a group takes and the channel's user limit; lowering it below the number of people moves nobody, the group is marked over size and takes nobody new until it is below its size again. Leave a size empty for no limit.</p></div>`;
+  const label = escapeHtml(d.groupLabel.toLowerCase());
+  return `<div class="field"><div class="kb-grouprows" data-group-rows>
+${GROUP_ROWS_HEAD}
+${rows}
+</div>
+<p class="muted">A name another ${label} has, or goes back to when a leader's rename is reset, is refused. A marker is the emoji in front of the channel's name, so changing it renames the channel like a name does (Discord allows about 2 renames per channel every 10 minutes: if it is used up, the change is saved and the channel follows by itself). A size is the most people a group takes and the channel's user limit; lowering it below the number of people moves nobody, the group is marked over size and takes nobody new until it is below its size again. Leave a size empty for no limit. An empty tag means that team carries no tag; a changed tag is put on the members' nicknames from their original nickname, never on top of the old tag. Only a team has a tag.</p></div>`;
 }
 
 /** The preset switch, its own form so it never shares a save with name edits. */
@@ -274,6 +324,7 @@ export async function buildGroupEditView(
       hasChannel: !!g.channelId,
       name: g.name,
       marker: g.marker ?? "",
+      tag: (g.tag ?? "").trim(),
       size: typeof g.size === "number" ? g.size : null,
       memberCount: (g.memberIds ?? []).length,
       overSize: isGroupOverSize(g),

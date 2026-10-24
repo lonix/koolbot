@@ -11,6 +11,7 @@ export interface CGroup {
   key: string;
   name: string;
   tag?: string;
+  marker?: string;
   kind: string;
   channelId?: string | null;
   captainId?: string | null;

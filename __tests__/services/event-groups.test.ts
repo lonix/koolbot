@@ -8,6 +8,7 @@ import {
   NICKNAME_MAX,
   TAG_DECORATION_LENGTH,
   captainsLobbyName,
+  checkGroupMarker,
   copyGroupSetup,
   effectiveChannelLeadMinutes,
   emptyGroupSetup,
@@ -275,6 +276,32 @@ describe("validateGroupSetup", () => {
     expect(
       errorsOf(input({ rows: [row(1, { marker: "\u0001" })] }))[0],
     ).toMatch(/control characters/);
+  });
+
+  it("checkGroupMarker is the one rule: empty is no marker, code points are counted, control characters are refused", () => {
+    expect(checkGroupMarker("")).toEqual({ ok: true, value: "" });
+    expect(checkGroupMarker("  \u{1F7E2}  ")).toEqual({
+      ok: true,
+      value: "\u{1F7E2}",
+    });
+    // A flag is two code points, four code points are the limit.
+    expect(
+      checkGroupMarker("\u{1F1F3}\u{1F1F4}\u{1F1F8}\u{1F1EA}"),
+    ).toMatchObject({
+      ok: true,
+    });
+    expect(
+      checkGroupMarker(
+        "\u{1F1F3}\u{1F1F4}\u{1F1F8}\u{1F1EA}\u{1F1E9}\u{1F1F0}",
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^at most 4 characters/),
+    });
+    expect(checkGroupMarker("a\u0001")).toMatchObject({
+      ok: false,
+      error: "control characters are not allowed.",
+    });
   });
 
   it("limits the marker to a few characters", () => {

@@ -526,6 +526,55 @@ describe("the Captains lobby switch of the event form (#1251)", () => {
   });
 });
 
+describe("renderGroupRow options (the host panel's live-edit rows, #1406)", () => {
+  it("posts the names it is given, and the default names otherwise", () => {
+    const html = renderGroupRow(
+      "3",
+      "4",
+      { name: "Red", marker: "R", size: "2", tag: "R" },
+      { names: { marker: "m1", name: "n1", size: "z1", tag: "t1" } },
+    );
+    for (const name of ["m1", "n1", "z1", "t1"]) {
+      expect(html).toContain(`name="${name}"`);
+    }
+    expect(html).not.toContain("group_3_name");
+    // The kind keeps its default name (it is not renamed by `names`).
+    expect(html).toContain('name="group_3_kind"');
+    const plain = renderGroupRow("3", "4", { name: "Red" });
+    expect(plain).toContain('name="group_3_marker"');
+    expect(plain).toContain('name="group_3_name"');
+    expect(plain).toContain('name="group_3_size"');
+    expect(plain).toContain('name="group_3_tag"');
+  });
+
+  it("fixedKind leaves out the kind select, its panel and the More button", () => {
+    const html = renderGroupRow(
+      "0",
+      "1",
+      { kind: "team" },
+      { fixedKind: true },
+    );
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("data-kind-toggle");
+    expect(html).not.toContain("data-kind-panel");
+    expect(renderGroupRow("0", "1", { kind: "team" })).toContain(
+      "data-kind-toggle",
+    );
+  });
+
+  it("noTag shows a disabled tag box that posts nothing", () => {
+    const html = renderGroupRow("0", "1", { tag: "X" }, { noTag: true });
+    expect(html).not.toContain('name="group_0_tag"');
+    expect(html).toMatch(/<input[^>]*aria-label="Group 1 tag[^>]*disabled>/);
+  });
+
+  it("extra goes inside the row's item, after the grid", () => {
+    const html = renderGroupRow("0", "1", {}, { extra: "<i>EXTRA</i>" });
+    expect(html.indexOf("EXTRA")).toBeGreaterThan(html.indexOf("kb-grouprow"));
+    expect(html.indexOf("EXTRA")).toBeLessThan(html.lastIndexOf("</div>"));
+  });
+});
+
 describe("the Captains lobby counts toward the cap of Add a group (#1263)", () => {
   const change = (dom: JSDOM, name: string, checked: boolean): void => {
     const el = field(dom, name);

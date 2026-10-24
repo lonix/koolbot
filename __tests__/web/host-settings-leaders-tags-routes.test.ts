@@ -280,7 +280,7 @@ afterEach(() => {
 });
 
 describe("the leaders and tags fields in the Live settings section", () => {
-  it("shows each switch with its stored value as the base, and one input per team tag", async () => {
+  it("shows each switch with its stored value as the base, and one tag input per team in the group rows", async () => {
     lstore.set(
       EVENT_ID,
       makeEvent({ captainsEnabled: true, tagsEnabled: true, tagsSuffix: true }),
@@ -292,8 +292,14 @@ describe("the leaders and tags fields in the Live settings section", () => {
     expect(r.text).toContain('name="b_tagsEnabled" value="1"');
     expect(r.text).toContain('name="b_tagsSuffix" value="1"');
     expect(r.text).toContain('name="b_leaderLabel" value="Leader"');
-    expect(r.text).toContain(`name="s_groupTags_${RED}" value="RED"`);
-    expect(r.text).toContain(`name="s_groupTags_${BLUE}" value=""`);
+    // The tag inputs are the group rows' (#1406): the same posted names, one
+    // place on the page, and not in the Event settings form.
+    const inputOf = (name: string): string =>
+      new RegExp(`<input[^>]*name="${name}"[^>]*>`).exec(r.text)?.[0] ?? "";
+    expect(inputOf(`s_groupTags_${RED}`)).toContain('value="RED"');
+    expect(inputOf(`b_groupTags_${RED}`)).toContain('value="RED"');
+    expect(inputOf(`s_groupTags_${BLUE}`)).toContain('value=""');
+    expect(r.text.split(`name="s_groupTags_${RED}"`)).toHaveLength(2);
     expect(r.text).toContain("Red &lt;b&gt;x&lt;/b&gt;");
   });
 

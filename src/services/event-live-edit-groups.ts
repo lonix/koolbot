@@ -21,6 +21,11 @@
  *   position a conflict (#1242: removing or adding a group moves positions).
  * - `groupSizeA`, ...: the size (max members and the channel's user limit,
  *   1 to 99, empty for no limit) of the group at that position.
+ * - `groupMarkers` (#1406): the marker of every group but the hidden captains
+ *   lobby, as ONE row holding a map from group KEY to marker (like the team
+ *   tags): a key, never a position, so it needs no `guard`. The marker is part of
+ *   the channel's name, so a change is a stored value plus a channel rename.
+ *   See `groupMarkersRow`.
  * - `groupPreset`: switch the preset, applying names, sizes and default tags to
  *   the existing groups BY POSITION. One atomic write for all groups.
  *
@@ -111,6 +116,7 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   GROUP_COUNT_HARD_MAX,
   captainsLobbyNameTaken,
+  checkGroupMarker,
   checkGroupName,
   checkGroupSize,
   checkGroupTag,
@@ -511,6 +517,187 @@ function sizeRow(index: number): LiveEditRow {
       return finish(ctx, key);
     },
   });
+}
+
+// ---------------------------------------------------------------
+// Marker row
+// ---------------------------------------------------------------
+
+export const GROUP_MARKERS_ROW_ID = "groupMarkers";
+/** Posted per group: `s_groupMarkers_<key>` (value) and `b_groupMarkers_<key>` (shown). */
+export const groupMarkerField = (key: string): string =>
+  `s_${GROUP_MARKERS_ROW_ID}_${key}`;
+export const groupMarkerBaseField = (key: string): string =>
+  `b_${GROUP_MARKERS_ROW_ID}_${key}`;
+const MARKER_VALUE_RE = /^s_groupMarkers_(g_[0-9a-f]{8})$/;
+
+type MarkerMap = { [groupKey: string]: string };
+
+/** The groups with a marker: all but the hidden captains lobby (its name is derived, #1251). */
+const markerGroups = (e: IEvent): GroupRowData[] =>
+  (e.groups ?? []).filter((g) => g.kind !== "leads");
+
+const markerText = (raw: string | null | undefined): string =>
+  checkGroupMarker(raw ?? "").value;
+
+/**
+ * Row: the marker of every group (the lobby excepted), as one map from group
+ * key to marker. Unlike the name and size rows it is addressed by KEY, never by
+ * position, exactly as the team tags are: a form that was opened before a group
+ * was removed, added or moved cannot put a marker on another group, so it needs
+ * no `guard`. The cost is the tags' too: if the set of groups changed while the
+ * form was open, the whole row is refused ("reload") instead of saving a part.
+ *
+ * The marker is part of the group's voice channel name (`groupChannelName`), so
+ * a change is a stored value plus a channel rename, written and finished like a
+ * name edit (decision 1 of the header): the value and `nameSyncPending` in ONE
+ * conditional write, then the channel pass. The pending flag is the one of the
+ * name rows, so a re-save finishes an owed rename through the group's NAME row
+ * (it reconciles, and the pass renames to the stored name and marker); this row
+ * has no `owed` of its own, or one owed rename would be reconciled and reported
+ * twice. A name and a marker changed in one save make two renames of the same
+ * channel (the name row runs first); the second may be `limited` by Discord's
+ * rename budget, which is reported and finished by the pass.
+ */
+export const groupMarkersRow: LiveEditRow = asRow<MarkerMap>({
+  id: GROUP_MARKERS_ROW_ID,
+  label: "Group markers",
+  read: (e) => {
+    const map: MarkerMap = {};
+    for (const g of markerGroups(e)) map[g.key] = markerText(g.marker);
+    return map;
+  },
+  applicable: (e) =>
+    hasGroups(e) && markerGroups(e).length > 0
+      ? null
+      : "This event has no groups to mark.",
+  collect: (body) => {
+    const raw: MarkerMap = {};
+    const base: MarkerMap = {};
+    let posted = false;
+    let baseMissing = false;
+    for (const [name, value] of Object.entries(body)) {
+      const m = MARKER_VALUE_RE.exec(name);
+      if (!m || typeof value !== "string") continue;
+      posted = true;
+      raw[m[1]] = value;
+      const shown = body[groupMarkerBaseField(m[1])];
+      if (typeof shown === "string") base[m[1]] = shown;
+      else baseMissing = true;
+    }
+    if (!posted) return null;
+    // An empty base cannot be parsed: the form is "out of date" (an empty
+    // marker is a valid value, so a missing shown value must not read as one).
+    return {
+      raw: JSON.stringify(raw),
+      base: baseMissing ? "" : JSON.stringify(base),
+    };
+  },
+  parse: (raw) => {
+    const bad = {
+      ok: false as const,
+      error: "Group markers: the form is not valid. Reload the page.",
+    };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return bad;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return bad;
+    }
+    const map: MarkerMap = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v !== "string") return bad;
+      map[k] = markerText(v);
+    }
+    return { ok: true, value: map };
+  },
+  validate: (to, ctx) => {
+    const groups = markerGroups(ctx.event);
+    const keys = new Set(groups.map((g) => g.key));
+    const sameKeys =
+      Object.keys(to).length === keys.size &&
+      Object.keys(to).every((k) => keys.has(k));
+    if (!sameKeys) {
+      return "the groups changed while you were editing. Reload the page and try again.";
+    }
+    const errors: string[] = [];
+    for (const g of groups) {
+      const checked = checkGroupMarker(to[g.key]);
+      if (!checked.ok) errors.push(`${g.name}: ${checked.error}`);
+    }
+    return errors.length > 0 ? errors.join(" ") : null;
+  },
+  describe: (v) => {
+    const parts = Object.values(v).filter((m) => m !== "");
+    return parts.length === 0
+      ? "no markers (the channel names follow)"
+      : `markers ${parts.join(" ")} (the channel names follow)`;
+  },
+  async apply(ctx) {
+    const { eventId, guildId, from, to } = ctx;
+    const changed = Object.keys(to).filter((k) => to[k] !== from[k]);
+    if (changed.length === 0) return { status: "applied" };
+    const $set: Record<string, unknown> = {};
+    const arrayFilters: Array<Record<string, string>> = [];
+    const mustHold: Array<Record<string, unknown>> = [];
+    changed.forEach((key, i) => {
+      $set[`groups.$[g${i}].marker`] = to[key];
+      $set[`groups.$[g${i}].nameSyncPending`] = true;
+      arrayFilters.push({ [`g${i}.key`]: key });
+      mustHold.push({
+        groups: {
+          $elemMatch: {
+            key,
+            marker: from[key] === "" ? { $in: ["", null] } : from[key],
+          },
+        },
+      });
+    });
+    // Asked synchronously right before the write (nothing awaited in between).
+    if (ctx.ending()) {
+      return {
+        status: "failed",
+        message: "was not saved because the event is being ended",
+      };
+    }
+    const result = await Event.updateOne(
+      {
+        _id: eventId,
+        guildId,
+        state: { $in: OPEN },
+        groupsEnabled: true,
+        $and: mustHold,
+      },
+      { $set },
+      { arrayFilters },
+    );
+    if ((result?.matchedCount ?? 0) !== 1) return { status: "lost" };
+    return finishRenames(ctx, changed);
+  },
+});
+
+/** Rename the channels of the groups whose marker changed; the owed texts as one outcome. */
+async function finishRenames(
+  ctx: ApplyContext<MarkerMap>,
+  keys: string[],
+): Promise<RowOutcome> {
+  const owed: string[] = [];
+  for (const key of keys) {
+    const group = (ctx.event.groups ?? []).find((g) => g.key === key);
+    if (!group?.channelId) continue;
+    if (ctx.ending()) {
+      owed.push(`${group.name}: the channel was not renamed (event ending)`);
+      continue;
+    }
+    const text = renameOwed(await attempt(ctx, "name", key));
+    if (text) owed.push(`${group.name}: ${text}`);
+  }
+  return owed.length === 0
+    ? { status: "applied" }
+    : { status: "partial", message: owed.join("; ") };
 }
 
 // ---------------------------------------------------------------
@@ -944,9 +1131,10 @@ export const groupSizeRows: readonly LiveEditRow[] = Array.from(
   (_, i) => sizeRow(i),
 );
 
-/** Every row of this step, in execution order: names, sizes, then the preset. */
+/** Every row of this step, in execution order: names, markers, sizes, then the preset. */
 export const GROUP_EDIT_ROWS: readonly LiveEditRow[] = [
   ...groupNameRows,
+  groupMarkersRow,
   ...groupSizeRows,
   groupPresetRow,
 ];
