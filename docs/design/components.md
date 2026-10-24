@@ -13,8 +13,8 @@ session and the way out.
 **Markup.** `header.kb-topbar` → `a.kb-topbar__brand` (name and `span.kb-topbar__motto`), `span.kb-pill.kb-mono` with the version, and
 `div.kb-topbar__end`, which starts with `span.kb-whoami` (avatar initial, `span.kb-whoami__name` with the display name, one ScopeBadge per scope above Member).
 
-- Admin console: whoami, a ghost link to *My preferences*, the session timer, then *Finish* (small danger button: it ends the admin session).
-- Everyone else: whoami, *Admin console* (only for admins who opened `/me`), the timer, then *Sign out*.
+- Admin console: whoami, a ghost link to _My preferences_, the session timer, then _Finish_ (small danger button: it ends the admin session).
+- Everyone else: whoami, _Admin console_ (only for admins who opened `/me`), the timer, then _Sign out_.
 - When a newer release exists, an `a.kb-pill.kb-pill--info` follows the version pill.
 - Under five minutes left, `is-low` turns the timer `warn`.
 - The bar wraps at every width and grows in height (`min-height`, never a fixed `height`); the identity group shrinks (`min-width: 0`) and the name breaks
@@ -26,29 +26,29 @@ One app for everyone; each scope adds its own sections, and admins get the conso
 
 **Non-admins** (signed in with `/me`): `nav.kb-sidenav` holds one group per scope the person has, each headed by the scope's icon and name.
 
-| Scope | Section | Pages |
-| --- | --- | --- |
-| Member | You | My preferences (its tabs: Overview, Notifications, Timezone, Voice) |
-| Event host | Hosting | Your events, New event |
-| Moderator | Moderation | Mod log, Command audit, and Tickets once it is on |
+| Scope      | Section    | Pages                                                               |
+| ---------- | ---------- | ------------------------------------------------------------------- |
+| Member     | You        | My preferences (its tabs: Overview, Notifications, Timezone, Voice) |
+| Event host | Hosting    | Your events, New event                                              |
+| Moderator  | Moderation | Mod log, Command audit, and Tickets once it is on                   |
 
 A person with only the Member scope has one section, so there is no sidebar at all: My preferences shows its tabs in one centred column.
 
 **Admins** (signed in with `/config`) get the console, grouped by task (#1296):
 
-| Group | Pages |
-| --- | --- |
-| (top) | Dashboard |
-| Features | the switched-on features, A to Z; then *N turned off*, folded |
-| Access | Command permissions, Role groups, Bot permissions |
+| Group        | Pages                                                                        |
+| ------------ | ---------------------------------------------------------------------------- |
+| (top)        | Dashboard                                                                    |
+| Features     | the switched-on features, A to Z; then _N turned off_, folded                |
+| Access       | Command permissions, Role groups, Bot permissions                            |
 | Server setup | Setup wizard, Server scan, Channel claims, Channel manager, Adoption history |
-| Bot | Presence, Database, Environment, Command audit, Command metrics |
-| (pinned) | All settings |
+| Bot          | Presence, Database, Environment, Command audit, Command metrics              |
+| (pinned)     | All settings                                                                 |
 
 - Renamed to say what the page does: Permissions → **Command permissions**, Bot Status → **Presence**, Bootstrap → **Environment**, Adoption →
   **Adoption history**, Settings → **All settings**.
 - Mark the current page with `aria-current="page"`; a page with problems gets a warn count badge.
-- *N turned off* is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch). It is open when the current page is inside it.
+- _N turned off_ is a `details` element whose open state is remembered per browser (`localStorage`, in try/catch). It is open when the current page is inside it.
 - Below 760px the nav sits above the content (reflow, #855).
 
 ### PageHeader
@@ -58,9 +58,9 @@ The top of a page's content: an optional breadcrumb, the title, one line of what
 **Markup.** `header.kb-pagehead` → `div.kb-pagehead__text` (`p.kb-pagehead__crumbs`, `h1.kb-pagehead__title`, `p.kb-pagehead__sub` or
 `p.kb-pagehead__meta`) and `div.kb-pagehead__actions`.
 
-- One `h1` per page, in `page-title`. A state badge may follow the title inside the `h1` (an event's *Active*).
+- One `h1` per page, in `page-title`. A state badge may follow the title inside the `h1` (an event's _Active_).
 - Use `__sub` for a sentence; use `__meta` for facts (time, duration, channel), each a `span` with a leading icon.
-- At most one primary button, and it goes last. A freshness note ("Read 12 s ago") sits left of a *Check again* button.
+- At most one primary button, and it goes last. A freshness note ("Read 12 s ago") sits left of a _Check again_ button.
 
 ### Tabs
 
@@ -70,7 +70,7 @@ Underlined tabs for the member pages: Overview, Notifications, Timezone, Voice.
 colour alone).
 
 Members only see what they can use. A tab whose feature the server has switched off (Birthday, Rewind) is not rendered at all, and its route returns
-404 (#1292). This replaces the greyed *Off* tabs of #709.
+404 (#1292). This replaces the greyed _Off_ tabs of #709.
 
 Also used inside a page for sibling views of one thing (Server scan: Overview, Roles, Channels, Other bots, Discord), each with a count badge. Inside
 a panel, switch sections with a SegmentedControl instead.
@@ -95,10 +95,10 @@ Access step and on Role groups.
 
 **Markup.** `div.kb-access` (grid) → `article.kb-access__card` → `header.kb-access__head` (icon well, `h3.kb-access__title`, `p.kb-access__how`),
 `ul.kb-access__can` (a check per thing they can do; `li.is-not` with a minus for what they cannot), and `div.kb-access__roles` (a Picker of roles, or
-*Create @Event host* when none exists, plus an optional help line).
+_Create @Event host_ when none exists, plus an optional help line).
 
-- Write *can* lines as plain verbs in the member's terms ("Run the host panel: teams, moves, clan tags").
-- List *cannot* lines only where people would expect otherwise ("Change settings").
+- Write _can_ lines as plain verbs in the member's terms ("Run the host panel: teams, moves, clan tags").
+- List _cannot_ lines only where people would expect otherwise ("Change settings").
 
 ### Steps
 
@@ -118,8 +118,8 @@ what deletes or undoes.
 **Markup.** `button.kb-btn` or `a.kb-btn`, plus `kb-btn--primary | --danger | --ghost`, and `--sm` for dense rows. An icon goes first (`svg.kb-icon`).
 Icon-only buttons are `kb-btn--icon` and need an `aria-label`.
 
-- One `--primary` per view (the save bar's *Save settings* counts as the view's).
-- Labels say what happens, in sentence case: *Save settings*, *Remove 2 teams*, *Switch groups off*. Not *OK*, *Submit* or *Yes*.
+- One `--primary` per view (the save bar's _Save settings_ counts as the view's).
+- Labels say what happens, in sentence case: _Save settings_, _Remove 2 teams_, _Switch groups off_. Not _OK_, _Submit_ or _Yes_.
 - A danger button that removes things opens a Dialog first; the dialog's button repeats the label.
 - `disabled` greys to 50%; say why next to it (help text), never only by the greyed button.
 
@@ -127,7 +127,7 @@ Icon-only buttons are `kb-btn--icon` and need an `aria-label`.
 
 An on/off control that saves as a checkbox. It replaces the "Off: … / On: …" selects of the old forms.
 
-**Markup.** `label.kb-switch` → `input[type=checkbox][role=switch]`, `span.kb-switch__track`, optional `span.kb-switch__state` (prints *On* or *Off*,
+**Markup.** `label.kb-switch` → `input[type=checkbox][role=switch]`, `span.kb-switch__track`, optional `span.kb-switch__state` (prints _On_ or _Off_,
 so the state never rests on colour or position alone), then the label text. Without visible text, give the input an `aria-label`.
 
 - On: `primary` track, white thumb. Off: `bg` track with a `control` edge (3.66:1 on surface), `muted` thumb.
@@ -168,7 +168,7 @@ Numbers that cannot be wrong (#1304): a stepper for small ranges, preset duratio
 
 - **Stepper:** `span.kb-stepper` → minus button, `input[inputmode=numeric][pattern="[0-9]*"]`, plus button; the buttons disable at `min` and `max`.
   `kb-stepper--sm` in dense rows. A `span.kb-unit` follows.
-- **Durations:** a SegmentedControl of common values (`5 · 10 · 15 · 30 · 60 · Custom…`) and the unit after it; *Custom…* reveals a bounded box.
+- **Durations:** a SegmentedControl of common values (`5 · 10 · 15 · 30 · 60 · Custom…`) and the unit after it; _Custom…_ reveals a bounded box.
 - **Box:** `input.kb-input--sm` with `inputmode=numeric`, sized to its content.
 
 **In a setting row** (#1427) the metadata decides: `stepper` for ranges under about 30 values, `presets` for durations, the box otherwise.
@@ -192,10 +192,10 @@ clamping silently.
 
 ### SettingRow
 
-The building block of every settings form: name and one line on the left, the control on the right, and the long explanation behind *More*.
+The building block of every settings form: name and one line on the left, the control on the right, and the long explanation behind _More_.
 
 **Markup.** `div.kb-settings` → `div.kb-setting` → a text `div` (`p.kb-setting__name`, `p.kb-setting__desc`), `div.kb-setting__control`, and an
-optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permission chip, or nested children). Group rows under a `kb-overline` in
+optional `div.kb-setting__extra` (inline _More_, a help line, a missing-permission chip, or nested children). Group rows under a `kb-overline` in
 `div.kb-settings__group`.
 
 - **Changed from the default:** a small dot after the name (`kb-setting__changed`, with visually hidden "(changed)") and a reset icon button next to
@@ -203,9 +203,9 @@ optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permissi
 - **Children nest under their parent** in `div.kb-nested` (a left rule and an indent). A child is never shown disabled unless its parent sits right
   above it (#1299).
 - **Missing permission next to the setting it breaks** (#1253): `a.kb-chip.kb-chip--warn` ("Bot lacks Manage Nicknames") linking to Bot permissions.
-- **Bot-managed values** (message ids) are never inputs (#1304): show *Jump to message* and *Re-post* instead.
-  The row shows the id as text with *Jump to message* and, once a message exists, a *Re-post* chip (`span.kb-mono` and `a.kb-chip`, or a "Not posted yet"
-  line) and has no field. *Re-post* is only a link to the owning feature page (#1428): the action itself is a `renderRepostCard` card there (a
+- **Bot-managed values** (message ids) are never inputs (#1304): show _Jump to message_ and _Re-post_ instead.
+  The row shows the id as text with _Jump to message_ and, once a message exists, a _Re-post_ chip (`span.kb-mono` and `a.kb-chip`, or a "Not posted yet"
+  line) and has no field. _Re-post_ is only a link to the owning feature page (#1428): the action itself is a `renderRepostCard` card there (a
   confirm-gated POST form, red confirm, consequences listed, the shown id sent back as `expectedId`), never a button on All settings.
 - **A setting with its own editor** (`editedElsewhere`, the leaderboard tiers) is not listed on All settings (#1428).
 - Controls follow #1304: Switch, SegmentedControl, NumberField, Picker, EmojiPicker, TimezoneSelect, MessageSelect or ColourField.
@@ -216,9 +216,9 @@ optional `div.kb-setting__extra` (inline *More*, a help line, a missing-permissi
 The marker for an event group: a small button showing the current emoji that opens a grid (#1299).
 
 **Markup.** `button.kb-emoji-btn` (the emoji, or a plus when empty; `aria-label` says "Marker: 🔵") and `div.kb-emoji-pop` → search,
-`p.kb-picker__group`, `div.kb-emoji-grid` of buttons (`aria-pressed` on the current one), and a *No marker* button.
+`p.kb-picker__group`, `div.kb-emoji-grid` of buttons (`aria-pressed` on the current one), and a _No marker_ button.
 
-- The curated first page is the coloured circles and squares, then common team icons. *Generate* uses the same colour order.
+- The curated first page is the coloured circles and squares, then common team icons. _Generate_ uses the same colour order.
 - Unicode only: Discord custom emoji cannot go in a channel name, so they are never offered, and neither is any emoji over the 4-code-point limit.
 - No JavaScript: the text input it replaces.
 - **In a setting row** (#1426: the channel name prefix and suffix, the event channel prefix) the field is `span.kb-emoji-field[data-emoji-field]` and the
@@ -234,14 +234,14 @@ An IANA zone for a setting or an event (#1426).
 **Markup.** `span.kb-tz[data-tz]` → `input[type=search][data-tz-search]` (hidden until the script runs, `form="none"` so it never posts, `aria-label`
 "Search timezones"), `select.kb-select` and `span.kb-help[data-tz-status][role=status]` ("3 timezones match").
 
-- The first option is the default: *Default (Europe/Oslo)*, posting nothing where blank means "the server zone" (settings), or the zone itself on a
+- The first option is the default: _Default (Europe/Oslo)_, posting nothing where blank means "the server zone" (settings), or the zone itself on a
   form that must post one. A zone the runtime does not list but that is stored shows as a selected `Zone (custom)` option and posts unchanged.
 - UTC is always listed, once: the runtime's own list omits it.
 - Searching only hides non-matching options (`hidden`, never `disabled`: a disabled option is not posted, so a selected one must never be disabled),
   so option indexes never move; the selected and the original option always stay visible; `new york` finds `America/New_York`; Enter picks the first
   match. Safari does not hide options in a dropdown, so there the search only helps through Enter and the match count.
 - No JavaScript: the plain select.
-- Also used on `/me/timezone` (#1436): *Server default* is the blank first option, and the live "Current time" preview listens to the same select.
+- Also used on `/me/timezone` (#1436): _Server default_ is the blank first option, and the live "Current time" preview listens to the same select.
 
 ### MessageSelect
 
@@ -249,7 +249,7 @@ One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#14
 
 **Markup.** `span.kb-msgpick` → `select.kb-select` and an optional `span.kb-help` under it.
 
-- The first option is empty, *Link the channel instead*. Each message is an option labelled where it is and what it hands out
+- The first option is empty, _Link the channel instead_. Each message is an option labelled where it is and what it hands out
   (`# roles · 🎮 Gamer, 🎨 Artist +2`, at most 100 characters), newest first, at most 50.
 - Labels come from stored rows and the channel names the page already holds: no Discord call per option. A channel that is gone reads
   `⚠ <id> (unavailable)`.
@@ -263,13 +263,13 @@ One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#14
 
 A role colour for a setting (#1426).
 
-**Markup.** `span.kb-colour[data-colour]` → `input[type=color].kb-colour__swatch` and `label.kb-colour__default` with a checkbox (*Use default*),
-plus a second one (*Keep the stored value*) when the stored value is not `#RRGGBB`.
+**Markup.** `span.kb-colour[data-colour]` → `input[type=color].kb-colour__swatch` and `label.kb-colour__default` with a checkbox (_Use default_),
+plus a second one (_Keep the stored value_) when the stored value is not `#RRGGBB`.
 
 - A colour input cannot be empty, so the checkbox is the empty state. It posts `use_default_<key>=true` and wins over the swatch, with or without
   JavaScript; with the script, picking a colour unticks it and the two boxes exclude each other.
 - The swatch of the default shows Discord's default grey (`#99aab5`).
-- A stored value that is not `#RRGGBB` is kept by the ticked *Keep the stored value* box (`keep_<key>=true`, read by the server as the stored value) and
+- A stored value that is not `#RRGGBB` is kept by the ticked _Keep the stored value_ box (`keep_<key>=true`, read by the server as the stored value) and
   noted under the control ("is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default").
 - Every state is a real control (swatch, two checkboxes), so the save bar compares, commits and restores them without help; the swatch is only
   disabled while the section's feature is off.
@@ -279,11 +279,11 @@ plus a second one (*Keep the stored value*) when the stored value is not `#RRGGB
 Group setups as cards, so the fast path comes first (#1299, #1300).
 
 **Markup.** `div.kb-choices[role=radiogroup]` → `label.kb-choice` → `input[type=radio]`, `span.kb-choice__title`, `span.kb-choice__meta` (where it
-comes from and its shape), `span.kb-choice__marks` (the markers), and a check icon shown when chosen. *Custom* is the last card (`kb-choice--custom`).
+comes from and its shape), `span.kb-choice__marks` (the markers), and a check icon shown when chosen. _Custom_ is the last card (`kb-choice--custom`).
 
-- Order: built-in *2 teams / 3 teams / 4 teams*, then the server library, then the host's own presets, then Custom.
+- Order: built-in _2 teams / 3 teams / 4 teams_, then the server library, then the host's own presets, then Custom.
 - The chosen card selects a border and a check icon, not only a colour.
-- Under the cards, one summary line says what the preset will create, with *Customise* to open the rows.
+- Under the cards, one summary line says what the preset will create, with _Customise_ to open the rows.
 
 ## Discord
 
@@ -294,17 +294,17 @@ A channel, category or role, labelled the way Discord labels it (#1303).
 **Markup.** `span.kb-mention` with an inline icon whose `aria-label` names the kind, then the name. One helper renders every channel, category or role
 name in the UI: options, tables, definition lists, sentences.
 
-| Kind | Shown as |
-| --- | --- |
-| Text | `hash` icon + name |
-| Announcement | `megaphone` icon + name |
-| Voice | `volume-2` icon + name |
-| Stage | `mic-vocal` icon + name |
-| Forum | `messages-square` icon + name |
-| Category | `folder` icon + NAME in uppercase (`kb-mention--category`), never a `#` |
-| Role | `@Name`, no icon |
+| Kind                                  | Shown as                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Text                                  | `hash` icon + name                                                                               |
+| Announcement                          | `megaphone` icon + name                                                                          |
+| Voice                                 | `volume-2` icon + name                                                                           |
+| Stage                                 | `mic-vocal` icon + name                                                                          |
+| Forum                                 | `messages-square` icon + name                                                                    |
+| Category                              | `folder` icon + NAME in uppercase (`kb-mention--category`), never a `#`                          |
+| Role                                  | `@Name`, no icon                                                                                 |
 | Deleted voice room with a stored name | `kb-mention` with the `volume-2` icon and the stored name, then a muted `(deleted)` (`kb-muted`) |
-| Deleted or unknown id, no stored name | `kb-mention--missing`: an alert icon and "(unavailable)" |
+| Deleted or unknown id, no stored name | `kb-mention--missing`: an alert icon and "(unavailable)"                                         |
 
 Inside a native `<option>`, where SVG cannot go, use the Unicode fallback from #1303 (`🔊 Lobby · VOICE`).
 
@@ -313,13 +313,16 @@ Inside a native `<option>`, where SVG cannot go, use the Unicode fallback from #
 A searchable list for choosing channels, categories and roles, modelled on Discord's composer autocomplete (#1303).
 
 **Markup.** `div.kb-field` → `button.kb-picker__trigger` (the current value as Mentions, then a chevron) and, when open, `div.kb-picker__pop` →
-`label.kb-picker__search`, `ul.kb-picker__list[role=listbox]` with `li.kb-picker__group` headers (*Text channels*, *Voice channels*, *Categories*,
-*Role groups*, *Roles*) and `li.kb-picker__opt[role=option]` rows (icon, name, the category muted on the right, a check when selected), then
+`label.kb-picker__search`, `ul.kb-picker__list[role=listbox]` with `li.kb-picker__group` headers (_Text channels_, _Voice channels_, _Categories_,
+_Role groups_, _Roles_) and `li.kb-picker__opt[role=option]` rows (icon, name, the category muted on the right, a check when selected), then
 `p.kb-picker__hint`.
 
 - Typing `#` filters to text channels, `#!` to voice, `@` to roles, as in Discord.
 - A setting only lists the kinds it accepts: a voice setting opens on Voice channels.
-- Multi-select (roles) shows each chosen role as a Mention in the trigger.
+- Multi-select (channel and role lists, #1473) shows each chosen item as a Mention chip in `div.kb-picker__chips` above the trigger, which reads _Add_. A chip is
+  `span.kb-picker__chip` → Mention + icon-only `button.kb-picker__chip-remove` (`x`, `aria-label` "Remove #general"). Past 12 chips a `button.kb-picker__more`
+  ("+N more") shows the rest. An empty list says _None selected_. Choosing a row toggles it and the popover stays open; Backspace in an empty search removes
+  the last chip; Escape, Tab or a click outside closes. The list is `aria-multiselectable`.
 - No JavaScript: a native `select` with `optgroup`s and the category in the option text.
 
 **Built on the select (#1394).** The Settings page renders `span.kb-picker[data-picker]` around the native single `select` and the page script adds
@@ -328,7 +331,8 @@ with `kb-visually-hidden` (never `hidden`, which the save bar treats as inactive
 disabled, and a stored id that is no longer listed stays selected and posts as stored. While open the popover is moved to the end of `<main>`
 and fixed under the trigger (`kb-picker__pop--floating`, flipped above when there is no room), so a scrolling settings card never clips it; it
 follows the trigger on scroll and resize. The trigger mirrors the select's `aria-invalid` and `aria-describedby`. Keys: arrows, Home and End move
-`aria-activedescendant` in the search box, Enter chooses, Escape closes. Multi-select lists still use the native select.
+`aria-activedescendant` in the search box, Enter chooses, Escape closes. A multi-select list (`select[multiple]`) is built the same way (see above);
+its "Selected:" summary shows only without JavaScript.
 
 ### DiscordEmbed
 
@@ -338,16 +342,16 @@ A sketch of how a KoolBot message reads in Discord, to design and review embeds 
 `p.kb-embed__title`, `p.kb-embed__text`, `div.kb-embed__fields` of `div.kb-embed__field` (`p.kb-embed__name`, `p.kb-embed__value`),
 `p.kb-embed__foot`.
 
-The card pairs today's messages with the rewritten ones. The rules are in the *Messages in Discord* section of the brand book.
+The card pairs today's messages with the rewritten ones. The rules are in the _Messages in Discord_ section of the brand book.
 
 **Message line.** Where it matters who posted, when, and what sits outside the embed (an alert's role mention, an edited post), wrap the embed in
-`article.kb-message` → `span.kb-avatar` (the bot's initial), `div.kb-message__body` → `p.kb-message__head` (the name, a `kb-badge--info` *App*
+`article.kb-message` → `span.kb-avatar` (the bot's initial), `div.kb-message__body` → `p.kb-message__head` (the name, a `kb-badge--info` _App_
 badge, `span.kb-message__time` with "(edited)" for a post the bot keeps up to date), an optional `p.kb-message__text` (the mention line, as
 Mentions), then the `kb-embed`.
 
 - A password members need is `span.kb-spoiler[role=img]` with an `aria-label` ("Password, hidden behind a spoiler"): a plain `span` cannot
   carry a name, and the sketch never prints the password.
-- Review alerts with the message line: a role mention inside the embed would not notify anyone (*Alerts that mention a role* in `discord.md`).
+- Review alerts with the message line: a role mention inside the embed would not notify anyone (_Alerts that mention a role_ in `discord.md`).
 
 ### EmbedColours
 
@@ -363,10 +367,10 @@ Short status words and counts: badges (uppercase), pills (versions, scopes), chi
 
 **Markup.**
 
-- `span.kb-badge` + `--on | --off | --info | --warn`: *On*, *Off*, *Active*. Add `--count` for a number (rounded, not uppercase).
-- `span.kb-pill`: neutral metadata (`v2.0.1`, *Server-wide*); `a.kb-pill--info` for "update available".
+- `span.kb-badge` + `--on | --off | --info | --warn`: _On_, _Off_, _Active_. Add `--count` for a number (rounded, not uppercase).
+- `span.kb-pill`: neutral metadata (`v2.0.1`, _Server-wide_); `a.kb-pill--info` for "update available".
 - `span.kb-chip`: a feature or permission a row mentions, with a leading icon; `--ok` puts a green check on it.
-- `span.kb-status` + `--ok | --warn | --off`: a dot and a word (*Connected*).
+- `span.kb-status` + `--ok | --warn | --off`: a dot and a word (_Connected_).
 
 Every state carries a word, never only a colour. Status colours always come in their pairs (`ok-bg` with `ok-text`, and so on).
 
@@ -377,21 +381,21 @@ A message about the page or the last action, with an optional action on the righ
 **Markup.** `div.kb-callout` (+ `--warn | --ok | --err`; plain is info) → `svg.kb-icon`, `div.kb-callout__body` (`p.kb-callout__title`, optional
 `p.kb-callout__text`), optional `div.kb-callout__actions`. Use `role="status"` for results and `role="alert"` for failures.
 
-- Title states the fact; text says the impact; the action fixes it (*Review*, *Enable*).
+- Title states the fact; text says the impact; the action fixes it (_Review_, _Enable_).
 - Put a warning callout at the top of the page only when something needs a decision; never for "everything is fine".
 - Results of a save (flash messages) use `--ok` or `--err` and say what changed: "Saved. 3 settings changed."
-- The disabled-feature banner (#610) is a plain callout with *Enable* (primary, small) and a *Settings* link.
+- The disabled-feature banner (#610) is a plain callout with _Enable_ (primary, small) and a _Settings_ link.
 
 ### IssueRow
 
 One problem per row, read left to right: what is wrong, what it breaks, how to fix it. Built for Bot Permissions; use it for any health check.
 
 **Markup.** Inside a Panel, `article.kb-issue` → `div.kb-issue__icon` (warn by default, `--err` for blocking), a body `div` (`div.kb-issue__head` with
-`h3.kb-issue__title` and a scope pill, `p.kb-issue__impact`, `div.kb-issue__affects` with chips), and `div.kb-issue__fix` (overline *How to fix* and
+`h3.kb-issue__title` and a scope pill, `p.kb-issue__impact`, `div.kb-issue__affects` with chips), and `div.kb-issue__fix` (overline _How to fix_ and
 the steps).
 
 - Title is the missing thing (the permission's Discord name). Impact is one sentence in the member's terms.
-- Scope pill: *Server-wide* or the channel name.
+- Scope pill: _Server-wide_ or the channel name.
 - Below 760px the fix box moves under the text.
 
 ### EmptyState
@@ -437,7 +441,7 @@ A feature or preference as a card: icon, name, one-line description, and its cur
 the link, `p.kb-feature__desc`, `p.kb-feature__value`), `div.kb-feature__aside` (a chevron, or a Switch that stays clickable above the card link).
 
 - Member pages show only features the server has on, so a member never sees `is-off`.
-- `is-off` (dashed edge, grey icon, *Off* badge) is for admin views that list every feature, such as the Setup wizard.
+- `is-off` (dashed edge, grey icon, _Off_ badge) is for admin views that list every feature, such as the Setup wizard.
 - The Dashboard links to feature pages and never switches a feature; the switch lives on the feature's own page.
 
 ### TeamCard
@@ -502,18 +506,18 @@ failed, `is-none` before the first check. `kb-uptime--lg` draws a taller bar for
 
 ### Disclosure
 
-Detail on demand, built on `details`/`summary`, in three sizes: a whole panel section, a row, and an inline *More* or *Why?* link.
+Detail on demand, built on `details`/`summary`, in three sizes: a whole panel section, a row, and an inline _More_ or _Why?_ link.
 
 **Markup.** `details.kb-disclosure` → `summary` (a `kb-chev` chevron icon, the label, optional count badge, optional `span.kb-disclosure__hint`
 summarising what is inside) and `div.kb-disclosure__body`. Inline: `details.kb-disclosure--inline` with a short link-coloured summary.
 
-- Fold what does not need a decision, keep the rest open: Bot permissions keeps every needed permission in its matrix and folds only *Not needed (3)*;
-  Server scan folds *Notes*.
+- Fold what does not need a decision, keep the rest open: Bot permissions keeps every needed permission in its matrix and folds only _Not needed (3)_;
+  Server scan folds _Notes_.
 - The summary must say what is inside, so people can skip it.
 - Never hide something a person must read before acting; that belongs in the Dialog for that action.
 
 **Settings fold (#1301).** A feature page's settings are one `details.kb-disclosure#feature-settings[data-settings-fold]` at the bottom of the page. Its
-summary reads *Settings*, a count badge and a `kb-disclosure__hint` ("2 changed from the default"). It is `open` (and carries `data-fold-forced`) when the
+summary reads _Settings_, a count badge and a `kb-disclosure__hint` ("2 changed from the default"). It is `open` (and carries `data-fold-forced`) when the
 feature is off, a required value is missing, or a save or reset has just happened; otherwise it is folded, and a script remembers per page whether the
 admin left it open (`localStorage` in try/catch; only a click on the summary counts as a choice). Above it, the page's status line is a
 `div.kb-statusline` of an On/Off badge and `kb-chip`s; a chip for something missing is `a.kb-chip.kb-chip--warn` with an icon, linking to the setting.
@@ -523,8 +527,8 @@ admin left it open (`localStorage` in try/catch; only a click on the summary cou
 The larger context for an action: its options and consequences, shown at the moment it is taken.
 
 **Markup.** `dialog.kb-dialog` opened with `showModal()` → `div.kb-dialog__head` (an icon well and `h2.kb-dialog__title`), `div.kb-dialog__body`,
-`div.kb-dialog__foot` (*Cancel* ghost, then the action). The backdrop is `scrim`.
-The footer wraps and stacks on a narrow screen, and its buttons may wrap a long label, so *Go back* stays reachable (scoped to the dialog; `.kb-btn` is unchanged).
+`div.kb-dialog__foot` (_Cancel_ ghost, then the action). The backdrop is `scrim`.
+The footer wraps and stacks on a narrow screen, and its buttons may wrap a long label, so _Go back_ stays reachable (scoped to the dialog; `.kb-btn` is unchanged).
 
 - **Confirm** (Switch groups off): the title is the question, the body lists every consequence, the button repeats the verb in `danger`.
 - **Options** (Randomise teams): a SegmentedControl or a few fields, one sentence on how it works, and a primary button that names the result
@@ -538,8 +542,8 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
 - `data-confirm-list` is a JSON array of consequence strings (`confirmListAttr()` writes it). They are rendered with `textContent`, never as HTML.
   Give a list to the high-impact actions: reset defaults, rebuild and resync, reaction-role and group delete, event cancel, birthday remove and
   making a removal permanent. Other actions are title-only.
-- The confirm button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads *Go back*, so it is never confused with a
-  *Cancel* verb such as "Cancel event".
+- The confirm button repeats the trigger's own label (or `data-confirm-verb`); the ghost button reads _Go back_, so it is never confused with a
+  _Cancel_ verb such as "Cancel event".
 - `data-confirm-tone` is `danger` (the default, so a site that says nothing fails closed to red) or `neutral` (the `primary` fill and its
   `on-primary` label, a pair the #1326 contrast gate already covers). Red is for actions that delete, remove, cancel or reset; "Run now", "Apply plan",
   "Readmit" and "Archive" are neutral. `NEUTRAL_CONFIRM_ACTIONS` in `src/web/html.ts` is the one list of neutral actions; a site that carries a
@@ -556,11 +560,11 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
 A bar that sticks to the bottom of a form once something has changed, with a count and the Save and Discard buttons.
 
 **Markup.** `div.kb-savebar[role=region][aria-label="Unsaved changes"]` → a `kb-status--warn` dot, `span.kb-savebar__text` ("2 unsaved changes"),
-*Discard* (ghost), *Save settings* (primary). Render it `hidden` and reveal it on the first `input` event.
+_Discard_ (ghost), _Save settings_ (primary). Render it `hidden` and reveal it on the first `input` event.
 
 - It is `position: sticky`, which resolves against the nearest scrolling ancestor, so no ancestor of the bar may be a scroll container
   (`overflow: auto`/`scroll`/`hidden`). On a page with a save bar, `renderAdminPage` puts `has-savebar` on `main` and the form's card is
   `card--savebar`; both use `overflow-x: clip`. Pages without a save bar keep a scrolling `main`. The rows' `.kb-settings` container is the
   bar's sibling and scrolls sideways; a wide table or `pre` on such a page goes in a card (which scrolls) or scrolls itself.
-- It replaces the *Save settings* buttons scattered through long forms: one save per form.
+- It replaces the _Save settings_ buttons scattered through long forms: one save per form.
 - Without JavaScript, render it visible with "Save your changes" as the text.

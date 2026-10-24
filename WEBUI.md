@@ -1341,7 +1341,9 @@ the right and a check on the chosen row. Typing `#` lists text channels, `#!` vo
 composer; the rest filters by name and category. The arrow keys, Home, End, Enter and Escape work from the search box. The
 native select underneath stays the field, so it posts the same stored id, a save that did not touch it changes nothing, an
 id that is no longer listed stays selected as `⚠ 1234 (unavailable)`, and without JavaScript the select is all there is.
-Lists that take several values (`channel_list`, `role_list`) are still native multi-selects. The rest of #1394 (the searchable multi-select, and labels
+Lists that take several values (`channel_list`, `role_list`) get the same picker as a multi-select (#1473): the chosen items are chips
+with a remove button above an _Add_ button, choosing a row toggles it and keeps the popover open, and Backspace in an empty search removes the last chip.
+The native `select multiple` stays the field and without JavaScript is shown with its "Selected:" line. The rest of #1394 (labels
 on voice stats, the bot permissions page, the events and host pages, the server scan pages and the Voice Channels status line) is not done yet.
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
