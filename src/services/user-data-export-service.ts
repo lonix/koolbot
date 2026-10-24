@@ -53,6 +53,7 @@ import { TrackingOptOut } from "../models/tracking-opt-out.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
 import { UserNameHistory } from "../models/user-name-history.js";
 import { EventGroupPersonalPreset } from "../models/event-group-personal-preset.js";
+import { EventGroupLastSetup } from "../models/event-group-last-setup.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
@@ -286,6 +287,14 @@ const READERS: Record<string, CollectionReader> = {
       .lean();
     const { rows: kept, truncated } = capped(rows, maxItems);
     return { value: kept.map(toPlain), truncated };
+  },
+
+  "event-last-setup": async ({ userId, guildId }) => {
+    const doc = await EventGroupLastSetup.findOne({
+      ownerId: userId,
+      guildId,
+    }).lean();
+    return { value: doc ? toPlain(doc) : null };
   },
 
   "rewind-snapshot": async ({ userId, guildId, maxItems }) => {

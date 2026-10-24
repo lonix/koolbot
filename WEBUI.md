@@ -2009,6 +2009,25 @@ deleted by a **reset** (`/me/privacy`), through the per-user data registry. A ho
 are also offered where the host panel turns groups on for an event (**Groups**, under Live
 settings), so a host who is not an admin can start an event's groups from their own preset.
 
+**The last setup is remembered per host** (#1406). When an event with groups is created from
+either form (`/admin/events` or `/me/events/new`), the setup the server accepted is stored for
+that host: the preset id (or Custom), the rows (name, kind, size, tag, marker), the group and
+leader wording, the channel lead time and the switches (leaders and what hangs off it, captains
+lobby, clan tags and their position). It is written only after the event exists, replaces the host's
+previous one (one row per host), and a plain event leaves it alone. The next time the host opens
+either form, the Groups section starts from it, with **Groups** ticked and a line "Prefilled from
+your last event" and a link, **Start from the defaults instead**, that reloads the form with the
+normal defaults (it does not delete anything; the next create replaces the stored setup). It is
+checked again on every read against today's limits: a setup whose rows no longer fit
+`events.groups.max_count`, or with a name, tag, marker, size or lead time that no longer passes
+the validator, is ignored and the form shows its normal defaults; a preset that was deleted,
+switched off or is now too big for the cap becomes Custom with the same rows. A failed read also
+means the defaults and never blocks creating an event. What the form posts always wins: the
+stored setup only fills the form, it is never merged into a submit, and the server still
+validates every field. Only the host's own row is ever read. It holds no members, leaders or
+channel ids, has no expiry, and is in the **member data export** (`event-last-setup`) and
+deleted by a **reset**, like the personal presets.
+
 **Clan tags** (#1194) are a per-event option on the schedule form (**Clan tags**, with an
 optional **Put the tag after the name**), off unless ticked, and only for an event with
 groups. While the event is **active**, each member of a **team** group that has a tag gets

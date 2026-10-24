@@ -1,4 +1,4 @@
-/* global HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLFormElement, HTMLElement, Document */
+/* global HTMLDetailsElement, HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLFormElement, HTMLElement, Document */
 /**
  * The picker and the admin page of the preset library (#1200). The markup and
  * the page script come from `renderEventsPage` / `renderEventPresetsPage`, and
@@ -1117,5 +1117,114 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
     box.checked = false;
     box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(add.hidden).toBe(false);
+  });
+});
+
+describe("the event form with a remembered setup (#1406)", () => {
+  const remembered = {
+    resetHref: "/admin/events?defaults=1#schedule-event",
+    prefill: {
+      presetId: "",
+      groupLabel: "Squad",
+      leaderLabel: "",
+      channelLeadMinutes: "10",
+      rows: [
+        { name: "Red", kind: "team", size: "5", tag: "RED", marker: "🔴" },
+        { name: "Blue", kind: "team", size: "5", tag: "", marker: "" },
+        { name: "Green", kind: "team", size: "", tag: "", marker: "" },
+      ],
+      captainsEnabled: true,
+      captainCustomisationEnabled: false,
+      captainsLobby: true,
+      tagsEnabled: true,
+      tagsSuffix: false,
+    },
+  };
+  const html = (): string =>
+    renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 15 },
+      groupRemembered: remembered,
+    } as never);
+
+  it("keeps the prefilled rows and switches once the page script has run", () => {
+    const dom = boot(html());
+    const doc = dom.window.document;
+    expect(field(dom, "groups_enabled").checked).toBe(true);
+    expect(
+      (doc.querySelector("[data-groups-body]") as HTMLElement).hidden,
+    ).toBe(false);
+    expect(field(dom, "group_0_name").value).toBe("Red");
+    expect(field(dom, "group_0_tag").value).toBe("RED");
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "groups_captains").checked).toBe(true);
+    expect(field(dom, "groups_captains_lobby").checked).toBe(true);
+    expect(field(dom, "groups_tags").checked).toBe(true);
+    expect(chosen(dom)).toBe("");
+    // The Advanced section holds a remembered value, so it stays open.
+    expect(
+      (doc.querySelector("[data-groups-advanced]") as HTMLDetailsElement).open,
+    ).toBe(true);
+  });
+
+  it("a later explicit choice still wins: picking a preset replaces the remembered rows", () => {
+    const dom = boot(
+      renderEventsPage({
+        ...COMMON,
+        groupLimits: { defaultCount: 2, maxCount: 15 },
+        groupPresets: [libraryPreset],
+        groupRemembered: remembered,
+      } as never),
+    );
+    choose(dom, LIB_ID);
+    expect(field(dom, "group_0_name").value).toBe("Assault");
+    expect(field(dom, "groups_label").value).toBe("Squad");
+  });
+});
+
+describe("a refused submit after the reset link, with a remembered setup (#1406)", () => {
+  it("does not bring the remembered extra rows back next to the restored draft", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 15 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+            {
+              name: "Green",
+              kind: "team",
+              size: "9",
+              tag: "GRN",
+              marker: "🟢",
+            },
+          ],
+          captainsEnabled: false,
+          captainCustomisationEnabled: false,
+          captainsLobby: false,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The draft is the two rows the host submitted from the default form.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      group_0_name: "One",
+      group_1_name: "Two",
+    });
+    expect(field(dom, "group_0_name").value).toBe("One");
+    expect(field(dom, "group_1_name").value).toBe("Two");
+    expect(field(dom, "group_2_name").value).toBe("");
+    expect(field(dom, "group_2_size").value).toBe("");
+    expect(field(dom, "group_2_tag").value).toBe("");
+    expect(field(dom, "group_2_marker").value).toBe("");
   });
 });

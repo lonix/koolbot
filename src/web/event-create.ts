@@ -25,6 +25,7 @@ import {
 } from "../models/event.js";
 import { ConfigService } from "../services/config-service.js";
 import { loadPresetResolver } from "../services/event-group-preset-service.js";
+import { rememberLastSetup } from "../services/event-last-setup-service.js";
 import {
   hasCaptainsLobby,
   parseGroupForm,
@@ -329,6 +330,12 @@ async function createEventUnlocked(
       },
       result: "success",
     });
+    // Remember the setup the form was accepted with as this host's next default
+    // (#1406). Only after the event exists, keyed on the session (never a posted
+    // field), and it cannot fail the create: the call logs and swallows.
+    if (groups) {
+      await rememberLastSetup(session.guildId, session.discordUserId, groups);
+    }
     return { ok: true, event, title, impromptu, started };
   } catch (err) {
     const text = err instanceof Error ? err.message : "Unknown error";

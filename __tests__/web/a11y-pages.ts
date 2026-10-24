@@ -4211,6 +4211,52 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (prefilled from the last event)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          groupRemembered: {
+            resetHref: "/me/events/new?defaults=1",
+            prefill: {
+              presetId: "",
+              groupLabel: "Squad",
+              leaderLabel: "Captain",
+              channelLeadMinutes: "10",
+              rows: [
+                {
+                  name: "Red",
+                  kind: "team",
+                  size: "5",
+                  tag: "RED",
+                  marker: "🔴",
+                },
+                {
+                  name: "Blue",
+                  kind: "team",
+                  size: "5",
+                  tag: "BLU",
+                  marker: "🔵",
+                },
+                { name: "Green", kind: "team", size: "", tag: "", marker: "" },
+              ],
+              captainsEnabled: true,
+              captainCustomisationEnabled: true,
+              captainsLobby: true,
+              tagsEnabled: true,
+              tagsSuffix: true,
+            },
+          },
+        }),
+      ),
+    },
+    {
       name: "/me new event (setup missing, presets unreadable)",
       html: shell(
         "New event",

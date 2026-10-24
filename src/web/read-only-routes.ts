@@ -34,6 +34,8 @@ import {
   enabledPresets,
   loadPresetCatalog,
 } from "../services/event-group-preset-service.js";
+import { resolveGroupCountLimits } from "../services/event-groups.js";
+import { loadGroupPrefill } from "../services/event-last-setup-service.js";
 import {
   loadRulesPage,
   parseRulesOptions,
@@ -1591,6 +1593,24 @@ export function createReadOnlyRouter(
         ownerId: req.webSession?.discordUserId,
       });
 
+      // The admin's last group setup (#1406), unless they asked for the defaults.
+      // A failed read is "no prefill" and never blocks the form.
+      const offeredPresets = enabledPresets(presetCatalog);
+      const prefill =
+        req.query.defaults === "1"
+          ? null
+          : await loadGroupPrefill(
+              common.guildId,
+              req.webSession?.discordUserId,
+              {
+                maxCount: resolveGroupCountLimits(
+                  groupDefaultCount,
+                  groupMaxCount,
+                ).maxCount,
+                presets: offeredPresets,
+              },
+            );
+
       res.type("text/html").send(
         renderEventsPage({
           ...common,
@@ -1610,11 +1630,17 @@ export function createReadOnlyRouter(
             defaultCount: groupDefaultCount,
             maxCount: groupMaxCount,
           },
-          groupPresets: enabledPresets(presetCatalog),
+          groupPresets: offeredPresets,
           groupPresetsNotice: catalogNotice(
             presetCatalog.state,
             presetCatalog.personalUnreadable,
           ),
+          groupRemembered: prefill
+            ? {
+                prefill,
+                resetHref: "/admin/events?defaults=1#schedule-event",
+              }
+            : null,
           flash: readFlash(req),
         }),
       );
