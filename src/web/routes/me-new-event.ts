@@ -21,6 +21,7 @@ import {
   loadPresetCatalog,
 } from "../../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../../services/event-groups.js";
+import { loadGroupPrefill } from "../../services/event-last-setup-service.js";
 import { parseEventWhen } from "../event-when.js";
 import { resolveTimezone } from "../../utils/timezone.js";
 import {
@@ -121,6 +122,18 @@ export function createMeNewEventRouter(client: Client): Router {
         // The host's own presets are offered too (#1216).
         loadPresetCatalog(session.guildId, { ownerId: session.discordUserId }),
       ]);
+      const limits = resolveGroupCountLimits(defaultCount, configuredMax);
+      const presets = enabledPresets(catalog);
+      const startNow = req.query.when === "now";
+      // The host's last setup (#1406), unless they asked for the defaults. A
+      // failed read is "no prefill" and never blocks the form.
+      const prefill =
+        req.query.defaults === "1"
+          ? null
+          : await loadGroupPrefill(session.guildId, session.discordUserId, {
+              maxCount: limits.maxCount,
+              presets,
+            });
       const setupNotice = !categoryId
         ? "No channel category is set, so event channels cannot be created yet."
         : !announcementChannelId
@@ -134,12 +147,18 @@ export function createMeNewEventRouter(client: Client): Router {
             csrfToken: csrfOf(req),
             timezone: resolveTimezone(tz),
             defaultDurationMinutes: defaultDuration,
-            groupLimits: resolveGroupCountLimits(defaultCount, configuredMax),
-            groupPresets: enabledPresets(catalog),
+            groupLimits: limits,
+            groupPresets: presets,
             groupPresetsNotice: catalogNotice(
               catalog.state,
               catalog.personalUnreadable,
             ),
+            groupRemembered: prefill
+              ? {
+                  prefill,
+                  resetHref: `${PAGE}?${startNow ? "when=now&" : ""}defaults=1`,
+                }
+              : null,
             setupNotice,
             // `?when=now` is Start now on Your events; anything else is the default.
             initialWhen:

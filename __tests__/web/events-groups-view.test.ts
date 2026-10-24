@@ -208,6 +208,93 @@ describe("renderEventsPage Groups section (#1188)", () => {
     expect(html.match(/title="Groups set up for this event"/g)).toHaveLength(1);
   });
 
+  describe("remembered setup (#1406)", () => {
+    const prefill = {
+      presetId: "",
+      groupLabel: "Squad",
+      leaderLabel: "Captain",
+      channelLeadMinutes: "10",
+      rows: [
+        { name: "Red", kind: "team", size: "5", tag: "RED", marker: "🔴" },
+        { name: "Blue", kind: "open", size: "", tag: "", marker: "" },
+        { name: "Green", kind: "team", size: "", tag: "", marker: "" },
+      ],
+      captainsEnabled: true,
+      captainCustomisationEnabled: true,
+      captainsLobby: false,
+      tagsEnabled: true,
+      tagsSuffix: true,
+    };
+    const remembered = (p: Record<string, unknown> = {}): unknown => ({
+      prefill: { ...prefill, ...p },
+      resetHref: "/admin/events?defaults=1#schedule-event",
+    });
+
+    it("prefills rows, switches, wording and lead time, and says so", () => {
+      const html = render({ groupRemembered: remembered() });
+      expect(html).toContain("Prefilled from your last event.");
+      expect(html).toContain(
+        '<a href="/admin/events?defaults=1#schedule-event">Start from the defaults instead</a>',
+      );
+      expect(html).toMatch(/name="groups_enabled" value="1" checked/);
+      expect(html).toMatch(/name="groups_captains" value="1" checked/);
+      expect(html).toMatch(/name="groups_captain_custom" value="1" checked/);
+      expect(html).not.toMatch(
+        /name="groups_captains_lobby" value="1" checked/,
+      );
+      expect(html).toMatch(/name="groups_tags" value="1" checked/);
+      expect(html).toMatch(/name="groups_tags_suffix" value="1" checked/);
+      // Three stored rows, more than the two the form shows by default.
+      expect(html).toMatch(/name="group_0_name"[^>]*value="Red"/);
+      expect(html).toMatch(/name="group_0_marker"[^>]*value="🔴"/);
+      expect(html).toMatch(/name="group_0_size"[^>]*value="5"/);
+      expect(html).toMatch(/name="group_2_name"[^>]*value="Green"/);
+      expect(html).toContain('<option value="open" selected>');
+      expect(html).toMatch(/name="groups_label"[^>]*value="Squad"/);
+      expect(html).toMatch(/name="groups_leader_label"[^>]*value="Captain"/);
+      expect(html).toMatch(/name="groups_lead_minutes"[^>]*value="10"/);
+    });
+
+    it("checks the remembered preset card and unchecks Custom", () => {
+      const id = EVENT_GROUP_PRESETS[0].id;
+      const html = render({
+        groupRemembered: remembered({ presetId: id, rows: prefill.rows }),
+      });
+      expect(html).toMatch(
+        new RegExp(`name="groups_preset" value="${id}"[^>]* checked`),
+      );
+      expect(html).not.toMatch(/name="groups_preset" value="" checked/);
+    });
+
+    it("escapes remembered text", () => {
+      const html = render({
+        groupRemembered: remembered({
+          rows: [
+            {
+              name: '"><script>x</script>',
+              kind: "team",
+              size: "",
+              tag: "",
+              marker: "",
+            },
+          ],
+        }),
+      });
+      expect(html).not.toContain("<script>x</script>");
+      expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
+    });
+
+    it("renders exactly the old form without a remembered setup", () => {
+      const html = render({ groupRemembered: null });
+      expect(html).not.toContain("Prefilled from your last event.");
+      expect(html).not.toMatch(/name="groups_enabled"[^>]*checked/);
+      expect(html).toMatch(/name="groups_preset" value="" checked/);
+      expect(html).not.toMatch(/name="groups_label"[^>]*value=/);
+      expect(html).not.toMatch(/name="groups_lead_minutes"[^>]*value=/);
+      expect(html).toBe(render());
+    });
+  });
+
   it("the page script is valid JavaScript", () => {
     const html = render();
     const scripts = [

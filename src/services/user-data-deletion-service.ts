@@ -87,6 +87,7 @@ import { UserAchievements } from "../models/user-achievements.js";
 import { UserNameHistory } from "../models/user-name-history.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { EventGroupPersonalPreset } from "../models/event-group-personal-preset.js";
+import { EventGroupLastSetup } from "../models/event-group-last-setup.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -557,6 +558,22 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  "event-last-setup": {
+    actions: ["hard-delete"],
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (
+            await EventGroupLastSetup.deleteMany({
+              ownerId: userId,
+              guildId,
+            })
+          ).deletedCount,
+        ),
+      );
+    },
+  },
+
   "rewind-snapshot": {
     actions: ["hard-delete"],
     run: async ({ userId, guildId }, emit) => {
@@ -711,6 +728,7 @@ export const PURGE_ORDER: readonly string[] = [
   "user-name-history",
   "user-voice-preferences",
   "event-personal-preset",
+  "event-last-setup",
   "rewind-snapshot",
   "rewind-nudge-state",
   "digest-state",

@@ -103,6 +103,7 @@ import {
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
 import { MARKER_COLOURS, groupRowsScript } from "./event-group-form.js";
+import type { GroupFormPrefill } from "../services/event-last-setup-service.js";
 import {
   MAX_GROUP_ENTRIES,
   reactionRoleGroupPresets,
@@ -2610,6 +2611,8 @@ export interface EventsProps extends CommonProps {
   groupPresets?: readonly EventGroupPreset[];
   /** Shown above the picker when the preset library could not be read. */
   groupPresetsNotice?: string | null;
+  /** The host's last group setup, to prefill the form (#1406); absent = defaults. */
+  groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
   flash?: FlashMessage | null;
 }
 
@@ -3039,6 +3042,7 @@ function presetSource(id: string): string {
 function renderPresetCard(
   preset: EventGroupPreset,
   limits: { maxCount: number },
+  checked = false,
 ): string {
   const groups = JSON.stringify(
     preset.groups.map((g) => ({
@@ -3076,7 +3080,7 @@ function renderPresetCard(
   const meta = tooBig
     ? `needs ${preset.groups.length} groups, limit is ${limits.maxCount}`
     : `${presetSource(preset.id)} · ${shape}`;
-  return `<label class="kb-choice"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>
+  return `<label class="kb-choice"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="${escapeHtml(preset.id)}" data-label="${escapeHtml(preset.groupLabel)}"${extra}${checked && !tooBig ? " checked" : ""} data-groups="${escapeHtml(groups)}"${tooBig ? " disabled" : ""}>
           <span class="kb-choice__title">${escapeHtml(preset.label)}</span>
           <span class="kb-choice__meta">${escapeHtml(meta)}</span>${preset.description ? `\n          <span class="kb-choice__meta">${escapeHtml(preset.description)}</span>` : ""}${markers ? `\n          <span class="kb-choice__marks">${escapeHtml(markers)}</span>` : ""}
           ${CHECK_ICON}</label>`;
@@ -3088,9 +3092,10 @@ function groupSwitch(
   label: string,
   help: string,
   idSuffix: string,
+  checked = false,
 ): string {
   return `<div class="kb-groupopt">
-        <label class="kb-switch"><input type="checkbox" role="switch" name="${name}" value="1" aria-describedby="groups-${idSuffix}-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>${escapeHtml(label)}</label>
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${name}" value="1"${checked ? " checked" : ""} aria-describedby="groups-${idSuffix}-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>${escapeHtml(label)}</label>
         <p class="kb-help" id="groups-${idSuffix}-help">${escapeHtml(help)}</p>
       </div>`;
 }
@@ -3109,11 +3114,31 @@ export function renderGroupsSection(
   presetsNotice: string | null = null,
   // Where the preset library is managed; an event host's own page for them (#1305).
   presetsHref = "/admin/events/presets",
+  // The host's last setup (#1406), already validated against today's limits by
+  // `loadGroupPrefill`; `resetHref` reloads the form with the normal defaults.
+  remembered: { prefill: GroupFormPrefill; resetHref: string } | null = null,
 ): string {
-  const presetCards = presets.map((p) => renderPresetCard(p, limits)).join("");
-  const rows = Array.from({ length: limits.defaultCount }, (_, i) =>
-    renderGroupRow(String(i), String(i + 1)),
+  const prefill = remembered?.prefill ?? null;
+  const presetCards = presets
+    .map((p) =>
+      renderPresetCard(
+        p,
+        limits,
+        prefill !== null && prefill.presetId === p.id,
+      ),
+    )
+    .join("");
+  const presetPicked =
+    prefill !== null &&
+    prefill.presetId !== "" &&
+    presets.some((p) => p.id === prefill.presetId);
+  const rowCount = Math.max(limits.defaultCount, prefill?.rows.length ?? 0);
+  const rows = Array.from({ length: rowCount }, (_, i) =>
+    renderGroupRow(String(i), String(i + 1), prefill?.rows[i]),
   ).join("\n      ");
+  const rememberedNote = remembered
+    ? `<p class="kb-help" data-prefilled>Prefilled from your last event. <a href="${escapeHtml(remembered.resetHref)}">Start from the defaults instead</a></p>`
+    : "";
   // The quick builder's own fields belong to no form (`form="none"`): they
   // are neither posted nor checked on submit, they only drive the script.
   const detached = ' form="none"';
@@ -3129,16 +3154,16 @@ export function renderGroupsSection(
     )
     .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups</legend>
+      <legend>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
-        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1" aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
       </div>
       <div data-groups-body class="kb-stack">
       <div class="kb-field">
         <p class="kb-label" id="groups-setup-label">Group setup</p>
         <div class="kb-choices" role="radiogroup" aria-labelledby="groups-setup-label">${presetCards}
-          <label class="kb-choice kb-choice--custom"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value="" checked>
+          <label class="kb-choice kb-choice--custom"><input type="radio" name="${GROUP_FORM_FIELDS.preset}" value=""${presetPicked ? "" : " checked"}>
           <span class="kb-choice__title">Custom</span>
           <span class="kb-choice__meta">Any number of groups and names</span>
           ${CHECK_ICON}</label>
@@ -3173,32 +3198,32 @@ export function renderGroupsSection(
       <p class="kb-help">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored. Max size empty means no limit. The tag is shown on nicknames when clan tags are on; it starts as the name in capitals.</p>
       <div class="notice err" role="alert" data-group-errors hidden></div>
       </div>
-      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains")}
+      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains", prefill?.captainsEnabled === true)}
       <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.captains}">
         <div class="kb-field">
           <label class="kb-label" for="groups-leader-label">What a leader is called</label>
-          <input type="text" id="groups-leader-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}" aria-describedby="groups-leader-label-help">
+          <input type="text" id="groups-leader-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}"${prefill?.leaderLabel ? ` value="${escapeHtml(prefill.leaderLabel)}"` : ""} aria-describedby="groups-leader-label-help">
           <p class="kb-help" id="groups-leader-label-help">For example Leader or Captain. It names the captains lobby and is used in the leader messages.</p>
         </div>
-        ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom")}
-        ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby")}
+        ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom", prefill?.captainCustomisationEnabled === true)}
+        ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby", prefill?.captainsLobby === true)}
       </div>
-      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags")}
+      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags", prefill?.tagsEnabled === true)}
       <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.tags}">
-        ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix")}
+        ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix", prefill?.tagsSuffix === true)}
       </div>
       <details class="kb-disclosure" data-groups-advanced open>
         <summary>${icon("chevron-right", { className: "kb-chev" })}Advanced</summary>
         <div class="kb-disclosure__body kb-stack">
           <div class="kb-field">
             <label class="kb-label" for="groups-label">What a group is called</label>
-            <input type="text" id="groups-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}" list="groups-label-options" aria-describedby="groups-label-help">
+            <input type="text" id="groups-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}" list="groups-label-options"${prefill?.groupLabel ? ` value="${escapeHtml(prefill.groupLabel)}"` : ""} aria-describedby="groups-label-help">
             <datalist id="groups-label-options">${GROUP_LABEL_SUGGESTIONS.map((s) => `<option value="${s}"></option>`).join("")}</datalist>
             <p class="kb-help" id="groups-label-help">For example Team, Squad, Room or Party. Choosing a preset sets it.</p>
           </div>
           <div class="kb-field">
             <label class="kb-label" for="groups-lead-minutes">Create channels this many minutes before the start</label>
-            <input type="number" id="groups-lead-minutes" class="kb-input kb-input--sm kb-input--num" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Default" aria-describedby="groups-lead-minutes-help">
+            <input type="number" id="groups-lead-minutes" class="kb-input kb-input--sm kb-input--num" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Default"${prefill?.channelLeadMinutes ? ` value="${escapeHtml(prefill.channelLeadMinutes)}"` : ""} aria-describedby="groups-lead-minutes-help">
             <p class="kb-help" id="groups-lead-minutes-help">Empty uses the server default. ${CHANNEL_LEAD_MIN} to ${CHANNEL_LEAD_MAX} minutes.</p>
           </div>
         </div>
@@ -3260,7 +3285,7 @@ function eventGroupsScript(): string {
     "sync();" +
     // The pieces that need scripts are unhidden here; the Advanced section starts
     // folded; the rows are one line each.
-    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv)adv.open=false;" +
+    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv&&!(val('groups_label')||val('groups_lead_minutes')))adv.open=false;" +
     // While groups are off the section's number fields leave native validation
     // (the server ignores them then); ticking the box restores min, max and step.
     "function validity(){var on=enabled.checked;" +
@@ -3620,7 +3645,7 @@ ${permissionNote}
         <option value="monthly">Monthly</option>
       </select>
     </label>
-    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null)}
+    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
   <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>

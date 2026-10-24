@@ -96,6 +96,7 @@ for (const [path, exportName, label] of [
     "EventGroupPersonalPreset",
     "event-personal-preset",
   ],
+  ["event-group-last-setup", "EventGroupLastSetup", "event-last-setup"],
   ["rewind-snapshot", "RewindSnapshot", "rewind-snapshot"],
   ["rewind-nudge-state", "RewindNudgeState", "rewind-nudge-state"],
   ["digest-state", "DigestState", "digest-state"],
@@ -606,6 +607,15 @@ describe("UserDataDeletionService.purge", () => {
       await service().purge(USER, GUILD);
 
       expect(FILTERS["event-personal-preset.deleteMany"]).toEqual({
+        ownerId: USER,
+        guildId: GUILD,
+      });
+    });
+
+    it("deletes a host's remembered group setup by owner and guild (#1406)", async () => {
+      await service().purge(USER, GUILD);
+
+      expect(FILTERS["event-last-setup.deleteMany"]).toEqual({
         ownerId: USER,
         guildId: GUILD,
       });

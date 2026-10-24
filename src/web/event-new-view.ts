@@ -29,6 +29,7 @@ import {
   EVENT_TITLE_MAX,
 } from "../services/event-edit.js";
 import type { EventGroupPreset } from "../content/event-group-presets.js";
+import type { GroupFormPrefill } from "../services/event-last-setup-service.js";
 
 export interface NewEventViewProps {
   csrfToken: string;
@@ -39,6 +40,8 @@ export interface NewEventViewProps {
   groupLimits: { defaultCount: number; maxCount: number };
   groupPresets: readonly EventGroupPreset[];
   groupPresetsNotice: string | null;
+  /** The host's last group setup, to prefill the form (#1406); absent = defaults. */
+  groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
   /** The channel category or the announcement channel is not set. */
   setupNotice?: string | null;
   /** The When choice that starts selected (Start now on Your events passes `now`). */
@@ -126,7 +129,7 @@ ${notice}
   <section class="kb-panel" aria-labelledby="new-event-groups-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-groups-h">Groups</h2></header>
     <div class="kb-panel__body">
-      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets")}
+      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null)}
     </div>
   </section>
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>

@@ -126,6 +126,9 @@ jest.unstable_mockModule(
     EventGroupPersonalPreset: listModel("event-personal-preset"),
   }),
 );
+jest.unstable_mockModule("../../src/models/event-group-last-setup.js", () => ({
+  EventGroupLastSetup: docModel("event-last-setup"),
+}));
 jest.unstable_mockModule("../../src/models/rewind-snapshot.js", () => ({
   RewindSnapshot: listModel("rewind-snapshot"),
 }));
@@ -314,6 +317,26 @@ describe("UserDataExportService", () => {
     expect(payload.data["event-personal-preset"]).toEqual([
       expect.objectContaining({ ownerId: USER, name: "Clan match" }),
     ]);
+  });
+
+  it("exports the member's remembered group setup by owner and guild (#1406)", async () => {
+    DATA["event-last-setup"] = {
+      _id: "s1",
+      ownerId: USER,
+      guildId: GUILD,
+      presetId: null,
+      groups: [{ name: "Red", kind: "team", size: 5, tag: "RED", marker: "x" }],
+    };
+
+    const { payload } = await runExport();
+
+    expect(FILTERS["event-last-setup"]).toEqual({
+      ownerId: USER,
+      guildId: GUILD,
+    });
+    expect(payload.data["event-last-setup"]).toEqual(
+      expect.objectContaining({ ownerId: USER, presetId: null }),
+    );
   });
 
   it("returns null for a collection the member has no row in", async () => {

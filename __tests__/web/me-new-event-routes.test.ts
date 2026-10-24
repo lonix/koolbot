@@ -82,6 +82,22 @@ jest.unstable_mockModule(
   }),
 );
 
+const mockRemember =
+  jest.fn<
+    (guildId: string, ownerId: string, setup: unknown) => Promise<void>
+  >();
+const mockLoadPrefill = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const actualLastSetup =
+  await import("../../src/services/event-last-setup-service.js");
+jest.unstable_mockModule(
+  "../../src/services/event-last-setup-service.js",
+  () => ({
+    ...actualLastSetup,
+    rememberLastSetup: mockRemember,
+    loadGroupPrefill: mockLoadPrefill,
+  }),
+);
+
 const { createMeNewEventRouter } =
   await import("../../src/web/routes/me-new-event.js");
 const { requireScopeMiddleware } = await import("../../src/web/session.js");
@@ -130,6 +146,8 @@ beforeEach(() => {
     role: "user",
     scopes: ["member", "host"],
   });
+  mockRemember.mockResolvedValue(undefined);
+  mockLoadPrefill.mockResolvedValue(null);
   mockCreateEvent.mockImplementation(async (input) => ({
     _id: EVENT_ID,
     startTime: (input as { startTime: Date }).startTime,
@@ -405,5 +423,111 @@ describe("POST /me/events/new: Now", () => {
     const res = await harness.post("", { when: "now" });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
     expect(mockCreateImpromptu).not.toHaveBeenCalled();
+  });
+});
+
+describe("the host's remembered group setup (#1406)", () => {
+  const groupForm = {
+    ...planned,
+    groups_enabled: "1",
+    groups_preset: "",
+    groups_captains: "1",
+    groups_tags: "1",
+    group_0_name: "Red",
+    group_0_marker: "🔴",
+    group_0_size: "5",
+    group_1_name: "Blue",
+  };
+
+  it("remembers the accepted setup for the signed-in host after a create", async () => {
+    const res = await harness.post("", {
+      ...groupForm,
+      // A posted owner must change nothing: the session decides.
+      ownerId: "999999999999999999",
+    });
+    expect(res.status).toBe(303);
+    expect(mockRemember).toHaveBeenCalledTimes(1);
+    const [guildId, ownerId, setup] = mockRemember.mock.calls[0] as [
+      string,
+      string,
+      {
+        groupsEnabled: boolean;
+        captainsEnabled: boolean;
+        tagsEnabled: boolean;
+        groups: Array<{ name: string; marker: string; size: number | null }>;
+      },
+    ];
+    expect(guildId).toBe(GUILD);
+    expect(ownerId).toBe(HOST);
+    expect(setup.groupsEnabled).toBe(true);
+    expect(setup.captainsEnabled).toBe(true);
+    expect(setup.tagsEnabled).toBe(true);
+    expect(setup.groups.map((g) => [g.name, g.marker, g.size])).toEqual([
+      ["Red", "🔴", 5],
+      ["Blue", "", null],
+    ]);
+  });
+
+  it("remembers nothing for a plain event", async () => {
+    await harness.post("", planned);
+    expect(mockRemember).not.toHaveBeenCalled();
+  });
+
+  it("remembers nothing when the form is refused or the create fails", async () => {
+    await harness.post("", { ...groupForm, group_0_name: "" });
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+    mockCreateEvent.mockRejectedValueOnce(new Error("boom"));
+    await harness.post("", groupForm);
+    expect(mockRemember).not.toHaveBeenCalled();
+  });
+
+  it("prefills the form from the host's own setup, with a way back to the defaults", async () => {
+    mockLoadPrefill.mockResolvedValue({
+      presetId: "",
+      groupLabel: "Squad",
+      leaderLabel: "",
+      channelLeadMinutes: "10",
+      rows: [
+        { name: "Red", kind: "team", size: "5", tag: "RED", marker: "🔴" },
+        { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+        { name: "Green", kind: "team", size: "", tag: "", marker: "" },
+      ],
+      captainsEnabled: true,
+      captainCustomisationEnabled: false,
+      captainsLobby: true,
+      tagsEnabled: true,
+      tagsSuffix: false,
+    });
+    const html = await (await harness.get("?when=now")).text();
+    expect(mockLoadPrefill).toHaveBeenCalledWith(
+      GUILD,
+      HOST,
+      expect.anything(),
+    );
+    expect(html).toContain("Prefilled from your last event.");
+    expect(html).toContain('href="/me/events/new?when=now&amp;defaults=1"');
+    expect(html).toMatch(/name="groups_enabled" value="1" checked/);
+    expect(html).toMatch(/name="groups_captains" value="1" checked/);
+    expect(html).toMatch(/name="groups_captains_lobby" value="1" checked/);
+    expect(html).toMatch(/name="groups_tags" value="1" checked/);
+    expect(html).not.toMatch(/name="groups_tags_suffix" value="1" checked/);
+    expect(html).toMatch(/name="group_2_name"[^>]*value="Green"/);
+    expect(html).toMatch(/name="groups_label"[^>]*value="Squad"/);
+    expect(html).toMatch(/name="groups_lead_minutes"[^>]*value="10"/);
+    // Custom stays the checked card, as no preset was remembered.
+    expect(html).toMatch(/name="groups_preset" value="" checked/);
+  });
+
+  it("shows the normal defaults for ?defaults=1 without reading the store", async () => {
+    const html = await (await harness.get("?defaults=1")).text();
+    expect(mockLoadPrefill).not.toHaveBeenCalled();
+    expect(html).not.toContain("Prefilled from your last event.");
+    expect(html).not.toMatch(/name="groups_enabled" value="1" checked/);
+  });
+
+  it("shows the normal defaults when there is nothing to prefill", async () => {
+    const html = await (await harness.get("")).text();
+    expect(html).not.toContain("Prefilled from your last event.");
+    expect(html).not.toMatch(/name="groups_enabled" value="1" checked/);
   });
 });
