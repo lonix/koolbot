@@ -1540,6 +1540,7 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     groupNotices: groupsEnabled ? groupNoticesFor(client, event) : [],
     ...tagStatusFor(client, event, groupsEnabled),
     adopted: event.nativeAdopted === true,
+    nativeDetached: event.nativeDetached === true,
     editable: editModeOf(event, new Date()).mode !== "refused",
   };
 }

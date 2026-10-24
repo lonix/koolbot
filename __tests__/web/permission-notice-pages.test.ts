@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
+import { nativeSyncPaused } from "../../src/services/event-native-rules.js";
 import { eventPermissionTargets } from "../../src/web/host-panel-shared.js";
 import {
   hostPanelPermissionFeatures,
@@ -149,6 +150,43 @@ describe("hostPanelPermissionFeatures", () => {
     expect(hostPanelPermissionFeatures(base)).toContain("event-channels");
   });
 
+  it("leaves out the Events list card for an event whose native event was detached (#1467)", () => {
+    // `syncEvent` skips a detached, not yet finished event, so the permission
+    // would not bring its card back.
+    expect(
+      hostPanelPermissionFeatures({ ...base, nativeDetached: true }),
+    ).not.toContain("event-native");
+    expect(
+      hostPanelPermissionFeatures({ ...base, nativeDetached: false }),
+    ).toContain("event-native");
+  });
+
+  it("moves need a group to move into, not only the groups switch", () => {
+    expect(hostPanelPermissionFeatures({ ...base, groups: [] })).not.toContain(
+      "event-moves",
+    );
+    expect(
+      hostPanelPermissionFeatures({ ...base, groups: [group("team")] }),
+    ).toContain("event-moves");
+  });
+
+  it("host access matters while a channel is still to be created, not once every channel exists", () => {
+    const made = { ...group("team"), hasChannel: true };
+    expect(
+      hostPanelPermissionFeatures({ ...base, channel: "Main", groups: [made] }),
+    ).not.toContain("event-host-access");
+    expect(
+      hostPanelPermissionFeatures({ ...base, channel: null, groups: [made] }),
+    ).toContain("event-host-access");
+    expect(
+      hostPanelPermissionFeatures({
+        ...base,
+        channel: "Main",
+        groups: [made, group("team")],
+      }),
+    ).toContain("event-host-access");
+  });
+
   it("leaves out the Events list card for an adopted event, and everything for a finished one", () => {
     expect(
       hostPanelPermissionFeatures({ ...base, adopted: true }),
@@ -193,6 +231,24 @@ describe("eventPermissionTargets", () => {
     expect(
       eventPermissionTargets({ channelId: "gone", categoryId: "" }, () => null),
     ).toEqual({});
+  });
+});
+
+describe("nativeSyncPaused", () => {
+  it("pauses an open detached event only", () => {
+    expect(nativeSyncPaused({ state: "scheduled", nativeDetached: true })).toBe(
+      true,
+    );
+    expect(nativeSyncPaused({ state: "active", nativeDetached: true })).toBe(
+      true,
+    );
+    expect(nativeSyncPaused({ state: "ended", nativeDetached: true })).toBe(
+      false,
+    );
+    expect(
+      nativeSyncPaused({ state: "scheduled", nativeDetached: false }),
+    ).toBe(false);
+    expect(nativeSyncPaused({ state: "scheduled" })).toBe(false);
   });
 });
 

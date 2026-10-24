@@ -11,6 +11,7 @@ import { escapeHtml } from "./html.js";
 import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
+import { nativeSyncPaused } from "../services/event-native-rules.js";
 import {
   renderPermissionNotice,
   type PermissionNotice,
@@ -117,6 +118,8 @@ export interface HostPanelEvent {
    * bot's, a refused edit). Names come from the gateway cache. */
   tagSkipped?: Array<{ name: string; reason: string }>;
   adopted: boolean;
+  /** The event's Discord event was deleted there; native sync leaves it alone. */
+  nativeDetached?: boolean;
 }
 
 const KIND_LABEL: Record<EventGroupKind, string> = {
@@ -333,9 +336,24 @@ export function hostPanelPermissionFeatures(e: HostPanelEvent): string[] {
   // Whether an adopted event has a channel of its own is known only from the
   // native listing (a Discord read), so before that it is left out.
   const ids = e.adopted && e.channel === null ? [] : ["event-channels"];
-  if (!e.adopted) ids.push("event-native");
+  // Native sync skips an adopted event and an open detached one (`nativeSyncPaused`).
+  if (
+    !e.adopted &&
+    !nativeSyncPaused({ state: e.state, nativeDetached: e.nativeDetached })
+  ) {
+    ids.push("event-native");
+  }
   if (e.groupsEnabled) {
-    ids.push("event-host-access", "event-moves");
+    // The host's access is granted when a channel is created: the main channel
+    // (`createEventChannel`) or a group's (`createOne`). Once every channel
+    // exists a missing permission changes nothing until one is re-created.
+    const channelToMake =
+      e.channel === null ||
+      e.groups.some((g) => !g.hasChannel) ||
+      e.captainsLobby?.hasChannel === false;
+    if (channelToMake) ids.push("event-host-access");
+    // `moveEventMembers` refuses an event without a group to move into.
+    if (e.groups.length > 0) ids.push("event-moves");
     if (e.groups.some((g) => g.kind === "leads") || e.captainsLobby) {
       ids.push("event-leads-channel");
     }
