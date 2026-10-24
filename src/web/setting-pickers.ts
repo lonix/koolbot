@@ -219,6 +219,10 @@ export const CHANNEL_PICKER_SCRIPT =
   // the chips' own remove buttons), and the no-JavaScript "Selected:" line
   // after the box becomes redundant.
   "var chips=null;if(multi){chips=el('div','kb-picker__chips');box.appendChild(chips);" +
+  // Focusable by script only: it takes focus when a repaint leaves no button to
+  // take it (a disabled select expanding "+N more"), and is named for that.
+  "chips.tabIndex=-1;chips.setAttribute('role','group');" +
+  "if(labels.length||sel.getAttribute('aria-label'))chips.setAttribute('aria-label','Selected '+name);" +
   "var nx=box.nextElementSibling;if(nx&&nx.hasAttribute('data-picker-summary'))nx.hidden=true}" +
   "box.appendChild(trig);box.appendChild(pop);" +
   "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
@@ -235,7 +239,10 @@ export const CHANNEL_PICKER_SCRIPT =
   "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
   "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
   "rows[k].setAttribute('aria-selected',on?'true':'false');" +
-  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}}" +
+  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
+  // The chips may have wrapped onto another row, which moves the Add trigger the
+  // open menu hangs from: place it again (a closed menu is placed when it opens).
+  "if(open)place()}" +
   "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
   "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
   "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);" +
@@ -278,12 +285,19 @@ export const CHANNEL_PICKER_SCRIPT =
   "function fireBoth(){sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}" +
   // A multiple select toggles the row and stays open, so several can be picked
   // in a row; Escape, Tab or a click outside closes it.
-  "function choose(k){if(k<0||!items[k])return;if(multi){sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
+  // A click makes its row the active one, as Enter does, so the placement that
+  // `paint()` runs while open scrolls to the row just toggled and not back to the
+  // row that was active before.
+  "function choose(k){if(k<0||!items[k])return;if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
   "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
   "function drop(k){if(!sel.options[k]||!sel.options[k].selected||sel.disabled)return;sel.options[k].selected=false;fireBoth();paint()}" +
   "function lastOn(){for(var k=items.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}" +
   "if(chips)chips.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):null;if(!t)return;" +
-  "if(t.hasAttribute('data-more')){expanded=true;paint();return}" +
+  // `paint()` replaces the focused "+N more" button: hand focus to the first
+  // remove button it revealed (the ones before it were already shown), or to the
+  // chip group when the select is disabled and every remove button is too.
+  "if(t.hasAttribute('data-more')){var seen=chips.querySelectorAll('[data-rm]').length;expanded=true;paint();" +
+  "var nb=chips.querySelectorAll('[data-rm]')[seen];(nb&&!nb.disabled?nb:chips).focus();return}" +
   "if(t.hasAttribute('data-rm')){drop(Number(t.getAttribute('data-rm')));if(!trig.disabled)trig.focus()}});" +
   "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
   "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
@@ -298,7 +312,11 @@ export const CHANNEL_PICKER_SCRIPT =
   "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
   "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
   "function inside(t){return box.contains(t)||pop.contains(t)}" +
-  "document.addEventListener('click',function(e){if(open&&!inside(e.target))close(false)});" +
+  // A handler on the way up may have repainted and removed the clicked node (a
+  // chip's remove button, "+N more", the check on a chosen row), so it no longer
+  // sits in the picker: ask the path the event took, which was fixed at dispatch.
+  "document.addEventListener('click',function(e){if(!open)return;var p=e.composedPath?e.composedPath():[];" +
+  "if(p.indexOf(box)<0&&p.indexOf(pop)<0&&!inside(e.target))close(false)});" +
   "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
   "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
   "sel.addEventListener('change',paint);" +

@@ -322,7 +322,8 @@ _Role groups_, _Roles_) and `li.kb-picker__opt[role=option]` rows (icon, name, t
 - Multi-select (channel and role lists, #1473) shows each chosen item as a Mention chip in `div.kb-picker__chips` above the trigger, which reads _Add_. A chip is
   `span.kb-picker__chip` → Mention + icon-only `button.kb-picker__chip-remove` (`x`, `aria-label` "Remove #general"). Past 12 chips a `button.kb-picker__more`
   ("+N more") shows the rest. An empty list says _None selected_. Choosing a row toggles it and the popover stays open; Backspace in an empty search removes
-  the last chip; Escape, Tab or a click outside closes. The list is `aria-multiselectable`.
+  the last chip; Escape, Tab or a click outside closes. The list is `aria-multiselectable`. The open popover follows the _Add_ trigger when
+  the chips wrap onto another row. _+N more_ moves focus to the first remove button it reveals (the chip group when the select is disabled).
 - No JavaScript: a native `select` with `optgroup`s and the category in the option text.
 
 **Built on the select (#1394).** The Settings page renders `span.kb-picker[data-picker]` around the native single `select` and the page script adds
