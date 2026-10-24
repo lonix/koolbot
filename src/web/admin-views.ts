@@ -2990,11 +2990,13 @@ const LEADS_KIND_OPTION: [string, string] = [
  */
 export interface GroupRowOptions {
   /** Field names, by column; a column left out keeps `group_<index>_<field>`. */
-  names?: Partial<Record<"marker" | "name" | "size" | "tag", string>>;
+  names?: Partial<Record<"marker" | "name" | "size" | "tag" | "kind", string>>;
   /** The group's kind cannot change here: no kind select and no "More" button. */
   fixedKind?: boolean;
   /** This group carries no tag (an open group): the tag box is shown disabled and posts nothing. */
   noTag?: boolean;
+  /** The name box is required (a form that adds one group: an empty name there is a mistake, not "no row"). */
+  requireName?: boolean;
   /** Markup inside the row, after the grid: hidden shown-value fields, a note. Built by the caller (escaped there). */
   extra?: string;
 }
@@ -3022,7 +3024,7 @@ export function renderGroupRow(
   options?: GroupRowOptions,
 ): string {
   const field = (f: "marker" | "name" | "size" | "tag" | "kind"): string =>
-    (f === "kind" ? undefined : options?.names?.[f]) ?? `group_${index}_${f}`;
+    options?.names?.[f] ?? `group_${index}_${f}`;
   const kinds = (
     group?.kind === "leads"
       ? [...GROUP_KIND_OPTIONS, LEADS_KIND_OPTION]
@@ -3039,7 +3041,7 @@ export function renderGroupRow(
             <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
             <button type="button" data-marker-btn class="kb-emoji-btn kb-emoji-btn--sm" aria-haspopup="true" aria-expanded="false" aria-label="Group ${position} marker: choose one" hidden>+</button>
           </div>
-          <input type="text" class="kb-input kb-input--sm" name="${field("name")}" aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
+          <input type="text" class="kb-input kb-input--sm" name="${field("name")}"${options?.requireName ? " required" : ""} aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
           <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
           ${
             options?.noTag

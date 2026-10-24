@@ -27,6 +27,7 @@ import {
 } from "./host-settings-groups.js";
 import {
   renderGroupsSwitchForms,
+  showsCustomRows,
   type GroupsSwitchView,
 } from "./host-settings-groups-switch.js";
 import {
@@ -182,7 +183,7 @@ ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfTo
 ${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
 ${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
 ${scriptTag(CONFIRM_FETCH_SCRIPT)}
-${d.groupEdit ? scriptTag(groupRowsScript()) : ""}`;
+${d.groupEdit || (d.groupsSwitch && showsCustomRows(d.groupsSwitch)) ? scriptTag(groupRowsScript()) : ""}`;
 }
 
 export interface ConfirmChangeView {
