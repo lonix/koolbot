@@ -23,6 +23,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ConfigSchema } from "../services/config-schema.js";
 import type { WebScope } from "../models/web-session.js";
 import { escapeHtml } from "./html.js";
+import { roleMention } from "./discord-labels.js";
 import { icon, type IconName } from "./icons.js";
 import { getBotVersion } from "../utils/version.js";
 import { formatVersion } from "../utils/semver.js";
@@ -394,7 +395,7 @@ export function renderSideNav(
 // ---- why you see this ------------------------------------------------------
 
 function roleList(names: string[]): string {
-  return names.map((n) => `@${escapeHtml(n)}`).join(", ");
+  return names.map(roleMention).join(", ");
 }
 
 /**

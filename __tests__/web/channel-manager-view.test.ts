@@ -1,5 +1,8 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderChannelManagerPage } from "../../src/web/channel-manager-view.js";
+import {
+  renderChannelDeleteConfirmPage,
+  renderChannelManagerPage,
+} from "../../src/web/channel-manager-view.js";
 import {
   buildChannelTree,
   type ManagedChannelView,
@@ -103,5 +106,127 @@ describe("edit form", () => {
     expect(html).toContain(
       'name="direction" value="up"><input type="hidden" name="neighbor" value="100000000000000020"',
     );
+  });
+});
+
+describe("channel labels (#1394)", () => {
+  const cat = view(CAT, { kind: "category", name: "Community" });
+  const rows = [
+    cat,
+    view("100000000000000030", {
+      kind: "text",
+      name: "general",
+      parentId: CAT,
+    }),
+    view("100000000000000031", {
+      kind: "voice",
+      name: "Hangout",
+      parentId: CAT,
+    }),
+    view("100000000000000032", {
+      kind: "other",
+      name: "Town hall",
+      typeLabel: "GuildStageVoice",
+      parentId: CAT,
+    }),
+    view("100000000000000033", {
+      kind: "other",
+      name: "news",
+      typeLabel: "GuildAnnouncement",
+      parentId: CAT,
+    }),
+  ];
+
+  it("shows each channel with its kind's icon, and the category in the card heading", () => {
+    const html = render(rows);
+    expect(html).toContain('aria-label="Text channel"');
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).toContain('aria-label="Stage channel"');
+    expect(html).toContain('aria-label="Announcement channel"');
+    expect(html).toMatch(
+      /<h2><span class="kb-mention kb-mention--category">.*?Community<\/span> <span class="tag">category<\/span><\/h2>/s,
+    );
+    expect(html).not.toContain("<strong>general</strong>");
+  });
+
+  it("keeps the Type column's words, so the kind is never the icon alone", () => {
+    const html = render(rows);
+    expect(html).toContain("<td>Text</td>");
+    expect(html).toContain("<td>Voice</td>");
+  });
+
+  it("shows a channel of a type with no label by its plain name, never as unavailable", () => {
+    const html = render([
+      cat,
+      view("100000000000000034", {
+        kind: "other",
+        name: "Directory",
+        typeLabel: "GuildDirectory",
+        parentId: CAT,
+      }),
+    ]);
+    expect(html).toContain("Directory");
+    expect(html).not.toContain("Directory (unavailable)");
+  });
+
+  it("does not label form values: the name field and baseline keep the bare name", () => {
+    const html = render([
+      cat,
+      view("100000000000000035", {
+        kind: "voice",
+        name: "A & B",
+        parentId: CAT,
+      }),
+    ]);
+    expect(html).toContain('name="name" value="A &amp; B"');
+    expect(html).toContain('name="orig_name" value="A &amp; B"');
+    expect(html).toContain('aria-label="Delete A &amp; B"');
+    expect(html).toContain('aria-label="Move A &amp; B up"');
+  });
+
+  it("escapes names in the mention", () => {
+    const html = render([
+      cat,
+      view("100000000000000036", {
+        kind: "text",
+        name: "<img src=x>",
+        parentId: CAT,
+      }),
+    ]);
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img src=x&gt;");
+  });
+
+  it("writes categories in the parent picker as plain text with the folder glyph", () => {
+    const html = render(rows);
+    expect(html).toContain(`value="${CAT}">📁 Community</option>`);
+  });
+});
+
+describe("delete confirmation labels (#1394)", () => {
+  const channel = view("100000000000000040", {
+    kind: "voice",
+    name: "Hangout",
+  });
+  const page = (c: ManagedChannelView): string =>
+    renderChannelDeleteConfirmPage({
+      csrfToken: "csrf",
+      remainingMs: 1,
+      channel: c,
+      verdict: { ok: true },
+      botCanManage: true,
+      confirmToken: "tok",
+    } as never);
+
+  it("names the channel with its icon in the sentence, and keeps the words", () => {
+    const html = page(channel);
+    expect(html).toContain("this voice channel");
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).toContain("Hangout</span>");
+  });
+
+  it("escapes the name", () => {
+    const html = page({ ...channel, name: "<b>x</b>" });
+    expect(html).not.toContain("<b>x");
   });
 });

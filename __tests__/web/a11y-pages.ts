@@ -71,7 +71,10 @@ import type {
   FeatureRef,
   PermissionTarget,
 } from "../../src/services/bot-permission-check.js";
-import { FEATURE_REQUIREMENTS } from "../../src/services/bot-permission-registry.js";
+import {
+  FEATURE_REQUIREMENTS,
+  ROLE_HIERARCHY_REQUIREMENTS,
+} from "../../src/services/bot-permission-registry.js";
 import { renderRulesPage } from "../../src/web/rules-page.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
@@ -223,7 +226,9 @@ function WELCOME_ROLES_GROUP(current: string): {
 /** A bot-permission report from real registry ids, so the matrix joins to the registry. */
 function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
   const ref = (id: string): FeatureRef => {
-    const r = FEATURE_REQUIREMENTS.find((x) => x.id === id);
+    const r =
+      FEATURE_REQUIREMENTS.find((x) => x.id === id) ??
+      ROLE_HIERARCHY_REQUIREMENTS.find((x) => x.id === id);
     if (!r) throw new Error(`no registry entry ${id}`);
     return {
       id: r.id,
@@ -242,11 +247,26 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
     kind: "category",
     id: "c1",
     name: "Events",
+    channelType: ChannelType.GuildCategory,
   };
   const quotes: PermissionTarget = {
     kind: "channel",
     id: "c3",
     name: "quotes",
+    channelType: ChannelType.GuildText,
+  };
+  // A voice room, a channel the bot cannot find and a role: every kind the
+  // "Where" cell labels (#1394).
+  const lobby: PermissionTarget = {
+    kind: "channel",
+    id: "c5",
+    name: "Lobby",
+    channelType: ChannelType.GuildVoice,
+  };
+  const gone: PermissionTarget = {
+    kind: "channel",
+    id: "999000111",
+    name: "999000111",
   };
   const check = (
     id: string,
@@ -279,6 +299,7 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
         check("event-tags", "ok", server),
         check("event-channels", "ok", events),
         check("quotes-post", "ok", quotes),
+        check("voice-lobby", "ok", lobby),
         check("reaction-roles", "ok", server, false),
       ],
     };
@@ -314,13 +335,25 @@ function botPermissionReport(kind: "ok" | "mixed"): BotPermissionReport {
         kind: "channel",
         id: "c4",
         name: "raid-alerts",
+        channelType: ChannelType.GuildText,
       }),
+      check("lfg-post", "unknown", gone),
+      check("voice-lobby", "ok", lobby),
+      {
+        feature: ref("rules-role-hierarchy"),
+        kind: "role-position",
+        enabled: true,
+        outcome: "ok",
+        target: { kind: "role", id: "r9", name: "Members" },
+        missing: [],
+      },
       check("notices-pin", "ok", quotes, false),
       check("event-moves", "unchecked", null),
       check("voice-rooms", "unknown", {
         kind: "category",
         id: "c2",
         name: "Voice",
+        channelType: ChannelType.GuildCategory,
       }),
       check("reaction-roles", "ok", server, false),
     ],
@@ -2073,7 +2106,19 @@ export function adminPages(): A11yPage[] {
             },
             legacyRsvps: { going: 4, maybe: 1, cant: 0 },
             channelId: "c1",
+            channelName: "Game night",
+            channelType: ChannelType.GuildVoice,
             groupCount: 3,
+          },
+          {
+            id: "e2",
+            title: "Old game night",
+            when: "2026-03-01 20:00",
+            state: "scheduled",
+            // The channel was deleted: shown by its id as unavailable (#1394).
+            channelId: "999000111",
+            channelName: null,
+            channelType: null,
           },
         ],
         groupLimits: { defaultCount: 3, maxCount: 8 },
@@ -3646,6 +3691,7 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
     durationMinutes: 90,
     recurrence: "weekly",
     channel: "quiz-night",
+    channelType: ChannelType.GuildVoice,
     groupsEnabled,
     groupLabel: "Team",
     leaderLabel: "Leader",
@@ -3931,6 +3977,17 @@ export function userPages(): A11yPage[] {
         renderHostPanelBody({
           event: hostEvent({ groupsEnabled: true }),
           permissionNotice: MISSING_PERMISSION_NOTICE,
+        }),
+      ),
+    },
+    {
+      // The main channel was deleted: the id shown as unavailable (#1394).
+      name: "/me host panel (main channel gone)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/events",
+        renderHostPanelBody({
+          event: hostEvent({ channel: "999000111", channelType: null }),
         }),
       ),
     },
@@ -4625,18 +4682,22 @@ const REMOVED_BOT: RemovedBotCandidate = {
   needsCheck: false,
   reason: "Its id is in the bot catalogue and it is no longer in the server.",
   overwriteChannels: [
-    { id: "11", name: "news" },
-    { id: "12", name: "chat" },
+    { id: "11", name: "news", typeName: "GuildText" },
+    { id: "12", name: "chat", typeName: "GuildVoice" },
+    { id: "14", name: "archive" },
   ],
   ownedChannels: [
     {
       id: "13",
       name: "log",
+      typeName: "GuildText",
       usedBy: ["core"],
       claimKey: "core.errors.channel_id",
     },
   ],
-  boundFeatures: [{ channel: "log", features: ["core"] }],
+  boundFeatures: [
+    { channel: "log", typeName: "GuildText", features: ["core"] },
+  ],
 };
 
 /** A cleanup plan with one approved overwrite removal (#1179). */

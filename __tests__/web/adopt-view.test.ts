@@ -696,7 +696,8 @@ describe("Server scan tabs (#1323)", () => {
   });
   it("lists the integration role and overwrite channels on a bot card", () => {
     const html = page("bots");
-    expect(html).toContain("<dt>Channels with overwrites</dt><dd>quotes</dd>");
+    expect(html).toContain("<dt>Channels with overwrites</dt><dd><span");
+    expect(html).toContain("</svg>quotes</span></dd>");
   });
 
   it("links the scheduled events to adoption on the Discord tab, escaping their names", () => {
@@ -843,6 +844,170 @@ describe("Server scan tabs (#1323)", () => {
     expect(html).toContain("boom &lt;x&gt;");
     expect(html).not.toContain('class="kb-tabs"');
     expect(html).not.toContain('role="switch"');
+  });
+});
+
+describe("Discord labels on the scan tabs (#1394)", () => {
+  const ch = scan.channels[0];
+  const voice = {
+    ...ch,
+    id: "c2",
+    name: "Lobby <i>",
+    kind: "voice" as const,
+    typeName: "GuildVoice",
+  };
+
+  it("shows a role in the Roles tab as @Name, and @everyone once", () => {
+    const html = mainOf(
+      page("roles", {
+        scan: {
+          ...scan,
+          roles: [
+            ...scan.roles,
+            {
+              ...scan.roles[0],
+              id: "g1",
+              name: "@everyone",
+              isEveryone: true,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain(
+      '<th scope="row"><span class="kb-mention">@&lt;script&gt;x&lt;/script&gt;</span></th>',
+    );
+    expect(html).toContain("@everyone");
+    expect(html).not.toContain("@@everyone");
+  });
+
+  it("shows a role overwrite as a role, and a member overwrite by its plain label", () => {
+    const html = mainOf(
+      page("channels", {
+        scan: {
+          ...scan,
+          channels: [
+            {
+              ...ch,
+              overwrites: [
+                ...ch.overwrites,
+                {
+                  id: "u1",
+                  type: "member" as const,
+                  label: "Some <b>member</b>",
+                  allow: [],
+                  deny: ["ViewChannel"],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain('<span class="kb-mention">@Mod</span>');
+    expect(html).toContain("Some &lt;b&gt;member&lt;/b&gt;");
+    // A role overwrite whose role is gone carries the id as its label: unavailable.
+    expect(
+      mainOf(
+        page("channels", {
+          scan: {
+            ...scan,
+            channels: [
+              {
+                ...ch,
+                overwrites: [
+                  {
+                    id: "r-gone",
+                    type: "role" as const,
+                    label: "r-gone",
+                    allow: [],
+                    deny: ["ViewChannel"],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ),
+    ).toContain("r-gone (unavailable)");
+    expect(html).not.toContain("<b>member");
+  });
+
+  it("names the channels a bot has overwrites in as mentions, an id that is gone as unavailable", () => {
+    const html = page("bots", {
+      scan: {
+        ...scan,
+        channels: [ch, voice],
+        bots: [{ ...scan.bots[0], overwriteChannelIds: ["c2", "c-gone"] }],
+      },
+    });
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).toContain("Lobby &lt;i&gt;</span>");
+    expect(html).not.toContain("Lobby <i>");
+    expect(html).toContain("c-gone (unavailable)");
+  });
+
+  it("labels the leftovers: integration role as @Name, channels by their kind", () => {
+    const withOwner = {
+      ...scan,
+      bots: [{ ...scan.bots[0], overwriteChannelIds: [] as string[] }],
+      channels: [
+        {
+          ...voice,
+          ownerHint: { botId: "d", botTag: "Dyno#1", share: 0.9 },
+          overwrites: [
+            {
+              id: "d",
+              type: "member" as const,
+              label: "Dyno",
+              allow: [],
+              deny: [],
+            },
+          ],
+        },
+      ],
+    };
+    const html = page("bots", { scan: withOwner });
+    expect(html).toContain("is mostly written by this bot");
+    expect(html).toContain("keeps a permission overwrite for the bot");
+    expect(html).toContain('aria-label="Voice channel"');
+    expect(html).not.toContain("<strong>Lobby");
+  });
+
+  it("shows the Discord tab's rules, system and updates channels and the onboarding roles with labels", () => {
+    const html = mainOf(
+      page("discord", {
+        scan: {
+          ...scan,
+          channels: [ch],
+          community: {
+            ...scan.community,
+            rulesChannelId: "c1",
+            systemChannelId: "c-gone",
+          },
+        },
+      }),
+    );
+    expect(html).toContain('aria-label="Text channel"');
+    expect(html).toContain("c-gone (unavailable)");
+    // Onboarding prompt roles: a known role as @Name, a deleted one by id.
+    expect(html).toContain("@&lt;script&gt;x&lt;/script&gt;");
+    expect(html).toContain("⚠ r-gone (unavailable)");
+    expect(html).not.toContain("<script>x</script>");
+  });
+
+  it("writes the roles that gate a channel as @Name in its note", () => {
+    const html = mainOf(
+      page("channels", {
+        scan: {
+          ...scan,
+          channels: [{ ...ch, gatedByRoleIds: ["r1", "r-gone"] }],
+        },
+      }),
+    );
+    expect(html).toContain(
+      "gated by: @&lt;script&gt;x&lt;/script&gt;, ⚠ r-gone (unavailable)",
+    );
   });
 });
 

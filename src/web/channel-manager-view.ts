@@ -1,6 +1,8 @@
 import { renderAdminPage, type NavFeatureStatus } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { escapeHtml } from "./html.js";
+import { channelText, namedChannelMention } from "./discord-labels.js";
+import { ChannelType } from "discord.js";
 import type { RecentChange } from "./channel-manager-data.js";
 import {
   CHANNEL_LIMITS,
@@ -41,6 +43,23 @@ export interface ChannelManagerProps {
 
 const KIND_LABEL = { text: "Text", voice: "Voice", category: "Category" };
 
+const TYPE_NAME = {
+  text: "GuildText",
+  voice: "GuildVoice",
+  category: "GuildCategory",
+} as const;
+
+/**
+ * The channel as a mention (icon and name). A type with no label (a directory)
+ * is shown by its plain name rather than as unavailable: it exists.
+ */
+function labelHtml(c: ManagedChannelView): string {
+  return namedChannelMention(
+    c.name,
+    c.kind === "other" ? c.typeLabel : TYPE_NAME[c.kind],
+  );
+}
+
 function csrfInput(token: string): string {
   return `<input type="hidden" name="_csrf" value="${escapeHtml(token)}">`;
 }
@@ -54,7 +73,7 @@ function parentSelect(
   const options = tree.categories
     .map(
       (n) =>
-        `<option value="${escapeHtml(n.category.id)}"${n.category.id === selected ? " selected" : ""}>${escapeHtml(n.category.name)}</option>`,
+        `<option value="${escapeHtml(n.category.id)}"${n.category.id === selected ? " selected" : ""}>${escapeHtml(channelText({ name: n.category.name, type: ChannelType.GuildCategory }))}</option>`,
     )
     .join("");
   return `<label>${escapeHtml(label)}
@@ -174,7 +193,7 @@ function channelRow(
 ): string {
   const label = c.kind === "other" ? c.typeLabel : KIND_LABEL[c.kind];
   return `<tr>
-<td><strong>${escapeHtml(c.name)}</strong>${describe(c)}${protectionNote(c, p)}</td>
+<td>${labelHtml(c)}${describe(c)}${protectionNote(c, p)}</td>
 <td>${escapeHtml(label)}</td>
 <td>${actions(c, p, tree)}</td>
 </tr>`;
@@ -197,7 +216,7 @@ function categoryCard(
   tree: ChannelTree,
 ): string {
   return `<div class="card">
-  <h2>${escapeHtml(n.category.name)} <span class="tag">category</span></h2>
+  <h2>${labelHtml(n.category)} <span class="tag">category</span></h2>
   ${protectionNote(n.category, p)}
   ${actions(n.category, p, tree)}
   ${channelTable(n.children, p, tree)}
@@ -340,8 +359,8 @@ export function renderChannelDeleteConfirmPage(
           ? "this voice channel"
           : "this text channel";
     inner = `<div class="card">
-  <h2>Delete ${escapeHtml(c.name)}?</h2>
-  <p>You are about to permanently delete ${what}, <strong>${escapeHtml(c.name)}</strong>. ${c.kind === "text" ? "Its messages are deleted with it. " : ""}This can't be undone.</p>
+  <h2>Delete ${labelHtml(c)}?</h2>
+  <p>You are about to permanently delete ${what}, ${labelHtml(c)}. ${c.kind === "text" ? "Its messages are deleted with it. " : ""}This can't be undone.</p>
   <form method="POST" action="${CHANNELS_PATH}/${escapeHtml(c.id)}/delete">
     ${csrfInput(p.csrfToken)}
     <input type="hidden" name="confirm" value="${escapeHtml(p.confirmToken)}">

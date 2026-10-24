@@ -381,3 +381,92 @@ describe("renderChannelClaimsPage (#1022)", () => {
     });
   });
 });
+
+describe("Discord labels on the claims page (#1394)", () => {
+  it("shows each channel with the icon of its kind, keeping the type word under it", () => {
+    const html = renderChannelClaimsPage(empty);
+    const row = (id: string): string =>
+      html.slice(html.indexOf(`<tr id="claim-${id}">`)).split("</tr>")[0];
+    expect(row("11")).toContain('aria-label="Text channel"');
+    expect(row("11")).toContain('<div class="muted">GuildText</div>');
+    expect(row("13")).toContain('aria-label="Voice channel"');
+    expect(row("10")).toContain("kb-mention--category");
+    expect(row("10")).toContain("Games &lt;script&gt;");
+  });
+
+  it("writes roles in the gate list as @Name, escaped, as plain option text", () => {
+    const html = renderChannelClaimsPage(empty);
+    expect(html).toContain("@&lt;b&gt;Mod&lt;/b&gt;");
+    expect(html).not.toContain("<b>Mod");
+  });
+
+  it("labels the category and role of a game-role pairing", () => {
+    const gated = {
+      ...scan,
+      roles: scan.roles.map((r: Record<string, unknown>) => ({
+        ...r,
+        usedBy: [],
+      })),
+      scanned: {
+        botRoleIds: [],
+        botHighestRolePosition: 50,
+        roles: [{ id: "r1", permissions: "0", position: 3 }],
+      },
+      channels: [
+        ch({
+          id: "10",
+          name: "Games <script>",
+          kind: "category",
+          typeName: "GuildCategory",
+          overwrites: [
+            {
+              id: "g",
+              type: "role",
+              label: "@everyone",
+              allow: [],
+              deny: ["ViewChannel"],
+            },
+            {
+              id: "r1",
+              type: "role",
+              label: "Mod",
+              allow: ["ViewChannel"],
+              deny: [],
+            },
+          ],
+        }),
+      ],
+    };
+    const html = renderChannelClaimsPage({ ...empty, scan: gated });
+    expect(html).toContain(
+      '<span class="kb-mention">@&lt;b&gt;Mod&lt;/b&gt;</span>',
+    );
+    expect(html).not.toContain("<td>Games &lt;script&gt;</td>");
+  });
+
+  it("labels the channel of the prefilled notice by its type, and leaves an untyped one plain", () => {
+    const prefill = (channelTypeName?: string): string =>
+      renderChannelClaimsPage({
+        ...empty,
+        claims: [
+          {
+            channelId: "13",
+            action: "leave",
+            bindKey: "voicechannels.lobby.channel_id",
+          },
+        ],
+        prefill: {
+          channelId: "13",
+          channelName: "Lobby",
+          channelTypeName,
+          featureLabel: "Voice lobby",
+        },
+      });
+    expect(prefill("GuildVoice")).toContain(
+      'Prefilled from the Server scan: <strong><span class="kb-mention"><svg',
+    );
+    expect(prefill()).toContain(
+      "Prefilled from the Server scan: <strong>Lobby</strong>",
+    );
+  });
+});

@@ -67,13 +67,19 @@ export function prefillFromQuery(
     channels: ReadonlyArray<{
       id: string;
       name: string;
+      typeName?: string;
       kind: "category" | "text" | "voice" | "other";
       flags: { forum: boolean; stage: boolean };
     }>;
   } | null,
 ): {
   claims: ChannelClaim[];
-  notice: { channelId: string; channelName: string; featureLabel: string };
+  notice: {
+    channelId: string;
+    channelName: string;
+    channelTypeName?: string;
+    featureLabel: string;
+  };
 } | null {
   const channelId = typeof query.channel === "string" ? query.channel : "";
   const feature = typeof query.feature === "string" ? query.feature : "";
@@ -86,6 +92,7 @@ export function prefillFromQuery(
     notice: {
       channelId,
       channelName: channel.name,
+      channelTypeName: channel.typeName,
       featureLabel: target.label,
     },
   };

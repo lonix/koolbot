@@ -61,6 +61,19 @@ export function channelKindOf(
   }
 }
 
+/**
+ * The Discord channel type named `name` (`ChannelType[type]`, as the scan and
+ * the Channel Manager keep it: "GuildVoice"), or null when the name is not a
+ * channel type. For callers that hold the type as a word.
+ */
+export function channelTypeByName(
+  name: string | null | undefined,
+): ChannelType | null {
+  if (!name) return null;
+  const type = (ChannelType as unknown as Record<string, unknown>)[name];
+  return typeof type === "number" ? type : null;
+}
+
 /** A channel to label: its name and Discord type (null/undefined = not found). */
 export interface ChannelRef {
   name: string;
@@ -178,6 +191,22 @@ export function channelMention(ref: ChannelRef): string {
   const cls =
     kind === "category" ? "kb-mention kb-mention--category" : "kb-mention";
   return `<span class="${cls}">${svg(info.icon, info.label)}${escapeHtml(ref.name)}</span>`;
+}
+
+/**
+ * A channel known by its name and its type as a word (`ChannelType[type]`,
+ * "GuildVoice"), the way the scan and the Channel Manager keep it. A type with
+ * no label (a directory) is shown by its plain, escaped name: the channel
+ * exists, so it is not "unavailable".
+ */
+export function namedChannelMention(
+  name: string,
+  typeName: string | null | undefined,
+): string {
+  const type = channelTypeByName(typeName);
+  return type !== null && channelKindOf(type)
+    ? channelMention({ name, type })
+    : escapeHtml(name);
 }
 
 /** A role as a `kb-mention`: `@Name`, no icon, as Discord shows it. */

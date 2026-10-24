@@ -15,7 +15,9 @@ import {
   channelKindOf,
   channelMention,
   channelText,
+  missingMention,
   missingText,
+  roleMention,
   roleText,
 } from "./discord-labels.js";
 import { ChannelType } from "discord.js";
@@ -2560,6 +2562,9 @@ export interface EventRow {
    * the event is finished and was not looked up. */
   expected?: EventExpected | null;
   channelId: string | null;
+  /** The main channel's name and Discord type when the bot can see it; absent or null when it is gone, so the row shows the id as unavailable (#1394). */
+  channelName?: string | null;
+  channelType?: ChannelType | null;
   /** Cadence label (e.g. "weekly") when part of a recurring series, else null (#744). */
   recurrence?: string | null;
   /** 1-based position within the series, for the indicator. */
@@ -3550,7 +3555,10 @@ export function renderEventsPage(props: EventsProps): string {
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
     const channelCell = e.channelId
-      ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
+      ? channelMention({
+          name: e.channelName ?? e.channelId,
+          type: e.channelType,
+        })
       : '<span class="muted">—</span>';
     return `<tr>
 <td>${escapeHtml(e.title)}${
@@ -3824,7 +3832,7 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
-<td>${s.pingRoleName ? `@${escapeHtml(s.pingRoleName)}` : '<span class="muted">none</span>'}</td>
+<td>${s.pingRoleName ? (s.pingRoleName === s.pingRoleId ? missingMention(s.pingRoleName) : roleMention(s.pingRoleName)) : '<span class="muted">none</span>'}</td>
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
 <td class="actions">
@@ -5493,7 +5501,10 @@ ${renderStatusLine({
   enabled: props.enabled,
   chips: [
     props.categoryFound
-      ? { text: `Category ${props.categoryName}`, mono: true }
+      ? {
+          text: `Category ${channelText({ name: props.categoryName, type: ChannelType.GuildCategory })}`,
+          mono: true,
+        }
       : {
           text: "Category not found",
           warn: true,
@@ -5501,8 +5512,16 @@ ${renderStatusLine({
             ? undefined
             : settingHref("voicechannels.category_id"),
         },
-    { text: `Lobby ${props.lobbyName}`, mono: true },
-    { text: `Offline lobby ${props.offlineLobbyName}`, mono: true },
+    {
+      // A configured name, not a looked-up channel: it is a voice room by
+      // definition, and may simply not exist yet, so it is never "unavailable".
+      text: `Lobby ${channelText({ name: props.lobbyName, type: ChannelType.GuildVoice })}`,
+      mono: true,
+    },
+    {
+      text: `Offline lobby ${channelText({ name: props.offlineLobbyName, type: ChannelType.GuildVoice })}`,
+      mono: true,
+    },
     { text: `Prefix ${props.prefix}`, mono: true },
     { text: `Control panel ${props.controlPanelEnabled ? "on" : "off"}` },
     {
@@ -5865,7 +5884,7 @@ export function renderLeaderboardRolesPage(
       const roleCell =
         t.roleName === null
           ? `<span class="mono">${escapeHtml(t.roleId)}</span> <span class="tag tag-warn">role not found</span>`
-          : `@${escapeHtml(t.roleName)}${renderTierRoleIssue(t)}`;
+          : `${roleMention(t.roleName)}${renderTierRoleIssue(t)}`;
       return `<tr>
 <td>Top ${t.topN}</td>
 <td>${roleCell}</td>
