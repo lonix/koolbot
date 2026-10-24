@@ -17,6 +17,7 @@ import {
   type LiveEditOutcome,
 } from "../../src/services/event-live-edit.js";
 import {
+  GROUP_MARKERS_ROW_ID,
   groupNameRowId,
   groupPresetRow,
   groupSizeRowId,
@@ -189,6 +190,136 @@ describeWithMongo(
         (before.groups as Raw[]).find((x) => x.key === B),
       );
       expect((await raw(id)).liveEditRevision).toBe(1);
+    });
+
+    describe("markers (#1406): one row, a map by group key", () => {
+      const markers = (a: string, b: string) => ({ [A]: a, [B]: b });
+
+      it("sets the marker and the pending rename only for the group that changed, through $and of $elemMatch and arrayFilters", async () => {
+        const id = await makeEvent();
+        const before = await raw(id);
+        const out = await run(id, [
+          entry(
+            GROUP_MARKERS_ROW_ID,
+            markers("\u{1F534}", ""),
+            markers("", ""),
+          ),
+        ]);
+        expect(applied(out)).toEqual([GROUP_MARKERS_ROW_ID]);
+        expect(await rawGroup(id)).toMatchObject({
+          marker: "\u{1F534}",
+          nameSyncPending: true,
+          name: "Alpha",
+          size: 3,
+          tag: "A",
+          channelId: A_CH,
+          memberIds: [LEADER, "u2"],
+        });
+        // The other group is byte for byte what it was: no marker write, no flag.
+        expect(await rawGroup(id, B)).toEqual(
+          (before.groups as Raw[]).find((x) => x.key === B),
+        );
+        expect("nameSyncPending" in (await rawGroup(id, B))).toBe(false);
+        // A marker can be cleared again, and a group with a stored marker matches by value.
+        const cleared = await run(id, [
+          entry(
+            GROUP_MARKERS_ROW_ID,
+            markers("", ""),
+            markers("\u{1F534}", ""),
+          ),
+        ]);
+        expect(applied(cleared)).toEqual([GROUP_MARKERS_ROW_ID]);
+        expect((await rawGroup(id)).marker).toBe("");
+      });
+
+      it("a group whose marker field was never written matches an empty from-value", async () => {
+        const id = await makeEvent();
+        await Event.collection.updateOne(
+          { _id: new mongoose.Types.ObjectId(id) },
+          { $unset: { "groups.$[g].marker": "" } },
+          { arrayFilters: [{ "g.key": B }] },
+        );
+        expect("marker" in (await rawGroup(id, B))).toBe(false);
+        const out = await run(id, [
+          entry(GROUP_MARKERS_ROW_ID, markers("", "\u2B50"), markers("", "")),
+        ]);
+        expect(applied(out)).toEqual([GROUP_MARKERS_ROW_ID]);
+        expect((await rawGroup(id, B)).marker).toBe("\u2B50");
+      });
+
+      it("a marker changed meanwhile is a conflict and nothing is written", async () => {
+        const id = await makeEvent();
+        await Event.collection.updateOne(
+          { _id: new mongoose.Types.ObjectId(id) },
+          { $set: { "groups.$[g].marker": "\u{1F7E3}" } },
+          { arrayFilters: [{ "g.key": A }] },
+        );
+        const before = await raw(id);
+        const out = await run(id, [
+          entry(
+            GROUP_MARKERS_ROW_ID,
+            markers("\u{1F535}", ""),
+            markers("", ""),
+          ),
+        ]);
+        expect(applied(out)).toEqual([]);
+        expect(out.status === "done" ? out.notApplied : []).toHaveLength(1);
+        expect((await rawGroup(id)).marker).toBe("\u{1F7E3}");
+        expect(await raw(id)).toEqual(before);
+      });
+
+      it("a removed group refuses the whole row: nothing is written", async () => {
+        const id = await makeEvent();
+        await Event.collection.updateOne(
+          { _id: new mongoose.Types.ObjectId(id) },
+          { $pull: { groups: { key: B } } },
+        );
+        const before = await raw(id);
+        const out = await run(id, [
+          entry(
+            GROUP_MARKERS_ROW_ID,
+            markers("\u{1F534}", ""),
+            markers("", ""),
+          ),
+        ]);
+        expect(applied(out)).toEqual([]);
+        expect((await rawGroup(id)).marker).toBe("");
+        expect(await raw(id)).toEqual(before);
+      });
+
+      it("a write lost between the plan and the write (the from-value no longer holds) is not applied", async () => {
+        const id = await makeEvent();
+        const original = Event.updateOne.bind(Event);
+        const spy = jest.spyOn(Event, "updateOne").mockImplementation(((
+          filter: unknown,
+          update: unknown,
+          opts: unknown,
+        ) => {
+          if (!JSON.stringify(update).includes("groups.$[g0].marker")) {
+            return original(filter as never, update as never, opts as never);
+          }
+          // A concurrent writer wins right before the row's own write.
+          return Event.collection
+            .updateOne(
+              { _id: new mongoose.Types.ObjectId(id) },
+              { $set: { "groups.$[g].marker": "\u{1F7E4}" } },
+              { arrayFilters: [{ "g.key": A }] },
+            )
+            .then(() =>
+              original(filter as never, update as never, opts as never),
+            );
+        }) as never);
+        const out = await run(id, [
+          entry(
+            GROUP_MARKERS_ROW_ID,
+            markers("\u{1F534}", ""),
+            markers("", ""),
+          ),
+        ]);
+        spy.mockRestore();
+        expect(applied(out)).toEqual([]);
+        expect((await rawGroup(id)).marker).toBe("\u{1F7E4}");
+      });
     });
 
     it("a group a leader renamed: the original becomes the host's name, the original tag stays", async () => {
