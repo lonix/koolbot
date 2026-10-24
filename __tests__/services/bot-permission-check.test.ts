@@ -1713,9 +1713,9 @@ describe("channel-posting features (#1254)", () => {
           const report = await runPost({
             channels: [text("c", bits(P.ViewChannel))],
           });
-          expect(
-            unknownIds(report.problems.flatMap((p) => p.features)),
-          ).not.toContain(c.id);
+          expect(ids(report.problems.flatMap((p) => p.features))).not.toContain(
+            c.id,
+          );
           expect(unknownIds(report.quiet)).toContain(c.id);
           expect(entryOf(report, c.id)).toMatchObject({ enabled: false });
         });
