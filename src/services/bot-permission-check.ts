@@ -515,16 +515,19 @@ export async function checkBotPermissions(
         continue;
       }
       if (r.scope !== "guild" && !targetId) {
+        // An optional channel left empty on purpose: nothing posts, so the
+        // feature is not in use (no "not set" note, no "not checked" verdict).
+        const optionalEmpty = r.targetOptional === true;
         checks.push({
           feature: ref(r),
           kind: "permission",
-          enabled: inUse,
+          enabled: inUse && !optionalEmpty,
           outcome: "unchecked",
           target: null,
           missing: [],
         });
         const note = `${r.area}: ${setting} is not set, so ${r.feature.toLowerCase()} is not checked.`;
-        if (inUse && !notes.includes(note)) notes.push(note);
+        if (inUse && !optionalEmpty && !notes.includes(note)) notes.push(note);
         continue;
       }
       let target: PermissionTarget = SERVER;

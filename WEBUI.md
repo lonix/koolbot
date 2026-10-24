@@ -1425,10 +1425,33 @@ is on. A configured channel that is a category, a forum or a thread (or not foun
 _Not checked_; threads are not checked because they need Send Messages in Threads and are not in
 Discord's channel list. The text chat of a voice or stage channel is checked, except for the weekly
 announcement, which needs a plain text channel. The weekly digest is sent as
-direct messages and needs no channel. Birthdays, celebrations, welcome messages, looking
-for group, event and leaderboard announcements, the reaction-role picker and the rules
-message post too but are not checked yet (#1254). When one of these features cannot post,
-most of them only write a line in the bot's log; nothing is shown in Discord.
+direct messages and needs no channel.
+
+The second group of posting features is checked the same way (#1254): birthdays and
+milestone celebrations (View Channel and Send Messages, in a plain text channel; celebrations
+only while achievements and voice tracking are on), welcome messages (View Channel and Send
+Messages; the rules channel it may mention is only text and needs nothing), looking for group
+(View Channel, Send Messages, Embed Links and Read Message History, which it needs to update
+or close a post), event announcements and reminders (View Channel, Send Messages and Read
+Message History, in a plain text channel), leaderboard role announcements (View Channel, Send
+Messages and Embed Links, only while voice tracking is on), the rules message (View Channel,
+Send Messages and Read Message History) and the reaction-role picker channel. The picker has two
+rows: posting (View Channel, Send Messages, Embed Links, Read Message History) and the
+reactions (Add Reactions for the emoji on reaction pickers, Manage Messages to remove a member's
+other reaction in one-of-a-set mode or after a refused pick). Whether a picker uses reactions
+or buttons, and its mode, is stored per picker and not read here, so a server that only uses
+button or menu pickers is shown the reactions row anyway; it can be ignored there. Pickers
+remember the channel they were posted in, so one posted before the picker channel was changed
+is not checked in its old channel. An event announcement is checked in the current
+announcement channel, not in the channel an older event was announced in. A birthday,
+celebration, welcome, leaderboard or event post that fails is only a line in the bot's log;
+nothing is shown in Discord. A failed LFG post is shown to the member who ran `/lfg`, and the
+rules message and the pickers are posted from the Web UI, which shows the error.
+Scheduled announcements, polls and tickets post too and are not checked yet. Four of these
+channels are optional: the event announcement channel, the leaderboard announcement channel,
+the celebrations channel and the LFG channel (empty means the channel `/lfg` was run in, which
+cannot be checked). Left empty, the feature is treated as not in use: no note, and it does not
+stop the page from saying everything is in place. The matrix lists it as _(off)_ then.
 
 - **Effective permissions.** A category or channel is checked with the bot's
   permissions _in that channel_, so an overwrite that denies a permission the bot's
@@ -1450,7 +1473,8 @@ most of them only write a line in the bot's log; nothing is shown in Discord.
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
   _checked in the table above_, _used, not checked on this page_ (moderation, ticket transcripts, the
-  channels not covered yet and the overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
+  channels of scheduled announcements, polls and tickets, and the overwrite permissions of read-only channels,
+  each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a

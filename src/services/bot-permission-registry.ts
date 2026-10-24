@@ -83,6 +83,14 @@ export interface FeatureRequirement {
    */
   targetType?: "text" | "guild-text";
   /**
+   * The channel setting may be left empty on purpose: the feature then posts
+   * nowhere (or, for looking for group, in the channel the command ran in), so
+   * the entry is reported as not in use, with no "channel is not set" note and no
+   * "not checked" verdict. Without this an owner who never set the optional
+   * event announcement channel could never see the page say everything is in place.
+   */
+  targetOptional?: boolean;
+  /**
    * A channel that is not a plain setting. `voice-lobby`: the lobby by id, or
    * by name in the managed category, as the voice service finds it.
    */
@@ -458,6 +466,151 @@ const postingRequirements: FeatureRequirement[] = [
   },
 ];
 
+/**
+ * The other features that post to one configured channel (#1254, second group),
+ * each audited from the producing service. `guild-text` marks the services that
+ * accept only a plain text channel (`instanceof TextChannel`); the rest accept any
+ * text-based channel. Where a failed post has no Discord-side sign, the `effect`
+ * says it is in the bot's log only.
+ */
+const morePostingRequirements: FeatureRequirement[] = [
+  {
+    id: "birthdays-post",
+    area: "Birthdays",
+    feature: "Birthday announcements",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "birthdays.enabled",
+    targetKey: "birthdays.channel_id",
+    effect:
+      "Birthday messages are not posted, and the birthday role is not granted for that member either. Each failed post is counted in the run summary and logged in the bot's log; the next hourly run tries again.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the birthday channel does not deny them.",
+  },
+  {
+    id: "celebrations-post",
+    area: "Celebrations",
+    feature: "Milestone celebrations",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "celebrations.enabled",
+    // Accolades are only awarded while achievements and voice tracking are on.
+    alsoKeys: ["achievements.enabled", "voicetracking.enabled"],
+    targetKey: "celebrations.channel_id",
+    targetOptional: true,
+    effect:
+      "Milestone celebrations are not posted (the accolade is still awarded). The failure is logged in the bot's log only and is not retried.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the celebrations channel does not deny them.",
+  },
+  {
+    id: "welcome-post",
+    area: "Welcome messages",
+    feature: "Welcome messages",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "welcome.enabled",
+    targetKey: "welcome.channel_id",
+    effect:
+      "New members are not greeted. The failure is logged in the bot's log only.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the welcome channel does not deny them.",
+  },
+  {
+    id: "lfg-post",
+    area: "Looking for group",
+    feature: "Looking-for-group posts",
+    scope: "channel",
+    targetType: "text",
+    needs: [
+      PERM.viewChannel,
+      PERM.sendMessages,
+      PERM.embedLinks,
+      PERM.readHistory,
+    ],
+    enabledKey: "lfg.enabled",
+    targetKey: "lfg.channel_id",
+    targetOptional: true,
+    effect:
+      "/lfg tells the member it could not post, and no post is made. Without Read Message History a post is not updated or closed when its party fills or its time runs out, so its buttons stay (logged in the bot's log only).",
+    fix: "Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the LFG channel does not deny them.",
+  },
+  {
+    id: "events-announce",
+    area: "Events",
+    feature: "Event announcements and reminders",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.readHistory],
+    enabledKey: "events.enabled",
+    targetKey: "events.announcement_channel_id",
+    targetOptional: true,
+    effect:
+      "Event announcements and start reminders are not posted, and an announcement is not updated or removed when the event changes. Failures are logged in the bot's log only; the event scan tries again.",
+    fix: "Give the bot's role View Channel, Send Messages and Read Message History, and make sure the announcement channel does not deny them.",
+  },
+  {
+    id: "leaderboard-announce",
+    area: "Leaderboard roles",
+    feature: "Leaderboard role announcements",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.embedLinks],
+    enabledKey: "leaderboard_roles.enabled",
+    // The reconciliation is skipped while voice tracking is off.
+    alsoKeys: ["voicetracking.enabled"],
+    targetKey: "leaderboard_roles.announcement_channel_id",
+    targetOptional: true,
+    effect:
+      "The summary of who gained or lost a leaderboard role is not posted; the roles still change. The failure is logged in the bot's log only.",
+    fix: "Give the bot's role View Channel, Send Messages and Embed Links, and make sure the announcement channel does not deny them.",
+  },
+  {
+    id: "rules-message",
+    area: "Rules",
+    feature: "The rules message",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.readHistory],
+    enabledKey: "rules.enabled",
+    targetKey: "rules.channel_id",
+    effect:
+      "Posting, updating or re-posting the rules message on the Rules page fails, and the page shows the error. A message already posted keeps working.",
+    fix: "Give the bot's role View Channel, Send Messages and Read Message History, and make sure the rules channel does not deny them.",
+  },
+  {
+    id: "reaction-picker-post",
+    area: "Reaction roles",
+    feature: "Posting the role pickers",
+    scope: "channel",
+    targetType: "text",
+    needs: [
+      PERM.viewChannel,
+      PERM.sendMessages,
+      PERM.embedLinks,
+      PERM.readHistory,
+    ],
+    enabledKey: "reactionroles.enabled",
+    targetKey: "reactionroles.message_channel_id",
+    effect:
+      "New role pickers cannot be posted or added to (the Reaction Roles page shows the error), and at startup the bot cannot find existing pickers to restore a reaction that went missing (logged in the bot's log only).",
+    fix: "Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the picker channel does not deny them.",
+  },
+  {
+    id: "reaction-picker-reactions",
+    area: "Reaction roles",
+    feature: "Reactions on the role pickers",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.addReactions, PERM.manageMessages],
+    enabledKey: "reactionroles.enabled",
+    targetKey: "reactionroles.message_channel_id",
+    effect:
+      "Reaction pickers get no emoji to click (Add Reactions). A member's other reaction is not removed when they pick another role in one-of-a-set mode, or when a pick is refused (Manage Messages), so the message shows a pick that has no role. Button and menu pickers need neither. Logged in the bot's log only, and not at all for a refused pick.",
+    fix: "Give the bot's role Add Reactions and Manage Messages, and make sure the picker channel does not deny them. Skip this if you only use button or menu pickers.",
+  },
+];
+
 export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   // ---- Voice channels ----
   {
@@ -614,6 +767,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   ...quotesRequirements,
   ...noticesRequirements,
   ...postingRequirements,
+  ...morePostingRequirements,
 ];
 
 /**
