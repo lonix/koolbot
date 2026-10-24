@@ -1810,14 +1810,36 @@ describe("renderEventsPage", () => {
     expect(html).toContain("Not on the Events list yet.");
   });
 
-  it("warns when the bot cannot create native events", () => {
+  it("warns when the bot cannot create native events, from the registry's check (#1253)", () => {
     const html = renderEventsPage({
       ...EVENTS_COMMON,
       enabled: true,
-      nativePermissionMissing: true,
+      permissionNotice: {
+        unavailable: null,
+        stale: false,
+        unchecked: [],
+        missing: [
+          {
+            feature: {
+              id: "event-native",
+              area: "Events",
+              feature: "Discord Events list card",
+              effect: "Events get no card in Discord's Events list.",
+              fix: "",
+            },
+            permissions: ["Create Events", "Manage Events"],
+            target: { kind: "server", id: null, name: "the server" },
+          },
+        ],
+      },
       rows: [],
     });
     expect(html).toContain("Create Events");
+    expect(html).toContain('href="/admin/bot-permissions"');
+    // No notice, nothing said: the page does not claim all is well.
+    expect(
+      renderEventsPage({ ...EVENTS_COMMON, enabled: true, rows: [] }),
+    ).not.toContain("data-permission-notice");
   });
 
   it("hides actions for a finished (cancelled) event", () => {

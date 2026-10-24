@@ -786,11 +786,10 @@ describe("the Events page", () => {
     expect(outside?.textContent).toContain("Channel");
   });
 
-  it("turns the warnings into chips that link to the setting or the permission", () => {
+  it("turns the warnings into chips that link to the setting", () => {
     const doc = eventsPage([], {
       categoryConfigured: false,
       announcementConfigured: false,
-      nativePermissionMissing: true,
     });
     const links = [...doc.querySelectorAll("a.kb-chip--warn")].map((a) =>
       a.getAttribute("href"),
@@ -798,7 +797,6 @@ describe("the Events page", () => {
     expect(links).toEqual([
       "#set-events.category_id",
       "#set-events.announcement_channel_id",
-      "/admin/bot-permissions",
     ]);
     // Both settings are unset, so the settings are open for the admin to fix them.
     expect(

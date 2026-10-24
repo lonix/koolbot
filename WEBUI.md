@@ -1495,6 +1495,27 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   with the number of missing permissions that affect enabled features. It comes from
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
+- **Next to the feature (#1253).** The pages that use a permission say so where you work
+  with the feature, not only here: the **Events** page, the **host panel** of an event and the
+  **Voice Channels** page show a notice when the bot lacks a permission that feature needs:
+  the permission, the channel or category it is missing in (or "server-wide"), what stops
+  working, and a link to this page. The notice comes from the same registry and the same
+  check as this page (`src/web/permission-notice.ts`), so it costs no extra Discord
+  request: the check is shared for 30 seconds, and a page that cannot get it within three
+  seconds says so. It shows only for a feature that is switched on and has its channel set
+  (the page's status line already says when the channel is missing), and it never says
+  that all is well. When the check cannot run (the bot has no connection to the server,
+  its own membership cannot be read, a configured channel is gone or is a thread) the
+  notice says "could not be checked" with the reason. On the host panel it is left out for
+  a finished event, names only the features that event uses (an adopted voice or stage event has no
+  channel of KoolBot's own, so no channel entry; a detached Discord event gets no Events list entry;
+  host access only while a channel is still to be made, judged from the channels the check
+  itself finds in Discord rather than from stored ids; moves only with a group), checks the category the event really sits in (its
+  main channel's category, else its own category, else `events.category_id`), and does not repeat the
+  group channel or clan tag warnings the panel already shows; a host who is not an admin gets
+  "ask a server admin" instead of the link, since this page is admin-only. The other features
+  (moderation, reaction roles, leaderboard roles, the logging channels and so on) are not
+  wired to the notice yet.
 - **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
   applies new permission bits to the bot's existing role) and a "Show all Discord
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
@@ -1812,7 +1833,8 @@ event link, remind attendees, and clean themselves up afterward. A status line s
 feature, the `events.category_id` channel category, and the
 `events.announcement_channel_id` are configured (with warning chips that link to the setting when a
 category or announcement channel is missing, since event channels and
-announcements won't be created without them, or to Bot Permissions when the bot lacks Create Events) plus the resolved event timezone.
+announcements won't be created without them) plus the resolved event timezone. A notice under the status line names any permission the bot lacks for the
+event features (Create Events or Manage Events, Manage Channels, host access, moves, clan tags, the announcement channel) and links to Bot Permissions.
 A **Schedule event** button at the top jumps to the form. The
 events table lists each event's title, start time, lifecycle state
 (_scheduled_ / _active_ / _ended_ / _cancelled_), and, when at least one event has something in it, an **Expected to show up** column, channel
