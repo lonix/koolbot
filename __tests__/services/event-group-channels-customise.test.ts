@@ -438,6 +438,46 @@ describe("syncNames: the stored name is the truth, the channel follows (#1196)",
     expect(env.channels.namesNeedAttention(cstore.get(EV)!)).toBe(true);
   });
 
+  it("the flag is cleared only for the name AND marker that were renamed (a marker the host set meanwhile keeps it pending, #1406)", async () => {
+    stored().marker = "R";
+    const env = makeEnv();
+    function routeChannel(route: string): string {
+      return /channels\/(\d+)/.exec(route)?.[1] ?? "";
+    }
+    // The channel is renamed with the old marker; while the request is in
+    // flight the host's live edit stores a new marker and a new pending flag.
+    env.rest.patch.mockImplementationOnce(
+      async (route: string, o: { body: { name: string } }) => {
+        env.channelNames.set(routeChannel(route), o.body.name);
+        stored().marker = "B";
+        stored().nameSyncPending = true;
+        return {};
+      },
+    );
+    const out = await env.channels.syncNames(EV, env.guild);
+    expect(out[0].status).toBe("applied");
+    expect(env.channelNames.get(RED_CH)).toBe(
+      groupChannelName("\u{1F4C5}", { name: "Crimson", marker: "R" }),
+    );
+    expect(stored().marker).toBe("B");
+    expect(stored().nameSyncPending).toBe(true); // the next pass renames to B
+    expect(env.channels.namesNeedAttention(cstore.get(EV)!)).toBe(true);
+    // The next pass renames with the new marker and then clears the flag.
+    const again = await env.channels.syncNames(EV, env.guild);
+    expect(again[0].status).toBe("applied");
+    expect(env.channelNames.get(RED_CH)).toBe(
+      groupChannelName("\u{1F4C5}", { name: "Crimson", marker: "B" }),
+    );
+    expect(stored().nameSyncPending).toBe(false);
+  });
+
+  it("a group with no stored marker is still settled by a rename (the marker is empty, not different)", async () => {
+    const env = makeEnv();
+    expect(stored().marker).toBeUndefined();
+    await env.channels.syncNames(EV, env.guild);
+    expect(stored().nameSyncPending).toBe(false);
+  });
+
   it("namesNeedAttention: pending only, open events only, with a channel", () => {
     const env = makeEnv();
     const doc = cstore.get(EV)!;

@@ -686,5 +686,112 @@ describeWithMongo(
         expect((await rawGroup(id)).memberIds).toEqual([LEADER, "u2"]);
       });
     });
+
+    describe("the name pass and a marker set while it renames (#1406)", () => {
+      function channelsWith(
+        names: Map<string, string>,
+        onPatch: () => Promise<void>,
+      ): EventGroupChannels {
+        const rest = {
+          patch: async (
+            route: string,
+            o: { body: Record<string, unknown> },
+          ) => {
+            names.set(/channels\/(\d+)/.exec(route)![1], o.body.name as string);
+            await onPatch();
+            return {};
+          },
+          post: async () => ({ id: "300000000000000001" }),
+          get: async () => [],
+          delete: async () => ({}),
+        };
+        return new EventGroupChannels(
+          { user: { id: "999999999999999999" }, token: "t" } as never,
+          {
+            getPrefix: async () => "",
+            getGraceMs: async () => 0,
+            isEnabled: async () => true,
+          },
+          {
+            rest: rest as never,
+            call: ((fn: (s: AbortSignal) => Promise<unknown>) =>
+              fn(new AbortController().signal)) as never,
+            paceMs: 0,
+          },
+        );
+      }
+      const guildWith = (names: Map<string, string>): never =>
+        ({
+          id: GUILD,
+          channels: {
+            cache: new Map(),
+            fetch: async (id: string) => ({
+              id,
+              name: names.get(id),
+              guildId: GUILD,
+              type: 2,
+            }),
+          },
+        }) as never;
+
+      it("a marker stored while the channel is renamed with the old marker keeps the new pending flag; the next pass renames and clears it", async () => {
+        const id = await makeEvent();
+        const markers = (a: string) => ({ [A]: a, [B]: "" });
+        await run(id, [entry(GROUP_MARKERS_ROW_ID, markers("R"), markers(""))]);
+        const names = new Map([[A_CH, "old"]]);
+        const channels = channelsWith(names, async () => {
+          // The host's live edit lands while the PATCH is in flight.
+          await Event.collection.updateOne(
+            { _id: new mongoose.Types.ObjectId(id) },
+            {
+              $set: {
+                "groups.$[g].marker": "B",
+                "groups.$[g].nameSyncPending": true,
+              },
+            },
+            { arrayFilters: [{ "g.key": A }] },
+          );
+        });
+        await Event.collection.updateOne(
+          { _id: new mongoose.Types.ObjectId(id) },
+          { $set: { "groups.$[g].nameSyncPending": true } },
+          { arrayFilters: [{ "g.key": A }] },
+        );
+        const first = await channels.syncNames(id, guildWith(names), A);
+        expect(first).toEqual([{ groupKey: A, status: "applied" }]);
+        expect(names.get(A_CH)).toBe("R Alpha");
+        expect(await rawGroup(id)).toMatchObject({
+          marker: "B",
+          nameSyncPending: true,
+        });
+        const second = await channelsWith(
+          names,
+          async () => undefined,
+        ).syncNames(id, guildWith(names), A);
+        expect(second).toEqual([{ groupKey: A, status: "applied" }]);
+        expect(names.get(A_CH)).toBe("B Alpha");
+        expect((await rawGroup(id)).nameSyncPending).toBe(false);
+      });
+
+      it("a group whose marker was never stored is settled by a rename (empty matches a missing field)", async () => {
+        const id = await makeEvent();
+        await Event.collection.updateOne(
+          { _id: new mongoose.Types.ObjectId(id) },
+          {
+            $set: { "groups.$[g].nameSyncPending": true },
+            $unset: { "groups.$[g].marker": "" },
+          },
+          { arrayFilters: [{ "g.key": A }] },
+        );
+        const names = new Map([[A_CH, "old"]]);
+        await channelsWith(names, async () => undefined).syncNames(
+          id,
+          guildWith(names),
+          A,
+        );
+        expect("marker" in (await rawGroup(id))).toBe(false);
+        expect((await rawGroup(id)).nameSyncPending).toBe(false);
+      });
+    });
   },
 );
