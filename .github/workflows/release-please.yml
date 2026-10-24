@@ -41,18 +41,27 @@ jobs:
       # Each push to main makes release-please update (force-push) the release branch,
       # a `synchronize` on a labelled PR, which docker.yml rebuilds.
       # `pr` is the JSON PullRequest object of the PR release-please created or updated
-      # (action v5 output; unset when it touched no PR, hence the `if`). It reaches the
-      # script only through env, never interpolated into it.
+      # (action v5 output). It is unset when release-please touched no PR (run 617: "PR
+      # #1074 remained the same"), and `!= ''` let that case through, so `fromJSON` in
+      # the env block failed the job with "Error reading JToken". Gate on plain
+      # truthiness and read the number in the script with `jq`, which also tolerates an
+      # empty or malformed value. It reaches the script only through env, never
+      # interpolated into it.
       # Do not add docker-preview to release-please-config.json's `label` option:
       # release-please uses that set to find its own pending PR.
       - name: Label the release PR docker-preview
-        if: steps.release.outputs.pr != ''
+        if: steps.release.outputs.pr
         env:
           # Must be the PAT: a label added with GITHUB_TOKEN does not trigger
           # docker.yml's `labeled` event, so no preview would be built.
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
+          PR_NUMBER=$(printf '%s' "$PR_JSON" | jq -r '.number // empty' 2>/dev/null || true)
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::notice title=No release PR to label::release-please reported no pull request in this run, so there is nothing to label."
+            exit 0
+          fi
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning title=RELEASE_PLEASE_TOKEN is not set::Skipping the docker-preview label on release PR #${PR_NUMBER}. Labels and pushes made with GITHUB_TOKEN do not trigger docker.yml, so the pr-${PR_NUMBER} preview image will not be built or refreshed."
             exit 0
