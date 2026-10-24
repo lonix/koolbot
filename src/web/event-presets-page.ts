@@ -6,13 +6,14 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import {
+  GROUP_ROWS_HEAD,
   renderFlash,
   renderGroupRow,
   type FlashMessage,
 } from "./admin-views.js";
 import { ConfigService } from "../services/config-service.js";
 import { EventService } from "../services/event-service.js";
-import { groupRowsScript } from "./event-group-form.js";
+import { deriveTagScript, groupRowsScript } from "./event-group-form.js";
 import {
   catalogNotice,
   eventSetupToFormValues,
@@ -39,6 +40,7 @@ import {
   GROUP_FORM_FIELDS,
   GROUP_LABEL_MAX,
   GROUP_NAME_MAX,
+  GROUP_TAG_MAX,
   resolveGroupCountLimits,
 } from "../services/event-groups.js";
 
@@ -267,6 +269,18 @@ export const EVENT_PRESETS_SCRIPT =
   "d.innerHTML=tpl.innerHTML.replace(/__N__/g,String(n)).replace(/__P__/g,String(n+1));" +
   "var nr=d.firstElementChild;box.appendChild(nr);if(window.koolGroupRows)window.koolGroupRows.enhance(nr);recompute();return true}" +
   "recompute();if(add)add.addEventListener('click',function(){addRow()});" +
+  // The tag follows the name (Red -> RED) while the clan tags box is ticked, until
+  // it is edited by hand: the same rule as on the event form.
+  deriveTagScript(GROUP_TAG_MAX) +
+  "var tagsBox=form.elements['groups_tags'];" +
+  "function deriveTags(){if(!tagsBox||!tagsBox.checked)return;Array.prototype.forEach.call(rows(),function(r){" +
+  "var n=r.querySelector('input[name$=\"_name\"]'),t=r.querySelector('input[name$=\"_tag\"]');if(!n||!t)return;" +
+  "if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
+  "var v=n.value.trim();if(v){t.value=derive(v);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
+  "box.addEventListener('input',function(e){var t=e.target;if(!t||!t.name)return;" +
+  "if(/_tag$/.test(t.name)){t.removeAttribute('data-auto');t.setAttribute('data-manual','1')}" +
+  "else if(/_name$/.test(t.name))deriveTags()});" +
+  "if(tagsBox)tagsBox.addEventListener('change',deriveTags);" +
   // One recompute for every change inside the form (the lobby box, a row's kind
   // such as a restored leads row). Code that sets a control by hand fires no
   // change event, so it calls the same recompute itself (the draft restore below).
@@ -382,6 +396,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
     <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"${lobbyOn ? " checked" : ""}> Captains lobby: a separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.</label>
     ${lobbyFields}
+    ${GROUP_ROWS_HEAD}
     <div data-group-rows data-max="${props.maxCount}" class="stack">
       ${rows}
     </div>

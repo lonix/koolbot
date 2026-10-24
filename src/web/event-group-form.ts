@@ -89,6 +89,20 @@ export function pickableMarkers(): readonly MarkerChoice[] {
 }
 
 /**
+ * The JavaScript for `derive(name)`: a clan tag from a group name (Red -> RED,
+ * "Alpha Bravo" -> AB), at most `maxTag` characters. The event form and both
+ * preset editors paste the same source into their scripts, so the three derive
+ * the same tag.
+ */
+export function deriveTagScript(maxTag: number): string {
+  return (
+    "function derive(name){var w=name.replace(/[^\\p{L}\\p{N}\\s]/gu,' ').trim().split(/\\s+/).filter(Boolean);" +
+    "var s=w.length>1?w.map(function(x){return Array.from(x)[0]}).join(''):Array.from(w[0]||'').slice(0,4).join('');" +
+    `return s.toUpperCase().slice(0,${maxTag})}`
+  );
+}
+
+/**
  * The script every group editor loads: it turns each row's marker text box into
  * a small button that opens a grid, and folds each row's kind select behind
  * "More". Without it the text box and the select stay as they are.
