@@ -12,6 +12,11 @@ import { channelMention } from "./discord-labels.js";
 import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
+import { nativeSyncPaused } from "../services/event-native-rules.js";
+import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
 
 export type HostSectionId = "board" | "end" | "settings" | "groupchanges";
 
@@ -119,6 +124,19 @@ export interface HostPanelEvent {
    * bot's, a refused edit). Names come from the gateway cache. */
   tagSkipped?: Array<{ name: string; reason: string }>;
   adopted: boolean;
+  /**
+   * The channel ids the event records (#1467), for the permission notice,
+   * which asks the check whether they still exist. Unlike `hasChannel` (what the
+   * table shows, from the stored ids) this is not taken as proof of existence.
+   */
+  recordedChannels?: {
+    main: string | null;
+    groups: Array<string | null>;
+    /** The Captains lobby's recorded channel ids; null when the event has no lobby. */
+    lobby: Array<string | null> | null;
+  };
+  /** The event's Discord event was deleted there; native sync leaves it alone. */
+  nativeDetached?: boolean;
 }
 
 const KIND_LABEL: Record<EventGroupKind, string> = {
@@ -322,14 +340,81 @@ ${inner}
     .join("\n");
 }
 
+/**
+ * The registry entries (#1253) this event's panel can be affected by: the
+ * event's channels always, and the group features only where the event uses
+ * them. A finished event has nothing left to set up.
+ */
+export function hostPanelPermissionFeatures(
+  e: HostPanelEvent,
+  /** Whether each recorded channel exists, from the permission check's snapshot (`PlacementReport.present`). */
+  present?: Readonly<Record<string, boolean>>,
+): string[] {
+  if (e.state === "ended" || e.state === "cancelled") return [];
+  // An adopted voice or stage event happens in its own Discord channel and
+  // gets no temporary one (`EventService.adoptedHasOwnChannel`), so the
+  // channel entry applies only once a channel of KoolBot's own exists for it.
+  // Whether an adopted event has a channel of its own is known only from the
+  // native listing (a Discord read), so before that it is left out.
+  const ids = e.adopted && e.channel === null ? [] : ["event-channels"];
+  // Native sync skips an adopted event and an open detached one (`nativeSyncPaused`).
+  if (
+    !e.adopted &&
+    !nativeSyncPaused({ state: e.state, nativeDetached: e.nativeDetached })
+  ) {
+    ids.push("event-native");
+  }
+  if (e.groupsEnabled) {
+    // The host's access is granted when a channel is created: the main channel
+    // (`createEventChannel`) or a group's (`createOne`). Once every channel
+    // exists a missing permission changes nothing until one is re-created.
+    // Existence comes from the check's snapshot; a deleted channel is made
+    // again by reconciliation and then needs the host's access granted again.
+    // Without it (the check could not run) the recorded ids stand in.
+    const recorded = e.recordedChannels;
+    const exists = (id: string | null | undefined): boolean =>
+      !!id && present?.[id] !== false;
+    const channelToMake = recorded
+      ? !exists(recorded.main) ||
+        recorded.groups.some((id) => !exists(id)) ||
+        (recorded.lobby !== null && !recorded.lobby.some(exists))
+      : e.channel === null ||
+        e.groups.some((g) => !g.hasChannel) ||
+        e.captainsLobby?.hasChannel === false;
+    if (channelToMake) ids.push("event-host-access");
+    // `moveEventMembers` refuses an event without a group to move into.
+    if (e.groups.length > 0) ids.push("event-moves");
+    if (e.groups.some((g) => g.kind === "leads") || e.captainsLobby) {
+      ids.push("event-leads-channel");
+    }
+    if (e.tagsEnabled === true) ids.push("event-tags");
+  }
+  return ids;
+}
+
+/** The recorded warning texts this panel shows, so the notice does not say them twice. */
+export function hostPanelShownWarnings(e: HostPanelEvent): string[] {
+  return [...(e.groupNotices ?? []), ...(e.tagNotices ?? [])];
+}
+
 export function renderHostPanelBody(opts: {
   event: HostPanelEvent;
+  /** What the bot lacks for this event (#1253), built with the two helpers above. */
+  permissionNotice?: PermissionNotice | null;
+  /** The Bot permissions page is admin-only; a host gets a sentence instead of the link. */
+  canLinkToPermissions?: boolean;
   /** Section HTML supplied by later issues, keyed by section id. */
   controls?: Partial<Record<HostSectionId, string>>;
   /** Open the two folds at the bottom (after a settings save, a flash is showing). */
   settingsOpen?: boolean;
 }): string {
   const e = opts.event;
+  // A line of its own only when there is something to show, so a panel without
+  // a notice is byte-for-byte what it was.
+  const notice = renderPermissionNotice(opts.permissionNotice ?? null, {
+    canLinkToPage: opts.canLinkToPermissions === true,
+  });
+  const noticeBlock = notice ? `${notice}\n` : "";
   const edit = e.editable
     ? `\n  <div class="kb-pagehead__actions"><a class="kb-btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></div>`
     : "";
@@ -341,6 +426,6 @@ export function renderHostPanelBody(opts: {
   </div>${edit}
 </header>
 ${renderSummary(e)}
-${renderGroups(e)}
+${noticeBlock}${renderGroups(e)}
 ${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
 }

@@ -213,6 +213,147 @@ describe("registry", () => {
   });
 });
 
+describe("one event's placement (#1467)", () => {
+  const cat = (id: string, name: string, lacks = false): FakeChannel => ({
+    id,
+    name,
+    type: ChannelType.GuildCategory,
+    bits: lacks ? without(ALL, P.ManageChannels) : ALL,
+  });
+  const voice = (id: string, parentId: string): FakeChannel => ({
+    id,
+    name: id,
+    type: ChannelType.GuildVoice,
+    bits: ALL,
+    parentId,
+  });
+  const base = [cat("cat-ev", "Events"), cat("cat-new", "New", true)];
+
+  // What the checker reads comes from Discord's own list (`fetched`), not from
+  // the gateway cache (`cached`), which can be stale or lack the channel.
+  // Columns: case, cached channels, fetched channels, placement, expected
+  // category the entries are checked in, expected presence.
+  it.each([
+    [
+      "cached parent is stale, Discord has the new one",
+      [...base, voice("m", "cat-ev")],
+      [...base, voice("m", "cat-new")],
+      { mainChannelId: "m" },
+      "cat-new",
+      { m: true },
+    ],
+    [
+      "main channel is not in the cache but Discord has it",
+      base,
+      [...base, voice("m", "cat-new")],
+      { mainChannelId: "m" },
+      "cat-new",
+      { m: true },
+    ],
+    [
+      "main channel is cached but deleted in Discord: its own category, then the setting",
+      [...base, voice("m", "cat-new")],
+      base,
+      { mainChannelId: "m", categoryId: "cat-new" },
+      "cat-new",
+      { m: false },
+    ],
+    [
+      "main channel deleted and no category of its own: the configured one",
+      [...base, voice("m", "cat-new")],
+      base,
+      { mainChannelId: "m" },
+      "cat-ev",
+      { m: false },
+    ],
+    [
+      "no main channel yet: the event's own category",
+      base,
+      base,
+      { mainChannelId: null, categoryId: "cat-new" },
+      "cat-new",
+      {},
+    ],
+    [
+      "no main channel and no category of its own: the configured one",
+      base,
+      base,
+      { mainChannelId: null },
+      "cat-ev",
+      {},
+    ],
+    [
+      "a group channel deleted in Discord but still cached",
+      [...base, voice("m", "cat-ev"), voice("g1", "cat-ev")],
+      [...base, voice("m", "cat-ev")],
+      { mainChannelId: "m", channelIds: ["g1"] },
+      "cat-ev",
+      { m: true, g1: false },
+    ],
+  ] as const)(
+    "%s",
+    async (_n, cached, fetched, placement, category, present) => {
+      settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+      check.resetBotPermissionCache();
+      const { client } = makeClient({
+        channels: [...cached],
+        fetchedChannels: [...fetched],
+      });
+      const report = await check.checkBotPermissions(client, "guild-1", {
+        ...direct,
+        eventPlacement: placement as never,
+      });
+      expect(report.fresh).toBe(true);
+      expect(report.placement?.present).toEqual(present);
+      const row = report.checks.find((c) => c.feature.id === "event-channels");
+      expect(row?.target?.id).toBe(category);
+      // Every entry that lives in the events category moves together.
+      for (const id of [
+        "event-host-access",
+        "event-moves",
+        "event-leads-channel",
+      ]) {
+        expect(report.checks.find((c) => c.feature.id === id)?.target?.id).toBe(
+          category,
+        );
+      }
+      // The category the event really uses is where a gap shows.
+      expect(row?.outcome).toBe(category === "cat-new" ? "missing" : "ok");
+    },
+  );
+
+  it("reads the gateway cache when Discord cannot be reached, and says so", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+    check.resetBotPermissionCache();
+    const { client } = makeClient({
+      channels: [...base, voice("m", "cat-new")],
+    });
+    const failing = {
+      ...direct,
+      call: async <T>(): Promise<T> => {
+        throw new Error("discord down");
+      },
+      eventPlacement: { mainChannelId: "m" },
+    };
+    const report = await check.checkBotPermissions(client, "guild-1", failing);
+    expect(report.fresh).toBe(false);
+    expect(report.placement?.categoryId).toBe("cat-new");
+  });
+
+  it("leaves the navigation badge to the plain check", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+    check.resetBotPermissionCache();
+    const { client } = makeClient({ channels: base });
+    await check.checkBotPermissions(client, "guild-1", direct);
+    expect(status.getPermissionIssueCount()).toBe(0);
+    await check.checkBotPermissions(client, "guild-1", {
+      ...direct,
+      eventPlacement: { mainChannelId: null, categoryId: "cat-new" },
+    });
+    expect(status.getPermissionIssueCount()).toBe(0);
+  });
+});
+
 describe("what is missing and where", () => {
   it("reports nothing when every permission is held in the configured places", async () => {
     settings = {
