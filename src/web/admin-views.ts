@@ -103,7 +103,11 @@ import {
   PERSONAL_PRESET_PREFIX,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
-import { MARKER_COLOURS, groupRowsScript } from "./event-group-form.js";
+import {
+  MARKER_COLOURS,
+  deriveTagScript,
+  groupRowsScript,
+} from "./event-group-form.js";
 import type { GroupFormPrefill } from "../services/event-last-setup-service.js";
 import {
   MAX_GROUP_ENTRIES,
@@ -3353,9 +3357,7 @@ function eventGroupsScript(): string {
     "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
     "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto');f(i,k).removeAttribute('data-manual')})}" +
     // The tag follows the name (Red -> RED) while clan tags are on, until it is edited.
-    "function derive(name){var w=name.replace(/[^\\p{L}\\p{N}\\s]/gu,' ').trim().split(/\\s+/).filter(Boolean);" +
-    "var s=w.length>1?w.map(function(x){return Array.from(x)[0]}).join(''):Array.from(w[0]||'').slice(0,4).join('');" +
-    "return s.toUpperCase().slice(0,MAXTAG)}" +
+    deriveTagScript("MAXTAG") +
     "function deriveTags(){if(!tagsOn())return;Array.prototype.forEach.call(rows(),function(r,i){" +
     "var t=f(i,'tag'),n=val('group_'+i+'_name');if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
     "if(n){t.value=derive(n);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +

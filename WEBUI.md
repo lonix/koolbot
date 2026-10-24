@@ -1928,6 +1928,10 @@ without the field (every preset saved before it existed, and every built-in) mea
 and choosing one puts the box back to off. The tag format (before or after the name) is
 set per event, not on a preset. There is no default for the leaders switch (#1195), so
 a preset never turns leaders on. The leader label is part of a preset, as before.
+The editor's group rows (here and on `/me/events/presets`) have the same column header row as the
+event form (Marker, Name, Max size, Tag; hidden on narrow screens), and with scripts on the tag follows the
+name (Red becomes RED) while the **Clan tags** box is ticked, until the tag is edited by hand
+(#1406). Both use the one `deriveTagScript` in `src/web/event-group-form.ts`.
 
 **Captains lobby in presets** (#1263). The preset editor (the server's library page and the hosts'
 own page, one shared form) has a **Captains lobby** tick instead of a "Leads" choice in a group's
