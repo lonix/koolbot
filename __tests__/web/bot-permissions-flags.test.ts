@@ -111,10 +111,6 @@ describe("flag classification", () => {
       "ReadMessageHistory",
       "ManageMessages",
       "PinMessages",
-      // Named by the lock-down entry, which has no PERM entry for them.
-      "SendMessagesInThreads",
-      "CreatePublicThreads",
-      "CreatePrivateThreads",
     ]) {
       expect(byKey.get(key)).toBe("checked");
     }
@@ -123,6 +119,14 @@ describe("flag classification", () => {
       "BanMembers",
       "KickMembers",
       "ModerateMembers",
+    ]) {
+      expect(byKey.get(key)).toBe("used");
+    }
+    // The channel lock-downs set these in overwrites; the page no longer checks them.
+    for (const key of [
+      "SendMessagesInThreads",
+      "CreatePublicThreads",
+      "CreatePrivateThreads",
     ]) {
       expect(byKey.get(key)).toBe("used");
     }

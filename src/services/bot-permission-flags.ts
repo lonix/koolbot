@@ -40,6 +40,9 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   ViewAuditLog: used("Reading who changed a channel."),
   ManageWebhooks: used("Reading the server's webhooks during the scan."),
   RequestToSpeak: used(CHANNEL_OVERWRITES),
+  SendMessagesInThreads: used(CHANNEL_OVERWRITES),
+  CreatePublicThreads: used(CHANNEL_OVERWRITES),
+  CreatePrivateThreads: used(CHANNEL_OVERWRITES),
   UseExternalEmojis: used(
     "Only when a reaction or message uses a custom emoji from another server.",
   ),
