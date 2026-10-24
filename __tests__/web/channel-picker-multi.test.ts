@@ -428,3 +428,57 @@ describe("focus after the chips are repainted (review of #1482)", () => {
     });
   }
 });
+
+describe("keyboard after a repaint while open (review of #1482, third round)", () => {
+  const press = (d: JSDOM, el: Element, k: string, init = {}): boolean =>
+    el.dispatchEvent(
+      new d.window.KeyboardEvent("keydown", {
+        key: k,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      }),
+    );
+
+  it("after removing a chip, ArrowDown on Add goes back to the search box and Escape then closes", () => {
+    const d = mount("1,2");
+    q<HTMLButtonElement>(d, ".kb-picker__trigger").click();
+    all(d, ".kb-picker__chip-remove")[0].click();
+    const trig = q<HTMLButtonElement>(d, ".kb-picker__trigger");
+    expect(d.window.document.activeElement).toBe(trig);
+    expect(q<HTMLElement>(d, ".kb-picker__pop").hidden).toBe(false);
+    press(d, trig, "ArrowDown");
+    const inp = q<HTMLInputElement>(d, ".kb-picker__search input");
+    expect(d.window.document.activeElement).toBe(inp);
+    // The search box still names a row that exists.
+    const ad = inp.getAttribute("aria-activedescendant");
+    expect(ad && d.window.document.getElementById(ad)).toBeTruthy();
+    press(d, inp, "Escape");
+    expect(q<HTMLElement>(d, ".kb-picker__pop").hidden).toBe(true);
+    expect(d.window.document.activeElement).toBe(trig);
+  });
+
+  it("after +N more, Escape on the revealed remove button closes the popover", () => {
+    const d = mountLong();
+    q<HTMLButtonElement>(d, ".kb-picker__trigger").click();
+    q<HTMLButtonElement>(d, ".kb-picker__more").click();
+    const rm = all(d, ".kb-picker__chip-remove")[12];
+    expect(d.window.document.activeElement).toBe(rm);
+    expect(press(d, rm, "Escape")).toBe(false);
+    expect(q<HTMLElement>(d, ".kb-picker__pop").hidden).toBe(true);
+    expect(d.window.document.activeElement).toBe(
+      q<HTMLElement>(d, ".kb-picker__trigger"),
+    );
+  });
+
+  it("keeps the IME guard: Escape while composing leaves the popover open, on the trigger too", () => {
+    const d = mount("1");
+    const trig = q<HTMLButtonElement>(d, ".kb-picker__trigger");
+    trig.click();
+    const inp = q<HTMLInputElement>(d, ".kb-picker__search input");
+    expect(press(d, inp, "Escape", { isComposing: true })).toBe(true);
+    expect(press(d, trig, "Escape", { isComposing: true })).toBe(true);
+    expect(press(d, trig, "Escape", { keyCode: 229 })).toBe(true);
+    expect(q<HTMLElement>(d, ".kb-picker__pop").hidden).toBe(false);
+  });
+});

@@ -301,14 +301,22 @@ export const CHANNEL_PICKER_SCRIPT =
   "if(t.hasAttribute('data-rm')){drop(Number(t.getAttribute('data-rm')));if(!trig.disabled)trig.focus()}});" +
   "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
   "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
-  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();show()}});" +
+  // Already open (focus came back to the trigger after a chip was removed): the
+  // arrows go back to the search box instead of doing nothing.
+  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(open)inp.focus();else show()}});" +
   "inp.addEventListener('input',filter);" +
   "inp.addEventListener('keydown',function(e){var m=e.key;" +
   // An input method is composing (Enter confirms the composition, Escape cancels it): leave every key to it.
   "if(e.isComposing||e.keyCode===229)return;" +
   "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
   "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
-  "else if(m==='Backspace'&&multi&&!inp.value){e.preventDefault();drop(lastOn())}else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(true)});" +
+  "else if(m==='Backspace'&&multi&&!inp.value){e.preventDefault();drop(lastOn())}else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Tab')close(true)});" +
+  // Escape closes from anywhere in the picker while it is open (the search box,
+  // the trigger, a chip's remove button, "+N more"), not only from the search
+  // box: a repaint moves focus off the box, and the open popover lives outside
+  // the wrapper, so both listen. Closed, Escape is left to the page (a dialog).
+  "function esc(e){if(!open||e.key!=='Escape'||e.isComposing||e.keyCode===229)return;e.preventDefault();e.stopPropagation();close(true)}" +
+  "box.addEventListener('keydown',esc);pop.addEventListener('keydown',esc);" +
   "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
   "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
   "function inside(t){return box.contains(t)||pop.contains(t)}" +

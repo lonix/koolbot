@@ -332,8 +332,9 @@ with `kb-visually-hidden` (never `hidden`, which the save bar treats as inactive
 disabled, and a stored id that is no longer listed stays selected and posts as stored. While open the popover is moved to the end of `<main>`
 and fixed under the trigger (`kb-picker__pop--floating`, flipped above when there is no room), so a scrolling settings card never clips it; it
 follows the trigger on scroll and resize. The trigger mirrors the select's `aria-invalid` and `aria-describedby`. Keys: arrows, Home and End move
-`aria-activedescendant` in the search box, Enter chooses, Escape closes. A multi-select list (`select[multiple]`) is built the same way (see above);
-its "Selected:" summary shows only without JavaScript.
+`aria-activedescendant` in the search box, Enter chooses, Escape closes from anywhere in the open picker (the search box, _Add_, a chip's remove button;
+not while an input method is composing) and returns to _Add_, and the arrow keys on _Add_ return to the search box while it is
+open. A multi-select list (`select[multiple]`) is built the same way (see above); its "Selected:" summary shows only without JavaScript.
 
 ### DiscordEmbed
 
