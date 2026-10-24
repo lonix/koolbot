@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 import { NATIVE_EVENTS_WARNING, PERM } from "./bot-permission-registry.js";
 import { ConfigService } from "./config-service.js";
+import { nativeSyncPaused } from "./event-native-rules.js";
 import { Event, type IEvent } from "../models/event.js";
 import {
   coverKeyFor,
@@ -311,7 +312,7 @@ export class NativeEventSync {
       // A terminal row with no id is only interesting while a create it
       // started may still land in Discord (see `reconcilePendingCreate`).
       if (pendingCreate && !event.nativeCreateStartedAt) return;
-      if (!terminal && event.nativeDetached) return;
+      if (nativeSyncPaused(event)) return;
 
       const g =
         guild ??

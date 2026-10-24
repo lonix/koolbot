@@ -130,6 +130,10 @@ import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
 import type { HostReview } from "../services/wizard-host-role.js";
+import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
 interface CommonProps {
@@ -2598,9 +2602,12 @@ export interface EventsProps extends CommonProps {
   enabled: boolean;
   categoryConfigured: boolean;
   announcementConfigured: boolean;
-  /** The bot lacks Create Events / Manage Events, so events get no native
-   * Discord event (and no Interested button). */
-  nativePermissionMissing?: boolean;
+  /**
+   * What the bot lacks for the event features (#1253), from the registry's
+   * check: the Discord Events list card, event channels, host access, moves,
+   * clan tags and the announcement channel. Null: nothing to say.
+   */
+  permissionNotice?: PermissionNotice | null;
   timezone: string;
   rows: EventRow[];
   /**
@@ -3632,22 +3639,16 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
             warn: true,
             href: settingLink("events.announcement_channel_id"),
           },
-      ...(props.nativePermissionMissing
-        ? [
-            {
-              text: "Bot lacks Create Events",
-              warn: true,
-              href: "/admin/bot-permissions",
-            },
-          ]
-        : []),
       { text: props.timezone, mono: true },
       { text: `${countOf(props.rows.length, "event")} scheduled` },
     ],
   });
-  const permissionNote = props.nativePermissionMissing
-    ? `<p class="muted">Without <strong>Create Events</strong> (or Manage Events) events are not created in Discord's Events list: announcements have no event card and members cannot mark Interested. Grant it to the bot's role.</p>`
-    : "";
+  const permissionNote = renderPermissionNotice(
+    props.permissionNotice ?? null,
+    {
+      canLinkToPage: true,
+    },
+  );
 
   const body = `
 <h1>Events</h1>
@@ -5221,6 +5222,8 @@ export interface VoiceChannelRow {
 
 export interface VoiceChannelsProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the voice channel features (#1253). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   controlPanelEnabled: boolean;
   categoryName: string;
   lobbyName: string;
@@ -5484,6 +5487,10 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
       ? `<div class="empty">Category exists but contains no voice channels.</div>`
       : `<table><thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Users</th><th scope="col">Custom name</th><th scope="col">Channel ID</th></tr></thead><tbody>${rows}</tbody></table>`;
 
+  const voiceNotice = renderPermissionNotice(props.permissionNotice ?? null, {
+    canLinkToPage: true,
+  });
+
   const reloadDisabled = !props.enabled || !props.categoryFound;
   const reloadHint = !props.enabled
     ? "Enable <code>voicechannels.enabled</code> first."
@@ -5530,7 +5537,7 @@ ${renderStatusLine({
     { text: `${props.totalEmpty} empty` },
   ],
 })}
-
+${voiceNotice}
 <div class="card">
   <h2>Cleanup actions</h2>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" data-confirm="${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}">

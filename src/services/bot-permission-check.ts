@@ -136,6 +136,8 @@ export interface BotPermissionReport {
    * when they could not be read.
    */
   serverPermissions?: bigint | null;
+  /** Set when the check was asked about one event's placement (`CheckDeps.eventPlacement`). */
+  placement?: PlacementReport;
 }
 
 type ApiCall = <T>(fn: () => Promise<T>, name: string) => Promise<T>;
@@ -145,6 +147,31 @@ export interface CheckDeps {
   /** How many role groups the server has (a read that rejects when it fails). */
   roleGroupCount?: (guildId: string) => Promise<number>;
   now?: () => number;
+  /**
+   * Where one event's channels really are (the event host panel, #1467). The
+   * check reads it from the same snapshot it checks against, so what exists and
+   * what a channel's category is are never taken from a staler view than the
+   * permissions are. Such a report is not the server's, so it does not set the
+   * navigation badge.
+   */
+  eventPlacement?: EventPlacement;
+}
+
+export interface EventPlacement {
+  /** The event's main channel, when it has one recorded. */
+  mainChannelId?: string | null;
+  /** The event's own category (an override of `events.category_id`). */
+  categoryId?: string | null;
+  /** Further recorded channels (groups, the leaders-only lobby) whose existence matters. */
+  channelIds?: readonly string[];
+}
+
+/** What `eventPlacement` found in the snapshot. */
+export interface PlacementReport {
+  /** Whether each recorded channel exists in the snapshot. */
+  present: Record<string, boolean>;
+  /** The category the event's channels are checked in; null: the configured one. */
+  categoryId: string | null;
 }
 
 /** The few things the check needs from a collection of channels or roles. */
@@ -405,6 +432,31 @@ async function defaultRoleGroupCount(guildId: string): Promise<number> {
 }
 
 /**
+ * One event's placement, from the snapshot the check runs against: which of its
+ * recorded channels exist, and the category to check (the main channel's, as the
+ * group channel service places its channels, else the event's own).
+ */
+function readPlacement(
+  snapshot: Snapshot,
+  want: EventPlacement | undefined,
+): PlacementReport | undefined {
+  if (!want) return undefined;
+  const present: Record<string, boolean> = {};
+  const ids = [want.mainChannelId, ...(want.channelIds ?? [])];
+  for (const id of ids) {
+    if (id) present[id] = !!snapshot.channels?.get(id);
+  }
+  const main = want.mainChannelId
+    ? (snapshot.channels?.get(want.mainChannelId) as
+        { parentId?: string | null } | null | undefined)
+    : null;
+  return {
+    present,
+    categoryId: main?.parentId || want.categoryId || null,
+  };
+}
+
+/**
  * Check the bot's permissions for every feature in use. Never throws: an
  * unreadable server is `available: false`.
  */
@@ -434,6 +486,7 @@ export async function checkBotPermissions(
   }
   const { me } = snapshot;
   const config = ConfigService.getInstance();
+  const placement = readPlacement(snapshot, deps.eventPlacement);
   // Read once per check, and only if a feature without a switch asks.
   let groupCount: Promise<number> | null = null;
   const roleGroupsConfigured = async (): Promise<boolean> => {
@@ -471,6 +524,11 @@ export async function checkBotPermissions(
         if (!lobby.categorySet) targetId = "";
       } else if (r.targetKey) {
         targetId = (await config.getStringStrict(r.targetKey, "")).trim();
+        // The entries that live in the events category: where this event's
+        // channels really are, when it was asked about one.
+        if (placement?.categoryId && r.targetKey === "events.category_id") {
+          targetId = placement.categoryId;
+        }
       }
       if (lobbyMissing) {
         checks.push({
@@ -658,7 +716,7 @@ export async function checkBotPermissions(
   }
 
   const list = [...problems.values()];
-  setPermissionIssueCount(guildId, list.length);
+  if (!deps.eventPlacement) setPermissionIssueCount(guildId, list.length);
   return {
     available: true,
     reason: null,
@@ -669,6 +727,7 @@ export async function checkBotPermissions(
     okFeatures,
     notes,
     checks,
+    ...(placement ? { placement } : {}),
     // The managed role's own bits: `me.permissions` also folds in @everyone
     // and any other role the bot was given.
     serverPermissions:
