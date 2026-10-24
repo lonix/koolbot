@@ -559,6 +559,53 @@ const morePostingRequirements: FeatureRequirement[] = [
   },
 ];
 
+/**
+ * Support tickets (`ticket-channel-manager.ts`, #1475). Every ticket channel is
+ * created with explicit overwrites, so it does not take the category's
+ * permissions: only the creation happens in the category, and what the bot does
+ * inside a ticket comes from its own member overwrite (View Channel, Send
+ * Messages, Read Message History, Attach Files, Manage Channels) plus its role's
+ * server-wide permissions. That is why creation is a category entry and the
+ * other two are server-wide. A ticket failure is never silent: the member sees
+ * "Something went wrong talking to Discord".
+ */
+const ticketRequirements: FeatureRequirement[] = [
+  {
+    id: "tickets-create",
+    area: "Tickets",
+    feature: "Opening ticket channels",
+    scope: "category",
+    needs: [PERM.manageChannels],
+    enabledKey: "tickets.enabled",
+    targetKey: "tickets.category_id",
+    effect:
+      "/ticket open creates no channel: the member is told something went wrong talking to Discord, and the error is logged.",
+    fix: "Give the bot's role Manage Channels, and make sure the ticket category does not deny it.",
+  },
+  {
+    id: "tickets-lock",
+    area: "Tickets",
+    feature: "Closing and reopening tickets",
+    scope: "guild",
+    needs: [PERM.manageRoles],
+    enabledKey: "tickets.enabled",
+    effect:
+      "A ticket cannot be closed or reopened: the lock on the author's Send Messages permission cannot be changed, so a close is refused and the member or staff member is told something went wrong.",
+    fix: "Give the bot's role Manage Roles in Server Settings, Roles.",
+  },
+  {
+    id: "tickets-greeting",
+    area: "Tickets",
+    feature: "The greeting in a new ticket",
+    scope: "guild",
+    needs: [PERM.embedLinks],
+    enabledKey: "tickets.enabled",
+    effect:
+      "The greeting embed with the ticket's subject is not shown in the new ticket. The ticket still opens; a failed greeting is logged in the bot's log only.",
+    fix: "Give the bot's role Embed Links in Server Settings, Roles.",
+  },
+];
+
 export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   // ---- Voice channels ----
   {
@@ -716,6 +763,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   ...noticesRequirements,
   ...postingRequirements,
   ...morePostingRequirements,
+  ...ticketRequirements,
 ];
 
 /**
