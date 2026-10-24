@@ -1450,7 +1450,17 @@ announcement channel, not in the channel an older event was announced in. A birt
 celebration, welcome, leaderboard or event post that fails is only a line in the bot's log;
 nothing is shown in Discord. A failed LFG post is shown to the member who ran `/lfg`, and the
 rules message and the pickers are posted from the Web UI, which shows the error.
-Scheduled announcements, polls and tickets post too and are not checked yet. Four of these
+Support tickets are checked in three rows (#1475). Opening a ticket needs Manage Channels in
+the ticket category. Each ticket channel is created with its own overwrites, so it does not take
+the category's permissions; closing and reopening a ticket (which changes the author's Send
+Messages permission) needs Manage Roles, and the greeting with the ticket's subject needs Embed
+Links, and both are checked server-wide. Inside a ticket the bot's own overwrite gives it View
+Channel, Send Messages, Read Message History, Attach Files and Manage Channels, so those are not
+checked. A ticket failure is never silent: the member is told something went wrong, and a close
+that cannot lock the channel is refused. Without a ticket category the channels are created at the
+top of the channel list, which needs Manage Channels server-wide; that case is shown as _Not
+checked_ for the category row, with a note. The channels of scheduled announcements and polls are
+stored on each schedule, not in a setting, so they are not checked here. Four of the posting
 channels are optional: the event announcement channel, the leaderboard announcement channel,
 the celebrations channel and the LFG channel (empty means the channel `/lfg` was run in, which
 cannot be checked). Left empty, the feature is treated as not in use: no note, and it does not
@@ -1475,8 +1485,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
 - **All Discord permissions.** A folded card at the bottom of the page lists every Discord
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
-  _checked in the table above_, _used, not checked on this page_ (moderation, ticket transcripts, the
-  channels of scheduled announcements, polls and tickets, and the overwrite permissions of read-only channels,
+  _checked in the table above_, _used, not checked on this page_ (moderation actions, ticket transcripts, the
+  channels of scheduled announcements and polls, and the overwrite permissions of read-only channels,
   each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
