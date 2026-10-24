@@ -59,6 +59,7 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
       hasChannel: true,
       name: 'Heli <b>"x"</b>',
       marker: "<i>",
+      tag: "HE<L>",
       size: 2,
       memberCount: 3,
       overSize: true,
@@ -71,6 +72,7 @@ const view = (over: Partial<GroupEditViewData> = {}): GroupEditViewData => ({
       hasChannel: false,
       name: "Logi",
       marker: "",
+      tag: "",
       size: null,
       memberCount: 0,
       overSize: false,
@@ -93,18 +95,65 @@ describe("renderGroupEditor", () => {
     ).toBe("");
   });
 
+  /** The attributes of the one input of the page with this name. */
+  const inputOf = (html: string, name: string): string => {
+    const m = new RegExp(`<input[^>]*name="${name}"[^>]*>`).exec(html);
+    if (!m) throw new Error(`no input named ${name}`);
+    return m[0];
+  };
+
   it("renders one name and one size field per group with the value it shows as the base", () => {
     const html = renderGroupEditor(view());
-    expect(html).toContain('name="s_groupNameA"');
-    expect(html).toContain('name="b_groupNameA"');
-    expect(html).toContain('name="s_groupSizeA" value="2"');
-    expect(html).toContain('name="b_groupSizeA" value="2"');
+    expect(inputOf(html, "s_groupNameA")).toContain('maxlength="50"');
+    expect(inputOf(html, "b_groupNameA")).toContain('value="Heli');
+    expect(inputOf(html, "s_groupSizeA")).toContain('value="2"');
+    expect(inputOf(html, "s_groupSizeA")).toContain('min="1" max="99"');
+    expect(inputOf(html, "b_groupSizeA")).toContain('value="2"');
     expect(html).toContain('name="s_groupNameB"');
     // No size is shown as empty, and as an empty base.
-    expect(html).toContain('name="s_groupSizeB" value=""');
-    expect(html).toContain('name="b_groupSizeB" value=""');
-    expect(html).toContain('maxlength="50"');
-    expect(html).toContain('min="1" max="99"');
+    expect(inputOf(html, "s_groupSizeB")).toContain('value=""');
+    expect(inputOf(html, "b_groupSizeB")).toContain('value=""');
+    // Each position posts the key of the group it showed (the stale guard).
+    expect(inputOf(html, "k_groupNameA")).toContain('value="g_00000001"');
+    expect(inputOf(html, "k_groupSizeA")).toContain('value="g_00000001"');
+    expect(inputOf(html, "k_groupNameB")).toContain('value="g_00000002"');
+    expect(inputOf(html, "k_groupSizeB")).toContain('value="g_00000002"');
+  });
+
+  it("renders the event form's group rows: a marker and a tag per group, with their shown values, by group key", () => {
+    const html = renderGroupEditor(view());
+    expect(html).toContain("data-group-row");
+    expect(html).toContain("kb-grouprows__head");
+    expect(html).toContain("data-marker-input");
+    expect(inputOf(html, "s_groupMarkers_g_00000001")).toContain(
+      'value="&lt;i&gt;"',
+    );
+    expect(inputOf(html, "b_groupMarkers_g_00000001")).toContain(
+      'value="&lt;i&gt;"',
+    );
+    expect(inputOf(html, "s_groupMarkers_g_00000002")).toContain('value=""');
+    expect(inputOf(html, "b_groupMarkers_g_00000002")).toContain('value=""');
+    expect(inputOf(html, "s_groupTags_g_00000001")).toContain(
+      'value="HE&lt;L&gt;"',
+    );
+    expect(inputOf(html, "b_groupTags_g_00000001")).toContain(
+      'value="HE&lt;L&gt;"',
+    );
+  });
+
+  it("an open group has a marker but no tag field (only a team carries a tag), and no group has a kind select (a kind cannot change here)", () => {
+    const html = renderGroupEditor(view());
+    expect(html).not.toContain("s_groupTags_g_00000002");
+    expect(html).not.toContain("b_groupTags_g_00000002");
+    expect(html).toContain("only a team carries a tag");
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("data-kind-toggle");
+    expect(html).not.toContain("data-kind-panel");
+    expect(html).not.toContain("group_0_kind");
+  });
+
+  it("posts no field of the event form's own names (group_<n>_*)", () => {
+    expect(renderGroupEditor(view())).not.toMatch(/name="group_\d+_/);
   });
 
   it("escapes every dynamic value", () => {
@@ -182,6 +231,8 @@ describe("Change the groups puts the editor in a form of its own, apart from Eve
     expect(withEditor.split("<form ").length - 1).toBe(4);
     const first = withEditor.slice(0, withEditor.indexOf("</form>"));
     expect(first).toContain('name="s_groupNameA"');
+    expect(first).toContain('name="s_groupMarkers_g_00000001"');
+    expect(first).toContain('name="s_groupTags_g_00000001"');
     expect(first).not.toContain("preset_pick");
     expect(withEditor.slice(withEditor.indexOf("</form>"))).toContain(
       "preset_pick",
@@ -190,6 +241,9 @@ describe("Change the groups puts the editor in a form of its own, apart from Eve
     expect(renderEventSettings({ ...base, groupEdit: view() })).not.toContain(
       "s_groupNameA",
     );
+    // The group rows script is on the page with the rows, and only then.
+    expect(withEditor).toContain("koolGroupRows");
+    expect(renderGroupChanges(base)).not.toContain("koolGroupRows");
     const plain = renderGroupChanges(base);
     expect(plain).not.toContain("s_groupNameA");
     expect(plain).toContain("prefs-table");

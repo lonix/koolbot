@@ -137,6 +137,12 @@ function makeEvent(over: Json = {}): Json {
 
 const group = (key: string): Json =>
   (store.get(EVENT_ID)?.groups as Json[]).find((g) => g.key === key) as Json;
+/** The attributes of the one input of the page with this name. */
+const inputOf = (html: string, name: string): string => {
+  const m = new RegExp(`<input[^>]*name="${name}"[^>]*>`).exec(html);
+  if (!m) throw new Error(`no input named ${name}`);
+  return m[0];
+};
 
 let auditRows: Array<Record<string, unknown>> = [];
 let eventsEnabled = true;
@@ -343,15 +349,21 @@ describe("the group editor on the page", () => {
   it("shows a name and size field per group with the stored values as the base, escaped, and the preset form", async () => {
     const r = await call(panel());
     expect(r.status).toBe(200);
-    expect(r.text).toContain(
-      'name="s_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"',
+    expect(inputOf(r.text, "s_groupNameA")).toContain(
+      'value="Heli &lt;b&gt;x&lt;/b&gt;"',
     );
-    expect(r.text).toContain(
-      'name="b_groupNameA" value="Heli &lt;b&gt;x&lt;/b&gt;"',
+    expect(inputOf(r.text, "b_groupNameA")).toContain(
+      'value="Heli &lt;b&gt;x&lt;/b&gt;"',
     );
     expect(r.text).not.toContain("Heli <b>x</b>");
-    expect(r.text).toContain('name="s_groupSizeA" value="2"');
-    expect(r.text).toContain('name="s_groupSizeB" value=""');
+    expect(inputOf(r.text, "s_groupSizeA")).toContain('value="2"');
+    expect(inputOf(r.text, "s_groupSizeB")).toContain('value=""');
+    // The rows of the event form carry the marker and the tag too.
+    expect(inputOf(r.text, `s_groupMarkers_${A}`)).toContain('value=""');
+    expect(inputOf(r.text, `b_groupMarkers_${A}`)).toContain('value=""');
+    expect(inputOf(r.text, `s_groupTags_${A}`)).toContain('value=""');
+    expect(inputOf(r.text, `b_groupTags_${B}`)).toContain('value=""');
+    expect(r.text).toContain("koolGroupRows");
     expect(r.text).toContain("over size");
     expect(r.text).toContain('name="preset_pick"');
     expect(r.text).toContain(
@@ -436,7 +448,7 @@ describe("saving names and sizes: one result, one audit row", () => {
     expect(flashOf(r.location).type).toBe("ok");
     expect(group(A).memberIds).toEqual(["u1", "u2", "u3"]);
     const page = await call(panel());
-    expect(page.text).toContain('name="s_groupSizeA" value="1"');
+    expect(inputOf(page.text, "s_groupSizeA")).toContain('value="1"');
     expect(page.text).toContain("over size");
   });
 
@@ -794,5 +806,66 @@ describe("a large partial save is shown in full", () => {
       b_groupNameB: "Logi",
     });
     expect(r.status).toBe(303);
+  });
+});
+
+describe("saving a marker and a tag from the group rows", () => {
+  const rowsForm = (over: Json = {}): Json => ({
+    [`s_groupMarkers_${A}`]: "🔴",
+    [`b_groupMarkers_${A}`]: "",
+    [`s_groupMarkers_${B}`]: "",
+    [`b_groupMarkers_${B}`]: "",
+    [`s_groupTags_${A}`]: "HEL",
+    [`b_groupTags_${A}`]: "",
+    [`s_groupTags_${B}`]: "",
+    [`b_groupTags_${B}`]: "",
+    ...over,
+  });
+
+  it("sets the marker and the tag of a running event's team in one save, renames the channel, one audit row", async () => {
+    const r = await post("settings", rowsForm());
+    expect(r.status).toBe(303);
+    expect(flashOf(r.location).type).toBe("ok");
+    expect(group(A)).toMatchObject({ marker: "🔴", tag: "HEL" });
+    expect(group(B)).toMatchObject({ marker: "", tag: "" });
+    expect(effectCalls).toEqual([`name:${A}`]);
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      result: "success",
+      details: { outcome: "applied" },
+    });
+    expect(
+      (auditRows[0].details as { changes: Array<{ row: string }> }).changes.map(
+        (c) => c.row,
+      ),
+    ).toEqual(["groupMarkers", "groupTags"]);
+  });
+
+  it("a marker over the limit is refused naming the group, nothing is saved", async () => {
+    const r = await post(
+      "settings",
+      rowsForm({ [`s_groupMarkers_${A}`]: "abcdefghi" }),
+    );
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("Heli <b>x</b>: at most");
+    expect(group(A).marker).toBe("");
+    expect(group(A).tag).toBe("");
+    expect(writes).toEqual([]);
+  });
+
+  it("the page then shows the new marker and tag as the values and as the base", async () => {
+    await post("settings", rowsForm());
+    const page = await call(panel());
+    expect(inputOf(page.text, `s_groupMarkers_${A}`)).toContain('value="🔴"');
+    expect(inputOf(page.text, `b_groupMarkers_${A}`)).toContain('value="🔴"');
+    expect(inputOf(page.text, `s_groupTags_${A}`)).toContain('value="HEL"');
+  });
+
+  it("a marker changed by another save since the form was shown is a conflict, never overwritten", async () => {
+    group(A).marker = "🟣";
+    const r = await post("settings", rowsForm());
+    expect(flashOf(r.location).type).toBe("err");
+    expect(flashOf(r.location).msg).toContain("changed by someone else");
+    expect(group(A).marker).toBe("🟣");
   });
 });

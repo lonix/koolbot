@@ -13,6 +13,7 @@
 import { escapeHtml, scriptTag } from "./html.js";
 import { CONFIRM_FETCH_SCRIPT, CONFIRM_PAGE_MARKER } from "./confirm-fetch.js";
 import { renderSeriesTick } from "./host-settings-series.js";
+import { groupRowsScript } from "./event-group-form.js";
 import {
   CHANNEL_LEAD_MAX,
   CHANNEL_LEAD_MIN,
@@ -173,14 +174,15 @@ export function renderGroupChanges(d: SettingsViewData): string {
     ? `<form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderGroupEditor(d.groupEdit)}
 ${renderSeriesTick(d.seriesTick)}
-<button type="submit">Save names and sizes</button>
+<button type="submit">Save groups</button>
 </form>`
     : "";
   return `${names}
 ${d.groupEdit ? renderPresetForm(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : renderGroups(d)}
 ${d.groupEdit ? renderGroupSetForms(d.groupEdit, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
 ${d.groupsSwitch ? renderGroupsSwitchForms(d.groupsSwitch, d.actionPath("settings"), d.csrfToken, d.seriesTick) : ""}
-${scriptTag(CONFIRM_FETCH_SCRIPT)}`;
+${scriptTag(CONFIRM_FETCH_SCRIPT)}
+${d.groupEdit ? scriptTag(groupRowsScript()) : ""}`;
 }
 
 export interface ConfirmChangeView {

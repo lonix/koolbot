@@ -92,11 +92,8 @@ describe("renderLeadersTagsFields", () => {
     expect(html).toContain(
       '<input type="hidden" name="b_leaderLabel" value="Cap&quot;tain">',
     );
-    expect(html).toContain(
-      '<input type="hidden" name="b_groupTags_g_00000001" value="RED">',
-    );
-    expect(html).toContain('name="s_groupTags_g_00000001" value="RED"');
-    expect(html).toContain('name="s_groupTags_g_00000003" value=""');
+    // The team tags moved to the group rows (#1406): not posted from here.
+    expect(html).not.toContain("groupTags");
   });
 
   it("selects the stored option of each switch", () => {
@@ -109,16 +106,14 @@ describe("renderLeadersTagsFields", () => {
     );
   });
 
-  it("escapes names, markers and the label; a team name never reaches the page as markup", () => {
+  it("escapes the label; a team name never reaches the page as markup (the team tags are in the group rows now)", () => {
     const html = renderLeadersTagsFields(view);
     expect(html).not.toContain("<img");
-    expect(html).toContain(
-      "R&amp;B Red &lt;img src=x onerror=&quot;1&quot;&gt;",
-    );
+    expect(html).not.toContain("onerror");
     expect(html).toContain('value="Cap&quot;tain"');
   });
 
-  it("nests the leader label, customisation and lobby under Leaders, and the tag position and team tags under Clan tags", () => {
+  it("nests the leader label, customisation and lobby under Leaders, and the tag position under Clan tags, with a pointer to the team tags", () => {
     const html = renderLeadersTagsFields(view);
     const leaders = html.slice(
       html.indexOf("<legend>Leaders</legend>"),
@@ -148,7 +143,8 @@ describe("renderLeadersTagsFields", () => {
     );
     const tc = nestedOf(tags);
     expect(tc).toContain('name="s_tagsSuffix"');
-    expect(tc).toContain("s_groupTags_g_00000001");
+    expect(tc).toContain('under "Change the groups"');
+    expect(tc).not.toContain("s_groupTags_");
     expect(tc).not.toContain('name="s_tagsEnabled"');
     // Every field name is still posted by the one form.
     expect(html).toContain('name="b_tagsEnabled"');
@@ -211,10 +207,24 @@ describe("renderLeadersTagsFields", () => {
     });
   });
 
-  it("limits the tag input to the tag maximum and has no input for a non-team group", () => {
+  it("has no tag input at all: a team's tag is edited in its group row, so it has one place on the panel", () => {
     const html = renderLeadersTagsFields(view);
-    expect(html).toContain('maxlength="8"');
-    expect(html).not.toContain("s_groupTags_g_00000002");
+    expect(html).not.toContain("s_groupTags_");
+    expect(html).not.toContain("b_groupTags_");
+    expect(html).not.toContain('placeholder="no tag"');
+  });
+
+  it("points to the group rows only when the event has a team", () => {
+    const noTeam = leadersTagsViewOf({
+      groupsEnabled: true,
+      groups: [groups[1]],
+    });
+    expect(renderLeadersTagsFields(noTeam)).not.toContain(
+      'under "Change the groups"',
+    );
+    expect(renderLeadersTagsFields(view)).toContain(
+      'under "Change the groups"',
+    );
   });
 
   it("is part of the Event settings form, inside the one form that posts to settings", () => {
@@ -230,7 +240,7 @@ describe("renderLeadersTagsFields", () => {
     });
     const form = page.slice(page.indexOf("<form"), page.indexOf("</form>"));
     expect(form).toContain("s_captainsEnabled");
-    expect(form).toContain("s_groupTags_g_00000001");
+    expect(form).not.toContain("s_groupTags_");
     expect(form).toContain('action="/me/events/e/host/settings"');
   });
 

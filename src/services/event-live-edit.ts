@@ -5,8 +5,8 @@
  * applies it under the per-event locks with ONE result (and, in the route, ONE
  * audit entry) per save.
  *
- * Rows delivered here: channel lead time and lock groups on/off. Names, sizes
- * and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
+ * Rows delivered here: channel lead time and lock groups on/off. Names, sizes,
+ * markers (#1406) and the preset (#1241) are rows of `event-live-edit-groups.ts`. #1240 adds
  * leaders, leader customisation, the leader label, tagging, the tag position
  * and each team's tag (`event-live-edit-leaders-tags.ts`). #1242 adds and
  * removes groups (`event-live-edit-group-set.ts`). #1251 adds the Captains lobby
