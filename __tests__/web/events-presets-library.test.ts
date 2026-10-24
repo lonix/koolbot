@@ -1398,3 +1398,75 @@ describe("restoring a refused draft: the whole grid of switches and row counts (
     },
   );
 });
+
+describe("replacing the rows after an over-cap restore (#1406)", () => {
+  const twoTeams: EventGroupPreset = {
+    id: "lib:0123456789abcdef01234999",
+    label: "Two teams",
+    description: "",
+    groupLabel: "Team",
+    groups: [
+      { name: "Alpha", kind: "team", size: null, tag: "", marker: "" },
+      { name: "Beta", kind: "team", size: null, tag: "", marker: "" },
+    ],
+  };
+  // Four rows restored at a cap of 3: the server refused them.
+  function overCap(): JSDOM {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupPresets: [twoTeams],
+    } as never);
+    const draft: Record<string, unknown> = {
+      groups_enabled: true,
+      groups_preset: "",
+    };
+    for (let i = 0; i < 4; i++) {
+      draft[`group_${i}_name`] = `Old${i}`;
+      draft[`group_${i}_size`] = "7";
+      draft[`group_${i}_tag`] = `O${i}`;
+      draft[`group_${i}_marker`] = "🟢";
+    }
+    return boot(html, draft);
+  }
+  function surplusIsEmpty(dom: JSDOM): void {
+    for (const i of [2, 3]) {
+      for (const k of ["name", "size", "tag", "marker"]) {
+        expect(field(dom, `group_${i}_${k}`).value).toBe("");
+      }
+    }
+  }
+
+  it("a preset with fewer teams empties every surplus row", () => {
+    const dom = overCap();
+    expect(field(dom, "group_3_name").value).toBe("Old3");
+    choose(dom, twoTeams.id);
+    expect(field(dom, "group_0_name").value).toBe("Alpha");
+    expect(field(dom, "group_1_name").value).toBe("Beta");
+    surplusIsEmpty(dom);
+  });
+
+  it("the quick builder with fewer teams empties every surplus row", () => {
+    const dom = overCap();
+    const count = dom.window.document.querySelector(
+      "[data-build-count]",
+    ) as HTMLInputElement;
+    count.value = "2";
+    (dom.window.document.querySelector("[data-build]") as HTMLElement).click();
+    expect(field(dom, "group_0_name").value).toBe("Red");
+    expect(field(dom, "group_1_name").value).toBe("Blue");
+    surplusIsEmpty(dom);
+  });
+
+  it("the interactive cap still holds for a new allocation", () => {
+    const dom = overCap();
+    const count = dom.window.document.querySelector(
+      "[data-build-count]",
+    ) as HTMLInputElement;
+    count.value = "9";
+    (dom.window.document.querySelector("[data-build]") as HTMLElement).click();
+    // Three teams at most are built; the restored fourth row is emptied.
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "group_3_name").value).toBe("");
+  });
+});

@@ -3378,7 +3378,9 @@ function eventGroupsScript(): string {
     // The preset's clan tags default (#1194); the host can still change the box.
     "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
     "var n=Math.max(rows().length,g.length);" +
-    "for(var i=0;i<n&&i<max;i++)setRow(i,i<g.length?g[i]:{});" +
+    // Every existing row past the preset's own is emptied, however many an over-cap
+    // restore left; setRow only allocates a new row while the cap has room.
+    "for(var i=0;i<n;i++)setRow(i,i<g.length?g[i]:{});" +
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();lobby();validity();summarise();compact(true)}" +
     "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',onPreset)});" +
     // The quick builder: N groups of S, named by colour or number, one marker each.
@@ -3390,7 +3392,7 @@ function eventGroupsScript(): string {
     "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
     "var word=val('groups_label')||'Team';" +
     "var total=Math.max(rows().length,n);" +
-    "for(var i=0;i<total&&i<max;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
+    "for(var i=0;i<total;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
     "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
     "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
