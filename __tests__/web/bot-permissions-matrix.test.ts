@@ -388,3 +388,45 @@ describe("renderBotPermissionsPage lead", () => {
     expect(html).toContain("(off)");
   });
 });
+
+describe("a lock-down check that did not evaluate every grant never shows the rest as Has", () => {
+  const CHANNEL: PermissionTarget = {
+    kind: "channel",
+    id: "n",
+    name: "notices",
+  };
+  const lock = (missing: string[], assessed?: string[]): FeatureCheck => ({
+    ...permCheck("notices-lock", missing.length ? "missing" : "ok", CHANNEL, {
+      missing,
+    }),
+    ...(assessed ? { assessed } : {}),
+  });
+  const labels = (rows: ReturnType<typeof buildMatrix>): string[] =>
+    rows
+      .filter((r) => r.features.some((f) => f.id === "notices-lock"))
+      .map((r) => r.label)
+      .sort();
+
+  it("shows every grant when all were evaluated", () => {
+    const rows = buildMatrix(report([lock([])]));
+    expect(labels(rows)).toContain("Create Public Threads");
+    expect(labels(rows)).toContain("Manage Roles");
+  });
+
+  it("shows only Manage Roles (missing) when it is missing and the grants were not reached", () => {
+    const rows = buildMatrix(
+      report([lock(["Manage Roles"], ["Manage Roles"])]),
+    );
+    expect(labels(rows)).toEqual(["Manage Roles"]);
+    expect(rows.find((r) => r.label === "Manage Roles")?.status).toBe(
+      "missing",
+    );
+  });
+
+  it("shows only Manage Roles (has) when an overwrite exemption waived the grants", () => {
+    const rows = buildMatrix(report([lock([], ["Manage Roles"])]));
+    expect(labels(rows)).toEqual(["Manage Roles"]);
+    expect(rows.find((r) => r.label === "Manage Roles")?.status).toBe("has");
+    expect(rows.some((r) => r.label === "Create Public Threads")).toBe(false);
+  });
+});

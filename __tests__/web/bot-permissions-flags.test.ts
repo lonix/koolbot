@@ -8,6 +8,7 @@ import { PermissionFlagsBits } from "discord.js";
 import {
   allFlagRows,
   FLAG_USE,
+  REGISTRY_NAMES,
 } from "../../src/services/bot-permission-flags.js";
 import type {
   BotPermissionReport,
@@ -72,7 +73,7 @@ function rowOf(html: string, name: string): string {
 
 describe("flag classification", () => {
   it("classifies every discord.js permission flag (a new flag must be added to FLAG_USE)", () => {
-    const registryBits = new Set(Object.values(PERM).map((p) => p.bit));
+    const registryBits = new Set(REGISTRY_NAMES.keys());
     const unclassified = allFlagRows().filter(
       (r) => r.use.kind === "unclassified",
     );
@@ -102,13 +103,23 @@ describe("flag classification", () => {
 
   it("marks what the page checks, and never calls a permission KoolBot posts or moderates with grant-only", () => {
     const byKey = new Map(allFlagRows().map((r) => [r.key, r.use.kind]));
-    expect(byKey.get("ManageNicknames")).toBe("checked");
     for (const key of [
+      "ManageNicknames",
       "SendMessages",
       "EmbedLinks",
+      "AddReactions",
       "ReadMessageHistory",
       "ManageMessages",
       "PinMessages",
+      // Named by the lock-down entry, which has no PERM entry for them.
+      "SendMessagesInThreads",
+      "CreatePublicThreads",
+      "CreatePrivateThreads",
+    ]) {
+      expect(byKey.get(key)).toBe("checked");
+    }
+    for (const key of [
+      "AttachFiles",
       "BanMembers",
       "KickMembers",
       "ModerateMembers",
@@ -205,11 +216,12 @@ describe("the All Discord permissions list", () => {
 
   it("is folded, has a row per permission, and uses the role's own bits", () => {
     const html = page(
-      report({ serverPermissions: PermissionFlagsBits.SendMessages }),
+      report({ serverPermissions: PermissionFlagsBits.AttachFiles }),
     );
     expect(html).toContain('<details class="kb-disclosure">');
-    expect(rowOf(html, "Send Messages")).toContain("Has");
-    expect(rowOf(html, "Send Messages")).toContain("Used, not checked");
+    expect(rowOf(html, "Attach Files")).toContain("Has");
+    expect(rowOf(html, "Attach Files")).toContain("Used, not checked");
+    expect(rowOf(html, "Send Messages")).toContain("Checked in the table");
     expect(rowOf(html, "Create Invite")).toContain("Not in the role");
     expect(rowOf(html, "Create Invite")).toContain(
       "Only needed if a Role group grants it",

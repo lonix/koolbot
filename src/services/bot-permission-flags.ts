@@ -4,9 +4,9 @@
  *
  * Three kinds of flag:
  * - `checked`: in `bot-permission-registry.ts`, so the page checks it per
- *   feature (names and bits come from `PERM`, not from here);
- * - `used`: the bot's code needs it but the page does not check it yet (posting,
- *   moderation, ...; the posting features are #1254). Each entry says what for;
+ *   feature (names and bits come from the registry, not from here);
+ * - `used`: the bot's code needs it but the page does not check it yet (moderation,
+ *   the posting channels that are not covered yet, ...). Each entry says what for;
  * - `grant-only`: KoolBot's code does not use it itself. It may still be needed:
  *   Role groups can grant any Discord permission to a role, and the bot can only
  *   hand out permissions it holds (server-adoption-planner.ts, "bot-lacks-permission").
@@ -18,7 +18,7 @@
  */
 
 import { PermissionFlagsBits } from "discord.js";
-import { PERM } from "./bot-permission-registry.js";
+import { FEATURE_REQUIREMENTS, PERM } from "./bot-permission-registry.js";
 
 export type FlagUse =
   | { kind: "used"; for: string }
@@ -33,25 +33,12 @@ const CHANNEL_OVERWRITES =
 
 /** Classification by discord.js flag name (deprecated aliases of one bit are classified together). */
 export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
-  SendMessages: used("Posting in channels. " + CHANNEL_OVERWRITES),
-  EmbedLinks: used("Embeds in posts (quotes, notices, digests, logs)."),
-  ReadMessageHistory: used(
-    "Reading earlier messages (quotes, ticket transcripts, reaction roles).",
-  ),
   AttachFiles: used("Ticket transcripts and quote exports."),
-  AddReactions: used("Poll and reaction-role reactions."),
-  ManageMessages: used(
-    "Clearing a channel and removing reactions. " + CHANNEL_OVERWRITES,
-  ),
-  PinMessages: used("Pinning the header post of a managed channel."),
   ModerateMembers: used("Timeouts (/timeout and raid mode)."),
   KickMembers: used("Raid mode kicks."),
   BanMembers: used("/ban."),
   ViewAuditLog: used("Reading who changed a channel."),
   ManageWebhooks: used("Reading the server's webhooks during the scan."),
-  CreatePublicThreads: used(CHANNEL_OVERWRITES),
-  CreatePrivateThreads: used(CHANNEL_OVERWRITES),
-  SendMessagesInThreads: used(CHANNEL_OVERWRITES),
   RequestToSpeak: used(CHANNEL_OVERWRITES),
   UseExternalEmojis: used(
     "Only when a reaction or message uses a custom emoji from another server.",
@@ -117,9 +104,17 @@ export interface FlagRow {
   use: FlagUse | { kind: "checked" };
 }
 
-const REGISTRY_NAMES = new Map<bigint, string>(
-  Object.values(PERM).map((p) => [p.bit, p.name] as const),
-);
+/**
+ * Every permission the page checks: `PERM`, plus any need of a registry entry
+ * (a requirement may name a permission that has no `PERM` entry), so the list
+ * cannot call a permission "not checked" that the matrix reports on.
+ */
+export const REGISTRY_NAMES = new Map<bigint, string>([
+  ...Object.values(PERM).map((p) => [p.bit, p.name] as const),
+  ...FEATURE_REQUIREMENTS.flatMap((r) =>
+    r.needs.map((n) => [n.bit, n.name] as const),
+  ),
+]);
 
 /** One row per distinct permission bit (discord.js keeps deprecated aliases for some), in discord.js order. */
 export function allFlagRows(

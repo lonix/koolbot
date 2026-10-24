@@ -16,8 +16,7 @@
  * does not make every row read "Has".
  *
  * Not built here: a "Re-authorise" invite link (whether Discord applies new
- * permission bits to the bot's existing role is not verified, and the posting
- * permissions are #1254). Places use plain names; the Discord-style
+ * permission bits to the bot's existing role is not verified). Places use plain names; the Discord-style
  * channel-type labels are #1303.
  */
 
@@ -136,6 +135,10 @@ export function buildMatrix(report: BotPermissionReport): MatrixRow[] {
       labels = req.anyOf
         ? [req.needs.map((n) => n.name).join(" or ")]
         : req.needs.map((n) => n.name);
+      // A check that did not evaluate every need (waived or not reached) shows
+      // only what it evaluated, so a skipped need is never a green "Has".
+      const assessed = check.assessed;
+      if (assessed) labels = labels.filter((l) => assessed.includes(l));
     }
     for (const label of labels) {
       let status: MatrixStatus;

@@ -69,6 +69,8 @@ interface FakeChannel {
   bits: bigint;
   type?: number;
   parentId?: string;
+  /** Channel overwrites for the bot or its roles that allow these bits. */
+  overwrites?: Array<{ id: string; allow: bigint }>;
 }
 
 function bits(...p: bigint[]): bigint {
@@ -94,20 +96,36 @@ function makeClient(opts: {
   client: never;
   me: { permissionsIn: jest.Mock };
 } {
+  const withOverwrites = (c: FakeChannel): FakeChannel =>
+    ({
+      ...c,
+      permissionOverwrites: {
+        cache: new Map(
+          (c.overwrites ?? []).map((o) => [
+            o.id,
+            { id: o.id, allow: new PermissionsBitField(o.allow) },
+          ]),
+        ),
+      },
+    }) as FakeChannel;
   const channels = new Map(
-    (opts.channels ?? []).map((c) => [c.id, c] as const),
+    (opts.channels ?? []).map((c) => [c.id, withOverwrites(c)] as const),
   );
   const roles = new Map((opts.roles ?? []).map((r) => [r.id, r] as const));
   const fetchedChannels = opts.fetchedChannels
-    ? new Map(opts.fetchedChannels.map((c) => [c.id, c] as const))
+    ? new Map(
+        opts.fetchedChannels.map((c) => [c.id, withOverwrites(c)] as const),
+      )
     : channels;
   const fetchedRoles = opts.fetchedRoles
     ? new Map(opts.fetchedRoles.map((r) => [r.id, r] as const))
     : roles;
   const me = {
+    id: "bot-1",
     permissions: new PermissionsBitField(opts.serverBits ?? ALL),
     permissionsIn: jest.fn((c: FakeChannel) => new PermissionsBitField(c.bits)),
     roles: {
+      cache: new Map([["bot-role", {}]]),
       highest: { position: opts.botPosition ?? 10 },
       botRole:
         opts.botRoleBits === undefined
@@ -176,7 +194,8 @@ describe("registry", () => {
       } else {
         expect(r.usedWhen).toBeDefined();
       }
-      if (r.alsoKey) expect(typeof defaultConfig[r.alsoKey]).toBe("boolean");
+      for (const k of r.alsoKeys ?? [])
+        expect(typeof defaultConfig[k]).toBe("boolean");
       if (r.scope !== "guild" && !r.targetResolver) {
         expect(r.targetKey).toBeDefined();
         expect(
@@ -994,5 +1013,508 @@ describe("the per-entry checks the permission matrix is built from (#1306)", () 
       report.checks.filter((c) => c.enabled && c.outcome === "missing"),
     ).toHaveLength(2);
     expect(status.getPermissionIssueCount()).toBe(1);
+  });
+});
+
+describe("channel-posting features (#1254)", () => {
+  const TEXT = bits(
+    P.ViewChannel,
+    P.SendMessages,
+    P.EmbedLinks,
+    P.ReadMessageHistory,
+    P.AddReactions,
+    P.ManageMessages,
+    P.PinMessages,
+    P.ManageRoles,
+    P.ManageChannels,
+  );
+  // What the lock-down sets, allowed or denied: the bot holds them server-wide.
+  const GRANTS = bits(
+    TEXT,
+    P.SendMessagesInThreads,
+    P.CreatePublicThreads,
+    P.CreatePrivateThreads,
+  );
+  const runPost = (
+    opts: Parameters<typeof makeClient>[0],
+  ): ReturnType<typeof run> => run({ serverBits: ALL | GRANTS, ...opts });
+  const text = (
+    id: string,
+    channelBits: bigint = TEXT,
+    type: number = ChannelType.GuildText,
+  ): FakeChannel => ({ id, name: `name-${id}`, bits: channelBits, type });
+  const ids = (list: Array<{ id: string }>): string[] =>
+    list.map((f) => f.id).sort();
+  const unknownIds = (list: Array<{ feature: { id: string } }>): string[] =>
+    list.map((f) => f.feature.id).sort();
+
+  it("reports nothing when the bot holds everything in the quotes and notices channels", async () => {
+    settings = {
+      "quotes.enabled": true,
+      "quotes.channel_id": "q",
+      "notices.enabled": true,
+      "notices.channel_id": "n",
+    };
+    const report = await runPost({ channels: [text("q"), text("n")] });
+    expect(report.problems).toEqual([]);
+    expect(report.unknown).toEqual([]);
+    expect(ids(report.okFeatures)).toEqual([
+      "notices-cleanup",
+      "notices-lock",
+      "notices-pin",
+      "notices-post",
+      "quotes-cleanup",
+      "quotes-lock",
+      "quotes-pin",
+      "quotes-post",
+      "quotes-votes",
+    ]);
+  });
+
+  it("counts a channel overwrite that denies Send Messages, and names the channel and every feature it affects", async () => {
+    settings = {
+      "quotes.enabled": true,
+      "quotes.channel_id": "q",
+      "moderation.enabled": true,
+      "core.moderation.enabled": true,
+      "core.moderation.channel_id": "q",
+    };
+    // The role has Send Messages server-wide; the channel's overwrite removes it.
+    const report = await runPost({
+      serverBits: ALL | GRANTS,
+      channels: [text("q", without(TEXT, P.SendMessages))],
+    });
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0]).toMatchObject({
+      permission: "Send Messages",
+      target: { kind: "channel", id: "q", name: "name-q" },
+    });
+    expect(ids(report.problems[0].features)).toEqual([
+      "log-moderation",
+      "quotes-post",
+    ]);
+  });
+
+  it("asks each channel what the bot holds there, not the server-wide bits", async () => {
+    settings = { "core.errors.enabled": true, "core.errors.channel_id": "e" };
+    const { client, me } = makeClient({
+      serverBits: ALL | P.SendMessages | P.EmbedLinks,
+      channels: [text("e", bits(P.ViewChannel))],
+    });
+    check.resetBotPermissionCache();
+    const report = await check.checkBotPermissions(client, "guild-1", direct);
+    expect(me.permissionsIn).toHaveBeenCalled();
+    expect(report.problems.map((p) => p.permission).sort()).toEqual([
+      "Embed Links",
+      "Send Messages",
+    ]);
+  });
+
+  it("puts the permissions only a switched-off posting feature needs in the quiet notes", async () => {
+    settings = {
+      "quotes.enabled": false,
+      "quotes.channel_id": "q",
+      "core.updates.enabled": false,
+      "core.updates.channel_id": "q",
+    };
+    const report = await runPost({
+      channels: [text("q", bits(P.ViewChannel))],
+    });
+    expect(report.problems).toEqual([]);
+    expect(unknownIds(report.quiet)).toContain("quotes-post");
+    expect(unknownIds(report.quiet)).toContain("log-updates");
+    expect(report.okFeatures).toEqual([]);
+  });
+
+  it("checks nothing for an enabled posting feature whose channel is not set, and says so", async () => {
+    settings = { "notices.enabled": true };
+    const report = await runPost({ channels: [] });
+    expect(report.problems).toEqual([]);
+    expect(report.notes.some((n) => n.includes("notices.channel_id"))).toBe(
+      true,
+    );
+    expect(
+      report.checks.find((c) => c.feature.id === "notices-post"),
+    ).toMatchObject({ outcome: "unchecked", target: null });
+  });
+
+  it("does not require Pin Messages while the header or its pin is off", async () => {
+    const channels = [text("q", without(TEXT, P.PinMessages))];
+    settings = {
+      "quotes.enabled": true,
+      "quotes.channel_id": "q",
+      "quotes.header_pin_enabled": false,
+    };
+    let report = await runPost({ channels });
+    expect(report.problems).toEqual([]);
+    expect(unknownIds(report.quiet)).toEqual(["quotes-pin"]);
+
+    settings = {
+      "quotes.enabled": true,
+      "quotes.channel_id": "q",
+      "quotes.header_enabled": false,
+    };
+    report = await runPost({ channels });
+    expect(report.problems).toEqual([]);
+
+    // Defaults: header and pin both on.
+    settings = { "quotes.enabled": true, "quotes.channel_id": "q" };
+    report = await runPost({ channels });
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0]).toMatchObject({ permission: "Pin Messages" });
+  });
+
+  it("has no vote-reaction entry for notices (the code adds none), only for quotes", () => {
+    const ids = registry.FEATURE_REQUIREMENTS.map((r) => r.id);
+    expect(ids).toContain("quotes-votes");
+    expect(ids).not.toContain("notices-votes");
+  });
+
+  it("reports a category or forum as the posting channel as could not check, never ok", async () => {
+    settings = {
+      "core.errors.enabled": true,
+      "core.errors.channel_id": "cat",
+      "moderation.enabled": true,
+      "moderation.raid.enabled": true,
+      "moderation.raid.alert_channel_id": "f",
+    };
+    const report = await runPost({
+      channels: [
+        text("cat", TEXT, ChannelType.GuildCategory),
+        text("f", TEXT, ChannelType.GuildForum),
+      ],
+    });
+    expect(report.problems).toEqual([]);
+    expect(report.okFeatures).toEqual([]);
+    expect(unknownIds(report.unknown)).toEqual(["log-errors", "raid-alerts"]);
+    expect(report.unknown[0].note).toMatch(/not a text channel/);
+  });
+
+  it("checks the text chat of a voice channel where the services post to any text-based channel", async () => {
+    settings = {
+      "core.errors.enabled": true,
+      "core.errors.channel_id": "v",
+      "moderation.enabled": true,
+      "moderation.raid.enabled": true,
+      "moderation.raid.alert_channel_id": "v",
+      "voicetracking.enabled": true,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "v",
+    };
+    const report = await runPost({
+      channels: [text("v", bits(P.ViewChannel), ChannelType.GuildVoice)],
+    });
+    // The voice channel is really checked (Send Messages and Embed Links are missing there)...
+    expect(report.problems.map((p) => p.permission).sort()).toEqual([
+      "Embed Links",
+      "Send Messages",
+    ]);
+    // ...except for the announcer, which refuses a voice channel.
+    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-stats"]);
+  });
+
+  it("shows a configured thread as could not check, with the reason, never ok", async () => {
+    settings = {
+      "core.errors.enabled": true,
+      "core.errors.channel_id": "t",
+    };
+    const report = await runPost({
+      channels: [text("t", TEXT, ChannelType.PublicThread)],
+    });
+    expect(report.problems).toEqual([]);
+    expect(report.okFeatures).toEqual([]);
+    expect(unknownIds(report.unknown)).toEqual(["log-errors"]);
+    expect(report.unknown[0].note).toMatch(/thread/);
+  });
+
+  it("treats a log category as off while the feature that produces it is off", async () => {
+    const channels = [text("l", bits(P.ViewChannel))];
+    const parents: Array<[string, string, string[]]> = [
+      ["updates", "log-updates", ["core.updatecheck.enabled"]],
+      ["moderation", "log-moderation", ["moderation.enabled"]],
+      [
+        "moderation_review",
+        "log-moderation-review",
+        ["moderation.enabled", "moderation.cases.enabled"],
+      ],
+      ["cleanup", "log-cleanup", ["voicetracking.cleanup.enabled"]],
+    ];
+    for (const [type, id, keys] of parents) {
+      // The log switch and channel are set; each parent in turn is off.
+      for (const off of keys) {
+        settings = {
+          [`core.${type}.enabled`]: true,
+          [`core.${type}.channel_id`]: "l",
+          ...Object.fromEntries(keys.map((k) => [k, k !== off])),
+        };
+        const report = await runPost({ channels });
+        expect(report.problems).toEqual([]);
+        expect(unknownIds(report.quiet)).toContain(id);
+      }
+      // All parents on: the missing permissions are real problems.
+      settings = {
+        [`core.${type}.enabled`]: true,
+        [`core.${type}.channel_id`]: "l",
+        ...Object.fromEntries(keys.map((k) => [k, true])),
+      };
+      const report = await runPost({ channels });
+      expect(report.problems.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("treats the update note as on by default, as the update check is", async () => {
+    settings = { "core.updates.enabled": true, "core.updates.channel_id": "l" };
+    const report = await runPost({
+      channels: [text("l", bits(P.ViewChannel))],
+    });
+    expect(report.problems.length).toBeGreaterThan(0);
+  });
+
+  it("needs the moderation log on for anti-raid alerts", async () => {
+    const channels = [text("r", bits(P.ViewChannel))];
+    settings = {
+      "moderation.raid.enabled": true,
+      "moderation.raid.alert_channel_id": "r",
+      "moderation.enabled": false,
+    };
+    let report = await runPost({ channels });
+    expect(report.problems).toEqual([]);
+    expect(unknownIds(report.quiet)).toEqual(["raid-alerts"]);
+    settings["moderation.enabled"] = true;
+    report = await runPost({ channels });
+    expect(report.problems.map((p) => p.permission)).toEqual(["Send Messages"]);
+  });
+
+  describe("the quotes and notices lock-down follows Discord's overwrite rule", () => {
+    const lockOf = (
+      report: Awaited<ReturnType<typeof run>>,
+    ): { outcome: string; missing: string[] } => {
+      const c = report.checks.find((x) => x.feature.id === "notices-lock");
+      return { outcome: c?.outcome ?? "", missing: [...(c?.missing ?? [])] };
+    };
+    beforeEach(() => {
+      settings = { "notices.enabled": true, "notices.channel_id": "n" };
+    });
+
+    it("is in place when the bot holds Manage Roles there and everything it allows and denies server-wide", async () => {
+      const report = await runPost({ channels: [text("n")] });
+      expect(lockOf(report).outcome).toBe("ok");
+    });
+
+    it("needs the denied bits too: Send Messages in Threads and the thread-creation bits", async () => {
+      const report = await runPost({
+        serverBits: without(
+          ALL | GRANTS,
+          P.SendMessagesInThreads,
+          P.CreatePublicThreads,
+          P.CreatePrivateThreads,
+        ),
+        channels: [text("n")],
+      });
+      const lock = lockOf(report);
+      expect(lock.outcome).toBe("missing");
+      expect(lock.missing.sort()).toEqual([
+        "Create Private Threads",
+        "Create Public Threads",
+        "Send Messages in Threads",
+      ]);
+    });
+
+    it("is missing when Manage Roles alone is held and the rest is not (server-wide or in the category)", async () => {
+      const report = await runPost({
+        serverBits: ALL,
+        channels: [text("n")],
+      });
+      const lock = lockOf(report);
+      expect(lock.outcome).toBe("missing");
+      expect(lock.missing).toEqual(
+        expect.arrayContaining(["Add Reactions", "Send Messages in Threads"]),
+      );
+    });
+
+    it("accepts bits held in the channel's parent category instead of server-wide", async () => {
+      const report = await runPost({
+        serverBits: ALL,
+        channels: [
+          { ...text("n"), parentId: "cat" },
+          text("cat", GRANTS, ChannelType.GuildCategory),
+        ],
+      });
+      expect(lockOf(report).outcome).toBe("ok");
+    });
+
+    it("needs nothing more than Manage Roles when the bot has a Manage Roles overwrite on the channel", async () => {
+      for (const id of ["bot-1", "bot-role"]) {
+        const report = await runPost({
+          serverBits: ALL,
+          channels: [
+            { ...text("n"), overwrites: [{ id, allow: P.ManageRoles }] },
+          ],
+        });
+        expect(lockOf(report)).toEqual({ outcome: "ok", missing: [] });
+      }
+      // An overwrite for someone else is no exemption.
+      const other = await runPost({
+        serverBits: ALL,
+        channels: [
+          {
+            ...text("n"),
+            overwrites: [{ id: "someone", allow: P.ManageRoles }],
+          },
+        ],
+      });
+      expect(lockOf(other).outcome).toBe("missing");
+    });
+
+    it("names only Manage Roles when the bot lacks it in the channel, exemption or not", async () => {
+      const report = await runPost({
+        channels: [text("n", without(TEXT, P.ManageRoles))],
+      });
+      expect(lockOf(report)).toEqual({
+        outcome: "missing",
+        missing: ["Manage Roles"],
+      });
+      // The grants were not reached, so the check says it assessed only Manage Roles.
+      expect(
+        report.checks.find((x) => x.feature.id === "notices-lock")?.assessed,
+      ).toEqual(["Manage Roles"]);
+    });
+
+    it("records which needs it assessed: all, or only Manage Roles when the exemption waives the rest", async () => {
+      const assessedOf = (
+        r: Awaited<ReturnType<typeof run>>,
+      ): string[] | undefined =>
+        r.checks.find((x) => x.feature.id === "notices-lock")?.assessed;
+      const full = await runPost({ channels: [text("n")] });
+      expect(assessedOf(full)).toContain("Create Public Threads");
+      const waived = await runPost({
+        serverBits: ALL,
+        channels: [
+          { ...text("n"), overwrites: [{ id: "bot-1", allow: P.ManageRoles }] },
+        ],
+      });
+      expect(assessedOf(waived)).toEqual(["Manage Roles"]);
+    });
+  });
+
+  it("accepts an announcement channel for the log, but not for the weekly announcer, which needs a plain text channel", async () => {
+    settings = {
+      "core.cron.enabled": true,
+      "core.cron.channel_id": "a",
+      "voicetracking.enabled": true,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "a",
+    };
+    const report = await runPost({
+      channels: [text("a", TEXT, ChannelType.GuildAnnouncement)],
+    });
+    expect(ids(report.okFeatures)).toEqual(["log-cron"]);
+    expect(unknownIds(report.unknown)).toEqual(["voice-weekly-stats"]);
+  });
+
+  it("needs both voice tracking and the announcement switch for the weekly announcer", async () => {
+    settings = {
+      "voicetracking.enabled": false,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "a",
+    };
+    const report = await runPost({
+      channels: [text("a", bits(P.ViewChannel))],
+    });
+    expect(report.problems).toEqual([]);
+    expect(unknownIds(report.quiet)).toEqual([
+      "voice-weekly-accolades",
+      "voice-weekly-polls",
+      "voice-weekly-quote",
+      "voice-weekly-stats",
+    ]);
+  });
+
+  it("only checks the weekly announcement sections that would be sent", async () => {
+    const channels = [text("a", bits(P.ViewChannel))];
+    const base = {
+      "voicetracking.enabled": true,
+      "voicetracking.announcements.enabled": true,
+      "voicetracking.announcements.channel_id": "a",
+    };
+    const sections = {
+      "voicetracking.announcements.include_voice_stats": false,
+      "voicetracking.announcements.include_accolades": false,
+      "voicetracking.announcements.include_quote_of_week": false,
+      "voicetracking.announcements.include_poll_turnout": false,
+    };
+    // Every section switched off: nothing is sent, so nothing is a problem.
+    settings = { ...base, ...sections, "quotes.enabled": true };
+    let report = await run({ channels });
+    expect(report.problems).toEqual([]);
+    expect(report.unknown).toEqual([]);
+    // One section on, with its own producer switches.
+    settings = {
+      ...base,
+      ...sections,
+      "voicetracking.announcements.include_accolades": true,
+      "achievements.enabled": true,
+      "achievements.announcements.enabled": false,
+    };
+    report = await run({ channels });
+    expect(report.problems).toEqual([]);
+    settings["achievements.announcements.enabled"] = true;
+    report = await run({ channels });
+    expect(report.problems).toHaveLength(1);
+    expect(ids(report.problems[0].features)).toEqual([
+      "voice-weekly-accolades",
+    ]);
+    // The quote and poll sections follow quotes and poll participation.
+    settings = {
+      ...base,
+      ...sections,
+      "voicetracking.announcements.include_quote_of_week": true,
+      "voicetracking.announcements.include_poll_turnout": true,
+      "quotes.enabled": true,
+      "polls.participation.enabled": false,
+    };
+    report = await run({ channels });
+    expect(ids(report.problems[0].features)).toEqual(["voice-weekly-quote"]);
+  });
+
+  it("says could not check when the configured channel is not found", async () => {
+    settings = { "quotes.enabled": true, "quotes.channel_id": "gone" };
+    const report = await runPost({ channels: [] });
+    expect(report.problems).toEqual([]);
+    expect(report.okFeatures).toEqual([]);
+    expect(unknownIds(report.unknown)).toContain("quotes-post");
+  });
+
+  it("covers every Discord log category once, with the registry's literal list equal to the logger's", async () => {
+    const { DISCORD_LOG_TYPES } =
+      await import("../../src/services/discord-logger.js");
+    expect(registry.LOG_CHANNEL_TYPES.map((t) => t.type).sort()).toEqual(
+      [...DISCORD_LOG_TYPES].sort(),
+    );
+    for (const { type } of registry.LOG_CHANNEL_TYPES) {
+      const entry = registry.FEATURE_REQUIREMENTS.find(
+        (r) => r.id === `log-${type.replace(/_/g, "-")}`,
+      );
+      expect(entry).toMatchObject({
+        scope: "channel",
+        targetType: "text",
+        enabledKey: `core.${type}.enabled`,
+        targetKey: `core.${type}.channel_id`,
+      });
+      expect(entry?.needs.map((n) => n.name)).toEqual([
+        "View Channel",
+        "Send Messages",
+        "Embed Links",
+      ]);
+    }
+  });
+
+  it("gives every posting entry a channel scope and a text target type", () => {
+    for (const r of registry.FEATURE_REQUIREMENTS) {
+      if (/^(log|quotes|notices)-|^(raid-alerts|voice-weekly)/.test(r.id)) {
+        expect(r.scope).toBe("channel");
+        expect(r.targetType).toBeDefined();
+      }
+    }
   });
 });

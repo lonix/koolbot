@@ -23,6 +23,7 @@
 
 import {
   ChannelType,
+  PermissionFlagsBits,
   type Client,
   type Guild,
   type GuildBasedChannel,
@@ -35,6 +36,7 @@ import { parseLeaderboardTiers } from "./leaderboard-tier-parse.js";
 import {
   FEATURE_REQUIREMENTS,
   missingNeeds,
+  missingOverwriteGrant,
   ROLE_HIERARCHY_REQUIREMENTS,
   type FeatureRequirement,
   type RoleHierarchyRequirement,
@@ -100,6 +102,13 @@ export interface FeatureCheck {
   target: PermissionTarget | null;
   /** The permission names (or `ROLE_ABOVE_BOT`) that are missing there. */
   missing: string[];
+  /**
+   * The permission names this check actually evaluated, when it did not
+   * evaluate all of the entry's needs (a lock-down whose grants are waived by an
+   * overwrite exemption, or not reached because Manage Roles is missing). The
+   * matrix shows only these; absent means every need was evaluated.
+   */
+  assessed?: string[];
 }
 
 export interface BotPermissionReport {
@@ -318,7 +327,7 @@ export function configuredRoleIds(
  */
 async function readFeatureState(
   config: ConfigService,
-  r: Pick<FeatureRequirement, "enabledKey" | "alsoKey" | "usedWhen">,
+  r: Pick<FeatureRequirement, "enabledKey" | "alsoKeys" | "usedWhen">,
   roleGroupsConfigured: () => Promise<boolean>,
 ): Promise<boolean> {
   if (r.usedWhen === "role-groups") return roleGroupsConfigured();
@@ -327,7 +336,9 @@ async function readFeatureState(
   const on = (key: keyof typeof defaultConfig): Promise<boolean> =>
     config.getBooleanStrict(key, defaultConfig[key] === true);
   if (r.enabledKey && !(await on(r.enabledKey))) return false;
-  if (r.alsoKey && !(await on(r.alsoKey))) return false;
+  for (const key of r.alsoKeys ?? []) {
+    if (!(await on(key))) return false;
+  }
   return true;
 }
 
@@ -373,6 +384,43 @@ async function resolveVoiceLobby(
     }
   }
   return { categorySet: true, id: "" };
+}
+
+/**
+ * Whether the bot, or one of its roles, has a channel overwrite that allows
+ * Manage Roles in this channel: Discord's exemption from "only bits you hold".
+ */
+function hasManageRolesOverwrite(
+  me: GuildMember,
+  channel: GuildBasedChannel,
+): boolean {
+  const overwrites = (
+    channel as { permissionOverwrites?: { cache?: Map<string, unknown> } }
+  ).permissionOverwrites?.cache;
+  for (const o of (overwrites?.values() ?? []) as Iterable<{
+    id: string;
+    allow?: { has: (bit: bigint) => boolean };
+  }>) {
+    const mine = o.id === me.id || Boolean(me.roles?.cache?.has(o.id));
+    if (mine && o.allow?.has(PermissionFlagsBits.ManageRoles)) return true;
+  }
+  return false;
+}
+
+/** Whether a channel is of the kind a posting service accepts (see `FeatureRequirement.targetType`). */
+function isPostingChannel(
+  type: ChannelType | undefined,
+  want: NonNullable<FeatureRequirement["targetType"]>,
+): boolean {
+  if (type === ChannelType.GuildText) return true;
+  // The services accept any `isTextBased()` channel: announcement channels and
+  // the text chat of a voice or stage channel. Threads are not checked here.
+  return (
+    want === "text" &&
+    (type === ChannelType.GuildAnnouncement ||
+      type === ChannelType.GuildVoice ||
+      type === ChannelType.GuildStageVoice)
+  );
 }
 
 async function defaultRoleGroupCount(guildId: string): Promise<number> {
@@ -491,6 +539,7 @@ export async function checkBotPermissions(
       }
       const feature = ref(r);
       let missing: string[] | null = null;
+      let assessed: string[] | undefined;
       let why = "";
       if (!me) {
         why = "The bot's own membership could not be read.";
@@ -503,13 +552,43 @@ export async function checkBotPermissions(
         // The services only accept a real category here (a text or voice
         // channel id is ignored), so it cannot be reported as in place.
         why = "The configured channel is not a category.";
+      } else if (
+        r.targetType &&
+        !isPostingChannel(channel?.type, r.targetType)
+      ) {
+        // Another kind of channel (a category, a forum, a thread) cannot be
+        // reported as in place.
+        why =
+          channel?.type === ChannelType.PublicThread ||
+          channel?.type === ChannelType.PrivateThread ||
+          channel?.type === ChannelType.AnnouncementThread
+            ? "The configured channel is a thread. This page checks text, announcement, voice and stage channels, not threads."
+            : "The configured channel is not a text channel.";
       } else {
         try {
           const perms =
             r.scope === "guild" || !channel
               ? me.permissions
               : me.permissionsIn(channel);
-          missing = missingNeeds(r, (bit) => perms.has(bit));
+          const grant =
+            r.overwriteGrant && channel
+              ? missingOverwriteGrant(r.needs, {
+                  inChannel: (bit) => perms.has(bit),
+                  inGuild: (bit) => me.permissions.has(bit),
+                  inParent: (bit) => {
+                    const parentId = channel?.parentId;
+                    const parent = parentId
+                      ? snapshot.channels?.get(parentId)
+                      : null;
+                    return parent ? me.permissionsIn(parent).has(bit) : false;
+                  },
+                  exempt: hasManageRolesOverwrite(me, channel),
+                })
+              : null;
+          missing = grant
+            ? grant.missing
+            : missingNeeds(r, (bit) => perms.has(bit));
+          assessed = grant?.assessed;
         } catch (err) {
           logger.warn("Bot permission check: permissions unreadable:", err);
           why = "The bot's permissions could not be read.";
@@ -527,6 +606,7 @@ export async function checkBotPermissions(
               : "missing",
         target,
         missing: missing ?? [],
+        ...(assessed ? { assessed } : {}),
       });
       if (missing === null) {
         if (inUse) unknown.push({ feature, target, note: why });

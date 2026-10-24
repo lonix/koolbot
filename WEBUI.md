@@ -1403,8 +1403,32 @@ their permission bits and warning texts from the same list. It covers voice
 channels and temporary rooms, events (channels, host access, the leaders-only
 channel, moves, clan tags, the Events list), reaction roles, leaderboard roles,
 role groups and the rules role (including a role that sits above the bot's
-highest role). The channel-posting features (View Channel, Send Messages, Embed
-Links) are not covered yet.
+highest role). It also covers the features that post into a configured channel:
+the Discord log channels (startup, errors, cleanup, config changes, scheduled jobs,
+moderation, case review, update notes and role groups), anti-raid alerts, the weekly
+voice-activity announcement, and the quotes and notices channels. Each is checked in
+its own channel, with overwrites, only while the feature is on and the channel is set.
+What each needs is what the code calls there: View Channel, Send Messages and Embed Links
+to post (the weekly announcement is plain text, so no Embed Links), Read Message History to
+find its header and the messages it edits or deletes, Add Reactions for the quote votes,
+Manage Messages to delete what members post in the quotes and notices channels, Pin
+Messages for the header while it is pinned, and for the lock-down the bot applies to those
+two channels at startup. The lock-down follows Discord's rule for channel overwrites: the bot needs
+Manage Roles _in the channel_, and every permission it allows or denies there (including Send
+Messages in Threads and the thread-creation permissions) must be held server-wide or on the channel's
+category, unless the bot has a Manage Roles override on the channel itself, which waives that second
+part (when Manage Roles is missing, or the override waives the rest, the matrix lists only Manage Roles for it,
+never the unevaluated permissions as "Has"). The weekly announcement is checked per section (stats, accolades, quote of the week,
+poll turnout), each only while its own switches are on. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
+moderation, moderation cases, the update check), and anti-raid alerts only while the moderation log
+is on. A configured channel that is a category, a forum or a thread (or not found) is shown as
+_Not checked_; threads are not checked because they need Send Messages in Threads and are not in
+Discord's channel list. The text chat of a voice or stage channel is checked, except for the weekly
+announcement, which needs a plain text channel. The weekly digest is sent as
+direct messages and needs no channel. Birthdays, celebrations, welcome messages, looking
+for group, event and leaderboard announcements, the reaction-role picker and the rules
+message post too but are not checked yet (#1254). When one of these features cannot post,
+most of them only write a line in the bot's log; nothing is shown in Discord.
 
 - **Effective permissions.** A category or channel is checked with the bot's
   permissions _in that channel_, so an overwrite that denies a permission the bot's
@@ -1425,8 +1449,8 @@ Links) are not covered yet.
 - **All Discord permissions.** A folded card at the bottom of the page lists every Discord
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
-  _checked in the table above_, _used, not checked on this page_ (posting, moderation and
-  the overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
+  _checked in the table above_, _used, not checked on this page_ (moderation, ticket transcripts, the
+  channels not covered yet and the overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
