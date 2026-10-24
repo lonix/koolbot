@@ -3153,7 +3153,35 @@ otherwise, with a link to suggest a catalogue entry. If the GuildMembers intent 
 an integration role may be missing. The report is read-only: removing a bot stays manual in Discord, KoolBot never kicks
 it, and data from other bots cannot be imported. Every catalogued card says the match is by id and the capability list may be
 out of date, and carries an _unverified entry_ note until the entry records what it was checked against (`verifiedAgainst`).
-An after-removal cleanup plan is not part of it yet.
+
+**Clean up after a removed bot** (`/admin/adopt/cleanup`, #1179, part of the server-adoption work #1017) is the part that
+comes after you have removed a bot in Discord yourself. KoolBot never removes another bot, and the page never does.
+The **Other bots** tab lists _Removed bots with leftovers_ (the ones the scan itself settles) and links to the page: a bot
+that is no longer in the server but whose catalogue id, a channel it mostly wrote to (needs channel ownership hints) or a
+member-specific permission overwrite still shows up in the scan. The scan's member cache is not trusted as proof that an
+account has left or is still here: a cached bot without an integration role, and a bare overwrite for an unknown account
+(which may be a current member), are only listed on the cleanup page after Discord has confirmed, with a forced lookup,
+that the account is a bot and no longer a member. This lookup does not need the GuildMembers intent. Discord is asked
+about at most 25 accounts per view; **Check the next accounts** continues with the rest. An account that cannot be
+checked is not listed and is counted in a notice. Discord removes the bot's managed role when it leaves, but not those
+overwrites.
+**Review cleanup** lists, per channel, the overwrite that still names the removed bot. Nothing is ticked for you.
+**Preview changes** shows the plan, and **Apply plan** runs it through the adoption engine like any other plan: a
+snapshot is saved first, and the result can be restored from **Adoption history**. The engine counts removing an
+overwrite as a destructive step, so the preview lists it in its own section and the apply form asks for the separate
+confirmation. Before it plans, and again right before the step runs, KoolBot asks Discord whether the account is a bot and
+no longer a member; if either read fails, or the bot is back, nothing is planned or applied. It also runs the same safety
+check Restore runs on the snapshot the apply would leave, so a cleanup that could not be undone (for example the removed
+bot's overwrite allows a permission KoolBot's own role lacks) is refused with the reason before anything changes.
+The audit log gets `adopt.cleanup.start` when an apply is accepted and `adopt.cleanup.apply` when the background job ends,
+as a success only if it finished with no failed step (a refusal by the live check or a failed step is a failure).
+Settings still bound to a channel the bot touched are flagged as warnings and are not changed. Channels it
+mostly wrote to link to **Channel claims** (with the feature prefilled where one fits) for the actual claim, which has its
+own preview. A Restore puts the removed overwrite back with the same permissions; whether Discord accepts a member
+overwrite for an account that has left is not confirmed on a real server yet.
+
+Not part of this yet: claiming a removed bot's channels inside the same plan, and archiving or deleting its channels
+(destructive, to be opt-in with explicit approval). Neither is offered today.
 
 **Channel Manager** (`/admin/channels`, #1065) lists the server's categories and their text and voice channels
 live from Discord and lets an admin create, rename, reorder and delete them. It is Web UI admin management, so it
@@ -3336,7 +3364,7 @@ warning that IDs, messages and member assignments can't be restored. When a plan
 carries a separate required confirmation (Channel Claims), or asks you to type the role's name (deleting a
 group's role); the server checks it again on apply. Adoption writes (everything under `/admin/adopt`,
 `/admin/role-groups` and `/admin/rules` that isn't a plain page read) share a limit of 30 requests a minute
-per client IP, and the pages that scan the server (`/admin/adopt`, `/admin/adopt/claims`, `/admin/adopt/events`)
+per client IP, and the pages that scan the server (`/admin/adopt`, `/admin/adopt/claims`, `/admin/adopt/events`, `/admin/adopt/cleanup`)
 a limit of 15 a minute. Over the limit the answer is HTTP 429 with a `Retry-After` header. Like the sign-in
 limits it is in memory and per IP, so set `WEBUI_TRUST_PROXY` correctly behind a reverse proxy.
 
@@ -3349,7 +3377,8 @@ opens the snapshot history.
 
 1. **Scan** (`/admin/adopt`). Read-only. Fix the red blockers first (for example the KoolBot role must sit above the roles
    it manages; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#adopting-a-server-role-hierarchy-missing-permissions-and-rollback)).
-   The bot replacement report on the same page shows which other bots KoolBot can replace.
+   The bot replacement report on the same page shows which other bots KoolBot can replace, and, once you have removed one in
+   Discord, **Clean up after a removed bot** (`/admin/adopt/cleanup`) tidies its leftover permission overwrites.
 2. **Role groups** (`/admin/role-groups`). Optional. Tie your existing Admin, Mod or VIP roles to groups, preview the plan
    and apply it.
 3. **Rules role** (`/admin/rules`). Optional. Only if you want a rules acceptance gate.

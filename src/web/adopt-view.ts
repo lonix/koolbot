@@ -16,6 +16,7 @@ import type {
 import { claimKeyFor, featureTarget } from "../services/channel-claims.js";
 import { channelMention } from "./discord-labels.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
+import { findRemovedBotCandidates } from "../services/bot-removal-cleanup.js";
 import {
   buildBotReplacementReport,
   type BotCard,
@@ -41,6 +42,7 @@ const ISSUES = "https://github.com/lonix/koolbot/issues";
 const SCAN_PAGE = "/admin/adopt";
 const BOT_PERMISSIONS_PAGE = "/admin/bot-permissions";
 const CLAIMS_PAGE = "/admin/adopt/claims";
+const CLEANUP_PAGE = "/admin/adopt/cleanup";
 
 export const SCAN_TABS = [
   "overview",
@@ -801,16 +803,40 @@ function renderCombined(report: BotReplacementReport): string {
   return `<section class="kb-panel" aria-labelledby="p-combined"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-combined">Combined view</h2></header><div class="kb-panel__body"><p>${escapeHtml(c.headline)}</p>${detail}</div></section>`;
 }
 
-function renderBots(scan: ServerScan): string {
+function renderRemovedBots(scan: ServerScan, sampled: boolean): string {
+  const q = sampled ? "&amp;sample=1" : "";
+  // Only what the scan itself settles. An account it cannot tell from a current
+  // member (a bare overwrite, a cached bot without a role) needs Discord to
+  // confirm that it is a bot that has left, which the cleanup page does.
+  const removed = findRemovedBotCandidates(scan).filter((c) => !c.needsCheck);
+  const check = `<p class="kb-muted">Removed a bot already? <a href="${CLEANUP_PAGE}${sampled ? "?sample=1" : ""}">Check with Discord for leftovers</a>.</p>`;
+  if (removed.length === 0) return check;
+  const items = removed
+    .map(
+      (c) =>
+        `<li><span class="kb-list__main"><strong>${escapeHtml(c.name)}</strong><span class="kb-muted">${escapeHtml(c.reason)} ${plural(c.overwriteChannels.length, "overwrite", "overwrites")} left.</span></span><a class="kb-btn kb-btn--sm" href="${CLEANUP_PAGE}?bot=${encodeURIComponent(c.userId)}${q}">Plan cleanup<span class="kb-visually-hidden"> for ${escapeHtml(c.name)}</span></a></li>`,
+    )
+    .join("");
+  return `${panel(
+    "Removed bots with leftovers",
+    String(removed.length),
+    `<p class="kb-muted">You removed these bots in Discord; KoolBot never does. A cleanup plan removes the permission overwrites they left behind. It is previewed, snapshotted and can be rolled back.</p><ul class="kb-list">${items}</ul>`,
+    { id: "p-removed-bots" },
+  )}${check}`;
+}
+
+function renderBots(scan: ServerScan, sampled: boolean): string {
   const report = buildBotReplacementReport(scan, scan.scanned?.config ?? {});
   const warn = report.warnings.map((w) => callout("warn", w)).join("");
+  const removed = renderRemovedBots(scan, sampled);
   if (report.cards.length === 0) {
-    return `${warn}<div class="kb-empty"><p class="kb-empty__title">No other bots found.</p><p class="kb-empty__text">Bots that join this server show up here with what KoolBot can replace.</p></div>`;
+    return `${warn}${removed}<div class="kb-empty"><p class="kb-empty__title">No other bots found.</p><p class="kb-empty__text">Bots that join this server show up here with what KoolBot can replace.</p></div>`;
   }
-  return `<p class="kb-muted">Read-only. Removing a bot stays manual in Discord, and nothing here changes your server. Data from other bots cannot be imported.</p>
+  return `<p class="kb-muted">Removing a bot stays manual in Discord, and this report changes nothing on your server. Data from other bots cannot be imported.</p>
 ${warn}
 ${renderCombined(report)}
-${report.cards.map((c) => renderBotCard(c, scan)).join("\n")}`;
+${report.cards.map((c) => renderBotCard(c, scan)).join("\n")}
+${removed}`;
 }
 
 // ---- Discord ----------------------------------------------------------------
@@ -876,7 +902,7 @@ function renderTab(
     case "channels":
       return renderChannels(scan, filter, sampled);
     case "bots":
-      return renderBots(scan);
+      return renderBots(scan, sampled);
     case "discord":
       return renderDiscord(scan);
     default:

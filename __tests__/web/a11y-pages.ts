@@ -75,6 +75,8 @@ import { FEATURE_REQUIREMENTS } from "../../src/services/bot-permission-registry
 import { renderRulesPage } from "../../src/web/rules-page.js";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
+import { renderBotCleanupPage } from "../../src/web/bot-cleanup-view.js";
+import type { RemovedBotCandidate } from "../../src/services/bot-removal-cleanup.js";
 import {
   renderAdminFixPage,
   renderRoleDeletePage,
@@ -950,6 +952,94 @@ export function adminPages(): A11yPage[] {
         sampled: false,
         tab: "bots",
         scan: busyScan(),
+      }),
+    },
+    {
+      name: "Server scan (other bots, with a removed bot)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: false,
+        tab: "bots",
+        scan: removedBotScan(),
+      }),
+    },
+    {
+      name: "Bot cleanup (no removed bot)",
+      html: renderBotCleanupPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        botId: null,
+        candidates: [],
+        planned: null,
+        selectedChannelIds: [],
+        sampled: false,
+        approvedAt: null,
+      }),
+    },
+    {
+      name: "Bot cleanup (server could not be read)",
+      html: renderBotCleanupPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        botId: null,
+        candidates: null,
+        planned: null,
+        selectedChannelIds: [],
+        sampled: false,
+        approvedAt: null,
+        error: "Discord couldn't be reached.",
+      }),
+    },
+    {
+      name: "Bot cleanup (bot chosen, nothing ticked)",
+      html: renderBotCleanupPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        botId: REMOVED_BOT.userId,
+        candidates: [REMOVED_BOT],
+        planned: null,
+        selectedChannelIds: [],
+        sampled: true,
+        nextAfter: "300000000000000009",
+        unchecked: 1,
+        approvedAt: null,
+      }),
+    },
+    {
+      // The preview with its destructive section and separate confirmation.
+      name: "Bot cleanup (previewed plan)",
+      html: renderBotCleanupPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        botId: REMOVED_BOT.userId,
+        candidates: [REMOVED_BOT],
+        planned: CLEANUP_PLAN,
+        selectedChannelIds: ["11"],
+        sampled: false,
+        approvedAt: "2026-10-17T10:00:00.000Z",
+      }),
+    },
+    {
+      name: "Bot cleanup (plan refused)",
+      html: renderBotCleanupPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        botId: REMOVED_BOT.userId,
+        candidates: [REMOVED_BOT],
+        planned: {
+          ...(CLEANUP_PLAN as object),
+          errors: [
+            {
+              code: "bot-still-present",
+              message: "That bot is still in the server.",
+            },
+          ],
+          plan: { ...(CLEANUP_PLAN as { plan: object }).plan, operations: [] },
+        } as never,
+        selectedChannelIds: ["11"],
+        sampled: false,
+        approvedAt: "2026-10-17T10:00:00.000Z",
       }),
     },
     {
@@ -4384,6 +4474,59 @@ const REWIND = {
   dayOfWeekDistribution: Array.from({ length: 7 }, (_, d) => d * 20),
   pollVotesCast: 12,
 };
+
+/** A removed bot with leftovers, as the cleanup page lists it (#1179). */
+const REMOVED_BOT: RemovedBotCandidate = {
+  userId: "155149108183695360",
+  name: "Dyno",
+  evidence: "catalogue",
+  needsCheck: false,
+  reason: "Its id is in the bot catalogue and it is no longer in the server.",
+  overwriteChannels: [
+    { id: "11", name: "news" },
+    { id: "12", name: "chat" },
+  ],
+  ownedChannels: [
+    {
+      id: "13",
+      name: "log",
+      usedBy: ["core"],
+      claimKey: "core.errors.channel_id",
+    },
+  ],
+  boundFeatures: [{ channel: "log", features: ["core"] }],
+};
+
+/** A cleanup plan with one approved overwrite removal (#1179). */
+const CLEANUP_PLAN = {
+  scan: {} as never,
+  candidate: REMOVED_BOT,
+  channelIds: ["11"],
+  errors: [],
+  plan: {
+    ...CLAIMS_DESTRUCTIVE_PLAN.plan,
+    operations: [CLAIMS_DESTRUCTIVE_PLAN.plan.operations[1]],
+    warnings: [
+      {
+        code: "feature-bound",
+        message: '"log" is bound to core and stays so.',
+      },
+    ],
+  },
+} as never;
+
+/** The busy scan, plus an overwrite for a catalogue bot that is no longer here. */
+function removedBotScan(): ReturnType<typeof busyScan> {
+  const scan = busyScan();
+  scan.channels[1]!.overwrites.push({
+    id: "235148962103951360",
+    type: "member",
+    label: "235148962103951360",
+    allow: ["ViewChannel"],
+    deny: [],
+  });
+  return scan;
+}
 
 /**
  * The app shell (#1317) for each scope combination: top bar, scope badges, the

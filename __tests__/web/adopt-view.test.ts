@@ -638,6 +638,62 @@ describe("Server scan tabs (#1323)", () => {
     expect(html).toContain("No other bots found.");
     expect(html).not.toContain("Combined view");
   });
+
+  describe("removed bots with leftovers (#1179)", () => {
+    const withLeftover = (bots: any[], sampled = false): string =>
+      page("bots", {
+        sampled,
+        scan: {
+          ...scan,
+          bots,
+          channels: [
+            {
+              ...scan.channels[0],
+              overwrites: [
+                {
+                  id: DYNO,
+                  type: "member",
+                  label: DYNO,
+                  allow: ["ViewChannel"],
+                  deny: [],
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+    it("offers a cleanup plan for a catalogue bot that is gone, linking the cleanup page", () => {
+      const html = withLeftover([]);
+      expect(html).toContain("Removed bots with leftovers");
+      expect(html).toContain(`href="/admin/adopt/cleanup?bot=${DYNO}"`);
+      expect(html).toContain("1 overwrite left");
+      expect(html).toContain("KoolBot never does");
+      // Still says there are no other bots in the server.
+      expect(html).toContain("No other bots found.");
+    });
+
+    it("keeps the ownership hints on in the link", () => {
+      expect(withLeftover([], true)).toContain(
+        `href="/admin/adopt/cleanup?bot=${DYNO}&amp;sample=1"`,
+      );
+    });
+
+    it("offers nothing for a bot that is still in the server", () => {
+      const html = withLeftover([
+        {
+          ...botBase,
+          userId: DYNO,
+          tag: "Dyno#1",
+          verified: true,
+        },
+      ]);
+      expect(html).not.toContain("Removed bots with leftovers");
+      expect(html).not.toContain("/admin/adopt/cleanup?bot=");
+      // Only the quiet entry point to the Discord-checked page remains.
+      expect(html).toContain("Check with Discord for leftovers");
+    });
+  });
   it("lists the integration role and overwrite channels on a bot card", () => {
     const html = page("bots");
     expect(html).toContain("<dt>Channels with overwrites</dt><dd>quotes</dd>");

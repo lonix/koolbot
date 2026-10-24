@@ -39,6 +39,7 @@ import { createVersionCheckRouter } from "./routes/write/version-check.js";
 import { createRoleGroupsRouter } from "./routes/write/role-groups.js";
 import { createRulesRouter } from "./routes/write/rules.js";
 import { createChannelClaimsRouter } from "./routes/write/channel-claims.js";
+import { createBotCleanupRouter } from "./routes/write/bot-cleanup.js";
 import { createEventAdoptionRouter } from "./routes/write/event-adoption.js";
 import { createAdoptionHistoryRouter } from "./routes/write/adoption-history.js";
 import { createChannelManagerRouter } from "./routes/write/channel-manager.js";
@@ -82,6 +83,7 @@ export function createWriteRouter(
   router.use(createRoleGroupsRouter(client));
   router.use(createRulesRouter(client));
   router.use(createChannelClaimsRouter(client));
+  router.use(createBotCleanupRouter(client));
   router.use(createEventAdoptionRouter(client));
   router.use(createAdoptionHistoryRouter(client));
   router.use(createChannelManagerRouter(client));

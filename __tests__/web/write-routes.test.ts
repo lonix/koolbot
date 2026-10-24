@@ -1001,7 +1001,7 @@ describe("createWriteRouter (#850)", () => {
       true,
     );
     // The adoption rate limits plus every domain module, each mounted once.
-    expect(stack.length - 3).toBe(26);
+    expect(stack.length - 3).toBe(27);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -1009,6 +1009,7 @@ describe("createWriteRouter (#850)", () => {
     expect(routes).toEqual(
       [
         "GET /adopt/claims",
+        "GET /adopt/cleanup",
         "GET /adopt/events",
         "GET /adopt/history",
         "GET /adopt/history/:id/restore",
@@ -1020,6 +1021,7 @@ describe("createWriteRouter (#850)", () => {
         "GET /wizard",
         "POST /adopt/claims/apply",
         "POST /adopt/claims/preview",
+        "POST /adopt/cleanup/apply",
         "POST /adopt/events/apply",
         "POST /adopt/history/:id/restore",
         "POST /announcements/:id/delete",
