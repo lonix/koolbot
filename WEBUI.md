@@ -1941,6 +1941,19 @@ event form (Marker, Name, Max size, Tag; hidden on narrow screens), and with scr
 name (Red becomes RED) while the **Clan tags** box is ticked, until the tag is edited by hand
 (#1406). Both use the one `deriveTagScript` in `src/web/event-group-form.ts`.
 
+The editor also has the event form's **Build groups** quick builder (#1472), above the rows: a number
+of groups, a size, Colours or Numbered names, and **Generate**. It fills the rows below the same way
+as on the event form: Colours names them Red, Blue, Green… with a matching marker (more groups than
+colours, or Numbered, gives "Team 1…N", using the wording from **What a group is called** when it is
+set), and an empty or out-of-range size means no limit. The count never goes past
+`events.groups.max_count`, and a ticked **Captains lobby** takes one of those places. Rows past the
+count are emptied (including rows a preset already had beyond the limit), and no row is added past the
+limit. With **Clan tags** ticked each generated group gets its tag from its name and keeps following
+it until the tag is edited by hand; with it off the tags stay empty. Generating only changes the
+rows on the page: nothing is saved until **Save changes**. The builder needs scripts (it stays
+hidden without them, and the rows are written by hand as before). The event form and both editors
+render and run one copy of it from `src/web/event-group-form.ts`.
+
 **Captains lobby in presets** (#1263). The preset editor (the server's library page and the hosts'
 own page, one shared form) has a **Captains lobby** tick instead of a "Leads" choice in a group's
 kind: the kind list offers only Team and Open, and a preset has at most one lobby. The tick stands

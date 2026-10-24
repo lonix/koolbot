@@ -2263,6 +2263,21 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The Generate builder ships hidden and the page script shows it, but the
+      // a11y gate drops scripts: show it here so the gate scans its fields (#1472).
+      name: "Group presets (Generate builder shown)",
+      html: renderEventPresetsPage({
+        ...COMMON,
+        entries: [],
+        state: "ok",
+        maxCount: 15,
+        defaultCount: 2,
+        editing: null,
+        values: {},
+        prefillNote: null,
+      }).replace("data-group-builder hidden", "data-group-builder"),
+    },
+    {
       name: "Group presets (hosts' presets card)",
       html: renderEventPresetsPage({
         ...COMMON,
@@ -4198,6 +4213,24 @@ export function userPages(): A11yPage[] {
           maxCount: 15,
           defaultCount: 2,
         }),
+      ),
+    },
+    {
+      // As for the admin editor: the builder is shown, scripts are not run (#1472).
+      name: "/me event presets (Generate builder shown)",
+      html: shell(
+        "My event presets",
+        "/me/",
+        renderMyEventPresetsBody({
+          csrfToken: COMMON.csrfToken,
+          presets: [],
+          editing: null,
+          editUnavailable: false,
+          values: {},
+          prefillNote: null,
+          maxCount: 15,
+          defaultCount: 2,
+        }).replace("data-group-builder hidden", "data-group-builder"),
       ),
     },
     {
