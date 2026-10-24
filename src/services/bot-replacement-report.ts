@@ -37,11 +37,24 @@ export interface ReportCapability {
 
 export interface ReportLeftovers {
   /** Channels the bot writes most messages to (needs message sampling). */
-  ownedChannels: Array<{ id: string; name: string; usedBy: string[] }>;
+  ownedChannels: Array<{
+    id: string;
+    name: string;
+    typeName?: string;
+    usedBy: string[];
+  }>;
   /** Channels with a member-specific overwrite for the bot itself. */
-  memberOverwriteChannels: Array<{ id: string; name: string }>;
+  memberOverwriteChannels: Array<{
+    id: string;
+    name: string;
+    typeName?: string;
+  }>;
   /** KoolBot features already bound to one of the bot's channels. */
-  boundFeatures: Array<{ channel: string; features: string[] }>;
+  boundFeatures: Array<{
+    channel: string;
+    typeName?: string;
+    features: string[];
+  }>;
 }
 
 export interface BotCard {
@@ -152,19 +165,28 @@ export function summariseCapabilities(
 function leftoversFor(bot: ScanBot, scan: ServerScan): ReportLeftovers {
   const ownedChannels = scan.channels
     .filter((c) => c.ownerHint?.botId === bot.userId)
-    .map((c) => ({ id: c.id, name: c.name, usedBy: c.usedBy }));
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      typeName: c.typeName,
+      usedBy: c.usedBy,
+    }));
   const memberOverwriteChannels = scan.channels
     .filter((c) =>
       c.overwrites.some((o) => o.type === "member" && o.id === bot.userId),
     )
-    .map((c) => ({ id: c.id, name: c.name }));
+    .map((c) => ({ id: c.id, name: c.name, typeName: c.typeName }));
   const touched = new Set<string>([
     ...ownedChannels.map((c) => c.id),
     ...bot.overwriteChannelIds,
   ]);
   const boundFeatures = scan.channels
     .filter((c) => touched.has(c.id) && c.usedBy.length > 0)
-    .map((c) => ({ channel: c.name, features: c.usedBy }));
+    .map((c) => ({
+      channel: c.name,
+      typeName: c.typeName,
+      features: c.usedBy,
+    }));
   return { ownedChannels, memberOverwriteChannels, boundFeatures };
 }
 

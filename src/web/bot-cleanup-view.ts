@@ -5,6 +5,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { scriptTag } from "./html.js";
+import { namedChannelMention } from "./discord-labels.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import {
   renderAdoptionDiff,
@@ -119,14 +120,14 @@ function renderChoice(c: RemovedBotCandidate, p: BotCleanupPageProps): string {
   const rows = c.overwriteChannels
     .map((ch, i) => {
       const id = `bc-ch-${i}`;
-      return `<li><label for="${id}"><input type="checkbox" id="${id}" name="ch" value="${escapeHtml(ch.id)}"${chosen.has(ch.id) ? " checked" : ""}> Remove the overwrite for the removed bot on <strong>${escapeHtml(ch.name)}</strong></label></li>`;
+      return `<li><label for="${id}"><input type="checkbox" id="${id}" name="ch" value="${escapeHtml(ch.id)}"${chosen.has(ch.id) ? " checked" : ""}> Remove the overwrite for the removed bot on ${namedChannelMention(ch.name, ch.typeName)}</label></li>`;
     })
     .join("");
   const owned = c.ownedChannels.length
     ? `<h3>Channels it mostly wrote to</h3><ul class="kb-list">${c.ownedChannels
         .map(
           (ch) =>
-            `<li><span class="kb-list__main"><strong>${escapeHtml(ch.name)}</strong>${ch.usedBy.length ? ` <span class="kb-muted">bound to ${escapeHtml(ch.usedBy.join(", "))}</span>` : ""}</span>${ch.claimKey ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(claimHref(ch.id, ch.claimKey))}">Claim<span class="kb-visually-hidden"> ${escapeHtml(ch.name)}</span></a>` : ""}</li>`,
+            `<li><span class="kb-list__main">${namedChannelMention(ch.name, ch.typeName)}${ch.usedBy.length ? ` <span class="kb-muted">bound to ${escapeHtml(ch.usedBy.join(", "))}</span>` : ""}</span>${ch.claimKey ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(claimHref(ch.id, ch.claimKey))}">Claim<span class="kb-visually-hidden"> ${escapeHtml(ch.name)}</span></a>` : ""}</li>`,
         )
         .join(
           "",

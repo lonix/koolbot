@@ -92,6 +92,8 @@ function makeEvent(over: Partial<FakeEvent> = {}): FakeEvent {
   };
 }
 
+// The Discord client the router gets; a test gives it a guild cache.
+const fakeClient: Record<string, unknown> = {};
 let events: Record<string, FakeEvent> = {};
 let auditRows: Array<Record<string, unknown>> = [];
 let sessionRole: Role = "user";
@@ -154,7 +156,7 @@ beforeAll(async () => {
   process.env.WEBUI_SESSION_SECRET = SECRET;
   process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
   process.env.GUILD_ID = GUILD;
-  const client = {} as never;
+  const client = fakeClient as never;
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   // As in production (createUserWebRouter): exposes the session-bound token.
@@ -175,6 +177,7 @@ beforeEach(() => {
   process.env.WEBUI_SESSION_SECRET = SECRET;
   process.env.GUILD_ID = GUILD;
   (WebSessionService as unknown as { instance: unknown }).instance = null;
+  delete fakeClient.guilds;
   events = { [EVENT_ID]: makeEvent() };
   auditRows = [];
 
@@ -355,6 +358,30 @@ describe("host panel page", () => {
       expect(r.text).toContain(`id="host-${id}"`);
     }
     expect(r.text).toContain("30 minutes before the start");
+  });
+
+  it("labels the main voice channel from the guild cache, and shows a gone one by its id (#1394)", async () => {
+    events[EVENT_ID] = makeEvent({ channelId: "vc1" });
+    fakeClient.guilds = {
+      cache: new Map([
+        [
+          GUILD,
+          {
+            channels: {
+              cache: new Map([["vc1", { name: "Quiz room", type: 2 }]]),
+            },
+          },
+        ],
+      ]),
+    };
+    const live = await call(url(PANEL));
+    expect(live.text).toContain('aria-label="Voice channel"');
+    expect(live.text).toContain("Quiz room</span>");
+
+    events[EVENT_ID] = makeEvent({ channelId: "gone1" });
+    const gone = await call(url(PANEL));
+    expect(gone.text).toContain("gone1 (unavailable)");
+    expect(gone.text).not.toContain("Quiz room");
   });
 
   it("shows the Captains lobby as one line, never as a row of the group table (#1251)", async () => {

@@ -1623,6 +1623,56 @@ describe("renderEventsPage", () => {
     }
   });
 
+  describe("channel column labels (#1394)", () => {
+    const row = {
+      id: "e1",
+      title: "Game Night",
+      when: "2026-07-04 20:00 (UTC)",
+      state: "scheduled",
+    };
+    const table = (over: Record<string, unknown>): string =>
+      renderEventsPage({
+        ...EVENTS_COMMON,
+        enabled: true,
+        rows: [{ ...row, ...over }],
+      } as never);
+
+    it("shows the event's voice channel with the speaker icon, not its raw id", () => {
+      const html = table({
+        channelId: "123456789",
+        channelName: "Game Night",
+        channelType: ChannelType.GuildVoice,
+      });
+      expect(html).toContain('<th scope="col">Channel</th>');
+      expect(html).toContain('aria-label="Voice channel"');
+      expect(html).toContain("Game Night</span>");
+      expect(html).not.toContain('<span class="mono">123456789</span>');
+    });
+
+    it("shows a channel that is gone by its id as unavailable", () => {
+      const html = table({
+        channelId: "123456789",
+        channelName: null,
+        channelType: null,
+      });
+      expect(html).toContain("kb-mention--missing");
+      expect(html).toContain("123456789 (unavailable)");
+    });
+
+    it("treats a row built without a name or type the same way", () => {
+      expect(table({ channelId: "42" })).toContain("42 (unavailable)");
+    });
+
+    it("escapes the channel name", () => {
+      const html = table({
+        channelId: "1",
+        channelName: "<img src=x>",
+        channelType: ChannelType.GuildVoice,
+      });
+      expect(html).not.toContain("<img src=x>");
+    });
+  });
+
   it("flags series occurrences and offers cancel-series", () => {
     const row = {
       id: "e1",
@@ -2039,6 +2089,8 @@ describe("renderPollsPage", () => {
     });
     expect(html).toContain("Pineapple on pizza?");
     expect(html).toContain("@Members");
+    // The ping role in the schedules table is a mention (#1394).
+    expect(html).toContain('<td><span class="kb-mention">@Members</span></td>');
     expect(html).toContain("Yes • No");
     expect(html).toContain("/admin/polls/schedules/s1/test");
     expect(html).toContain("/admin/polls/items/i1/delete");
@@ -2123,6 +2175,9 @@ describe("renderPollsPage", () => {
     // silently reassign the channel or clear the ping role.
     expect(html).toContain('value="gone-chan" selected');
     expect(html).toContain('value="gone-role" selected');
+    // In the table, a ping role that is gone is its id as unavailable, not @gone-role (#1394).
+    expect(html).toContain("gone-role (unavailable)");
+    expect(html).not.toContain("@gone-role</span>");
     expect(html).toContain("(unavailable)");
   });
 
@@ -3424,6 +3479,70 @@ describe("renderVoiceChannelsPage", () => {
       categoryChannels: [],
     });
     expect(html).toContain("Voice channel category not found");
+  });
+
+  describe("status line labels (#1394)", () => {
+    const render = (over: Record<string, unknown> = {}): string =>
+      renderVoiceChannelsPage({
+        ...COMMON,
+        enabled: true,
+        controlPanelEnabled: true,
+        categoryName: "Voice",
+        lobbyName: "Lobby",
+        offlineLobbyName: "Lobby (Offline)",
+        prefix: "🎮",
+        totalManaged: 0,
+        totalEmpty: 0,
+        channels: [],
+        categoryFound: true,
+        settingRows: [],
+        categoryChannels: [],
+        ...over,
+      } as never);
+    const chips = (html: string): string =>
+      html.match(/<div class="kb-statusline".*?<\/div>/s)?.[0] ?? "";
+
+    it("writes the category, lobby and offline lobby with their Discord glyphs, never a #", () => {
+      const line = chips(render());
+      expect(line).toContain("Category 📁 Voice");
+      expect(line).toContain("Lobby 🔊 Lobby");
+      expect(line).toContain("Offline lobby 🔊 Lobby (Offline)");
+      expect(line).not.toContain("#");
+    });
+
+    it("keeps the warning chip, not a folder glyph, when the category is missing", () => {
+      const line = chips(
+        render({ categoryFound: false, categoryName: "(not configured)" }),
+      );
+      expect(line).toContain("Category not found");
+      expect(line).not.toContain("📁");
+    });
+
+    it("escapes the names", () => {
+      const line = chips(
+        render({ categoryName: "<b>c</b>", lobbyName: "<i>l</i>" }),
+      );
+      expect(line).not.toContain("<b>c");
+      expect(line).not.toContain("<i>l");
+      expect(line).toContain("&lt;b&gt;c");
+    });
+
+    it("labels the channel table's rows as voice channels", () => {
+      const html = render({
+        totalManaged: 1,
+        channels: [
+          {
+            name: "🎮 Game",
+            isLobby: false,
+            isLive: false,
+            memberCount: 0,
+            customName: null,
+            channelId: "c2",
+          },
+        ],
+      });
+      expect(html).toContain('aria-label="Voice channel"');
+    });
   });
 
   it("shows a notice in place of the settings card when settings are unavailable", () => {
@@ -5761,6 +5880,8 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     // The stored role stays selected, including one that no longer exists.
     expect(tbody).toContain('<option value="111" selected>@Champion</option>');
     expect(tbody).toContain('value="222" selected>⚠ 222 (unavailable)');
+    // The tiers table shows the role as a mention (#1394).
+    expect(html).toContain('<td><span class="kb-mention">@Champion</span>');
     expect(html).toContain('action="/admin/leaderboard-roles/tiers"');
     expect(html).toContain('<template id="lb-tier-template">');
   });

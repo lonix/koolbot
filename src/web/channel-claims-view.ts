@@ -4,6 +4,13 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
+import {
+  channelMention,
+  namedChannelMention,
+  roleMention,
+  roleText,
+} from "./discord-labels.js";
+import { ChannelType } from "discord.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import {
   renderAdoptionDiff,
@@ -71,6 +78,8 @@ export interface ClaimsPageProps {
   prefill?: {
     channelId: string;
     channelName: string;
+    /** Discord channel type name (`GuildVoice`), so the notice can label it. */
+    channelTypeName?: string;
     featureLabel: string;
   } | null;
 }
@@ -100,7 +109,7 @@ function roleOptions(scan: ServerScan, selected: readonly string[]): string {
         : r.managed
           ? " (managed: gate only)"
           : "";
-      return `<option value="${escapeHtml(r.id)}"${selected.includes(r.id) ? " selected" : ""}${disabled ? " disabled" : ""}>@${escapeHtml(r.name)}${escapeHtml(note)}</option>`;
+      return `<option value="${escapeHtml(r.id)}"${selected.includes(r.id) ? " selected" : ""}${disabled ? " disabled" : ""}>${escapeHtml(roleText(r.name))}${escapeHtml(note)}</option>`;
     })
     .join("");
 }
@@ -186,7 +195,7 @@ ${forumLock}
 ${voiceBind}
 </div></details>`;
   return `<tr id="claim-${id}">
-<td>${c.kind === "category" ? `<strong>${escapeHtml(c.name)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${escapeHtml(c.name)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</td>
+<td>${c.kind === "category" ? `<strong>${namedChannelMention(c.name, c.typeName)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${namedChannelMention(c.name, c.typeName)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</td>
 <td>${actionSelect}${bulkSelect}</td>
 <td>${featureOptions(c, claim?.bindKey ?? "")}</td>
 <td>${options}</td>
@@ -209,7 +218,7 @@ function renderSuggestions(
         p.state === "proposed"
           ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <label>Emoji <input type="text" name="pairemoji_${cid}" value="${escapeHtml(claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI)}" size="6" maxlength="64"><span class="visually-hidden"> for ${escapeHtml(p.categoryName)}</span></label>`
           : `<span class="tag ${p.state === "refused" ? "tag-off" : "tag-on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
-      return `<tr><td>${escapeHtml(p.categoryName)}</td><td>@${escapeHtml(p.roleName)}</td><td>${action}</td></tr>`;
+      return `<tr><td>${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</td><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
     })
     .join("");
   const pairing = pairings.length
@@ -364,7 +373,7 @@ export function renderChannelClaimsPage(props: ClaimsPageProps): string {
     ? `<div class="notice" id="cc-job" role="status">Applying…</div>`
     : "";
   const prefill = props.prefill
-    ? `<div class="notice" role="status">Prefilled from the Server scan: <strong>${escapeHtml(props.prefill.channelName)}</strong> is set to be bound to <strong>${escapeHtml(props.prefill.featureLabel)}</strong>. Nothing changes until you preview the plan and apply it.</div>`
+    ? `<div class="notice" role="status">Prefilled from the Server scan: <strong>${namedChannelMention(props.prefill.channelName, props.prefill.channelTypeName)}</strong> is set to be bound to <strong>${escapeHtml(props.prefill.featureLabel)}</strong>. Nothing changes until you preview the plan and apply it.</div>`
     : "";
   const problems = props.problems.length
     ? `<div class="notice warn" role="status">${props.problems.map((p) => escapeHtml(p)).join(" ")}</div>`

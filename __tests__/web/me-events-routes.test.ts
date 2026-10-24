@@ -299,7 +299,9 @@ describe("Your events (#1319)", () => {
     const { text } = await call("/me/events");
     expect(text).toContain('href="/me/events/new?when=now"');
     expect(text).toContain('href="/me/events/new"');
-    expect(text).toContain("You can host because you are in @Event hosts");
+    expect(text).toContain(
+      'You can host because you are in <span class="kb-mention">@Event hosts</span>',
+    );
   });
 
   it("leaves out Start now and New event while Events is switched off", async () => {

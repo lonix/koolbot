@@ -8,6 +8,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { channelMention } from "./discord-labels.js";
 import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
@@ -84,6 +85,11 @@ export interface HostPanelEvent {
   recurrence: string | null;
   /** Main voice channel: its name when known, else its id; null before it exists. */
   channel: string | null;
+  /**
+   * Discord's type of the main channel when it resolved; null or absent when
+   * it did not, so `channel` is its id and the panel shows it as unavailable.
+   */
+  channelType?: number | null;
   groupsEnabled: boolean;
   groupLabel: string;
   leaderLabel: string;
@@ -139,7 +145,7 @@ function renderSummary(e: HostPanelEvent): string {
     row(
       "Main voice channel",
       e.channel
-        ? `<span class="mono">${escapeHtml(e.channel)}</span>`
+        ? channelMention({ name: e.channel, type: e.channelType })
         : '<span class="muted">Not created yet</span>',
     ),
     e.adopted

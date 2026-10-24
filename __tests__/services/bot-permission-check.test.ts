@@ -259,6 +259,7 @@ describe("what is missing and where", () => {
       kind: "category",
       id: "cat-ev",
       name: "Events",
+      channelType: ChannelType.GuildCategory,
     });
     expect(problem?.features.map((f) => f.id)).toEqual(["event-channels"]);
   });

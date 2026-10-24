@@ -1469,10 +1469,10 @@ function registerSettingsActions(router: Router, client: Client): void {
 
 function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   const channelId = event.channelId ?? null;
-  const channelName = channelId
-    ? (client.guilds?.cache?.get(event.guildId)?.channels?.cache?.get(channelId)
-        ?.name ?? null)
-    : null;
+  const channel = channelId
+    ? client.guilds?.cache?.get(event.guildId)?.channels?.cache?.get(channelId)
+    : undefined;
+  const channelName = channel?.name ?? null;
   const groupsEnabled = event.groupsEnabled === true;
   const captainsEnabled = groupsEnabled && event.captainsEnabled === true;
   const leaderOf = new Map(
@@ -1489,6 +1489,7 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     durationMinutes: event.durationMinutes,
     recurrence: isRecurring(event) ? recurrenceLabel(event.recurrence) : null,
     channel: channelId ? (channelName ?? channelId) : null,
+    channelType: channel ? channel.type : null,
     groupsEnabled,
     groupLabel: event.groupLabel || "Group",
     leaderLabel: event.leaderLabel || "Leader",
