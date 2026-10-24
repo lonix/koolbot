@@ -139,6 +139,12 @@ export interface CheckDeps {
   /** How many role groups the server has (a read that rejects when it fails). */
   roleGroupCount?: (guildId: string) => Promise<number>;
   now?: () => number;
+  /**
+   * Check a registry entry in another channel than its setting names, by entry
+   * id (the event host panel: an event can sit in a category of its own, #1467).
+   * Such a report is not the server's, so it does not set the navigation badge.
+   */
+  targetOverrides?: Readonly<Record<string, string>>;
 }
 
 /** The few things the check needs from a collection of channels or roles. */
@@ -465,6 +471,7 @@ export async function checkBotPermissions(
         if (!lobby.categorySet) targetId = "";
       } else if (r.targetKey) {
         targetId = (await config.getStringStrict(r.targetKey, "")).trim();
+        targetId = deps.targetOverrides?.[r.id] ?? targetId;
       }
       if (lobbyMissing) {
         checks.push({
@@ -651,7 +658,7 @@ export async function checkBotPermissions(
   }
 
   const list = [...problems.values()];
-  setPermissionIssueCount(guildId, list.length);
+  if (!deps.targetOverrides) setPermissionIssueCount(guildId, list.length);
   return {
     available: true,
     reason: null,

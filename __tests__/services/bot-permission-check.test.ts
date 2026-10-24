@@ -212,6 +212,52 @@ describe("registry", () => {
   });
 });
 
+describe("per-event targets (#1467)", () => {
+  const cats: FakeChannel[] = [
+    {
+      id: "cat-ev",
+      type: ChannelType.GuildCategory,
+      name: "Events",
+      bits: ALL,
+    },
+    {
+      id: "cat-own",
+      type: ChannelType.GuildCategory,
+      name: "Own category",
+      bits: without(ALL, P.ManageChannels),
+    },
+  ];
+
+  it("checks the event's own category instead of the configured one, for the entries it names", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+    check.resetBotPermissionCache();
+    const { client } = makeClient({ channels: cats });
+    const report = await check.checkBotPermissions(client, "guild-1", {
+      ...direct,
+      targetOverrides: { "event-channels": "cat-own" },
+    });
+    const row = report.checks.find((c) => c.feature.id === "event-channels");
+    expect(row?.target?.id).toBe("cat-own");
+    expect(row?.missing).toEqual(["Manage Channels"]);
+    // Entries it does not name keep the configured category.
+    const moves = report.checks.find((c) => c.feature.id === "event-moves");
+    expect(moves?.target?.id).toBe("cat-ev");
+  });
+
+  it("leaves the navigation badge to the plain check", async () => {
+    settings = { "events.enabled": true, "events.category_id": "cat-ev" };
+    check.resetBotPermissionCache();
+    const { client } = makeClient({ channels: cats });
+    await check.checkBotPermissions(client, "guild-1", direct);
+    expect(status.getPermissionIssueCount()).toBe(0);
+    await check.checkBotPermissions(client, "guild-1", {
+      ...direct,
+      targetOverrides: { "event-channels": "cat-own" },
+    });
+    expect(status.getPermissionIssueCount()).toBe(0);
+  });
+});
+
 describe("what is missing and where", () => {
   it("reports nothing when every permission is held in the configured places", async () => {
     settings = {

@@ -1499,8 +1499,10 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   that all is well. When the check cannot run (the bot has no connection to the server,
   its own membership cannot be read, a configured channel is gone or is a thread) the
   notice says "could not be checked" with the reason. On the host panel it is left out for
-  a finished event, names only the features that event uses, and does not repeat the group
-  channel or clan tag warnings the panel already shows; a host who is not an admin gets
+  a finished event, names only the features that event uses (an adopted voice or stage event has no
+  channel of KoolBot's own, so no channel entry), checks the category the event really sits in (its
+  main channel's category, else its own category, else `events.category_id`), and does not repeat the
+  group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The other features
   (moderation, reaction roles, leaderboard roles, the logging channels and so on) are not
   wired to the notice yet.

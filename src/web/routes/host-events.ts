@@ -75,6 +75,7 @@ import { renderErrorPage } from "../views.js";
 import { scriptTag } from "../html.js";
 import { isEventHost } from "../event-host.js";
 import {
+  eventPermissionTargets,
   hostControlsAvailable,
   hostPanelPath,
   isEventRunning,
@@ -1551,6 +1552,7 @@ async function hostPermissionNotice(
   client: Client,
   guildId: string,
   panelEvent: HostPanelEvent,
+  event: Pick<IEvent, "channelId" | "categoryId">,
 ): Promise<PermissionNotice | null> {
   const features = hostPanelPermissionFeatures(panelEvent);
   if (features.length === 0) return null;
@@ -1563,6 +1565,12 @@ async function hostPermissionNotice(
     enabled,
     filter: inFeatures(...features),
     shownWarnings: hostPanelShownWarnings(panelEvent),
+    targetOverrides: eventPermissionTargets(event, (id) => {
+      const channel = client.guilds?.cache
+        ?.get(guildId)
+        ?.channels?.cache?.get(id) as { parentId?: string | null } | undefined;
+      return channel?.parentId;
+    }),
   });
 }
 
@@ -2181,6 +2189,7 @@ export function createHostEventsRouter(client: Client): Router {
         client,
         event.guildId,
         panelEvent,
+        event,
       );
       res.type("text/html").send(
         renderUserPage({

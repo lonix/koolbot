@@ -21,6 +21,7 @@ import type { Client } from "discord.js";
 import {
   checkBotPermissions,
   type BotPermissionReport,
+  type CheckDeps,
   type FeatureRef,
   type PermissionTarget,
 } from "../services/bot-permission-check.js";
@@ -175,9 +176,12 @@ export function renderPermissionNotice(
     );
   }
   const parts: string[] = [];
-  const stale = notice.stale
+  const staleText = notice.stale
     ? `<p class="kb-callout__text">Discord could not be reached, so this is from the bot's cached view and may be out of date.</p>`
     : "";
+  // Said once: with the missing-permissions callout when there is one,
+  // otherwise with the "could not be checked" one.
+  const stale = notice.missing.length > 0 ? staleText : "";
   if (notice.missing.length > 0) {
     const items = notice.missing
       .map(
@@ -207,7 +211,7 @@ export function renderPermissionNotice(
       callout(
         "",
         "Some bot permissions could not be checked",
-        `<div class="kb-callout__text"><ul>${items}</ul></div>`,
+        `<div class="kb-callout__text"><ul>${items}</ul></div>${notice.missing.length > 0 ? "" : staleText}`,
         notice.missing.length === 0 ? link : "",
       ),
     );
@@ -219,7 +223,13 @@ export interface LoadOptions extends BuildOptions {
   client: Client;
   guildId: string;
   /** Test seam: the checker. */
-  check?: (client: Client, guildId: string) => Promise<BotPermissionReport>;
+  check?: (
+    client: Client,
+    guildId: string,
+    deps?: CheckDeps,
+  ) => Promise<BotPermissionReport>;
+  /** Check an entry in another channel than its setting names (see `CheckDeps`). */
+  targetOverrides?: Readonly<Record<string, string>>;
   timeoutMs?: number;
 }
 
@@ -234,7 +244,13 @@ export async function loadPermissionNotice(
   if (!opts.enabled) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const run = (opts.check ?? checkBotPermissions)(opts.client, opts.guildId);
+    const run = (opts.check ?? checkBotPermissions)(
+      opts.client,
+      opts.guildId,
+      opts.targetOverrides
+        ? { targetOverrides: opts.targetOverrides }
+        : undefined,
+    );
     const limit = new Promise<null>((resolve) => {
       timer = setTimeout(
         () => resolve(null),

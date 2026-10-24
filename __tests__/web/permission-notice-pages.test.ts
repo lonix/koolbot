@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
+import { eventPermissionTargets } from "../../src/web/host-panel-shared.js";
 import {
   hostPanelPermissionFeatures,
   hostPanelShownWarnings,
@@ -135,6 +136,19 @@ describe("hostPanelPermissionFeatures", () => {
     ).toContain("event-leads-channel");
   });
 
+  it("leaves out the channel entry for an adopted event with no channel of KoolBot's own (#1467)", () => {
+    // An adopted voice or stage event happens in its own Discord channel, so
+    // KoolBot makes no temporary one and needs no Manage Channels for it.
+    expect(
+      hostPanelPermissionFeatures({ ...base, adopted: true, channel: null }),
+    ).not.toContain("event-channels");
+    // An adopted external event that got a temporary room still needs it.
+    expect(
+      hostPanelPermissionFeatures({ ...base, adopted: true, channel: "Room" }),
+    ).toContain("event-channels");
+    expect(hostPanelPermissionFeatures(base)).toContain("event-channels");
+  });
+
   it("leaves out the Events list card for an adopted event, and everything for a finished one", () => {
     expect(
       hostPanelPermissionFeatures({ ...base, adopted: true }),
@@ -145,6 +159,40 @@ describe("hostPanelPermissionFeatures", () => {
     expect(
       hostPanelPermissionFeatures({ ...base, state: "cancelled" }),
     ).toEqual([]);
+  });
+});
+
+describe("eventPermissionTargets", () => {
+  it("uses the main channel's category, as the group channels do", () => {
+    expect(
+      eventPermissionTargets({ channelId: "main", categoryId: "own" }, (id) =>
+        id === "main" ? "parent-1" : undefined,
+      ),
+    ).toEqual({
+      "event-channels": "parent-1",
+      "event-host-access": "parent-1",
+      "event-leads-channel": "parent-1",
+      "event-moves": "parent-1",
+    });
+  });
+
+  it("uses the event's category override before its channel exists", () => {
+    expect(
+      eventPermissionTargets(
+        { channelId: null, categoryId: "own" },
+        () => null,
+      )["event-channels"],
+    ).toBe("own");
+  });
+
+  it("leaves the configured category alone when the event names none", () => {
+    expect(
+      eventPermissionTargets({ channelId: null, categoryId: "" }, () => null),
+    ).toEqual({});
+    // A main channel not in the cache falls back to the override, then to the setting.
+    expect(
+      eventPermissionTargets({ channelId: "gone", categoryId: "" }, () => null),
+    ).toEqual({});
   });
 });
 
@@ -291,6 +339,6 @@ describe("Voice Channels page", () => {
   it("shows no notice when the permissions are in place, and adds no blank line", () => {
     const html = renderVoiceChannelsPage({ ...props } as never);
     expect(html).not.toContain("data-permission-notice");
-    expect(html).not.toMatch(/\n\n\n<div class="card">\n  <h2>Cleanup/);
+    expect(html).not.toMatch(/\n{3}<div class="card">\n {2}<h2>Cleanup/);
   });
 });

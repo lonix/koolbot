@@ -327,7 +327,12 @@ ${inner}
  */
 export function hostPanelPermissionFeatures(e: HostPanelEvent): string[] {
   if (e.state === "ended" || e.state === "cancelled") return [];
-  const ids = ["event-channels"];
+  // An adopted voice or stage event happens in its own Discord channel and
+  // gets no temporary one (`EventService.adoptedHasOwnChannel`), so the
+  // channel entry applies only once a channel of KoolBot's own exists for it.
+  // Whether an adopted event has a channel of its own is known only from the
+  // native listing (a Discord read), so before that it is left out.
+  const ids = e.adopted && e.channel === null ? [] : ["event-channels"];
   if (!e.adopted) ids.push("event-native");
   if (e.groupsEnabled) {
     ids.push("event-host-access", "event-moves");

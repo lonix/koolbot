@@ -219,6 +219,30 @@ describe("buildPermissionNotice", () => {
     expect(buildPermissionNotice(fine, EVENTS)).toBeNull();
   });
 
+  it("explains a stale read when only unchecked results are shown (#1467)", () => {
+    const target = { kind: "category" as const, id: "gone", name: "gone" };
+    const r = report([check("event-channels", "unknown", target)], {
+      fresh: false,
+    });
+    const html = renderPermissionNotice(buildPermissionNotice(r, EVENTS), OPTS);
+    expect(html).toContain("may be out of date");
+  });
+
+  it("says the stale read once when missing and unchecked results are both shown", () => {
+    const target = { kind: "category" as const, id: "gone", name: "gone" };
+    const r = report(
+      [
+        check("event-channels", "missing", cat("Events"), {
+          missing: ["Manage Channels"],
+        }),
+        check("event-moves", "unknown", target),
+      ],
+      { fresh: false },
+    );
+    const html = renderPermissionNotice(buildPermissionNotice(r, EVENTS), OPTS);
+    expect(html.split("may be out of date").length - 1).toBe(1);
+  });
+
   it("escapes names, permissions and reasons", () => {
     const evil = cat('<img src=x onerror="alert(1)">');
     const r = report([
@@ -332,6 +356,22 @@ describe("loadPermissionNotice", () => {
     });
     expect(n).toBeNull();
     expect(check).not.toHaveBeenCalled();
+  });
+
+  it("hands the per-event targets to the checker (#1467)", async () => {
+    const seen = jest.fn<
+      (c: Client, g: string, d?: unknown) => Promise<BotPermissionReport>
+    >(async () => report([]));
+    await loadPermissionNotice({
+      ...EVENTS,
+      client,
+      guildId: "g",
+      targetOverrides: { "event-channels": "cat-9" },
+      check: seen,
+    });
+    expect(seen.mock.calls[0][2]).toEqual({
+      targetOverrides: { "event-channels": "cat-9" },
+    });
   });
 
   it("builds the notice from the checker's report", async () => {
