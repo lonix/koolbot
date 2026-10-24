@@ -124,6 +124,17 @@ export interface HostPanelEvent {
    * bot's, a refused edit). Names come from the gateway cache. */
   tagSkipped?: Array<{ name: string; reason: string }>;
   adopted: boolean;
+  /**
+   * The channel ids the event records (#1467), for the permission notice,
+   * which asks the check whether they still exist. Unlike `hasChannel` (what the
+   * table shows, from the stored ids) this is not taken as proof of existence.
+   */
+  recordedChannels?: {
+    main: string | null;
+    groups: Array<string | null>;
+    /** The Captains lobby's recorded channel ids; null when the event has no lobby. */
+    lobby: Array<string | null> | null;
+  };
   /** The event's Discord event was deleted there; native sync leaves it alone. */
   nativeDetached?: boolean;
 }
@@ -334,7 +345,11 @@ ${inner}
  * event's channels always, and the group features only where the event uses
  * them. A finished event has nothing left to set up.
  */
-export function hostPanelPermissionFeatures(e: HostPanelEvent): string[] {
+export function hostPanelPermissionFeatures(
+  e: HostPanelEvent,
+  /** Whether each recorded channel exists, from the permission check's snapshot (`PlacementReport.present`). */
+  present?: Readonly<Record<string, boolean>>,
+): string[] {
   if (e.state === "ended" || e.state === "cancelled") return [];
   // An adopted voice or stage event happens in its own Discord channel and
   // gets no temporary one (`EventService.adoptedHasOwnChannel`), so the
@@ -353,10 +368,19 @@ export function hostPanelPermissionFeatures(e: HostPanelEvent): string[] {
     // The host's access is granted when a channel is created: the main channel
     // (`createEventChannel`) or a group's (`createOne`). Once every channel
     // exists a missing permission changes nothing until one is re-created.
-    const channelToMake =
-      e.channel === null ||
-      e.groups.some((g) => !g.hasChannel) ||
-      e.captainsLobby?.hasChannel === false;
+    // Existence comes from the check's snapshot; a deleted channel is made
+    // again by reconciliation and then needs the host's access granted again.
+    // Without it (the check could not run) the recorded ids stand in.
+    const recorded = e.recordedChannels;
+    const exists = (id: string | null | undefined): boolean =>
+      !!id && present?.[id] !== false;
+    const channelToMake = recorded
+      ? !exists(recorded.main) ||
+        recorded.groups.some((id) => !exists(id)) ||
+        (recorded.lobby !== null && !recorded.lobby.some(exists))
+      : e.channel === null ||
+        e.groups.some((g) => !g.hasChannel) ||
+        e.captainsLobby?.hasChannel === false;
     if (channelToMake) ids.push("event-host-access");
     // `moveEventMembers` refuses an event without a group to move into.
     if (e.groups.length > 0) ids.push("event-moves");

@@ -45,34 +45,3 @@ export function isEventRunning(
     event.startTime.getTime() <= now.getTime()
   );
 }
-
-/**
- * The registry entries (`bot-permission-registry.ts`) that are checked in the
- * events category, so one event can name the category it really uses (#1467).
- */
-const EVENT_CATEGORY_ENTRIES = [
-  "event-channels",
-  "event-host-access",
-  "event-leads-channel",
-  "event-moves",
-] as const;
-
-/**
- * Where one event's channels really live, for the permission check, following
- * the event services' own placement: the group channels sit in the main
- * channel's category (`event-group-channels.ts`), and before the main channel
- * exists `EventService.resolveEventCategory` takes the event's category, then
- * the `events.category_id` setting. Returns the category id per registry entry,
- * or `{}` to leave the configured category in place.
- */
-export function eventPermissionTargets(
-  event: { channelId?: string | null; categoryId?: string | null },
-  parentOf: (channelId: string) => string | null | undefined,
-): Record<string, string> {
-  const category =
-    (event.channelId ? parentOf(event.channelId) : null) ||
-    event.categoryId ||
-    "";
-  if (!category) return {};
-  return Object.fromEntries(EVENT_CATEGORY_ENTRIES.map((id) => [id, category]));
-}

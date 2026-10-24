@@ -22,6 +22,7 @@ import {
   checkBotPermissions,
   type BotPermissionReport,
   type CheckDeps,
+  type EventPlacement,
   type FeatureRef,
   type PermissionTarget,
 } from "../services/bot-permission-check.js";
@@ -72,6 +73,12 @@ export interface BuildOptions {
   enabled: boolean;
   filter: FeatureFilter;
   /**
+   * The filter as a function of the finished report, for a page whose choice of
+   * features depends on what the check found (the host panel: which channels
+   * exist). Wins over `filter`.
+   */
+  filterFromReport?: (report: BotPermissionReport) => FeatureFilter;
+  /**
    * Recorded warning texts the page already shows (the host panel's group and
    * tag warnings). A finding they fully cover is left out, so it is read once.
    */
@@ -106,10 +113,11 @@ export function buildPermissionNotice(
       stale: false,
     };
   }
+  const filter = opts.filterFromReport?.(report) ?? opts.filter;
   const missing: NoticeMissing[] = [];
   const unchecked: NoticeUnchecked[] = [];
   for (const c of report.checks) {
-    if (!c.enabled || !c.target || !opts.filter(c.feature)) continue;
+    if (!c.enabled || !c.target || !filter(c.feature)) continue;
     if (c.outcome === "missing") {
       const m = {
         feature: c.feature,
@@ -228,8 +236,8 @@ export interface LoadOptions extends BuildOptions {
     guildId: string,
     deps?: CheckDeps,
   ) => Promise<BotPermissionReport>;
-  /** Check an entry in another channel than its setting names (see `CheckDeps`). */
-  targetOverrides?: Readonly<Record<string, string>>;
+  /** Ask the check about one event's channels (see `CheckDeps.eventPlacement`). */
+  eventPlacement?: EventPlacement;
   timeoutMs?: number;
 }
 
@@ -247,9 +255,7 @@ export async function loadPermissionNotice(
     const run = (opts.check ?? checkBotPermissions)(
       opts.client,
       opts.guildId,
-      opts.targetOverrides
-        ? { targetOverrides: opts.targetOverrides }
-        : undefined,
+      opts.eventPlacement ? { eventPlacement: opts.eventPlacement } : undefined,
     );
     const limit = new Promise<null>((resolve) => {
       timer = setTimeout(

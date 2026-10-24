@@ -358,7 +358,7 @@ describe("loadPermissionNotice", () => {
     expect(check).not.toHaveBeenCalled();
   });
 
-  it("hands the per-event targets to the checker (#1467)", async () => {
+  it("hands the event's placement to the checker (#1467)", async () => {
     const seen = jest.fn<
       (c: Client, g: string, d?: unknown) => Promise<BotPermissionReport>
     >(async () => report([]));
@@ -366,12 +366,33 @@ describe("loadPermissionNotice", () => {
       ...EVENTS,
       client,
       guildId: "g",
-      targetOverrides: { "event-channels": "cat-9" },
+      eventPlacement: { mainChannelId: "m", categoryId: "cat-9" },
       check: seen,
     });
     expect(seen.mock.calls[0][2]).toEqual({
-      targetOverrides: { "event-channels": "cat-9" },
+      eventPlacement: { mainChannelId: "m", categoryId: "cat-9" },
     });
+  });
+
+  it("chooses the features from the finished report when asked to", async () => {
+    const n = await loadPermissionNotice({
+      ...EVENTS,
+      client,
+      guildId: "g",
+      filterFromReport: (r) =>
+        r.placement?.present.m === false
+          ? inFeatures("event-channels")
+          : inFeatures("nothing"),
+      check: async () => ({
+        ...report([
+          check("event-channels", "missing", cat("Events"), {
+            missing: ["Manage Channels"],
+          }),
+        ]),
+        placement: { present: { m: false }, categoryId: null },
+      }),
+    });
+    expect(n?.missing).toHaveLength(1);
   });
 
   it("builds the notice from the checker's report", async () => {

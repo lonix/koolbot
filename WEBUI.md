@@ -1509,7 +1509,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   notice says "could not be checked" with the reason. On the host panel it is left out for
   a finished event, names only the features that event uses (an adopted voice or stage event has no
   channel of KoolBot's own, so no channel entry; a detached Discord event gets no Events list entry;
-  host access only while a channel is still to be made; moves only with a group), checks the category the event really sits in (its
+  host access only while a channel is still to be made, judged from the channels the check
+  itself finds in Discord rather than from stored ids; moves only with a group), checks the category the event really sits in (its
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The other features

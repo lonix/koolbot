@@ -7,7 +7,6 @@
 import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import { nativeSyncPaused } from "../../src/services/event-native-rules.js";
-import { eventPermissionTargets } from "../../src/web/host-panel-shared.js";
 import {
   hostPanelPermissionFeatures,
   hostPanelShownWarnings,
@@ -170,22 +169,82 @@ describe("hostPanelPermissionFeatures", () => {
     ).toContain("event-moves");
   });
 
-  it("host access matters while a channel is still to be created, not once every channel exists", () => {
-    const made = { ...group("team"), hasChannel: true };
-    expect(
-      hostPanelPermissionFeatures({ ...base, channel: "Main", groups: [made] }),
-    ).not.toContain("event-host-access");
-    expect(
-      hostPanelPermissionFeatures({ ...base, channel: null, groups: [made] }),
-    ).toContain("event-host-access");
-    expect(
-      hostPanelPermissionFeatures({
-        ...base,
-        channel: "Main",
-        groups: [made, group("team")],
-      }),
-    ).toContain("event-host-access");
-  });
+  // Host access is granted when a channel is created, so it matters while any
+  // recorded channel is missing. Existence is the check's snapshot, never the
+  // stored id alone: a deleted channel is made again and needs it again (#1467).
+  // Columns: main, group, lobby recorded ids; what the snapshot has; expected.
+  it.each([
+    [
+      "all recorded and present",
+      "m",
+      ["g1"],
+      ["l1"],
+      { m: true, g1: true, l1: true },
+      false,
+    ],
+    ["main never made", null, ["g1"], ["l1"], { g1: true, l1: true }, true],
+    [
+      "main deleted",
+      "m",
+      ["g1"],
+      ["l1"],
+      { m: false, g1: true, l1: true },
+      true,
+    ],
+    [
+      "group deleted",
+      "m",
+      ["g1"],
+      ["l1"],
+      { m: true, g1: false, l1: true },
+      true,
+    ],
+    ["group never made", "m", [null], ["l1"], { m: true, l1: true }, true],
+    [
+      "one of two groups deleted",
+      "m",
+      ["g1", "g2"],
+      null,
+      { m: true, g1: true, g2: false },
+      true,
+    ],
+    [
+      "lobby deleted",
+      "m",
+      ["g1"],
+      ["l1"],
+      { m: true, g1: true, l1: false },
+      true,
+    ],
+    ["lobby never made", "m", ["g1"], [null], { m: true, g1: true }, true],
+    ["no lobby, all present", "m", ["g1"], null, { m: true, g1: true }, false],
+    [
+      "check gave no snapshot: recorded ids stand in",
+      "m",
+      ["g1"],
+      ["l1"],
+      undefined,
+      false,
+    ],
+  ] as const)(
+    "host access, %s",
+    (_name, main, groups, lobby, present, expected) => {
+      const ids = hostPanelPermissionFeatures(
+        {
+          ...base,
+          channel: main,
+          groups: [group("team")],
+          recordedChannels: {
+            main,
+            groups: [...groups],
+            lobby: lobby ? [...lobby] : null,
+          },
+        },
+        present as Record<string, boolean> | undefined,
+      );
+      expect(ids.includes("event-host-access")).toBe(expected);
+    },
+  );
 
   it("leaves out the Events list card for an adopted event, and everything for a finished one", () => {
     expect(
@@ -197,40 +256,6 @@ describe("hostPanelPermissionFeatures", () => {
     expect(
       hostPanelPermissionFeatures({ ...base, state: "cancelled" }),
     ).toEqual([]);
-  });
-});
-
-describe("eventPermissionTargets", () => {
-  it("uses the main channel's category, as the group channels do", () => {
-    expect(
-      eventPermissionTargets({ channelId: "main", categoryId: "own" }, (id) =>
-        id === "main" ? "parent-1" : undefined,
-      ),
-    ).toEqual({
-      "event-channels": "parent-1",
-      "event-host-access": "parent-1",
-      "event-leads-channel": "parent-1",
-      "event-moves": "parent-1",
-    });
-  });
-
-  it("uses the event's category override before its channel exists", () => {
-    expect(
-      eventPermissionTargets(
-        { channelId: null, categoryId: "own" },
-        () => null,
-      )["event-channels"],
-    ).toBe("own");
-  });
-
-  it("leaves the configured category alone when the event names none", () => {
-    expect(
-      eventPermissionTargets({ channelId: null, categoryId: "" }, () => null),
-    ).toEqual({});
-    // A main channel not in the cache falls back to the override, then to the setting.
-    expect(
-      eventPermissionTargets({ channelId: "gone", categoryId: "" }, () => null),
-    ).toEqual({});
   });
 });
 

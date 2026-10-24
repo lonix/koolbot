@@ -75,7 +75,6 @@ import { renderErrorPage } from "../views.js";
 import { scriptTag } from "../html.js";
 import { isEventHost } from "../event-host.js";
 import {
-  eventPermissionTargets,
   hostControlsAvailable,
   hostPanelPath,
   isEventRunning,
@@ -1542,6 +1541,20 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     ...tagStatusFor(client, event, groupsEnabled),
     adopted: event.nativeAdopted === true,
     nativeDetached: event.nativeDetached === true,
+    recordedChannels: {
+      main: channelId,
+      groups: groupsEnabled
+        ? (event.groups ?? [])
+            .filter((g) => g.kind !== "leads")
+            .map((g) => g.channelId ?? null)
+        : [],
+      lobby:
+        groupsEnabled && hasCaptainsLobby(event.groups)
+          ? (event.groups ?? [])
+              .filter((g) => g.kind === "leads")
+              .map((g) => g.channelId ?? null)
+          : null,
+    },
     editable: editModeOf(event, new Date()).mode !== "refused",
   };
 }
@@ -1554,25 +1567,35 @@ async function hostPermissionNotice(
   client: Client,
   guildId: string,
   panelEvent: HostPanelEvent,
-  event: Pick<IEvent, "channelId" | "categoryId">,
+  event: Pick<IEvent, "categoryId">,
 ): Promise<PermissionNotice | null> {
-  const features = hostPanelPermissionFeatures(panelEvent);
-  if (features.length === 0) return null;
+  // Nothing to say for a finished event; the full choice needs the check.
+  if (hostPanelPermissionFeatures(panelEvent).length === 0) return null;
   const enabled = await ConfigService.getInstance()
     .getBoolean("events.enabled", false)
     .catch(() => false);
+  const recorded = panelEvent.recordedChannels;
   return loadPermissionNotice({
     client,
     guildId,
     enabled,
-    filter: inFeatures(...features),
+    // Which channels exist, and the category they sit in, are read by the check
+    // from its own snapshot, so the features chosen here and the category
+    // checked never come from a staler view than the permissions do.
+    eventPlacement: {
+      mainChannelId: recorded?.main ?? null,
+      categoryId: event.categoryId,
+      channelIds: [
+        ...(recorded?.groups ?? []),
+        ...(recorded?.lobby ?? []),
+      ].filter((id): id is string => !!id),
+    },
+    filter: inFeatures(...hostPanelPermissionFeatures(panelEvent)),
+    filterFromReport: (report) =>
+      inFeatures(
+        ...hostPanelPermissionFeatures(panelEvent, report.placement?.present),
+      ),
     shownWarnings: hostPanelShownWarnings(panelEvent),
-    targetOverrides: eventPermissionTargets(event, (id) => {
-      const channel = client.guilds?.cache
-        ?.get(guildId)
-        ?.channels?.cache?.get(id) as { parentId?: string | null } | undefined;
-      return channel?.parentId;
-    }),
   });
 }
 
