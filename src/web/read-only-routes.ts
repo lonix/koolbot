@@ -28,7 +28,7 @@ import {
 } from "./event-presets-page.js";
 import { renderBotPermissionsPage } from "./bot-permissions-view.js";
 import { checkBotPermissions } from "../services/bot-permission-check.js";
-import { missingNeeds, PERM } from "../services/bot-permission-registry.js";
+import { inAreas, loadPermissionNotice } from "./permission-notice.js";
 import {
   catalogNotice,
   enabledPresets,
@@ -1534,13 +1534,12 @@ export function createReadOnlyRouter(
           );
         }),
       );
-      const me = client.guilds.cache.get(common.guildId)?.members.me;
-      const nativePermissionMissing =
-        !!me &&
-        missingNeeds(
-          { needs: [PERM.createEvents, PERM.manageEvents], anyOf: true },
-          (bit) => me.permissions.has(bit),
-        ).length > 0;
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Events"),
+      });
 
       const rows = events.map((e) => {
         const counts = countRsvps(e.rsvps);
@@ -1617,7 +1616,7 @@ export function createReadOnlyRouter(
           enabled,
           categoryConfigured: categoryId.length > 0,
           announcementConfigured: announcementChannelId.length > 0,
-          nativePermissionMissing,
+          permissionNotice,
           // Resolve to a usable zone (falls back to server tz on an invalid
           // value) so the UI shows exactly what event parsing will use.
           timezone: resolveTimezone(tz),
@@ -2465,10 +2464,18 @@ export function createReadOnlyRouter(
         logger.debug("voice channels guild fetch failed", err);
       }
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Voice channels"),
+      });
+
       res.type("text/html").send(
         renderVoiceChannelsPage({
           ...common,
           enabled,
+          permissionNotice,
           controlPanelEnabled,
           categoryName,
           lobbyName,

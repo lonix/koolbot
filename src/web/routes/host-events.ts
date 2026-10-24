@@ -80,10 +80,17 @@ import {
   isEventRunning,
 } from "../host-panel-shared.js";
 import {
+  hostPanelPermissionFeatures,
+  hostPanelShownWarnings,
   renderHostPanelBody,
   type HostPanelEvent,
   type HostSectionId,
 } from "../host-panel-view.js";
+import {
+  inFeatures,
+  loadPermissionNotice,
+  type PermissionNotice,
+} from "../permission-notice.js";
 import {
   FLASH_MAX,
   readSignedFlash,
@@ -1536,6 +1543,29 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
   };
 }
 
+/**
+ * What the bot lacks for this event (#1253), from the registry's check. Only
+ * while events are on; never throws and never holds the page for long.
+ */
+async function hostPermissionNotice(
+  client: Client,
+  guildId: string,
+  panelEvent: HostPanelEvent,
+): Promise<PermissionNotice | null> {
+  const features = hostPanelPermissionFeatures(panelEvent);
+  if (features.length === 0) return null;
+  const enabled = await ConfigService.getInstance()
+    .getBoolean("events.enabled", false)
+    .catch(() => false);
+  return loadPermissionNotice({
+    client,
+    guildId,
+    enabled,
+    filter: inFeatures(...features),
+    shownWarnings: hostPanelShownWarnings(panelEvent),
+  });
+}
+
 /** The clan tags (#1194) as the panel shows them; nothing while they are off. */
 function tagStatusFor(
   client: Client,
@@ -2146,12 +2176,20 @@ export function createHostEventsRouter(client: Client): Router {
           if (html !== undefined) controls[id] = html;
         }
       }
+      const panelEvent = toPanelEvent(client, event);
+      const permissionNotice = await hostPermissionNotice(
+        client,
+        event.guildId,
+        panelEvent,
+      );
       res.type("text/html").send(
         renderUserPage({
           title: `Host panel: ${event.title}`,
           active: "/me/events",
           body: renderHostPanelBody({
-            event: toPanelEvent(client, event),
+            event: panelEvent,
+            permissionNotice,
+            canLinkToPermissions: session.role === "admin",
             controls,
             settingsOpen:
               flash !== null &&

@@ -11,6 +11,10 @@ import { escapeHtml } from "./html.js";
 import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
+import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
 
 export type HostSectionId = "board" | "end" | "settings" | "groupchanges";
 
@@ -316,8 +320,36 @@ ${inner}
     .join("\n");
 }
 
+/**
+ * The registry entries (#1253) this event's panel can be affected by: the
+ * event's channels always, and the group features only where the event uses
+ * them. A finished event has nothing left to set up.
+ */
+export function hostPanelPermissionFeatures(e: HostPanelEvent): string[] {
+  if (e.state === "ended" || e.state === "cancelled") return [];
+  const ids = ["event-channels"];
+  if (!e.adopted) ids.push("event-native");
+  if (e.groupsEnabled) {
+    ids.push("event-host-access", "event-moves");
+    if (e.groups.some((g) => g.kind === "leads") || e.captainsLobby) {
+      ids.push("event-leads-channel");
+    }
+    if (e.tagsEnabled === true) ids.push("event-tags");
+  }
+  return ids;
+}
+
+/** The recorded warning texts this panel shows, so the notice does not say them twice. */
+export function hostPanelShownWarnings(e: HostPanelEvent): string[] {
+  return [...(e.groupNotices ?? []), ...(e.tagNotices ?? [])];
+}
+
 export function renderHostPanelBody(opts: {
   event: HostPanelEvent;
+  /** What the bot lacks for this event (#1253), built with the two helpers above. */
+  permissionNotice?: PermissionNotice | null;
+  /** The Bot permissions page is admin-only; a host gets a sentence instead of the link. */
+  canLinkToPermissions?: boolean;
   /** Section HTML supplied by later issues, keyed by section id. */
   controls?: Partial<Record<HostSectionId, string>>;
   /** Open the two folds at the bottom (after a settings save, a flash is showing). */
@@ -335,6 +367,7 @@ export function renderHostPanelBody(opts: {
   </div>${edit}
 </header>
 ${renderSummary(e)}
+${renderPermissionNotice(opts.permissionNotice ?? null, { canLinkToPage: opts.canLinkToPermissions === true })}
 ${renderGroups(e)}
 ${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
 }

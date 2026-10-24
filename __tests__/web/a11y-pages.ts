@@ -109,6 +109,7 @@ import {
   renderHostPanelBody,
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
+import type { PermissionNotice } from "../../src/web/permission-notice.js";
 import {
   renderEventEditBody,
   type EventEditView,
@@ -144,6 +145,45 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+/** The per-feature permission notice (#1253): a missing permission, and a check that could not run. */
+const MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [
+    {
+      feature: {
+        id: "event-moves",
+        area: "Events",
+        feature: "Moving members between event channels",
+        effect: "",
+        fix: "",
+      },
+      target: { kind: "category", id: "gone", name: "gone" },
+      note: "The configured category could not be found.",
+    },
+  ],
+  missing: [
+    {
+      feature: {
+        id: "event-channels",
+        area: "Events",
+        feature: "Event and group channels",
+        effect:
+          "Event voice channels and group channels are not created, deleted or put in order.",
+        fix: "",
+      },
+      permissions: ["Manage Channels", "Move Members"],
+      target: { kind: "category", id: "c1", name: "Events" },
+    },
+  ],
+};
+const UNAVAILABLE_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: "The bot could not read this server from Discord.",
+  stale: false,
+  unchecked: [],
+  missing: [],
+};
 
 /** The bot's reaction-role messages as the welcome roles picker lists them (#1433). */
 const WELCOME_MESSAGES = {
@@ -2122,6 +2162,32 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Events (missing bot permission notice)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        permissionNotice: MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Events (bot permission check unavailable)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+      }),
+    },
+    {
       name: "Events (library presets, unreadable notice)",
       html: renderEventsPage({
         ...COMMON,
@@ -3855,6 +3921,17 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/events",
         renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+      ),
+    },
+    {
+      name: "/me host panel (missing bot permission notice, host)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/events",
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true }),
+          permissionNotice: MISSING_PERMISSION_NOTICE,
+        }),
       ),
     },
     {

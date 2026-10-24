@@ -124,6 +124,10 @@ import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
 import type { HostReview } from "../services/wizard-host-role.js";
+import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
 
 interface CommonProps {
@@ -2583,9 +2587,12 @@ export interface EventsProps extends CommonProps {
   enabled: boolean;
   categoryConfigured: boolean;
   announcementConfigured: boolean;
-  /** The bot lacks Create Events / Manage Events, so events get no native
-   * Discord event (and no Interested button). */
-  nativePermissionMissing?: boolean;
+  /**
+   * What the bot lacks for the event features (#1253), from the registry's
+   * check: the Discord Events list card, event channels, host access, moves,
+   * clan tags and the announcement channel. Null: nothing to say.
+   */
+  permissionNotice?: PermissionNotice | null;
   timezone: string;
   rows: EventRow[];
   /**
@@ -3616,22 +3623,16 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
             warn: true,
             href: settingLink("events.announcement_channel_id"),
           },
-      ...(props.nativePermissionMissing
-        ? [
-            {
-              text: "Bot lacks Create Events",
-              warn: true,
-              href: "/admin/bot-permissions",
-            },
-          ]
-        : []),
       { text: props.timezone, mono: true },
       { text: `${countOf(props.rows.length, "event")} scheduled` },
     ],
   });
-  const permissionNote = props.nativePermissionMissing
-    ? `<p class="muted">Without <strong>Create Events</strong> (or Manage Events) events are not created in Discord's Events list: announcements have no event card and members cannot mark Interested. Grant it to the bot's role.</p>`
-    : "";
+  const permissionNote = renderPermissionNotice(
+    props.permissionNotice ?? null,
+    {
+      canLinkToPage: true,
+    },
+  );
 
   const body = `
 <h1>Events</h1>
@@ -5205,6 +5206,8 @@ export interface VoiceChannelRow {
 
 export interface VoiceChannelsProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the voice channel features (#1253). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   controlPanelEnabled: boolean;
   categoryName: string;
   lobbyName: string;
@@ -5503,6 +5506,7 @@ ${renderStatusLine({
     { text: `${props.totalEmpty} empty` },
   ],
 })}
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 
 <div class="card">
   <h2>Cleanup actions</h2>
