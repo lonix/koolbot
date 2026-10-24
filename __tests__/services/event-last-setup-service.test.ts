@@ -89,8 +89,28 @@ describe("prefillFromStored", () => {
       ctx,
     );
     expect(out?.presetId).toBe("lib:clan");
-    expect(out?.groupLabel).toBe("Squad");
+    // Equal to what the preset supplies when the box is empty, so left empty.
+    expect(out?.groupLabel).toBe("");
     expect(out?.channelLeadMinutes).toBe("10");
+  });
+
+  it("keeps an explicit default wording when the preset's own wording differs", () => {
+    const wordy = { ...preset, leaderLabel: "Captain" };
+    const out = prefillFromStored(
+      stored({
+        presetId: "lib:clan",
+        groupLabel: "Team",
+        leaderLabel: "Leader",
+      }),
+      { maxCount: 15, presets: [wordy] },
+    );
+    // An empty box would turn into "Squad" / "Captain" on submit.
+    expect(out?.groupLabel).toBe("Team");
+    expect(out?.leaderLabel).toBe("Leader");
+    // Under Custom (no preset fallback) the default words are still blanked.
+    const custom = prefillFromStored(stored(), ctx);
+    expect(custom?.groupLabel).toBe("");
+    expect(custom?.leaderLabel).toBe("");
   });
 
   it("falls back to Custom, keeping the rows, when the preset is gone", () => {

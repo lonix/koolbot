@@ -1181,3 +1181,50 @@ describe("the event form with a remembered setup (#1406)", () => {
     expect(field(dom, "groups_label").value).toBe("Squad");
   });
 });
+
+describe("a refused submit after the reset link, with a remembered setup (#1406)", () => {
+  it("does not bring the remembered extra rows back next to the restored draft", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 15 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+            {
+              name: "Green",
+              kind: "team",
+              size: "9",
+              tag: "GRN",
+              marker: "🟢",
+            },
+          ],
+          captainsEnabled: false,
+          captainCustomisationEnabled: false,
+          captainsLobby: false,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The draft is the two rows the host submitted from the default form.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      group_0_name: "One",
+      group_1_name: "Two",
+    });
+    expect(field(dom, "group_0_name").value).toBe("One");
+    expect(field(dom, "group_1_name").value).toBe("Two");
+    expect(field(dom, "group_2_name").value).toBe("");
+    expect(field(dom, "group_2_size").value).toBe("");
+    expect(field(dom, "group_2_tag").value).toBe("");
+    expect(field(dom, "group_2_marker").value).toBe("");
+  });
+});

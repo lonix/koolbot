@@ -3420,6 +3420,9 @@ function eventGroupsScript(): string {
     "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
     "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
     "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+    // The page may start with remembered rows (#1406): the draft is what was
+    // submitted, so rows it does not hold are emptied before it is put back.
+    "Array.prototype.forEach.call(rows(),function(r,i){['name','size','tag','marker'].forEach(function(k){f(i,k).value=''});f(i,'kind').value='team'});" +
     // A draft from before the switch can hold a row of kind leads (the select no
     // longer offers it): that row is the captains lobby now, so it ticks the box
     // and is not restored as a team. The other rows are left as they are.

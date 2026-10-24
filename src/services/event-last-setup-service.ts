@@ -136,12 +136,15 @@ export function prefillFromStored(
   if (!result.ok) return null;
 
   const setup = result.setup;
+  // An empty label box means "the preset's wording, else the default" on submit,
+  // so a default label is only blanked when that fallback is the same word.
+  // Otherwise an explicit "Team" under a "Squad" preset would turn into "Squad".
+  const groupFallback = offered?.groupLabel ?? DEFAULT_GROUP_LABEL;
+  const leaderFallback = offered?.leaderLabel ?? DEFAULT_LEADER_LABEL;
   return {
     presetId: setup.presetId ?? "",
-    groupLabel:
-      setup.groupLabel === DEFAULT_GROUP_LABEL ? "" : setup.groupLabel,
-    leaderLabel:
-      setup.leaderLabel === DEFAULT_LEADER_LABEL ? "" : setup.leaderLabel,
+    groupLabel: setup.groupLabel === groupFallback ? "" : setup.groupLabel,
+    leaderLabel: setup.leaderLabel === leaderFallback ? "" : setup.leaderLabel,
     channelLeadMinutes:
       setup.channelLeadMinutes === null ? "" : String(setup.channelLeadMinutes),
     rows: setup.groups
