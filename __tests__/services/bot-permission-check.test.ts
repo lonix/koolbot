@@ -69,8 +69,6 @@ interface FakeChannel {
   bits: bigint;
   type?: number;
   parentId?: string;
-  /** Channel overwrites for the bot or its roles that allow these bits. */
-  overwrites?: Array<{ id: string; allow: bigint }>;
 }
 
 function bits(...p: bigint[]): bigint {
@@ -96,26 +94,12 @@ function makeClient(opts: {
   client: never;
   me: { permissionsIn: jest.Mock };
 } {
-  const withOverwrites = (c: FakeChannel): FakeChannel =>
-    ({
-      ...c,
-      permissionOverwrites: {
-        cache: new Map(
-          (c.overwrites ?? []).map((o) => [
-            o.id,
-            { id: o.id, allow: new PermissionsBitField(o.allow) },
-          ]),
-        ),
-      },
-    }) as FakeChannel;
   const channels = new Map(
-    (opts.channels ?? []).map((c) => [c.id, withOverwrites(c)] as const),
+    (opts.channels ?? []).map((c) => [c.id, c] as const),
   );
   const roles = new Map((opts.roles ?? []).map((r) => [r.id, r] as const));
   const fetchedChannels = opts.fetchedChannels
-    ? new Map(
-        opts.fetchedChannels.map((c) => [c.id, withOverwrites(c)] as const),
-      )
+    ? new Map(opts.fetchedChannels.map((c) => [c.id, c] as const))
     : channels;
   const fetchedRoles = opts.fetchedRoles
     ? new Map(opts.fetchedRoles.map((r) => [r.id, r] as const))
@@ -1025,19 +1009,10 @@ describe("channel-posting features (#1254)", () => {
     P.AddReactions,
     P.ManageMessages,
     P.PinMessages,
-    P.ManageRoles,
-    P.ManageChannels,
-  );
-  // What the lock-down sets, allowed or denied: the bot holds them server-wide.
-  const GRANTS = bits(
-    TEXT,
-    P.SendMessagesInThreads,
-    P.CreatePublicThreads,
-    P.CreatePrivateThreads,
   );
   const runPost = (
     opts: Parameters<typeof makeClient>[0],
-  ): ReturnType<typeof run> => run({ serverBits: ALL | GRANTS, ...opts });
+  ): ReturnType<typeof run> => run({ serverBits: ALL, ...opts });
   const text = (
     id: string,
     channelBits: bigint = TEXT,
@@ -1060,11 +1035,9 @@ describe("channel-posting features (#1254)", () => {
     expect(report.unknown).toEqual([]);
     expect(ids(report.okFeatures)).toEqual([
       "notices-cleanup",
-      "notices-lock",
       "notices-pin",
       "notices-post",
       "quotes-cleanup",
-      "quotes-lock",
       "quotes-pin",
       "quotes-post",
       "quotes-votes",
@@ -1081,7 +1054,7 @@ describe("channel-posting features (#1254)", () => {
     };
     // The role has Send Messages server-wide; the channel's overwrite removes it.
     const report = await runPost({
-      serverBits: ALL | GRANTS,
+      serverBits: ALL,
       channels: [text("q", without(TEXT, P.SendMessages))],
     });
     expect(report.problems).toHaveLength(1);
@@ -1285,118 +1258,6 @@ describe("channel-posting features (#1254)", () => {
     expect(report.problems.map((p) => p.permission)).toEqual(["Send Messages"]);
   });
 
-  describe("the quotes and notices lock-down follows Discord's overwrite rule", () => {
-    const lockOf = (
-      report: Awaited<ReturnType<typeof run>>,
-    ): { outcome: string; missing: string[] } => {
-      const c = report.checks.find((x) => x.feature.id === "notices-lock");
-      return { outcome: c?.outcome ?? "", missing: [...(c?.missing ?? [])] };
-    };
-    beforeEach(() => {
-      settings = { "notices.enabled": true, "notices.channel_id": "n" };
-    });
-
-    it("is in place when the bot holds Manage Roles there and everything it allows and denies server-wide", async () => {
-      const report = await runPost({ channels: [text("n")] });
-      expect(lockOf(report).outcome).toBe("ok");
-    });
-
-    it("needs the denied bits too: Send Messages in Threads and the thread-creation bits", async () => {
-      const report = await runPost({
-        serverBits: without(
-          ALL | GRANTS,
-          P.SendMessagesInThreads,
-          P.CreatePublicThreads,
-          P.CreatePrivateThreads,
-        ),
-        channels: [text("n")],
-      });
-      const lock = lockOf(report);
-      expect(lock.outcome).toBe("missing");
-      expect(lock.missing.sort()).toEqual([
-        "Create Private Threads",
-        "Create Public Threads",
-        "Send Messages in Threads",
-      ]);
-    });
-
-    it("is missing when Manage Roles alone is held and the rest is not (server-wide or in the category)", async () => {
-      const report = await runPost({
-        serverBits: ALL,
-        channels: [text("n")],
-      });
-      const lock = lockOf(report);
-      expect(lock.outcome).toBe("missing");
-      expect(lock.missing).toEqual(
-        expect.arrayContaining(["Add Reactions", "Send Messages in Threads"]),
-      );
-    });
-
-    it("accepts bits held in the channel's parent category instead of server-wide", async () => {
-      const report = await runPost({
-        serverBits: ALL,
-        channels: [
-          { ...text("n"), parentId: "cat" },
-          text("cat", GRANTS, ChannelType.GuildCategory),
-        ],
-      });
-      expect(lockOf(report).outcome).toBe("ok");
-    });
-
-    it("needs nothing more than Manage Roles when the bot has a Manage Roles overwrite on the channel", async () => {
-      for (const id of ["bot-1", "bot-role"]) {
-        const report = await runPost({
-          serverBits: ALL,
-          channels: [
-            { ...text("n"), overwrites: [{ id, allow: P.ManageRoles }] },
-          ],
-        });
-        expect(lockOf(report)).toEqual({ outcome: "ok", missing: [] });
-      }
-      // An overwrite for someone else is no exemption.
-      const other = await runPost({
-        serverBits: ALL,
-        channels: [
-          {
-            ...text("n"),
-            overwrites: [{ id: "someone", allow: P.ManageRoles }],
-          },
-        ],
-      });
-      expect(lockOf(other).outcome).toBe("missing");
-    });
-
-    it("names only Manage Roles when the bot lacks it in the channel, exemption or not", async () => {
-      const report = await runPost({
-        channels: [text("n", without(TEXT, P.ManageRoles))],
-      });
-      expect(lockOf(report)).toEqual({
-        outcome: "missing",
-        missing: ["Manage Roles"],
-      });
-      // The grants were not reached, so the check says it assessed only Manage Roles.
-      expect(
-        report.checks.find((x) => x.feature.id === "notices-lock")?.assessed,
-      ).toEqual(["Manage Roles"]);
-    });
-
-    it("records which needs it assessed: all, or only Manage Roles when the exemption waives the rest", async () => {
-      const assessedOf = (
-        r: Awaited<ReturnType<typeof run>>,
-      ): string[] | undefined =>
-        r.checks.find((x) => x.feature.id === "notices-lock")?.assessed;
-      const full = await runPost({ channels: [text("n")] });
-      expect(assessedOf(full)).toContain("Create Public Threads");
-      const waived = await runPost({
-        serverBits: ALL,
-        channels: [
-          { ...text("n"), overwrites: [{ id: "bot-1", allow: P.ManageRoles }] },
-        ],
-      });
-      expect(assessedOf(waived)).toEqual(["Manage Roles"]);
-    });
-  });
-
   it("accepts an announcement channel for the log, but not for the weekly announcer, which needs a plain text channel", async () => {
     settings = {
       "core.cron.enabled": true,
@@ -1511,10 +1372,313 @@ describe("channel-posting features (#1254)", () => {
 
   it("gives every posting entry a channel scope and a text target type", () => {
     for (const r of registry.FEATURE_REQUIREMENTS) {
-      if (/^(log|quotes|notices)-|^(raid-alerts|voice-weekly)/.test(r.id)) {
+      if (
+        /^(log|quotes|notices)-|^(raid-alerts|voice-weekly)|^(birthdays|celebrations|welcome|lfg|events-announce|leaderboard-announce|rules-message|reaction-picker)/.test(
+          r.id,
+        )
+      ) {
         expect(r.scope).toBe("channel");
         expect(r.targetType).toBeDefined();
       }
     }
+  });
+
+  describe("the other posting features (second group)", () => {
+    interface Case {
+      id: string;
+      /** Settings that switch the feature on and set its channel "c". */
+      on: Record<string, string | boolean>;
+      /** The booleans in `on` that are producer switches, switched off one at a time. */
+      parents: string[];
+      needs: string[];
+      /** Plain text channel only (the service refuses the rest). */
+      guildText: boolean;
+    }
+    const cases: Case[] = [
+      {
+        id: "birthdays-post",
+        on: { "birthdays.enabled": true, "birthdays.channel_id": "c" },
+        parents: [],
+        needs: ["View Channel", "Send Messages"],
+        guildText: true,
+      },
+      {
+        id: "celebrations-post",
+        on: {
+          "celebrations.enabled": true,
+          "celebrations.channel_id": "c",
+          "achievements.enabled": true,
+          "voicetracking.enabled": true,
+        },
+        parents: ["achievements.enabled", "voicetracking.enabled"],
+        needs: ["View Channel", "Send Messages"],
+        guildText: true,
+      },
+      {
+        id: "welcome-post",
+        on: { "welcome.enabled": true, "welcome.channel_id": "c" },
+        parents: [],
+        needs: ["View Channel", "Send Messages"],
+        guildText: false,
+      },
+      {
+        id: "lfg-post",
+        on: { "lfg.enabled": true, "lfg.channel_id": "c" },
+        parents: [],
+        needs: [
+          "View Channel",
+          "Send Messages",
+          "Embed Links",
+          "Read Message History",
+        ],
+        guildText: false,
+      },
+      {
+        id: "events-announce",
+        on: {
+          "events.enabled": true,
+          "events.announcement_channel_id": "c",
+        },
+        parents: [],
+        needs: ["View Channel", "Send Messages", "Read Message History"],
+        guildText: true,
+      },
+      {
+        id: "leaderboard-announce",
+        on: {
+          "leaderboard_roles.enabled": true,
+          "leaderboard_roles.announcement_channel_id": "c",
+          "voicetracking.enabled": true,
+        },
+        parents: ["voicetracking.enabled"],
+        needs: ["View Channel", "Send Messages", "Embed Links"],
+        guildText: false,
+      },
+      {
+        id: "rules-message",
+        on: { "rules.enabled": true, "rules.channel_id": "c" },
+        parents: [],
+        needs: ["View Channel", "Send Messages", "Read Message History"],
+        guildText: false,
+      },
+      {
+        id: "reaction-picker-post",
+        on: {
+          "reactionroles.enabled": true,
+          "reactionroles.message_channel_id": "c",
+        },
+        parents: [],
+        needs: [
+          "View Channel",
+          "Send Messages",
+          "Embed Links",
+          "Read Message History",
+        ],
+        guildText: false,
+      },
+      {
+        id: "reaction-picker-reactions",
+        on: {
+          "reactionroles.enabled": true,
+          "reactionroles.message_channel_id": "c",
+        },
+        parents: [],
+        needs: ["Add Reactions", "Manage Messages"],
+        guildText: false,
+      },
+    ];
+    const bitOf = (name: string): bigint => {
+      const found = Object.values(registry.PERM).find((p) => p.name === name);
+      if (!found) throw new Error(`no permission ${name}`);
+      return found.bit;
+    };
+    const entryOf = (
+      report: Awaited<ReturnType<typeof run>>,
+      id: string,
+    ): { outcome: string; missing: string[]; enabled: boolean } | undefined =>
+      report.checks.find((x) => x.feature.id === id);
+
+    // The channel may be left empty on purpose (no post, or LFG in the command's channel).
+    const OPTIONAL_CHANNEL = [
+      "celebrations-post",
+      "lfg-post",
+      "events-announce",
+      "leaderboard-announce",
+    ];
+
+    it("marks exactly the features whose channel is optional", () => {
+      expect(
+        registry.FEATURE_REQUIREMENTS.filter((r) => r.targetOptional)
+          .map((r) => r.id)
+          .sort(),
+      ).toEqual([...OPTIONAL_CHANNEL].sort());
+    });
+
+    it("lets an enabled event feature with no announcement channel keep the all-clear", async () => {
+      settings = { "events.enabled": true, "events.category_id": "cat" };
+      const report = await runPost({
+        channels: [
+          { id: "cat", name: "e", bits: TEXT, type: ChannelType.GuildCategory },
+        ],
+      });
+      expect(report.notes).toEqual([]);
+      expect(
+        report.checks.some((c) => c.enabled && c.outcome === "unchecked"),
+      ).toBe(false);
+    });
+
+    it("has an entry for each feature, in the shape the code needs", () => {
+      for (const c of cases) {
+        const r = registry.FEATURE_REQUIREMENTS.find((x) => x.id === c.id);
+        expect(r?.needs.map((n) => n.name)).toEqual(c.needs);
+        expect(r?.scope).toBe("channel");
+        expect(r?.targetType).toBe(c.guildText ? "guild-text" : "text");
+        expect(r?.targetKey).toBe(
+          Object.keys(c.on).find((k) => /channel_id$/.test(k)),
+        );
+      }
+    });
+
+    for (const c of cases) {
+      describe(c.id, () => {
+        const holds = (...except: string[]): bigint =>
+          without(TEXT, ...except.map(bitOf));
+
+        it("is fine when the bot holds what it needs", async () => {
+          settings = { ...c.on };
+          const report = await runPost({ channels: [text("c")] });
+          expect(report.problems).toEqual([]);
+          expect(entryOf(report, c.id)).toMatchObject({
+            outcome: "ok",
+            enabled: true,
+          });
+        });
+
+        for (const need of c.needs) {
+          it(`names ${need}, the channel and the feature when it is missing (an overwrite counts)`, async () => {
+            settings = { ...c.on };
+            // The role has it server-wide; the channel's own bits do not.
+            const report = await runPost({
+              channels: [text("c", holds(need))],
+            });
+            const found = report.problems.find((p) => p.permission === need);
+            expect(found).toMatchObject({
+              target: { kind: "channel", id: "c", name: "name-c" },
+            });
+            expect(found?.features.map((f) => f.id)).toContain(c.id);
+          });
+        }
+
+        it("is a quiet note, not a problem, while the feature is off", async () => {
+          settings = { ...c.on, [Object.keys(c.on)[0]]: false };
+          const report = await runPost({
+            channels: [text("c", bits(P.ViewChannel))],
+          });
+          expect(ids(report.problems.flatMap((p) => p.features))).not.toContain(
+            c.id,
+          );
+          expect(unknownIds(report.quiet)).toContain(c.id);
+          expect(entryOf(report, c.id)).toMatchObject({ enabled: false });
+        });
+
+        for (const parent of c.parents) {
+          it(`is off while ${parent} is off`, async () => {
+            settings = { ...c.on, [parent]: false };
+            const report = await runPost({
+              channels: [text("c", bits(P.ViewChannel))],
+            });
+            expect(unknownIds(report.quiet)).toContain(c.id);
+            expect(
+              report.problems.flatMap((p) => p.features.map((f) => f.id)),
+            ).not.toContain(c.id);
+          });
+        }
+
+        it("checks nothing, and says so, while its channel is not set", async () => {
+          const channelKey = Object.keys(c.on).find((k) =>
+            /channel_id$/.test(k),
+          ) as string;
+          settings = { ...c.on, [channelKey]: "" };
+          const report = await runPost({ channels: [] });
+          expect(report.problems).toEqual([]);
+          const optional = OPTIONAL_CHANNEL.includes(c.id);
+          // An optional channel left empty means nothing posts: not in use,
+          // no note, and no "not checked" verdict that would block the green line.
+          expect(entryOf(report, c.id)).toMatchObject({
+            outcome: "unchecked",
+            enabled: !optional,
+          });
+          expect(report.notes.some((n) => n.includes(channelKey))).toBe(
+            !optional,
+          );
+        });
+
+        it("says could not check, never ok, for a category and for a missing channel", async () => {
+          settings = { ...c.on };
+          let report = await runPost({
+            channels: [text("c", TEXT, ChannelType.GuildCategory)],
+          });
+          expect(entryOf(report, c.id)).toMatchObject({ outcome: "unknown" });
+          expect(unknownIds(report.unknown)).toContain(c.id);
+          report = await runPost({ channels: [] });
+          expect(entryOf(report, c.id)).toMatchObject({ outcome: "unknown" });
+        });
+
+        it(
+          c.guildText
+            ? "refuses an announcement channel and a voice channel (the service takes a plain text channel only)"
+            : "checks the text chat of a voice channel and an announcement channel",
+          async () => {
+            settings = { ...c.on };
+            for (const type of [
+              ChannelType.GuildVoice,
+              ChannelType.GuildAnnouncement,
+            ]) {
+              const report = await runPost({
+                channels: [text("c", TEXT, type)],
+              });
+              expect(entryOf(report, c.id)).toMatchObject({
+                outcome: c.guildText ? "unknown" : "ok",
+              });
+            }
+          },
+        );
+      });
+    }
+
+    it("never reports a thread as fine", async () => {
+      settings = { "welcome.enabled": true, "welcome.channel_id": "c" };
+      const report = await runPost({
+        channels: [text("c", TEXT, ChannelType.PublicThread)],
+      });
+      expect(entryOf(report, "welcome-post")).toMatchObject({
+        outcome: "unknown",
+      });
+      expect(report.unknown[0].note).toMatch(/thread/);
+    });
+
+    it("lists a missing permission once per channel with every feature that shares the channel", async () => {
+      settings = {
+        "welcome.enabled": true,
+        "welcome.channel_id": "c",
+        "leaderboard_roles.enabled": true,
+        "leaderboard_roles.announcement_channel_id": "c",
+        "voicetracking.enabled": true,
+        "rules.enabled": true,
+        "rules.channel_id": "c",
+      };
+      const report = await runPost({
+        channels: [text("c", without(TEXT, P.SendMessages))],
+      });
+      const send = report.problems.filter(
+        (p) => p.permission === "Send Messages",
+      );
+      expect(send).toHaveLength(1);
+      expect(ids(send[0].features)).toEqual([
+        "leaderboard-announce",
+        "rules-message",
+        "welcome-post",
+      ]);
+    });
   });
 });

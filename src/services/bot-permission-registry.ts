@@ -10,7 +10,7 @@
  * about it, or calls a Discord API that Discord refuses without it. The channel-
  * posting features (#1254) are audited feature by feature: what each one sends,
  * reads, deletes or pins in its channel. A posting feature's bit set is not the
- * overwrite set the channel claims grant (`NOTICES_BOT`, `BOT_POSTS`): those say
+ * overwrite set the channel claims grant (`BOT_POSTS`): those say
  * what to leave the bot in a channel it owns, these say what the code calls.
  *
  * `scope` says where the permission is evaluated:
@@ -33,11 +33,6 @@
 import { PermissionFlagsBits } from "discord.js";
 import { LEADS_REQUIRED_BOT_PERMISSIONS } from "./event-leads-access.js";
 import type { ConfigSchema } from "./config-schema.js";
-import {
-  NOTICES_BOT,
-  NOTICES_EVERYONE,
-  type PermissionName,
-} from "../utils/channel-permissions.js";
 
 export interface PermissionNeed {
   bit: bigint;
@@ -56,11 +51,6 @@ export interface FeatureRequirement {
   /** True: holding any one of `needs` is enough (Create Events or Manage Events). */
   anyOf?: boolean;
   needs: readonly PermissionNeed[];
-  /**
-   * `needs` are what the code grants with `permissionOverwrites.edit`, not what
-   * it holds in the channel: see `missingOverwriteGrant`.
-   */
-  overwriteGrant?: boolean;
   /** The feature's `*.enabled` setting. Absent when `usedWhen` decides. */
   enabledKey?: keyof ConfigSchema;
   /**
@@ -82,6 +72,14 @@ export interface FeatureRequirement {
    * channel list, so this page does not check threads).
    */
   targetType?: "text" | "guild-text";
+  /**
+   * The channel setting may be left empty on purpose: the feature then posts
+   * nowhere (or, for looking for group, in the channel the command ran in), so
+   * the entry is reported as not in use, with no "channel is not set" note and no
+   * "not checked" verdict. Without this an owner who never set the optional
+   * event announcement channel could never see the page say everything is in place.
+   */
+  targetOptional?: boolean;
   /**
    * A channel that is not a plain setting. `voice-lobby`: the lobby by id, or
    * by name in the managed category, as the voice service finds it.
@@ -255,45 +253,12 @@ const logChannelRequirements: FeatureRequirement[] = LOG_CHANNEL_TYPES.map(
 );
 
 /**
- * What the quotes and notices lock-down sets. The managers apply
- * `NOTICES_EVERYONE` to @everyone and `NOTICES_BOT` to the bot with
- * `permissionOverwrites.edit`: Manage Roles first, then the permissions in both
- * the allow and the deny lists (Discord's rule for overwrites covers both),
- * evaluated by `missingOverwriteGrant`. Derived from the same constants the
- * managers use, so the two cannot drift. (The managers call nothing with
- * Manage Channels apart from this grant; see the audit in #1254.)
- */
-const LOCK_DOWN_NEEDS: readonly PermissionNeed[] = ((): PermissionNeed[] => {
-  const byBit = new Map<bigint, PermissionNeed>(
-    Object.values(PERM).map((p) => [p.bit, p]),
-  );
-  const names: PermissionName[] = [
-    ...new Set([
-      ...NOTICES_BOT.allow,
-      ...NOTICES_BOT.deny,
-      ...NOTICES_EVERYONE.allow,
-      ...NOTICES_EVERYONE.deny,
-    ]),
-  ];
-  const granted = names.map((n) => {
-    const bit = PermissionFlagsBits[n];
-    return (
-      byBit.get(bit) ?? {
-        bit,
-        name: n.replace(/([a-z])([A-Z])/g, "$1 $2").replace(" In ", " in "),
-      }
-    );
-  });
-  return [PERM.manageRoles, ...granted.filter((n) => n !== PERM.manageRoles)];
-})();
-
-/**
  * A read-only channel the bot keeps by itself (quotes, notices): what its
  * manager actually calls there. Reading history is how it finds its header and
  * the messages it edits or deletes; Manage Messages only for deleting what
  * others posted (the cleanup job runs every few minutes) and for clearing the
- * channel on a quote sync; `LOCK_DOWN_NEEDS` for the lock-down it applies to the
- * channel at startup (`permissionOverwrites.edit`).
+ * channel on a quote sync. (The lock-down the managers apply at startup is not
+ * checked here.)
  */
 function managedChannelRequirements(o: {
   id: string;
@@ -346,15 +311,6 @@ function managedChannelRequirements(o: {
       needs: [PERM.manageMessages],
       effect: `Messages that members post in the channel are not removed (each failed delete is logged in the bot's log only).`,
       fix: `Give the bot's role Manage Messages, and make sure the ${name} channel does not deny it.`,
-    },
-    {
-      ...base,
-      id: `${o.id}-lock`,
-      feature: `Making the ${name} channel read-only`,
-      needs: LOCK_DOWN_NEEDS,
-      overwriteGrant: true,
-      effect: `The bot cannot set the channel's permissions at startup, so it does not lock the channel itself (logged in the bot's log only). Discord lets it allow or deny only permissions it holds server-wide or in the category, unless it has a Manage Roles override on the channel. It still works if you locked the channel by hand.`,
-      fix: `Give the bot's role Manage Roles in the ${name} channel, and either give the bot's role the other listed permissions server-wide (or on the category), or give the bot a Manage Roles permission override on the channel. Or lock the channel yourself.`,
     },
     {
       ...base,
@@ -455,6 +411,151 @@ const postingRequirements: FeatureRequirement[] = [
     effect:
       "Raid alerts are not posted. A failed send is logged in the bot's log; a channel that is not a text channel is skipped with no message at all.",
     fix: "Give the bot's role View Channel and Send Messages, and make sure the alert channel does not deny them.",
+  },
+];
+
+/**
+ * The other features that post to one configured channel (#1254, second group),
+ * each audited from the producing service. `guild-text` marks the services that
+ * accept only a plain text channel (`instanceof TextChannel`); the rest accept any
+ * text-based channel. Where a failed post has no Discord-side sign, the `effect`
+ * says it is in the bot's log only.
+ */
+const morePostingRequirements: FeatureRequirement[] = [
+  {
+    id: "birthdays-post",
+    area: "Birthdays",
+    feature: "Birthday announcements",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "birthdays.enabled",
+    targetKey: "birthdays.channel_id",
+    effect:
+      "Birthday messages are not posted, and the birthday role is not granted for that member either. Each failed post is counted in the run summary and logged in the bot's log; the next hourly run tries again.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the birthday channel does not deny them.",
+  },
+  {
+    id: "celebrations-post",
+    area: "Celebrations",
+    feature: "Milestone celebrations",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "celebrations.enabled",
+    // Accolades are only awarded while achievements and voice tracking are on.
+    alsoKeys: ["achievements.enabled", "voicetracking.enabled"],
+    targetKey: "celebrations.channel_id",
+    targetOptional: true,
+    effect:
+      "Milestone celebrations are not posted (the accolade is still awarded). The failure is logged in the bot's log only and is not retried.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the celebrations channel does not deny them.",
+  },
+  {
+    id: "welcome-post",
+    area: "Welcome messages",
+    feature: "Welcome messages",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "welcome.enabled",
+    targetKey: "welcome.channel_id",
+    effect:
+      "New members are not greeted. The failure is logged in the bot's log only.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the welcome channel does not deny them.",
+  },
+  {
+    id: "lfg-post",
+    area: "Looking for group",
+    feature: "Looking-for-group posts",
+    scope: "channel",
+    targetType: "text",
+    needs: [
+      PERM.viewChannel,
+      PERM.sendMessages,
+      PERM.embedLinks,
+      PERM.readHistory,
+    ],
+    enabledKey: "lfg.enabled",
+    targetKey: "lfg.channel_id",
+    targetOptional: true,
+    effect:
+      "/lfg tells the member it could not post, and no post is made. Without Read Message History a post is not updated or closed when its party fills or its time runs out, so its buttons stay (logged in the bot's log only).",
+    fix: "Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the LFG channel does not deny them.",
+  },
+  {
+    id: "events-announce",
+    area: "Events",
+    feature: "Event announcements and reminders",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.readHistory],
+    enabledKey: "events.enabled",
+    targetKey: "events.announcement_channel_id",
+    targetOptional: true,
+    effect:
+      "Event announcements and start reminders are not posted, and an announcement is not updated or removed when the event changes. Failures are logged in the bot's log only; the event scan tries again.",
+    fix: "Give the bot's role View Channel, Send Messages and Read Message History, and make sure the announcement channel does not deny them.",
+  },
+  {
+    id: "leaderboard-announce",
+    area: "Leaderboard roles",
+    feature: "Leaderboard role announcements",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.embedLinks],
+    enabledKey: "leaderboard_roles.enabled",
+    // The reconciliation is skipped while voice tracking is off.
+    alsoKeys: ["voicetracking.enabled"],
+    targetKey: "leaderboard_roles.announcement_channel_id",
+    targetOptional: true,
+    effect:
+      "The summary of who gained or lost a leaderboard role is not posted; the roles still change. The failure is logged in the bot's log only.",
+    fix: "Give the bot's role View Channel, Send Messages and Embed Links, and make sure the announcement channel does not deny them.",
+  },
+  {
+    id: "rules-message",
+    area: "Rules",
+    feature: "The rules message",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.readHistory],
+    enabledKey: "rules.enabled",
+    targetKey: "rules.channel_id",
+    effect:
+      "Posting, updating or re-posting the rules message on the Rules page fails, and the page shows the error. A message already posted keeps working.",
+    fix: "Give the bot's role View Channel, Send Messages and Read Message History, and make sure the rules channel does not deny them.",
+  },
+  {
+    id: "reaction-picker-post",
+    area: "Reaction roles",
+    feature: "Posting the role pickers",
+    scope: "channel",
+    targetType: "text",
+    needs: [
+      PERM.viewChannel,
+      PERM.sendMessages,
+      PERM.embedLinks,
+      PERM.readHistory,
+    ],
+    enabledKey: "reactionroles.enabled",
+    targetKey: "reactionroles.message_channel_id",
+    effect:
+      "New role pickers cannot be posted or added to (the Reaction Roles page shows the error), and at startup the bot cannot find existing pickers to restore a reaction that went missing (logged in the bot's log only).",
+    fix: "Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the picker channel does not deny them.",
+  },
+  {
+    id: "reaction-picker-reactions",
+    area: "Reaction roles",
+    feature: "Reactions on the role pickers",
+    scope: "channel",
+    targetType: "text",
+    needs: [PERM.addReactions, PERM.manageMessages],
+    enabledKey: "reactionroles.enabled",
+    targetKey: "reactionroles.message_channel_id",
+    effect:
+      "Reaction pickers get no emoji to click (Add Reactions). A member's other reaction is not removed when they pick another role in one-of-a-set mode, or when a pick is refused (Manage Messages), so the message shows a pick that has no role. Button and menu pickers need neither. Logged in the bot's log only, and not at all for a refused pick.",
+    fix: "Give the bot's role Add Reactions and Manage Messages, and make sure the picker channel does not deny them. Skip this if you only use button or menu pickers.",
   },
 ];
 
@@ -614,6 +715,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   ...quotesRequirements,
   ...noticesRequirements,
   ...postingRequirements,
+  ...morePostingRequirements,
 ];
 
 /**
@@ -661,46 +763,6 @@ export const ROLE_HIERARCHY_REQUIREMENTS: readonly RoleHierarchyRequirement[] =
       fix: ROLE_HIERARCHY_FIX,
     },
   ];
-
-/**
- * What the bot holds, for an overwrite grant (`overwriteGrant`): Discord lets a
- * bot with Manage Roles in the channel allow or deny only bits it holds in the
- * guild or in the channel's parent category, unless the bot has a Manage Roles
- * overwrite in that channel itself (the exemption). Both the allowed and the
- * denied bits count. Manage Roles (the first need) must be held in the channel.
- * Not verified against a live Discord server; see the PR for #1254.
- */
-export interface OverwriteGrantHolder {
-  /** The bot's effective permissions in the target channel. */
-  inChannel: (bit: bigint) => boolean;
-  /** Held server-wide (the bot's guild permissions). */
-  inGuild: (bit: bigint) => boolean;
-  /** Held in the channel's parent category; false when there is none. */
-  inParent: (bit: bigint) => boolean;
-  /** The bot (or one of its roles) has a Manage Roles overwrite in the channel. */
-  exempt: boolean;
-}
-
-export function missingOverwriteGrant(
-  needs: readonly PermissionNeed[],
-  has: OverwriteGrantHolder,
-): { missing: string[]; assessed: string[] } {
-  const [manageRoles, ...grants] = needs;
-  if (!has.inChannel(manageRoles.bit)) {
-    // Without Manage Roles nothing can be edited: the grants are not assessed.
-    return { missing: [manageRoles.name], assessed: [manageRoles.name] };
-  }
-  if (has.exempt) {
-    // The exemption waives the grants: they are neither held nor missing.
-    return { missing: [], assessed: [manageRoles.name] };
-  }
-  return {
-    missing: grants
-      .filter((n) => !has.inGuild(n.bit) && !has.inParent(n.bit))
-      .map((n) => n.name),
-    assessed: needs.map((n) => n.name),
-  };
-}
 
 /**
  * The names of the needs the holder lacks. With `anyOf`, either all of the

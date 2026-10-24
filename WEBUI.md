@@ -1412,23 +1412,41 @@ What each needs is what the code calls there: View Channel, Send Messages and Em
 to post (the weekly announcement is plain text, so no Embed Links), Read Message History to
 find its header and the messages it edits or deletes, Add Reactions for the quote votes,
 Manage Messages to delete what members post in the quotes and notices channels, Pin
-Messages for the header while it is pinned, and for the lock-down the bot applies to those
-two channels at startup. The lock-down follows Discord's rule for channel overwrites: the bot needs
-Manage Roles _in the channel_, and every permission it allows or denies there (including Send
-Messages in Threads and the thread-creation permissions) must be held server-wide or on the channel's
-category, unless the bot has a Manage Roles override on the channel itself, which waives that second
-part (when Manage Roles is missing, or the override waives the rest, the matrix lists only Manage Roles for it,
-never the unevaluated permissions as "Has"). The weekly announcement is checked per section (stats, accolades, quote of the week,
+Messages for the header while it is pinned. The page does not check the permissions the
+bot needs to lock the quotes and notices channels read-only at startup. The weekly announcement is checked per section (stats, accolades, quote of the week,
 poll turnout), each only while its own switches are on. A log category counts as in use only while the feature that writes to it is on (voice cleanup,
 moderation, moderation cases, the update check), and anti-raid alerts only while the moderation log
 is on. A configured channel that is a category, a forum or a thread (or not found) is shown as
 _Not checked_; threads are not checked because they need Send Messages in Threads and are not in
 Discord's channel list. The text chat of a voice or stage channel is checked, except for the weekly
 announcement, which needs a plain text channel. The weekly digest is sent as
-direct messages and needs no channel. Birthdays, celebrations, welcome messages, looking
-for group, event and leaderboard announcements, the reaction-role picker and the rules
-message post too but are not checked yet (#1254). When one of these features cannot post,
-most of them only write a line in the bot's log; nothing is shown in Discord.
+direct messages and needs no channel.
+
+The second group of posting features is checked the same way (#1254): birthdays and
+milestone celebrations (View Channel and Send Messages, in a plain text channel; celebrations
+only while achievements and voice tracking are on), welcome messages (View Channel and Send
+Messages; the rules channel it may mention is only text and needs nothing), looking for group
+(View Channel, Send Messages, Embed Links and Read Message History, which it needs to update
+or close a post), event announcements and reminders (View Channel, Send Messages and Read
+Message History, in a plain text channel), leaderboard role announcements (View Channel, Send
+Messages and Embed Links, only while voice tracking is on), the rules message (View Channel,
+Send Messages and Read Message History) and the reaction-role picker channel. The picker has two
+rows: posting (View Channel, Send Messages, Embed Links, Read Message History) and the
+reactions (Add Reactions for the emoji on reaction pickers, Manage Messages to remove a member's
+other reaction in one-of-a-set mode or after a refused pick). Whether a picker uses reactions
+or buttons, and its mode, is stored per picker and not read here, so a server that only uses
+button or menu pickers is shown the reactions row anyway; it can be ignored there. Pickers
+remember the channel they were posted in, so one posted before the picker channel was changed
+is not checked in its old channel. An event announcement is checked in the current
+announcement channel, not in the channel an older event was announced in. A birthday,
+celebration, welcome, leaderboard or event post that fails is only a line in the bot's log;
+nothing is shown in Discord. A failed LFG post is shown to the member who ran `/lfg`, and the
+rules message and the pickers are posted from the Web UI, which shows the error.
+Scheduled announcements, polls and tickets post too and are not checked yet. Four of these
+channels are optional: the event announcement channel, the leaderboard announcement channel,
+the celebrations channel and the LFG channel (empty means the channel `/lfg` was run in, which
+cannot be checked). Left empty, the feature is treated as not in use: no note, and it does not
+stop the page from saying everything is in place. The matrix lists it as _(off)_ then.
 
 - **Effective permissions.** A category or channel is checked with the bot's
   permissions _in that channel_, so an overwrite that denies a permission the bot's
@@ -1450,7 +1468,8 @@ most of them only write a line in the bot's log; nothing is shown in Discord.
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
   _checked in the table above_, _used, not checked on this page_ (moderation, ticket transcripts, the
-  channels not covered yet and the overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
+  channels of scheduled announcements, polls and tickets, and the overwrite permissions of read-only channels,
+  each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
@@ -1988,6 +2007,25 @@ A host's personal presets are their own data: they are in the **member data expo
 deleted by a **reset** (`/me/privacy`), through the per-user data registry. A host's own presets
 are also offered where the host panel turns groups on for an event (**Groups**, under Live
 settings), so a host who is not an admin can start an event's groups from their own preset.
+
+**The last setup is remembered per host** (#1406). When an event with groups is created from
+either form (`/admin/events` or `/me/events/new`), the setup the server accepted is stored for
+that host: the preset id (or Custom), the rows (name, kind, size, tag, marker), the group and
+leader wording, the channel lead time and the switches (leaders and what hangs off it, captains
+lobby, clan tags and their position). It is written only after the event exists, replaces the host's
+previous one (one row per host), and a plain event leaves it alone. The next time the host opens
+either form, the Groups section starts from it, with **Groups** ticked and a line "Prefilled from
+your last event" and a link, **Start from the defaults instead**, that reloads the form with the
+normal defaults (it does not delete anything; the next create replaces the stored setup). It is
+checked again on every read against today's limits: a setup whose rows no longer fit
+`events.groups.max_count`, or with a name, tag, marker, size or lead time that no longer passes
+the validator, is ignored and the form shows its normal defaults; a preset that was deleted,
+switched off or is now too big for the cap becomes Custom with the same rows. A failed read also
+means the defaults and never blocks creating an event. What the form posts always wins: the
+stored setup only fills the form, it is never merged into a submit, and the server still
+validates every field. Only the host's own row is ever read. It holds no members, leaders or
+channel ids, has no expiry, and is in the **member data export** (`event-last-setup`) and
+deleted by a **reset**, like the personal presets.
 
 **Clan tags** (#1194) are a per-event option on the schedule form (**Clan tags**, with an
 optional **Put the tag after the name**), off unless ticked, and only for an event with

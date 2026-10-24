@@ -308,6 +308,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "The member's own presets; every row is theirs, so the lot goes. A copy an admin published to the server library holds no owner id and stays: it is server configuration by then, and the reset does not reach into it.",
   },
   {
+    source: "src/models/event-group-last-setup.ts",
+    collection: "event-last-setup",
+    field: "ownerId",
+    exportable: true,
+    guildScoped: true,
+    note: "The group setup the member used for their last event (#1406), kept to prefill the next event form: preset id, rows (name, kind, size, tag, marker), labels, lead time and switches. Never members, leaders, channel ids or the event itself.",
+    onDelete: "hard-delete",
+    subject: "self",
+    deleteNote:
+      "One row per host, all theirs, kept only as a convenience for their next event form; the whole row goes and the form falls back to its defaults.",
+  },
+  {
     source: "src/models/rewind-snapshot.ts",
     collection: "rewind-snapshot",
     field: "userId",

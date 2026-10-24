@@ -6,7 +6,7 @@
  * - `checked`: in `bot-permission-registry.ts`, so the page checks it per
  *   feature (names and bits come from the registry, not from here);
  * - `used`: the bot's code needs it but the page does not check it yet (moderation,
- *   the posting channels that are not covered yet, ...). Each entry says what for;
+ *   scheduled announcements, polls and tickets, which also post, ...). Each entry says what for;
  * - `grant-only`: KoolBot's code does not use it itself. It may still be needed:
  *   Role groups can grant any Discord permission to a role, and the bot can only
  *   hand out permissions it holds (server-adoption-planner.ts, "bot-lacks-permission").
@@ -40,6 +40,9 @@ export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
   ViewAuditLog: used("Reading who changed a channel."),
   ManageWebhooks: used("Reading the server's webhooks during the scan."),
   RequestToSpeak: used(CHANNEL_OVERWRITES),
+  SendMessagesInThreads: used(CHANNEL_OVERWRITES),
+  CreatePublicThreads: used(CHANNEL_OVERWRITES),
+  CreatePrivateThreads: used(CHANNEL_OVERWRITES),
   UseExternalEmojis: used(
     "Only when a reaction or message uses a custom emoji from another server.",
   ),
