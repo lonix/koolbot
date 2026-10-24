@@ -356,6 +356,12 @@ export function renderHostPanelBody(opts: {
   settingsOpen?: boolean;
 }): string {
   const e = opts.event;
+  // A line of its own only when there is something to show, so a panel without
+  // a notice is byte-for-byte what it was.
+  const notice = renderPermissionNotice(opts.permissionNotice ?? null, {
+    canLinkToPage: opts.canLinkToPermissions === true,
+  });
+  const noticeBlock = notice ? `${notice}\n` : "";
   const edit = e.editable
     ? `\n  <div class="kb-pagehead__actions"><a class="kb-btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></div>`
     : "";
@@ -367,7 +373,6 @@ export function renderHostPanelBody(opts: {
   </div>${edit}
 </header>
 ${renderSummary(e)}
-${renderPermissionNotice(opts.permissionNotice ?? null, { canLinkToPage: opts.canLinkToPermissions === true })}
-${renderGroups(e)}
+${noticeBlock}${renderGroups(e)}
 ${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
 }

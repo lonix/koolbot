@@ -5473,6 +5473,10 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
       ? `<div class="empty">Category exists but contains no voice channels.</div>`
       : `<table><thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Users</th><th scope="col">Custom name</th><th scope="col">Channel ID</th></tr></thead><tbody>${rows}</tbody></table>`;
 
+  const voiceNotice = renderPermissionNotice(props.permissionNotice ?? null, {
+    canLinkToPage: true,
+  });
+
   const reloadDisabled = !props.enabled || !props.categoryFound;
   const reloadHint = !props.enabled
     ? "Enable <code>voicechannels.enabled</code> first."
@@ -5508,8 +5512,7 @@ ${renderStatusLine({
     { text: `${props.totalEmpty} empty` },
   ],
 })}
-${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-
+${voiceNotice}
 <div class="card">
   <h2>Cleanup actions</h2>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" data-confirm="${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."}${props.managedOnly ? " An existing lobby is kept, renamed back online if needed, and only created when missing." : " An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it."}">

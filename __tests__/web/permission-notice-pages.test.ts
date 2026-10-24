@@ -177,9 +177,11 @@ describe("host panel", () => {
     expect(html).not.toContain("/admin/bot-permissions");
   });
 
-  it("shows nothing when there is no notice", () => {
-    expect(renderHostPanelBody({ event: base })).not.toContain(
-      "data-permission-notice",
+  it("shows nothing when there is no notice, and leaves the markup as it was (no stray blank line)", () => {
+    const html = renderHostPanelBody({ event: base });
+    expect(html).not.toContain("data-permission-notice");
+    expect(html).toContain(
+      '</section>\n<section class="card" id="host-groups"',
     );
   });
 
@@ -286,9 +288,9 @@ describe("Voice Channels page", () => {
     expect(html).toContain("in the category “Voice”");
   });
 
-  it("shows no notice when the permissions are in place", () => {
-    expect(renderVoiceChannelsPage({ ...props } as never)).not.toContain(
-      "data-permission-notice",
-    );
+  it("shows no notice when the permissions are in place, and adds no blank line", () => {
+    const html = renderVoiceChannelsPage({ ...props } as never);
+    expect(html).not.toContain("data-permission-notice");
+    expect(html).not.toMatch(/\n\n\n<div class="card">\n  <h2>Cleanup/);
   });
 });
