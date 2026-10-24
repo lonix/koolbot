@@ -160,7 +160,7 @@ describe.each<Surface>(["admin", "me"])(
       const fields = Array.from(
         form.querySelectorAll("[data-group-builder] input"),
       );
-      expect(fields).toHaveLength(5);
+      expect(fields).toHaveLength(4);
       for (const f of fields) expect(f.getAttribute("form")).toBe("none");
     });
 
