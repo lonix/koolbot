@@ -341,3 +341,292 @@ describe("the shared builder (#1472)", () => {
     expect(page).not.toContain("data-group-builder");
   });
 });
+
+/**
+ * The cap boundaries of the one shared Generate handler (`groupBuilderScript`),
+ * on both preset editors and the event form. A ticked Captains lobby takes one
+ * place under `events.groups.max_count`; with no place left Generate must
+ * change nothing and say what to do, instead of leaving one team plus the lobby
+ * against a cap of one (the server refuses that save).
+ */
+type AnySurface = Surface | "event";
+
+function bootAny(
+  surface: AnySurface,
+  values: Values,
+  maxCount: number,
+  defaultCount: number,
+): JSDOM {
+  if (surface !== "event") return boot(surface, values, maxCount, defaultCount);
+  const page = renderEventsPage({
+    csrfToken: "t",
+    remainingMs: 1,
+    categoryConfigured: true,
+    announcementConfigured: true,
+    timezone: "UTC",
+    settingRows: [],
+    enabled: true,
+    rows: [],
+    groupLimits: { defaultCount, maxCount },
+  } as never);
+  const dom = new JSDOM(page, {
+    url: "http://localhost/admin/events",
+    runScripts: "outside-only",
+  });
+  const scripts = [
+    ...page.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
+  ].map((m) => m[1]);
+  dom.window.eval(scripts.find((c) => c.includes("koolGroupRows="))!);
+  dom.window.eval(scripts.find((c) => c.includes("koolbot-event-form-draft"))!);
+  return dom;
+}
+
+/** Tick Captains lobby (on the event form it first needs the leaders box). */
+function tickLobby(dom: JSDOM, surface: AnySurface, on = true): void {
+  if (surface === "event") change(dom, "groups_captains", true);
+  change(dom, "groups_captains_lobby", on);
+}
+
+const note = (dom: JSDOM): HTMLElement => el(dom, "[data-build-note]");
+
+interface CapCase {
+  name: string;
+  max: number;
+  lobby: boolean;
+  /** Rows the page starts with: the editor's prefill, or the default count. */
+  rows: number;
+  count: string;
+  /** Names after Generate, from the first row on. */
+  names: string[];
+  /** Generate was refused: nothing changed and the note is shown. */
+  blocked?: boolean;
+  /** Only on the preset editors (the event form cannot be prefilled). */
+  editorOnly?: boolean;
+}
+
+const OLD = (n: number): string[] =>
+  Array.from({ length: n }, (_, i) => `Old ${i + 1}`);
+const NUMBERED = (n: number, total = n): string[] =>
+  Array.from({ length: total }, (_, i) => (i < n ? `Team ${i + 1}` : ""));
+
+const CAP_CASES: CapCase[] = [
+  // The finding: room is zero.
+  {
+    name: "max 1, lobby ticked, count 1",
+    max: 1,
+    lobby: true,
+    rows: 1,
+    count: "1",
+    names: ["Old 1"],
+    blocked: true,
+    editorOnly: true,
+  },
+  {
+    name: "max 1, lobby ticked, count 5",
+    max: 1,
+    lobby: true,
+    rows: 1,
+    count: "5",
+    names: ["Old 1"],
+    blocked: true,
+    editorOnly: true,
+  },
+  {
+    name: "max 1, lobby ticked, empty rows",
+    max: 1,
+    lobby: true,
+    rows: 1,
+    count: "1",
+    names: [""],
+    blocked: true,
+  },
+  {
+    name: "max 1, lobby ticked, over-cap prefill left alone",
+    max: 1,
+    lobby: true,
+    rows: 5,
+    count: "2",
+    names: OLD(5),
+    blocked: true,
+    editorOnly: true,
+  },
+  // The neighbours of the same expression.
+  {
+    name: "max 1, no lobby",
+    max: 1,
+    lobby: false,
+    rows: 1,
+    count: "3",
+    names: ["Red"],
+  },
+  {
+    name: "max 2, lobby ticked (room 1)",
+    max: 2,
+    lobby: true,
+    rows: 2,
+    count: "5",
+    names: ["Red", ""],
+  },
+  {
+    name: "max 2, no lobby",
+    max: 2,
+    lobby: false,
+    rows: 2,
+    count: "5",
+    names: ["Red", "Blue"],
+  },
+  {
+    name: "max 3, lobby ticked (room 2)",
+    max: 3,
+    lobby: true,
+    rows: 2,
+    count: "9",
+    names: ["Red", "Blue"],
+  },
+  {
+    name: "max 3, no lobby, count equals room",
+    max: 3,
+    lobby: false,
+    rows: 2,
+    count: "3",
+    names: ["Red", "Blue", "Green"],
+  },
+  {
+    name: "count below room",
+    max: 6,
+    lobby: false,
+    rows: 2,
+    count: "2",
+    names: ["Red", "Blue"],
+  },
+  {
+    name: "count 0 becomes 1",
+    max: 6,
+    lobby: false,
+    rows: 2,
+    count: "0",
+    names: ["Red", ""],
+  },
+  {
+    name: "negative count becomes 1",
+    max: 6,
+    lobby: false,
+    rows: 2,
+    count: "-4",
+    names: ["Red", ""],
+  },
+  {
+    name: "empty count becomes 1",
+    max: 6,
+    lobby: false,
+    rows: 2,
+    count: "",
+    names: ["Red", ""],
+  },
+  {
+    name: "non-numeric count becomes 1",
+    max: 6,
+    lobby: false,
+    rows: 2,
+    count: "abc",
+    names: ["Red", ""],
+  },
+  {
+    name: "the hard maximum of 25 groups",
+    max: 25,
+    lobby: false,
+    rows: 2,
+    count: "99",
+    names: NUMBERED(25),
+  },
+  {
+    name: "the hard maximum with the lobby (room 24)",
+    max: 25,
+    lobby: true,
+    rows: 2,
+    count: "99",
+    names: NUMBERED(24),
+  },
+  {
+    name: "over-cap prefill is emptied, not grown",
+    max: 3,
+    lobby: false,
+    rows: 5,
+    count: "2",
+    names: ["Red", "Blue", "", "", ""],
+    editorOnly: true,
+  },
+  {
+    name: "a prefill at the 100-row form limit",
+    max: 3,
+    lobby: true,
+    rows: 100,
+    count: "9",
+    names: ["Red", "Blue", ...Array<string>(98).fill("")],
+    editorOnly: true,
+  },
+];
+
+describe.each<AnySurface>(["admin", "me", "event"])(
+  "Generate against the cap on the %s surface",
+  (surface) => {
+    it.each(CAP_CASES.filter((c) => !(c.editorOnly && surface === "event")))(
+      "$name",
+      (c) => {
+        const values = c.editorOnly ? rowValues(c.rows) : {};
+        const dom = bootAny(surface, values, c.max, c.rows);
+        if (c.lobby) tickLobby(dom, surface);
+        const before = names(dom);
+        const total = rowCount(dom);
+        generate(dom, { count: c.count });
+        // Rows grow up to the groups made, never past the cap and never by a refused run.
+        const made = c.blocked ? 0 : c.names.filter((n) => n !== "").length;
+        expect(rowCount(dom)).toBe(Math.max(total, made));
+        expect(names(dom).slice(0, c.names.length)).toEqual(c.names);
+        if (c.blocked) {
+          expect(names(dom)).toEqual(before);
+          expect(note(dom).hidden).toBe(false);
+          expect(note(dom).getAttribute("role")).toBe("status");
+          expect(note(dom).textContent).toMatch(/Untick Captains lobby/);
+        } else {
+          expect(note(dom).hidden).toBe(true);
+          expect(note(dom).textContent).toBe("");
+        }
+      },
+    );
+
+    it("a refused Generate works once the lobby is unticked, and the note goes", () => {
+      const dom = bootAny(surface, {}, 1, 1);
+      tickLobby(dom, surface);
+      generate(dom, { count: "1" });
+      expect(note(dom).hidden).toBe(false);
+      tickLobby(dom, surface, false);
+      expect(note(dom).hidden).toBe(true);
+      generate(dom, { count: "1" });
+      expect(names(dom)).toEqual(["Red"]);
+      expect(note(dom).hidden).toBe(true);
+    });
+
+    it("never leaves more channels than the cap: rows plus a ticked lobby", () => {
+      for (const max of [1, 2, 3]) {
+        for (const lobby of [false, true]) {
+          const dom = bootAny(surface, {}, max, 1);
+          if (lobby) tickLobby(dom, surface);
+          generate(dom, { count: "9" });
+          const filled = names(dom).filter((n) => n !== "").length;
+          expect(filled + (lobby ? 1 : 0)).toBeLessThanOrEqual(max);
+        }
+      }
+    });
+  },
+);
+
+describe("the Generate note markup (#1472)", () => {
+  it("is one hidden status line next to the builder on every surface", () => {
+    for (const surface of ["admin", "me"] as const) {
+      const page = html(surface);
+      expect(page.match(/<p [^>]*data-build-note/g)).toHaveLength(1);
+      expect(page).toMatch(/<p [^>]*role="status" data-build-note hidden>/);
+    }
+  });
+});

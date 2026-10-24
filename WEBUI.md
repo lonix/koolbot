@@ -1968,7 +1968,9 @@ of groups, a size, Colours or Numbered names, and **Generate**. It fills the row
 as on the event form: Colours names them Red, Blue, Green… with a matching marker (more groups than
 colours, or Numbered, gives "Team 1…N", using the wording from **What a group is called** when it is
 set), and an empty or out-of-range size means no limit. The count never goes past
-`events.groups.max_count`, and a ticked **Captains lobby** takes one of those places. Rows past the
+`events.groups.max_count`, and a ticked **Captains lobby** takes one of those places. When the limit
+is 1 and **Captains lobby** is ticked there is no place left: **Generate** changes nothing and a note
+beside it says to untick **Captains lobby** or raise the limit. Rows past the
 count are emptied (including rows a preset already had beyond the limit), and no row is added past the
 limit. With **Clan tags** ticked each generated group gets its tag from its name and keeps following
 it until the tag is edited by hand; with it off the tags stay empty. Generating only changes the

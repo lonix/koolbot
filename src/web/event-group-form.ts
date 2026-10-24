@@ -205,6 +205,7 @@ export function renderGroupBuilder(maxCount: number): string {
           <div class="kb-segmented" role="radiogroup" aria-label="Names for the groups"><label><input type="radio" name="groups_build_names"${detached} value="colours" checked><span>Colours</span></label><label><input type="radio" name="groups_build_names"${detached} value="numbers"><span>Numbered</span></label></div>
           <button type="button" class="kb-btn kb-btn--sm" data-build>Generate</button>
         </div>
+        <p class="kb-help" role="status" data-build-note hidden></p>
         <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
       </div>`;
 }
@@ -231,12 +232,16 @@ export function groupSetRowScript(): string {
  * editors, so the rules cannot drift apart:
  *
  * - the count is clamped to the room the cap leaves (the Captains lobby, while
- *   ticked and not disabled, is a channel and takes one place);
+ *   ticked and not disabled, is a channel and takes one place); with no room left
+ *   (a cap of 1 and the lobby ticked) nothing is changed and the note next to the
+ *   button says what to do, because even one group would put the form over the cap;
  * - rows past the count are emptied, however many a restore or an over-cap
  *   preset left, and no row is allocated past the cap (`setRow` allocates only
  *   through `addRow()`, which refuses at the cap);
  * - generated sizes and markers are marked automatic, and the tag is left empty
  *   for `deriveTags` to derive while clan tags are on.
+ *
+ * A change anywhere in the form (the lobby tick, say) clears the note.
  *
  * `afterBuild` is the page's own JavaScript to run once the rows are set (derive
  * tags, resync the pickers and the button, fold or summarise). Needs `form`,
@@ -248,6 +253,9 @@ export function groupBuilderScript(afterBuild: string): string {
     "var build=form.querySelector('[data-build]');" +
     "if(build)build.addEventListener('click',function(){var cnt=form.querySelector('[data-build-count]'),sz=form.querySelector('[data-build-size]');" +
     "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
+    "var note=form.querySelector('[data-build-note]');" +
+    "if(note){note.hidden=true;note.textContent=''}" +
+    "if(room<1){if(note){note.textContent='The Captains lobby takes the only place the limit allows ('+max+'). Untick Captains lobby to generate groups, or raise the limit.';note.hidden=false}return}" +
     "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
     "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
     "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
@@ -257,6 +265,7 @@ export function groupBuilderScript(afterBuild: string): string {
     "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
     "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
     afterBuild +
-    "})"
+    "});" +
+    "form.addEventListener('change',function(){var n=form.querySelector('[data-build-note]');if(n){n.hidden=true;n.textContent=''}})"
   );
 }
