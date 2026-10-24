@@ -1196,6 +1196,75 @@ describe("the preset editors' header row and derived tags (#1406)", () => {
     type(doc, "group_1_name", "Green");
     expect(tagOf(doc, 1).value).toBe("ZZ");
   });
+
+  it("clears an automatic tag when the name is emptied, even after Clan tags was switched off", () => {
+    const doc = run();
+    const box = doc.querySelector('[name="groups_tags"]') as HTMLInputElement;
+    box.checked = true;
+    type(doc, "group_0_name", "Red");
+    expect(tagOf(doc, 0).value).toBe("RED");
+    box.checked = false;
+    box.dispatchEvent(new doc.defaultView!.Event("change", { bubbles: true }));
+    type(doc, "group_0_name", "");
+    expect(tagOf(doc, 0).value).toBe("");
+    // Switched off, a name alone still generates nothing.
+    type(doc, "group_0_name", "Blue");
+    expect(tagOf(doc, 0).value).toBe("");
+  });
+
+  describe("after a refused save", () => {
+    const refuse = (steps: (doc: Document) => void): Document => {
+      const first = new JSDOM(`<body>${editor()}</body>`, {
+        url: "http://localhost/admin/events/presets",
+        runScripts: "outside-only",
+      });
+      first.window.eval(EVENT_PRESETS_SCRIPT);
+      steps(first.window.document);
+      first.window.document
+        .querySelector("form[data-preset-form]")!
+        .dispatchEvent(
+          new first.window.Event("submit", { bubbles: true, cancelable: true }),
+        );
+      const draft = first.window.sessionStorage.getItem(
+        "koolbot-event-preset-draft",
+      ) as string;
+      const second = new JSDOM(
+        `<body><div class="notice err" data-flash>nope</div>${editor()}</body>`,
+        {
+          url: "http://localhost/admin/events/presets",
+          runScripts: "outside-only",
+        },
+      );
+      second.window.sessionStorage.setItem("koolbot-event-preset-draft", draft);
+      second.window.eval(EVENT_PRESETS_SCRIPT);
+      return second.window.document;
+    };
+
+    it("a restored automatic tag keeps following the name", () => {
+      const doc = refuse((d) => {
+        (d.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+          true;
+        type(d, "group_0_name", "Red");
+      });
+      expect(tagOf(doc, 0).value).toBe("RED");
+      type(doc, "group_0_name", "Blue");
+      expect(tagOf(doc, 0).value).toBe("BLUE");
+      type(doc, "group_0_name", "");
+      expect(tagOf(doc, 0).value).toBe("");
+    });
+
+    it("a tag cleared by hand stays empty and is not regenerated", () => {
+      const doc = refuse((d) => {
+        (d.querySelector('[name="groups_tags"]') as HTMLInputElement).checked =
+          true;
+        type(d, "group_0_name", "Red");
+        type(d, "group_0_tag", "");
+      });
+      expect(tagOf(doc, 0).value).toBe("");
+      type(doc, "group_0_name", "Green");
+      expect(tagOf(doc, 0).value).toBe("");
+    });
+  });
 });
 
 describe("the event form with a remembered setup (#1406)", () => {

@@ -273,10 +273,12 @@ export const EVENT_PRESETS_SCRIPT =
   // it is edited by hand: the same rule as on the event form.
   deriveTagScript(GROUP_TAG_MAX) +
   "var tagsBox=form.elements['groups_tags'];" +
-  "function deriveTags(){if(!tagsBox||!tagsBox.checked)return;Array.prototype.forEach.call(rows(),function(r){" +
+  // An emptied name clears its automatic tag whatever the box says (the server
+  // would refuse a row with a tag and no name); only generating needs the box.
+  "function deriveTags(){var on=tagsBox&&tagsBox.checked;Array.prototype.forEach.call(rows(),function(r){" +
   "var n=r.querySelector('input[name$=\"_name\"]'),t=r.querySelector('input[name$=\"_tag\"]');if(!n||!t)return;" +
   "if(t.hasAttribute('data-manual')||(t.value&&!t.hasAttribute('data-auto')))return;" +
-  "var v=n.value.trim();if(v){t.value=derive(v);t.setAttribute('data-auto','1')}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
+  "var v=n.value.trim();if(v){if(on){t.value=derive(v);t.setAttribute('data-auto','1')}}else if(t.hasAttribute('data-auto')){t.value='';t.removeAttribute('data-auto')}})}" +
   "box.addEventListener('input',function(e){var t=e.target;if(!t||!t.name)return;" +
   "if(/_tag$/.test(t.name)){t.removeAttribute('data-auto');t.setAttribute('data-manual','1')}" +
   "else if(/_name$/.test(t.name))deriveTags()});" +
@@ -288,11 +290,14 @@ export const EVENT_PRESETS_SCRIPT =
   "form.addEventListener('change',recompute);" +
   "form.addEventListener('submit',function(){try{var d={};" +
   "Array.prototype.forEach.call(form.elements,function(el){if(!el.name||el.name==='_csrf'||el.type==='button'||el.type==='submit')return;d[el.name]=el.type==='checkbox'?el.checked:el.value});" +
+  // Which fields were filled in automatically or typed by hand travels with the
+  // values, so a restored tag still follows the name (or stays as it was left).
+  "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
   "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
-  "Object.keys(d).forEach(function(k){var el=form.elements[k];if(!el)return;" +
+  "Object.keys(d).forEach(function(k){if(k.indexOf('__')===0)return;var el=form.elements[k];if(!el)return;" +
   // A draft from before the tick can hold a leads row in a kind select, which
   // has no leads option now; it gets its option back so the retry keeps the row
   // instead of defaulting to a team, and the tick is set (it decides whether the
@@ -305,6 +310,7 @@ export const EVENT_PRESETS_SCRIPT =
   // having unticked the box after an earlier restore, and stays unticked.
   "if(lobby&&typeof d['groups_captains_lobby']!=='boolean')lobby.checked=true}" +
   "if(k==='preset_id')return;if(el.type==='checkbox'){el.checked=d[k]===true;return}if(typeof d[k]==='string')el.value=d[k]});" +
+  "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
   // Setting `checked` fires no change event: the button follows the restored box.
   "if(window.koolGroupRows)window.koolGroupRows.syncAll();recompute()}}catch(x){}" +
   "})();";
