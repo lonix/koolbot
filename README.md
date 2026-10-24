@@ -17,7 +17,7 @@ management, activity tracking, automated announcements, and a browser-based admi
 > [docs for the latest release][docs-latest], or pick your version under [Documentation for older versions](#documentation-for-older-versions).
 
 <!-- x-release-please-start-version -->
-[docs-latest]: https://github.com/lonix/koolbot/tree/v2.0.1
+[docs-latest]: https://github.com/lonix/koolbot/tree/v2.1.0
 <!-- x-release-please-end -->
 
 ---
@@ -481,7 +481,7 @@ For example, to stay on one exact release:
 ```yaml
 services:
   bot:
-    image: ghcr.io/lonix/koolbot:2.0.1
+    image: ghcr.io/lonix/koolbot:2.1.0
 ```
 <!-- x-release-please-end -->
 
@@ -742,7 +742,7 @@ shipped. Older release lines get no further patches, so each one links to its la
 
 | Version | Docs |
 | --- | --- |
-| Latest release | [v2.0.1][docs-latest] <!-- x-release-please-version --> |
+| Latest release | [v2.1.0][docs-latest] <!-- x-release-please-version --> |
 | 1.2 | [v1.2.2](https://github.com/lonix/koolbot/tree/v1.2.2) |
 | 1.1 | [v1.1.0](https://github.com/lonix/koolbot/tree/v1.1.0) |
 | 1.0 | [v1.0.0](https://github.com/lonix/koolbot/tree/v1.0.0) |
