@@ -1228,3 +1228,43 @@ describe("a refused submit after the reset link, with a remembered setup (#1406)
     expect(field(dom, "group_2_marker").value).toBe("");
   });
 });
+
+describe("a refused submit at the full cap, with a remembered captains lobby (#1406)", () => {
+  it("restores the draft's third team when the lobby was unticked before submitting", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      groupLimits: { defaultCount: 2, maxCount: 3 },
+      groupRemembered: {
+        resetHref: "/admin/events?defaults=1#schedule-event",
+        prefill: {
+          presetId: "",
+          groupLabel: "",
+          leaderLabel: "",
+          channelLeadMinutes: "",
+          rows: [
+            { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+            { name: "Blue", kind: "team", size: "", tag: "", marker: "" },
+          ],
+          captainsEnabled: true,
+          captainCustomisationEnabled: false,
+          captainsLobby: true,
+          tagsEnabled: false,
+          tagsSuffix: false,
+        },
+      },
+    } as never);
+    // The host unticked the lobby, added a third team and was refused.
+    const dom = boot(html, {
+      groups_enabled: true,
+      groups_preset: "",
+      groups_captains: true,
+      groups_captains_lobby: false,
+      group_0_name: "Red",
+      group_1_name: "Blue",
+      group_2_name: "Green",
+    });
+    expect(field(dom, "group_2_name").value).toBe("Green");
+    expect(field(dom, "groups_captains_lobby").checked).toBe(false);
+    expect(field(dom, "group_0_name").value).toBe("Red");
+  });
+});
