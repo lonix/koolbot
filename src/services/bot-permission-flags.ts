@@ -34,7 +34,6 @@ const CHANNEL_OVERWRITES =
 
 /** Classification by discord.js flag name (deprecated aliases of one bit are classified together). */
 export const FLAG_USE: Readonly<Record<string, FlagUse>> = {
-  AttachFiles: used("Ticket transcripts and quote exports."),
   ModerateMembers: used("Timeouts (/timeout and raid mode)."),
   KickMembers: used("Raid mode kicks."),
   BanMembers: used("/ban."),

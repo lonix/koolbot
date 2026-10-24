@@ -111,11 +111,11 @@ describe("flag classification", () => {
       "ReadMessageHistory",
       "ManageMessages",
       "PinMessages",
+      "AttachFiles",
     ]) {
       expect(byKey.get(key)).toBe("checked");
     }
     for (const key of [
-      "AttachFiles",
       "BanMembers",
       "KickMembers",
       "ModerateMembers",
@@ -220,11 +220,11 @@ describe("the All Discord permissions list", () => {
 
   it("is folded, has a row per permission, and uses the role's own bits", () => {
     const html = page(
-      report({ serverPermissions: PermissionFlagsBits.AttachFiles }),
+      report({ serverPermissions: PermissionFlagsBits.BanMembers }),
     );
     expect(html).toContain('<details class="kb-disclosure">');
-    expect(rowOf(html, "Attach Files")).toContain("Has");
-    expect(rowOf(html, "Attach Files")).toContain("Used, not checked");
+    expect(rowOf(html, "Ban Members")).toContain("Has");
+    expect(rowOf(html, "Ban Members")).toContain("Used, not checked");
     expect(rowOf(html, "Send Messages")).toContain("Checked in the table");
     expect(rowOf(html, "Create Invite")).toContain("Not in the role");
     expect(rowOf(html, "Create Invite")).toContain(

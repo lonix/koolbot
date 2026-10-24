@@ -60,6 +60,10 @@ const ALL =
   P.ManageEvents |
   P.ViewChannel |
   P.EmbedLinks |
+  P.SendMessages |
+  P.ReadMessageHistory |
+  P.AttachFiles |
+  P.ManageMessages |
   P.Speak |
   P.SetVoiceChannelStatus;
 
@@ -1839,9 +1843,27 @@ describe("support tickets (#1475)", () => {
     id: string,
   ): { outcome: string; missing: string[]; enabled: boolean } | undefined =>
     report.checks.find((x) => x.feature.id === id);
-  const SERVER = bits(P.ManageRoles, P.EmbedLinks);
+  // Every bit createTicketChannel puts in the new channel's overwrites
+  // (ticket-channel-manager.ts: everyone denied View Channel; author, staff and
+  // the bot allowed the member set; staff also Manage Messages; the bot also
+  // Manage Channels). Discord requires the bot to hold each one server-wide.
+  const OVERWRITE_BITS = [
+    P.ViewChannel,
+    P.SendMessages,
+    P.ReadMessageHistory,
+    P.AttachFiles,
+    P.ManageMessages,
+    P.ManageChannels,
+  ];
+  const SERVER = bits(P.ManageRoles, P.EmbedLinks, ...OVERWRITE_BITS);
+  const TICKET_IDS = [
+    "tickets-create",
+    "tickets-create-overwrites",
+    "tickets-lock",
+    "tickets-greeting",
+  ];
 
-  it("has the three entries, each with the scope and permission the code needs", () => {
+  it("has the four entries, each with the scope and permission the code needs", () => {
     const shape = (id: string): unknown => {
       const r = registry.FEATURE_REQUIREMENTS.find((x) => x.id === id);
       return {
@@ -1855,6 +1877,19 @@ describe("support tickets (#1475)", () => {
       scope: "category",
       needs: ["Manage Channels"],
       targetKey: "tickets.category_id",
+      optional: undefined,
+    });
+    expect(shape("tickets-create-overwrites")).toEqual({
+      scope: "guild",
+      needs: [
+        "View Channel",
+        "Send Messages",
+        "Read Message History",
+        "Attach Files",
+        "Manage Messages",
+        "Manage Channels",
+      ],
+      targetKey: undefined,
       optional: undefined,
     });
     expect(shape("tickets-lock")).toEqual({
@@ -1871,11 +1906,11 @@ describe("support tickets (#1475)", () => {
     });
   });
 
-  it("is fine when the bot holds Manage Channels in the category and Manage Roles and Embed Links server-wide", async () => {
+  it("is fine when the bot holds Manage Channels in the category and the ticket permissions server-wide", async () => {
     settings = { ...ON };
     const report = await run({ serverBits: SERVER, channels: [category()] });
     expect(report.problems).toEqual([]);
-    for (const id of ["tickets-create", "tickets-lock", "tickets-greeting"]) {
+    for (const id of TICKET_IDS) {
       expect(entry(report, id)).toMatchObject({ outcome: "ok", enabled: true });
     }
   });
@@ -1901,7 +1936,7 @@ describe("support tickets (#1475)", () => {
     // The category grants them; the role does not. Ticket channels do not
     // take the category's overwrites, so this is a problem.
     const report = await run({
-      serverBits: 0n,
+      serverBits: bits(...OVERWRITE_BITS),
       channels: [category(bits(P.ManageChannels, P.ManageRoles, P.EmbedLinks))],
     });
     const byPermission = new Map(
@@ -1919,6 +1954,45 @@ describe("support tickets (#1475)", () => {
     expect(byPermission.has("Manage Channels")).toBe(false);
   });
 
+  // Discord's Create Guild Channel: "If setting permission overwrites, only
+  // permissions your bot has in the guild can be allowed/denied". The ticket
+  // channel's initial overwrites carry six bits, so each is a server-wide need
+  // of /ticket open, whatever the category grants.
+  it.each([
+    ["View Channel", P.ViewChannel],
+    ["Send Messages", P.SendMessages],
+    ["Read Message History", P.ReadMessageHistory],
+    ["Attach Files", P.AttachFiles],
+    ["Manage Messages", P.ManageMessages],
+    ["Manage Channels", P.ManageChannels],
+  ])(
+    "opening a ticket needs %s server-wide, even when the other requirements are met and the category grants it",
+    async (name, bit) => {
+      settings = { ...ON };
+      const report = await run({
+        serverBits: SERVER & ~bit,
+        channels: [category(bits(...OVERWRITE_BITS))],
+      });
+      expect(report.problems).toHaveLength(1);
+      expect(report.problems[0]).toMatchObject({
+        permission: name,
+        target: { kind: "server" },
+      });
+      expect(report.problems[0].features.map((f) => f.id)).toEqual([
+        "tickets-create-overwrites",
+      ]);
+    },
+  );
+
+  it("says what stops working and where to fix it when a ticket overwrite bit is missing", () => {
+    const r = registry.FEATURE_REQUIREMENTS.find(
+      (x) => x.id === "tickets-create-overwrites",
+    );
+    expect(r?.effect).toContain("/ticket open");
+    expect(r?.fix).toContain("Server Settings");
+    expect(r?.fix).toContain("category");
+  });
+
   it("is a quiet note, not a problem, while tickets are off", async () => {
     settings = { ...ON, "tickets.enabled": false };
     const report = await run({ serverBits: 0n, channels: [category(0n)] });
@@ -1928,13 +2002,21 @@ describe("support tickets (#1475)", () => {
         .map((q) => q.feature.id)
         .filter((id) => id.startsWith("tickets-"))
         .sort(),
-    ).toEqual(["tickets-create", "tickets-greeting", "tickets-lock"]);
+    ).toEqual([
+      "tickets-create",
+      "tickets-create-overwrites",
+      "tickets-greeting",
+      "tickets-lock",
+    ]);
     expect(entry(report, "tickets-create")).toMatchObject({ enabled: false });
   });
 
   it("checks the server-wide permissions, and says the category is not checked, while no category is set", async () => {
     settings = { "tickets.enabled": true };
-    const report = await run({ serverBits: 0n, channels: [] });
+    const report = await run({
+      serverBits: bits(...OVERWRITE_BITS),
+      channels: [],
+    });
     expect(entry(report, "tickets-create")).toMatchObject({
       outcome: "unchecked",
       enabled: true,

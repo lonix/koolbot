@@ -191,7 +191,7 @@ const flat = (name: string): string =>
  * Whether the permission report already has a row for this scan finding. The
  * report covers the permissions its registry lists and the roles a feature is
  * bound to; the scan also reports permissions the registry leaves out (posting
- * in channels that no checked feature uses, Attach Files, ...) and the general
+ * in channels that no checked feature uses, ...) and the general
  * "roles above the bot" warning. Those have no row there, so they stay. A
  * server-wide scan finding is dropped when the report names the same
  * permission anywhere, because a role that lacks it makes the channel checks of

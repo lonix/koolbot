@@ -114,6 +114,10 @@ export const PERM = {
     bit: PermissionFlagsBits.ReadMessageHistory,
     name: "Read Message History",
   },
+  attachFiles: {
+    bit: PermissionFlagsBits.AttachFiles,
+    name: "Attach Files",
+  },
   connect: { bit: PermissionFlagsBits.Connect, name: "Connect" },
   speak: { bit: PermissionFlagsBits.Speak, name: "Speak" },
   moveMembers: { bit: PermissionFlagsBits.MoveMembers, name: "Move Members" },
@@ -152,6 +156,7 @@ export const PERMISSION_ORDER: readonly (keyof typeof PERM)[] = [
   "manageNicknames",
   "sendMessages",
   "embedLinks",
+  "attachFiles",
   "addReactions",
   "manageMessages",
   "pinMessages",
@@ -593,8 +598,16 @@ const morePostingRequirements: FeatureRequirement[] = [
  * inside a ticket comes from its own member overwrite (View Channel, Send
  * Messages, Read Message History, Attach Files, Manage Channels) plus its role's
  * server-wide permissions. That is why creation is a category entry and the
- * other two are server-wide. A ticket failure is never silent: the member sees
- * "Something went wrong talking to Discord".
+ * others are server-wide. Creation also has a server-wide half: Discord's
+ * Create Guild Channel accepts permission overwrites only for "permissions your
+ * bot has in the guild", so every bit `createTicketChannel` puts in the initial
+ * overwrites (View Channel, Send Messages, Read Message History, Attach Files,
+ * Manage Messages for staff, Manage Channels for the bot) must be held
+ * server-wide, whatever the category grants. Closing a ticket edits an
+ * existing overwrite, where Discord also counts the parent category; that
+ * prerequisite is deliberately not evaluated (#1464 dropped the evaluator).
+ * A ticket failure is never silent: the member sees "Something went wrong
+ * talking to Discord".
  */
 const ticketRequirements: FeatureRequirement[] = [
   {
@@ -608,6 +621,24 @@ const ticketRequirements: FeatureRequirement[] = [
     effect:
       "/ticket open creates no channel: the member is told something went wrong talking to Discord, and the error is logged.",
     fix: "Give the bot's role Manage Channels, and make sure the ticket category does not deny it.",
+  },
+  {
+    id: "tickets-create-overwrites",
+    area: "Tickets",
+    feature: "Setting up a new ticket's permissions",
+    scope: "guild",
+    needs: [
+      PERM.viewChannel,
+      PERM.sendMessages,
+      PERM.readHistory,
+      PERM.attachFiles,
+      PERM.manageMessages,
+      PERM.manageChannels,
+    ],
+    enabledKey: "tickets.enabled",
+    effect:
+      "/ticket open creates no channel: Discord refuses a new channel whose permissions give anyone something the bot does not hold itself server-wide (the author and staff get View Channel, Send Messages, Read Message History and Attach Files, staff also Manage Messages, the bot Manage Channels). The member is told something went wrong talking to Discord, and the error is logged.",
+    fix: "Give the bot's role View Channel, Send Messages, Read Message History, Attach Files, Manage Messages and Manage Channels in Server Settings, Roles. A category overwrite does not count: Discord checks these server-wide.",
   },
   {
     id: "tickets-lock",
