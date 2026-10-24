@@ -2175,6 +2175,9 @@ describe("renderPollsPage", () => {
     // silently reassign the channel or clear the ping role.
     expect(html).toContain('value="gone-chan" selected');
     expect(html).toContain('value="gone-role" selected');
+    // In the table, a ping role that is gone is its id as unavailable, not @gone-role (#1394).
+    expect(html).toContain("gone-role (unavailable)");
+    expect(html).not.toContain("@gone-role</span>");
     expect(html).toContain("(unavailable)");
   });
 

@@ -906,6 +906,30 @@ describe("Discord labels on the scan tabs (#1394)", () => {
     );
     expect(html).toContain('<span class="kb-mention">@Mod</span>');
     expect(html).toContain("Some &lt;b&gt;member&lt;/b&gt;");
+    // A role overwrite whose role is gone carries the id as its label: unavailable.
+    expect(
+      mainOf(
+        page("channels", {
+          scan: {
+            ...scan,
+            channels: [
+              {
+                ...ch,
+                overwrites: [
+                  {
+                    id: "r-gone",
+                    type: "role" as const,
+                    label: "r-gone",
+                    allow: [],
+                    deny: ["ViewChannel"],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ),
+    ).toContain("r-gone (unavailable)");
     expect(html).not.toContain("<b>member");
   });
 

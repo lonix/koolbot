@@ -15,6 +15,7 @@ import {
   channelKindOf,
   channelMention,
   channelText,
+  missingMention,
   missingText,
   roleMention,
   roleText,
@@ -3830,7 +3831,7 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
-<td>${s.pingRoleName ? roleMention(s.pingRoleName) : '<span class="muted">none</span>'}</td>
+<td>${s.pingRoleName ? (s.pingRoleName === s.pingRoleId ? missingMention(s.pingRoleName) : roleMention(s.pingRoleName)) : '<span class="muted">none</span>'}</td>
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
 <td class="actions">

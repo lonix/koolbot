@@ -331,7 +331,7 @@ function renderTiles(scan: ServerScan, sampled: boolean): string {
   <a class="kb-tile${r.ready ? "" : " kb-tile--warn"}" href="${BOT_PERMISSIONS_PAGE}">
     <div class="kb-tile__top"><span class="kb-overline">Readiness</span>${r.ready ? badge("Ready", "on") : badge("Not ready", "off")}</div>
     <div class="kb-tile__value">${r.ready ? "Ready" : plural(n, "blocker", "blockers")}</div>
-    <div class="kb-tile__detail">${escapeHtml(r.highestRoleName ?? "No KoolBot role")} is at position ${r.highestRolePosition} of ${r.roleCount}${r.administrator ? ", with Administrator" : ""}.</div>
+    <div class="kb-tile__detail">${r.highestRoleName ? roleMention(r.highestRoleName) : "No KoolBot role"} is at position ${r.highestRolePosition} of ${r.roleCount}${r.administrator ? ", with Administrator" : ""}.</div>
   </a>
   <a class="kb-tile" href="${escapeHtml(scanHref("roles", sampled))}">
     <div class="kb-tile__top"><span class="kb-overline">Roles</span></div>
@@ -509,7 +509,7 @@ function renderOverwrites(c: ScanChannel): string {
   return c.overwrites
     .map(
       (o) =>
-        `<div>${o.type === "role" && !o.label.startsWith("@") ? roleMention(o.label) : `<strong>${escapeHtml(o.label)}</strong>`} <span class="kb-muted">(${o.type})</span>${
+        `<div>${o.type === "role" && o.label === o.id ? missingMention(o.id) : o.type === "role" && !o.label.startsWith("@") ? roleMention(o.label) : `<strong>${escapeHtml(o.label)}</strong>`} <span class="kb-muted">(${o.type})</span>${
           o.allow.length
             ? ` ${badge("allow", "on")} ${escapeHtml(o.allow.join(", "))}`
             : ""
