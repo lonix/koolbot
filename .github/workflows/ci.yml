@@ -108,7 +108,7 @@ jobs:
 
       # Temporary measurement for #1501 (Jest worker "ran out of memory" on Node 22): runner
       # memory and the V8 heap limit before the run, per-suite worker heap during it, and the
-      # kernel OOM log after it. Removed or reduced once the cause is settled (evidence run 1).
+      # kernel OOM log after it. Removed or reduced once the cause is settled (evidence run 2).
       - name: Log runner memory (#1501)
         run: |
           nproc
