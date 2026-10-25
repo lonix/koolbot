@@ -181,6 +181,37 @@ const MISSING_PERMISSION_NOTICE: PermissionNotice = {
     },
   ],
 };
+/** The Moderation page's notice (#1488): the anti-raid alert channel and a moderation log channel. */
+const MODERATION_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [
+    {
+      feature: {
+        id: "log-moderation-review",
+        area: "Discord logging",
+        feature: "Moderation case review log channel",
+        effect: "",
+        fix: "",
+      },
+      target: { kind: "channel", id: "gone", name: "gone" },
+      note: "The configured channel could not be found.",
+    },
+  ],
+  missing: [
+    {
+      feature: {
+        id: "raid-alerts",
+        area: "Moderation",
+        feature: "Anti-raid alerts",
+        effect: "Raid alerts are not posted.",
+        fix: "",
+      },
+      permissions: ["Send Messages"],
+      target: { kind: "channel", id: "c1", name: "mod-alerts" },
+    },
+  ],
+};
 const UNAVAILABLE_PERMISSION_NOTICE: PermissionNotice = {
   unavailable: "The bot could not read this server from Discord.",
   stale: false,
@@ -1304,6 +1335,52 @@ export function adminPages(): A11yPage[] {
         guildId: "g1",
         guildName: "Test Guild",
         flash: FLASH,
+      }),
+    },
+    {
+      // The bot-permission notice at the top of two sections (#1487): welcome
+      // messages with a missing permission, the log channels with a check that
+      // could not run.
+      name: "Settings (permission notice: missing, unavailable)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "welcome",
+            rows: [
+              {
+                key: "welcome.enabled",
+                label: "Enable welcome messages",
+                current: true,
+                defaultValue: false,
+                type: "boolean",
+                description: "Greet new members in the welcome channel.",
+                category: "welcome",
+              },
+            ],
+          },
+          {
+            category: "core",
+            rows: [
+              {
+                key: "core.errors.enabled",
+                label: "Post errors to a channel",
+                current: true,
+                defaultValue: false,
+                type: "boolean",
+                description: "Post errors in the log channel.",
+                category: "core",
+              },
+            ],
+          },
+        ],
+        permissionNotices: {
+          welcome: MISSING_PERMISSION_NOTICE,
+          core: UNAVAILABLE_PERMISSION_NOTICE,
+        },
+        guildId: "g1",
+        guildName: "Test Guild",
       }),
     },
     {
@@ -3216,6 +3293,36 @@ export function adminPages(): A11yPage[] {
         total: 1,
         page: 1,
         pageSize: 50,
+      }),
+    },
+    {
+      name: "Moderation (missing bot permission notice)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        filters: { action: "", userId: "" },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        permissionNotice: MODERATION_MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Moderation (bot permission check unavailable)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        filters: { action: "", userId: "" },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
       }),
     },
     {

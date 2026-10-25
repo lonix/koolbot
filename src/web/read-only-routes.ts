@@ -28,7 +28,12 @@ import {
 } from "./event-presets-page.js";
 import { renderBotPermissionsPage } from "./bot-permissions-view.js";
 import { checkBotPermissions } from "../services/bot-permission-check.js";
-import { inAreas, loadPermissionNotice } from "./permission-notice.js";
+import {
+  inAreas,
+  inFeatures,
+  loadPermissionNotice,
+} from "./permission-notice.js";
+import { loadSettingsPermissionNotices } from "./settings-permission-notices.js";
 import {
   catalogNotice,
   enabledPresets,
@@ -1352,10 +1357,21 @@ export function createReadOnlyRouter(
         logger.debug("settings guild fetch failed", err);
       }
 
+      // One check for the whole page, split per section (#1487). Not while the
+      // stored config cannot be read: the forms are replaced by a notice then.
+      const permissionNotices = settingsUnavailable
+        ? undefined
+        : await loadSettingsPermissionNotices({
+            client,
+            guildId: common.guildId,
+            groups,
+          });
+
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
           settingsUnavailable,
+          permissionNotices,
           groups,
           textChannels,
           voiceChannels,
@@ -3006,6 +3022,19 @@ export function createReadOnlyRouter(
           ])
         : [0, []];
 
+      // Raid alerts and the moderation log channels only; the other log channels
+      // are covered where they are configured.
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inFeatures(
+          "raid-alerts",
+          "log-moderation",
+          "log-moderation-review",
+        ),
+      });
+
       const caseData = await loadModerationCaseData({
         caseService: ModerationCaseService.getInstance(client),
         moderationService,
@@ -3053,6 +3082,7 @@ export function createReadOnlyRouter(
         renderModerationPage({
           ...common,
           enabled,
+          permissionNotice,
           actionOptions: MODERATION_ACTIONS,
           userOptions,
           filters: {

@@ -461,6 +461,12 @@ export interface SettingsProps extends CommonProps {
    */
   invalidKeys?: string[];
   /**
+   * The bot-permission notice per section, keyed by category (#1487): shown at
+   * the top of the section's card, before the form. Only mapped sections with
+   * something to report have an entry.
+   */
+  permissionNotices?: Record<string, PermissionNotice>;
+  /**
    * The stored config could not be read. The per-section forms are replaced
    * by a notice: rendering them from schema defaults would let a save
    * overwrite the real stored values.
@@ -1698,6 +1704,15 @@ export function renderSettingsPage(props: SettingsProps): string {
       const descHtml = meta.description
         ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
         : "";
+      // The bot-permission notice of a mapped section (#1487), between the
+      // description and the form; nothing at all when there is none.
+      const noticeText = renderPermissionNotice(
+        props.permissionNotices?.[g.category] ?? null,
+        { canLinkToPage: true },
+      );
+      const noticeHtml = noticeText
+        ? `\n  <div class="kb-stack" style="margin-bottom: var(--space-3)">${noticeText}</div>`
+        : "";
       // One <form> per category. Save submits every row's value in one
       // atomic request; the per-row reset buttons submit the sibling reset
       // form for a single key (issue #433).
@@ -1705,7 +1720,7 @@ export function renderSettingsPage(props: SettingsProps): string {
       return `
 <div class="card card--savebar" id="section-${escapeHtml(g.category)}">
   <h2>${escapeHtml(meta.title)}</h2>
-  ${descHtml}
+  ${descHtml}${noticeHtml}
   ${renderSettingsForms({
     formId: `form-${g.category}`,
     saveAttrs: scopeAttr,
@@ -6214,6 +6229,8 @@ export interface ModerationRow {
 
 export interface ModerationProps extends CommonProps {
   enabled: boolean;
+  /** Bot permission notice for the raid alert and moderation log channels (#1488). */
+  permissionNotice?: PermissionNotice | null;
   /** All action types — populates the filter dropdown. */
   actionOptions: readonly ModerationAction[];
   /** Distinct target user IDs on the current page — populates the user filter. */
@@ -6418,6 +6435,10 @@ ${renderCaseGroup("Closed in the last 30 days", "No case was closed in the last 
 }
 
 export function renderModerationPage(props: ModerationProps): string {
+  const permissionNote = renderPermissionNotice(
+    props.permissionNotice ?? null,
+    { canLinkToPage: true },
+  );
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
   const page = Math.min(Math.max(1, props.page), totalPages);
 
@@ -6483,7 +6504,7 @@ ${renderStatusLine({
   onLabel: "Log on",
   offLabel: "Log off",
   chips: [{ text: `${countOf(props.total, "action")} matched` }],
-})}
+})}${permissionNote ? `\n${permissionNote}` : ""}
 <p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
 
 

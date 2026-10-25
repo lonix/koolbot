@@ -1477,12 +1477,35 @@ channel); the page does not check that, as it does not check lock-down permissio
 failure is never silent: the member is told something went wrong, and a close that cannot lock
 the channel is refused. Without a ticket category the channels are created at the top of the
 channel list, which needs Manage Channels server-wide; that case is shown as _Not checked_ for
-the category row, with a note. The channels of scheduled announcements and polls are
-stored on each schedule, not in a setting, so they are not checked here. Four of the posting
+the category row, with a note. Four of the posting
 channels are optional: the event announcement channel, the leaderboard announcement channel,
 the celebrations channel and the LFG channel (empty means the channel `/lfg` was run in, which
 cannot be checked). Left empty, the feature is treated as not in use: no note, and it does not
 stop the page from saying everything is in place. The matrix lists it as _(off)_ then.
+
+Scheduled announcements and polls are checked too (#1481). Their channel is stored on each
+schedule, not in a setting, so the page reads the enabled schedules of the server (one read per
+kind, kept for the same 30 seconds as the Discord read, and only while announcements or polls
+are switched on) and checks every channel they use, in that channel, with overwrites. A channel
+shared by several schedules is checked once. Both need a plain text channel. Scheduled
+announcements need View Channel and Send Messages. Embed Links is checked only in the channels
+of announcements that have an embed, and Mention @everyone, @here and All Roles only in the
+channels of announcements whose text pings `@everyone`, `@here` or a role that members cannot
+mention themselves (a role that is mentionable needs nothing). Scheduled polls need View
+Channel, Send Messages and Send Polls, and Mention @everyone, @here and All Roles only when
+the role to ping is not mentionable. Without View Channel, Send Messages, Send Polls or, for
+an announcement with an embed, Embed Links, the post fails: as a line in the bot's log for a
+scheduled run (a poll's last run is then not updated and nothing retries until the next
+time), and as an error on the Announcements page for Post now and Send once. Without the ping
+permission the message is still posted, but nobody is notified, and nothing says so. These
+effects are read from the code and Discord's documented permission model, not tried live. When no
+enabled schedule uses a permission, its entry is treated as not in use: no note, it does not
+stop the page from saying everything is in place, and the matrix lists it as _(off)_. A
+channel that is gone, is not a plain text channel (a voice, announcement or forum channel,
+or a thread) or whose pinged role cannot be found (when the bot lacks the ping permission and
+nothing else in that channel definitely needs it) is _Not checked_, never fine, and so is a
+schedule list that cannot be read from the database. Schedules that are switched off are not
+checked, and a placeholder that expands to a mention is not seen.
 
 - **Effective permissions.** A category or channel is checked with the bot's
   permissions _in that channel_, so an overwrite that denies a permission the bot's
@@ -1503,9 +1526,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
 - **All Discord permissions.** A folded card at the bottom of the page lists every Discord
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
-  _checked in the table above_, _used, not checked on this page_ (moderation actions, the
-  channels of scheduled announcements and polls, and the overwrite permissions of read-only channels,
-  each with what for), or _only needed if a Role group grants it_
+  _checked in the table above_, _used, not checked on this page_ (moderation actions and the
+  overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
@@ -1525,7 +1547,7 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
   with the feature, not only here: the **Events** page, the **host panel** of an event, the
-  **Voice Channels** page and the **Quotes** and **Notices** pages show a notice when the bot lacks a permission that feature needs:
+  **Voice Channels**, **Moderation**, **Quotes** and **Notices** pages show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
   check as this page (`src/web/permission-notice.ts`), so it costs no extra Discord
@@ -1541,9 +1563,17 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   itself finds in Discord rather than from stored ids; moves only with a group), checks the category the event really sits in (its
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
-  "ask a server admin" instead of the link, since this page is admin-only. The other features
-  (moderation, reaction roles, leaderboard roles, the logging channels and so on) are not
-  wired to the notice yet.
+  "ask a server admin" instead of the link, since this page is admin-only. The **Quotes** and
+  **Notices** pages (#1489) show the notice for their own channel only. The reaction roles, role groups, leaderboard roles, Birthdays and Rules
+  pages are not wired to the notice yet. The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
+  (those log channels also show in the **Core** section of All settings, below).
+- **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
+  stats announcements and the Discord log channels have no page of their own, so **All settings**
+  shows the same notice at the top of their sections, before the form: **Celebrations**, **Welcome**,
+  **LFG**, **Voice tracking** (the weekly announcement sections) and **Core** (the log channels). It
+  follows the rules above, with one check for the whole page, and a log channel whose own switch or
+  producing feature is off shows nothing. The table that maps a section to the registry areas it shows
+  is `SETTINGS_NOTICE_AREAS` in `src/web/settings-permission-notices.ts`; no other section shows a notice.
 - **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
   applies new permission bits to the bot's existing role) and a "Show all Discord
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
@@ -3240,6 +3270,9 @@ table without querying the moderation log. A **Settings** card on the page edits
 (`core.moderation.enabled` / `core.moderation.channel_id`, which also stay in the
 Core section of Settings); saving returns to the page with a flash message, and
 unticking `moderation.enabled` writes only that flag so the other values are kept.
+Under the status line, a notice (the same one as on Events and Voice Channels, see **Bot permissions**) names any permission the bot lacks
+in the anti-raid alert channel and the moderation and moderation case review log channels, only for a feature that is switched on with its channel set. When the
+check cannot run it says "could not be checked" with the reason, and it is never shown to say all is well.
 
 The same Settings card holds the **anti-raid** keys (`moderation.raid.*`, #1045): the master switch, the **dry
 run** switch, the join threshold and window, the lockdown and new-account actions, the minimum account age, the

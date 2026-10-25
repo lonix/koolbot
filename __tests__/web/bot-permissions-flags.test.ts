@@ -112,14 +112,12 @@ describe("flag classification", () => {
       "ManageMessages",
       "PinMessages",
       "AttachFiles",
+      "MentionEveryone",
+      "SendPolls",
     ]) {
       expect(byKey.get(key)).toBe("checked");
     }
-    for (const key of [
-      "BanMembers",
-      "KickMembers",
-      "ModerateMembers",
-    ]) {
+    for (const key of ["BanMembers", "KickMembers", "ModerateMembers"]) {
       expect(byKey.get(key)).toBe("used");
     }
     // The channel lock-downs set these in overwrites; the page no longer checks them.
@@ -130,7 +128,7 @@ describe("flag classification", () => {
     ]) {
       expect(byKey.get(key)).toBe("used");
     }
-    for (const key of ["MentionEveryone", "SendPolls", "ManageGuild"]) {
+    for (const key of ["ManageGuild"]) {
       expect(byKey.get(key)).toBe("used");
     }
     expect(byKey.get("CreateInstantInvite")).toBe("grant-only");

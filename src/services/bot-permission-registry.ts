@@ -81,6 +81,20 @@ export interface FeatureRequirement {
    */
   targetOptional?: boolean;
   /**
+   * The channels are not in a setting: each schedule row in Mongo names its own
+   * (#1481), so there is no `targetKey`. `announcements`: the enabled scheduled
+   * announcements; `polls`: the enabled poll schedules. The entry is checked once
+   * per distinct channel of the rows it applies to (see `scheduleWhen`), only
+   * while its `enabledKey` is on, and it is not in use when no row applies.
+   */
+  schedules?: "announcements" | "polls";
+  /**
+   * Which of the rows of `schedules` the entry applies to. Absent: every row.
+   * `embed`: rows that send an embed. `mentions`: rows whose text pings
+   * `@everyone`, `@here` or a role members cannot mention themselves.
+   */
+  scheduleWhen?: "embed" | "mentions";
+  /**
    * A channel that is not a plain setting. `voice-lobby`: the lobby by id, or
    * by name in the managed category, as the voice service finds it.
    */
@@ -98,6 +112,11 @@ export const PERM = {
     name: "Send Messages",
   },
   embedLinks: { bit: PermissionFlagsBits.EmbedLinks, name: "Embed Links" },
+  mentionEveryone: {
+    bit: PermissionFlagsBits.MentionEveryone,
+    name: "Mention @everyone, @here and All Roles",
+  },
+  sendPolls: { bit: PermissionFlagsBits.SendPolls, name: "Send Polls" },
   addReactions: {
     bit: PermissionFlagsBits.AddReactions,
     name: "Add Reactions",
@@ -158,9 +177,11 @@ export const PERMISSION_ORDER: readonly (keyof typeof PERM)[] = [
   "embedLinks",
   "attachFiles",
   "addReactions",
+  "mentionEveryone",
   "manageMessages",
   "pinMessages",
   "readHistory",
+  "sendPolls",
   "connect",
   "speak",
   "moveMembers",
@@ -443,6 +464,87 @@ const postingRequirements: FeatureRequirement[] = [
     effect:
       "Raid alerts are not posted. A failed send is logged in the bot's log; a channel that is not a text channel is skipped with no message at all.",
     fix: "Give the bot's role View Channel and Send Messages, and make sure the alert channel does not deny them.",
+  },
+];
+
+/**
+ * Scheduled announcements and polls (#1481). Their channel is stored on each
+ * schedule row in Mongo, not in a setting, so each entry names a `schedules`
+ * source instead of a `targetKey` and is checked once per channel the rows use.
+ * What each one needs is what the service calls (`channel.send`): both accept a
+ * plain text channel only (`instanceof TextChannel`). The permissions that only
+ * some rows need are separate entries (`scheduleWhen`), so a channel is asked for
+ * Embed Links or Mention Everyone only when a row there really uses it, and the
+ * matrix never shows a "Has" for something nothing needs.
+ */
+const scheduleRequirements: FeatureRequirement[] = [
+  {
+    id: "announcements-post",
+    area: "Announcements",
+    feature: "Posting scheduled announcements",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages],
+    enabledKey: "announcements.enabled",
+    schedules: "announcements",
+    effect:
+      "Scheduled announcements are not posted in this channel. A scheduled run logs the error in the bot's log only; Post now and Send once show it.",
+    fix: "Give the bot's role View Channel and Send Messages, and make sure the channel does not deny them.",
+  },
+  {
+    id: "announcements-embed",
+    area: "Announcements",
+    feature: "Embeds in scheduled announcements",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.embedLinks],
+    enabledKey: "announcements.enabled",
+    schedules: "announcements",
+    scheduleWhen: "embed",
+    effect:
+      "Scheduled announcements with an embed are not posted in this channel. A scheduled run logs the error in the bot's log only; Post now and Send once show it.",
+    fix: "Give the bot's role Embed Links, and make sure the channel does not deny it.",
+  },
+  {
+    id: "announcements-mentions",
+    area: "Announcements",
+    feature: "Pings in scheduled announcements",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.mentionEveryone],
+    enabledKey: "announcements.enabled",
+    schedules: "announcements",
+    scheduleWhen: "mentions",
+    effect:
+      "The announcement is still posted, but an @everyone, an @here or a role that members cannot mention themselves does not notify anyone. Nothing tells you.",
+    fix: "Give the bot's role Mention @everyone, @here and All Roles, and make sure the channel does not deny it. Or make the role mentionable.",
+  },
+  {
+    id: "polls-post",
+    area: "Polls",
+    feature: "Posting scheduled polls",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.viewChannel, PERM.sendMessages, PERM.sendPolls],
+    enabledKey: "polls.enabled",
+    schedules: "polls",
+    effect:
+      "Scheduled polls are not posted in this channel. The error is logged in the bot's log only, the schedule's last run is not updated, and nothing retries until the next scheduled time.",
+    fix: "Give the bot's role View Channel, Send Messages and Send Polls, and make sure the channel does not deny them.",
+  },
+  {
+    id: "polls-mentions",
+    area: "Polls",
+    feature: "Role ping on scheduled polls",
+    scope: "channel",
+    targetType: "guild-text",
+    needs: [PERM.mentionEveryone],
+    enabledKey: "polls.enabled",
+    schedules: "polls",
+    scheduleWhen: "mentions",
+    effect:
+      "The poll is still posted, but the role to ping is not notified. Nothing tells you.",
+    fix: "Give the bot's role Mention @everyone, @here and All Roles, and make sure the channel does not deny it. Or make the role mentionable.",
   },
 ];
 
@@ -822,6 +924,7 @@ export const FEATURE_REQUIREMENTS: readonly FeatureRequirement[] = [
   ...postingRequirements,
   ...morePostingRequirements,
   ...ticketRequirements,
+  ...scheduleRequirements,
 ];
 
 /**

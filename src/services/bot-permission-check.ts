@@ -19,6 +19,11 @@
  * read. When Discord cannot be reached the gateway cache is used and the
  * report says so (`fresh: false`); when even that is missing a feature is
  * `unknown`, which the UI never shows as fine.
+ *
+ * Scheduled announcements and polls keep their channel on each Mongo row, not in
+ * a setting (#1481): while the feature is on, `CheckDeps.scheduleRows` reads the
+ * enabled rows (cached for the same time) and each distinct channel is checked in
+ * its own channel.
  */
 
 import {
@@ -40,6 +45,11 @@ import {
   type RoleHierarchyRequirement,
 } from "./bot-permission-registry.js";
 import { setPermissionIssueCount } from "./bot-permission-status.js";
+import {
+  readScheduleRows,
+  type ScheduleRow,
+  type ScheduleSource,
+} from "./schedule-posting-rows.js";
 import logger from "../utils/logger.js";
 
 /** A re-read of the server is reused for this long (a constant, not a setting: it only bounds Discord traffic). */
@@ -148,6 +158,16 @@ export interface CheckDeps {
   roleGroupCount?: (guildId: string) => Promise<number>;
   now?: () => number;
   /**
+   * The enabled scheduled announcements or poll schedules of a server (#1481):
+   * their channel is stored on each row, not in a setting. Called only while the
+   * feature is on, and its answer is kept with the Discord read for
+   * `SNAPSHOT_TTL_MS`. A rejection makes those entries `unknown`.
+   */
+  scheduleRows?: (
+    guildId: string,
+    source: ScheduleSource,
+  ) => Promise<ScheduleRow[]>;
+  /**
    * Where one event's channels really are (the event host panel, #1467). The
    * check reads it from the same snapshot it checks against, so what exists and
    * what a channel's category is are never taken from a staler view than the
@@ -203,9 +223,87 @@ const snapshots = new Map<
   }
 >();
 
+/** The schedule rows of one server and source, kept for the same time as the Discord read. */
+const scheduleReads = new Map<
+  string,
+  { settledAt: number | null; promise: Promise<ScheduleRow[]> }
+>();
+
 /** Test hook: forget every cached read. */
 export function resetBotPermissionCache(): void {
   snapshots.clear();
+  scheduleReads.clear();
+}
+
+/** One read of the schedule rows per server and source, shared while it runs and reused for the TTL. */
+function getScheduleRows(
+  guildId: string,
+  source: ScheduleSource,
+  deps: CheckDeps,
+): Promise<ScheduleRow[]> {
+  const now = (deps.now ?? Date.now)();
+  const key = `${guildId}|${source}`;
+  const cached = scheduleReads.get(key);
+  if (
+    cached &&
+    (cached.settledAt === null || now - cached.settledAt < SNAPSHOT_TTL_MS)
+  ) {
+    return cached.promise;
+  }
+  const entry: { settledAt: number | null; promise: Promise<ScheduleRow[]> } = {
+    settledAt: null,
+    promise: (deps.scheduleRows ?? readScheduleRows)(guildId, source).finally(
+      () => {
+        entry.settledAt = (deps.now ?? Date.now)();
+      },
+    ),
+  };
+  scheduleReads.set(key, entry);
+  return entry.promise;
+}
+
+/**
+ * The channels a schedule entry is checked in: the distinct channels of the
+ * rows it applies to. `unreadableRole` is set for a channel where a pinged role
+ * could not be found in the server's roles and nothing else in that channel
+ * definitely needs Mention Everyone, so whether it is needed is not known.
+ */
+function scheduleChannels(
+  r: Pick<FeatureRequirement, "scheduleWhen">,
+  rows: readonly ScheduleRow[],
+  roles: Lookup<Role>,
+): { channelId: string; unreadableRole: boolean }[] {
+  // Per channel: whether a ping definitely needs the permission (@everyone,
+  // @here or a role known to be unmentionable), and whether a pinged role was
+  // not found. The second only matters when the first is false.
+  const byChannel = new Map<string, { definite: boolean; unread: boolean }>();
+  for (const row of rows) {
+    if (!row.channelId) continue;
+    let definite = true;
+    let unread = false;
+    if (r.scheduleWhen === "embed") definite = row.embed;
+    if (r.scheduleWhen === "mentions") {
+      definite = row.everyone;
+      for (const id of row.roleIds) {
+        const role = roles?.get(id);
+        if (!role) unread = true;
+        else if (!role.mentionable) definite = true;
+      }
+    }
+    if (!definite && !unread) continue;
+    const seen = byChannel.get(row.channelId) ?? {
+      definite: false,
+      unread: false,
+    };
+    byChannel.set(row.channelId, {
+      definite: seen.definite || definite,
+      unread: seen.unread || unread,
+    });
+  }
+  return [...byChannel].map(([channelId, v]) => ({
+    channelId,
+    unreadableRole: v.unread && !v.definite,
+  }));
 }
 
 async function defaultCall<T>(
@@ -548,7 +646,67 @@ export async function checkBotPermissions(
         }
         continue;
       }
-      if (r.scope !== "guild" && !targetId) {
+      // Where this entry is checked: its one configured channel, or for a
+      // schedule entry each channel its rows use (#1481).
+      let units: { id: string; unreadableRole: boolean }[] = [
+        { id: targetId, unreadableRole: false },
+      ];
+      if (r.schedules) {
+        const source = r.schedules;
+        const off = (): void => {
+          checks.push({
+            feature: ref(r),
+            kind: "permission",
+            enabled: false,
+            outcome: "unchecked",
+            target: null,
+            missing: [],
+          });
+        };
+        // Nothing is read while the feature is off.
+        if (!inUse) {
+          off();
+          continue;
+        }
+        let rows: ScheduleRow[];
+        try {
+          rows = await getScheduleRows(guildId, source, deps);
+        } catch (err) {
+          logger.warn("Bot permission check: schedules unreadable:", err);
+          const target: PermissionTarget = {
+            kind: "channel",
+            id: null,
+            name: `the ${source === "polls" ? "poll" : "announcement"} schedules`,
+          };
+          checks.push({
+            feature: ref(r),
+            kind: "permission",
+            enabled: true,
+            outcome: "unknown",
+            target,
+            missing: [],
+          });
+          unknown.push({
+            feature: ref(r),
+            target,
+            note: "The schedules could not be read, so their channels could not be checked.",
+          });
+          continue;
+        }
+        const channels = scheduleChannels(r, rows, snapshot.roles);
+        // No schedule (or none this entry applies to): nothing posts, so the
+        // entry is not in use, with no note.
+        if (channels.length === 0) {
+          off();
+          continue;
+        }
+        units = channels.map((c) => ({
+          id: c.channelId,
+          unreadableRole: c.unreadableRole,
+        }));
+      }
+      let entryOk = true;
+      if (r.scope !== "guild" && !targetId && !r.schedules) {
         // An optional channel left empty on purpose: nothing posts, so the
         // feature is not in use (no "not set" note, no "not checked" verdict).
         const optionalEmpty = r.targetOptional === true;
@@ -564,86 +722,100 @@ export async function checkBotPermissions(
         if (inUse && !optionalEmpty && !notes.includes(note)) notes.push(note);
         continue;
       }
-      let target: PermissionTarget = SERVER;
-      let channel: GuildBasedChannel | null = null;
-      if (r.scope !== "guild") {
-        channel = snapshot.channels?.get(targetId) ?? null;
-        target = {
-          kind: r.scope,
-          id: targetId,
-          name: channel?.name ?? targetId,
-          ...(channel ? { channelType: channel.type } : {}),
-        };
-      }
-      const feature = ref(r);
-      let missing: string[] | null = null;
-      let why = "";
-      if (!me) {
-        why = "The bot's own membership could not be read.";
-      } else if (r.scope !== "guild" && !channel) {
-        why = `The configured ${r.scope} could not be found.`;
-      } else if (
-        r.scope === "category" &&
-        channel?.type !== ChannelType.GuildCategory
-      ) {
-        // The services only accept a real category here (a text or voice
-        // channel id is ignored), so it cannot be reported as in place.
-        why = "The configured channel is not a category.";
-      } else if (
-        r.targetType &&
-        !isPostingChannel(channel?.type, r.targetType)
-      ) {
-        // Another kind of channel (a category, a forum, a thread) cannot be
-        // reported as in place.
-        why =
-          channel?.type === ChannelType.PublicThread ||
-          channel?.type === ChannelType.PrivateThread ||
-          channel?.type === ChannelType.AnnouncementThread
-            ? "The configured channel is a thread. This page checks text, announcement, voice and stage channels, not threads."
-            : "The configured channel is not a text channel.";
-      } else {
-        try {
-          const perms =
-            r.scope === "guild" || !channel
-              ? me.permissions
-              : me.permissionsIn(channel);
-          missing = missingNeeds(r, (bit) => perms.has(bit));
-        } catch (err) {
-          logger.warn("Bot permission check: permissions unreadable:", err);
-          why = "The bot's permissions could not be read.";
+      for (const unit of units) {
+        const unitId = unit.id;
+        let target: PermissionTarget = SERVER;
+        let channel: GuildBasedChannel | null = null;
+        if (r.scope !== "guild") {
+          channel = snapshot.channels?.get(unitId) ?? null;
+          target = {
+            kind: r.scope,
+            id: unitId,
+            name: channel?.name ?? unitId,
+            ...(channel ? { channelType: channel.type } : {}),
+          };
+        }
+        const feature = ref(r);
+        let missing: string[] | null = null;
+        let why = "";
+        if (!me) {
+          why = "The bot's own membership could not be read.";
+        } else if (r.scope !== "guild" && !channel) {
+          why = `The configured ${r.scope} could not be found.`;
+        } else if (
+          r.scope === "category" &&
+          channel?.type !== ChannelType.GuildCategory
+        ) {
+          // The services only accept a real category here (a text or voice
+          // channel id is ignored), so it cannot be reported as in place.
+          why = "The configured channel is not a category.";
+        } else if (
+          r.targetType &&
+          !isPostingChannel(channel?.type, r.targetType)
+        ) {
+          // Another kind of channel (a category, a forum, a thread) cannot be
+          // reported as in place.
+          why =
+            channel?.type === ChannelType.PublicThread ||
+            channel?.type === ChannelType.PrivateThread ||
+            channel?.type === ChannelType.AnnouncementThread
+              ? "The configured channel is a thread. This page checks text, announcement, voice and stage channels, not threads."
+              : "The configured channel is not a text channel.";
+        } else {
+          try {
+            const perms =
+              r.scope === "guild" || !channel
+                ? me.permissions
+                : me.permissionsIn(channel);
+            missing = missingNeeds(r, (bit) => perms.has(bit));
+          } catch (err) {
+            logger.warn("Bot permission check: permissions unreadable:", err);
+            why = "The bot's permissions could not be read.";
+          }
+        }
+        if (missing !== null && missing.length > 0 && unit.unreadableRole) {
+          // Whether a ping needs this permission depends on a role that is gone.
+          missing = null;
+          why =
+            "A role this schedule pings could not be found, so whether the ping needs this permission is not known.";
+        }
+        checks.push({
+          feature,
+          kind: "permission",
+          enabled: inUse,
+          outcome:
+            missing === null
+              ? "unknown"
+              : missing.length === 0
+                ? "ok"
+                : "missing",
+          target,
+          missing: missing ?? [],
+        });
+        if (missing === null) {
+          entryOk = false;
+          if (inUse) unknown.push({ feature, target, note: why });
+          continue;
+        }
+        if (missing.length === 0) continue;
+        entryOk = false;
+        if (!inUse) {
+          quiet.push({ feature, target, missing });
+          continue;
+        }
+        for (const permission of missing) {
+          const key = `${permission}|${target.kind}|${target.id ?? ""}`;
+          const entry = problems.get(key) ?? {
+            permission,
+            target,
+            features: [],
+          };
+          entry.features.push(feature);
+          problems.set(key, entry);
         }
       }
-      checks.push({
-        feature,
-        kind: "permission",
-        enabled: inUse,
-        outcome:
-          missing === null
-            ? "unknown"
-            : missing.length === 0
-              ? "ok"
-              : "missing",
-        target,
-        missing: missing ?? [],
-      });
-      if (missing === null) {
-        if (inUse) unknown.push({ feature, target, note: why });
-        continue;
-      }
-      if (missing.length === 0) {
-        if (inUse) okFeatures.push(feature);
-        continue;
-      }
-      if (!inUse) {
-        quiet.push({ feature, target, missing });
-        continue;
-      }
-      for (const permission of missing) {
-        const key = `${permission}|${target.kind}|${target.id ?? ""}`;
-        const entry = problems.get(key) ?? { permission, target, features: [] };
-        entry.features.push(feature);
-        problems.set(key, entry);
-      }
+      // One line per entry, however many channels it was checked in.
+      if (inUse && entryOk) okFeatures.push(ref(r));
     }
 
     // Roles the bot must be able to hand out sit below its highest role.
