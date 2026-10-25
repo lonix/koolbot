@@ -28,7 +28,11 @@ import {
 } from "./event-presets-page.js";
 import { renderBotPermissionsPage } from "./bot-permissions-view.js";
 import { checkBotPermissions } from "../services/bot-permission-check.js";
-import { inAreas, loadPermissionNotice } from "./permission-notice.js";
+import {
+  inAreas,
+  inFeatures,
+  loadPermissionNotice,
+} from "./permission-notice.js";
 import { loadSettingsPermissionNotices } from "./settings-permission-notices.js";
 import {
   catalogNotice,
@@ -3002,6 +3006,19 @@ export function createReadOnlyRouter(
           ])
         : [0, []];
 
+      // Raid alerts and the moderation log channels only; the other log channels
+      // are covered where they are configured.
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inFeatures(
+          "raid-alerts",
+          "log-moderation",
+          "log-moderation-review",
+        ),
+      });
+
       const caseData = await loadModerationCaseData({
         caseService: ModerationCaseService.getInstance(client),
         moderationService,
@@ -3049,6 +3066,7 @@ export function createReadOnlyRouter(
         renderModerationPage({
           ...common,
           enabled,
+          permissionNotice,
           actionOptions: MODERATION_ACTIONS,
           userOptions,
           filters: {

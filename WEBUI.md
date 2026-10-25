@@ -1536,8 +1536,8 @@ checked, and a placeholder that expands to a mention is not seen.
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
-  with the feature, not only here: the **Events** page, the **host panel** of an event and the
-  **Voice Channels** page show a notice when the bot lacks a permission that feature needs:
+  with the feature, not only here: the **Events** page, the **host panel** of an event, the
+  **Voice Channels** page and the **Moderation** page show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
   check as this page (`src/web/permission-notice.ts`), so it costs no extra Discord
@@ -1554,8 +1554,9 @@ checked, and a placeholder that expands to a mention is not seen.
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The other features
-  (moderation, reaction roles, leaderboard roles and so on) are not
-  wired to the notice yet.
+  (reaction roles, leaderboard roles and so on) are not
+  wired to the notice yet. The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
+  (those log channels also show in the **Core** section of All settings, below).
 - **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
   stats announcements and the Discord log channels have no page of their own, so **All settings**
   shows the same notice at the top of their sections, before the form: **Celebrations**, **Welcome**,
@@ -3259,6 +3260,9 @@ table without querying the moderation log. A **Settings** card on the page edits
 (`core.moderation.enabled` / `core.moderation.channel_id`, which also stay in the
 Core section of Settings); saving returns to the page with a flash message, and
 unticking `moderation.enabled` writes only that flag so the other values are kept.
+Under the status line, a notice (the same one as on Events and Voice Channels, see **Bot permissions**) names any permission the bot lacks
+in the anti-raid alert channel and the moderation and moderation case review log channels, only for a feature that is switched on with its channel set. When the
+check cannot run it says "could not be checked" with the reason, and it is never shown to say all is well.
 
 The same Settings card holds the **anti-raid** keys (`moderation.raid.*`, #1045): the master switch, the **dry
 run** switch, the join threshold and window, the lockdown and new-account actions, the minimum account age, the

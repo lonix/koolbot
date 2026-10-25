@@ -6225,6 +6225,8 @@ export interface ModerationRow {
 
 export interface ModerationProps extends CommonProps {
   enabled: boolean;
+  /** Bot permission notice for the raid alert and moderation log channels (#1488). */
+  permissionNotice?: PermissionNotice | null;
   /** All action types — populates the filter dropdown. */
   actionOptions: readonly ModerationAction[];
   /** Distinct target user IDs on the current page — populates the user filter. */
@@ -6429,6 +6431,10 @@ ${renderCaseGroup("Closed in the last 30 days", "No case was closed in the last 
 }
 
 export function renderModerationPage(props: ModerationProps): string {
+  const permissionNote = renderPermissionNotice(
+    props.permissionNotice ?? null,
+    { canLinkToPage: true },
+  );
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
   const page = Math.min(Math.max(1, props.page), totalPages);
 
@@ -6494,7 +6500,7 @@ ${renderStatusLine({
   onLabel: "Log on",
   offLabel: "Log off",
   chips: [{ text: `${countOf(props.total, "action")} matched` }],
-})}
+})}${permissionNote ? `\n${permissionNote}` : ""}
 <p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
 
 
