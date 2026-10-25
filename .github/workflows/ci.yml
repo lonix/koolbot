@@ -106,8 +106,23 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # Temporary measurement for #1501 (Jest worker "ran out of memory" on Node 22): runner
+      # memory and the V8 heap limit before the run, per-suite worker heap during it, and the
+      # kernel OOM log after it. Removed or reduced once the cause is settled.
+      - name: Log runner memory (#1501)
+        run: |
+          nproc
+          free -m
+          node -p "const v8=require('v8');'node '+process.version+' heap_size_limit_mb='+Math.round(v8.getHeapStatistics().heap_size_limit/1048576)"
+
       - name: Run tests
-        run: npm run test:ci
+        run: npm run test:ci -- --logHeapUsage
+
+      - name: Log memory after tests (#1501)
+        if: always()
+        run: |
+          free -m
+          (sudo dmesg 2>/dev/null | grep -iE 'out of memory|oom|killed process' | tail -n 20) || echo "no kernel OOM lines readable"
 
       # Jest's coverageThreshold only catches coverage falling; this catches the
       # floors falling behind actual coverage and going stale (#848). Also writes
