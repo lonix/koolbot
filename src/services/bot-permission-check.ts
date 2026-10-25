@@ -184,6 +184,12 @@ export interface EventPlacement {
   categoryId?: string | null;
   /** Further recorded channels (groups, the leaders-only lobby) whose existence matters. */
   channelIds?: readonly string[];
+  /**
+   * The channel this event's announcement was posted in (`event.announcementChannelId`).
+   * Editing the event updates the post there, whatever `events.announcement_channel_id`
+   * says now, so the announcement entry is checked in this channel.
+   */
+  announcementChannelId?: string | null;
 }
 
 /** What `eventPlacement` found in the snapshot. */
@@ -626,6 +632,13 @@ export async function checkBotPermissions(
         // channels really are, when it was asked about one.
         if (placement?.categoryId && r.targetKey === "events.category_id") {
           targetId = placement.categoryId;
+        }
+        // The announcement entry: the channel this event's post is really in.
+        if (
+          deps.eventPlacement?.announcementChannelId &&
+          r.targetKey === "events.announcement_channel_id"
+        ) {
+          targetId = deps.eventPlacement.announcementChannelId;
         }
       }
       if (lobbyMissing) {

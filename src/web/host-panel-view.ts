@@ -392,6 +392,29 @@ export function hostPanelPermissionFeatures(
   return ids;
 }
 
+/**
+ * The registry entries (#1478) the edit form can be affected by. Saving a
+ * change updates the Discord Events list card (not for an adopted event or one
+ * whose sync is paused, as on the panel) and the announcement post (only when
+ * the event has one, in the channel it is stored in), so those two; the
+ * channels are not touched by an edit. A finished event has nothing left to change.
+ */
+export function hostEditPermissionFeatures(
+  e: HostPanelEvent,
+  /** The event has an announcement post (`announcementChannelId` and `announcementMessageId` stored); an edit only updates a post that exists. */
+  announced: boolean,
+): string[] {
+  if (e.state === "ended" || e.state === "cancelled") return [];
+  const ids = announced ? ["events-announce"] : [];
+  if (
+    !e.adopted &&
+    !nativeSyncPaused({ state: e.state, nativeDetached: e.nativeDetached })
+  ) {
+    ids.unshift("event-native");
+  }
+  return ids;
+}
+
 /** The recorded warning texts this panel shows, so the notice does not say them twice. */
 export function hostPanelShownWarnings(e: HostPanelEvent): string[] {
   return [...(e.groupNotices ?? []), ...(e.tagNotices ?? [])];

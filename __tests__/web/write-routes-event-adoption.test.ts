@@ -41,6 +41,49 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+// The bot permission check (#1478): the page hands the view the notice built from it.
+const actualCheck = await import("../../src/services/bot-permission-check.js");
+const registry = await import("../../src/services/bot-permission-registry.js");
+const mockCheck = jest.fn<(...a: any[]) => Promise<any>>();
+jest.unstable_mockModule("../../src/services/bot-permission-check.js", () => ({
+  ...actualCheck,
+  checkBotPermissions: mockCheck,
+}));
+const featureRef = (id: string) => {
+  const r = registry.FEATURE_REQUIREMENTS.find((x) => x.id === id);
+  if (!r) throw new Error(id);
+  return {
+    id: r.id,
+    area: r.area,
+    feature: r.feature,
+    effect: r.effect,
+    fix: r.fix,
+  };
+};
+const checkReport = (
+  checks: unknown[],
+  over: Record<string, unknown> = {},
+) => ({
+  available: true,
+  reason: null,
+  fresh: true,
+  problems: [],
+  unknown: [],
+  quiet: [],
+  okFeatures: [],
+  notes: [],
+  checks,
+  ...over,
+});
+const finding = (id: string, outcome: "missing" | "ok") => ({
+  feature: featureRef(id),
+  kind: "permission",
+  enabled: true,
+  outcome,
+  target: { kind: "category", id: "c1", name: "Events" },
+  missing: outcome === "missing" ? ["Manage Channels"] : [],
+});
+
 const mockPlan = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/services/event-adoption.js", () => ({
   planEventAdoption: mockPlan,
@@ -113,6 +156,72 @@ describe("parseEventIds", () => {
     ]);
     expect(parseEventIds({ ev: "987654321" })).toEqual(["987654321"]);
     expect(parseEventIds({})).toEqual([]);
+  });
+});
+
+describe("GET /adopt/events bot permission notice (#1478)", () => {
+  const noticeOf = () => mockRender.mock.calls[0][0].permissionNotice;
+
+  beforeEach(() => {
+    mockPlan.mockResolvedValue(planned({ eventsEnabled: true }));
+    mockCheck.mockResolvedValue(checkReport([]));
+  });
+
+  it("hands the view what the bot lacks for the announcement and the temporary channel", async () => {
+    mockCheck.mockResolvedValue(
+      checkReport([
+        finding("event-channels", "missing"),
+        finding("events-announce", "ok"),
+        // An entry adopting does not use is left out.
+        finding("event-moves", "missing"),
+      ]),
+    );
+    await mount();
+    await harness.get("/adopt/events");
+    expect(noticeOf()).toMatchObject({
+      unavailable: null,
+      missing: [
+        { feature: { id: "event-channels" }, permissions: ["Manage Channels"] },
+      ],
+      unchecked: [],
+    });
+    expect(mockCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the view nothing when the permissions are in place", async () => {
+    mockCheck.mockResolvedValue(checkReport([finding("event-channels", "ok")]));
+    await mount();
+    await harness.get("/adopt/events");
+    expect(noticeOf()).toBeNull();
+  });
+
+  it("says the check could not run, rather than staying quiet", async () => {
+    mockCheck.mockResolvedValue(
+      checkReport([], {
+        available: false,
+        reason: "The bot is not connected.",
+      }),
+    );
+    await mount();
+    await harness.get("/adopt/events");
+    expect(noticeOf()).toMatchObject({
+      unavailable: "The bot is not connected.",
+    });
+  });
+
+  it("does not run the check while Events is off", async () => {
+    mockPlan.mockResolvedValue(planned({ eventsEnabled: false }));
+    await mount();
+    await harness.get("/adopt/events");
+    expect(noticeOf()).toBeNull();
+    expect(mockCheck).not.toHaveBeenCalled();
+  });
+
+  it("does not run the check when the server could not be read", async () => {
+    await mount(makeClient({ fetchFails: true }));
+    await harness.get("/adopt/events");
+    expect(noticeOf()).toBeNull();
+    expect(mockCheck).not.toHaveBeenCalled();
   });
 });
 

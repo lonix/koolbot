@@ -80,6 +80,7 @@ import {
   isEventRunning,
 } from "../host-panel-shared.js";
 import {
+  hostEditPermissionFeatures,
   hostPanelPermissionFeatures,
   hostPanelShownWarnings,
   renderHostPanelBody,
@@ -1567,10 +1568,18 @@ async function hostPermissionNotice(
   client: Client,
   guildId: string,
   panelEvent: HostPanelEvent,
-  event: Pick<IEvent, "categoryId">,
+  event: Pick<
+    IEvent,
+    "categoryId" | "announcementChannelId" | "announcementMessageId"
+  >,
+  /** The registry entries the page uses; the panel's own choice by default. */
+  featuresOf: (
+    e: HostPanelEvent,
+    present?: Readonly<Record<string, boolean>>,
+  ) => string[] = hostPanelPermissionFeatures,
 ): Promise<PermissionNotice | null> {
   // Nothing to say for a finished event; the full choice needs the check.
-  if (hostPanelPermissionFeatures(panelEvent).length === 0) return null;
+  if (featuresOf(panelEvent).length === 0) return null;
   const enabled = await ConfigService.getInstance()
     .getBoolean("events.enabled", false)
     .catch(() => false);
@@ -1585,16 +1594,17 @@ async function hostPermissionNotice(
     eventPlacement: {
       mainChannelId: recorded?.main ?? null,
       categoryId: event.categoryId,
+      // Where the post really is (an edit updates it there), not where the
+      // setting points now.
+      announcementChannelId: event.announcementChannelId ?? null,
       channelIds: [
         ...(recorded?.groups ?? []),
         ...(recorded?.lobby ?? []),
       ].filter((id): id is string => !!id),
     },
-    filter: inFeatures(...hostPanelPermissionFeatures(panelEvent)),
+    filter: inFeatures(...featuresOf(panelEvent)),
     filterFromReport: (report) =>
-      inFeatures(
-        ...hostPanelPermissionFeatures(panelEvent, report.placement?.present),
-      ),
+      inFeatures(...featuresOf(panelEvent, report.placement?.present)),
     shownWarnings: hostPanelShownWarnings(panelEvent),
   });
 }
@@ -1675,6 +1685,17 @@ function registerEditRoutes(router: Router, client: Client): void {
       const startLocked =
         mode.mode === "full" && !(await service().startMayMove(event));
       const flags = await readMeSurfaceFlags();
+      const permissionNotice = await hostPermissionNotice(
+        client,
+        event.guildId,
+        toPanelEvent(client, event),
+        event,
+        (e) =>
+          hostEditPermissionFeatures(
+            e,
+            !!event.announcementChannelId && !!event.announcementMessageId,
+          ),
+      );
       res
         .set("Cache-Control", "no-store")
         .type("text/html")
@@ -1683,6 +1704,8 @@ function registerEditRoutes(router: Router, client: Client): void {
             title: `Edit event: ${event.title}`,
             active: "/me/events",
             body: renderEventEditBody({
+              permissionNotice,
+              canLinkToPermissions: session.role === "admin",
               cover: coverViewOf(event),
               ...(session.role === "admin"
                 ? { adminEventsHref: "/admin/events" }

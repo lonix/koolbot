@@ -2197,10 +2197,18 @@ export function createReadOnlyRouter(
       const viewerName = userLabels.get(viewerId) ?? "Member";
       const previewArgs = { userId: viewerId, displayName: viewerName };
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Birthdays"),
+      });
+
       res.type("text/html").send(
         renderBirthdaysPage({
           ...common,
           enabled,
+          permissionNotice,
           channel: channelId
             ? {
                 name: channelNames.get(channelId) ?? channelId,
@@ -2737,10 +2745,20 @@ export function createReadOnlyRouter(
         session.discordUserId,
         previewing ? options : null,
       );
+      // The acceptance role sits below the bot's highest role: the checker's
+      // finding, not the page's own (the page shows no role-position warning,
+      // so there is nothing to pass as `shownWarnings`).
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled: data.enabled,
+        filter: inAreas("Rules"),
+      });
       res.type("text/html").send(
         renderRulesPage({
           ...common,
           ...data,
+          permissionNotice,
           options,
           jobId:
             typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)

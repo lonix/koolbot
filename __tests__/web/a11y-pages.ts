@@ -181,6 +181,62 @@ const MISSING_PERMISSION_NOTICE: PermissionNotice = {
     },
   ],
 };
+/**
+ * The Events form notice (#1478): one finding with no field (the Events list
+ * card) and one next to each of the group channels and the leaders-only
+ * channel, plus a result that could not be checked, which stays in the block.
+ */
+const eventFeature = (id: string, feature: string, effect: string) => ({
+  id,
+  area: "Events",
+  feature,
+  effect,
+  fix: "",
+});
+const EVENT_FORM_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [
+    {
+      feature: eventFeature(
+        "event-tags",
+        "Clan tags on nicknames",
+        "Clan tags are not applied to nicknames and old tags are not restored.",
+      ),
+      target: { kind: "server", id: "g1", name: "Server" },
+      note: "The bot's own membership could not be read.",
+    },
+  ],
+  missing: [
+    {
+      feature: eventFeature(
+        "event-native",
+        "Discord Events list card",
+        "Events get no card in Discord's Events list.",
+      ),
+      permissions: ["Create Events"],
+      target: { kind: "server", id: "g1", name: "Server" },
+    },
+    {
+      feature: eventFeature(
+        "event-channels",
+        "Event and group channels",
+        "Event voice channels and group channels are not created, deleted or put in order.",
+      ),
+      permissions: ["Manage Channels"],
+      target: { kind: "category", id: "c1", name: "Events" },
+    },
+    {
+      feature: eventFeature(
+        "event-leads-channel",
+        "Leaders-only group channel",
+        "A leaders-only channel is created without its restriction.",
+      ),
+      permissions: ["Manage Roles"],
+      target: { kind: "category", id: "c1", name: "Events" },
+    },
+  ],
+};
 /** The Moderation page's notice (#1488): the anti-raid alert channel and a moderation log channel. */
 const MODERATION_MISSING_PERMISSION_NOTICE: PermissionNotice = {
   unavailable: null,
@@ -337,6 +393,44 @@ const LEADERBOARD_ROLES_MISSING_PERMISSION_NOTICE: PermissionNotice = {
       ),
       target: { kind: "role", id: "r9", name: "r9" },
       note: "The configured role could not be found.",
+    },
+  ],
+};
+
+/** The Birthdays and Rules pages' notice (#1491): a missing permission, and an unreadable role position. */
+const BIRTHDAYS_MISSING_PERMISSION_NOTICE = channelNotice(
+  "birthdays-post",
+  "Birthdays",
+  "Birthday announcements",
+  "general",
+);
+const RULES_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: false,
+  unchecked: [
+    {
+      feature: {
+        id: "rules-role-hierarchy",
+        area: "Rules",
+        feature: "Granting the acceptance role",
+        effect: "",
+        fix: "",
+      },
+      target: { kind: "role", id: "100000000000000011", name: "Accepted" },
+      note: "The bot's own roles could not be read.",
+    },
+  ],
+  missing: [
+    {
+      feature: {
+        id: "rules-message",
+        area: "Rules",
+        feature: "The rules message",
+        effect: "Posting the rules message fails.",
+        fix: "",
+      },
+      permissions: ["Read Message History"],
+      target: { kind: "channel", id: "100000000000000010", name: "rules" },
     },
   ],
 };
@@ -1316,6 +1410,26 @@ export function adminPages(): A11yPage[] {
         navFeatureStatus: {},
         planned: plannedEventAdoption(),
         previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (missing bot permissions)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Adopt Discord events (bot permission check unavailable)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
       }),
     },
     {
@@ -2419,6 +2533,19 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Events (missing bot permissions, next to their fields)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+      }),
+    },
+    {
       name: "Events (bot permission check unavailable)",
       html: renderEventsPage({
         ...COMMON,
@@ -2890,6 +3017,56 @@ export function adminPages(): A11yPage[] {
         pageSize: 25,
         search: "hydrated",
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Birthdays (missing bot permission notice)",
+      html: renderBirthdaysPage({
+        ...COMMON,
+        enabled: true,
+        permissionNotice: BIRTHDAYS_MISSING_PERMISSION_NOTICE,
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
+        role: null,
+        cron: "0 * * * *",
+        settingRows: [],
+        settingsPickers: {},
+        preview: {
+          mentionUserId: "999999999999999999",
+          mentionLabel: "Admin",
+          mention: true,
+          withAge: "Happy birthday!",
+          withoutAge: null,
+          sampleAge: 30,
+        },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+      }),
+    },
+    {
+      name: "Birthdays (permission check unavailable)",
+      html: renderBirthdaysPage({
+        ...COMMON,
+        enabled: true,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
+        role: null,
+        cron: "0 * * * *",
+        settingRows: [],
+        settingsPickers: {},
+        preview: {
+          mentionUserId: "999999999999999999",
+          mentionLabel: "Admin",
+          mention: true,
+          withAge: "Happy birthday!",
+          withoutAge: null,
+          sampleAge: 30,
+        },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
       }),
     },
     {
@@ -3578,6 +3755,56 @@ export function adminPages(): A11yPage[] {
         membersUnavailable: false,
         roleNames: {},
         globalPolicy: "flag",
+      }),
+    },
+    {
+      name: "Rules acceptance (missing bot permission notice)",
+      html: renderRulesPage({
+        ...COMMON,
+        permissionNotice: RULES_MISSING_PERMISSION_NOTICE,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: null,
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      name: "Rules acceptance (permission check unavailable)",
+      html: renderRulesPage({
+        ...COMMON,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: null,
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
       }),
     },
     {
@@ -4768,6 +4995,55 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (missing bot permissions, admin)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+          canLinkToPermissions: true,
+        }),
+      ),
+    },
+    {
+      name: "/me new event (missing bot permissions, host)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+        }),
+      ),
+    },
+    {
+      name: "/me new event (bot permission check unavailable)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        }),
+      ),
+    },
+    {
       name: "/me new event (prefilled from the last event)",
       html: shell(
         "New event",
@@ -4839,6 +5115,31 @@ export function userPages(): A11yPage[] {
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (missing bot permissions, admin)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+          canLinkToPermissions: true,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (bot permission check unavailable, host)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
         }),
       ),
     },
