@@ -9,6 +9,10 @@ import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import { roleMention } from "./discord-labels.js";
 import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
+import {
   formatColour,
   PERMISSION_PRESETS,
 } from "../services/role-group-plan.js";
@@ -67,6 +71,8 @@ export interface RoleGroupsPageProps {
   csrfToken: string;
   remainingMs: number;
   navFeatureStatus?: NavFeatureStatus;
+  /** What the bot lacks for Manage Roles and the log channel (#1490). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   groups: RoleGroupRow[];
   roleOptions: RoleGroupRoleOption[];
   plan: AdoptionPlan | null;
@@ -541,7 +547,7 @@ export function renderRoleGroupsPage(props: RoleGroupsPageProps): string {
 <h1>Role Groups</h1>
 <p class="subtitle">Name the roles that matter on your server (Admin, Mod, VIP, Friends, Bots …), rank them, and let features ask for a capability instead of a role id. Groups are optional.</p>
 ${renderFlash(props.flash)}
-${job}
+${job}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 <div class="card">
   <h2>Groups</h2>
   ${renderGroups(props, csrf)}
