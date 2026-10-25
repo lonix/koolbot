@@ -185,7 +185,12 @@ describe("registry", () => {
       }
       for (const k of r.alsoKeys ?? [])
         expect(typeof defaultConfig[k]).toBe("boolean");
-      if (r.scope !== "guild" && !r.targetResolver) {
+      if (r.schedules) {
+        // The channels are on the schedule rows (#1481): no setting names one.
+        expect(r.scope).toBe("channel");
+        expect(r.targetKey).toBeUndefined();
+        expect(r.targetResolver).toBeUndefined();
+      } else if (r.scope !== "guild" && !r.targetResolver) {
         expect(r.targetKey).toBeDefined();
         expect(
           typeof defaultConfig[r.targetKey as keyof typeof defaultConfig],
