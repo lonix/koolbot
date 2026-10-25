@@ -1074,6 +1074,12 @@ paths accept **toggle** or **sticky**. How a new message lets members pick
 (emoji reactions, buttons or a select menu) comes from the surface style,
 `reactionroles.style`; existing messages keep the style they were created with.
 
+Below the status line, the **Reaction Roles** page shows the bot-permission notice (#1490) for the
+picker channel (posting the pickers, and the emoji and message cleanup on them) and for **Manage Roles**,
+which handing out roles needs. It follows the rules in **Bot permissions**: only while reaction roles are on and
+a picker channel is set, "could not be checked" with the reason, a cached read labelled as possibly out of date,
+and it never says that all is well.
+
 **Generate a grouped set** (#1064) creates a whole group of roles and one picker
 message in one step, from a preset (**Region**: seven world regions; **Country**:
 twenty common countries with flag emoji, Nordics first) or a custom group (a name
@@ -1552,8 +1558,8 @@ checked, and a placeholder that expands to a mention is not seen.
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
   with the feature, not only here: the **Events** page, the **host panel** of an event, the
-  **Edit event** and **New event** forms, **Adopt Discord Events**, the
-  **Voice Channels**, **Moderation**, **Quotes** and **Notices** pages show a notice when the bot lacks a permission that feature needs:
+  **Edit event** and **New event** forms, **Adopt Discord Events**, the **Voice Channels**, **Moderation**, **Quotes**,
+  **Notices**, **Reaction Roles**, **Role Groups** and **Leaderboard Roles** pages show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
   check as this page (`src/web/permission-notice.ts`), so it costs no extra Discord
@@ -1570,9 +1576,10 @@ checked, and a placeholder that expands to a mention is not seen.
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The **Quotes** and
-  **Notices** pages (#1489) show the notice for their own channel only. The **Birthdays** and **Rules** pages (#1491) do the same for the birthday
-  channel, the rules channel, the Manage Roles permission and the position of the acceptance role (an unreadable position is listed as
-  "could not be checked" with its note). The reaction roles, role groups and leaderboard roles pages are not wired to the notice yet.
+  **Notices** pages (#1489) show the notice for their own channel only. The **Reaction Roles**, **Role Groups**
+  and **Leaderboard Roles** pages (#1490) show it for their own area, and a role-position finding names the role. The **Birthdays** and **Rules**
+  pages (#1491) do the same for the birthday channel, the rules channel, the Manage Roles permission and the position of the acceptance role
+  (an unreadable position is listed as "could not be checked" with its note).
   The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
   (those log channels also show in the **Core** section of All settings, below).
   - **Events forms (#1478).** On the **Events** page and the **New event** form, a finding that
@@ -1706,6 +1713,11 @@ to break, so the tier editor is the only place it is edited. The key is still st
 like any other, so a YAML backup carries the tiers. The Setup Wizard's Leaderboard Roles step does not ask for it either (#1433): the
 step says the tiers are set in the tier editor once the wizard is applied, and links to it.
 
+Below the status line, the **Leaderboard Roles** page shows the bot-permission notice (#1490) for the
+announcement channel, for **Manage Roles**, and for the tier roles' position: a role at or above the bot's highest
+role is named ("for the role ..."), and a role whose position could not be read is listed under "could not be
+checked" with the reason. It shows only while leaderboard roles are on, and never says that all is well.
+
 The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
 lets admins name the roles that matter on their server and rank them: as many or as few as
 they like (Admin, Mod, Helper, VIP, Friends, Bots …). Groups are optional; with none defined
@@ -1732,6 +1744,10 @@ every feature keeps its current behaviour.
 - **Locked roles.** @everyone and roles at or above the bot's highest role can't be picked.
   Integration-managed roles (Server Booster, subscriptions, bot roles) can be linked only as
   **gate-only** groups: they can be referenced for gating, never edited, and carry no capability.
+- **Bot permissions (#1490).** The page shows the bot-permission notice before the group list when the bot lacks
+  **Manage Roles** or cannot post to the Role groups log channel (a role-position finding names the role, not a
+  channel). Role groups have no switch of their own, so the notice appears only once the server has at least one group.
+  Roles the page already marks as locked (at or above the bot's role) keep their own tag next to the group.
 - **Roles other features hold can't newly back a group (#1023).** A role that is a Leaderboard
   Roles tier, a Reaction Roles role or the birthday role is shown disabled in the add form
   ("used by …") and left out of the re-link choices; creating or re-linking a group with one is

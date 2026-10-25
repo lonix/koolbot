@@ -312,6 +312,91 @@ const NOTICES_MISSING_PERMISSION_NOTICE = channelNotice(
   "rules",
 );
 
+/** The role pages' notice (#1490): a missing permission in the picker channel, a role above the bot, and a hierarchy that could not be read. */
+const roleFeature = (id: string, area: string, feature: string) => ({
+  id,
+  area,
+  feature,
+  effect: `${feature} does not work.`,
+  fix: "",
+});
+const REACTION_ROLES_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [],
+  missing: [
+    {
+      feature: roleFeature(
+        "reaction-picker-post",
+        "Reaction roles",
+        "Posting the role pickers",
+      ),
+      permissions: ["Send Messages", "Embed Links"],
+      target: { kind: "channel", id: "c1", name: "roles" },
+    },
+    {
+      feature: roleFeature(
+        "reaction-roles",
+        "Reaction roles",
+        "Handing out roles",
+      ),
+      permissions: ["Manage Roles"],
+      target: { kind: "server", id: null, name: "the server" },
+    },
+  ],
+};
+const ROLE_GROUPS_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: false,
+  unchecked: [],
+  missing: [
+    {
+      feature: roleFeature(
+        "role-groups",
+        "Role groups",
+        "Managing role groups",
+      ),
+      permissions: ["Manage Roles"],
+      target: { kind: "server", id: null, name: "the server" },
+    },
+    {
+      feature: roleFeature(
+        "log-role-groups",
+        "Discord logging",
+        "Role groups log channel",
+      ),
+      permissions: ["Embed Links"],
+      target: { kind: "channel", id: "c1", name: "role-log" },
+    },
+  ],
+};
+const LEADERBOARD_ROLES_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: false,
+  missing: [
+    {
+      feature: roleFeature(
+        "leaderboard-roles-hierarchy",
+        "Leaderboard roles",
+        "Handing out leaderboard roles",
+      ),
+      permissions: ["Bot role below this role"],
+      target: { kind: "role", id: "r1", name: "Admin" },
+    },
+  ],
+  unchecked: [
+    {
+      feature: roleFeature(
+        "leaderboard-roles-hierarchy",
+        "Leaderboard roles",
+        "Handing out leaderboard roles",
+      ),
+      target: { kind: "role", id: "r9", name: "r9" },
+      note: "The configured role could not be found.",
+    },
+  ],
+};
+
 /** The Birthdays and Rules pages' notice (#1491): a missing permission, and an unreadable role position. */
 const BIRTHDAYS_MISSING_PERMISSION_NOTICE = channelNotice(
   "birthdays-post",
@@ -3886,6 +3971,73 @@ export function adminPages(): A11yPage[] {
         permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
       }),
     },
+    {
+      name: "Reaction roles (missing bot permission notice)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        textChannels: CHANNELS,
+        permissionNotice: REACTION_ROLES_MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Reaction roles (bot permission check unavailable)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        textChannels: CHANNELS,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+      }),
+    },
+    ...[
+      ["missing bot permission notice", ROLE_GROUPS_MISSING_PERMISSION_NOTICE],
+      ["bot permission check unavailable", UNAVAILABLE_PERMISSION_NOTICE],
+    ].map(([label, notice]) => ({
+      name: `Role groups (${label as string})`,
+      html: renderRoleGroupsPage({
+        ...COMMON,
+        groups: [],
+        roleOptions: [],
+        plan: null,
+        extraErrors: [],
+        botScanUnavailable: false,
+        botsMissing: 0,
+        adminReport: { humans: [], bots: [] },
+        adminGroupLacksAdministrator: false,
+        membersUnavailable: false,
+        roleNames: {},
+        globalPolicy: "flag",
+        permissionNotice: notice as PermissionNotice,
+      }),
+    })),
+    ...[
+      [
+        "missing bot permission notice",
+        LEADERBOARD_ROLES_MISSING_PERMISSION_NOTICE,
+      ],
+      ["bot permission check unavailable", UNAVAILABLE_PERMISSION_NOTICE],
+    ].map(([label, notice]) => ({
+      name: `Leaderboard roles (${label as string})`,
+      html: renderLeaderboardRolesPage({
+        ...COMMON,
+        enabled: true,
+        voiceTrackingEnabled: true,
+        period: "week",
+        cron: "0 0 * * 1",
+        tiers: [],
+        ignoredEntries: [],
+        roles: ROLES,
+        settingRows: [],
+        pickers: PICKERS,
+        permissionNotice: notice as PermissionNotice,
+      }),
+    })),
     {
       name: "Support tickets",
       html: renderTicketsPage({

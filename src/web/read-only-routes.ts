@@ -1859,10 +1859,18 @@ export function createReadOnlyRouter(
           : null,
       });
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Reaction roles"),
+      });
+
       res.type("text/html").send(
         renderReactionRolesPage({
           ...common,
           enabled,
+          permissionNotice,
           configChannel: configChannelId
             ? {
                 name: channelNames.get(configChannelId) ?? configChannelId,
@@ -2653,10 +2661,18 @@ export function createReadOnlyRouter(
         parsed.tiers,
       );
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Leaderboard roles"),
+      });
+
       res.type("text/html").send(
         renderLeaderboardRolesPage({
           ...common,
           enabled,
+          permissionNotice,
           voiceTrackingEnabled,
           period,
           cron,
@@ -2686,10 +2702,18 @@ export function createReadOnlyRouter(
         common.guildId,
         session.discordUserId,
       );
+      // Role groups have no switch: they are in use once the server has one.
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled: data.groups.length > 0,
+        filter: (f) => f.area === "Role groups" || f.id === "log-role-groups",
+      });
       res.type("text/html").send(
         renderRoleGroupsPage({
           ...common,
           ...data,
+          permissionNotice,
           jobId:
             typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
               ? jobParam

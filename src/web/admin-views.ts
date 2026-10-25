@@ -4035,6 +4035,8 @@ export interface ReactionRoleRow {
 
 export interface ReactionRolesProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the picker channel and Manage Roles (#1490). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   configChannel: { name: string; id: string; type: ChannelType | null } | null;
   active: ReactionRoleRow[];
   archived: ReactionRoleRow[];
@@ -4172,7 +4174,7 @@ ${renderStatusLine({
     { text: `${props.active.length} active` },
     { text: `${props.archived.length} archived` },
   ],
-})}
+})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPickers} active ${olderPickers === 1 ? "mapping was" : "mappings were"} created before pickers remembered their channel.</strong> ${olderPickers === 1 ? "Its picker is" : "Their pickers are"} still looked up in the channel set by <code>reactionroles.message_channel_id</code>, and changing that setting does not move ${olderPickers === 1 ? "it" : "them"}. Delete ${olderPickers === 1 ? "that picker and mapping" : "those pickers and mappings"} <em>before</em> changing the channel, or change it back before cleaning up. Startup keeps such mappings while none of them is found in the configured channel, and archives the ones that are missing once another is. Pickers created from now on remember their channel (shown under the message ID) and are not affected by later changes to the setting.</div>` : ""}
 <div class="card">
   <h2>Active</h2>
@@ -5790,6 +5792,8 @@ export interface LeaderboardTierView {
 
 export interface LeaderboardRolesProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the announcement channel, Manage Roles and the tier roles' position (#1490). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   /** `voicetracking.enabled` — the ranking data the tiers are computed from. */
   voiceTrackingEnabled: boolean;
   period: string;
@@ -5949,7 +5953,7 @@ ${renderStatusLine({
     { text: `Schedule ${props.cron || "(unset)"}`, mono: true },
     { text: countOf(props.tiers.length, "tier") },
   ],
-})}
+})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 
 <div class="card">
   <h2>Current holders</h2>
