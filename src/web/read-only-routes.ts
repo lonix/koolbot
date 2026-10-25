@@ -1942,10 +1942,18 @@ export function createReadOnlyRouter(
         label: `${info.emoji} ${info.label}`,
       }));
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Notices"),
+      });
+
       res.type("text/html").send(
         renderNoticesPage({
           ...common,
           enabled,
+          permissionNotice,
           channel: channelId
             ? {
                 name: channelNames.get(channelId) ?? channelId,
@@ -2052,10 +2060,18 @@ export function createReadOnlyRouter(
         };
       });
 
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: common.guildId,
+        enabled,
+        filter: inAreas("Quotes"),
+      });
+
       res.type("text/html").send(
         renderQuotesPage({
           ...common,
           enabled,
+          permissionNotice,
           channel: channelId
             ? {
                 name: channelNames.get(channelId) ?? channelId,

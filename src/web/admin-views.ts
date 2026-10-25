@@ -4310,6 +4310,8 @@ export interface NoticeCategoryOption {
 
 export interface NoticesProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the notices channel (#1489). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   channel: { name: string; id: string; type: ChannelType | null } | null;
   total: number;
   /** The auto-managed `notices.header_message_id`, sent back by Re-post. */
@@ -4405,7 +4407,7 @@ ${renderStatusLine({
         },
     { text: countOf(props.total, "notice") },
   ],
-})}
+})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 <div class="card">
   <h2>Create a notice</h2>
   <form method="POST" action="/admin/notices/create" class="stack">
@@ -4496,6 +4498,8 @@ export interface QuoteRow {
 
 export interface QuotesProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the quotes channel (#1489). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   channel: { name: string; id: string; type: ChannelType | null } | null;
   /** The auto-managed `quotes.header_message_id`, shown read-only. */
   headerMessageId: string;
@@ -4604,7 +4608,7 @@ ${renderStatusLine({
       text: `${props.search ? "Matching quotes" : "Total quotes"}: ${props.total}`,
     },
   ],
-})}
+})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 
 <div class="card">
   <h2>Quotes</h2>
