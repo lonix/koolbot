@@ -333,7 +333,7 @@ describe("scheduled announcements", () => {
     ]);
   });
 
-  it("says a ping could not be checked when the pinged role is gone and the bot lacks the permission", async () => {
+  it("says a ping could not be checked when only a pinged role is gone and the bot lacks the permission", async () => {
     announcementRows = [row("a", { roleIds: ["gone"] })];
     const report = await run([text("a", BASE)]);
     expect(report.problems).toEqual([]);
@@ -341,6 +341,58 @@ describe("scheduled announcements", () => {
       "announcements-mentions",
     ]);
     expect(report.unknown[0].note).toMatch(/role/);
+  });
+
+  // A pinged role that is gone only makes the ping "not checked" when nothing
+  // else in that channel definitely needs Mention Everyone. Columns: case, rows
+  // (all in channel "a"), expected outcome without the permission.
+  it.each([
+    ["only a deleted role", [row("a", { roleIds: ["gone"] })], "unknown"],
+    [
+      "a deleted role and @everyone in the same text",
+      [row("a", { everyone: true, roleIds: ["gone"] })],
+      "missing",
+    ],
+    [
+      "a deleted role and an unmentionable role in the same text",
+      [row("a", { roleIds: ["gone", "locked"] })],
+      "missing",
+    ],
+    [
+      "a deleted role in one schedule and @everyone in another",
+      [row("a", { roleIds: ["gone"] }), row("a", { everyone: true })],
+      "missing",
+    ],
+    [
+      "@everyone in one schedule and a deleted role in another",
+      [row("a", { everyone: true }), row("a", { roleIds: ["gone"] })],
+      "missing",
+    ],
+    [
+      "a deleted role and a mentionable role",
+      [row("a", { roleIds: ["gone", "open"] })],
+      "unknown",
+    ],
+  ])("pings: %s", async (_name, schedules, outcome) => {
+    announcementRows = schedules;
+    const report = await run(
+      [text("a", BASE)],
+      [
+        { id: "locked", mentionable: false },
+        { id: "open", mentionable: true },
+      ],
+    );
+    expect(entry(report, "announcements-mentions")).toEqual([
+      {
+        outcome,
+        missing:
+          outcome === "missing"
+            ? ["Mention @everyone, @here and All Roles"]
+            : [],
+        enabled: true,
+        id: "a",
+      },
+    ]);
   });
 
   it.each([

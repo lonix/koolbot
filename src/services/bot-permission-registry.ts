@@ -502,7 +502,7 @@ const scheduleRequirements: FeatureRequirement[] = [
     schedules: "announcements",
     scheduleWhen: "embed",
     effect:
-      "The announcement is still posted, but its embed is not shown. Nothing tells you.",
+      "Scheduled announcements with an embed are not posted in this channel. A scheduled run logs the error in the bot's log only; Post now and Send once show it.",
     fix: "Give the bot's role Embed Links, and make sure the channel does not deny it.",
   },
   {

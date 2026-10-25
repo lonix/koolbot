@@ -265,39 +265,44 @@ function getScheduleRows(
 /**
  * The channels a schedule entry is checked in: the distinct channels of the
  * rows it applies to. `unreadableRole` is set for a channel where a pinged role
- * could not be found in the server's roles, so whether the ping needs Mention
- * Everyone is not known.
+ * could not be found in the server's roles and nothing else in that channel
+ * definitely needs Mention Everyone, so whether it is needed is not known.
  */
 function scheduleChannels(
   r: Pick<FeatureRequirement, "scheduleWhen">,
   rows: readonly ScheduleRow[],
   roles: Lookup<Role>,
 ): { channelId: string; unreadableRole: boolean }[] {
-  const byChannel = new Map<string, boolean>();
+  // Per channel: whether a ping definitely needs the permission (@everyone,
+  // @here or a role known to be unmentionable), and whether a pinged role was
+  // not found. The second only matters when the first is false.
+  const byChannel = new Map<string, { definite: boolean; unread: boolean }>();
   for (const row of rows) {
     if (!row.channelId) continue;
-    let applies = true;
-    let unreadable = false;
-    if (r.scheduleWhen === "embed") applies = row.embed;
+    let definite = true;
+    let unread = false;
+    if (r.scheduleWhen === "embed") definite = row.embed;
     if (r.scheduleWhen === "mentions") {
-      applies = row.everyone;
+      definite = row.everyone;
       for (const id of row.roleIds) {
         const role = roles?.get(id);
-        if (!role) {
-          applies = true;
-          unreadable = true;
-        } else if (!role.mentionable) applies = true;
+        if (!role) unread = true;
+        else if (!role.mentionable) definite = true;
       }
     }
-    if (!applies) continue;
-    byChannel.set(
-      row.channelId,
-      (byChannel.get(row.channelId) ?? false) || unreadable,
-    );
+    if (!definite && !unread) continue;
+    const seen = byChannel.get(row.channelId) ?? {
+      definite: false,
+      unread: false,
+    };
+    byChannel.set(row.channelId, {
+      definite: seen.definite || definite,
+      unread: seen.unread || unread,
+    });
   }
-  return [...byChannel].map(([channelId, unreadableRole]) => ({
+  return [...byChannel].map(([channelId, v]) => ({
     channelId,
-    unreadableRole,
+    unreadableRole: v.unread && !v.definite,
   }));
 }
 

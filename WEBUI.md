@@ -1483,15 +1483,17 @@ of announcements that have an embed, and Mention @everyone, @here and All Roles 
 channels of announcements whose text pings `@everyone`, `@here` or a role that members cannot
 mention themselves (a role that is mentionable needs nothing). Scheduled polls need View
 Channel, Send Messages and Send Polls, and Mention @everyone, @here and All Roles only when
-the role to ping is not mentionable. With Embed Links or the ping permission missing the
-message is still posted, but the embed is not shown or nobody is notified, and nothing says
-so; without View Channel, Send Messages or Send Polls the post fails, as a line in the bot's
-log for a scheduled run (a poll's last run is then not updated and nothing retries until the
-next time), and as an error on the Announcements page for Post now and Send once. When no
+the role to ping is not mentionable. Without View Channel, Send Messages, Send Polls or, for
+an announcement with an embed, Embed Links, the post fails: as a line in the bot's log for a
+scheduled run (a poll's last run is then not updated and nothing retries until the next
+time), and as an error on the Announcements page for Post now and Send once. Without the ping
+permission the message is still posted, but nobody is notified, and nothing says so. These
+effects are read from the code and Discord's documented permission model, not tried live. When no
 enabled schedule uses a permission, its entry is treated as not in use: no note, it does not
 stop the page from saying everything is in place, and the matrix lists it as _(off)_. A
 channel that is gone, is not a plain text channel (a voice, announcement or forum channel,
-or a thread) or whose pinged role cannot be found (when the bot also lacks the ping permission) is _Not checked_, never fine, and so is a
+or a thread) or whose pinged role cannot be found (when the bot lacks the ping permission and
+nothing else in that channel definitely needs it) is _Not checked_, never fine, and so is a
 schedule list that cannot be read from the database. Schedules that are switched off are not
 checked, and a placeholder that expands to a mention is not seen.
 
