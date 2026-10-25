@@ -3182,6 +3182,34 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Moderation (missing bot permission notice)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        permissionNotice: MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Moderation (bot permission check unavailable)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+      }),
+    },
+    {
       name: "Command metrics",
       html: renderCommandMetricsPage({
         ...COMMON,
