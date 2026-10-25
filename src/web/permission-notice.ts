@@ -366,15 +366,40 @@ export interface LoadOptions extends BuildOptions {
   timeoutMs?: number;
 }
 
+function blindReport(reason: string): BotPermissionReport {
+  return {
+    available: false,
+    reason,
+    fresh: false,
+    problems: [],
+    unknown: [],
+    quiet: [],
+    okFeatures: [],
+    notes: [],
+    checks: [],
+  };
+}
+
+export interface ReportOptions {
+  client: Client;
+  guildId: string;
+  /** Test seam: the checker. */
+  check?: LoadOptions["check"];
+  /** Ask the check about one event's channels (see `CheckDeps.eventPlacement`). */
+  eventPlacement?: EventPlacement;
+  timeoutMs?: number;
+}
+
 /**
- * Run (or reuse) the check and build the notice. Never throws and never holds
- * a page for long: past the timeout the page says the check did not finish (the
- * read keeps going and fills the checker's cache for the next view).
+ * Run (or reuse) the check once. Never throws and never holds a page for long:
+ * past the timeout, or when the check fails, the report is an unavailable one
+ * whose `reason` says so (the read keeps going and fills the checker's cache for
+ * the next view). A page that splits one report over several notices (All
+ * settings, #1487) calls this once and builds each notice from the result.
  */
-export async function loadPermissionNotice(
-  opts: LoadOptions,
-): Promise<PermissionNotice | null> {
-  if (!opts.enabled) return null;
+export async function loadPermissionReport(
+  opts: ReportOptions,
+): Promise<BotPermissionReport> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const run = (opts.check ?? checkBotPermissions)(
@@ -392,24 +417,26 @@ export async function loadPermissionNotice(
     if (!report) {
       // A late rejection must not become an unhandled one.
       run.catch(() => undefined);
-      return {
-        unavailable:
-          "The check did not finish in time; reload the page in a moment.",
-        missing: [],
-        unchecked: [],
-        stale: false,
-      };
+      return blindReport(
+        "The check did not finish in time; reload the page in a moment.",
+      );
     }
-    return buildPermissionNotice(report, opts);
+    return report;
   } catch (err) {
     logger.debug("Permission notice: check failed:", err);
-    return {
-      unavailable: "The bot's permissions could not be checked right now.",
-      missing: [],
-      unchecked: [],
-      stale: false,
-    };
+    return blindReport("The bot's permissions could not be checked right now.");
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * Run (or reuse) the check and build the notice. Never throws and never holds
+ * a page for long (see {@link loadPermissionReport}).
+ */
+export async function loadPermissionNotice(
+  opts: LoadOptions,
+): Promise<PermissionNotice | null> {
+  if (!opts.enabled) return null;
+  return buildPermissionNotice(await loadPermissionReport(opts), opts);
 }

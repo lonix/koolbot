@@ -1533,14 +1533,14 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The other features
-  (moderation, reaction roles, leaderboard roles, the logging channels and so on) are not
+  (moderation, reaction roles, leaderboard roles and so on) are not
   wired to the notice yet.
   - **Events forms (#1478).** On the **Events** page and the **New event** form, a finding that
     belongs to a field sits right under that field instead of in a block under the status line:
     group channels, host access and moving members under the **Split into groups** switch, the
     leaders-only channel under **Group leaders**, and clan tags under **Clan tags**. It is a
-    warning chip ("Bot lacks Manage Channels in the category “Events”", linking to this page for
-    an admin) and one line on what stops working. What has no field (the Discord Events list
+    warning chip per missing permission ("Bot lacks Manage Channels", linking to this page for
+    an admin) and one line on where and what stops working. What has no field (the Discord Events list
     card, the announcement channel) and a check that could not run stay in the one block, so
     that is said once. A cached read is labelled on each finding. **New event** checks the
     server's configured category, as no event exists yet, and a host who is not an admin gets
@@ -1551,6 +1551,13 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
     and the temporary voice channel. Ending an event has no page of its own: its form sits in the
     host panel (and in the Events list), which already carry the notice for the event's channels
     and moves.
+- **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
+  stats announcements and the Discord log channels have no page of their own, so **All settings**
+  shows the same notice at the top of their sections, before the form: **Celebrations**, **Welcome**,
+  **LFG**, **Voice tracking** (the weekly announcement sections) and **Core** (the log channels). It
+  follows the rules above, with one check for the whole page, and a log channel whose own switch or
+  producing feature is off shows nothing. The table that maps a section to the registry areas it shows
+  is `SETTINGS_NOTICE_AREAS` in `src/web/settings-permission-notices.ts`; no other section shows a notice.
 - **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
   applies new permission bits to the bot's existing role) and a "Show all Discord
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with
