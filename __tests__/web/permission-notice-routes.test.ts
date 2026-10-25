@@ -137,13 +137,27 @@ afterEach(async () => {
 });
 
 describe.each([
-  ["/events", "event features", "Event and group channels", "Events"],
-  ["/voice-channels", "voice features", "Temporary voice rooms", "Voice"],
-])("GET %s", (path, _name, featureName, category) => {
+  [
+    "/events",
+    "event features",
+    // The inline form names the permission, not the feature: the field says which.
+    "Bot lacks Manage Channels",
+    "Events",
+    // Group channels belong to the Groups switch (#1478), so the finding sits there.
+    'data-permission-inline="event-channels"',
+  ],
+  [
+    "/voice-channels",
+    "voice features",
+    "Temporary voice rooms",
+    "Voice",
+    "data-permission-notice",
+  ],
+])("GET %s", (path, _name, featureName, category, marker) => {
   it("shows the missing permission with the channel category named", async () => {
     mockCheck.mockResolvedValue(missing);
     const html = await (await harness.get(path)).text();
-    expect(html).toContain("data-permission-notice");
+    expect(html).toContain(marker);
     expect(html).toContain(featureName);
     expect(html).toContain(`in the category “${category}”`);
     expect(html).toContain('href="/admin/bot-permissions"');
@@ -153,6 +167,7 @@ describe.each([
     mockCheck.mockResolvedValue(report({}));
     const html = await (await harness.get(path)).text();
     expect(html).not.toContain("data-permission-notice");
+    expect(html).not.toContain("data-permission-inline");
   });
 
   it("says the check could not run, rather than staying quiet", async () => {
@@ -169,6 +184,7 @@ describe.each([
     mockCheck.mockResolvedValue(missing);
     const html = await (await harness.get(path)).text();
     expect(html).not.toContain("data-permission-notice");
+    expect(html).not.toContain("data-permission-inline");
     // The navigation badge's own warm-up may call it; the page's must not.
     const pageCalls = mockCheck.mock.calls.length;
     expect(pageCalls).toBeLessThanOrEqual(1);

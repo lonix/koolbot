@@ -18,6 +18,7 @@ import {
 } from "../../../services/event-adoption.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
 import { recordAudit } from "../../audit.js";
+import { inFeatures, loadPermissionNotice } from "../../permission-notice.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
 import type { FlashMessage } from "../../admin-views.js";
 import {
@@ -50,6 +51,9 @@ export function parseEventIds(source: Record<string, unknown>): string[] {
   const list = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
   return [...new Set(list.map(String).filter((id) => SNOWFLAKE.test(id)))];
 }
+
+/** The registry entries adopting uses; an adopted event has no group features and no card of KoolBot's own. */
+const ADOPTION_PERMISSION_FEATURES = ["events-announce", "event-channels"];
 
 export function createEventAdoptionRouter(client: Client): Router {
   const router = Router();
@@ -87,8 +91,20 @@ export function createEventAdoptionRouter(client: Client): Router {
         }
       }
       const jobParam = query["job"];
+      // What adopting sets up: the announcement post and, for an event with no
+      // channel of its own, KoolBot's temporary one. Only once the server was
+      // read, and only while Events is on (the page already says when it is off).
+      const permissionNotice = planned
+        ? await loadPermissionNotice({
+            client,
+            guildId: session.guildId,
+            enabled: planned.eventsEnabled,
+            filter: inFeatures(...ADOPTION_PERMISSION_FEATURES),
+          })
+        : null;
       res.type("text/html").send(
         renderEventAdoptionPage({
+          permissionNotice,
           csrfToken: getCsrfFromReq(req),
           remainingMs: getDisplayedRemainingMs(session),
           navFeatureStatus: await navStatusForPage(),

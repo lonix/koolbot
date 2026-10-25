@@ -181,6 +181,62 @@ const MISSING_PERMISSION_NOTICE: PermissionNotice = {
     },
   ],
 };
+/**
+ * The Events form notice (#1478): one finding with no field (the Events list
+ * card, in the block under the status line) and one next to each of the group
+ * channels, the leaders-only channel and the clan tags.
+ */
+const eventFeature = (id: string, feature: string, effect: string) => ({
+  id,
+  area: "Events",
+  feature,
+  effect,
+  fix: "",
+});
+const EVENT_FORM_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [
+    {
+      feature: eventFeature(
+        "event-tags",
+        "Clan tags on nicknames",
+        "Clan tags are not applied to nicknames and old tags are not restored.",
+      ),
+      target: { kind: "server", id: "g1", name: "Server" },
+      note: "The bot's own membership could not be read.",
+    },
+  ],
+  missing: [
+    {
+      feature: eventFeature(
+        "event-native",
+        "Discord Events list card",
+        "Events get no card in Discord's Events list.",
+      ),
+      permissions: ["Create Events"],
+      target: { kind: "server", id: "g1", name: "Server" },
+    },
+    {
+      feature: eventFeature(
+        "event-channels",
+        "Event and group channels",
+        "Event voice channels and group channels are not created, deleted or put in order.",
+      ),
+      permissions: ["Manage Channels"],
+      target: { kind: "category", id: "c1", name: "Events" },
+    },
+    {
+      feature: eventFeature(
+        "event-leads-channel",
+        "Leaders-only group channel",
+        "A leaders-only channel is created without its restriction.",
+      ),
+      permissions: ["Manage Roles"],
+      target: { kind: "category", id: "c1", name: "Events" },
+    },
+  ],
+};
 const UNAVAILABLE_PERMISSION_NOTICE: PermissionNotice = {
   unavailable: "The bot could not read this server from Discord.",
   stale: false,
@@ -1163,6 +1219,26 @@ export function adminPages(): A11yPage[] {
         navFeatureStatus: {},
         planned: plannedEventAdoption(),
         previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (missing bot permissions)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Adopt Discord events (bot permission check unavailable)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
       }),
     },
     {
@@ -2217,6 +2293,19 @@ export function adminPages(): A11yPage[] {
         settingRows: [],
         rows: [],
         permissionNotice: MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Events (missing bot permissions, next to their fields)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [],
+        permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
       }),
     },
     {
@@ -4404,6 +4493,55 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (missing bot permissions, admin)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+          canLinkToPermissions: true,
+        }),
+      ),
+    },
+    {
+      name: "/me new event (missing bot permissions, host)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+        }),
+      ),
+    },
+    {
+      name: "/me new event (bot permission check unavailable)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        }),
+      ),
+    },
+    {
       name: "/me new event (prefilled from the last event)",
       html: shell(
         "New event",
@@ -4475,6 +4613,31 @@ export function userPages(): A11yPage[] {
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (missing bot permissions, admin)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+          canLinkToPermissions: true,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (bot permission check unavailable, host)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
         }),
       ),
     },

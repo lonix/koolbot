@@ -38,7 +38,12 @@ jest.unstable_mockModule("../../src/web/audit.js", () => ({
   boundAuditEntry: actualAudit.boundAuditEntry,
 }));
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
-  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  default: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
 }));
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -57,6 +62,20 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       registerReloadCallback: jest.fn(),
     }),
   },
+}));
+// The bot permission check (#1478): the page only reads its report.
+const actualCheck = await import("../../src/services/bot-permission-check.js");
+const registry = await import("../../src/services/bot-permission-registry.js");
+const mockCheck =
+  jest.fn<
+    (client: unknown, guildId: string) => Promise<ReportOf<typeof actualCheck>>
+  >();
+type ReportOf<M extends typeof actualCheck> = Awaited<
+  ReturnType<M["checkBotPermissions"]>
+>;
+jest.unstable_mockModule("../../src/services/bot-permission-check.js", () => ({
+  ...actualCheck,
+  checkBotPermissions: mockCheck,
 }));
 const actualEvents = await import("../../src/services/event-service.js");
 jest.unstable_mockModule("../../src/services/event-service.js", () => ({
@@ -168,6 +187,117 @@ const planned = {
   timezone: "UTC",
   duration: "90",
 };
+
+function permissionReport(
+  checks: Array<{
+    id: string;
+    outcome: "missing" | "ok";
+    permissions?: string[];
+    target?: { kind: "category" | "server"; id: string; name: string };
+  }>,
+  over: Partial<ReportOf<typeof actualCheck>> = {},
+): ReportOf<typeof actualCheck> {
+  return {
+    available: true,
+    reason: null,
+    fresh: true,
+    problems: [],
+    unknown: [],
+    quiet: [],
+    okFeatures: [],
+    notes: [],
+    checks: checks.map((c) => {
+      const r = registry.FEATURE_REQUIREMENTS.find((x) => x.id === c.id);
+      if (!r) throw new Error(c.id);
+      return {
+        feature: {
+          id: r.id,
+          area: r.area,
+          feature: r.feature,
+          effect: r.effect,
+          fix: r.fix,
+        },
+        kind: "permission",
+        enabled: true,
+        outcome: c.outcome,
+        target: c.target ?? { kind: "category", id: "c1", name: "Events" },
+        missing: c.permissions ?? [],
+      };
+    }),
+    ...over,
+  } as ReportOf<typeof actualCheck>;
+}
+
+describe("GET /me/events/new bot permission notice (#1478)", () => {
+  const lacking = permissionReport([
+    {
+      id: "event-channels",
+      outcome: "missing",
+      permissions: ["Manage Channels"],
+    },
+    {
+      id: "event-native",
+      outcome: "missing",
+      permissions: ["Create Events"],
+      target: { kind: "server", id: "g1", name: "Server" },
+    },
+  ]);
+
+  beforeEach(() => {
+    mockCheck.mockResolvedValue(permissionReport([]));
+  });
+
+  it("shows nothing when the permissions are in place, and leaves the page as it was", async () => {
+    const html = await (await harness.get("")).text();
+    expect(html).not.toContain("data-permission");
+  });
+
+  it("shows a host who is not an admin each missing permission, with 'Ask a server admin' and no link", async () => {
+    mockCheck.mockResolvedValue(lacking);
+    const html = await (await harness.get("")).text();
+    expect(html).toContain('data-permission-inline="event-channels"');
+    expect(html).toContain(
+      "Bot lacks Manage Channels in the category “Events”",
+    );
+    expect(html).toContain("Create Events");
+    expect(html).toContain("Ask a server admin");
+    expect(html).not.toContain("/admin/bot-permissions");
+    // Asked for the server's own Events entries, with no event placement.
+    expect(mockCheck).toHaveBeenCalledWith({}, GUILD, undefined);
+  });
+
+  it("links an admin to Bot permissions", async () => {
+    current = createTestSession({
+      discordUserId: HOST,
+      guildId: GUILD,
+      role: "admin",
+      scopes: ["member", "host"],
+    });
+    mockCheck.mockResolvedValue(lacking);
+    const html = await (await harness.get("")).text();
+    expect(html).toContain('href="/admin/bot-permissions"');
+    expect(html).not.toContain("Ask a server admin");
+  });
+
+  it("says the check could not run, rather than staying quiet", async () => {
+    mockCheck.mockResolvedValue(
+      permissionReport([], {
+        available: false,
+        reason: "The bot is not connected.",
+      }),
+    );
+    const html = await (await harness.get("")).text();
+    expect(html).toContain("Bot permissions could not be checked");
+    expect(html).toContain("The bot is not connected.");
+  });
+
+  it("does not fail the page when the check throws", async () => {
+    mockCheck.mockRejectedValue(new Error("boom"));
+    const res = await harness.get("");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Bot permissions could not be checked");
+  });
+});
 
 describe("GET /me/events/new", () => {
   it("shows the form with the When choice and no Repeat field", async () => {

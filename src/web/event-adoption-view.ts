@@ -7,6 +7,10 @@ import { CONFIRM_NEUTRAL_ATTR, scriptTag } from "./html.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
+import {
   eventPlanIsApplicable,
   type EventAdoptionPlan,
 } from "../services/event-adoption.js";
@@ -31,6 +35,8 @@ export interface EventAdoptionPageProps {
   previewing: boolean;
   jobId?: string | null;
   flash?: FlashMessage | null;
+  /** What the bot lacks for what adopting sets up (#1478). The page is admin-only, so it always links. */
+  permissionNotice?: PermissionNotice | null;
 }
 
 const JOB_SCRIPT = (jobId: string): string =>
@@ -102,8 +108,11 @@ export function renderEventAdoptionPage(props: EventAdoptionPageProps): string {
     ? `<div class="notice" id="ea-job" role="status">Applying…</div>`
     : "";
   const p = props.planned;
+  const permission = renderPermissionNotice(props.permissionNotice ?? null, {
+    canLinkToPage: true,
+  });
   const content = p
-    ? `${renderNotices(p)}
+    ? `${renderNotices(p)}${permission ? `\n${permission}` : ""}
 <div class="card">
   <h2>Discord events (${p.candidates.length})</h2>
   <p class="muted">Adopting makes a KoolBot event for a Discord event: KoolBot posts the event link in the announcement channel, sends the reminder and, for an event with no channel of its own, makes the temporary voice channel. The Discord event stays as it is, and members keep marking Interested on it. KoolBot follows later edits to its name, time and description, and drops its event if the Discord one is deleted or cancelled. Rolling back removes only the KoolBot event and its announcement.</p>

@@ -89,6 +89,16 @@ jest.unstable_mockModule("../../src/models/event.js", () => ({
   },
 }));
 
+// The bot permission check (#1478): by default the real one; a test that
+// needs a finding gives the page a report of its own.
+const actualCheck = await import("../../src/services/bot-permission-check.js");
+const registry = await import("../../src/services/bot-permission-registry.js");
+const mockCheck = jest.fn(actualCheck.checkBotPermissions);
+jest.unstable_mockModule("../../src/services/bot-permission-check.js", () => ({
+  ...actualCheck,
+  checkBotPermissions: mockCheck,
+}));
+
 const { signValue } = await import("../../src/web/cookies.js");
 const { deriveCsrfToken, ensureCsrfCookie } =
   await import("../../src/web/csrf.js");
@@ -542,6 +552,123 @@ describe("the form's markup", () => {
     }
     // `form.stack` is an admin-layout class that the /me layout does not load.
     expect(r.text).not.toContain('class="stack"');
+  });
+});
+
+/** A report with one finding for the registry entry `id`. */
+function permissionReport(
+  id: string,
+  outcome: "missing" | "unknown" | "ok",
+  over: Record<string, unknown> = {},
+): Awaited<ReturnType<typeof actualCheck.checkBotPermissions>> {
+  const r = registry.FEATURE_REQUIREMENTS.find((x) => x.id === id);
+  if (!r) throw new Error(id);
+  const feature = {
+    id: r.id,
+    area: r.area,
+    feature: r.feature,
+    effect: r.effect,
+    fix: r.fix,
+  };
+  const target = { kind: "server", id: "g1", name: "Server" } as const;
+  return {
+    available: true,
+    reason: null,
+    fresh: true,
+    problems: [],
+    unknown: [],
+    quiet: [],
+    okFeatures: [],
+    notes: [],
+    checks: [
+      {
+        feature,
+        kind: "permission",
+        enabled: true,
+        outcome,
+        target,
+        missing: outcome === "missing" ? ["Create Events"] : [],
+      },
+    ],
+    ...over,
+  } as never;
+}
+
+describe("the bot permission notice (#1478)", () => {
+  beforeEach(() => {
+    mockCheck.mockReset();
+  });
+
+  it("shows a host who is not an admin what the bot lacks for saving, with 'Ask a server admin' and no link", async () => {
+    mockCheck.mockResolvedValue(permissionReport("event-native", "missing"));
+    const r = await call(EDIT);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("Create Events");
+    expect(r.text).toContain("Ask a server admin");
+    expect(r.text).not.toContain("/admin/bot-permissions");
+    expect(r.text.indexOf("data-permission-notice")).toBeLessThan(
+      r.text.indexOf("data-event-edit-form"),
+    );
+  });
+
+  it("links an admin to Bot permissions", async () => {
+    sessionRole = "admin";
+    mockCheck.mockResolvedValue(permissionReport("event-native", "missing"));
+    const r = await call(EDIT);
+    expect(r.text).toContain('href="/admin/bot-permissions"');
+    expect(r.text).not.toContain("Ask a server admin");
+  });
+
+  it("asks the check about this event's own placement, once", async () => {
+    events[EVENT_ID] = makeEvent({ categoryId: "own-cat" });
+    mockCheck.mockResolvedValue(permissionReport("event-native", "ok"));
+    await call(EDIT);
+    expect(mockCheck).toHaveBeenCalledTimes(1);
+    expect(mockCheck.mock.calls[0][2]).toMatchObject({
+      eventPlacement: { categoryId: "own-cat" },
+    });
+  });
+
+  it("leaves out a finding for an entry the edit does not use (the channels)", async () => {
+    mockCheck.mockResolvedValue(permissionReport("event-channels", "missing"));
+    const r = await call(EDIT);
+    expect(r.text).not.toContain("data-permission-notice");
+  });
+
+  it("says a permission could not be checked, rather than staying quiet", async () => {
+    mockCheck.mockResolvedValue(
+      permissionReport("event-native", "unknown", {
+        unknown: [
+          {
+            feature: permissionReport("event-native", "ok").checks[0].feature,
+            target: { kind: "server", id: "g1", name: "Server" },
+            note: "The bot's own membership could not be read.",
+          },
+        ],
+      }),
+    );
+    const r = await call(EDIT);
+    expect(r.text).toContain("Some bot permissions could not be checked");
+    expect(r.text).toContain("membership could not be read.");
+  });
+
+  it("says the whole check could not run", async () => {
+    mockCheck.mockResolvedValue(
+      permissionReport("event-native", "ok", {
+        available: false,
+        reason: "The bot is not connected.",
+      }),
+    );
+    const r = await call(EDIT);
+    expect(r.text).toContain("Bot permissions could not be checked");
+  });
+
+  it("shows nothing while events are off (the page redirects before the check)", async () => {
+    eventsOn = false;
+    mockCheck.mockResolvedValue(permissionReport("event-native", "missing"));
+    const r = await call(EDIT);
+    expect(r.text).not.toContain("data-permission-notice");
+    expect(mockCheck).not.toHaveBeenCalled();
   });
 });
 

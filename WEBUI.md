@@ -1514,7 +1514,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
-  with the feature, not only here: the **Events** page, the **host panel** of an event and the
+  with the feature, not only here: the **Events** page, the **host panel** of an event, the
+  **Edit event** and **New event** forms, **Adopt Discord Events** and the
   **Voice Channels** page show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
@@ -1534,6 +1535,21 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   "ask a server admin" instead of the link, since this page is admin-only. The other features
   (moderation, reaction roles, leaderboard roles, the logging channels and so on) are not
   wired to the notice yet.
+  - **Events forms (#1478).** On the **Events** page and the **New event** form, a finding that
+    belongs to a field sits right under that field instead of in a block under the status line:
+    group channels, host access and moving members under the **Split into groups** switch, the
+    leaders-only channel under **Group leaders**, and clan tags under **Clan tags**. It is a
+    warning chip ("Bot lacks Manage Channels in the category “Events”", linking to this page for
+    an admin) and one line on what stops working. What has no field (the Discord Events list
+    card, the announcement channel) and a check that could not run stay in the one block, so
+    that is said once. A cached read is labelled on each finding. **New event** checks the
+    server's configured category, as no event exists yet, and a host who is not an admin gets
+    "Ask a server admin". **Edit event** names only what saving changes: the Events list card
+    (not for an adopted event or a detached one) and the announcement post, and nothing for a
+    finished event. **Adopt Discord Events** names what adopting sets up: the announcement post
+    and the temporary voice channel. Ending an event has no page of its own: its form sits in the
+    host panel (and in the Events list), which already carry the notice for the event's channels
+    and moves.
 - **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
   applies new permission bits to the bot's existing role) and a "Show all Discord
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with

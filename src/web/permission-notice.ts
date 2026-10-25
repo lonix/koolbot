@@ -227,6 +227,127 @@ export function renderPermissionNotice(
   return parts.join("\n");
 }
 
+/**
+ * A notice cut into the part that belongs next to named fields and the rest
+ * (#1478). Each slot takes the findings of the registry entries it names; what
+ * no slot names stays in `rest`, which also keeps the "could not be checked"
+ * message, so that is said once for the page and never per field. Nothing is
+ * dropped and nothing is read again: the slots are slices of the one report.
+ */
+export interface PartitionedNotice<S extends string> {
+  rest: PermissionNotice | null;
+  slots: Record<S, PermissionNotice | null>;
+}
+
+export function partitionNotice<S extends string>(
+  notice: PermissionNotice | null,
+  slotFeatures: Record<S, readonly string[]>,
+): PartitionedNotice<S> {
+  const slots = {} as Record<S, PermissionNotice | null>;
+  const claimed = new Set<string>();
+  for (const slot of Object.keys(slotFeatures) as S[]) {
+    const ids = slotFeatures[slot];
+    ids.forEach((id) => claimed.add(id));
+    const missing = notice?.missing.filter((m) => ids.includes(m.feature.id));
+    const unchecked = notice?.unchecked.filter((u) =>
+      ids.includes(u.feature.id),
+    );
+    slots[slot] =
+      notice &&
+      notice.unavailable === null &&
+      ((missing?.length ?? 0) > 0 || (unchecked?.length ?? 0) > 0)
+        ? {
+            unavailable: null,
+            missing: missing ?? [],
+            unchecked: unchecked ?? [],
+            stale: notice.stale,
+          }
+        : null;
+  }
+  if (!notice) return { rest: null, slots };
+  const missing = notice.missing.filter((m) => !claimed.has(m.feature.id));
+  const unchecked = notice.unchecked.filter((u) => !claimed.has(u.feature.id));
+  const rest =
+    notice.unavailable !== null || missing.length > 0 || unchecked.length > 0
+      ? { ...notice, missing, unchecked }
+      : null;
+  return { rest, slots };
+}
+
+/**
+ * The slice of a notice that belongs to one field, as a chip and a help line
+ * right under it (components.md, "Missing permission next to the setting it
+ * breaks"). Empty string for null. It is the same finding as the block form
+ * (`renderPermissionNotice`), at the field: the chip says what is missing and
+ * where, the line says what stops working. A stale read is labelled on the
+ * slice itself, since a slice is read on its own.
+ */
+export function renderInlinePermissionNotice(
+  notice: PermissionNotice | null,
+  opts: RenderOptions,
+): string {
+  if (!notice) return "";
+  const chip = (text: string, warn: boolean): string => {
+    const cls = warn ? "kb-chip kb-chip--warn" : "kb-chip";
+    const body = `${icon(warn ? "triangle-alert" : "info")}${escapeHtml(text)}`;
+    return opts.canLinkToPage
+      ? `<a class="${cls}" href="${BOT_PERMISSIONS_HREF}">${body}</a>`
+      : `<span class="${cls}">${body}</span>`;
+  };
+  const askAdmin = opts.canLinkToPage ? "" : " Ask a server admin to fix it.";
+  const stale = notice.stale
+    ? " Discord could not be reached, so this is from the bot's cached view and may be out of date."
+    : "";
+  const lines: string[] = [];
+  for (const m of notice.missing) {
+    lines.push(
+      `<p class="kb-help" data-permission-inline="${escapeHtml(m.feature.id)}">${chip(`Bot lacks ${m.permissions.join(", ")} ${where(m.target)}`, true)} ${escapeHtml(m.feature.effect)}${escapeHtml(askAdmin)}${escapeHtml(stale)}</p>`,
+    );
+  }
+  for (const u of notice.unchecked) {
+    lines.push(
+      `<p class="kb-help" data-permission-inline="${escapeHtml(u.feature.id)}">${chip("Could not be checked", false)} ${escapeHtml(u.note)}${escapeHtml(stale)}</p>`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Which Events form field each Events registry entry belongs to: the group
+ * switch (group channels, host access, moves between them), the group leaders
+ * and the clan tags. The other Events entries (the Events list card, the
+ * announcement channel) have no field and stay in the page's own block.
+ */
+export const EVENT_FORM_NOTICE_SLOTS = {
+  groups: ["event-channels", "event-host-access", "event-moves"],
+  leaders: ["event-leads-channel"],
+  tags: ["event-tags"],
+} as const;
+
+export type EventFormSlot = keyof typeof EVENT_FORM_NOTICE_SLOTS;
+
+/** The inline HTML for each Events form field; "" where there is nothing to say. */
+export type EventFormInline = Record<EventFormSlot, string>;
+
+/**
+ * An Events notice split for a form that renders the shared Groups section:
+ * the block for the page, and the inline HTML for the fields.
+ */
+export function splitEventFormNotice(
+  notice: PermissionNotice | null,
+  opts: RenderOptions,
+): { block: string; inline: EventFormInline } {
+  const { rest, slots } = partitionNotice(notice, EVENT_FORM_NOTICE_SLOTS);
+  return {
+    block: renderPermissionNotice(rest, opts),
+    inline: {
+      groups: renderInlinePermissionNotice(slots.groups, opts),
+      leaders: renderInlinePermissionNotice(slots.leaders, opts),
+      tags: renderInlinePermissionNotice(slots.tags, opts),
+    },
+  };
+}
+
 export interface LoadOptions extends BuildOptions {
   client: Client;
   guildId: string;

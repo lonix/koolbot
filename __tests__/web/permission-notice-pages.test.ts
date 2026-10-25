@@ -348,12 +348,41 @@ describe("admin Events page", () => {
     rows: [],
   };
 
-  it("shows the notice under the status line", () => {
-    const html = renderEventsPage({ ...props, permissionNotice: noticeFor() });
+  it("shows a finding that belongs to no field under the status line", () => {
+    const notice = buildPermissionNotice(
+      {
+        ...missingChannelsReport(),
+        checks: [
+          {
+            feature: ref("event-native"),
+            kind: "permission",
+            enabled: true,
+            outcome: "missing",
+            target: { kind: "server", id: "g", name: "g" },
+            missing: ["Create Events"],
+          },
+        ],
+      },
+      { enabled: true, filter: inAreas("Events") },
+    );
+    const html = renderEventsPage({ ...props, permissionNotice: notice });
     expect(html).toContain("data-permission-notice");
-    expect(html).toContain("in the category “Events”");
+    expect(html).toContain("Create Events");
     expect(html.indexOf("kb-statusline")).toBeLessThan(
       html.indexOf("data-permission-notice"),
+    );
+  });
+
+  it("puts the group channel finding next to the Groups switch instead (#1478)", () => {
+    const html = renderEventsPage({ ...props, permissionNotice: noticeFor() });
+    expect(html).not.toContain("data-permission-notice");
+    expect(html).toContain('data-permission-inline="event-channels"');
+    expect(html).toContain("in the category “Events”");
+    expect(html.indexOf("groups-enabled-help")).toBeLessThan(
+      html.indexOf("data-permission-inline"),
+    );
+    expect(html.indexOf("data-permission-inline")).toBeLessThan(
+      html.indexOf("data-groups-body"),
     );
   });
 
