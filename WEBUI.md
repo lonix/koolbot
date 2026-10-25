@@ -1029,6 +1029,10 @@ The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
 are already posted: after saving, use **Resync notices to channel** to repost
 them in the new channel. The status line keeps the total notice count.
 
+Below the status line, the **Notices** page shows the same bot-permission notice (#1489) for the notices
+channel: posting, keeping the channel clean, and pinning the header (only while the header pin is on),
+under the same rules as the **Quotes** page.
+
 The **Polls** page manages poll schedules and the question library. Questions
 are imported from a file you upload or a YAML/JSON document you paste into the
 box (`{ polls: [{ question, answers, multiselect?, tags? }] }`); the content goes
@@ -1133,6 +1137,12 @@ channel, the header and pin toggles, `quotes.clear_on_sync`, the cooldown,
 maximum length and vote-history retention, and the roles allowed to delete
 quotes. The auto-managed `quotes.header_message_id` is shown read-only in the
 status line.
+
+Below the status line, the **Quotes** page shows the bot-permission notice (#1489) when the bot lacks
+a permission in the quote channel: posting quotes, the vote buttons, keeping the channel clean, or
+pinning the header (the pin check only while the header and its pin are on). It follows the rules in
+**Bot permissions** (only while quotes are on and a channel is set, "could not be checked" with the
+reason, a cached read labelled as possibly out of date) and never says that all is well.
 
 The **Birthdays** page (#986) is for the admin side of birthdays; members still
 set their own date on `/me/birthday`. It lists every stored birthday, soonest
@@ -1514,8 +1524,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   the last check (any admin page load refreshes it in the background), so a page is
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
-  with the feature, not only here: the **Events** page, the **host panel** of an event and the
-  **Voice Channels** page show a notice when the bot lacks a permission that feature needs:
+  with the feature, not only here: the **Events** page, the **host panel** of an event, the
+  **Voice Channels** page and the **Quotes** and **Notices** pages show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
   check as this page (`src/web/permission-notice.ts`), so it costs no extra Discord
