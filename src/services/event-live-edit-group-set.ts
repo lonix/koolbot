@@ -97,6 +97,7 @@ import {
   clashesWithCaptainsLobby,
   checkGroupSize,
   checkGroupTag,
+  checkGroupMarker,
   GROUP_COUNT_HARD_MAX,
 } from "./event-groups.js";
 import { OPEN_STATES, nameTakenByOther } from "./event-customise-rules.js";
@@ -123,6 +124,7 @@ export const GROUP_ADD_FIELDS = {
   kind: "s_groupAdd_kind",
   size: "s_groupAdd_size",
   tag: "s_groupAdd_tag",
+  marker: "s_groupAdd_marker",
   key: "s_groupAdd_key",
   base: "b_groupAdd",
 } as const;
@@ -138,6 +140,8 @@ export type NewGroupValue = {
   kind: string;
   size: number | null;
   tag: string;
+  /** The emoji in front of the channel name; "" = none. Absent in a value signed before #1469: read as "". */
+  marker: string;
 };
 
 const OPEN = [...OPEN_STATES];
@@ -204,26 +208,34 @@ function parseAddValue(raw: string): NewGroupValue[] | null {
   const out: NewGroupValue[] = [];
   for (const item of data) {
     if (!item || typeof item !== "object") return null;
-    const { key, name, kind, size, tag } = item as Record<string, unknown>;
+    const { key, name, kind, size, tag, marker } = item as Record<
+      string,
+      unknown
+    >;
     if (typeof key !== "string" || !GROUP_KEY_PATTERN.test(key)) return null;
     if (typeof name !== "string" || typeof tag !== "string") return null;
     if (typeof kind !== "string") return null;
+    if (marker !== undefined && typeof marker !== "string") return null;
     if (!(ADD_KINDS as readonly string[]).includes(kind)) return null;
     if (size !== null && typeof size !== "number" && typeof size !== "string") {
       return null;
     }
     const nameCheck = checkGroupName(name);
     const tagCheck = checkGroupTag(tag);
+    const markerCheck = checkGroupMarker(marker ?? "");
     const sizeCheck = checkGroupSize(
       size === null ? "" : typeof size === "number" ? String(size) : size,
     );
-    if (!nameCheck.ok || !tagCheck.ok || !sizeCheck.ok) return null;
+    if (!nameCheck.ok || !tagCheck.ok || !sizeCheck.ok || !markerCheck.ok) {
+      return null;
+    }
     out.push({
       key,
       name: nameCheck.value,
       kind,
       size: sizeCheck.value,
       tag: tagCheck.value,
+      marker: markerCheck.value,
     });
   }
   return out;
@@ -237,6 +249,8 @@ function addFieldError(value: Record<string, unknown>): string | null {
   if (!size.ok) return `New group size: ${size.error}`;
   const tag = checkGroupTag(String(value.tag ?? ""));
   if (!tag.ok) return `New group tag: ${tag.error}`;
+  const marker = checkGroupMarker(String(value.marker ?? ""));
+  if (!marker.ok) return `New group marker: ${marker.error}`;
   return kindError(String(value.kind ?? ""));
 }
 
@@ -286,6 +300,7 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
           kind: str(GROUP_ADD_FIELDS.kind),
           size: str(GROUP_ADD_FIELDS.size),
           tag: str(GROUP_ADD_FIELDS.tag),
+          marker: str(GROUP_ADD_FIELDS.marker),
         },
       ]),
       base: str(GROUP_ADD_FIELDS.base),
@@ -337,7 +352,7 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
         kind: g.kind,
         size: g.size === null ? "" : String(g.size),
         tag: g.tag,
-        marker: "",
+        marker: g.marker ?? "",
         key: g.key,
       });
     });
@@ -346,12 +361,12 @@ export const groupAddRow: LiveEditRow = asRow<NewGroupValue[]>({
   describe: (v) =>
     v.length === 0
       ? "no new group"
-      : `"${v[0].name}" (${v[0].kind}${v[0].size === null ? "" : `, size ${v[0].size}`})`,
+      : `${v[0].marker ? `${v[0].marker} ` : ""}"${v[0].name}" (${v[0].kind}${v[0].size === null ? "" : `, size ${v[0].size}`})`,
   auditValue: (v) => ({
     ...Object.fromEntries(
       v.map((g, i) => [
         `g${i + 1}`,
-        `${g.key} | ${g.name} | ${g.kind} | ${g.size === null ? "no limit" : `size ${g.size}`} | ${g.tag === "" ? "no tag" : `tag ${g.tag}`}`,
+        `${g.key} | ${g.name} | ${g.kind} | ${g.size === null ? "no limit" : `size ${g.size}`} | ${g.tag === "" ? "no tag" : `tag ${g.tag}`}${g.marker ? ` | marker ${g.marker}` : ""}`,
       ]),
     ),
   }),
@@ -430,7 +445,7 @@ export async function addGroupLocked(
           kind: g.kind,
           size: g.size,
           tag: g.tag,
-          marker: "",
+          marker: g.marker ?? "",
           channelId: null,
           captainId: null,
           memberIds: [],

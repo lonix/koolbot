@@ -2692,7 +2692,8 @@ position now holds another group, is reported as changed by someone else instead
 that moved there.
 
 - **Add a group.** Give it a name, a kind (team or open; the leaders-only channel is the **Captains
-  lobby** switch below), a size and a tag, with the same limits as when the event was made (a name
+  lobby** switch below), a size, a tag and an optional marker (the emoji in front of the channel's name, picked the same way as
+  in the event form), with the same limits as when the event was made (a name
   another group has, or goes back to when its leader's rename is reset, is refused;
   `events.groups.max_count` applies). It goes
   last. Its voice channel is made by the same pass as the other group channels, next to them and in
@@ -2836,7 +2837,7 @@ event, which KoolBot only reads, never gets groups). The row is applied after th
   A preset is chosen by id: the page offers the presets that are on for the server, and the server turns
   the id into the preset's groups (names, kinds, sizes, tags, markers, labels and its default for clan
   tags) at the moment you save; nothing about a preset's groups is taken from the browser. Your own groups
-  are up to six starter rows (name, kind, size, tag; a row with no name is skipped) checked with the
+  are up to six starter rows (marker, name, kind, size, tag; a row with no name is skipped) checked with the
   event form's rules (name rules, size 1 to 99, tag length, at most one leaders-only group,
   `events.groups.max_count`), and the whole result is validated again as the edited setup; a chosen
   preset wins over the rows, and the rows are the way in when no preset is available. Add, rename,

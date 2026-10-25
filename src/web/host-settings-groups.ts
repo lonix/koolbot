@@ -18,19 +18,9 @@
 
 import { escapeHtml } from "./html.js";
 import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
-import {
-  GROUP_KIND_OPTIONS,
-  GROUP_ROWS_HEAD,
-  renderGroupRow,
-} from "./admin-views.js";
+import { GROUP_ROWS_HEAD, renderGroupRow } from "./admin-views.js";
 import { renderSeriesTick } from "./host-settings-series.js";
-import {
-  GROUP_NAME_MAX,
-  GROUP_SIZE_MAX,
-  GROUP_SIZE_MIN,
-  GROUP_TAG_MAX,
-  newGroupKey,
-} from "../services/event-groups.js";
+import { newGroupKey } from "../services/event-groups.js";
 import {
   GROUP_ADD_FIELDS,
   GROUP_REMOVE_BASE_FIELD,
@@ -270,20 +260,22 @@ ${tick}
 <button type="submit">Remove selected</button>
 ${confirmFetchError()}
 </form>`;
-  const kinds = GROUP_KIND_OPTIONS.map(
-    ([value, text]) =>
-      `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`,
-  ).join("");
+  const row = renderGroupRow("add", "new", undefined, {
+    names: {
+      marker: GROUP_ADD_FIELDS.marker,
+      name: GROUP_ADD_FIELDS.name,
+      kind: GROUP_ADD_FIELDS.kind,
+      size: GROUP_ADD_FIELDS.size,
+      tag: GROUP_ADD_FIELDS.tag,
+    },
+    requireName: true,
+  });
   const add = `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
 <fieldset class="field"><legend>Add a ${escapeHtml(label)}</legend>
-<label for="host-settings-add-name">Name</label>
-<input id="host-settings-add-name" type="text" maxlength="${GROUP_NAME_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.name)}" required>
-<label for="host-settings-add-kind">Kind</label>
-<select id="host-settings-add-kind" name="${escapeHtml(GROUP_ADD_FIELDS.kind)}">${kinds}</select>
-<label for="host-settings-add-size">Size</label>
-<input id="host-settings-add-size" type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${escapeHtml(GROUP_ADD_FIELDS.size)}" placeholder="No limit">
-<label for="host-settings-add-tag">Tag</label>
-<input id="host-settings-add-tag" type="text" maxlength="${GROUP_TAG_MAX}" name="${escapeHtml(GROUP_ADD_FIELDS.tag)}">
+<div class="kb-grouprows" data-group-rows>
+${GROUP_ROWS_HEAD}
+${row}
+</div>
 ${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
 <p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others. Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
 ${tick}

@@ -135,6 +135,7 @@ function lobbyValue(e: IEvent): {
   kind: string;
   size: null;
   tag: string;
+  marker: string;
 } {
   return {
     key: newGroupKey(new Set((e.groups ?? []).map((g) => g.key))),
@@ -142,6 +143,7 @@ function lobbyValue(e: IEvent): {
     kind: "leads",
     size: null,
     tag: "",
+    marker: "",
   };
 }
 

@@ -32,15 +32,12 @@ import {
   loadPresetCatalog,
   presetResolver,
 } from "../services/event-group-preset-service.js";
-import { GROUP_KIND_OPTIONS } from "./admin-views.js";
+import { GROUP_ROWS_HEAD, renderGroupRow } from "./admin-views.js";
 import { renderSeriesTick } from "./host-settings-series.js";
 import {
   DEFAULT_GROUP_LABEL,
   DEFAULT_LEADER_LABEL,
-  GROUP_NAME_MAX,
-  GROUP_SIZE_MAX,
-  GROUP_SIZE_MIN,
-  GROUP_TAG_MAX,
+  checkGroupMarker,
   checkGroupName,
   checkGroupSize,
   checkGroupTag,
@@ -67,6 +64,15 @@ export interface GroupsSwitchView {
   /** Groups and channels now (on only), for the texts. */
   groupCount: number;
   channelCount: number;
+}
+
+/**
+ * Whether the switch shows the rows for the host's own groups (off, nothing
+ * kept, not blocked): the page then needs the group rows script (the marker
+ * picker) even though the event has no groups to edit.
+ */
+export function showsCustomRows(v: GroupsSwitchView): boolean {
+  return !v.on && v.blocked === null && v.kept.length === 0;
 }
 
 /** How many starter groups the custom setup form has (blank names are skipped). */
@@ -219,23 +225,27 @@ ${hidden(id, ON)}${hidden(base, OFF)}
 <select id="host-settings-groups-pick" name="${GROUPS_PICK_FIELD}">
 <option value="">No preset: use my own groups below</option>${options}
 </select>`;
-  const kinds = GROUP_KIND_OPTIONS.map(
-    ([value, text]) =>
-      `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`,
-  ).join("");
-  const rows = Array.from({ length: CUSTOM_GROUP_ROWS }, (_, k) => {
-    const i = k + 1;
-    return `<tr><td>${i}</td><td><input type="text" maxlength="${GROUP_NAME_MAX}" name="${customField("name", i)}" aria-label="Name of group ${i}"></td>
-<td><select name="${customField("kind", i)}" aria-label="Kind of group ${i}">${kinds}</select></td>
-<td><input type="number" inputmode="numeric" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" step="1" name="${customField("size", i)}" placeholder="No limit" aria-label="Size of group ${i}"></td>
-<td><input type="text" maxlength="${GROUP_TAG_MAX}" name="${customField("tag", i)}" aria-label="Tag of group ${i}"></td></tr>`;
-  }).join("");
+  const rows = Array.from({ length: CUSTOM_GROUP_ROWS }, (_, k) =>
+    renderGroupRow(String(k + 1), String(k + 1), undefined, {
+      names: {
+        marker: customField("marker", k + 1),
+        name: customField("name", k + 1),
+        kind: customField("kind", k + 1),
+        size: customField("size", k + 1),
+        tag: customField("tag", k + 1),
+      },
+    }),
+  ).join("\n");
   return form(
     actionPath,
     csrfToken,
     `<div class="field"><p><strong>Groups are off.</strong> This event has no groups yet.</p>
 ${picker}
-<table class="prefs-table"><caption class="muted">Or your own groups (leave a name empty to skip a row)</caption><thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Size</th><th scope="col">Tag</th></tr></thead><tbody>${rows}</tbody></table>
+<p class="muted">Or your own groups (leave a name empty to skip a row)</p>
+<div class="kb-grouprows" data-group-rows>
+${GROUP_ROWS_HEAD}
+${rows}
+</div>
 ${hidden(base, OFF)}
 <p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and so does a preset's Captains lobby (switch it on with the leaders), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
     "Switch groups on",
@@ -270,6 +280,8 @@ function customSetup(
     if (!size.ok) return { error: `Group ${i} size: ${size.error}` };
     const tag = checkGroupTag(str("tag", i));
     if (!tag.ok) return { error: `Group ${i} tag: ${tag.error}` };
+    const marker = checkGroupMarker(str("marker", i));
+    if (!marker.ok) return { error: `Group ${i} marker: ${marker.error}` };
     const kind = str("kind", i) || "team";
     if (!(EVENT_GROUP_KINDS as readonly string[]).includes(kind)) {
       return { error: `Group ${i} kind: must be team, open or leads.` };
@@ -279,7 +291,7 @@ function customSetup(
       kind,
       size: size.value,
       tag: tag.value,
-      marker: "",
+      marker: marker.value,
     });
   }
   if (groups.length === 0) return null;
@@ -325,7 +337,7 @@ export async function prepareGroupsSwitchBody(
   }
   const custom = customSetup(source);
   for (let i = 1; i <= CUSTOM_GROUP_ROWS; i++) {
-    for (const part of ["name", "kind", "size", "tag"]) {
+    for (const part of ["marker", "name", "kind", "size", "tag"]) {
       delete source[customField(part, i)];
     }
   }

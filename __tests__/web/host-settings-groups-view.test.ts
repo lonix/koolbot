@@ -479,6 +479,24 @@ describe("renderGroupSetForms (#1242)", () => {
     expect(out).toContain("Add a squad");
   });
 
+  it("the add form is the event form's row: marker box and picker hooks, required name, the add field names (#1469)", () => {
+    const out = html();
+    const add = out.slice(out.indexOf("Add a squad"));
+    expect(add).toContain("data-group-rows");
+    expect(add).toContain("data-group-row ");
+    expect(add).toContain("data-marker-input");
+    expect(add).toContain("data-marker-btn");
+    expect(add).toContain('name="s_groupAdd_marker"');
+    expect(add).toMatch(/name="s_groupAdd_name" required/);
+    expect(add).toContain('name="s_groupAdd_size"');
+    expect(add).toContain('name="s_groupAdd_tag"');
+    expect(add).toContain(
+      '<select class="kb-select kb-input--sm" name="s_groupAdd_kind">',
+    );
+    // The old hand-written fields are gone.
+    expect(add).not.toContain("host-settings-add-name");
+  });
+
   it("escapes a hostile key and label", () => {
     const out = html({ addKey: '"><script>x</script>', groupLabel: "<i>Crew" });
     expect(out).not.toContain("<script>");

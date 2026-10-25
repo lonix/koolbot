@@ -267,6 +267,7 @@ const newGroup = (over: Record<string, unknown> = {}) => ({
   kind: "team",
   size: 4,
   tag: "D",
+  marker: "",
   ...over,
 });
 const run = (
@@ -355,10 +356,51 @@ describe("parseSubmission of the two forms", () => {
     expect(parsed.entries).toEqual([
       {
         rowId: "groupAdd",
-        to: [{ key: NEW, name: "New Squad", kind: "open", size: 5, tag: "NS" }],
+        to: [
+          {
+            key: NEW,
+            name: "New Squad",
+            kind: "open",
+            size: 5,
+            tag: "NS",
+            marker: "",
+          },
+        ],
         base: [],
       },
     ]);
+  });
+
+  it("reads the marker the add form posts, with its whitespace collapsed (#1469)", () => {
+    const parsed = live.parseSubmission({
+      [GROUP_ADD_FIELDS.name]: "Delta",
+      [GROUP_ADD_FIELDS.kind]: "team",
+      [GROUP_ADD_FIELDS.size]: "",
+      [GROUP_ADD_FIELDS.tag]: "",
+      [GROUP_ADD_FIELDS.marker]: "  \u{1F7E5}  ",
+      [GROUP_ADD_FIELDS.key]: NEW,
+      [GROUP_ADD_FIELDS.base]: "[]",
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.entries[0]).toMatchObject({
+      to: [{ key: NEW, name: "Delta", marker: "\u{1F7E5}" }],
+    });
+  });
+
+  it.each([
+    ["five code points", "\u{1F7E5}".repeat(5)],
+    ["a control character", "a\u0007"],
+  ])("refuses a marker of %s, naming the field (#1469)", (_n, marker) => {
+    const parsed = live.parseSubmission({
+      [GROUP_ADD_FIELDS.name]: "Delta",
+      [GROUP_ADD_FIELDS.kind]: "team",
+      [GROUP_ADD_FIELDS.marker]: marker,
+      [GROUP_ADD_FIELDS.key]: NEW,
+      [GROUP_ADD_FIELDS.base]: "[]",
+    });
+    expect(parsed.entries).toEqual([]);
+    expect(parsed.errors).toHaveLength(1);
+    expect(parsed.errors[0]).toContain("New group marker");
   });
 
   it("an add form with an empty name is no change at all", () => {
@@ -479,6 +521,27 @@ describe("add a group", () => {
       "groups.key": { $ne: NEW },
     });
     expect(text(out)).toBe('Saved: New group is now "Delta" (team, size 4).');
+  });
+
+  it("stores the marker the host typed, and the channel pass gets the group with it (#1469)", async () => {
+    const out = await addForm({ marker: "\u{1F7E5}" });
+    done(out);
+    expect(group(NEW).marker).toBe("\u{1F7E5}");
+    const [write] = rowWrites();
+    expect(
+      (write.update as { $push: { groups: { marker: string } } }).$push.groups
+        .marker,
+    ).toBe("\u{1F7E5}");
+    expect(text(out)).toContain('\u{1F7E5} "Delta"');
+  });
+
+  it("a value signed without a marker (before #1469) still adds the group, with no marker", async () => {
+    const old: Record<string, unknown> = newGroup();
+    delete old.marker;
+    const out = await run([entry(GROUP_ADD_ROW_ID, [old], [])]);
+    done(out);
+    expect(group(NEW).marker).toBe("");
+    expect(live.describeLiveEditOutcome(out).details).toBeDefined();
   });
 
   it("needs no confirmation: it destroys nothing", async () => {
@@ -712,6 +775,14 @@ describe("add a group", () => {
       // A save that stored nothing runs no follow-up.
       expect(calls).toEqual([]);
     });
+  });
+
+  it("a marker is part of the audited value, an empty one is not mentioned", async () => {
+    const out = await addForm({ marker: "\u{1F7E5}" });
+    const { details } = live.describeLiveEditOutcome(out);
+    expect((details.changes as Array<{ to: { g1: string } }>)[0].to.g1).toBe(
+      "g_0000abcd | Delta | team | size 4 | tag D | marker \u{1F7E5}",
+    );
   });
 
   it("is audited once with the group flattened, within the audit bound", async () => {
