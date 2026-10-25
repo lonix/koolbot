@@ -181,6 +181,37 @@ const MISSING_PERMISSION_NOTICE: PermissionNotice = {
     },
   ],
 };
+/** The Moderation page's notice (#1488): the anti-raid alert channel and a moderation log channel. */
+const MODERATION_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: true,
+  unchecked: [
+    {
+      feature: {
+        id: "log-moderation-review",
+        area: "Discord logging",
+        feature: "Moderation case review log channel",
+        effect: "",
+        fix: "",
+      },
+      target: { kind: "channel", id: "gone", name: "gone" },
+      note: "The configured channel could not be found.",
+    },
+  ],
+  missing: [
+    {
+      feature: {
+        id: "raid-alerts",
+        area: "Moderation",
+        feature: "Anti-raid alerts",
+        effect: "Raid alerts are not posted.",
+        fix: "",
+      },
+      permissions: ["Send Messages"],
+      target: { kind: "channel", id: "c1", name: "mod-alerts" },
+    },
+  ],
+};
 const UNAVAILABLE_PERMISSION_NOTICE: PermissionNotice = {
   unavailable: "The bot could not read this server from Discord.",
   stale: false,
@@ -3193,7 +3224,7 @@ export function adminPages(): A11yPage[] {
         total: 0,
         page: 1,
         pageSize: 50,
-        permissionNotice: MISSING_PERMISSION_NOTICE,
+        permissionNotice: MODERATION_MISSING_PERMISSION_NOTICE,
       }),
     },
     {
