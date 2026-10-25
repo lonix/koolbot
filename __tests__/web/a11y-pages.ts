@@ -312,6 +312,44 @@ const NOTICES_MISSING_PERMISSION_NOTICE = channelNotice(
   "rules",
 );
 
+/** The Birthdays and Rules pages' notice (#1491): a missing permission, and an unreadable role position. */
+const BIRTHDAYS_MISSING_PERMISSION_NOTICE = channelNotice(
+  "birthdays-post",
+  "Birthdays",
+  "Birthday announcements",
+  "general",
+);
+const RULES_MISSING_PERMISSION_NOTICE: PermissionNotice = {
+  unavailable: null,
+  stale: false,
+  unchecked: [
+    {
+      feature: {
+        id: "rules-role-hierarchy",
+        area: "Rules",
+        feature: "Granting the acceptance role",
+        effect: "",
+        fix: "",
+      },
+      target: { kind: "role", id: "100000000000000011", name: "Accepted" },
+      note: "The bot's own roles could not be read.",
+    },
+  ],
+  missing: [
+    {
+      feature: {
+        id: "rules-message",
+        area: "Rules",
+        feature: "The rules message",
+        effect: "Posting the rules message fails.",
+        fix: "",
+      },
+      permissions: ["Read Message History"],
+      target: { kind: "channel", id: "100000000000000010", name: "rules" },
+    },
+  ],
+};
+
 /** The bot's reaction-role messages as the welcome roles picker lists them (#1433). */
 const WELCOME_MESSAGES = {
   options: [
@@ -2897,6 +2935,56 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Birthdays (missing bot permission notice)",
+      html: renderBirthdaysPage({
+        ...COMMON,
+        enabled: true,
+        permissionNotice: BIRTHDAYS_MISSING_PERMISSION_NOTICE,
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
+        role: null,
+        cron: "0 * * * *",
+        settingRows: [],
+        settingsPickers: {},
+        preview: {
+          mentionUserId: "999999999999999999",
+          mentionLabel: "Admin",
+          mention: true,
+          withAge: "Happy birthday!",
+          withoutAge: null,
+          sampleAge: 30,
+        },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+      }),
+    },
+    {
+      name: "Birthdays (permission check unavailable)",
+      html: renderBirthdaysPage({
+        ...COMMON,
+        enabled: true,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
+        role: null,
+        cron: "0 * * * *",
+        settingRows: [],
+        settingsPickers: {},
+        preview: {
+          mentionUserId: "999999999999999999",
+          mentionLabel: "Admin",
+          mention: true,
+          withAge: "Happy birthday!",
+          withoutAge: null,
+          sampleAge: 30,
+        },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+      }),
+    },
+    {
       name: "Birthdays",
       html: renderBirthdaysPage({
         ...COMMON,
@@ -3582,6 +3670,56 @@ export function adminPages(): A11yPage[] {
         membersUnavailable: false,
         roleNames: {},
         globalPolicy: "flag",
+      }),
+    },
+    {
+      name: "Rules acceptance (missing bot permission notice)",
+      html: renderRulesPage({
+        ...COMMON,
+        permissionNotice: RULES_MISSING_PERMISSION_NOTICE,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: null,
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      name: "Rules acceptance (permission check unavailable)",
+      html: renderRulesPage({
+        ...COMMON,
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: null,
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
       }),
     },
     {

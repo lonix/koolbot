@@ -4724,6 +4724,8 @@ export interface BirthdayPreviewView {
 
 export interface BirthdaysProps extends CommonProps {
   enabled: boolean;
+  /** What the bot lacks for the birthday channel (#1491). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   channel: { name: string; id: string; type: ChannelType | null } | null;
   role: { name: string; id: string } | null;
   cron: string;
@@ -4883,7 +4885,7 @@ ${renderStatusLine({
         : `${countOf(props.total, "stored birthday")}`,
     },
   ],
-})}
+})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 <div class="card">
   <h2>Run the check</h2>
   <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
