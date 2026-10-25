@@ -761,8 +761,7 @@ shipped. Older release lines get no further patches, so each one links to its la
 Node.js 22 or newer (the Docker images use Node 24) and a MongoDB instance.
 
 > [!NOTE]
-> Release 2.1 is the last one that supports Node.js 22. From 2.2, KoolBot is built on Node.js 26 by default, and Node.js 24 stays supported until the end
-> of January 2027. Plan to move to Node.js 24 or newer before you upgrade to 2.2.
+> Release 2.1 is the last one that supports Node.js 22 and 24. From 2.2, Node.js 26 is required. Plan to move to Node.js 26 before you upgrade to 2.2.
 
 ### Cloning for development
 
