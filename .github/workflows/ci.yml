@@ -116,12 +116,19 @@ jobs:
           node -p "const v8=require('v8');'node '+process.version+' heap_size_limit_mb='+Math.round(v8.getHeapStatistics().heap_size_limit/1048576)"
 
       - name: Run tests
-        run: npm run test:ci -- --logHeapUsage
+        shell: bash
+        run: npm run test:ci -- --logHeapUsage 2>&1 | tee "$RUNNER_TEMP/jest-output.log"
 
       - name: Log memory after tests (#1501)
         if: always()
         run: |
           free -m
+          {
+            echo "Worker heap per finished suite (MB), from --logHeapUsage:"
+            grep -oE '\(([0-9]+) MB heap size\)' "$RUNNER_TEMP/jest-output.log" | grep -oE '[0-9]+' | sort -n | awk '{a[NR]=$1} END {if (NR) printf "suites=%d min=%d median=%d p90=%d max=%d over3000=%d\n", NR, a[1], a[int((NR+1)/2)], a[int(NR*0.9)], a[NR], c; else print "no heap lines"}' c="$(grep -oE '\(([0-9]+) MB heap size\)' "$RUNNER_TEMP/jest-output.log" | grep -oE '[0-9]+' | awk '$1>3000' | wc -l)"
+            node -p "const v8=require('v8');'node '+process.version+' heap_size_limit_mb='+Math.round(v8.getHeapStatistics().heap_size_limit/1048576)"
+            grep -E '^Time:' "$RUNNER_TEMP/jest-output.log" || true
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           (sudo dmesg 2>/dev/null | grep -iE 'out of memory|oom|killed process' | tail -n 20) || echo "no kernel OOM lines readable"
 
       # Jest's coverageThreshold only catches coverage falling; this catches the
