@@ -1541,8 +1541,10 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
     leaders-only channel under **Group leaders**, and clan tags under **Clan tags**. It is a
     warning chip per missing permission ("Bot lacks Manage Channels", linking to this page for
     an admin) and one line on where and what stops working. What has no field (the Discord Events list
-    card, the announcement channel) and a check that could not run stay in the one block, so
-    that is said once. A cached read is labelled on each finding. **New event** checks the
+    card, the announcement channel), every "could not be checked" result and a check that
+    could not run stay in the one block, so that is said once (one cause, such as a deleted
+    category, makes several entries unchecked at once). Only a confirmed missing permission
+    goes next to a field. A cached read is labelled on each finding. **New event** checks the
     server's configured category, as no event exists yet, and a host who is not an admin gets
     "Ask a server admin". **Edit event** names only what saving changes: the Events list card
     (not for an adopted event or a detached one) and the announcement post (only when the event has

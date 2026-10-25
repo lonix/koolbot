@@ -70,13 +70,7 @@ const everyField = notice({
     missing("event-channels", ["Manage Channels"]),
     missing("event-moves", ["Move Members"]),
     missing("event-leads-channel", ["Manage Roles"]),
-  ],
-  unchecked: [
-    {
-      feature: ref("event-tags"),
-      target: SERVER,
-      note: "The bot's own membership could not be read.",
-    },
+    missing("event-tags", ["Manage Nicknames"], SERVER),
   ],
 });
 
@@ -97,8 +91,7 @@ describe("partitionNotice", () => {
     expect(slots.leaders?.missing.map((m) => m.feature.id)).toEqual([
       "event-leads-channel",
     ]);
-    expect(slots.tags?.missing).toEqual([]);
-    expect(slots.tags?.unchecked.map((u) => u.feature.id)).toEqual([
+    expect(slots.tags?.missing.map((m) => m.feature.id)).toEqual([
       "event-tags",
     ]);
     expect(rest?.missing.map((m) => m.feature.id)).toEqual(["event-native"]);
@@ -129,7 +122,63 @@ describe("partitionNotice", () => {
     );
     expect(rest?.stale).toBe(true);
     expect(slots.groups?.stale).toBe(true);
-    expect(slots.tags?.stale).toBe(true);
+    expect(slots.leaders?.stale).toBe(true);
+  });
+
+  // One cause (a deleted category) leaves several entries unchecked at once:
+  // that is one shared block, never one "could not be checked" per field.
+  describe("a partly checked server (#1478 review)", () => {
+    const category = {
+      kind: "category",
+      id: "gone",
+      name: "gone",
+    } as const;
+    const partial = notice({
+      stale: true,
+      unchecked: [
+        "event-channels",
+        "event-host-access",
+        "event-moves",
+        "event-leads-channel",
+      ].map((id) => ({
+        feature: ref(id),
+        target: category,
+        note: "The configured category could not be found.",
+      })),
+      missing: [missing("event-tags", ["Manage Nicknames"], SERVER)],
+    });
+
+    it("keeps every unchecked result in the rest and only confirmed missing in the slots", () => {
+      const { rest, slots } = partitionNotice(partial, EVENT_FORM_NOTICE_SLOTS);
+      expect(rest?.unchecked.map((u) => u.feature.id)).toEqual(
+        partial.unchecked.map((u) => u.feature.id),
+      );
+      expect(rest?.missing).toEqual([]);
+      for (const slot of Object.values(slots)) {
+        expect(slot?.unchecked ?? []).toEqual([]);
+      }
+      expect(slots.tags?.missing.map((m) => m.feature.id)).toEqual([
+        "event-tags",
+      ]);
+      expect(slots.groups).toBeNull();
+      expect(slots.leaders).toBeNull();
+    });
+
+    it("renders one shared 'could not be checked' block and no per-field chip for it", () => {
+      const { block, inline } = splitEventFormNotice(partial, {
+        canLinkToPage: true,
+      });
+      expect(
+        block.match(/Some bot permissions could not be checked/g),
+      ).toHaveLength(1);
+      expect(
+        block.match(/The configured category could not be found/g),
+      ).toHaveLength(4);
+      expect(Object.values(inline).join("")).not.toContain(
+        "Could not be checked",
+      );
+      expect(inline.tags).toContain("Bot lacks Manage Nicknames");
+    });
   });
 
   it("keeps a check that could not run in the rest, once", () => {
@@ -236,7 +285,7 @@ describe("renderInlinePermissionNotice", () => {
     expect(html).toContain("Server-wide.");
   });
 
-  it("says a permission could not be checked, with the reason, and never that all is well", () => {
+  it("leaves a result that could not be checked to the page's block", () => {
     const html = renderInlinePermissionNotice(
       notice({
         unchecked: [
@@ -245,10 +294,7 @@ describe("renderInlinePermissionNotice", () => {
       }),
       { canLinkToPage: true },
     );
-    expect(html).toContain("Could not be checked");
-    expect(html).toContain("Not readable.");
-    expect(html).not.toContain("kb-chip--warn");
-    expect(html).not.toMatch(/in place|all is well/i);
+    expect(html).toBe("");
   });
 
   it("labels a cached read on the slice itself", () => {
@@ -559,7 +605,7 @@ describe("admin Events page", () => {
     expect(at('data-permission-inline="event-leads-channel"')).toBeLessThan(
       at('data-permission-inline="event-tags"'),
     );
-    expect(html).toContain("Could not be checked");
+    expect(html).toContain("Bot lacks Manage Nicknames");
   });
 
   it("says a check that could not run once, not at every field", () => {

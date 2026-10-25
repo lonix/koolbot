@@ -232,10 +232,13 @@ export function renderPermissionNotice(
 
 /**
  * A notice cut into the part that belongs next to named fields and the rest
- * (#1478). Each slot takes the findings of the registry entries it names; what
- * no slot names stays in `rest`, which also keeps the "could not be checked"
- * message, so that is said once for the page and never per field. Nothing is
- * dropped and nothing is read again: the slots are slices of the one report.
+ * (#1478). Each slot takes the CONFIRMED missing permissions of the registry
+ * entries it names. Everything else stays in `rest`: what no slot names, every
+ * "could not be checked" result (one cause, such as a deleted category, leaves
+ * several entries unchecked at once) and the message for a check that could not
+ * run, so "could not be checked" is said once for the page and never per field.
+ * Nothing is dropped and nothing is read again: the slots are slices of the
+ * one report.
  */
 export interface PartitionedNotice<S extends string> {
   rest: PermissionNotice | null;
@@ -252,27 +255,23 @@ export function partitionNotice<S extends string>(
     const ids = slotFeatures[slot];
     ids.forEach((id) => claimed.add(id));
     const missing = notice?.missing.filter((m) => ids.includes(m.feature.id));
-    const unchecked = notice?.unchecked.filter((u) =>
-      ids.includes(u.feature.id),
-    );
     slots[slot] =
-      notice &&
-      notice.unavailable === null &&
-      ((missing?.length ?? 0) > 0 || (unchecked?.length ?? 0) > 0)
+      notice && notice.unavailable === null && (missing?.length ?? 0) > 0
         ? {
             unavailable: null,
             missing: missing ?? [],
-            unchecked: unchecked ?? [],
+            unchecked: [],
             stale: notice.stale,
           }
         : null;
   }
   if (!notice) return { rest: null, slots };
   const missing = notice.missing.filter((m) => !claimed.has(m.feature.id));
-  const unchecked = notice.unchecked.filter((u) => !claimed.has(u.feature.id));
   const rest =
-    notice.unavailable !== null || missing.length > 0 || unchecked.length > 0
-      ? { ...notice, missing, unchecked }
+    notice.unavailable !== null ||
+    missing.length > 0 ||
+    notice.unchecked.length > 0
+      ? { ...notice, missing }
       : null;
   return { rest, slots };
 }
@@ -283,7 +282,8 @@ export function partitionNotice<S extends string>(
  * breaks"). Empty string for null. It is the same finding as the block form
  * (`renderPermissionNotice`), at the field: one chip per missing permission (a
  * chip does not wrap, so a list of them is what reflows on a narrow form), the
- * line says where and what stops working. A stale
+ * line says where and what stops working. Only confirmed missing permissions
+ * come here (`partitionNotice`); "could not be checked" stays in the page's block. A stale
  * read is labelled on the slice itself, since a slice is read on its own.
  */
 export function renderInlinePermissionNotice(
@@ -291,12 +291,11 @@ export function renderInlinePermissionNotice(
   opts: RenderOptions,
 ): string {
   if (!notice) return "";
-  const chip = (text: string, warn: boolean): string => {
-    const cls = warn ? "kb-chip kb-chip--warn" : "kb-chip";
-    const body = `${icon(warn ? "triangle-alert" : "info")}${escapeHtml(text)}`;
+  const chip = (text: string): string => {
+    const body = `${icon("triangle-alert")}${escapeHtml(text)}`;
     return opts.canLinkToPage
-      ? `<a class="${cls}" href="${BOT_PERMISSIONS_HREF}">${body}</a>`
-      : `<span class="${cls}">${body}</span>`;
+      ? `<a class="kb-chip kb-chip--warn" href="${BOT_PERMISSIONS_HREF}">${body}</a>`
+      : `<span class="kb-chip kb-chip--warn">${body}</span>`;
   };
   const askAdmin = opts.canLinkToPage ? "" : " Ask a server admin to fix it.";
   const stale = notice.stale
@@ -305,12 +304,7 @@ export function renderInlinePermissionNotice(
   const lines: string[] = [];
   for (const m of notice.missing) {
     lines.push(
-      `<p class="kb-help" data-permission-inline="${escapeHtml(m.feature.id)}">${m.permissions.map((p) => chip(`Bot lacks ${p}`, true)).join(" ")} ${escapeHtml(capitalise(where(m.target)))}. ${escapeHtml(m.feature.effect)}${escapeHtml(askAdmin)}${escapeHtml(stale)}</p>`,
-    );
-  }
-  for (const u of notice.unchecked) {
-    lines.push(
-      `<p class="kb-help" data-permission-inline="${escapeHtml(u.feature.id)}">${chip("Could not be checked", false)} ${escapeHtml(u.note)}${escapeHtml(stale)}</p>`,
+      `<p class="kb-help" data-permission-inline="${escapeHtml(m.feature.id)}">${m.permissions.map((p) => chip(`Bot lacks ${p}`)).join(" ")} ${escapeHtml(capitalise(where(m.target)))}. ${escapeHtml(m.feature.effect)}${escapeHtml(askAdmin)}${escapeHtml(stale)}</p>`,
     );
   }
   return lines.join("\n");
