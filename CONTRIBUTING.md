@@ -39,6 +39,10 @@ For detailed technical guidance on extending KoolBot:
 - **Discord Bot Token** (for testing)
 - **MongoDB** (local installation or Docker)
 
+> [!NOTE]
+> Support for Node.js 22 is planned to end with the 2.1 release, and support for Node.js 24 at the end of January 2027. Until then the CI matrix keeps
+> testing Node.js 22, 24 and 26. New code should not depend on a feature that only an older version has.
+
 ### First Time Setup
 
 1. **Fork the repository** on GitHub
