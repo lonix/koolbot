@@ -349,6 +349,49 @@ describe("one event's placement (#1467)", () => {
     expect(report.placement?.categoryId).toBe("cat-new");
   });
 
+  // The announcement entry is checked where this event's post really is
+  // (an edit updates it there), not where the setting points now (#1478).
+  // Columns: case, configured channel, event's stored channel, channel the
+  // entry is checked in, outcome there.
+  it.each([
+    [
+      "stored differs from the setting",
+      "ann-cfg",
+      "ann-old",
+      "ann-old",
+      "missing",
+    ],
+    ["the setting was cleared since", "", "ann-old", "ann-old", "missing"],
+    ["no stored announcement: the setting", "ann-cfg", null, "ann-cfg", "ok"],
+    ["stored is the setting", "ann-cfg", "ann-cfg", "ann-cfg", "ok"],
+  ] as const)(
+    "announcement entry: %s",
+    async (_n, configured, stored, checkedIn, outcome) => {
+      settings = {
+        "events.enabled": true,
+        "events.category_id": "cat-ev",
+        "events.announcement_channel_id": configured,
+      };
+      check.resetBotPermissionCache();
+      const text = (id: string, lacks: boolean): FakeChannel => ({
+        id,
+        name: id,
+        type: ChannelType.GuildText,
+        bits: lacks ? without(ALL, P.SendMessages) : ALL,
+      });
+      const { client } = makeClient({
+        channels: [...base, text("ann-cfg", false), text("ann-old", true)],
+      });
+      const report = await check.checkBotPermissions(client, "guild-1", {
+        ...direct,
+        eventPlacement: { mainChannelId: null, announcementChannelId: stored },
+      });
+      const row = report.checks.find((c) => c.feature.id === "events-announce");
+      expect(row?.target?.id).toBe(checkedIn);
+      expect(row?.outcome).toBe(outcome);
+    },
+  );
+
   it("leaves the navigation badge to the plain check", async () => {
     settings = { "events.enabled": true, "events.category_id": "cat-ev" };
     check.resetBotPermissionCache();

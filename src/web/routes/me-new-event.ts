@@ -30,6 +30,7 @@ import {
   redirectToHostPanel,
 } from "../event-create.js";
 import { renderNewEventBody } from "../event-new-view.js";
+import { inAreas, loadPermissionNotice } from "../permission-notice.js";
 import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { requireCsrf } from "../csrf.js";
 import { getDisplayedRemainingMs } from "../admin-layout.js";
@@ -139,11 +140,21 @@ export function createMeNewEventRouter(client: Client): Router {
         : !announcementChannelId
           ? "No announcement channel is set, so events will not be announced."
           : null;
+      // Only the Events entries; the channel category and announcement channel
+      // being unset is the setup notice's to say (the check skips an unset one).
+      const permissionNotice = await loadPermissionNotice({
+        client,
+        guildId: session.guildId,
+        enabled: true,
+        filter: inAreas("Events"),
+      });
       res.type("text/html").send(
         renderUserPage({
           title: "New event",
           active: PAGE,
           body: renderNewEventBody({
+            permissionNotice,
+            canLinkToPermissions: session.role === "admin",
             csrfToken: csrfOf(req),
             timezone: resolveTimezone(tz),
             defaultDurationMinutes: defaultDuration,

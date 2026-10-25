@@ -1547,6 +1547,7 @@ checked, and a placeholder that expands to a mention is not seen.
   never held up for it.
 - **Next to the feature (#1253).** The pages that use a permission say so where you work
   with the feature, not only here: the **Events** page, the **host panel** of an event, the
+  **Edit event** and **New event** forms, **Adopt Discord Events**, the
   **Voice Channels**, **Moderation**, **Quotes** and **Notices** pages show a notice when the bot lacks a permission that feature needs:
   the permission, the channel or category it is missing in (or "server-wide"), what stops
   working, and a link to this page. The notice comes from the same registry and the same
@@ -1567,6 +1568,24 @@ checked, and a placeholder that expands to a mention is not seen.
   **Notices** pages (#1489) show the notice for their own channel only. The reaction roles, role groups, leaderboard roles, Birthdays and Rules
   pages are not wired to the notice yet. The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
   (those log channels also show in the **Core** section of All settings, below).
+  - **Events forms (#1478).** On the **Events** page and the **New event** form, a finding that
+    belongs to a field sits right under that field instead of in a block under the status line:
+    group channels, host access and moving members under the **Split into groups** switch, the
+    leaders-only channel under **Group leaders**, and clan tags under **Clan tags**. It is a
+    warning chip per missing permission ("Bot lacks Manage Channels", linking to this page for
+    an admin) and one line on where and what stops working. What has no field (the Discord Events list
+    card, the announcement channel), every "could not be checked" result and a check that
+    could not run stay in the one block, so that is said once (one cause, such as a deleted
+    category, makes several entries unchecked at once). Only a confirmed missing permission
+    goes next to a field. A cached read is labelled on each finding. **New event** checks the
+    server's configured category, as no event exists yet, and a host who is not an admin gets
+    "Ask a server admin". **Edit event** names only what saving changes: the Events list card
+    (not for an adopted event or a detached one) and the announcement post (only when the event has
+    one, checked in the channel it was posted in, not the one the setting names now), and nothing
+    for a finished event. **Adopt Discord Events** names what adopting sets up: the announcement post
+    and the temporary voice channel. Ending an event has no page of its own: its form sits in the
+    host panel (and in the Events list), which already carry the notice for the event's channels
+    and moves.
 - **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
   stats announcements and the Discord log channels have no page of their own, so **All settings**
   shows the same notice at the top of their sections, before the form: **Celebrations**, **Welcome**,

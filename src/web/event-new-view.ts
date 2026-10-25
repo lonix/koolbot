@@ -19,6 +19,10 @@ import {
 import { groupRowsScript } from "./event-group-form.js";
 import { EVENT_GROUPS_SCRIPT, renderGroupsSection } from "./admin-views.js";
 import {
+  splitEventFormNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
+import {
   EVENT_WHEN_CHOICES,
   EVENT_WHEN_LABELS,
   EVENT_WHEN_SCRIPT,
@@ -44,6 +48,10 @@ export interface NewEventViewProps {
   groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
   /** The channel category or the announcement channel is not set. */
   setupNotice?: string | null;
+  /** What the bot lacks for the event features (#1478), from the registry's check. */
+  permissionNotice?: PermissionNotice | null;
+  /** The Bot permissions page is admin-only; a host gets a sentence instead of the link. */
+  canLinkToPermissions?: boolean;
   /** The When choice that starts selected (Start now on Your events passes `now`). */
   initialWhen?: EventWhen;
 }
@@ -76,6 +84,14 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   const notice = props.setupNotice
     ? `<div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(props.setupNotice)}</p><p class="kb-callout__text">Ask an admin to finish setting up Events.</p></div></div>`
     : "";
+  // Findings that belong to a field sit next to it in the Groups section; the
+  // rest is one block under the setup notice. Nothing is added to a page that
+  // has nothing to say.
+  const { block: permissionBlock, inline: permissionInline } =
+    splitEventFormNotice(props.permissionNotice ?? null, {
+      canLinkToPage: props.canLinkToPermissions === true,
+    });
+  const permissionLine = permissionBlock ? `${permissionBlock}\n` : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">New event</h1>
@@ -83,7 +99,7 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   </div>
 </header>
 ${notice}
-<form method="POST" action="/me/events/new" class="kb-stack" data-event-form>
+${permissionLine}<form method="POST" action="/me/events/new" class="kb-stack" data-event-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
   <section class="kb-panel" aria-labelledby="new-event-when-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-when-h">When</h2></header>
@@ -129,7 +145,7 @@ ${notice}
   <section class="kb-panel" aria-labelledby="new-event-groups-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-groups-h">Groups</h2></header>
     <div class="kb-panel__body">
-      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null)}
+      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null, permissionInline)}
     </div>
   </section>
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>

@@ -135,6 +135,8 @@ import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
 import type { HostReview } from "../services/wizard-host-role.js";
 import {
   renderPermissionNotice,
+  splitEventFormNotice,
+  type EventFormInline,
   type PermissionNotice,
 } from "./permission-notice.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
@@ -3189,7 +3191,12 @@ export function renderGroupsSection(
   // The host's last setup (#1406), already validated against today's limits by
   // `loadGroupPrefill`; `resetHref` reloads the form with the normal defaults.
   remembered: { prefill: GroupFormPrefill; resetHref: string } | null = null,
+  // A missing bot permission next to the field it breaks (#1478), already
+  // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
+  permissionInline: Partial<EventFormInline> = {},
 ): string {
+  const inline = (html: string | undefined): string =>
+    html ? `\n      ${html}` : "";
   const prefill = remembered?.prefill ?? null;
   const presetCards = presets
     .map((p) =>
@@ -3230,7 +3237,7 @@ export function renderGroupsSection(
       <div class="kb-groupopt">
         <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
-      </div>
+      </div>${inline(permissionInline.groups)}
       <div data-groups-body class="kb-stack">
       <div class="kb-field">
         <p class="kb-label" id="groups-setup-label">Group setup</p>
@@ -3260,7 +3267,7 @@ export function renderGroupsSection(
       <p class="kb-help">Up to ${limits.maxCount} groups (<code>events.groups.max_count</code>). Rows left completely empty are ignored. Max size empty means no limit. The tag is shown on nicknames when clan tags are on; it starts as the name in capitals.</p>
       <div class="notice err" role="alert" data-group-errors hidden></div>
       </div>
-      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains", prefill?.captainsEnabled === true)}
+      ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains", prefill?.captainsEnabled === true)}${inline(permissionInline.leaders)}
       <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.captains}">
         <div class="kb-field">
           <label class="kb-label" for="groups-leader-label">What a leader is called</label>
@@ -3270,7 +3277,7 @@ export function renderGroupsSection(
         ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom", prefill?.captainCustomisationEnabled === true)}
         ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby", prefill?.captainsLobby === true)}
       </div>
-      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags", prefill?.tagsEnabled === true)}
+      ${groupSwitch(GROUP_FORM_FIELDS.tags, "Clan tags", "While the event runs, each team's tag goes on its members' server nicknames (for example [RED] Alice). The original nickname is always put back. Members cannot opt out. Only teams with a tag are tagged.", "tags", prefill?.tagsEnabled === true)}${inline(permissionInline.tags)}
       <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.tags}">
         ${groupSwitch(GROUP_FORM_FIELDS.tagsSuffix, "Tag after the name", "Alice [RED] instead of [RED] Alice.", "tags-suffix", prefill?.tagsSuffix === true)}
       </div>
@@ -3640,12 +3647,13 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
       { text: `${countOf(props.rows.length, "event")} scheduled` },
     ],
   });
-  const permissionNote = renderPermissionNotice(
-    props.permissionNotice ?? null,
-    {
+  // The findings that belong to a field of the schedule form sit next to it
+  // (#1478); the rest (the Events list card, the announcement channel, a check
+  // that could not run) stay in one block under the status line.
+  const { block: permissionNote, inline: permissionInline } =
+    splitEventFormNotice(props.permissionNotice ?? null, {
       canLinkToPage: true,
-    },
-  );
+    });
 
   const body = `
 <h1>Events</h1>
@@ -3702,7 +3710,7 @@ ${permissionNote}
         <option value="monthly">Monthly</option>
       </select>
     </label>
-    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null)}
+    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null, permissionInline)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
   <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>

@@ -14,6 +14,10 @@ import { COVER_MAX_BYTES } from "../services/event-cover.js";
 import { EVENT_COVER_UPLOAD_SCRIPT } from "./event-cover-upload.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
+import {
   TIMEZONE_SELECT_SCRIPT,
   renderTimezoneSelect,
 } from "./setting-pickers.js";
@@ -138,6 +142,10 @@ export function renderEventEditBody(opts: {
   cover?: EventEditCover;
   /** Set for an administrator: a link to the admin Events page. */
   adminEventsHref?: string;
+  /** What the bot lacks for what saving changes (#1478), from the registry's check. */
+  permissionNotice?: PermissionNotice | null;
+  /** The Bot permissions page is admin-only; a host gets a sentence instead of the link. */
+  canLinkToPermissions?: boolean;
 }): string {
   const e = opts.event;
   const panel = hostPanelPath(e.id);
@@ -185,6 +193,11 @@ export function renderEventEditBody(opts: {
     full && !e.startLocked
       ? `<footer class="kb-panel__foot">Moving the start moves the Discord event, the announcement, the reminder and the time the voice channel is created. People who marked Interested keep their answer.</footer>`
       : "";
+  // A line of its own only when there is something to show.
+  const notice = renderPermissionNotice(opts.permissionNotice ?? null, {
+    canLinkToPage: opts.canLinkToPermissions === true,
+  });
+  const noticeBlock = notice ? `${notice}\n` : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <p class="kb-pagehead__crumbs"><a href="${escapeHtml(panel)}">Host panel</a></p>
@@ -192,7 +205,7 @@ export function renderEventEditBody(opts: {
     <p class="kb-pagehead__sub">${escapeHtml(e.title)}</p>
   </div>
 </header>
-<form method="POST" action="${escapeHtml(panel)}/edit" data-event-edit-form>
+${noticeBlock}<form method="POST" action="${escapeHtml(panel)}/edit" data-event-edit-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
   <input type="hidden" name="version" value="${escapeHtml(e.version)}">
   <input type="hidden" name="mode" value="${full ? "full" : "limited"}">
