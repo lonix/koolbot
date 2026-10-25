@@ -49,6 +49,12 @@ export default {
     },
   },
   testTimeout: 10000,
+  // Recycle a Jest worker once its heap passes 3 GB after a suite (#1501). With coverage on, a
+  // worker's heap runs at about 2.6-2.8 GB (median) and peaks near 3.9 GB over the full run, against
+  // a V8 heap limit of about 4.1-4.3 GB on Node 22, 24 and 26; whichever suite lands next to a worker
+  // at its peak is reported as "Jest worker ran out of memory". Recycling bounds the heap well under
+  // that limit on every Node version. Measured with `--logHeapUsage` (the same heapUsed figure).
+  workerIdleMemoryLimit: '3GB',
   verbose: true,
   roots: ['<rootDir>/src', '<rootDir>/__tests__'],
   // Real-MongoDB suites (#1106) run under jest.integration.config.js, not here: this
